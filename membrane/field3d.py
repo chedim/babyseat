@@ -1,28 +1,46 @@
-"""THE WHOLE FIELD IN 3D (2026-10-08, the operator's viewer v3).
+"""THE WHOLE FIELD IN 3D (2026-10-08, the operator's viewer v3; a sphere
+since #362).
 
 The 2D map projected the top-3000 by mass; the live field is ~14k entities
-and only grows. This projects EVERY live entity into a [0,1]^3 cube and
-serves it as octree tiles, so the viewer loads what the camera can see and
-drops the rest (Android's recycled lists, in space):
+and only grows. This projects EVERY live entity into the ball inscribed in
+the [0,1]^3 cube and serves it as octree tiles, so the viewer loads what the
+camera can see and drops the rest (Android's recycled lists, in space):
 
   * TWO STREAMING PASSES over the store (never an N x 1024 matrix): pass 1
     sums the mean + per-kind centroids and keeps a bounded sample (the top
     SAMPLE_TOP by mass + a SAMPLE_RAND reservoir) to fit the PCA; pass 2
     projects every row in chunks onto the three chosen axes.
   * AXES: pcN (principal components of the sample, signs fixed), kind:<k>
-    (mean -> kind centroid), e:<eid> (1 - cos to an entity) or
-    e:<eid>:toward (signed projection on mean -> entity) -- the 2D view's
-    "Make X-axis", now three of them.
-  * THE SPREAD: per axis, 0.8 x rank + 0.2 x robust z (median/MAD,
-    clipped) -- the 2D layout's recipe, done once server-side over the
-    whole field.
+    (mean -> kind centroid), e:<eid> or e:<eid>:toward (both: the signed
+    projection on mean -> entity) -- the 2D view's "Make X-axis", now three
+    of them. All three are LINEAR in the centred vector (v - mean); e:<eid>
+    used to be 1 - cos to the entity, which a sphere cannot use as a
+    direction (#362), so plain e:<eid> now means the same as :toward.
+  * THE RUSSIAN-DOLL SPHERE (#362): p = the centred vector's projection on
+    the three axes. DIRECTION from the centre = p / |p| (an entity with no
+    projection at all gets a direction from its id's hash, stable). RADIUS
+    = how much of the vector the axes capture, |p| / |v - mean| -- the
+    centred length, because the axes are directions of variation ABOUT the
+    mean (the PCA is fitted on centred vectors, kind/entity axes start at
+    the mean): for orthonormal axes it is in [0, 1], and the offset every
+    entity shares (the mean) does not crowd everyone toward the centre.
+    Real captured fractions bunch up, so the radius is spread by THE
+    SPREAD below; position = 0.5 + 0.5 x radius x direction, so the octree
+    keeps working inside [0,1]^3 unchanged.
+  * THE SPREAD: 0.8 x rank + 0.2 x robust z (median/MAD, clipped) -- the
+    2D layout's recipe (the cube's per-axis rule before #362), done once
+    server-side over the whole field, now on the radius; the rank counts
+    from 1/n so the radius is in (0, 1] and nobody sits AT the centre. The
+    radius is the CUBE ROOT of that spread: a ball's volume grows as r^3, so
+    a spread that is even in r would crowd the core (density ~ 1/r^2); the
+    cube root fills the ball evenly by volume and keeps the order.
   * THE OCTREE LOD: entities in mass order claim a slot at the coarsest
     level whose cell still has room (K per cell); each entity lives in
     exactly ONE tile, so the client shows levels 0..L of the cells in view
     and more of the field appears as you zoom in.
-  * place(vec): a moved entity's new cube position under the SAME fit
-    (the sorted axis values + median/MAD are kept) -- the live layer
-    glides nodes without a refit.
+  * place(vec): a moved entity's new position on the sphere under the SAME
+    fit (the sorted captured fractions + median/MAD are kept) -- the live
+    layer glides nodes without a refit.
 
 Pure numpy; the seat's lanes feed it the store's scan.
 """
@@ -64,30 +82,60 @@ def _fix_signs(vt: np.ndarray) -> np.ndarray:
 
 
 class _Axis:
-    """One axis: how to compute its raw value from a state vector."""
+    """One axis: a unit direction the centred vector is projected on
+    (None: a dead axis, every projection 0)."""
 
-    def __init__(self, aid: str, kind: str, vec=None, mu=None):
-        self.id, self.kind = aid, kind          # kind: lin | cos
-        self.vec, self.mu = vec, mu
+    def __init__(self, aid: str, vec=None):
+        self.id, self.vec = aid, vec
 
-    def raw(self, X: np.ndarray) -> np.ndarray:
-        if self.vec is None:
-            return np.zeros(X.shape[0])
-        if self.kind == "cos":
-            n = np.linalg.norm(X, axis=1)
-            n[n < 1e-12] = 1.0
-            return 1.0 - (X @ self.vec) / n
-        return (X - self.mu) @ self.vec
+
+def _hash_dir(eid: str) -> np.ndarray:
+    """A stable unit direction from an id (for an entity the axes see none of)."""
+    h = hashlib.md5(str(eid).encode()).digest()
+    d = np.asarray([int.from_bytes(h[4 * k:4 * k + 4], "big") / 2 ** 32 - 0.5 for k in range(3)])
+    n = float(np.linalg.norm(d))
+    return d / n if n > 1e-12 else np.asarray([1.0, 0.0, 0.0])
+
+
+def _project(X: np.ndarray, mu: np.ndarray, A: np.ndarray):
+    """(the 3D projections, the captured fractions |p| / |x - mu|)."""
+    C = X - mu
+    P = C @ A.T
+    pn = np.linalg.norm(P, axis=1)
+    cn = np.linalg.norm(C, axis=1)
+    frac = np.where(cn > 1e-12, pn / np.where(cn > 1e-12, cn, 1.0), 0.0)
+    return P, frac
+
+
+def _directions(P: np.ndarray, frac: np.ndarray, eids) -> np.ndarray:
+    pn = np.linalg.norm(P, axis=1)
+    out = np.zeros_like(P)
+    for i in range(P.shape[0]):
+        # no projection at all (or rounding noise): the id's own direction
+        if pn[i] > 1e-12 and frac[i] > 1e-9:
+            out[i] = P[i] / pn[i]
+        else:
+            out[i] = _hash_dir(eids[i] if eids is not None else "")
+    return out
+
+
+def _spread(r: float, srt, med: float, mad: float) -> float:
+    n = len(srt)
+    rank = min(1.0, (float(np.searchsorted(srt, r)) + 1.0) / max(1, n))
+    z = 0.0 if mad < 1e-12 else max(-3.0, min(3.0, (r - med) / mad))
+    return (0.8 * rank + 0.2 * (z + 3.0) / 6.0) ** (1.0 / 3.0)     # the cube root: even by volume
 
 
 class Projection:
     def __init__(self, axes, ids, coords, mass, kinds, kind_names, labels,
-                 contest, level, cell, edges, scale, explained, built_s):
+                 contest, level, cell, edges, scale, explained, built_s,
+                 mu=None, A=None):
         self.axes, self.ids, self.coords = axes, ids, coords
         self.mass, self.kinds, self.kind_names = mass, kinds, kind_names
         self.labels, self.contest = labels, contest
         self.level, self.cell, self.edges = level, cell, edges
         self.scale, self.explained, self.built_s = scale, explained, built_s
+        self.mu, self.A = mu, A
         self.index = {e: i for i, e in enumerate(ids)}
         self.ts = time.time()
         self.pid = hashlib.sha1((",".join(a.id for a in axes) + repr(self.ts)
@@ -124,7 +172,7 @@ class Projection:
                 "n_total": len(self.ids), "kinds": self.kind_names,
                 "kind_counts": counts, "explained": self.explained,
                 "max_level": self.max_level, "per_level": per_level,
-                "tile_k": TILE_K, "edges": len(self.edges),
+                "tile_k": TILE_K, "edges": len(self.edges), "shape": "sphere",
                 "built_s": round(self.built_s, 2)}
 
     def _node(self, i: int) -> dict:
@@ -176,16 +224,17 @@ class Projection:
         out.sort(key=lambda d: (-d["n"], -d["m"]))
         return out[:max(1, int(k))]
 
-    def place(self, vec) -> list[float]:
-        """A (moved) state's cube position under this fit."""
+    def place(self, vec, eid: str = "") -> list[float]:
+        """A (moved) state's position on the sphere under this fit (eid:
+        the stable direction when the axes see none of it)."""
+        if self.mu is None or self.A is None:
+            return [0.5, 0.5, 0.5]
         x = np.asarray(vec, dtype=np.float64)[None, :]
-        out = []
-        for a, (srt, med, mad) in zip(self.axes, self.scale):
-            r = float(a.raw(x)[0])
-            rank = float(np.searchsorted(srt, r)) / max(1, len(srt) - 1)
-            z = 0.0 if mad < 1e-12 else max(-3.0, min(3.0, (r - med) / mad))
-            out.append(round(min(1.0, max(0.0, 0.8 * rank + 0.2 * (z + 3.0) / 6.0)), 4))
-        return out
+        P, frac = _project(x, self.mu, self.A)
+        d = _directions(P, frac, [eid])[0]
+        srt, med, mad = self.scale
+        rad = _spread(float(frac[0]), srt, med, mad)
+        return [round(min(1.0, max(0.0, 0.5 + 0.5 * rad * float(d[k]))), 4) for k in range(3)]
 
 
 def build(rows_factory, unpack, axes_spec: str = "", ref_vec=None, rels=(),
@@ -248,64 +297,62 @@ def build(rows_factory, unpack, axes_spec: str = "", ref_vec=None, rels=(),
     except np.linalg.LinAlgError:
         vt = np.zeros((9, S.shape[1]))
     del S
+    def _unit(d):
+        nd = float(np.linalg.norm(d))
+        return d / nd if nd > 1e-12 else None
+
     axes = []
     for aid in parse_axes(axes_spec):
         if aid.startswith("pc") and aid[2:].isdigit() and 1 <= int(aid[2:]) <= vt.shape[0]:
-            axes.append(_Axis(aid, "lin", vt[int(aid[2:]) - 1], mu))
+            axes.append(_Axis(aid, vt[int(aid[2:]) - 1]))
         elif aid.startswith("kind:") and aid[5:] in ksum:
-            d = ksum[aid[5:]] / kcnt[aid[5:]] - mu
-            nd = float(np.linalg.norm(d))
-            axes.append(_Axis(aid, "lin", d / nd if nd > 1e-12 else None, mu))
+            axes.append(_Axis(aid, _unit(ksum[aid[5:]] / kcnt[aid[5:]] - mu)))
         elif aid.startswith("e:"):
+            # e:<eid> and e:<eid>:toward: the signed projection on mean ->
+            # entity (#362: linear, so the sphere's direction is defined)
             body = aid[2:]
-            toward = body.endswith(":toward")
-            eid = body[:-len(":toward")] if toward else body
+            eid = body[:-len(":toward")] if body.endswith(":toward") else body
             q = ref_vec(eid) if ref_vec else None
-            if q is None:
-                axes.append(_Axis(aid, "lin", None, mu))
-            elif toward:
-                d = np.asarray(q, dtype=np.float64) - mu
-                nd = float(np.linalg.norm(d))
-                axes.append(_Axis(aid, "lin", d / nd if nd > 1e-12 else None, mu))
-            else:
-                q = np.asarray(q, dtype=np.float64)
-                qn = float(np.linalg.norm(q))
-                axes.append(_Axis(aid, "cos", q / qn if qn > 1e-12 else None))
+            axes.append(_Axis(aid, None if q is None else _unit(np.asarray(q, dtype=np.float64) - mu)))
         else:
-            axes.append(_Axis(aid, "lin", None, mu))
-    # ---- pass 2: every row's raw axis values, in chunks
-    raw = np.zeros((n, 3), dtype=np.float64)
+            axes.append(_Axis(aid, None))
+    A = np.asarray([a.vec if a.vec is not None else np.zeros_like(mu) for a in axes], dtype=np.float64)
+    # ---- pass 2: every row's projection + captured fraction, in chunks
+    P = np.zeros((n, 3), dtype=np.float64)
+    frac = np.zeros(n, dtype=np.float64)
     i = 0
     buf = []
+
+    def _flush(i, buf):
+        Pb, fb = _project(np.asarray(buf), mu, A)
+        P[i:i + len(buf)], frac[i:i + len(buf)] = Pb, fb
+
     for r in rows_factory():
         if not r.get("eid") or r.get("state") is None:
             continue
         buf.append(np.asarray(unpack(r["state"]), dtype=np.float64))
         if len(buf) >= chunk:
-            X = np.asarray(buf)
-            raw[i:i + len(buf)] = np.stack([a.raw(X) for a in axes], 1)
+            _flush(i, buf)
             i += len(buf)
             buf = []
         if i + len(buf) >= n:
             break
     if buf:
-        X = np.asarray(buf)
-        raw[i:i + len(buf)] = np.stack([a.raw(X) for a in axes], 1)
-    # ---- the spread: rank + robust z, per axis
-    coords = np.zeros((n, 3), dtype=np.float32)
-    scale = []
+        _flush(i, buf)
+    # ---- the sphere: direction = p / |p|, radius = the captured fraction
+    # spread by rank + robust z (the cube's per-axis recipe, on the radius)
     ids = [m_[0] for m_ in meta]
     tie = np.asarray([int(hashlib.md5(e.encode()).hexdigest()[:8], 16) for e in ids])
-    for k in range(3):
-        col = raw[:, k]
-        order = np.lexsort((tie, col))
-        rank = np.empty(n)
-        rank[order] = np.arange(n) / max(1, n - 1)
-        med = float(np.median(col))
-        mad = float(np.median(np.abs(col - med))) * 1.4826
-        z = np.zeros(n) if mad < 1e-12 else np.clip((col - med) / mad, -3, 3)
-        coords[:, k] = 0.8 * rank + 0.2 * (z + 3.0) / 6.0
-        scale.append((np.sort(col), med, mad))
+    order = np.lexsort((tie, frac))
+    rank = np.empty(n)
+    rank[order] = (np.arange(n) + 1.0) / n
+    med = float(np.median(frac))
+    mad = float(np.median(np.abs(frac - med))) * 1.4826
+    z = np.zeros(n) if mad < 1e-12 else np.clip((frac - med) / mad, -3, 3)
+    radius = (0.8 * rank + 0.2 * (z + 3.0) / 6.0) ** (1.0 / 3.0)   # even by VOLUME, not by radius
+    dirs = _directions(P, frac, ids)
+    coords = np.clip(0.5 + 0.5 * radius[:, None] * dirs, 0.0, 1.0).astype(np.float32)
+    scale = (np.sort(frac), med, mad)
     # ---- the octree: heaviest first claim the coarsest cell with room
     mass = np.asarray([m_[3] for m_ in meta], dtype=np.int64)
     level = np.zeros(n, dtype=np.int32)
@@ -353,4 +400,4 @@ def build(rows_factory, unpack, axes_spec: str = "", ref_vec=None, rels=(),
     kix = {kd: j for j, kd in enumerate(kind_names)}
     return Projection(axes, ids, coords, mass, [kix[m_[1]] for m_ in meta], kind_names,
                       [m_[2] for m_ in meta], [m_[4] for m_ in meta], level, cell,
-                      edges, scale, explained, time.time() - t0)
+                      edges, scale, explained, time.time() - t0, mu=mu, A=A)

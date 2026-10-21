@@ -1,7 +1,7 @@
 """THE WHOLE FIELD IN 3D (2026-10-08, the operator's viewer v3, red first).
 
 The 2D map clamped to the top-3000 by mass (of ~14k live). Pinned: every
-live entity gets a cube position; the octree puts each in exactly one tile
+live entity gets a position (a sphere inside the cube since #362); the octree puts each in exactly one tile
 (K per cell, heaviest coarsest) so zooming in shows more; three axes (PCs,
 kinds, entity distance / toward); the fit streams (no N x 1024 matrix kept);
 place() re-positions a moved entity under the same fit.
@@ -119,14 +119,17 @@ class TestAxes(unittest.TestCase):
         self.assertEqual(F.parse_axes(""), ["pc1", "pc2", "pc3"])
         self.assertEqual(F.parse_axes("e:f:e3,pc1"), ["e:f:e3", "pc1", "pc2"])
 
-    def test_entity_distance_axis_puts_the_reference_at_zero(self):
+    def test_entity_axis_points_toward_the_reference(self):
+        # #362 (the sphere): e:<eid> is the signed projection on mean ->
+        # entity (was 1 - cos, the reference at 0): the reference and its
+        # kind sit on the axis' + side, the other kinds below them
         rows = _rows(900)
         p = _build(rows, "e:f:e3,pc1,pc2")
         ref = p.locate("f:e3")["p"][0]
-        self.assertLess(ref, 0.1)                             # nearest to itself
+        self.assertGreater(ref, 0.5)                          # on its own side
         same_kind = np.mean([p.locate(f"f:e{i}")["p"][0] for i in range(0, 900, 3)])
         other = np.mean([p.locate(f"s:e{i}")["p"][0] for i in range(1, 900, 3)])
-        self.assertLess(same_kind, other)
+        self.assertGreater(same_kind, other)
 
     def test_toward_and_kind_axes(self):
         rows = _rows(900)

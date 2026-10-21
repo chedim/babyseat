@@ -9,8 +9,14 @@
  *                                         every entity, not the budget's)
  *   serve/event                           field.* / mind.* frames (HA admins)
  *
+ * THE RUSSIAN-DOLL SPHERE (#362): an entity's DIRECTION from the centre is
+ * where it points on the three axes; its DISTANCE is how much of it those
+ * axes capture (spread by rank) -- the outer shell is what the axes explain
+ * well, the core what they barely see. Faint shells, no cube edges; the far
+ * side dims, the heaviest near-side entities are labelled.
+ *
  * THE RECYCLED FIELD (Android's lists, in space): the seat projects every
- * live entity into a cube and files each into exactly ONE octree tile
+ * live entity into the ball inside a cube and files each into exactly ONE octree tile
  * (heaviest coarsest, K per cell). Each frame the view walks the octree
  * from the root, refines a tile when it covers enough of the screen, fetches
  * what it lacks and unloads tiles that left the view (an LRU under a node
@@ -163,6 +169,48 @@ function cubeToWorld(p) { return [(p[0] - 0.5) * F3_WORLD, (p[1] - 0.5) * F3_WOR
 function tileCenter(l, x, y, z) {
   const s = 1 / (1 << l);
   return cubeToWorld([(x + 0.5) * s, (y + 0.5) * s, (z + 0.5) * s]);
+}
+
+// ---- #362: the sphere's look (visual constants, not Blurp's)
+const F3_SHELLS = [1, 2 / 3, 1 / 3];  // the dolls: shell radii as a fraction of the ball
+const F3_DEPTH_DIM = 0.65;            // the far side of the ball at 35% brightness
+const F3_LABEL_CAP = 40;              // labels at once (was 90): readable at the default zoom
+const F3_FRAME_MARGIN = 1.12;         // the default camera leaves ~12% round the ball
+
+/** Circles of radius R x r in the given planes ("xy" | "yz" | "xz"), one
+ *  per shell fraction x plane: the faint shells (#362). */
+function shellCircles(R, fracs, segs, planes) {
+  const out = [];
+  for (const r of fracs) {
+    for (const pl of planes || ["xy"]) {
+      const pts = [];
+      for (let i = 0; i < segs; i++) {
+        const a = 2 * Math.PI * i / segs, u = R * r * Math.cos(a), v = R * r * Math.sin(a);
+        pts.push(pl === "yz" ? [0, u, v] : pl === "xz" ? [u, 0, v] : [u, v, 0]);
+      }
+      out.push({ r, plane: pl, pts });
+    }
+  }
+  return out;
+}
+
+/** The camera distance at which a ball of radius R fits the view (both the
+ *  vertical and the horizontal field of view), with a margin. */
+function frameBall(R, fovY, aspect, margin = F3_FRAME_MARGIN) {
+  const hy = fovY / 2, hx = Math.atan(Math.tan(hy) * (aspect || 1));
+  return R * margin / Math.sin(Math.min(hx, hy));
+}
+
+/** Depth cue (the points' shader does the same): 1 at the ball's near
+ *  surface, 1 - F3_DEPTH_DIM at its far one. */
+function depthFade(dist, camDist, R) {
+  const t = Math.max(0, Math.min(1, (dist - (camDist - R)) / Math.max(1e-9, 2 * R)));
+  return 1 - F3_DEPTH_DIM * t;
+}
+
+/** Is p on the camera's half of the ball (centre c)? Labels only there. */
+function nearSide(p, camPos, c) {
+  return (p[0] - c[0]) * (camPos[0] - c[0]) + (p[1] - c[1]) * (camPos[1] - c[1]) + (p[2] - c[2]) * (camPos[2] - c[2]) >= 0;
 }
 
 function tileRadius(l) { return (F3_WORLD / (1 << l)) * 0.8661; }
@@ -592,7 +640,7 @@ function faceOn(x, y, z, min, out) {
 
 const F3Logic = { faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
-  fieldArea, inArea, arrowFor, layoutLabels, selfTag };
+  fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP };
 if (typeof module !== "undefined" && module.exports) module.exports = F3Logic;
 
 // ------------------------------------------------------------ three.js
@@ -611,15 +659,18 @@ function loadThree() {
   return window.__f3ThreeLoading;
 }
 
+// the depth cue (#362) = depthFade(): farther across the ball, dimmer
 const F3_VERT = `
-  attribute float asize; attribute vec3 acolor; varying vec3 vColor; uniform float uScale;
+  attribute float asize; attribute vec3 acolor; varying vec3 vColor; varying float vFade;
+  uniform float uScale; uniform float uCamDist; uniform float uR;
   void main() { vColor = acolor; vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vFade = 1.0 - ${F3_DEPTH_DIM.toFixed(3)} * clamp((-mv.z - (uCamDist - uR)) / max(1e-6, 2.0 * uR), 0.0, 1.0);
     gl_PointSize = clamp(asize * uScale / max(1.0, -mv.z), asize > 0.0 ? 2.0 : 0.0, 22.0);
     gl_Position = projectionMatrix * mv; }`;
 const F3_FRAG = `
-  varying vec3 vColor;
+  varying vec3 vColor; varying float vFade;
   void main() { vec2 d = gl_PointCoord - 0.5; float r = dot(d, d); if (r > 0.25) discard;
-    float a = smoothstep(0.25, 0.16, r); gl_FragColor = vec4(vColor * (0.8 + 1.2 * (0.25 - r)), a); }`;
+    float a = smoothstep(0.25, 0.16, r); gl_FragColor = vec4(vColor * (0.8 + 1.2 * (0.25 - r)) * vFade, a * (0.4 + 0.6 * vFade)); }`;
 
 class Field3DView {
   /**
@@ -663,10 +714,16 @@ class Field3DView {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(55, 1, 1, 20000);
     this.orbit = { target: [0, 0, 0], r: 1750, theta: 0.7, phi: 1.05 };
-    // the cube's edges, faint: the space the field lives in
-    const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(F3_WORLD, F3_WORLD, F3_WORLD)),
-      new THREE.LineBasicMaterial({ color: 0x334055, transparent: true, opacity: 0.35 }));
-    this.scene.add(box);
+    this._autoR = this.orbit.r;          // _resize frames the ball until someone zooms
+    // the shells, faint (#362): the dolls as rings that always face the
+    // camera (concentric circles from any angle) + the outer shell's three
+    // great circles for orientation -- a few line loops, no meshes
+    const ring = (c, opacity) => new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(c.pts.map((q) => new THREE.Vector3(q[0], q[1], q[2]))),
+      new THREE.LineBasicMaterial({ color: 0x5a6e8c, transparent: true, opacity, depthWrite: false }));
+    this.shells = new THREE.Group();
+    for (const c of shellCircles(F3_WORLD / 2, F3_SHELLS, 96, ["xy"])) this.shells.add(ring(c, c.r === 1 ? 0.32 : 0.16));
+    this.scene.add(this.shells);
+    for (const c of shellCircles(F3_WORLD / 2, [1], 128, ["xy", "yz", "xz"])) this.scene.add(ring(c, 0.09));
     // nodes: one preallocated point buffer, slots recycled
     const g = new THREE.BufferGeometry();
     this.posA = new Float32Array(this.cap * 3); this.colA = new Float32Array(this.cap * 3);
@@ -677,7 +734,7 @@ class Field3DView {
     g.setDrawRange(0, this.cap);
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
     this.pointMat = new THREE.ShaderMaterial({ vertexShader: F3_VERT, fragmentShader: F3_FRAG, transparent: true,
-      depthWrite: false, uniforms: { uScale: { value: 600 } } });
+      depthWrite: false, uniforms: { uScale: { value: 600 }, uCamDist: { value: 1750 }, uR: { value: F3_WORLD / 2 } } });
     this.points = new THREE.Points(g, this.pointMat);
     this.scene.add(this.points);
     for (let i = this.cap - 1; i >= 0; i--) this.free.push(i);
@@ -978,6 +1035,8 @@ class Field3DView {
     const cv = this._camVecs();
     this.camera.position.set(cv.pos[0], cv.pos[1], cv.pos[2]);
     this.camera.lookAt(this.orbit.target[0], this.orbit.target[1], this.orbit.target[2]);
+    this.shells.quaternion.copy(this.camera.quaternion);
+    this.pointMat.uniforms.uCamDist.value = len3(cv.pos);
     // the recycler: what the camera wants, fetch / unload, ~4x a second
     if (this.pid && !this.stale && now - this._lastWant > 250) {
       this._lastWant = now;
@@ -1053,14 +1112,18 @@ class Field3DView {
     // tracked and what it touches, what is active)
     const only = this.api.labelIds ? this.api.labelIds() : null;
     const cands = [];
+    const cam = this._camVecs().pos, outside = len3(cam) > F3_WORLD / 2;
     for (const [id, s] of this.slots) {
       if (!this.sizeA[s]) continue;
       if (only && !only.has(id)) continue;
       const m = this.meta[s];
       const p = [this.posA[s * 3], this.posA[s * 3 + 1], this.posA[s * 3 + 2]];
+      // #362: from outside the ball, only the near half is labelled (the far
+      // half's labels would sit over the near half's points)
+      if (outside && !only && id !== this.sel && !nearSide(p, cam, [0, 0, 0])) continue;
       const sc = this._project(p);
       if (!sc || sc[0] < 0 || sc[1] < 0 || sc[0] > this._w || sc[1] > this._h) continue;
-      const d = len3(sub3(p, this._camVecs().pos));
+      const d = len3(sub3(p, cam));
       // THE TINY LABEL (2026-10-15): a fresh change stashes `act` -- show
       // what/why changed as a one-line suffix, still 11px + ellipsis.
       let txt = m.label;
@@ -1071,19 +1134,19 @@ class Field3DView {
           m.act = null;
         }
       }
-      cands.push({ id, txt, x: sc[0], y: sc[1], w: (m.mass + 5) / (d * d) + (id === this.sel ? 1e9 : 0) });
+      cands.push({ id, txt, k: m.k, x: sc[0], y: sc[1], w: (m.mass + 5) / (d * d) + (id === this.sel ? 1e9 : 0) });
     }
     cands.sort((a, b) => b.w - a.w);
     const shown = [], boxes = [];
     for (const c of cands) {
-      if (shown.length >= 90) break;
+      if (shown.length >= F3_LABEL_CAP) break;
       const bw = Math.min(200, c.txt.length * 6.5 + 6), bx = c.x + 8, by = c.y - 8;
       if (boxes.some((b) => bx < b[0] + b[2] && bx + bw > b[0] && by < b[1] + 16 && by + 16 > b[1])) continue;
       boxes.push([bx, by, bw]); shown.push([c, bx, by]);
     }
     while (this.labels.length < shown.length) {
       const el = document.createElement("div");
-      el.style.cssText = "position:absolute;font:11px system-ui,sans-serif;color:rgba(235,240,250,.92);text-shadow:0 1px 2px #000;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis";
+      el.style.cssText = "position:absolute;font:11px system-ui,sans-serif;color:rgba(235,240,250,.92);text-shadow:0 1px 2px #000;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;padding-left:3px;border-left:2px solid #888";
       this.labelLayer.appendChild(el); this.labels.push(el);
     }
     this.labels.forEach((el, i) => {
@@ -1092,6 +1155,8 @@ class Field3DView {
       el.style.display = ""; el.textContent = it[0].txt;
       el.style.transform = "translate(" + it[1].toFixed(0) + "px," + it[2].toFixed(0) + "px)";
       el.style.color = it[0].id === this.sel ? "#fff" : "";
+      const kc = this.kindRGB && this.kindRGB[it[0].k];                  // #362: the kind's colour, on the label too
+      el.style.borderLeftColor = kc ? "#" + kc.getHexString() : "#888";
       el.style.fontWeight = it[0].id === this.sel ? "600" : "";
     });
   }
@@ -1281,6 +1346,10 @@ class Field3DView {
     this._w = Math.max(1, r.width); this._h = Math.max(1, r.height);
     this.renderer.setSize(this._w, this._h, false);
     this.camera.aspect = this._w / this._h; this.camera.updateProjectionMatrix();
+    // #362: the default camera frames the whole ball (until someone zooms)
+    if (this.orbit.r === this._autoR) {
+      this._autoR = this.orbit.r = frameBall(F3_WORLD / 2, this.camera.fov * Math.PI / 180, this.camera.aspect);
+    }
     this.pointMat.uniforms.uScale.value = this._h / (2 * Math.tan(this.camera.fov * Math.PI / 360));
   }
 

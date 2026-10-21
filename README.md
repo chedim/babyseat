@@ -149,7 +149,9 @@ mkdir ~/bob && cd ~/bob
 babyseat                           # = membrane standalone; opens http://localhost:4096/
 ```
 
-You get membrane home: the field in 3D, the chat, and voice ("Hey Bob" — a new
+You get membrane home: the field in 3D (a ball: direction = what an entity is
+like, distance from the centre = how well the three axes capture it; see
+[docs/standalone.md](docs/standalone.md#reading-the-field-the-sphere)), the chat, and voice ("Hey Bob" — a new
 membrane is Bob until you agree on a name together; it will ask). Other
 devices on your network reach it at `http://<this machine>:4096/`. No login on
 this machine; from another device the page reads freely and asks once for the

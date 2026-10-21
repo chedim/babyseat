@@ -64,11 +64,12 @@ class TestRoutes(unittest.TestCase):
         self.assertIn(p1.pid, self.srv._field3d)
         self.assertIn(p3.pid, self.srv._field3d)
 
-    def test_an_entity_axis_puts_the_reference_near_zero(self):
+    def test_an_entity_axis_puts_the_reference_on_its_side(self):
+        # #362: e:<eid> = the signed projection on mean -> entity (was 1 - cos)
         live = self._live()
         p = L.field3d_projection(self.srv, f"e:{live[0]},pc1,pc2")
         xs = sorted(p.locate(e)["p"][0] for e in live)
-        self.assertLessEqual(p.locate(live[0])["p"][0], xs[len(xs) // 2])
+        self.assertGreaterEqual(p.locate(live[0])["p"][0], xs[len(xs) // 2])
 
     def test_the_seat_relays_the_three_reads(self):
         class S:

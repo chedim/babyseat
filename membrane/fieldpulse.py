@@ -269,7 +269,7 @@ class FieldPulse:
                 for eid, vec in moved.items():
                     if eid in proj.index:
                         try:
-                            moves.append([eid] + proj.place(vec))
+                            moves.append([eid] + proj.place(vec, eid))
                         except Exception:
                             pass
                 if moves:
@@ -279,7 +279,7 @@ class FieldPulse:
             projs = list((getattr(self.srv, "_field3d", None) or {}).items())
             for pid, proj in projs:
                 try:
-                    placed = {k: proj.place(v) for k, v in pts.items() if v is not None}
+                    placed = {k: proj.place(v, k) for k, v in pts.items() if v is not None}
                 except Exception:
                     continue
                 out.append({"type": "self.cycle", "pid": pid, "points": placed, **stats})
