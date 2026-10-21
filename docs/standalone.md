@@ -116,7 +116,7 @@ window fills the screen; × or Escape closes it.
 |---|---|
 | Blurp's CPU share | a slider, 10–100 % (default 50 %): `self_cpu_share`. The self loop reads the file through `options.cpu_share()`, so a change needs no restart (#343 throttles the cycles to it) |
 | The field current's fade | read-only, `CURRENT_TAU_S` (180 s today): it is a threshold, and changing it needs the operator's approval |
-| Blurp's health | read-only, once it exists (#333); the row says "not built yet" until then |
+| Blurp's energy | read-only: its energy as a percentage and whether it is awake or asleep (#345, #363); "not running yet" before Blurp has run |
 
 Writes go through the owner's door like every other write: from another
 machine they need the [seat token](auth.md#the-seat-token). Home Assistant's

@@ -3083,7 +3083,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             elif path == "/membrane/options":
                 # #344: the seat-wide options (options.py) -- the ⚙ window's read
                 from . import options as _OPT
-                self._json_out(_OPT.read())
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                self._json_out(_OPT.read(psrv))            # #363: with Blurp's energy
             elif path == "/membrane/self/recent":
                 # #230: self's record, newest first and capped -- the 👶
                 # panel's activity feed (read-only; the gate above ran first)
