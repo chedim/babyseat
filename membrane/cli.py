@@ -524,8 +524,8 @@ def _auth_claude_agent(provider: str) -> int:
           f"(no key or token stored)")
     print(f"[membrane] rungs at the next boot: "
           f"{', '.join(CA.rung_names())} -- opt-in: pick one, or add it to "
-          f"the ladder with --ladder-include <rung>; text-only; its replies "
-          f"are shown, never learned")
+          f"the ladder with --ladder-include <rung>; Claude gets only "
+          f"membrane's tools; its replies are learned like any model's")
     return 0
 
 

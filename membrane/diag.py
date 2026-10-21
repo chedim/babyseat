@@ -47,7 +47,8 @@ PROFILE_TOP = 30              # the stacks GET /membrane/diag/profile lists
 PROFILE_MAX_DEPTH = 200       # frames kept per stack (the root side is cut beyond)
 PROFILER_THREAD = "membrane-profiler"
 
-DIAG_PATHS = ("/membrane/diag/timing", "/membrane/diag/profile")
+DIAG_PATHS = ("/membrane/diag/timing", "/membrane/diag/profile",
+              "/membrane/diag/claude-agent")
 
 _lock = threading.Lock()      # this module's own; never one of the seat's
 _ring: deque = deque(maxlen=TIMING_RING)
@@ -349,6 +350,11 @@ def route(handler, path: str) -> bool:
             body = {}
         if not isinstance(body, dict):
             body = {}
+    if path == "/membrane/diag/claude-agent":
+        # the claude-agent rung's turn cap (#389): cap hits and continues
+        from . import claude_agent as _CA
+        _send(handler, 200, {**_CA.stats(), "max_turns": _CA.MAX_TURNS})
+        return True
     if path == "/membrane/diag/timing":
         if post:
             on = body.get("on", q.get("on"))

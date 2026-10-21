@@ -1194,6 +1194,39 @@ class TurnRunner:
                   "time": {"start": now}}]
         return info, parts
 
+    def claude_continue(self, sid: str, mid: str) -> str:
+        """A PERSON'S CONTINUE (#389): claim the capped claude-agent answer
+        `mid` for one Continue and return its SDK session id. Raises
+        claude_agent.ContinueRefused on a background lane's session, a row
+        that is not capped, or one already continued (nothing runs twice)."""
+        from . import claude_agent as _CA
+        if not _CA.person_agent(self._turn_agent(sid, None)):
+            raise _CA.ContinueRefused("background lanes never continue a claude-agent answer")
+        lock = self.__dict__.setdefault("_claude_continue_lock", threading.Lock())
+        with lock:
+            row = self.messages.get_msg(sid, str(mid or ""))
+            info = (row or {}).get("info") or {}
+            cap = info.get(_CA.CAP_MARK)
+            if not isinstance(cap, dict) or not cap.get("session"):
+                raise _CA.ContinueRefused("that message did not stop at the turn cap")
+            if cap.get("continued"):
+                raise _CA.ContinueRefused("that answer was already continued")
+            info[_CA.CAP_MARK] = dict(cap, continued=True)
+            self.messages.append(sid, info, list(row.get("parts") or []))
+        self.hub.publish({"type": "message.updated", "info": dict(info),
+                          "sessionID": sid})
+        return str(cap["session"])
+
+    def claude_continue_row(self, sid: str, mid: str, session: str) -> dict:
+        """The person's Continue row (stored): the turn it starts resumes
+        `session` (claude_agent.RESUME_KEY)."""
+        from . import claude_agent as _CA
+        info, parts = self._mint_user_row(sid, _CA.CONTINUE_TEXT)
+        info[_CA.RESUME_KEY] = str(session)
+        info[_CA.CONTINUE_FIELD] = str(mid)
+        self.messages.append(sid, info, parts)
+        return info
+
     def _turn_agent(self, sid: str, user_info: dict | None) -> str:
         """The turn's agent (the lane gate's input): the turn's own agent
         wins, then the session doc's, then 'build'. A bare loop key
@@ -1991,6 +2024,15 @@ class TurnRunner:
             lane = _lane_of((self._agents or {}).get(sid))
             if tools and not _text_only:
                 body["tools"] = tools
+            # A PERSON'S CONTINUE (#389): the first round resumes the capped
+            # claude-agent session -- only on a person's lane, only to a
+            # claude-agent rung, never by itself
+            _resume = (user_info or {}).get("claude_resume") if rounds == 1 else None
+            if _resume:
+                from . import claude_agent as _CA
+                if _CA.is_claude_rung(getattr(self, "srv", None), turn_model) \
+                        and _CA.person_agent((self._agents or {}).get(sid)):
+                    body[_CA.RESUME_KEY] = str(_resume)
             mkpart({"type": "step-start"})
             live = {"text": None, "reasoning": None}
             # THE DELTAS, BATCHED (2026-10-11, the operator: "the whole chat dynamics
@@ -2015,6 +2057,12 @@ class TurnRunner:
                 if kind == "ext":
                     self._inject_card(sid, val, rounds, mkpart)
                     return False
+                if kind == "tool":
+                    # a tool Claude ran in its own loop (#389): shown, never re-run
+                    for other in [k for k in _pend if _pend[k][0]]:
+                        _flush(other)
+                    _agent_tool_part(val)
+                    return False
                 p = _live.get(kind)
                 if p is None:
                     p = _live[kind] = mkpart({"type": kind, "text": "",
@@ -2027,6 +2075,34 @@ class TurnRunner:
                 if time.time() - e[1] >= DELTA_COALESCE_S:
                     _flush(p["id"])
                 return False
+            _agent_shown: set = set()
+
+            def _agent_tool_part(t, _shown=_agent_shown):
+                """One tool the claude-agent rung ran inside the SDK's loop
+                (#389): a finished tool part, marked claude-agent. Never
+                handed to this runner's executor: it already ran."""
+                from . import claude_agent as _CA
+                if not isinstance(t, dict):
+                    return
+                key = str(t.get("id") or "") or json.dumps(t, sort_keys=True, default=str)
+                if key in _shown:
+                    return
+                _shown.add(key)
+                now = int(time.time() * 1000)
+                name = str(t.get("name") or "")
+                targs = t.get("input") if isinstance(t.get("input"), dict) else {}
+                st = {"status": "error" if t.get("is_error") else "completed",
+                      "input": targs, "title": _tool_title(name, targs),
+                      "time": {"start": now, "end": now}}
+                if t.get("is_error"):
+                    st["error"] = str(t.get("output") or "")[:300]
+                else:
+                    st["output"] = str(t.get("output") or "")
+                tp = mkpart({"type": "tool", "callID": str(t.get("id") or ""),
+                             "tool": name, _CA.MARK_KEY: _CA.PROVIDER, "state": st,
+                             "time": {"start": now, "end": now}})
+                self.hub.publish({"type": "message.part.updated", "part": dict(tp),
+                                  "time": now, "sessionID": sid})
             _stream = getattr(self.call_ladder, "stream", None) if STREAM_ROUNDS else None
             try:
                 if _stream is not None:
@@ -2064,12 +2140,23 @@ class TurnRunner:
             msg = ((resp.get("choices") or [{}])[0].get("message")
                    or {})
             # THE CLAUDE-MADE MARK (issue #384): the proxy stamps the
-            # answering provider; a Claude reply is shown (this row keeps
-            # it) and never fed to the field later (absorb/voice skip it)
+            # answering provider; the row keeps it for provenance (#389:
+            # the reply is learned like any model's). The tools Claude ran
+            # in its own loop become finished tool parts (the buffered
+            # round's; a streamed round showed them as they came).
             from . import claude_agent as _CA
             _ca_round = resp.get(_CA.RESP_KEY) == _CA.PROVIDER
             if _ca_round:
                 a_info[_CA.MARK_KEY] = _CA.PROVIDER
+                for _t in resp.get(_CA.TOOLS_KEY) or []:
+                    _agent_tool_part(_t)
+                # THE TURN CAP (#389): stopped at MAX_TURNS, not an error;
+                # the chat offers the person a Continue on this row
+                _cap = resp.get(_CA.CAPPED_KEY)
+                if isinstance(_cap, dict) and _cap.get("session"):
+                    a_info[_CA.CAP_MARK] = {"session": str(_cap["session"]),
+                                            "turns": int(_cap.get("turns") or _CA.MAX_TURNS),
+                                            "continued": False}
             _tokens_fill(a_info, resp)
             # THE INJECTION AS A CARD (2026-10-08, the operator: show it
             # like every tool call): what membrane added to this round --
@@ -2090,6 +2177,8 @@ class TurnRunner:
             # in-turn; a bad object refuses honestly there, never
             # guesses. Real tool_calls beside bullets stay real: the
             # model already fired, more would double-execute.
+            # (a claude-agent round already ran its tools in its own loop:
+            # salvaging its words into calls would run them twice)
             if not tcs and self.tools is None and content and not _ca_round:
                 try:
                     from . import streams as _ST
@@ -2104,8 +2193,7 @@ class TurnRunner:
             reason = "tool-calls" if tcs else "stop"
             try:
                 from . import predict as _predict
-                if not _ca_round:          # Claude's moves are never learned (#384)
-                    _predict.step_end(self, sid, list(tcs or []), content, step=rounds, mid=aid)
+                _predict.step_end(self, sid, list(tcs or []), content, step=rounds, mid=aid)
             except Exception:
                 pass
             if msg.get("reasoning") or msg.get("thinking"):
@@ -2442,13 +2530,10 @@ class TurnRunner:
         try:
             from . import voice as _voice
             _lane_end = _lane_of((self._agents or {}).get(sid))
-            from . import claude_agent as _CA
             _voice.on_turn_end(self, sid, text,
-                               "" if _CA.is_claude_made(a_info) else
                                "\n".join(p.get("text") or "" for p in parts
                                          if isinstance(p, dict) and p.get("type") == "text"),
-                               _lane_end,
-                               parts=[] if _CA.is_claude_made(a_info) else parts)
+                               _lane_end, parts=parts)
             if _lane_end not in _voice._CHAT_LANES:      # the chat's guess rides its voice line
                 from . import predict as _predict
                 threading.Thread(target=_predict.end, args=(self, sid, list(parts)),
@@ -2532,6 +2617,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
         content, reasoning, tcs = [], [], {}
         usage, ext, finish = None, None, None
         provider = None                      # the answering provider's stamp (#384)
+        agent_tools = []                     # tools the claude-agent rung ran (#389)
+        capped = None                        # ...and its turn cap, when hit
         done = False
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             for raw in resp:
@@ -2554,6 +2641,11 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     usage = d["usage"]
                 if d.get("membrane_provider"):
                     provider = d["membrane_provider"]
+                if isinstance(d.get("membrane_tool"), dict):
+                    agent_tools.append(d["membrane_tool"])
+                    on_event("tool", d["membrane_tool"])
+                if isinstance(d.get("membrane_capped"), dict):
+                    capped = d["membrane_capped"]
                 for ch in d.get("choices") or []:
                     delta = ch.get("delta") or ch.get("message") or {}
                     if ch.get("finish_reason"):
@@ -2602,6 +2694,10 @@ def loopback_ladder(port: int, runner=None, cell=None):
             out["membrane"] = ext
         if provider:
             out["membrane_provider"] = provider
+        if agent_tools:
+            out["membrane_tools"] = agent_tools
+        if capped is not None:
+            out["membrane_capped"] = capped
         return out
     call.stream = stream
     return call
@@ -3421,7 +3517,19 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if isinstance(p, dict) and p.get("type") == "text")
             if not text.strip():
                 return self._json_err(400, "message needs a text part")
+            # A PERSON'S CONTINUE (#389): the chat's button on a capped
+            # claude-agent answer; claimed once, refused on a loop's session
+            _cont = None
+            from . import claude_agent as _CA
+            if b.get(_CA.CONTINUE_FIELD):
+                try:
+                    _cont = (str(b[_CA.CONTINUE_FIELD]),
+                             runner.claude_continue(sid, str(b[_CA.CONTINUE_FIELD])))
+                except _CA.ContinueRefused as e:
+                    return self._json_err(409, str(e))
             user_info, row = self._record_user(sid, text, b)
+            if _cont is not None:
+                user_info[_CA.CONTINUE_FIELD], user_info[_CA.RESUME_KEY] = _cont
             # THE MESSAGE'S PICK STICKS (the chooser's last mile, the
             # operator's 'the chooser is ignored' exhibit): the POST's
             # body carries the TUI's CURRENT model; the message lane

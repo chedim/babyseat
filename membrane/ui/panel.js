@@ -380,6 +380,18 @@ function isMove(p) {
 
 /** A phantom: membrane's guess of a move, greyed -- a phrase it expected him
  *  to write, or a tool call; ✓ / ~ (in its top 3) / ✗ once the move is made. */
+/** THE TURN CAP (#389): a claude-agent answer that stopped at its turn
+ *  limit says so, with a Continue the person can press (once per answer). */
+function capHtml(info) {
+  const cap = info && info.claudeCapped;
+  if (!cap || typeof cap !== "object") return "";
+  const n = cap.turns || 4;
+  return '<div class="ccap">⏸ Claude stopped at the turn cap (' + escText(String(n)) + " turns). " +
+    (cap.continued ? '<span class="usage">continued</span>'
+      : '<button class="more" data-ccont="' + escAttr(info.id || "") + '">Continue (' + escText(String(n)) +
+        " more)</button>") + "</div>";
+}
+
 function phantomHtml(it) {
   if (!it || !it.label) return "";
   const mark = it.pending ? "…" : it.hit ? "✓" : it.top3 ? "~" : "✗";
@@ -1909,7 +1921,7 @@ function offlineNotice(data, zoo) {
     : { text: name + " is offline", switchTo: null };
 }
 
-const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, sheetSleep, sleepBars, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -1968,6 +1980,7 @@ const STYLE = `
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .mind b { font-weight:600; }
   .err { color:var(--error-color,#f66); font:13px monospace; white-space:pre-wrap; padding:0 12px; }
+  .ccap { font:13px sans-serif; opacity:.85; padding:4px 12px; }
   .err .zswitch { font:inherit; margin-left:6px; padding:2px 10px; border-radius:999px; cursor:pointer;
                   border:1px solid currentColor; background:transparent; color:var(--primary-text-color,#ddd); }
   .err:not(:empty) { padding:8px 12px; }
@@ -3003,6 +3016,21 @@ function definePanel() {
       if (!this._live) { await this._resync(); this._startPoll(); }
     }
 
+    /** A PERSON'S CONTINUE (#389): Claude stopped at its turn cap; this
+     *  answer gets another round of turns in the same Claude session. */
+    async _claudeContinue(mid, btn) {
+      if (!mid || !this._sid) return;
+      if (btn) btn.disabled = true;
+      this._err("");
+      if (!this._busy()) { this._chat.status = { type: "busy", since: Date.now() }; this._paintStatus(); this._schedule(); }
+      const r = await this._api(SERVE + "/session/" + this._sid + "/prompt_async", {
+        method: "POST", body: JSON.stringify({ agent: this._agent, claudeContinue: mid,
+                                               parts: [{ type: "text", text: "Continue" }] }),
+      });
+      if (!r.ok) { this._err(this._apiErr("continue failed", r)); if (btn) btn.disabled = false; }
+      if (!this._live) { await this._resync(); this._startPoll(); }
+    }
+
     async _submit() {
       const text = (this._ta.value || "").trim();
       if (!text || !this._sid) return;
@@ -3206,6 +3234,7 @@ function definePanel() {
       const usage = fmtUsage(info);
       if (usage && (info.time || {}).completed) html += '<div class="usage">' + escText(usage) + "</div>";
       if (info.error) html += '<div class="err">' + escText(pretty(info.error.data || info.error)) + "</div>";
+      html += capHtml(info);
       el.innerHTML = html || '<div class="usage">…</div>';
       return el;
     }
@@ -3469,6 +3498,8 @@ function definePanel() {
         }
         return;
       }
+      const cont = ev.target.closest("[data-ccont]");
+      if (cont) { this._claudeContinue(cont.dataset.ccont, cont).catch(() => {}); return; }
       const more = ev.target.closest(".more");
       if (more) {
         this._expanded.add(more.dataset.full + ":full");

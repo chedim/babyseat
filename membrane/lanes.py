@@ -5625,9 +5625,10 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         orig_model = str(up.get("model") or "membrane")
         t0 = time.monotonic()
         # THE CLAUDE-AGENT RUNG (issue #384): Claude through the Agent SDK.
-        # Its reply is SHOWN (teed to the client like any rung's) and never
-        # LEARNED: the capture below gets the person's side only. Keyed on
-        # the rung's provider, never on the model's name.
+        # Its reply is shown and learned like any rung's (#389); the tools it
+        # ran in its own loop (membrane's, relaying back to this proxy) ride
+        # the reply and are captured below. Keyed on the rung's provider,
+        # never on the model's name.
         from . import claude_agent as _CA
         _ca = _CA.is_claude_rung(srv, orig_model)
         if _ca:
@@ -5669,8 +5670,12 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             rec = (getattr(srv, "router", None).records.get(model_name)
                    if getattr(srv, "router", None) else None)
             if _CA.is_claude_rung(srv, model_name):
-                # the SDK answers in-process (text-only: tools stay here)
-                return _CA.open_reply(u2)
+                # the SDK answers in-process; its tools are membrane's,
+                # relaying back to THIS proxy (#389)
+                _port = getattr(srv, "listen_port", None)
+                if _port is None:
+                    _port = (getattr(srv, "server_address", None) or (None, None))[1]
+                return _CA.open_reply(u2, port=_port)
             if rec is not None and rec.backend:
                 from .auth import PROVIDERS as _PROV
                 prov = _PROV.get(rec.backend) or {}
@@ -5836,7 +5841,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             # registered them -- opencode's traffic is stream:true, so
             # _pending_tools never populated for the real flow (the
             # receipt lane's missing-registration exhibit, E9)
-            if calls and not _ca:
+            if calls:
                 _capture_plan_and_calls(mem, query, "".join(parts), calls)
             resp_obj = None
         else:
@@ -5971,15 +5976,24 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # the entity field's discourse intake: the user's text + the model's
         # prose + its reasoning -- mixed prose+tool turns included (the
         # exemplar path below drops them); tool calls ride on_calls
+        # THE CLAUDE-AGENT TURN (#389): learned like any model's. Only a
+        # failed SDK turn's error line is not the model's words; the tools
+        # Claude ran in its own loop are captured as calls + results.
+        _ca_failed = _ca and bool(getattr(backend_r, "failed", False))
+        _ca_tools = list(getattr(backend_r, "tools", None) or []) if _ca else []
+        _learned = "" if _ca_failed else content
         _cap = getattr(srv, "capturer", None)
         if _cap is not None:
-            if _ca:
-                _cap.on_turn(query, "", "")       # the person's side only (#384)
-            else:
-                _cap.on_turn(query, content, thought or "")
+            _cap.on_turn(query, _learned, "" if _ca_failed else (thought or ""))
+            if _ca_tools:
+                _cap.on_calls(query, _CA.captured_calls(_ca_tools))
+                for _t in _ca_tools:
+                    _cap.on_tool_result(_t.get("id") or "", _t.get("name") or "",
+                                        _t.get("input") or {}, _t.get("output") or "",
+                                        query)
         # the A/B pair closes on the model's final answer (a text turn)
         k_ab = getattr(srv, "_ab_key", None)
-        if k_ab and content.strip() and not tool_calls and not _ca \
+        if k_ab and _learned.strip() and not tool_calls \
                 and _efield_on(srv) is not None:
             srv._ab_key = None
             import threading as _th
@@ -5993,9 +6007,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # discipline violations (stacked/buried canon frames) so the poison
         # that self-learns as junk memory is also VISIBLE and countable.
         try:
-            if content.strip() and not tool_calls and not _ca:
+            if _learned.strip() and not tool_calls:
                 _frame_lint(srv, content, source="assistant-text")
-            if calls and not _ca:
+            if calls:
                 _capture_plan_and_calls(mem, query, content, calls)
         except Exception as e:
             print(f"[opencode] capture error (response already served): {e}",

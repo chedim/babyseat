@@ -162,8 +162,9 @@ PROVIDERS: dict[str, dict] = {
 # drives the local `claude` CLI with that CLI's own login; membrane never
 # holds a key or token for it. `membrane auth claude-agent` checks the CLI
 # and stores only a non-secret "enabled" mark. The rungs are opt-in
-# (router.OPT_IN_BACKENDS) and text-only; their replies are never learned
-# (membrane/claude_agent.py, docs/claude-agent.md).
+# (router.OPT_IN_BACKENDS); Claude gets only membrane's own tools, and its
+# replies are learned like any model's (#389; membrane/claude_agent.py,
+# docs/claude-agent.md).
 AGENT_PROVIDERS: dict[str, dict] = {
     "claude-agent": {
         "kind": "agent-sdk",
