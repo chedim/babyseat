@@ -1314,12 +1314,21 @@ def nerve_paused(srv) -> bool:
     autonode's scanner gates, the idle judges skip, speech holds. READS,
     the memory frames and `intend` stay live: the plan's artifact is the
     board, inert by construction (a planted intent fires nothing until
-    resume -- every lane that would react is down too). RAM-only: a
-    restart unpauses (a persisted pause = a stuck seat). The kill switch
+    resume -- every lane that would react is down too). Never on disk (a
+    persisted pause = a stuck seat): a cold start runs; a requested restart
+    (presence.restart's re-exec) keeps the person's pause through the
+    environment (#395, restarts.apply_carried_pause), while the battery's
+    pause re-derives itself on the new boot. The kill switch
     MEMBRANE_NERVE_PAUSE=0 makes pause a no-op (the ablation)."""
     if os.environ.get("MEMBRANE_NERVE_PAUSE") == "0":
         return False
     return bool(getattr(srv, "paused", False))
+
+
+def person_paused(srv) -> bool:
+    """#395: the seat is paused and the pause is the person's (the typed
+    frames, the button, a carried one) -- not the battery guard's."""
+    return bool(getattr(srv, "paused", False)) and getattr(srv, "pause_by", None) != "battery"
 
 
 def _is_restart_call(est, op: str, body) -> bool:
@@ -1353,8 +1362,11 @@ def nerve_set(srv, on: bool, by: str | None = None) -> bool:
     """Pause (True) or resume (False) the seat: the flag and its audit line
     ({"event": "nerve", "op": "pause"|"resume", "ts"} plus `by` when the
     caller is known). The one setter the typed frames and membrane home's
-    button (#348, seat_panel.set_pause) share. RAM-only, like the flag."""
+    button (#348, seat_panel.set_pause) share. RAM-only, like the flag.
+    The pause it sets is the person's (`pause_by`, #395): the one a restart
+    carries."""
     srv.paused = bool(on)
+    srv.pause_by = "person" if on else None
     rec = {"event": "nerve", "op": "pause" if on else "resume", "ts": time.time()}
     if by:
         rec["by"] = str(by)
@@ -6691,8 +6703,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
 
         RESTARTS WHILE PAUSED (#388): the pause's write gate lets exactly
         one call through -- presence.restart (a staged deploy must not
-        wait for a resume). The pause stays RAM-only, so the seat comes
-        back running; every other method still answers 423."""
+        wait for a resume). The person's pause is carried to the new
+        boot (#395); every other method still answers 423."""
         body = self._json_body()
         srv = self.server
         est = getattr(srv, "entity_store", None)
@@ -7147,7 +7159,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             "frame": (getattr(srv, "_frame", None).readings()
                       if getattr(srv, "_frame", None) is not None else None),
             "embed_model": getattr(mem.embedder, "model", None),
-            # the operator's stable point (RAM-only; the acting lanes hold)
+            # the operator's stable point (never on disk; a restart carries it, #395)
             "paused": nerve_paused(srv),
             # the viewer's counters and cloud: live entities, their states
             "field_size": int((vit.get("entities") or {}).get("live", 0)),

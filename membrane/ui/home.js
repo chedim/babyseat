@@ -1013,7 +1013,8 @@ function titleFlash(base, text, tick) { return (Number(tick) || 0) % 2 ? base : 
 // seat runs, ⏸ while it is paused. GET /membrane/seat/pause reads it (on load,
 // every PAUSE_POLL_MS -- the typed `pause` / `resume` and the battery move it
 // too -- and after every change); a post of {paused} sets it behind the owner's
-// door. RAM-only on the seat: a restart resumes, so the button shows ▶ again.
+// door. Never on disk: a requested restart keeps the person's pause (#395, the
+// re-exec carries it), a cold start runs. The battery's pause re-derives itself.
 // PauseButton takes its button and the two calls, so node drives it with
 // stubs (tests/test_nerve_pause_348.py).
 const PAUSE_PATH = "/membrane/seat/pause";
@@ -1030,12 +1031,12 @@ function pauseView(st) {
     title: "the pause is switched off on this seat (MEMBRANE_NERVE_PAUSE=0): pausing changes nothing" };
   if (st.paused) return { icon: "▶", pressed: "true", label: "the seat is paused: resume it",
     title: "the seat is paused -- click to resume: its acting lanes wake and what they held runs " +
-           "(the loops' queued events, the night's deferred pass, the autonode's backlog). A restart resumes it too." };
+           "(the loops' queued events, the night's deferred pass, the autonode's backlog). A restart keeps it." };
   return { icon: "⏸", pressed: "false", label: "the seat is running: pause it",
     title: "the seat is running -- click to pause its acting lanes: the loops, the dreamer, the thinker's ticks, " +
            "the night pass, the autonode, the idle judges, speech, " + SELF_NAME + "'s cycle and the scripts' model calls " +
            "stand down, and the LLM's entity and file writes are refused. Reads, memory, intend and your chat stay. " +
-           "Not remembered: a restart resumes." };
+           "A restart keeps it; a cold start runs." };
 }
 
 class PauseButton {
