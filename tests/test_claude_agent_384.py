@@ -1,18 +1,20 @@
 """THE CLAUDE-AGENT RUNG (issue #384): Claude through the Claude Agent SDK
-(the local `claude` CLI and its login), with its replies kept out of what
-membrane learns.
+(the local `claude` CLI and its login). Issue #389 changed two rules: the
+replies are learned like any model's, and Claude gets membrane's own tools
+in the SDK's loop (tests/test_claude_agent_tools_389.py).
 
 - the provider `claude-agent` sits beside the others in auth.PROVIDERS; a
   turn routed to one of its rungs goes to the SDK's query() (stubbed here --
   the real CLI is never spawned) and comes back as an ordinary OpenAI
   response, streamed or not;
-- Claude Code's own tools are off (no built-in tools, no allowed tools, no
-  MCP servers, no settings files): the rung is text-only;
+- Claude Code's own tools are off (no built-in tools, no settings files);
+  only membrane's tools are allowed (#389);
 - opt-in: the router never escalates to it unless pinned or added to the
   ladder; background lanes never use it;
-- learned: the person's side; never Claude's reply text (field capture,
-  claims/night input, the voice, absorb). Shown: the transcript keeps the
-  reply, marked Claude-made by provider, not by model name;
+- learned: the person's side and Claude's reply, like any model's (#389);
+  absorb's older Anthropic filter still skips the session. Shown: the
+  transcript keeps the reply, marked Claude-made by provider, not by model
+  name;
 - a missing SDK or CLI is a clear error.
 """
 import asyncio
@@ -94,8 +96,17 @@ def fake_sdk(words=("Hello ", "world"), error=None):
         yield AssistantMessage([TextBlock("".join(words))])
         yield ResultMessage()
 
+    def tool(name, description, input_schema):          # #389: membrane's tools
+        return lambda fn: types.SimpleNamespace(name=name, description=description,
+                                                input_schema=input_schema, handler=fn)
+
+    def create_sdk_mcp_server(name, version="1.0.0", tools=None):
+        return {"type": "sdk", "name": name, "tools": list(tools or [])}
+
     mod.ClaudeAgentOptions = ClaudeAgentOptions
     mod.CLINotFoundError = CLINotFoundError
+    mod.tool = tool
+    mod.create_sdk_mcp_server = create_sdk_mcp_server
     mod.query = query
     return mod
 
@@ -135,7 +146,7 @@ class TestProviderRow(unittest.TestCase):
         self.assertFalse(CA.is_rung_name("claude-sonnet-4"))   # a name is not the provider
 
 
-# ---- options: the tools are off -------------------------------------------
+# ---- options: Claude Code's tools are off, membrane's are on (#389) ---------
 
 class TestOptions(_SDKCase):
     def test_tools_off_and_isolated(self):
@@ -144,11 +155,13 @@ class TestOptions(_SDKCase):
                            "claude-agent:sonnet", stream=False))
         opts = self.sdk.calls[0]["options"]
         self.assertEqual(opts.kw["tools"], [])             # no built-in tools
-        self.assertEqual(opts.kw["allowed_tools"], [])     # nothing auto-allowed
-        self.assertEqual(opts.kw["mcp_servers"], {})       # no MCP surface of its own
+        # #389: only membrane's own tools, through its own MCP server
+        self.assertTrue(opts.kw["allowed_tools"])
+        self.assertTrue(all(n.startswith("mcp__membrane__") for n in opts.kw["allowed_tools"]))
+        self.assertEqual(set(opts.kw["mcp_servers"]), {"membrane"})
         self.assertTrue(opts.kw["strict_mcp_config"])
         self.assertEqual(opts.kw["setting_sources"], [])   # no settings / CLAUDE.md
-        self.assertEqual(opts.kw["max_turns"], 1)
+        self.assertEqual(opts.kw["max_turns"], CA.MAX_TURNS)
         self.assertEqual(opts.kw["model"], "sonnet")
         self.assertIn("be brief", opts.kw["system_prompt"])
 
@@ -305,7 +318,7 @@ class TestRouterOptIn(unittest.TestCase):
         self.assertIn("claude-agent:haiku", names)
         self.assertNotIn("claude-agent:opus", names)
 
-    def test_rungs_are_text_only(self):
+    def test_rungs_never_take_the_callers_tools(self):
         reg = _registry()
         rec = reg.records["claude-agent:sonnet"]
         self.assertEqual(rec.backend, CA.PROVIDER)
@@ -340,7 +353,7 @@ class TestBackgroundNever(_SDKCase):
         self.assertEqual(CA.guard_turn_model(srv, "paid-cloud", "watch:x", "m"), "paid-cloud")
 
 
-# ---- the proxy turn: shown, never learned ---------------------------------
+# ---- the proxy turn: shown and learned (#389) -----------------------------
 
 class _Cap:
     def __init__(self):
@@ -391,7 +404,7 @@ class TestProxyTurn(_SDKCase):
         h._v1_deliver(up, b"{}", PERSON, None, verdict, None)
         return srv, h.wfile.getvalue()
 
-    def test_streamed_turn_shows_the_reply_and_learns_only_the_person(self):
+    def test_streamed_turn_shows_and_learns_the_reply(self):
         srv, raw = self._deliver(stream=True)
         self.assertIn(b"200", raw.split(b"\r\n", 1)[0])
         body = raw.split(b"\r\n\r\n", 1)[1]
@@ -402,24 +415,24 @@ class TestProxyTurn(_SDKCase):
                        for c in chunks)
         self.assertEqual(text, "Hello world")                  # shown
         self.assertTrue(all(c.get(CA.RESP_KEY) == CA.PROVIDER for c in chunks))
-        # learned: the person's text, never the reply
-        self.assertEqual(srv.capturer.turns, [(PERSON, "", "")])
+        # learned: the person's text and the reply, like any model's (#389)
+        self.assertEqual(srv.capturer.turns, [(PERSON, "Hello world", "")])
         self.assertEqual(srv.capturer.calls, [])
         # the SDK got the system prompt; its own tools stayed off
         call = self.sdk.calls[0]
         self.assertIn("doctrine", call["options"].kw["system_prompt"])
         self.assertEqual(call["options"].kw["tools"], [])
 
-    def test_buffered_turn_shows_the_reply_and_learns_only_the_person(self):
+    def test_buffered_turn_shows_and_learns_the_reply(self):
         srv, raw = self._deliver(stream=False)
         body = json.loads(raw.split(b"\r\n\r\n", 1)[1])
         self.assertEqual(body["choices"][0]["message"]["content"], "Hello world")
         self.assertEqual(body[CA.RESP_KEY], CA.PROVIDER)
-        self.assertEqual(srv.capturer.turns, [(PERSON, "", "")])
+        self.assertEqual(srv.capturer.turns, [(PERSON, "Hello world", "")])
 
-    def test_no_reply_text_reaches_the_field_events(self):
-        """Claims and the night read the field's events: a Claude turn leaves
-        only the person's event there (no role 'model')."""
+    def test_the_reply_text_reaches_the_field_events(self):
+        """Claims and the night read the field's events: a Claude turn now
+        leaves the reply there like any model's (#389)."""
         from membrane.capture import Capturer
         seen = []
         fld = types.SimpleNamespace(write_events=lambda evs, session=None: seen.extend(evs) or [],
@@ -433,8 +446,7 @@ class TestProxyTurn(_SDKCase):
         h._v1_deliver(up, b"{}", PERSON, None, {"verdict": "escalate"}, None)
         cap.flush()
         self.assertTrue(seen)
-        self.assertFalse([e for e in seen if getattr(e, "role", "") == "model"], seen)
-        self.assertFalse([e for e in seen if "Hello" in (getattr(e, "text", "") or "")])
+        self.assertTrue([e for e in seen if "Hello" in (getattr(e, "text", "") or "")], seen)
 
     def test_missing_cli_is_a_clear_503(self):
         srv = _srv()
@@ -503,7 +515,7 @@ class TestTranscriptMark(unittest.TestCase):
                                            "modelID": "renamed-model"}))
         self.assertFalse(CA.is_claude_made({"role": "assistant", "modelID": "claude-sonnet"}))
 
-    def test_the_voice_never_hears_a_claude_row(self):
+    def test_the_voice_hears_a_claude_row(self):
         from membrane import voice as V
         rows = [{"info": {"role": "user", "id": "u1"},
                  "parts": [{"type": "text", "text": "the person speaks"}]},
@@ -518,12 +530,11 @@ class TestTranscriptMark(unittest.TestCase):
         heard = list(V.history_texts(runner))
         self.assertIn("the person speaks", heard)
         self.assertIn("a local model speaks", heard)
-        self.assertNotIn("Claude speaks", heard)
+        self.assertIn("Claude speaks", heard)                   # #389: like any model
         replies, pairs = V.history_replies(runner)
-        self.assertFalse([t for _, t in replies if "Claude" in t], replies)
-        self.assertFalse([p for p in pairs if "Claude" in p[1]], pairs)
+        self.assertIn(("the person speaks", "Claude speaks"), pairs)
 
-    def test_the_turn_end_hands_the_voice_no_claude_reply(self):
+    def test_the_turn_end_hands_the_voice_the_claude_reply(self):
         from membrane import voice as V
         seen = []
         resp = {"choices": [{"message": {"content": "Hello world"}, "finish_reason": "stop"}],
@@ -532,7 +543,7 @@ class TestTranscriptMark(unittest.TestCase):
                                lambda runner, sid, user_text, reply, lane, parts=None:
                                seen.append(reply)):
             self._run(resp)
-        self.assertEqual(seen, [""])
+        self.assertEqual(seen, ["Hello world"])                 # #389
 
 
 class TestLoopbackCarriesTheProvider(unittest.TestCase):

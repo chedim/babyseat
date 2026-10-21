@@ -8,24 +8,23 @@ SDK's query() -- the turn's system messages as the system prompt, the rest
 as the prompt -- and the reply comes back as an ordinary OpenAI chat
 response, streamed (chat.completion.chunk SSE lines) or buffered.
 
-Claude Code's own tools are switched off (no built-in tools, nothing
-auto-allowed, no MCP servers, no settings files, one turn): membrane's tool
-loop stays the only tool surface. The SDK runs its own agent loop when it
-gets tools, and it cannot hand a tool call back to a caller unexecuted, so
-this rung is TEXT-ONLY: the turn's tool definitions are not passed on and
-the reply never carries tool calls.
+MEMBRANE'S TOOLS IN CLAUDE'S LOOP (issue #389): Claude Code's own tools are
+switched off (no built-in tools, no user MCP config, no settings files).
+The SDK runs its own agent loop and cannot hand a tool call back to a caller
+unexecuted, so Claude gets membrane's MCP tool surface (mcp_server.TOOLS,
+run by mcp_server.TOOL_IMPLS, write tools included) as an in-process SDK
+MCP server, and allowed_tools is exactly that mcp__membrane__* set. The
+tools relay to this seat's proxy like the stdio MCP server's do, so every
+proxy-side guard applies. MAX_TURNS caps the loop. The turn's own tool
+definitions (the caller's surface) are not passed on; the reply never
+carries tool_calls for the caller to run. Each tool Claude ran rides the
+reply as a TOOL_KEY chunk (streamed) or TOOLS_KEY list (buffered), so the
+transcript shows it and the proxy captures it.
 
-THE RULE (Anthropic's terms, the operator's 2026-10-21): Claude's replies
-never become learned material. What membrane keeps from a Claude turn:
-- learned: the person's side, and tool RESULTS (world data). Never Claude's
-  reply text, its reasoning, or its tool-call arguments (the proxy hands
-  the capturer an empty reply; the voice, the predictor, the A/B judge and
-  the frame lint never see it);
-- shown: the reply stays in the session transcript (the chat shows it, the
-  conversation continues). The transcript row is marked Claude-made
-  (MARK_KEY) so nothing later feeds it to the field.
-The rule keys on the PROVIDER (the rung's backend, the response's
-RESP_KEY stamp, the row's MARK_KEY), never on a model's name.
+LEARNED LIKE ANY MODEL (issue #389, the operator's 2026-10-21): Claude's
+reply, its reasoning and its tool calls and results are learned like any
+other model's. The transcript row keeps the Claude-made mark (MARK_KEY,
+from the response's RESP_KEY stamp) for provenance only.
 
 Opt-in: the router never escalates to a claude-agent rung on its own (see
 router.OPT_IN_BACKENDS); the operator pins it or adds it to the ladder
@@ -58,6 +57,12 @@ INSTALL_HINT = ("pip install 'babyseat[claude-agent]' (or: pip install "
 LOGIN_HINT = ("install Claude Code, run `claude` once to log in, then "
               "`membrane auth claude-agent`")
 STATUS_TIMEOUT_S = 20
+MAX_TURNS = 4                       # tool turns per answer (#389); AWAITING the
+                                    # operator's approval
+MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
+TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
+TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
+TOOLS_KEY = "membrane_tools"        # a buffered response: every tool Claude ran
 
 
 class Unavailable(RuntimeError):
@@ -111,8 +116,9 @@ def is_claude_made(info) -> bool:
 
 
 def register_rungs(router, models=DEFAULT_MODELS) -> int:
-    """The provider's rungs on the router: cloud kind, TEXT-ONLY caps
-    (completion, no tools), opt-in (router.OPT_IN_BACKENDS)."""
+    """The provider's rungs on the router: cloud kind, completion caps (the
+    rung never takes the caller's tools: its tools are membrane's, run in
+    Claude's own loop), opt-in (router.OPT_IN_BACKENDS)."""
     n = 0
     for name in rung_names(models):
         rec = router.records.get(name)
@@ -258,15 +264,57 @@ def split_messages(messages) -> tuple[str, str]:
     return sys_prompt, prompt
 
 
-def build_options(sdk, system: str, model: str, stream: bool):
+# ---- membrane's tools, served to the SDK in-process (#389) ----------------------
+
+def tool_names() -> list[str]:
+    """allowed_tools: exactly membrane's MCP tools, as the SDK names them."""
+    from . import mcp_server as _mcp
+    return [TOOL_PREFIX + t["name"] for t in _mcp.TOOLS]
+
+
+def _tool_handler(name: str, port):
+    """The SDK tool's handler: the stdio MCP server's own function for
+    `name` (mcp_server.TOOL_IMPLS), run off the event loop, relaying to this
+    seat's proxy on `port`. A failure goes back to Claude as an error
+    result, the way the stdio server returns it."""
+    from . import mcp_server as _mcp
+    impl = _mcp.TOOL_IMPLS[name]
+
+    async def handler(args):
+        try:
+            if port is None:
+                raise _mcp.ProxyError(503, "the seat's proxy port is unknown")
+            text = await asyncio.to_thread(impl, dict(args or {}), int(port))
+            return {"content": [{"type": "text", "text": str(text)}]}
+        except _mcp.ProxyError as e:
+            msg = f"membrane tool error: {e.message}"
+        except Exception as e:
+            msg = f"membrane tool error: {e}"
+        return {"content": [{"type": "text", "text": msg}], "is_error": True}
+    return handler
+
+
+def build_mcp_server(sdk, port):
+    """membrane's MCP surface as an in-process SDK MCP server: one SDK tool
+    per mcp_server.TOOLS entry (its name, description and JSON schema),
+    each run by the matching mcp_server.TOOL_IMPLS function."""
+    from . import mcp_server as _mcp
+    tools = [sdk.tool(t["name"], t["description"], t["inputSchema"])(
+                 _tool_handler(t["name"], port))
+             for t in _mcp.TOOLS if t["name"] in _mcp.TOOL_IMPLS]
+    return sdk.create_sdk_mcp_server(name=MCP_NAME, version=_mcp.SERVER_VERSION,
+                                     tools=tools)
+
+
+def build_options(sdk, system: str, model: str, stream: bool, port=None):
     return sdk.ClaudeAgentOptions(
         system_prompt=system or None,
         tools=[],                  # Claude Code's built-in tools: off
-        allowed_tools=[],          # nothing auto-allowed
-        mcp_servers={},            # no MCP surface of its own
-        strict_mcp_config=True,    # ...nor the user's configured ones
+        allowed_tools=tool_names(),  # only membrane's tools (#389)
+        mcp_servers={MCP_NAME: build_mcp_server(sdk, port)},
+        strict_mcp_config=True,    # never the user's configured MCP servers
         setting_sources=[],        # no settings files, no CLAUDE.md
-        max_turns=1,
+        max_turns=MAX_TURNS,
         model=sdk_model(model) or None,
         include_partial_messages=bool(stream),
     )
@@ -282,10 +330,25 @@ def _usage(u) -> dict:
             "total_tokens": pin + pout}
 
 
-async def _consume(sdk, messages, model, stream, put):
+def _result_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(c.get("text") or "") for c in content
+                         if isinstance(c, dict) and c.get("text"))
+    return "" if content is None else str(content)
+
+
+def _bare(name: str) -> str:
+    n = str(name or "")
+    return n[len(TOOL_PREFIX):] if n.startswith(TOOL_PREFIX) else n
+
+
+async def _consume(sdk, messages, model, stream, put, port=None):
     system, prompt = split_messages(messages)
-    opts = build_options(sdk, system, model, stream)
+    opts = build_options(sdk, system, model, stream, port)
     partial = False
+    pending: dict = {}                   # tool_use id -> (name, input)
     async for m in sdk.query(prompt=prompt, options=opts):
         kind = type(m).__name__
         if kind == "StreamEvent":
@@ -301,12 +364,27 @@ async def _consume(sdk, messages, model, stream, put):
             err = getattr(m, "error", None)
             if err:
                 raise RuntimeError(f"claude-agent: {err}")
-            if not partial:
-                for b in getattr(m, "content", None) or []:
-                    if type(b).__name__ == "TextBlock" and getattr(b, "text", ""):
-                        put(("text", b.text))
-                    elif type(b).__name__ == "ThinkingBlock" and getattr(b, "thinking", ""):
-                        put(("reasoning", b.thinking))
+            for b in getattr(m, "content", None) or []:
+                bk = type(b).__name__
+                if bk == "ToolUseBlock":
+                    pending[str(getattr(b, "id", ""))] = (
+                        _bare(getattr(b, "name", "")), getattr(b, "input", None) or {})
+                elif partial:
+                    continue                  # the words already came as deltas
+                elif bk == "TextBlock" and getattr(b, "text", ""):
+                    put(("text", b.text))
+                elif bk == "ThinkingBlock" and getattr(b, "thinking", ""):
+                    put(("reasoning", b.thinking))
+        elif kind == "UserMessage":
+            # the tool results the SDK's loop fed back to Claude
+            for b in getattr(m, "content", None) or []:
+                if type(b).__name__ != "ToolResultBlock":
+                    continue
+                tid = str(getattr(b, "tool_use_id", ""))
+                name, args = pending.pop(tid, ("", {}))
+                put(("tool", {"id": tid, "name": name, "input": args,
+                              "output": _result_text(getattr(b, "content", None)),
+                              "is_error": bool(getattr(b, "is_error", False))}))
         elif kind == "ResultMessage":
             if getattr(m, "is_error", False):
                 why = getattr(m, "result", None) or getattr(m, "errors", None) \
@@ -318,16 +396,17 @@ async def _consume(sdk, messages, model, stream, put):
 _END = object()
 
 
-def iter_reply(messages, model: str, stream: bool = True, sdk=None):
-    """The SDK's reply as ("text"|"reasoning"|"usage", value) items, in
-    order. The async SDK runs on its own thread and loop (the proxy's
-    handler threads are synchronous); an SDK error re-raises here."""
+def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None):
+    """The SDK's reply as ("text"|"reasoning"|"tool"|"usage", value) items,
+    in order. `port` is this seat's proxy, where membrane's tools relay.
+    The async SDK runs on its own thread and loop (the proxy's handler
+    threads are synchronous); an SDK error re-raises here."""
     sdk = sdk or check_available()
     q: queue.Queue = queue.Queue()
 
     def run():
         try:
-            asyncio.run(_consume(sdk, messages, model, stream, q.put))
+            asyncio.run(_consume(sdk, messages, model, stream, q.put, port))
         except BaseException as e:          # carried to the reader
             q.put(("error", e))
         finally:
@@ -345,10 +424,13 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None):
 
 # ---- the reply as an OpenAI response ---------------------------------------------
 
-def _chunk(model: str, delta: dict, finish=None, usage=None) -> bytes:
+def _chunk(model: str, delta: dict, finish=None, usage=None, tool=None) -> bytes:
     obj = {"id": "chatcmpl-claude-agent", "object": "chat.completion.chunk",
            "created": int(time.time()), "model": model, RESP_KEY: PROVIDER,
-           "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+           "choices": ([{"index": 0, "delta": delta, "finish_reason": finish}]
+                       if tool is None else [])}
+    if tool is not None:
+        obj[TOOL_KEY] = tool
     if usage is not None:
         obj["usage"] = usage
     return b"data: " + json.dumps(obj).encode() + b"\n"
@@ -361,11 +443,14 @@ def _error_text(e: BaseException) -> str:
 class SSEReply:
     """A backend-response stand-in for the proxy's streaming tee: iterates
     chat.completion.chunk SSE lines, then [DONE]. close() (the watchdog's
-    abort) stops it."""
+    abort) stops it. After the iteration: .tools (every tool Claude ran)
+    and .failed (the turn failed: the reply is the error line)."""
 
-    def __init__(self, messages, model: str, sdk=None):
-        self.messages, self.model, self.sdk = messages, model, sdk
+    def __init__(self, messages, model: str, sdk=None, port=None):
+        self.messages, self.model, self.sdk, self.port = messages, model, sdk, port
         self.closed = False
+        self.tools: list = []
+        self.failed = False
 
     def __enter__(self):
         return self
@@ -381,11 +466,17 @@ class SSEReply:
         usage = None
         first = True
         try:
-            for kind, val in iter_reply(self.messages, self.model, True, self.sdk):
+            for kind, val in iter_reply(self.messages, self.model, True, self.sdk,
+                                        self.port):
                 if self.closed:
                     break
                 if kind == "usage":
                     usage = val
+                    continue
+                if kind == "tool":
+                    self.tools.append(val)
+                    yield _chunk(self.model, {}, tool=val)
+                    yield b"\n"
                     continue
                 d = {"content": val} if kind == "text" else {"reasoning": val}
                 if first:
@@ -395,6 +486,7 @@ class SSEReply:
                 yield b"\n"
         except Exception as e:
             print(f"[claude-agent] {e}", file=sys.stderr)
+            self.failed = True
             yield _chunk(self.model, {"role": "assistant", "content": _error_text(e)})
             yield b"\n"
         yield _chunk(self.model, {}, finish="stop", usage=usage)
@@ -405,10 +497,13 @@ class SSEReply:
 
 class JSONReply:
     """A backend-response stand-in for the buffered path: read() is the
-    whole chat.completion body."""
+    whole chat.completion body, with TOOLS_KEY when Claude ran tools.
+    After read(): .tools and .failed, as SSEReply's."""
 
-    def __init__(self, messages, model: str, sdk=None):
-        self.messages, self.model, self.sdk = messages, model, sdk
+    def __init__(self, messages, model: str, sdk=None, port=None):
+        self.messages, self.model, self.sdk, self.port = messages, model, sdk, port
+        self.tools: list = []
+        self.failed = False
 
     def __enter__(self):
         return self
@@ -422,15 +517,19 @@ class JSONReply:
     def read(self) -> bytes:
         text, reasoning, usage = [], [], None
         try:
-            for kind, val in iter_reply(self.messages, self.model, False, self.sdk):
+            for kind, val in iter_reply(self.messages, self.model, False, self.sdk,
+                                        self.port):
                 if kind == "text":
                     text.append(val)
                 elif kind == "reasoning":
                     reasoning.append(val)
+                elif kind == "tool":
+                    self.tools.append(val)
                 elif kind == "usage":
                     usage = val
         except Exception as e:
             print(f"[claude-agent] {e}", file=sys.stderr)
+            self.failed = True
             text = [_error_text(e)]
         msg = {"role": "assistant", "content": "".join(text)}
         if reasoning:
@@ -441,15 +540,27 @@ class JSONReply:
                "choices": [{"index": 0, "message": msg, "finish_reason": "stop"}]}
         if usage is not None:
             obj["usage"] = usage
+        if self.tools:
+            obj[TOOLS_KEY] = list(self.tools)
         return json.dumps(obj).encode()
 
 
-def open_reply(body: dict):
+def open_reply(body: dict, port=None):
     """The proxy's _open_backend for a claude-agent rung: the turn's
-    messages (tools dropped: text-only) -> a streaming or buffered reply."""
+    messages (the caller's tool definitions dropped: Claude's tools are
+    membrane's, relaying to `port`) -> a streaming or buffered reply."""
     sdk = check_available()
     model = str(body.get("model") or "")
     msgs = body.get("messages") or []
     if body.get("stream"):
-        return SSEReply(msgs, model, sdk)
-    return JSONReply(msgs, model, sdk)
+        return SSEReply(msgs, model, sdk, port)
+    return JSONReply(msgs, model, sdk, port)
+
+
+def captured_calls(tools) -> dict:
+    """Claude's tool calls in the shape the capturer's on_calls takes
+    (index -> {id, type, function: {name, arguments}})."""
+    return {i: {"id": t.get("id") or f"claude-agent-{i}", "type": "function",
+                "function": {"name": t.get("name") or "",
+                             "arguments": json.dumps(t.get("input") or {})}}
+            for i, t in enumerate(tools or [])}

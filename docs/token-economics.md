@@ -105,9 +105,9 @@ load. Scoring:
   is `claude-agent`: Claude through the Agent SDK and the local `claude`
   CLI login, with no key. Its rungs (`claude-agent:sonnet|opus|haiku`) are
   **opt-in**: autoselect, the ceiling and the failover ladder skip them
-  unless you pin one or name it with `--ladder-include`. They are
-  text-only, background lanes never use them, and their replies are shown
-  but never learned. See [claude-agent.md](claude-agent.md).
+  unless you pin one or name it with `--ladder-include`. Claude gets only
+  membrane's own tools, background lanes never use them, and their replies
+  are learned like any model's. See [claude-agent.md](claude-agent.md).
 - **Explore lane** — chat turns never eps-explore while a cloud floor holds;
   `@explore`-pointed subagents sample least-tried eligible locals (in-memory
   only, never cloud).

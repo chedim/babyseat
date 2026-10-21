@@ -896,11 +896,6 @@ def of(srv):
     return v
 
 
-def is_claude_made(info) -> bool:
-    from .claude_agent import is_claude_made as _icm
-    return _icm(info)
-
-
 def history_texts(runner):
     """The teachers' words in the chat history: the operator's and the
     LLM's text parts, chat sessions only (never the loops' or a call's)."""
@@ -917,8 +912,6 @@ def history_texts(runner):
         except Exception:
             continue
         for r in rows or []:
-            if is_claude_made(r.get("info")):
-                continue                 # Claude's words are never heard (#384)
             for p in r.get("parts") or []:
                 if p.get("type") == "text" and not p.get("synthetic") and p.get("text") \
                         and not p["text"].startswith("[membrane voice] "):     # never itself
@@ -958,9 +951,6 @@ def history_replies(runner, limit: int = POOL_BOOT):
         last_user = None
         for r in rows or []:
             info = r.get("info") or {}
-            if is_claude_made(info):
-                last_user = None         # never a teacher, never a pair (#384)
-                continue
             t = "\n".join(p.get("text") or "" for p in r.get("parts") or []
                           if p.get("type") == "text" and not p.get("synthetic"))
             ts = ((info.get("time") or {}).get("created") or 0) / 1000

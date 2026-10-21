@@ -1588,8 +1588,8 @@ def main() -> None:
                     continue
                 if prov.get("kind") == "agent-sdk":
                     # issue #384: Claude through the Agent SDK -- no key, no
-                    # listing; opt-in, text-only rungs whose replies are
-                    # shown and never learned (membrane/claude_agent.py)
+                    # listing; opt-in rungs with membrane's tools only,
+                    # learned like any model (membrane/claude_agent.py)
                     try:
                         from . import claude_agent as _CA
                         _CA.register_rungs(srv.router)
@@ -1601,7 +1601,7 @@ def main() -> None:
                             _ok = f"NOT usable yet: {_ue}"
                         print(f"[opencode] {pname}: rungs "
                               f"{', '.join(_CA.rung_names())} (opt-in, "
-                              f"text-only, never learned; {_ok})",
+                              f"membrane's tools only; {_ok})",
                               file=sys.stderr)
                     except Exception as p_e:
                         print(f"[opencode] {pname} rungs skipped ({p_e})",

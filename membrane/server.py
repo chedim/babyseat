@@ -2015,6 +2015,12 @@ class TurnRunner:
                 if kind == "ext":
                     self._inject_card(sid, val, rounds, mkpart)
                     return False
+                if kind == "tool":
+                    # a tool Claude ran in its own loop (#389): shown, never re-run
+                    for other in [k for k in _pend if _pend[k][0]]:
+                        _flush(other)
+                    _agent_tool_part(val)
+                    return False
                 p = _live.get(kind)
                 if p is None:
                     p = _live[kind] = mkpart({"type": kind, "text": "",
@@ -2027,6 +2033,34 @@ class TurnRunner:
                 if time.time() - e[1] >= DELTA_COALESCE_S:
                     _flush(p["id"])
                 return False
+            _agent_shown: set = set()
+
+            def _agent_tool_part(t, _shown=_agent_shown):
+                """One tool the claude-agent rung ran inside the SDK's loop
+                (#389): a finished tool part, marked claude-agent. Never
+                handed to this runner's executor: it already ran."""
+                from . import claude_agent as _CA
+                if not isinstance(t, dict):
+                    return
+                key = str(t.get("id") or "") or json.dumps(t, sort_keys=True, default=str)
+                if key in _shown:
+                    return
+                _shown.add(key)
+                now = int(time.time() * 1000)
+                name = str(t.get("name") or "")
+                targs = t.get("input") if isinstance(t.get("input"), dict) else {}
+                st = {"status": "error" if t.get("is_error") else "completed",
+                      "input": targs, "title": _tool_title(name, targs),
+                      "time": {"start": now, "end": now}}
+                if t.get("is_error"):
+                    st["error"] = str(t.get("output") or "")[:300]
+                else:
+                    st["output"] = str(t.get("output") or "")
+                tp = mkpart({"type": "tool", "callID": str(t.get("id") or ""),
+                             "tool": name, _CA.MARK_KEY: _CA.PROVIDER, "state": st,
+                             "time": {"start": now, "end": now}})
+                self.hub.publish({"type": "message.part.updated", "part": dict(tp),
+                                  "time": now, "sessionID": sid})
             _stream = getattr(self.call_ladder, "stream", None) if STREAM_ROUNDS else None
             try:
                 if _stream is not None:
@@ -2064,12 +2098,16 @@ class TurnRunner:
             msg = ((resp.get("choices") or [{}])[0].get("message")
                    or {})
             # THE CLAUDE-MADE MARK (issue #384): the proxy stamps the
-            # answering provider; a Claude reply is shown (this row keeps
-            # it) and never fed to the field later (absorb/voice skip it)
+            # answering provider; the row keeps it for provenance (#389:
+            # the reply is learned like any model's). The tools Claude ran
+            # in its own loop become finished tool parts (the buffered
+            # round's; a streamed round showed them as they came).
             from . import claude_agent as _CA
             _ca_round = resp.get(_CA.RESP_KEY) == _CA.PROVIDER
             if _ca_round:
                 a_info[_CA.MARK_KEY] = _CA.PROVIDER
+                for _t in resp.get(_CA.TOOLS_KEY) or []:
+                    _agent_tool_part(_t)
             _tokens_fill(a_info, resp)
             # THE INJECTION AS A CARD (2026-10-08, the operator: show it
             # like every tool call): what membrane added to this round --
@@ -2090,6 +2128,8 @@ class TurnRunner:
             # in-turn; a bad object refuses honestly there, never
             # guesses. Real tool_calls beside bullets stay real: the
             # model already fired, more would double-execute.
+            # (a claude-agent round already ran its tools in its own loop:
+            # salvaging its words into calls would run them twice)
             if not tcs and self.tools is None and content and not _ca_round:
                 try:
                     from . import streams as _ST
@@ -2104,8 +2144,7 @@ class TurnRunner:
             reason = "tool-calls" if tcs else "stop"
             try:
                 from . import predict as _predict
-                if not _ca_round:          # Claude's moves are never learned (#384)
-                    _predict.step_end(self, sid, list(tcs or []), content, step=rounds, mid=aid)
+                _predict.step_end(self, sid, list(tcs or []), content, step=rounds, mid=aid)
             except Exception:
                 pass
             if msg.get("reasoning") or msg.get("thinking"):
@@ -2442,13 +2481,10 @@ class TurnRunner:
         try:
             from . import voice as _voice
             _lane_end = _lane_of((self._agents or {}).get(sid))
-            from . import claude_agent as _CA
             _voice.on_turn_end(self, sid, text,
-                               "" if _CA.is_claude_made(a_info) else
                                "\n".join(p.get("text") or "" for p in parts
                                          if isinstance(p, dict) and p.get("type") == "text"),
-                               _lane_end,
-                               parts=[] if _CA.is_claude_made(a_info) else parts)
+                               _lane_end, parts=parts)
             if _lane_end not in _voice._CHAT_LANES:      # the chat's guess rides its voice line
                 from . import predict as _predict
                 threading.Thread(target=_predict.end, args=(self, sid, list(parts)),
@@ -2532,6 +2568,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         content, reasoning, tcs = [], [], {}
         usage, ext, finish = None, None, None
         provider = None                      # the answering provider's stamp (#384)
+        agent_tools = []                     # tools the claude-agent rung ran (#389)
         done = False
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             for raw in resp:
@@ -2554,6 +2591,9 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     usage = d["usage"]
                 if d.get("membrane_provider"):
                     provider = d["membrane_provider"]
+                if isinstance(d.get("membrane_tool"), dict):
+                    agent_tools.append(d["membrane_tool"])
+                    on_event("tool", d["membrane_tool"])
                 for ch in d.get("choices") or []:
                     delta = ch.get("delta") or ch.get("message") or {}
                     if ch.get("finish_reason"):
@@ -2602,6 +2642,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
             out["membrane"] = ext
         if provider:
             out["membrane_provider"] = provider
+        if agent_tools:
+            out["membrane_tools"] = agent_tools
         return out
     call.stream = stream
     return call
