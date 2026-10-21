@@ -12,6 +12,7 @@ code, and verbatim copies of the old helpers are compared with the new ones
 on many random records.
 """
 import json
+import math
 import os
 import random
 import sys
@@ -299,13 +300,26 @@ def tree(request, monkeypatch):
     return request.param
 
 
+def _same(a, b):
+    """Equal, but an unrounded float (a fitted p_self, the advisor's
+    calibration) may differ in its last bits across platforms' BLAS."""
+    if isinstance(a, float) or isinstance(b, float):
+        return isinstance(a, (int, float)) and isinstance(b, (int, float)) and math.isclose(a, b, rel_tol=1e-9,
+                                                                                          abs_tol=1e-12)
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    return a == b
+
+
 def test_status_and_its_helpers_give_the_old_codes_numbers(tree):
     pinned = json.loads(PINNED_PATH.read_text())[tree]
     got = _pins(tree)
     assert set(got) == set(pinned)
     for name in pinned:
         for k in pinned[name]:
-            assert got[name][k] == pinned[name][k], (name, k)
+            assert _same(got[name][k], pinned[name][k]), (name, k)
 
 
 @pytest.mark.parametrize("seed", range(30))
