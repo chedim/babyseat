@@ -5,7 +5,7 @@ The page decides with pure helpers in membrane/ui/panel.js:
 skillTree(sheet) reads the sheet's `tree` and `level` when the seat sends them
 (#295) and, until then, derives a fallback tree from the ladder fields (passed
 rungs, the next rung, its bar) with a fixed rung -> skill mapping; treeLayout
-puts the nodes in lanes by branch (Self / World / Others / Later), each node
+puts the nodes in lanes by branch (Self / World / Others), each node
 below its prerequisites, with the edges; nodeCard is what a hover, focus or
 tap shows; achievementsList is the earned ones, newest first; ringDash is the
 open node's progress ring. renderSkillTree builds the tab with DOM calls only
@@ -60,7 +60,7 @@ SEAT_TREE = {
         {"id": "expect", "name": "understand an other", "branch": "others", "prereqs": ["meet"], "built": True,
          "state": "open", "earned_at": None, "skill": -0.05, "bar": 1.7, "waiting_on": "reply checks",
          "child_age": "9 months", "child_ability": "predicts what others will do", "why_prereqs": "it reads meet's lines"},
-        {"id": "speak", "name": "speak", "branch": "later", "prereqs": ["expect", "ghost"], "built": False,
+        {"id": "speak", "name": "speak", "branch": "others", "prereqs": ["expect", "ghost"], "built": False,
          "state": "weird", "earned_at": None, "skill": None, "bar": None, "waiting_on": None,
          "child_age": "4 years", "child_ability": "tells its own story", "why_prereqs": ""},
     ],
@@ -84,7 +84,7 @@ def test_without_a_tree_the_ladder_is_read_as_a_tree():
     for k in ("mirror", "change", "speak", "invent"):
         assert by[k]["state"] == "unbuilt" and by[k]["built"] is False
     assert {k: by[k]["branch"] for k in ("mirror", "change", "speak", "invent")} == \
-        {"mirror": "self", "change": "self", "speak": "later", "invent": "later"}       # #329
+        {"mirror": "self", "change": "self", "speak": "others", "invent": "self"}       # #329, #353
     # the passed rungs are earned, with their dates and skills
     assert [by[k]["state"] for k in ("feel", "reach", "kinds")] == ["earned"] * 3
     assert by["reach"]["earned_at"] == "2026-10-16T10:00:00+00:00" and by["reach"]["skill"] == 0.31
@@ -142,8 +142,8 @@ def _layout(sheet):
 @NODE
 def test_lanes_by_branch_and_every_node_below_its_prereqs():
     L = _layout(LADDER)
-    assert [l["branch"] for l in L["lanes"]] == ["self", "world", "others", "later"]
-    assert [l["label"] for l in L["lanes"]] == ["Self", "World", "Others", "Later"]
+    assert [l["branch"] for l in L["lanes"]] == ["self", "world", "others"]
+    assert [l["label"] for l in L["lanes"]] == ["Self", "World", "Others"]
     pos = {n["id"]: n for n in L["nodes"]}
     lane_x = {l["branch"]: l["x"] for l in L["lanes"]}
     seen = set()
@@ -162,7 +162,7 @@ def test_lanes_by_branch_and_every_node_below_its_prereqs():
 @NODE
 def test_unknown_prereqs_and_cycles_do_not_break_the_layout():
     L = _layout(SEAT_TREE)
-    assert [l["branch"] for l in L["lanes"]] == ["self", "others", "later"]   # only the lanes it has
+    assert [l["branch"] for l in L["lanes"]] == ["self", "others"]   # only the lanes it has
     assert {(e["from"], e["to"]) for e in L["edges"]} == {("feel", "meet"), ("meet", "expect"), ("expect", "speak")}
     cyc = [{"id": "a", "name": "a", "branch": "self", "prereqs": ["b"], "state": "locked"},
            {"id": "b", "name": "b", "branch": "mystery", "prereqs": ["a"], "state": "locked"}]
@@ -301,3 +301,12 @@ def test_the_guide_says_so():
 def test_the_ladder_fallback_draws_mirror_and_change_in_the_self_lane_329():
     rows = _run("out = Object.fromEntries(P.TREE_LADDER.map((r) => [r[0], r[2]]))")
     assert rows["mirror"] == "self" and rows["change"] == "self"
+
+
+@NODE
+def test_no_later_lane_locked_skills_sit_in_their_own_lane_353():
+    L = _layout(LADDER)
+    assert "later" not in [l["branch"] for l in L["lanes"]]
+    by = {n["id"]: n for n in L["nodes"]}
+    assert by["speak"]["branch"] == "others" and by["invent"]["branch"] == "self"
+    assert by["invent"]["state"] == "unbuilt"                     # greyed out, in its lane

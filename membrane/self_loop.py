@@ -160,14 +160,14 @@ ACHIEVEMENTS = {
                                "the looks its dream scores are patience's timed looks, whose p reads the rate "
                                "fit it tunes (without them there is nothing to replay)")},
     # #311: the test measures first referential words to an other, so the child is ~12 mo, not ~4 y's narrative
-    "speak": {"rung": 11, "name": "speak", "branch": "later", "prereqs": ("turns", "expect"), "built": True,
+    "speak": {"rung": 11, "name": "speak", "branch": "others", "prereqs": ("turns", "expect"), "built": True,
               "child_age": "~12 mo",
               "child_ability": ("names a thing to an other and gets a response: first referential words "
                                 "and pointing to share (Bates, Camaioni & Volterra 1975)"),
               "why_prereqs": ("its words take turns (time its turn: its timing is that skill's policy, and one "
                               "stage is that skill's contingency) with an other it can predict (expect a reply: "
                               "its outcome is the reply check after each push)")},
-    "invent": {"rung": 12, "name": "invent", "branch": "later", "prereqs": ("change", "speak"), "built": False,
+    "invent": {"rung": 12, "name": "invent", "branch": "self", "prereqs": ("change", "speak"), "built": False,
                "child_age": "~5 y",
                "child_ability": "makes up games with its own rules",
                "why_prereqs": "not built yet; planned: rules of its own (change itself), said to others (speak)"},

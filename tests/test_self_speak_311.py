@@ -103,7 +103,7 @@ def _last_said(recs):
 
 def test_speak_is_built_under_turns_and_expect():
     a = SL.ACHIEVEMENTS["speak"]
-    assert a["built"] is True and a["rung"] == 11 and a["branch"] == "later"
+    assert a["built"] is True and a["rung"] == 11 and a["branch"] == "others"
     assert set(a["prereqs"]) == {"turns", "expect"}
     assert "speak" in SL.BUILT
     assert "time its turn" in a["why_prereqs"] and "expect a reply" in a["why_prereqs"]

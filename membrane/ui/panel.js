@@ -1177,7 +1177,7 @@ function selfSheetHtml(s, open, nowS) {
 // fixed mapping below (only the next rung is open: the strict ladder opens
 // nothing else). Pure helpers, then renderSkillTree: DOM calls only, every
 // data-derived string through textContent.
-const TREE_BRANCHES = [["self", "Self"], ["world", "World"], ["others", "Others"], ["later", "Later"]];
+const TREE_BRANCHES = [["self", "Self"], ["world", "World"], ["others", "Others"]];
 const TREE_STATES = ["earned", "open", "locked", "unbuilt"];   // the seat's; "awaiting" (#299) is read from `accepted`
 const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladder read as a tree
   ["feel", "feel itself", "self", 1, []], ["reach", "first reach", "world", 2, []],
@@ -1185,7 +1185,7 @@ const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladde
   ["shift", "notice the world changed", "world", 5, ["reach"]], ["meet", "meet an other", "others", 6, ["kinds"]],
   ["turns", "time its turn", "others", 7, ["meet"]], ["expect", "expect a reply", "others", 8, ["meet"]],
   ["mirror", "recognize itself", "self", 9, []], ["change", "change itself", "self", 10, []],
-  ["speak", "speak", "later", 11, []], ["invent", "invent", "later", null, []]];
+  ["speak", "speak", "others", 11, []], ["invent", "invent", "self", null, []]];
 const TREE_STATE_TEXT = { earned: "earned", open: "open: its test is running", locked: "locked: its prerequisites first",
                           unbuilt: "not built yet", awaiting: "earned · awaiting your accept" };
 const finiteOr = (v, d) => (v == null || v === "" || !isFinite(Number(v)) ? d : Number(v));
@@ -1211,7 +1211,7 @@ function skillTree(s) {
       const accepted = n.accepted !== false;        // #299: a seat from before acceptance accepted everything
       if (state === "earned" && !accepted) state = "awaiting";
       const bar = finiteOr(n.bar, null);
-      return { id: String(n.id), name: String(n.name || n.id), branch: String(n.branch || "later"),
+      return { id: String(n.id), name: String(n.name || n.id), branch: String(n.branch || "self"),
                prereqs: (Array.isArray(n.prereqs) ? n.prereqs : []).map(String), built, state, accepted,
                earned_at: n.earned_at || null, skill: finiteOr(n.skill, null), bar: bar == null ? null : clamp01(bar),
                waiting_on: n.waiting_on || null, test: n.test || n.asks || null,
@@ -1249,7 +1249,7 @@ function skillTree(s) {
 
 const TREE_LANE_W = 84, TREE_NODE_W = 76, TREE_NODE_H = 64, TREE_ROW_H = 94, TREE_TOP = 24, TREE_PAD = 4;
 
-/** Lanes by branch (Self / World / Others / Later, then any other branch as
+/** Lanes by branch (Self / World / Others, then any other branch as
  *  it comes), each node in its lane's next free row below all its
  *  prerequisites; the edges from every known prerequisite. Centres in px. */
 function treeLayout(nodes) {
