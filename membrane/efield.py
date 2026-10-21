@@ -141,17 +141,24 @@ def f32(v) -> np.ndarray:
     return np.asarray(v, dtype=np.float32).astype(np.float64)
 
 
-def _nnls(M, x, tol: float = 1e-10) -> np.ndarray:
+def _nnls(M, x, tol: float = 1e-10, max_on: int | None = None) -> np.ndarray:
     """Non-negative least squares, min |M w - x| with w >= 0 (Lawson-Hanson
     active set): the residual ends orthogonal to every column with a positive
     weight, and no zero-weight column points along it. A message mentions a
-    few things, so the loop is short."""
+    few things, so the loop is short.
+
+    max_on (#333, Blurp's line): at most this many columns may carry weight --
+    the active set stops growing once it holds max_on, so the fit is the
+    non-negative one over the columns it chose first (the steepest), and the
+    loop stays short however many columns there are."""
     n = M.shape[1]
     w = np.zeros(n)
     on = np.zeros(n, dtype=bool)
-    for _ in range(3 * n + 10):
+    for _ in range(3 * (n if max_on is None else min(n, int(max_on))) + 10):
         g = M.T @ (x - M @ w)
         if on.all() or g[~on].max() <= tol:
+            break
+        if max_on is not None and on.sum() >= max_on:
             break
         on[np.flatnonzero(~on)[np.argmax(g[~on])]] = True
         while True:
@@ -1913,6 +1920,20 @@ class EntityField:
                 and evs[k2].get("stream") != "code"]
         rows.sort(key=lambda t: -t[1])
         return rows[:k]
+
+    def sentences_heard(self, session: str) -> list[tuple[str, str, np.ndarray]]:
+        """#333: the sentences said in one session (this origin's discourse,
+        none forgotten), each once, oldest first: [(sid, text, unit vec)].
+        The session is an indexed scan; the vectors come in one read."""
+        sids: list = []
+        for _, d in self.b.scan("events", {"origin": self.origin, "session": session}):
+            if d.get("stream") != "discourse" or d.get("status") == "forgotten":
+                continue
+            sids.extend((d.get("seq") or 0, s) for s in d.get("sids") or [])
+        order = list(dict.fromkeys(s for _, s in sorted(sids, key=lambda t: t[0])))
+        got = self.b.get_multi("sentences", order) if order else {}
+        return [(s, str(got[s].get("text") or ""), unit(got[s]["vec"]))
+                for s in order if s in got and got[s].get("vec") is not None]
 
     @_locked
     def recompute(self, eid: str) -> EntityState | None:

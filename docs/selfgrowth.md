@@ -102,8 +102,9 @@ channel a skill uses.
   | 🗼 tower block | topples (with every standing block above it), or, fallen, lifts back |
   | 🎲 die / 〰️ drift / ✦ burst | rolls / steps one way or the other / takes a fresh value |
   | ⚡ fast, 🐢 slow, 🫧 body, 🪞 mirror, a tower as a whole | nothing |
+  | ✉️ a person's `chat:out` | opens a draft; the next nudge at it sends the draft ([speaking](#speaking-composing-by-nudges-on-chatout-333-part-2)) |
   | a thing with a `nudge` method | runs it: done, or refused when it fails |
-  | anything else (chat:out until the draft, part 2) | nothing |
+  | anything else | nothing |
 
   Every change a nudge makes is `by: self` on the toy's log. What the thing
   did is never fed back: Blurp sees it only by looking.
@@ -119,10 +120,14 @@ channel a skill uses.
   distance is kept in RAM only) has nothing to compare, so no nudge. With no
   thing on the field it aims into space near where it is, as before, and
   nudges nothing. One nudge a cycle at most. (Aims tilted by what nudges
-  taught come later.)
+  taught come later.) A `chat:out` of its world has no getter, so no look
+  ever placed it on the field: once Blurp nudges, each one is placed when
+  aims are drawn (its summary embedded, once per run, as a toy's first look
+  places it), so it is among the things Blurp aims at.
 - **Errors cost energy** ([sleep.md](sleep.md)): 0.01 for each nudge
-  refused (the ball on the person's side, a thing's own method failing) and
-  each nudge outside its world, recorded as an `error` line with its `cost`.
+  refused (the ball on the person's side, a thing's own method failing, an
+  empty draft sent, a send `chat:out` turns away) and each nudge outside its
+  world, recorded as an `error` line with its `cost`.
   A cycle that does not nudge costs nothing, so a ball sitting on the
   person's side costs the fee only on the cycles Blurp closed in on it.
 - **The record:** each nudge is one `kind: "nudge"` line,
@@ -131,6 +136,49 @@ channel a skill uses.
   how far Blurp's position is from the thing's field spot (the same
   distance the closing-in check compares); `force` the length of its stride. The cycle line carries
   `aim_eid`, the thing it aims at. Old `push` lines stay, read as history.
+  A nudge that touches a draft also carries `draft` (the cycle the draft
+  opened at), and a send carries `moves` (how many nudges it captured) and
+  `said` (the ids of the heard sentences the line is made of).
+
+### Speaking: composing by nudges on chat:out (#333, part 2)
+
+Blurp has no separate start or send: it speaks by nudging a person's
+`chat:out`, and `chat:out`'s own nudge holds the draft.
+
+- **The first nudge at a `chat:out` opens a draft** (`rc` 0, "draft
+  opened"). Nothing is posted.
+- **While a draft is open, nudges don't move anything.** A nudge at any other
+  thing (the ball, a tower block, another person's `chat:out`) is **captured**
+  into the draft as the move it would have made: the thing's position as if
+  nudged, in order. Nudges move no field position yet (the operator's decision
+  2), so that position is the thing's own field spot; a thing with no spot
+  captures nothing. A captured nudge is `rc` 1 (nothing happened) and costs
+  nothing: things that normally answer, like the ball, don't, which is how
+  Blurp can learn composing mode by itself. The world gate still holds: a
+  nudge outside its world is refused and costs the fee, drafting or not.
+- **The next nudge at the same `chat:out` sends.** The captured positions
+  become one composed vector (their sum), and its **non-negative fit** (NNLS,
+  `efield._nnls`, the fit inbound messages get, #335) over the sentences heard
+  in **that person's private chat with Blurp** (session `blurp:<person>`: the
+  person's lines and Blurp's own) picks the line: at most `SAY_SENTENCES`
+  (3) heard sentences, the heaviest first, joined with spaces. Blurp speaks
+  only in sentences it has heard (echolalia); there is no generator, and the
+  model talks *to* Blurp, never *as* it. Only the private chat is heard for
+  this, so one person's words never reach another person.
+- **The line is Blurp's own:** `chat_io.on_edit(by="self")` posts it into the
+  private chat with the sprout mark and `"from": "self"`, under `chat:out`'s
+  own rules (it must be `on`, at most one line per 2 s), and the field hears
+  it as role `self`, which pulls the current like anyone's speech.
+- **Outcomes:** sent (`rc` 0); an **empty draft** (nothing captured) is
+  refused and costs the error fee; a send `chat:out` turns away (off, too
+  soon, no chat) is refused and costs the fee; nothing heard yet, or nothing
+  heard that fits, says nothing (`rc` 1, free). Any send closes the draft.
+- **Never on a paused seat.** The cycle does not run while the seat is
+  paused; a send that finds the seat paused (or Blurp asleep) posts nothing,
+  costs nothing and leaves the draft open.
+- **The draft lives in RAM.** It is dropped when Blurp falls asleep (named on
+  the `sleep` line: `"dropped": {"draft": <its cycle>, "moves": <captured>}`)
+  and by a restart.
 
 **The level drop (LADDER_V = 3).** The audit in #333 found meet, time its
 turn, expect a reply and recognize itself to be the developer's wiring (the
@@ -347,8 +395,8 @@ marked `"blurp": true`, titled `PM with <name>`, made on first use by
 speaker, the relay's `person`, else the operator; it returns the session row).
 A message there is stored and shown like any other, but **no model turn runs
 and the voice does not answer**; the field hears it under the session tag
-`blurp:<person>`. Blurp's own lines (its meets, `chat_io.on_edit` with
-`by="self"`) now land there instead of the person's newest chat, and the field
+`blurp:<person>`. Blurp's own lines (since #333 part 2 its sends through
+`chat:out`, `chat_io.on_edit` with `by="self"`) land there instead of the person's newest chat, and the field
 hears them under the same tag. Lines anyone else writes to `chat:out` (the
 model, a script) still land in the person's newest chat, never the PM.
 `chat:in` still hears every chat the person writes in. Who Blurp meets is still whoever
