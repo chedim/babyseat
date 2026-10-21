@@ -41,8 +41,8 @@ rule.
 | `meet` | meet an other (6) | others | reach | its answered looks at the other are reach's looks, and the self/other split is reach's own prediction skill | ~3-5 mo: self- vs social contingency (Bahrick & Watson) |
 | `turns` | time its turn (7) | others | meet | it times its pushes to the other meet found, through meet's channel, scored by the reply check | ~3-5 mo: times its turn in a proto-conversation (Bateson; Trevarthen; Jaffe et al.) |
 | `expect` | expect a reply (8) | others | meet | it predicts whether meet's other replies to a push, at the reply check; it does not need time its turn's learned timing (a push by the timer is checked and predicted the same) | ~2-3 mo: expects a response (the still-face, Tronick 1978) |
-| `mirror` | recognize itself (9, #312) | later | feel, meet | feel: what the mirror shows is its own moves, the body whose steering feel's pass switches on; meet: it labels the glass and the stranger with meet's self/other split (Brier-style skill ≥ 0.9: my body) | ~18 mo: the mirror test (Amsterdam 1972) |
-| `change` | change itself (10, #320) | later | mirror, patience | mirror: it changes only a self it recognizes -- its own learning's settings, by replaying its own record; patience: the looks its dream replays are patience's timed looks, whose p reads the rate fit it tunes | ~4-5 y: picks how it learns by its own track record, keeping a change only when it works better (adaptive strategy choice, Siegler & Shrager 1984). Until #320 the tree said ~4 y, metacognition in general; the test measures strategy choice |
+| `mirror` | recognize itself (9, #312) | self (#329) | feel, meet | feel: what the mirror shows is its own moves, the body whose steering feel's pass switches on; meet: it labels the glass and the stranger with meet's self/other split (Brier-style skill ≥ 0.9: my body) | ~18 mo: the mirror test (Amsterdam 1972) |
+| `change` | change itself (10, #320) | self (#329) | mirror, patience | mirror: it changes only a self it recognizes -- its own learning's settings, by replaying its own record; patience: the looks its dream replays are patience's timed looks, whose p reads the rate fit it tunes | ~4-5 y: picks how it learns by its own track record, keeping a change only when it works better (adaptive strategy choice, Siegler & Shrager 1984). Until #320 the tree said ~4 y, metacognition in general; the test measures strategy choice |
 | `speak` | speak (11, #311) | later | turns, expect | its words take turns: its timing is time its turn's policy, and one stage is that skill's contingency; its outcome is expect a reply's reply check after each push | ~12 mo: first referential words, naming a thing to an other (Bates, Camaioni & Volterra 1975). Until #311 the tree said ~4 y, autobiographical narrative; the test measures first words, not a story |
 | `invent` | invent | later, not built | change, speak | planned | ~5 y: games with its own rules |
 
@@ -510,7 +510,7 @@ this tab's. The tab reads the same `GET /membrane/self/sheet` as the rest of
 the panel: its `tree` and `level` when the seat sends them. A seat that sends
 only the ladder gets the ladder read as a tree, and the tab says so: rungs 1-8
 map to feel (Self); reach, kinds, patience, shift (World); meet, turns, expect
-(Others); with mirror, change, speak and invent under Later, not built yet.
+(Others); with mirror, change, speak and invent not built yet (mirror and change in Self since #329, speak and invent under Later).
 There only the next rung is open: the strict ladder opens nothing else. On a
 phone the tree scrolls inside its own box; the page never scrolls sideways.
 
