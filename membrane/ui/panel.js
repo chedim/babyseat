@@ -1185,7 +1185,7 @@ const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladde
   ["shift", "notice the world changed", "world", 5, ["reach"]], ["meet", "meet an other", "others", 6, ["kinds"]],
   ["turns", "time its turn", "others", 7, ["meet"]], ["expect", "expect a reply", "others", 8, ["meet"]],
   ["mirror", "recognize itself", "self", 9, []], ["change", "change itself", "self", 10, []],
-  ["speak", "speak", "others", 11, []], ["invent", "invent", "world", null, []]];
+  ["speak", "speak", "others", 11, []], ["invent", "invent", "self", null, []]];
 const TREE_STATE_TEXT = { earned: "earned", open: "open: its test is running", locked: "locked: its prerequisites first",
                           unbuilt: "not built yet", awaiting: "earned · awaiting your accept" };
 const finiteOr = (v, d) => (v == null || v === "" || !isFinite(Number(v)) ? d : Number(v));

@@ -84,7 +84,7 @@ def test_without_a_tree_the_ladder_is_read_as_a_tree():
     for k in ("mirror", "change", "speak", "invent"):
         assert by[k]["state"] == "unbuilt" and by[k]["built"] is False
     assert {k: by[k]["branch"] for k in ("mirror", "change", "speak", "invent")} == \
-        {"mirror": "self", "change": "self", "speak": "others", "invent": "world"}       # #329, #353
+        {"mirror": "self", "change": "self", "speak": "others", "invent": "self"}       # #329, #353
     # the passed rungs are earned, with their dates and skills
     assert [by[k]["state"] for k in ("feel", "reach", "kinds")] == ["earned"] * 3
     assert by["reach"]["earned_at"] == "2026-10-16T10:00:00+00:00" and by["reach"]["skill"] == 0.31
@@ -308,5 +308,5 @@ def test_no_later_lane_locked_skills_sit_in_their_own_lane_353():
     L = _layout(LADDER)
     assert "later" not in [l["branch"] for l in L["lanes"]]
     by = {n["id"]: n for n in L["nodes"]}
-    assert by["speak"]["branch"] == "others" and by["invent"]["branch"] == "world"
+    assert by["speak"]["branch"] == "others" and by["invent"]["branch"] == "self"
     assert by["invent"]["state"] == "unbuilt"                     # greyed out, in its lane

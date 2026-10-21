@@ -167,7 +167,7 @@ ACHIEVEMENTS = {
               "why_prereqs": ("its words take turns (time its turn: its timing is that skill's policy, and one "
                               "stage is that skill's contingency) with an other it can predict (expect a reply: "
                               "its outcome is the reply check after each push)")},
-    "invent": {"rung": 12, "name": "invent", "branch": "world", "prereqs": ("change", "speak"), "built": False,
+    "invent": {"rung": 12, "name": "invent", "branch": "self", "prereqs": ("change", "speak"), "built": False,
                "child_age": "~5 y",
                "child_ability": "makes up games with its own rules",
                "why_prereqs": "not built yet; planned: rules of its own (change itself), said to others (speak)"},

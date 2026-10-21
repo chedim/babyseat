@@ -93,7 +93,7 @@ def test_the_tree_has_stable_ids_branches_and_real_edges():
     assert {br[a] for a in ("reach", "kinds", "patience", "shift")} == {"world"}
     assert {br[a] for a in ("meet", "turns", "expect")} == {"others"}
     assert {br[a] for a in ("mirror", "change")} == {"self"}          # #329: about self, beside feel
-    assert br["speak"] == "others" and br["invent"] == "world"     # #353: no Later lane
+    assert br["speak"] == "others" and br["invent"] == "self"     # #353: no Later lane
     pre = {a: set(A[a]["prereqs"]) for a in A}
     assert pre["feel"] == set() and pre["reach"] == set()          # two roots: reaching never read feel's data
     assert pre["kinds"] == {"reach"}
