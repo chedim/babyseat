@@ -2936,11 +2936,12 @@ def _lam(recs: list[dict], eid: str, looks: int | None = None, prior: float | No
     change itself adopted: _lam_of); None reads the constants."""
     W = LAM_LOOKS if looks is None else int(looks)
     K = LAM_PRIOR_LOOKS if prior is None else float(prior)
-    since = _last_shift_ts(recs, eid)
-    fit = [(r["eid"], r["ts"], float(r["dt"]), r["answer"] == "changed") for r in recs
-           if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5")
-           and r.get("answer") in ("changed", "unchanged") and r.get("dt")]
-    mine = [o for o in fit if o[0] == eid]
+    fit, by, shifts = _scoped(recs, "lam_looks", lambda: _lam_looks(recs))   # #346: one pass, shared
+    if _hashable(eid):
+        sh = shifts.get(eid)
+        since, mine = (None if sh is None else sh["ts"]), by.get(eid, [])
+    else:                                          # never on a seat (an eid is a string): the slow way
+        since, mine = _last_shift_ts(recs, eid), [o for o in fit if o[0] == eid]
     obs = [o for o in mine if since is None or o[1] > since][-W:]
     if not obs:
         return None
@@ -2950,6 +2951,40 @@ def _lam(recs: list[dict], eid: str, looks: int | None = None, prior: float | No
         if old:                                    # + half a look each way (Jeffreys): peaks inside the grid
             ll = ll + _lam_prior_ll(eid, old, K)
     return float(LAM_GRID[int(np.argmax(ll))])
+
+
+def _hashable(x) -> bool:
+    try:
+        hash(x)
+    except TypeError:
+        return False
+    return True
+
+
+def _lam_looks(recs: list[dict]) -> tuple:
+    """#346: what _lam reads, in ONE pass over the record: the looks it fits
+    on, (eid, ts, dt, changed) in record order; the same grouped by thing;
+    and each thing's last shift line. Rung 4's choice (_due) fits every
+    target's rate each cycle: a pass per target made it time ~ targets x
+    record. Shared within a call (_scoped), never kept across calls."""
+    fit, by, shifts = [], {}, {}
+    for r in recs:
+        k = r.get("kind")
+        if k == "reach":
+            if (not r.get("audit") and not r.get("audit5")
+                    and r.get("answer") in ("changed", "unchanged") and r.get("dt")):
+                o = (r["eid"], r["ts"], float(r["dt"]), r["answer"] == "changed")
+                fit.append(o)
+                try:
+                    by.setdefault(o[0], []).append(o)
+                except TypeError:                  # an unhashable eid: _lam reads it the slow way
+                    pass
+        elif k == "shift":
+            try:
+                shifts[r.get("eid")] = r           # the last one wins: _last_shift_ts's line
+            except TypeError:
+                pass
+    return fit, by, shifts
 
 
 def _lam_prior_ll(eid: str, old: list[tuple], k: float) -> np.ndarray:
@@ -3076,7 +3111,16 @@ def _due(srv, recs, targets, kinds, now, rng):
     the curiosity tilt. The two are separate questions: the entropy asks how
     unsure the answer to THIS look is, the tilt whether looks at the thing have
     lately been turning surprise into a better model. Their product is the
-    learning self expects from the look; either floor keeps a thing in play."""
+    learning self expects from the look; either floor keeps a thing in play.
+    #346: it runs every cycle; the targets' rate fits share one pass over the
+    record within the call (_Scope, _lam_looks), never across calls."""
+    s = _SCOPE.get()
+    if s is None or s.recs is not recs or s.n != len(recs):      # #346: the targets' rate fits share one pass
+        tok = _SCOPE.set(_Scope(recs))
+        try:
+            return _due(srv, recs, targets, kinds, now, rng)
+        finally:
+            _SCOPE.reset(tok)
     tempo = _tempo(srv)
     due = []
     for e in targets:
