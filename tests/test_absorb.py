@@ -326,9 +326,10 @@ class TestOpencodeCollector(unittest.TestCase):
             self.assertEqual((c.call_id, c.name), ("call_1", "edit"))
             self.assertEqual(c.output, "wrote c.py")
 
-    def test_other_and_unknown_providers_drop_the_session(self):
-        # #396: anthropic joined ollama as an absorbed provider; any
-        # other provider, or a message with none, still drops the session
+    def test_every_provider_and_a_missing_one_are_collected(self):
+        # #404: the allowlist is gone -- any provider is absorbed, and a
+        # message with none is kept as 'unknown' (the seat's own
+        # 'membrane' provider stays out: test_absorb_folder_providers_401)
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / "opencode.db"
             rows = self._sess(provider="anthropic", sid="ses_anth",
@@ -356,7 +357,7 @@ class TestOpencodeCollector(unittest.TestCase):
                           {"id": "msg_a", "role": "assistant",
                            "ts_ms": 1759300001000,
                            # ollama session but a message with NO
-                           # provider -- unknown, so the session drops
+                           # provider -- kept, recorded as 'unknown'
                            "parts": [{"type": "text", "text": "a"}]}]}]
             rows += [{"sid": "ses_ok", "directory": "/x/proj",
                       "title": "t", "updated_ms": 1759300000000,
@@ -372,7 +373,8 @@ class TestOpencodeCollector(unittest.TestCase):
             _mk_opencode_db(db, rows)
             got = AB.opencode_sessions("/x/proj", 0, db=db)
             sids = [a.sid for a in got]
-            self.assertEqual(sorted(sids), ["ses_anth", "ses_ok"])
+            self.assertEqual(sorted(sids),
+                             ["ses_anth", "ses_ok", "ses_open", "ses_x"])
 
     def test_directory_mismatch_is_not_collected(self):
         with tempfile.TemporaryDirectory() as d:
