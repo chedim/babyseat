@@ -682,10 +682,13 @@ RPG draws a skill tree:
   flashes gold once, its badge pops and the lines out of it brighten. Opening
   the page or the tab lights nothing -- only a change seen while it is open --
   and with reduced motion asked for (`prefers-reduced-motion`) nothing moves;
-- **hover, focus or tap a skill** for its card: what its test asks, its skill
-  against its bar, when it was earned, what it needs first and why, and the
-  closest child ability with the age it shows up -- labelled as an analogy, as
-  on the growth curve;
+- **click or tap a skill** (or Enter/Space on a focused one) for its card:
+  what its test asks, its skill against its bar, when it was earned, what it
+  needs first and why, and the closest child ability with the age it shows up
+  -- labelled as an analogy, as on the growth curve. The chosen skill is
+  outlined and stays chosen until you click another: hovering or focusing
+  other skills, clicking empty space, and the tree's refresh leave it, and the
+  page remembers it per browser;
 - the header says **Lv** (the achievements earned) and self's name; below the
   tree, **Achievements** lists the earned ones, newest first (an unaccepted
   one says "awaiting your accept").

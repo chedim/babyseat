@@ -28,6 +28,7 @@ const SEAT_LOGO = (typeof window !== "undefined" && window.MEMBRANE_STANDALONE)
 const LS_CHAT = "membrane.home.chat";
 const LS_IMMERSIVE = "membrane.home.immersive";
 const LS_FOLLOW = "membrane.home.follow";
+const LS_TREESEL = "membrane.home.treesel";   // #394: the Skill tree's clicked skill
 // what the camera follows (the operator, 2026-10-10: "the seat (the most
 // interesting entity) or thinker/chat, whoever's active, to show what Argus
 // is thinking/doing, or even just where stuff is changing")
@@ -2984,7 +2985,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // #296: the panel's tabs (the sheet, the Skill tree): arrows move between them
       this._spTabs = Array.from(root.querySelectorAll(".sptab"));
       this._spPaneSheet = $("#sppane-sheet"); this._spPaneTree = $("#sppane-tree"); this._spTree = $(".sktree");
-      this._spTreeSel = { onAccept: (id) => this._acceptSelf(id) };   // #299: the tree card's Accept
+      // #299: the tree card's Accept; #394: the clicked skill, remembered per viewer
+      this._spTreeSel = { id: lsGet(LS_TREESEL, null) || undefined, onAccept: (id) => this._acceptSelf(id),
+                          onPick: (id) => lsSet(LS_TREESEL, id) };
       this._spSleep = $(".spsleep");
       this._spSleep.addEventListener("click", () => this._onSleep());
       for (const b of this._spTabs) {
