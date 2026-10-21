@@ -6,7 +6,7 @@ skillTree(sheet) reads the sheet's `tree` and `level` when the seat sends them
 (#295) and, until then, derives a fallback tree from the ladder fields (passed
 rungs, the next rung, its bar) with a fixed rung -> skill mapping; treeLayout
 puts the nodes in lanes by branch (Self / World / Others), each node
-below its prerequisites, with the edges; nodeCard is what a hover, focus or
+below its prerequisites, with the edges; nodeCard is what a click or
 tap shows; achievementsList is the earned ones, newest first; ringDash is the
 open node's progress ring. renderSkillTree builds the tab with DOM calls only
 (createElement + textContent): data-derived text never goes through innerHTML.

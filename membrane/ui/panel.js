@@ -1439,7 +1439,11 @@ const TREE_ICON = { earned: "🏅", awaiting: "🎁", locked: "🔒", unbuilt: "
 const SVGNS = "http://www.w3.org/2000/svg";
 
 /** The tab, built into `root` with DOM calls (no markup strings). `sel`
- *  keeps the chosen node across repaints ({id}); the node that had focus
+ *  keeps the chosen node across repaints ({id}): #394 a click (a tap, or
+ *  Enter/Space on a node -- they are buttons) chooses it and it holds until
+ *  another skill is clicked; hover and focus never change it, nor does a
+ *  click on empty space or on the chosen one. `sel.onPick(id)`, when given,
+ *  hears each new choice (the page remembers it). The node that had focus
  *  keeps it, and the tree's box keeps its scroll. #299: `sel.onAccept(id)`
  *  (a promise of {ok, error}), when given, puts an Accept button on an
  *  awaiting node's card. */
@@ -1471,7 +1475,7 @@ function renderSkillTree(doc, root, sheet, sel) {
   hdr.appendChild(el("span", "lvb", "Lv " + m.level));
   root.appendChild(el("p", "note", m.source === "ladder"
     ? "the ladder read as a tree: this seat doesn't send its skill tree yet, so only the next rung is open"
-    : "each skill is an achievement; its test runs once its prerequisites are earned and you accepted them. Hover, focus or tap one."));
+    : "each skill is an achievement; its test runs once its prerequisites are earned and you accepted them. Click or tap one; it stays until you pick another."));
   const box = root.appendChild(el("div", "skbox"));
   box.setAttribute("role", "group");
   box.setAttribute("aria-label", m.name + "'s skill tree");
@@ -1515,7 +1519,7 @@ function renderSkillTree(doc, root, sheet, sel) {
     card.textContent = "";
     for (const id in btns) btns[id].className = nodeClass(L.nodes.find((n) => n.id === id), { sel: sel.id, lit });
     const c = nodeCard(L.nodes.find((n) => n.id === sel.id), m.nodes);
-    if (!c) { card.appendChild(el("p", "muted", "hover, focus or tap a skill to see it")); return; }
+    if (!c) { card.appendChild(el("p", "muted", "click or tap a skill to see it")); return; }
     card.appendChild(el("p", "skct", c.title));
     const dl = card.appendChild(el("dl", "skcd"));
     for (const [k, v] of c.rows) { dl.appendChild(el("dt", null, k)); dl.appendChild(el("dd", null, v)); }
@@ -1543,10 +1547,14 @@ function renderSkillTree(doc, root, sheet, sel) {
     for (let e = t; e && e !== box; e = e.parentNode || e.parent) if (e.getAttribute && e.getAttribute("data-id")) return e.getAttribute("data-id");
     return null;
   };
-  const pick = (ev) => { const id = idOf(ev.target); if (id && id !== sel.id) { sel.id = id; paintCard(); } };
+  const pick = (ev) => {                       // #394: a click only; empty space keeps the choice
+    const id = idOf(ev.target);
+    if (!id || id === sel.id) return;
+    sel.id = id;
+    paintCard();
+    if (typeof sel.onPick === "function") { try { sel.onPick(id); } catch (e) { /* remembering is a convenience */ } }
+  };
   box.addEventListener("click", pick);
-  box.addEventListener("focusin", pick);
-  box.addEventListener("mouseover", pick);
   paintCard();
   root.appendChild(el("h4", null, "Achievements"));
   const ach = achievementsList(m.nodes);
