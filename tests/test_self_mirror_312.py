@@ -118,16 +118,16 @@ def test_it_opens_once_feel_and_meet_are_earned_and_accepted():
 def test_the_mirror_is_a_built_in_kind_unlocked_with_meet():
     assert "mirror" in TB.KINDS and TB.KINDS["mirror"]["clock"] is False
     assert "mirror" not in TU.PLACEHOLDERS
-    assert TB.MIRROR_LAG == SL.MIRROR_LAG and TB.KINDS["mirror"]["params"]["lag"] == TB.MIRROR_LAG
+    assert TB.MIRROR_LAG == SL.MIRROR_LAG and TB.KINDS["mirror"]["params"]["lag_s"] == TB.MIRROR_LAG   # #343: s
     assert TB.MIRROR_LAG % SL.AIM_HOLD                            # never in step with its aims (they'd leak timing)
     assert TU.UNLOCKS["mirror"] == 6 and TU.UNLOCK_IDS["mirror"] == "meet"   # its last prerequisite
 
 
 def test_the_glass_shows_the_move_one_feed_back_and_the_stranger_one_from_long_ago():
     TB.create("mirror", "toy:mirror", now=1.0)
-    lag, j = TB.MIRROR_LAG, TB.KINDS["mirror"]["params"]["jitter"]
+    lag, j = int(round(SL.MIRROR_LAG / SL.PACE_S)), TB.KINDS["mirror"]["params"]["jitter"]   # #343: 187 feeds at the 10 s pace
     moves = [float(np.sin(0.7 * k) + 0.3 * k % 1.0) for k in range(lag + 5)]
-    outs = [TB.mirror_feed("toy:mirror", m, now=2.0 + k) for k, m in enumerate(moves)]
+    outs = [TB.mirror_feed("toy:mirror", m, now=2.0 + k * SL.PACE_S) for k, m in enumerate(moves)]
     assert outs[0]["ok"] and outs[0]["glass"] is None              # nothing one feed back yet
     for k in range(1, len(moves)):
         assert abs(outs[k]["glass"] - moves[k - 1]) <= 5 * j       # the move before, a little blurred
@@ -137,6 +137,22 @@ def test_the_glass_shows_the_move_one_feed_back_and_the_stranger_one_from_long_a
         assert abs(outs[k]["stranger"] - moves[k - 1 - lag]) <= 5 * j
     errs = [outs[k]["glass"] - moves[k - 1] for k in range(1, len(moves))]
     assert 0.3 * j < float(np.std(errs)) < 2 * j                   # jittered, by about its SD
+
+
+@pytest.mark.parametrize("step", [10.0, 1.0])
+def test_the_stranger_lags_mirror_lag_seconds_whatever_the_pace_343(step):
+    TB.create("mirror", "toy:mirror", now=1.0)
+    j = TB.KINDS["mirror"]["params"]["jitter"]
+    k_lag = int(round(SL.MIRROR_LAG / step))                       # 187 feeds at 10 s, 1870 at 1 s
+    n = k_lag + 4
+    moves = [float(np.sin(0.7 * k)) for k in range(n)]
+    ts = [2.0 + k * step for k in range(n)]
+    outs = [TB.mirror_feed("toy:mirror", m, now=t) for m, t in zip(moves, ts)]
+    for k in range(k_lag + 1):
+        assert outs[k]["stranger"] is None                         # nothing MIRROR_LAG s before the glass yet
+    for k in range(k_lag + 1, n):
+        assert abs(outs[k]["stranger"] - moves[k - 1 - k_lag]) <= 5 * j   # the move MIRROR_LAG s before the glass's
+    assert len(TB.peek("toy:mirror")["moves"]) <= k_lag + 2         # it keeps only what it still shows
 
 
 def test_the_mirror_replays_and_keeps_its_moves_over_a_restart():
@@ -151,8 +167,8 @@ def test_the_mirror_replays_and_keeps_its_moves_over_a_restart():
 
 def test_who_changed_each_side_is_on_the_log():
     TB.create("mirror", "toy:mirror", now=1.0)
-    for k in range(TB.MIRROR_LAG + 3):
-        TB.mirror_feed("toy:mirror", 0.5, now=2.0 + k)
+    for k in range(int(round(SL.MIRROR_LAG / SL.PACE_S)) + 3):                    # #343: feeds at the 10 s pace
+        TB.mirror_feed("toy:mirror", 0.5, now=2.0 + k * SL.PACE_S)
     log = TB.state("toy:mirror")["log"]
     assert {e["by"] for e in log if e.get("side") == "glass"} == {"self"}
     assert {e["by"] for e in log if e.get("side") == "stranger"} == {"world"}
@@ -292,7 +308,7 @@ def test_a_still_self_cannot_recognize_itself():
 
 def test_the_loop_feeds_the_mirror_and_earns_recognize_itself():
     srv = _seat(world=_Drift(0))
-    _run(srv, SL.MIRROR_LAG + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS + 120)
+    _run(srv, int(round(SL.MIRROR_LAG / SL.PACE_S)) + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS + 120)   # #343: the lag in 10 s cycles
     recs = _record(srv)
     lines = [r for r in recs if r["kind"] == "mirror"]
     assert lines and all(r["toy"] == "toy:mirror" for r in lines)
@@ -334,7 +350,7 @@ def test_the_sheet_says_the_mirrors_criteria_in_words():
 
 def test_the_sheet_knows_when_it_was_built_and_how_fast_it_can_pass():
     assert SH.BUILT_AT["mirror"]["pr"] > 0 and SH.BUILT_AT["mirror"]["merged"] > 0
-    assert SH.fastest_cycles()[9] == SL.MIRROR_LAG + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS
+    assert SH.fastest_cycles()[9] == int(round(SL.MIRROR_LAG / SL.PACE_S)) + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS   # #343: as cycles at 10 s
     assert "mirror" in SH._needs()[9]
     assert SH.SKILL_LABEL[9]
 

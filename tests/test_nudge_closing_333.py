@@ -87,7 +87,7 @@ def test_holding_still_is_not_closing_in(monkeypatch):
 
 
 def test_a_new_aims_first_cycle_does_not_nudge(monkeypatch):
-    monkeypatch.setattr(SL, "AIM_HOLD", 3)
+    monkeypatch.setattr(SL, "AIM_HOLD", 3 * 11.0)                # 3 cycles, 11 s apart (_run; #343: s)
     srv = _felt(toys=("ball",))
     state = _fake_spots(monkeypatch, [0.9 - 0.02 * k for k in range(12)])  # closing in all along
     _run(srv, state, 9)
@@ -102,6 +102,7 @@ def test_a_new_aims_first_cycle_does_not_nudge(monkeypatch):
 
 
 def test_a_ball_on_their_side_over_29_held_cycles_costs_only_the_closing_cycles(monkeypatch):
+    monkeypatch.setattr(SL, "AIM_HOLD", 30 * 11.0)               # one aim held 30 cycles 11 s apart (_run; #343: s)
     srv = _felt(toys=("ball",))
     TB.nudge("toy:ball", now=T0)                                 # on the person's side, and it stays there
     sched = [0.5 + (0.05 if k % 3 == 0 else -0.01 * k) for k in range(30)]   # some closer, some not

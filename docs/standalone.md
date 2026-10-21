@@ -141,7 +141,7 @@ window fills the screen; × or Escape closes it.
 
 | Option | |
 |---|---|
-| Blurp's CPU share | a slider, 10–100 % (default 50 %): `self_cpu_share`. The self loop reads the file through `options.cpu_share()`, so a change needs no restart (#343 throttles the cycles to it) |
+| Blurp's CPU share | a slider, 10–100 % (default 50 %): `self_cpu_share`. The self loop and the record cap read the file through one reader, `options.cpu_share(srv)` (the settings.json beside the seat's `self/`), so a change needs no restart (#343 throttles the cycles to it × Blurp's energy) |
 | The field current's fade | read-only, `CURRENT_TAU_S` (180 s today): it is a threshold, and changing it needs the operator's approval |
 | Blurp's energy | read-only: its energy as a percentage and whether it is awake or asleep (#345, #363); "not running yet" before Blurp has run |
 

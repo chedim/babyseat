@@ -145,6 +145,19 @@ def test_it_waits_when_nothing_is_due(monkeypatch):
     assert [r for r in _record(srv) if r["kind"] == "wait"]
 
 
+@pytest.mark.parametrize("step", [10.0, 1.0])
+def test_a_waiting_stretch_is_recorded_once_per_wait_every_seconds_343(monkeypatch, step):
+    monkeypatch.setattr(SL, "_read_entity", _Clock({"slow1": 0.004}))
+    srv = _seat(("slow1",), limit=3)
+    t = _run(srv, 60)
+    cap(srv, 4)
+    for i in range(int(3 * SL.WAIT_EVERY / step)):
+        SL.cycle(srv, now=t + i * step)
+    waits = [r["ts"] for r in _record(srv) if r["kind"] == "wait"]
+    assert len(waits) >= 2
+    assert all(b - a >= SL.WAIT_EVERY for a, b in zip(waits, waits[1:]))   # 300 s apart at 10 s or 1 s cycles
+
+
 def test_rung_four_opens_by_its_test(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Clock({"fast": 0.03, "slow": 0.004}))
     srv = _seat(("fast", "slow"), limit=3)

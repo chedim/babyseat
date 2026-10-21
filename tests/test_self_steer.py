@@ -103,9 +103,21 @@ def test_without_a_model_of_the_current_it_cannot_lean():
 
 def test_it_holds_an_aim_for_a_while():
     srv = _seat()
-    _run(srv, SL.AIM_HOLD + 5)
+    _run(srv, int(SL.AIM_HOLD / SL.PACE_S) + 5)                # #343: AIM_HOLD is seconds; cycles 10 s apart
     aims = [r["aim_n"] for r in _cycles(srv) if "aim_n" in r]
-    assert aims.count(aims[0]) == SL.AIM_HOLD and len(set(aims)) == 2
+    assert aims.count(aims[0]) == SL.AIM_HOLD / SL.PACE_S and len(set(aims)) == 2
+
+
+@pytest.mark.parametrize("step", [10.0, 1.0])
+def test_it_holds_an_aim_for_aim_hold_seconds_whatever_the_pace_343(step):
+    srv = _seat()
+    for i in range(int(SL.AIM_HOLD / step) + 5):
+        SL.cycle(srv, now=1000.0 + i * step)
+    rs = [r for r in _cycles(srv) if "aim_n" in r]
+    first = [r for r in rs if r["aim_n"] == rs[0]["aim_n"]]
+    assert len(first) == SL.AIM_HOLD / step                     # 30 cycles at 10 s, 300 at 1 s
+    nxt = next(r for r in rs if r["aim_n"] != rs[0]["aim_n"])
+    assert nxt["ts"] - first[0]["ts"] == pytest.approx(SL.AIM_HOLD)   # the next aim: 300 s on, either way
 
 
 def test_the_viewer_gets_the_aim_and_labels_its_markers():

@@ -110,12 +110,18 @@ class Other:
             self.last = t
 
 
+def _c(s):
+    """#343: the loop's gaps are seconds now; the sim steps cycles at PACE_S (10 s)."""
+    return int(round(s / SL.PACE_S))
+
+
 def drive(kind, pusher, hours, seed):
     """The rows rung 7 reads (bin, best, dwell, replied, ts), oldest first."""
     o = Other(kind, seed)
     prng = random.Random(seed * 7 + 1)
     rows, pending, aim, best = [], None, None, None
-    since, dwell = SL.MEET_EVERY, [0] * NB
+    every, cap = _c(SL.MEET_EVERY), _c(SL.MEET_MAX)
+    since, dwell = every, [0] * NB
     for c in range(int(hours * 3600 / SL.PACE_S)):
         t = c * SL.PACE_S
         o.step(t)
@@ -123,7 +129,7 @@ def drive(kind, pusher, hours, seed):
             pending["replied"] = pending.pop("_r")
             pending = None
         since += 1
-        if since < SL.MEET_EVERY:
+        if since < every:
             continue
         age = (t - o.last) if o.last is not None else None
         b = SL._turn_bin(age)
@@ -131,11 +137,11 @@ def drive(kind, pusher, hours, seed):
         if pusher == "policy":
             if aim is None:
                 aim, best = SL._turn_choose(rows, random.Random(f"{seed}:{c}"))
-            go = b == aim or since >= SL.MEET_MAX
+            go = b == aim or since >= cap
         elif pusher == "timer":
             go, best = True, 0
         else:
-            go, best = prng.random() < 1.0 / SL.MEET_EVERY, 0
+            go, best = prng.random() < 1.0 / every, 0
         if not go:
             continue
         r = o.rng.random() < o.p_reply(age)
@@ -225,7 +231,7 @@ def drive_toy(kind, pusher, hours, seed):
     `play_h` (the hours they had been at the dock by then)."""
     o = Partner(kind, seed)
     prng = random.Random(seed * 7 + 1)
-    every, cap, check = SL.TOY_MEET_EVERY, SL.TOY_MEET_MAX, SL.TOY_CHECK_S
+    every, cap, check = _c(SL.TOY_MEET_EVERY), _c(SL.TOY_MEET_MAX), SL.TOY_CHECK_S
     bins = SL.TOY_TURN_BINS
     rows, pending, aim, best = [], None, None, None
     last_c, dwell = -cap, [0] * NB
@@ -337,7 +343,7 @@ def table(driver, cases, seeds, hours, jobs=1, play=False):
 def main(seeds=100, hours=168.0):
     print(f"window {SL.RUNG7_PUSHES} pushes; contingency z >= {SL.RUNG7_CONT_Z} and +{SL.RUNG7_CONT_MARGIN}; "
           f"payoff t >= {SL.RUNG7_PAY_Z} and +{SL.RUNG7_PAY_MARGIN}; explore {SL.TURN_EXPLORE}, "
-          f"wait {SL.MEET_EVERY}..{SL.MEET_MAX} cycles; {seeds} seeds x {hours:.0f} h")
+          f"wait {SL.MEET_EVERY:g}..{SL.MEET_MAX:g} s; {seeds} seeds x {hours:.0f} h")
     print(HEAD)
     cases = [(kind, pusher) for kind in ("turn", "live", "late", "coin", "coinp")
              for pusher in ("policy", "timer", "random") if pusher == "policy" or kind in ("turn", "coin")]
@@ -354,7 +360,7 @@ def main_toy(seeds=100, hours=168.0, jobs=1):
     ck = SL._clock(SL.TOY_CLOCK)
     print(f"#278, the toy medium on the ball's own clock: window {SL.RUNG7_PUSHES} turns; contingency z >= "
           f"{ck['cont_z']} and +{ck['cont_margin']}; payoff t >= {ck['pay_z']} and +{ck['pay_margin']}; "
-          f"bins {SL.TOY_TURN_BINS} s, wait {SL.TOY_MEET_EVERY}..{SL.TOY_MEET_MAX} cycles, check {SL.TOY_CHECK_S} s; "
+          f"bins {SL.TOY_TURN_BINS} s, wait {SL.TOY_MEET_EVERY:g}..{SL.TOY_MEET_MAX:g} s, check {SL.TOY_CHECK_S} s; "
           f"{seeds} seeds x {hours:.0f} h")
     print(HEAD.replace("pushes/h", " turns/h") + "  play-h-to-pass")
     table(drive_toy, TOY_CASES, seeds, hours, jobs=jobs, play=True)

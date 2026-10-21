@@ -29,7 +29,7 @@ reserve runs from 1 (full) to 0 (empty):
   record   1 - the record held in memory (self_loop.record_bytes: its
            serialized lines) / the record cap. THE CAP IS DERIVED, NOT A
            CONSTANT (the operator): the person's CPU share
-           (options.cpu_share(), default 0.5) x the RAM available when
+           (options.cpu_share(srv), default 0.5) x the RAM available when
            Blurp woke, so the throttle that bounds its CPU bounds its
            memory too. Recomputed at each wake. The RAM is read (_read_ram)
            from /proc/meminfo's MemAvailable (Linux, Android), else
@@ -47,7 +47,7 @@ free disk now is the new baseline and the awake clock is back at zero.
 Asleep is not the operator's off: the mode stays as it was.
 
 share(throttle, srv) is the person's CPU throttle x energy, for #343's
-pacing (a tired Blurp gets less CPU); nothing on main reads it yet.
+pacing (a tired Blurp gets less CPU): self_loop.pace_share reads it.
 
 CONSOLIDATION (#345 part 2): falling asleep drops what is open (a turn
 awaiting its reply check: the sleep line's `dropped`) and consolidates the
@@ -174,12 +174,13 @@ def _avail_ram() -> int | None:
     return _read_ram()
 
 
-def _record_cap(avail) -> float | None:
-    """The record cap: the person's CPU share x the RAM available now."""
+def _record_cap(avail, srv=None) -> float | None:
+    """The record cap: the person's CPU share (the seat's, options.cpu_share)
+    x the RAM available now."""
     if not isinstance(avail, (int, float)) or avail <= 0:
         return None
     from . import options as O
-    return O.cpu_share() * float(avail)
+    return O.cpu_share(srv) * float(avail)
 
 
 def level(srv) -> float:
@@ -246,7 +247,7 @@ def _fall_asleep(srv, st: dict, now: float, why: str, rs: dict) -> None:
 
 def _wake(srv, st: dict, now: float, why: str, free, avail, who: str | None = None) -> None:
     st.update(asleep=False, since=now, awake_s=0.0, disk_base=free, disk_free=free,
-              record_cap=_record_cap(avail))
+              record_cap=_record_cap(avail, srv))
     rec = {"ts": now, "kind": "wake", "why": why, "energy": st["energy"]}
     if who is not None:
         rec["who"] = who
@@ -277,7 +278,7 @@ def tick(srv, now: float, cpu_s: float = 0.0, free: int | None = None, avail: in
         if st.get("disk_base") is None:
             st["disk_base"] = free                  # a Blurp's first day: the disk as it is now
         if st.get("record_cap") is None and not st["asleep"]:
-            st["record_cap"] = _record_cap(_avail_ram() if avail is None else avail)   # ...and the RAM
+            st["record_cap"] = _record_cap(_avail_ram() if avail is None else avail, srv)   # ...and the RAM
         if st["asleep"]:
             st["energy"] = min(1.0, st["energy"] + RESTORE_PER_S * dt)
             if st["energy"] >= _FULL:

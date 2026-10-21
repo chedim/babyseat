@@ -35,9 +35,17 @@ history() is the archive plus the working record, for the sheet and the
 dock; nothing on the cycle path reads the archive.
 
 THE LOOP is change-driven: each notice changes self's state and wakes the
-next cycle. The runaway guard: PACE_S between cycles (MEMBRANE_SELF_PACE_S,
-floor 1 s), at most BURST_PER_MIN a minute, and three failed cycles in a row
-hold it until the operator's next toggle. A paused seat runs nothing.
+next cycle. #343: the next cycle starts as soon as the last one ends,
+throttled to a CPU share the person chooses (`self_cpu_share` in the seat's
+settings.json, 0 < share <= 1, default 0.5: cpu_share): the wait after a
+cycle is its own wall duration x (1 / share - 1) (share_wait), so at 50% it
+waits as long as the cycle took and at 100% runs back to back. The share the
+loop paces by is that throttle x Blurp's energy (pace_share: energy.share,
+#345), so a tired Blurp slows; at a share of 0 no cycle is timed and the
+loop waits for its rest tick (PACE_S). Each cycle line records its duration
+(`dur_s`) and its number `n`, from a running count (cycle_count: counted once
+when the record loads, then kept as cycle lines are appended). Three failed cycles in a row hold it
+until the operator's next toggle. A paused seat runs nothing.
 
 SLEEP (#345, energy.py): each step of the loop's thread (step()) charges
 Blurp's energy for the time awake and the cycle's CPU; when a reserve runs
@@ -218,14 +226,13 @@ RUNG_ID = {a["rung"]: i for i, a in ACHIEVEMENTS.items()}            # the recor
 # runs only for a built skill, so it stops with them
 BUILT = [i for i, a in ACHIEVEMENTS.items() if a["built"]]
 
-try:
-    PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
-except ValueError:
-    PACE_S = 10.0
-BURST_PER_MIN = 30
+# #343: no longer the loop's pace (the CPU share is): the 10 s a cycle took until #343, at which the
+# constants once counted in cycles became seconds. The idle loop polls at it (nothing woke it), the
+# patience floor and the sheet's fastest line read it, and tests simulate cycles at it.
+PACE_S = 10.0
 HOLD_AFTER = 3              # failed cycles in a row
 STEP = 0.1                  # how far self pushes itself per try (its babble)
-AIM_HOLD = 30               # cycles self holds an aim before choosing the next (steer, after rung 1)
+AIM_HOLD = 300.0            # s self holds an aim before choosing the next (steer, after rung 1; #343: was 30 cycles)
 AIM_REACH = 0.3             # how far from where it is an aim lies
 STEP_MAX = 0.3              # its longest stride when it steers (leaning into a 0.2 pull needs more than 0.1)
 PUSH_GAIN = 0.2             # how hard the current pulls it toward itself
@@ -251,7 +258,7 @@ PATIENCE_P = 0.6            # look again once a change is this likely
 PATIENCE_MAX_S = 1800.0     # never wait longer than this
 RUNG4_TIMED = 30            # timed looks before the test reads them
 RUNG4_CALIB = 0.1           # its predictions must match the outcomes within this
-WAIT_EVERY = 30             # a waiting stretch is recorded once per this many cycles
+WAIT_EVERY = 300.0          # s: a waiting stretch is recorded at most once per this long (#343: was 30 cycles)
 SHIFT_WINDOWS = (3, 4, 5)   # recent looks read against the long memory
 SHIFT_P = 0.02              # ...a shift when they are this unlikely under it
 SHIFT_GAP = 0.4             # ...and this far from it
@@ -263,13 +270,13 @@ RUNG5_SHIFTS = 2            # the two shifts its audit probes (went still, moves
 RUNG6_PUSHES = 10           # pushes to chat:out before the test reads the split
 RUNG6_HEARD = 20            # answered looks at the other before the test reads the split
 BODY_SKILL = 0.9            # predict it this well and it is my body (zero gap), else an other
-MEET_EVERY = 30             # cycles between self's pushes to chat:out: rung 6's timer, and the cap on every push after
-MEET_MAX = 180              # rung 7: a push waits at most this many cycles for its moment, then goes ('overdue')
+MEET_EVERY = 300.0          # s between self's pushes to chat:out: rung 6's timer, and the cap on every push after (#343: was 30 cycles)
+MEET_MAX = 1800.0           # s: rung 7: a push waits at most this long for its moment, then goes ('overdue'; #343: was 180 cycles)
 # RUNG 7 (#258), TAKE TURNS: self learns WHEN to push. After each push it draws the moment it
 # will wait for -- a bin of spoke_age (how long since the other last spoke) -- by Thompson
 # sampling on the reply rate each bin earned over its last TURN_MEMORY pushes (Beta(1, 1)
 # prior: no bin is favoured before evidence), a random bin with chance TURN_EXPLORE, and
-# pushes when the other's spoke_age is in that bin, never sooner than MEET_EVERY cycles after
+# pushes when the other's spoke_age is in that bin, never sooner than MEET_EVERY s after
 # the last push (the timer's own rate is the cap) and never later than MEET_MAX. A push's
 # reward is the reply check's `replied`: the other spoke AFTER the push, by the check.
 # THE TEST over the last RUNG7_PUSHES such pushes, prequential (each push scored with what
@@ -338,7 +345,7 @@ RUNG7_PAY_MARGIN = 0.05     # ...and be at least this
 # (>= 30 cycles apart, up to 180, bins of minutes), and a person who rolled the ball back waited
 # 5-30 min for self's next roll. Serve-and-return with an object is seconds, so a turn with the
 # ball runs on TOY_CLOCK: TOY_TURN_BINS of seconds since the other last acted, a turn at most
-# every TOY_MEET_EVERY cycles, overdue after TOY_MEET_MAX. The edges are what a 10 s cycle can
+# every TOY_MEET_EVERY s, overdue after TOY_MEET_MAX s (#343: they were 2 and 30 cycles). The edges are what a 10 s cycle can
 # resolve: 0-20s spans two cycles (the cycle the ball is seen back and the next), 20-60s four,
 # 1-3m twelve, and 3m+ stays choosable under the 5 min cap (a returned ball can wait for it).
 # THE ORDER OF A TURN (TOY_CLOCK): self rolls; its reply check comes as soon as it sees the ball
@@ -348,7 +355,7 @@ RUNG7_PAY_MARGIN = 0.05     # ...and be at least this
 # last roll's check, and it waits for the ball to be back on its side: only those cycles are
 # moments it could have rolled in (its waiting time, `dwell`, and the shuffled chance the test
 # compares with). An unreturned ball is fetched at the cap ('overdue'), so a person away for
-# hours sees one roll every TOY_MEET_MAX cycles. The rule keeps the test honest: a reply is
+# hours sees one roll every TOY_MEET_MAX s. The rule keeps the test honest: a reply is
 # always the person's roll after self's, and self's next roll answers theirs. Turns on this
 # clock carry `clock: 2` (their checks too), and rungs 7 and 8 read only the current clock's
 # turns: #264's toy turns (no `clock`) were timed in minutes, and their bins never mix in.
@@ -371,8 +378,8 @@ RUNG7_PAY_MARGIN = 0.05     # ...and be at least this
 TOY_CLOCK = 2               # the `clock` a turn with the ball records (#264's turns: none = the chat's, 1)
 TOY_TURN_BINS = (20.0, 60.0, 180.0)     # seconds since the other last acted; the last bin: 3 min+ or never
 TOY_TURN_NAMES = ("0-20s", "20-60s", "1-3m", "3m+")
-TOY_MEET_EVERY = 2          # cycles between self's rolls, at least
-TOY_MEET_MAX = 30           # a roll waits at most this many cycles (5 min) for its moment or the ball, then goes
+TOY_MEET_EVERY = 20.0       # s between self's rolls, at least (#343: was 2 cycles)
+TOY_MEET_MAX = 300.0        # s: a roll waits at most this long for its moment or the ball, then goes (#343: was 30 cycles)
 TOY_CHECK_S = 30.0          # a reply: the person's roll within this of self's; the check comes by then
 TOY_GRACE_S = 20.0          # rung 8: the check waits up to this much longer for the advisor's answer
 TOY_RUNG7_CONT_Z = RUNG7_CONT_Z         # the toy clock's bar (never looser than the chat's)
@@ -423,9 +430,9 @@ RUNG8_RECENT = 6            # reply checks the RECENT rate is over, next to the 
 # stranger the same does not hold -- it reads as other. Measured on simulated moves from the real
 # loop (steering, a drifting current or a fixed one; issue #312): the glass's skill 0.90-0.99
 # (z 3-10, median 6-9), the stranger's best window +0.10 (z <= 4); a still self (no moves) never
-# reaches it. MIRROR_LAG is no multiple of AIM_HOLD: an aim switch every AIM_HOLD cycles is a
+# reaches it. MIRROR_LAG is no multiple of AIM_HOLD: an aim switch every AIM_HOLD s is a
 # rhythm of self's own, and a lag in step with it would leak its timing into the stranger.
-MIRROR_LAG = 187            # the stranger's replay: feeds back (~31 min at the 10 s pace); toybox.MIRROR_LAG
+MIRROR_LAG = 1870.0         # s: the stranger's replay, behind the glass (#343: was 187 feeds, ~31 min); toybox.MIRROR_LAG
 MIRROR_OWN = 3              # its own moves the prediction reads (this cycle's and the two before)
 MIRROR_PAST = 2             # ...and the side's own last values (the baseline reads only these)
 MIRROR_FIT = 200            # rows each prediction is fitted on (the side's latest)
@@ -440,7 +447,7 @@ MIRROR_Z = 5.0              # the glass's sign-test z (p closer than b) must rea
 # honestly, because they change only the p of a look, never which looks happen (the curiosity
 # floor or patience's threshold would, so they are not here). An adopted value is saved in
 # <data dir>/self/settings.json and the live fit reads it (_lam_of); with no file, the constants.
-# ITS PRACTICE IS A DREAM (_dream_tick): every CHANGE_EVERY cycles, on a thread of its own over a
+# ITS PRACTICE IS A DREAM (_dream_tick): every CHANGE_EVERY s, on a thread of its own over a
 # snapshot of the record (the cycle never waits; one dream at a time; the next cycle writes what
 # it found), it proposes ONE candidate -- a grid neighbour, rotating over the settings and both
 # directions, never back to a value a setting left within CHANGE_WINDOW proposals -- and replays
@@ -464,7 +471,7 @@ MIRROR_Z = 5.0              # the glass's sign-test z (p closer than b) must rea
 CHANGE_RUNG = 10
 CHANGE_SETTINGS = {"lam_looks": (10, 15, 20, 30, 45, 60, 90, 120),      # LAM_LOOKS (#293: 20-60 flat, 10 worse)
                    "lam_prior_looks": (1.0, 2.0, 3.0, 5.0, 10.0)}        # LAM_PRIOR_LOOKS (#235)
-CHANGE_EVERY = 360          # cycles between dreams (an hour at the 10 s pace)
+CHANGE_EVERY = 3600.0       # s between dreams (#343: was 360 cycles, an hour at the 10 s pace)
 CHANGE_LOOKS = 1000         # rate-read looks a proposal is scored on (~3 h of the live seat's looks), and its check
 CHANGE_BLOCKS = 10          # ...in this many consecutive blocks (batch means)
 CHANGE_MARGIN = 0.001       # Brier gain per look a candidate must reach
@@ -478,7 +485,7 @@ CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier wind
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
 CURIO_MIN = 0.005           # progress under this anywhere is no frontier: the base chooser runs untilted
 CURIO_TRIM = 0.25           # #259: a window's error is its interquartile mean -- a rare outlier is no progress
-CURIO_GAP_S = 2 * WAIT_EVERY * PACE_S   # #259: a record gap this long is a restart/stall; a look spanning one is no error
+CURIO_GAP_S = 2 * WAIT_EVERY            # #259: a record gap this long is a restart/stall; a look spanning one is no error
 ATTENTION = True            # #266: among the due, weigh a look by what it can teach (tests switch it off for the base)
 INFO_FLOOR = 0.1            # #266: a near-certain look still weighs this much: a mastered thing is re-checked now and then
 RECENT_MAX = 100            # #230: the most record lines the page's activity feed may ask for
@@ -556,7 +563,7 @@ def _rt(srv) -> dict:
     with _lock:
         rt = _RT.get(id(srv))
         if rt is None:
-            rt = _RT[id(srv)] = {"mode": "off", "last": None, "burst": [], "fails": 0,
+            rt = _RT[id(srv)] = {"mode": "off", "last": None, "fails": 0,
                                  "held": False, "wake": threading.Event(), "srv": srv}
         return rt
 
@@ -785,6 +792,8 @@ def _append(srv, rec: dict) -> None:
         if cache is not None:
             cache.append(rec)
             rt["recs_bytes"] = rt.get("recs_bytes", 0) + len(line)
+            if rec.get("kind") == "cycle":
+                rt["recs_cycles"] = rt.get("recs_cycles", 0) + 1     # the running count (cycle_count)
 
 
 def _read(srv) -> list[dict]:
@@ -799,6 +808,7 @@ def _read(srv) -> list[dict]:
             if rt.get("recs") is None:
                 redo = _recover(srv)
                 rt["recs"], rt["recs_bytes"] = _load_record(record_path(srv))
+                rt["recs_cycles"] = _cycles(rt["recs"])   # #343: the one full count, at load
                 if redo is not None:
                     consolidate(srv, redo)          # it was cut off before the swap: do it whole
     return rt["recs"]
@@ -841,7 +851,9 @@ def _carry(recs: list) -> dict:
 
 
 def _cycles(recs: list) -> int:
-    """The cycles Blurp has run (its next cycle's number is this + 1)."""
+    """The cycles Blurp has run, counted in full (the summary's carry + the
+    cycle lines since): only when the record is loaded or consolidated --
+    every other reader takes cycle_count's running count (#343)."""
     return sum(1 for r in recs if r.get("kind") == "cycle") + int(_carry(recs).get("cycle", 0))
 
 
@@ -880,6 +892,16 @@ def _dropped(recs: list) -> set:
             if isinstance(d, dict) and d.get("turn") is not None:
                 out.add(float(d["turn"]))
     return out
+
+
+def cycle_count(srv) -> int:
+    """#343: the cycles Blurp has run (its next cycle's number is this + 1):
+    counted in full once when the record is loaded (at boot, after a restart)
+    or consolidated (the summary's carry + the window), then kept as cycle
+    lines are appended -- O(1)."""
+    with _lock:
+        _read(srv)
+        return int(_rt(srv).get("recs_cycles") or 0)
 
 
 def record_bytes(srv) -> int:
@@ -1261,7 +1283,7 @@ def _clock_of(r: dict | None) -> int:
 
 def _clock(c: int) -> dict:
     """A clock's numbers (#278): the bins and their names, the gap and the
-    cap (cycles), the reply horizon (s) and rung 7's bar."""
+    cap (s, #343: they were cycles), the reply horizon (s) and rung 7's bar."""
     if c == TOY_CLOCK:
         return {"bins": TOY_TURN_BINS, "names": TOY_TURN_NAMES, "every": TOY_MEET_EVERY, "max": TOY_MEET_MAX,
                 "check_s": TOY_CHECK_S, "cont_z": TOY_RUNG7_CONT_Z, "cont_margin": TOY_RUNG7_CONT_MARGIN,
@@ -1696,16 +1718,19 @@ def _turn_choose(rows: list[dict], rng) -> tuple[int, int | None]:
     return max(range(nb), key=lambda b: draws[b]), best
 
 
-def _turn_push(srv, recs: list[dict], to: str, n: int, age, clock: int = 1) -> dict | None:
+def _turn_push(srv, recs: list[dict], to: str, n: int, age, clock: int = 1,
+               now: float | None = None) -> dict | None:
     """One cycle of rung 7's practice: count the moment (its bin) into this
     interval's waiting time and say whether to push now -- the push's fields
-    (bin, aim, best, dwell, why) or None. Never sooner than MEET_EVERY cycles
+    (bin, aim, best, dwell, why) or None. Never sooner than MEET_EVERY s
     after the last push; at MEET_MAX it goes anyway ('overdue'). On the
-    ball's clock (#278) its bins, gap and cap are TOY_*."""
+    ball's clock (#278) its bins, gap and cap are TOY_*. #343: the gap and
+    the cap are seconds since the last push (they were cycles)."""
     import random
+    now = time.time() if now is None else now
     ck = _clock(clock)
     last = next((r for r in reversed(recs) if r.get("kind") == "push"), None)
-    if last is not None and n - int(last.get("n") or 0) < ck["every"]:
+    if last is not None and now - float(last.get("ts") or 0) < ck["every"]:
         return None
     rt = _rt(srv)
     st = rt.get("turn")
@@ -1713,10 +1738,10 @@ def _turn_push(srv, recs: list[dict], to: str, n: int, age, clock: int = 1) -> d
     if st is None or st.get("key") != key:
         rows = _turn_rows(recs, to, "toy", clock) if clock == TOY_CLOCK else _turn_rows(recs, to)
         aim, best = _turn_choose(rows, random.Random(f"turn:{n}"))
-        st = rt["turn"] = {"key": key, "aim": aim, "best": best, "dwell": [0] * (len(ck["bins"]) + 1)}
+        st = rt["turn"] = {"key": key, "aim": aim, "best": best, "dwell": [0] * (len(ck["bins"]) + 1), "t0": now}
     b = _turn_bin(age, ck["bins"])
     st["dwell"][b] += 1
-    waited = (n - int(last.get("n") or 0)) if last is not None else ck["every"] - 1 + sum(st["dwell"])
+    waited = (now - float(last.get("ts") or 0)) if last is not None else ck["every"] + now - st["t0"]
     if b != st["aim"] and waited < ck["max"]:
         return None
     rt["turn"] = None
@@ -2475,7 +2500,7 @@ def _dream_apply(srv, out: dict, n: int, now: float) -> None:
 
 def _dream_tick(srv, n: int, now: float) -> None:
     """CHANGE ITSELF'S PRACTICE (#320), each cycle: write a finished dream's
-    lines; on the beat (every CHANGE_EVERY cycles), while the skill is open
+    lines; on the beat (every CHANGE_EVERY s, #343), while the skill is open
     and no dream is running, start one on a thread of its own over a snapshot
     of the record -- the cycle never waits for it."""
     rt = _rt(srv)
@@ -2485,8 +2510,12 @@ def _dream_tick(srv, n: int, now: float) -> None:
     th = rt.get("dream")
     if th is not None and th.is_alive():
         return
-    if n % CHANGE_EVERY or not _available(srv, CHANGE_RUNG):
+    if "dream_at" not in rt:                                # #343: the beat is time -- the last dream on the record
+        rt["dream_at"] = max((float(r.get("ts") or 0) for r in _read(srv)
+                              if r.get("kind") in ("change", "change_check")), default=None)
+    if (rt["dream_at"] is not None and now - rt["dream_at"] < CHANGE_EVERY) or not _available(srv, CHANGE_RUNG):
         return
+    rt["dream_at"] = now
     recs = list(_read(srv))
     settings = dict(_settings(srv))
     k = _dreams(recs)
@@ -2508,7 +2537,7 @@ def _dream_tick(srv, n: int, now: float) -> None:
         _dream_apply(srv, rt.pop("dream_out"), n, now)
 
 
-# ---- the cycle and its guard --------------------------------------------------
+# ---- the cycle and its CPU share (#343) -----------------------------------------
 
 def _runs(srv) -> bool:
     from .lanes import nerve_paused
@@ -2520,16 +2549,40 @@ def _runs(srv) -> bool:
     return rt["mode"] != "off" and not rt["held"] and not paused
 
 
-def _guard_ok(rt: dict, now: float) -> bool:
-    if rt["last"] is not None and now - rt["last"] < PACE_S:
-        return False
-    rt["burst"] = [t for t in rt["burst"] if now - t < 60.0]
-    return len(rt["burst"]) < BURST_PER_MIN
+def cpu_share(srv) -> float:
+    """#343: self's CPU share, a seat setting (`self_cpu_share` in the seat's
+    <data dir>/settings.json, beside self/): options.cpu_share(srv), the one
+    reader, so the loop, the record cap and the options window agree."""
+    from . import options as O
+    return O.cpu_share(srv)
+
+
+def share_wait(dur_s: float, share: float) -> float:
+    """#343: the wait after a cycle that took dur_s, at CPU share `share`:
+    dur_s x (1 / share - 1) -- as long as the cycle at 50%, none at 100%."""
+    return max(0.0, float(dur_s)) * (1.0 / share - 1.0)
+
+
+def pace_share(srv) -> float:
+    """#343 x #345: the share the loop paces by -- the person's throttle
+    (cpu_share) x Blurp's energy (energy.share), so a tired Blurp slows."""
+    from . import energy as _E
+    return max(0.0, _E.share(cpu_share(srv), srv))
+
+
+def pace_wait(srv, dur_s: float) -> float | None:
+    """The wait after a cycle that took dur_s, at pace_share. None at a share
+    of 0 (energy spent): no next cycle on a timer -- the loop waits for its
+    rest tick (PACE_S), never divides by zero and never spins."""
+    sh = pace_share(srv)
+    return share_wait(dur_s, sh) if sh > 0.0 else None
 
 
 def cycle(srv, now: float | None = None) -> dict | None:
     """One try -> expect -> notice. None when nothing ran (off, paused, held,
-    the guard, or nowhere to stand: no current and no position yet).
+    or nowhere to stand: no current and no position yet). #343: no guard of
+    its own -- the loop's CPU share paces it (start); its line carries
+    `dur_s`, the whole cycle's wall time, so it is written last.
 
     A STILL WORLD (#282): with no current (a fresh boot, nobody has spoken
     or played lately) self still cycles -- the current is where it stands,
@@ -2538,9 +2591,10 @@ def cycle(srv, now: float | None = None) -> dict | None:
     about the current from it, and the rung stats that read push / gap /
     naive skip it (rung 1 reads only change "world"; no aim lines)."""
     now = time.time() if now is None else now
+    t0 = time.perf_counter()                                     # #343: the cycle's own wall time
     rt = _rt(srv)
     from . import energy as _E
-    if not _runs(srv) or _E.asleep(srv) or not _guard_ok(rt, now):   # #345: asleep, no cycle
+    if not _runs(srv) or _E.asleep(srv):                          # #345: asleep, no cycle
         return None
     cur = _current(srv)
     est = srv.entity_store
@@ -2555,12 +2609,11 @@ def cycle(srv, now: float | None = None) -> dict | None:
     elif pos is None or len(pos) != len(cur):
         pos = _unit(cur + _seed_dir("birthplace", len(cur)))      # born near the current, not on it
     rt["last"] = now
-    rt["burst"].append(now)
-    n = _cycles(_read(srv)) + 1
+    n = cycle_count(srv) + 1                                      # O(1): the running count (#343)
     seed = f"{n}"
     aim = None
     if 1 in _passed(_read(srv)):            # steer: earned by feeling itself
-        if (rt.get("aim") is None or rt.get("aim_count", 0) >= AIM_HOLD
+        if (rt.get("aim") is None or now - rt.get("aim_at", now) >= AIM_HOLD     # #343: AIM_HOLD s, not cycles
                 or len(rt["aim"]) != len(pos)):
             # #333: once it nudges, an aim is a thing of its world's field spot, at random among
             # them (none on the field: a spot near where it is, as before, and nothing to nudge)
@@ -2571,8 +2624,7 @@ def cycle(srv, now: float | None = None) -> dict | None:
                 rt["aim"], rt["aim_eid"] = spots[eid], eid
             else:
                 rt["aim"], rt["aim_eid"] = _unit(pos + AIM_REACH * _seed_dir(f"aim:{n}", len(pos))), None
-            rt["aim_n"], rt["aim_count"] = n, 0
-        rt["aim_count"] += 1
+            rt["aim_n"], rt["aim_at"] = n, now                # #343: held AIM_HOLD s from here
         aim = rt["aim"]
     from .night import method_call
     _ctx.cycle = {"srv": srv, "pos": pos, "current": cur, "aim": aim, "still": still}
@@ -2612,19 +2664,22 @@ def cycle(srv, now: float | None = None) -> dict | None:
                     "aim_naive": float(np.linalg.norm(naive_land - aim))})
     if aim is not None and rt.get("aim_eid"):
         rec["aim_eid"] = rt["aim_eid"]       # #333: the thing it aims at (and nudges)
-    _append(srv, rec)
     est.upsert(ent, embedder=None)
-    _mark_rung7_restart(srv, now)
-    _mark_glitch_fix(srv, now)
-    if (aim is not None and rt.get("aim_eid") and _practised(srv, "nudge")
-            and _closing(srv, rt["aim_eid"])):
-        # #333: its own move nudges what it aims at -- only while it is getting closer to it
-        _nudge_once(srv, n, now, rt["aim_eid"], c["mine"])
-    if _available(srv, 2):
-        _reach_once(srv, est, ent, n, now)
-    if _available(srv, 9):
-        _mirror_once(srv, n, now, c["observed"] - pos)      # #312: its move, to the mirror
-    _dream_tick(srv, n, now)                                # #320: off the cycle's thread
+    try:
+        _mark_rung7_restart(srv, now)
+        _mark_glitch_fix(srv, now)
+        if (aim is not None and rt.get("aim_eid") and _practised(srv, "nudge")
+                and _closing(srv, rt["aim_eid"])):
+            # #333: its own move nudges what it aims at -- only while it is getting closer to it
+            _nudge_once(srv, n, now, rt["aim_eid"], c["mine"])
+        if _available(srv, 2):
+            _reach_once(srv, est, ent, n, now)
+        if _available(srv, 9):
+            _mirror_once(srv, n, now, c["observed"] - pos)      # #312: its move, to the mirror
+        _dream_tick(srv, n, now)                                # #320: off the cycle's thread
+    finally:
+        rec["dur_s"] = round(time.perf_counter() - t0, 4)       # #343: the whole cycle, so its line comes last
+        _append(srv, rec)
     _open_rungs(srv)
     _unlock_toys(srv)
     _show(srv, ent, pos, c, rec)
@@ -2710,8 +2765,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         eid, lam = _due(srv, recs, targets, kinds, now, rng)
         if eid is None:
             rt = _rt(srv)
-            rt["waits"] = rt.get("waits", 0) + 1
-            if rt["waits"] % WAIT_EVERY == 1:
+            if rt.get("wait_at") is None or now - rt["wait_at"] >= WAIT_EVERY:   # #343: once per WAIT_EVERY s
+                rt["wait_at"] = now
                 _append(srv, {"ts": now, "kind": "wait", "n": n})
             return
     else:
@@ -2971,7 +3026,7 @@ def _due(srv, recs, targets, kinds, now, rng):
         if last is None or lam is None:
             due.append((e, lam))
             continue
-        wait = min(PATIENCE_MAX_S, max(PACE_S, -np.log(1.0 - PATIENCE_P) / lam))
+        wait = min(PATIENCE_MAX_S, max(PACE_S, -np.log(1.0 - PATIENCE_P) / lam))   # #343: a 10 s floor, as before
         if now - float(last) >= wait:
             due.append((e, lam))
     silent = [e for e in targets if kinds.get(e) == "silent"]
@@ -3884,7 +3939,7 @@ def status(srv) -> dict:
              "push_age": round(now - pushes[-1]["ts"], 3) if pushes else None,
              "heard_age": round(now - heard, 3) if heard is not None else None}
     return {"mode": rt["mode"], "limit": lim, "born": born, "held": rt["held"],
-            "cycles": _cycles(recs),
+            "cycles": cycle_count(srv),
             "rung": level, "level": level, "rung_name": ACHIEVEMENTS[latest]["name"] if latest else RUNG_NAMES[0],
             "next": opens, "earned": [{k: e[k] for k in ("id", "name", "ts")} for e in earned],
             "old_wiring": _old_wiring(recs),                                              # #333
@@ -4739,6 +4794,7 @@ def consolidate(srv, now: float | None = None) -> dict | None:
             (_dir(srv) / CONSOLIDATING).unlink(missing_ok=True)
         rt = _rt(srv)
         rt["recs"], rt["recs_bytes"] = [head] + lines, len(text)
+        rt["recs_cycles"] = _cycles(rt["recs"])     # #343: the carry + the window: the same count, once a sleep
         for k in ("sheet", "dock", "off_field"):
             rt.pop(k, None)
         return {"archived": len(raw), "kept": len(lines), "bytes": len(text), "id": cid}
@@ -4832,21 +4888,26 @@ def step(srv, now: float | None = None) -> dict | None:
 
 
 def start(srv) -> threading.Thread:
-    """The loop: wakes on its own change (or the switch), runs one step when
-    the guard allows (a cycle, or a sleeping Blurp's rest, #345), nothing when off."""
+    """The loop: wakes on its own change (or the switch), runs one step (a
+    cycle, or a sleeping Blurp's rest, #345), then after a cycle waits
+    pace_wait of it (#343: the person's throttle x energy, so a tired Blurp
+    slows; no fixed pace and no burst cap). With nothing to wake it (off,
+    paused, held, asleep, no cycle ran, or a share of 0) it polls every
+    PACE_S -- the rest tick. The switch or an accept cuts a wait short."""
     rt = _rt(srv)
-    from . import energy as _E
 
     def run():
         while True:
             rt["wake"].wait(timeout=PACE_S)
             rt["wake"].clear()
             try:
-                if _runs(srv) and not _E.asleep(srv):
-                    wait = (rt["last"] + PACE_S - time.time()) if rt["last"] else 0.0
-                    if wait > 0:
-                        time.sleep(wait)
-                step(srv)
+                rec = step(srv)
+                if rec is not None:                         # it set wake: the next cycle, after its share's wait
+                    rt["wake"].clear()
+                    wait = pace_wait(srv, rec.get("dur_s") or 0.0)
+                    if wait is not None:                    # share 0 (energy spent): no wake, the rest tick
+                        rt["wake"].wait(timeout=wait)
+                        rt["wake"].set()
             except Exception as e:                          # noqa: BLE001
                 import sys
                 print(f"[self] cycle failed ({e!r})", file=sys.stderr)
