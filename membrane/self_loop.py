@@ -93,6 +93,7 @@ and their old passes no longer count (LADDER_V = 3, _void_old_wiring).
 from __future__ import annotations
 
 import bisect
+import contextvars
 import json
 import os
 import shlex
@@ -504,6 +505,33 @@ _ctx = threading.local()    # the cycle in flight: only the loop's own thread ha
 OPERATOR_KINDS = ("accept", "accept_migrated")   # #299: record lines the operator's acts write, not self's running
 _ACC_MEMO: dict = {}        # #299: _accepted's last answer: the record it read (held, so never mistaken) and its length
 _RT: dict[int, dict] = {}   # id(srv) -> runtime (mode, guard clocks, hold, the wake event)
+_SCOPE: contextvars.ContextVar = contextvars.ContextVar("self_status_scope", default=None)   # #346: see _Scope
+
+
+class _Scope:
+    """#346: ONE status() call's shared reads. status() runs every cycle (the
+    cycle's _show) and its parts read the same things again and again -- the
+    counting passes, rung 2's stats, the reply checks -- each one a walk over
+    the whole record. Inside a call they are read once and shared; the scope
+    ends with the call (nothing is kept across calls: each cycle appends a
+    line). It holds the record it was opened on and that record's length --
+    a different list, or the record grown under it, is read afresh."""
+
+    def __init__(self, recs: list):
+        self.recs, self.n, self.memo = recs, len(recs), {}
+
+
+def _scoped(recs: list, key, fn):
+    """fn(), shared within the open scope on this record (else just fn()).
+    The value is shared, not copied: its readers never change it."""
+    s = _SCOPE.get()
+    if s is None or s.recs is not recs or s.n != len(recs):
+        return fn()
+    if key not in s.memo:
+        s.memo[key] = fn()
+    return s.memo[key]
+
+
 SUMMARY = "summary"         # #345: the consolidated record's first line
 ARCHIVE = "archive"         # ...the dated archives' folder under self/
 MANIFEST = "manifest.jsonl"     # ...the order the archived lines were written in (one line per sleep)
@@ -679,7 +707,8 @@ def _awaiting(recs: list[dict]) -> list[str]:
 
 
 def _earn_order(recs: list[dict]) -> list[str]:
-    return [i for i in ACHIEVEMENTS if i in _earn_times(recs)]
+    times = _earn_times(recs)                     # #346: once, not once per achievement
+    return [i for i in ACHIEVEMENTS if i in times]
 
 
 def _opens(recs: list[dict]) -> set:
@@ -760,6 +789,10 @@ def _earned(recs: list[dict]) -> set:
 
 def _earn_times(recs: list[dict]) -> dict:
     """id -> its first counting pass line (an old `rung` line or an `achieve` line)."""
+    return _scoped(recs, "earn_times", lambda: _earn_times_of(recs))
+
+
+def _earn_times_of(recs: list[dict]) -> dict:
     out: dict = {}
     for r in _rung_lines(recs):
         i = RUNG_ID.get(r.get("rung"))
@@ -1325,6 +1358,10 @@ def _reply_checks(recs: list[dict], eid: str, medium: str | None = None) -> list
     push's question is about (one horizon: RUNG8_CHECK_S after the push; a
     turn with the ball's: TOY_CHECK_S) -- in one medium (#264: the current
     one by default; never mixed) and one clock (#278: the current one)."""
+    return _scoped(recs, ("reply_checks", eid, medium), lambda: _reply_checks_of(recs, eid, medium))
+
+
+def _reply_checks_of(recs: list[dict], eid: str, medium: str | None = None) -> list[dict]:
     medium = medium or _cur_medium(recs, eid)
     clock = _cur_clock(recs, eid, medium)
     return [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid and r.get("reply")
@@ -1502,6 +1539,7 @@ def _rung8_series(recs: list[dict], eid: str) -> list[dict]:
     off = X = y = None
     h = hash(("carry", n0, k0)) if n0 else 0
     k = float(k0)
+    told: dict = {}                                   # #346: per model, its answered checks so far (the latest)
     for i, r in enumerate(rows):
         r["rate"] = (k + 0.5) / (n0 + i + 1.0)
         h = hash((h, r["ts"], r["o"], r["gap"]))
@@ -1522,10 +1560,14 @@ def _rung8_series(recs: list[dict], eid: str) -> list[dict]:
         else:
             rc = r["rec_cal"]
             r["cal"] = (float(rc[0]), float(rc[1])) if isinstance(rc, (list, tuple)) and len(rc) == 2 \
-                else _advisor_cal(rows[:i], r["model"])
+                else _advisor_cal(told.get(r["model"], [])[-RUNG8_TRUST:], r["model"])   # = rows[:i]'s last
             r["w"] = r["cal"][1]
             r["p"] = (float(r["rec_p"]) if r["rec_p"] is not None
                       else _advise(r["p_self"], float(r["p_llm"]), r["cal"]))
+            mine = told.setdefault(r["model"], [])
+            mine.append(r)
+            if len(mine) > 2 * RUNG8_TRUST:
+                del mine[:-RUNG8_TRUST]
         k += r["o"]
     return rows
 
@@ -3261,15 +3303,25 @@ def _rung2_stats(recs: list[dict], tempo: dict) -> dict:
     """Per thing, over its last RUNG2_REACHES answered reaches (outside any
     audit): the Brier skill of my predictions against the seat-wide change
     rate, and whether it moves often enough to be audited."""
+    if not tempo:                                     # an empty tempo: every reader's {} is the same
+        return _scoped(recs, ("rung2", None), lambda: _rung2_stats_of(recs, tempo))
+    held, out = _scoped(recs, ("rung2", id(tempo)), lambda: (tempo, _rung2_stats_of(recs, tempo)))
+    return out if held is tempo else _rung2_stats_of(recs, tempo)
+
+
+def _rung2_stats_of(recs: list[dict], tempo: dict) -> dict:
     ans = [r for r in recs if r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
            and not r.get("audit")]
     if not ans:
         return {}
     pool = ans[-RUNG2_REACHES * 4:]
     p0 = sum(r["answer"] == "changed" for r in pool) / len(pool)
+    by: dict = {}                                     # #346: the looks by thing, in one pass (not a scan per thing)
+    for r in ans:
+        by.setdefault(r["eid"], []).append(r)
     out = {}
-    for eid in sorted({r["eid"] for r in ans}):
-        mine = [r for r in ans if r["eid"] == eid][-RUNG2_REACHES:]
+    for eid in sorted(by):
+        mine = by[eid][-RUNG2_REACHES:]
         a = [1.0 if r["answer"] == "changed" else 0.0 for r in mine]
         brier = sum((x - r["p"]) ** 2 for x, r in zip(a, mine))
         base = sum((x - p0) ** 2 for x in a)
@@ -3795,6 +3847,10 @@ def _rung_lines(recs: list[dict], old_wiring: bool = False) -> list[dict]:
     #333: a pass of a rebuilt rung (6-9) counts only with "ladder": 3.
     old_wiring=True gives the passes that rule alone voids instead (what
     counted before it): the voids' migration and the sheet read them."""
+    return _scoped(recs, ("rung_lines", bool(old_wiring)), lambda: _rung_lines_of(recs, old_wiring))
+
+
+def _rung_lines_of(recs: list[dict], old_wiring: bool = False) -> list[dict]:
     voids: dict = {}
     for r in recs:
         if r.get("kind") == "rung_void" and r.get("issue") != 333:   # #333's voids: the ladder rule below
@@ -3886,9 +3942,20 @@ def status(srv) -> dict:
     order (the page's celebration reads it); #299: `accepted` the earned ones
     the operator accepted, `awaiting` the earned ones not yet (tree order).
     The bar reads the open achievement closest to passing; with none, the
-    latest earned one's own test -- so a pass can be seen slipping."""
-    rt = _rt(srv)
+    latest earned one's own test -- so a pass can be seen slipping.
+
+    #346: it runs every cycle; its parts share what they read within the
+    call (_Scope), never across calls."""
     recs = _read(srv)
+    tok = _SCOPE.set(_Scope(recs))
+    try:
+        return _status(srv, recs)
+    finally:
+        _SCOPE.reset(tok)
+
+
+def _status(srv, recs: list[dict]) -> dict:
+    rt = _rt(srv)
     born = any(r.get("kind") == "birth" for r in recs)
     done = _passed(recs)
     earned = _earned_rows(recs)
