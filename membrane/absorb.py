@@ -91,7 +91,21 @@ def _is_anthropic_model(model_id: str | None) -> bool:
     m = str(model_id or "").strip().lower()
     if not m:
         return True
+    from .claude_agent import is_rung_name
+    if is_rung_name(m):
+        return True                    # the claude-agent rung (#384)
     return m.startswith("claude") or "anthropic" in m
+
+
+def is_claude_made_row(info: dict | None) -> bool:
+    """THE RULE BY PROVIDER (issue #384): a row the claude-agent rung made
+    -- the transcript's Claude-made mark, the provider id, or a model id in
+    the rung namespace membrane mints -- is never absorbed (fail-closed:
+    its whole session is skipped)."""
+    from .claude_agent import is_claude_made, is_rung_name
+    if not isinstance(info, dict):
+        return False
+    return is_claude_made(info) or is_rung_name(info.get("modelID"))
 
 
 # ---- collector: Claude Code transcripts -------------------------------------
@@ -313,7 +327,8 @@ def _opencode_rows(conn, sid: str, prov: str) -> list[TurnRow]:
         if role == "assistant":
             mprov = str(d.get("providerID") or "")
             mmid = str(d.get("modelID") or "")
-            if mprov != prov or _is_anthropic_model(mmid):
+            if mprov != prov or _is_anthropic_model(mmid) \
+                    or is_claude_made_row(d):
                 return []                        # fail-closed, whole sid
         parts = conn.execute(
             "SELECT data FROM part WHERE message_id = ?"

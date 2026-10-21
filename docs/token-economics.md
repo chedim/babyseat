@@ -98,12 +98,23 @@ load. Scoring:
   rung. When every rung is down, **the field itself is the last resort**
   (`[membrane] FIELD-ONLY` — the field's own answer, honestly marked, never
   learned: the field does not feed on itself).
+- **Providers** — every provider in `auth.PROVIDERS` with a key
+  (`membrane auth <provider>` or its env var) registers its models as cloud
+  rungs at boot (OpenAI-compatible chat, memory-only keys).
+  `auth.AGENT_PROVIDERS` holds the providers that are not APIs. Today that
+  is `claude-agent`: Claude through the Agent SDK and the local `claude`
+  CLI login, with no key. Its rungs (`claude-agent:sonnet|opus|haiku`) are
+  **opt-in**: autoselect, the ceiling and the failover ladder skip them
+  unless you pin one or name it with `--ladder-include`. They are
+  text-only, background lanes never use them, and their replies are shown
+  but never learned. See [claude-agent.md](claude-agent.md).
 - **Explore lane** — chat turns never eps-explore while a cloud floor holds;
   `@explore`-pointed subagents sample least-tried eligible locals (in-memory
   only, never cloud).
 
 Knobs: `--prefer-local` (classic local-first floor for offline/privacy),
-`--cloud-budget` (daily cap), `--explore`, `--disable-llm-router` (the kill
+`--cloud-budget` (daily cap), `--explore`, `--ladder-include` (an opt-in
+rung joins the ladder), `--disable-llm-router` (the kill
 switch — plain single-model escalation), `--max-local-gib`, `--replay-ab`.
 Per-turn audit lines (`route: model=… reason=… pressure=…`) tabulate
 claimed-vs-measured win rates in `field state`. Tests:

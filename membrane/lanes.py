@@ -5595,6 +5595,30 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         routed_model = route.get("route")
         orig_model = str(up.get("model") or "membrane")
         t0 = time.monotonic()
+        # THE CLAUDE-AGENT RUNG (issue #384): Claude through the Agent SDK.
+        # Its reply is SHOWN (teed to the client like any rung's) and never
+        # LEARNED: the capture below gets the person's side only. Keyed on
+        # the rung's provider, never on the model's name.
+        from . import claude_agent as _CA
+        _ca = _CA.is_claude_rung(srv, orig_model)
+        if _ca:
+            try:
+                _CA.check_available()
+            except _CA.Unavailable as ua:
+                # a clear error before any byte: the SDK or the CLI is missing
+                msg = str(ua)
+                out = json.dumps({"error": {"message": msg,
+                                            "type": "claude_agent_unavailable"}}).encode()
+                reason = " ".join(msg.split())[:200].encode(
+                    "latin-1", "replace").decode("latin-1")
+                self.send_response(503, reason)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+                self.wfile.flush()
+                print(f"[claude-agent] {msg}", file=sys.stderr)
+                return
 
         def _open_backend(model_name: str):
             """POST the turn to the routed model's backend. On a rung DOWN
@@ -5615,6 +5639,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             # everything else goes to the Ollama /v1 surface as before.
             rec = (getattr(srv, "router", None).records.get(model_name)
                    if getattr(srv, "router", None) else None)
+            if _CA.is_claude_rung(srv, model_name):
+                # the SDK answers in-process (text-only: tools stay here)
+                return _CA.open_reply(u2)
             if rec is not None and rec.backend:
                 from .auth import PROVIDERS as _PROV
                 prov = _PROV.get(rec.backend) or {}
@@ -5780,7 +5807,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             # registered them -- opencode's traffic is stream:true, so
             # _pending_tools never populated for the real flow (the
             # receipt lane's missing-registration exhibit, E9)
-            if calls:
+            if calls and not _ca:
                 _capture_plan_and_calls(mem, query, "".join(parts), calls)
             resp_obj = None
         else:
@@ -5917,10 +5944,14 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # exemplar path below drops them); tool calls ride on_calls
         _cap = getattr(srv, "capturer", None)
         if _cap is not None:
-            _cap.on_turn(query, content, thought or "")
+            if _ca:
+                _cap.on_turn(query, "", "")       # the person's side only (#384)
+            else:
+                _cap.on_turn(query, content, thought or "")
         # the A/B pair closes on the model's final answer (a text turn)
         k_ab = getattr(srv, "_ab_key", None)
-        if k_ab and content.strip() and not tool_calls and _efield_on(srv) is not None:
+        if k_ab and content.strip() and not tool_calls and not _ca \
+                and _efield_on(srv) is not None:
             srv._ab_key = None
             import threading as _th
             from .efgate import ab_close
@@ -5933,9 +5964,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # discipline violations (stacked/buried canon frames) so the poison
         # that self-learns as junk memory is also VISIBLE and countable.
         try:
-            if content.strip() and not tool_calls:
+            if content.strip() and not tool_calls and not _ca:
                 _frame_lint(srv, content, source="assistant-text")
-            if calls:
+            if calls and not _ca:
                 _capture_plan_and_calls(mem, query, content, calls)
         except Exception as e:
             print(f"[opencode] capture error (response already served): {e}",

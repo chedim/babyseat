@@ -439,16 +439,20 @@ def _auth(argv: list[str]) -> int:
     """`membrane auth <provider>`: store a cloud API key outside the repo.
 
     Providers come from auth.PROVIDERS (anthropic, openrouter, gemini, groq,
-    github, mistral). The key goes to ~/.membrane/auth.json (600); the
+    github, mistral; claude-agent from auth.AGENT_PROVIDERS needs no key --
+    it checks the `claude` CLI login, issue #384). The key goes to
+    ~/.membrane/auth.json (600); the
     provider's env var always wins over the stored value (the shell is the
     louder authority). Probes the provider's model listing on success so a
     typo fails HERE, not on the first routed turn."""
     from .auth import (save_api_key, mask, fetch_models, PROVIDERS,
-                       load_api_key, _env_names)
+                       AGENT_PROVIDERS, load_api_key, _env_names)
     import getpass as _getpass
     provider = argv[0] if argv and not argv[0].startswith("-") else None
+    if provider in AGENT_PROVIDERS:
+        return _auth_claude_agent(provider)
     if not provider or provider not in PROVIDERS:
-        provs = ", ".join(sorted(PROVIDERS))
+        provs = ", ".join(sorted(PROVIDERS) + sorted(AGENT_PROVIDERS))
         print(f"usage: membrane auth <{provs}>   "
               f"(or: membrane auth <provider> --key <KEY>)", file=sys.stderr)
         return 2
@@ -486,6 +490,42 @@ def _auth(argv: list[str]) -> int:
     env_names = _env_names(provider)
     print(f"[membrane] active key: {mask(key)} "
           f"(env {env_names[0]} overrides the store)")
+    return 0
+
+
+def _auth_claude_agent(provider: str) -> int:
+    """`membrane auth claude-agent` (issue #384): no key. Checks that the
+    Claude Agent SDK is installed and that the `claude` CLI is installed
+    and logged in, then stores only a non-secret mark that enables the
+    rungs at the next boot. The login stays the CLI's own."""
+    from . import claude_agent as CA
+    from .auth import save_api_key
+    try:
+        CA.load_sdk()
+    except CA.Unavailable as e:
+        print(f"[membrane] {e}", file=sys.stderr)
+        return 1
+    st = CA.cli_status()
+    if not st.get("installed"):
+        print(f"[membrane] claude-agent: the `claude` CLI was not found; "
+              f"{CA.LOGIN_HINT}", file=sys.stderr)
+        return 1
+    if not st.get("logged_in"):
+        print(f"[membrane] claude-agent: `claude` is installed "
+              f"({st.get('cli')}) but not logged in"
+              + (f" ({st['error']})" if st.get("error") else "")
+              + "; run `claude` (or `claude auth login`) once, then this "
+                "command again", file=sys.stderr)
+        return 1
+    p = save_api_key(provider, CA.ENABLED_MARK)
+    plan = f", {st['plan']} plan" if st.get("plan") else ""
+    print(f"[membrane] claude-agent: `claude` is logged in "
+          f"({st.get('method') or 'login'}{plan}); enabled in {p} "
+          f"(no key or token stored)")
+    print(f"[membrane] rungs at the next boot: "
+          f"{', '.join(CA.rung_names())} -- opt-in: pick one, or add it to "
+          f"the ladder with --ladder-include <rung>; text-only; its replies "
+          f"are shown, never learned")
     return 0
 
 
