@@ -3,8 +3,7 @@ was cut mid-generation; the seat read a silent end, counted a 'stop' with
 no words, the operator's question got an empty reply and auto-chat
 stalled on it for good. Now a stream that ends without its finish is
 truncated -- asked again when nothing usable came; words already given are
-kept, a half-built tool call never runs -- and auto-chat continues from
-Argus's last real words after an empty turn (twice at most in a row)."""
+kept, a half-built tool call never runs. (Auto-chat itself is gone, #348.)"""
 import http.server
 import json
 import os
@@ -85,36 +84,6 @@ class TestDroppedStream(unittest.TestCase):
     def test_a_whole_stream_is_untouched(self):
         out, calls, _ = self._call([([WORDS, FIN], False)])
         self.assertEqual((len(calls), out["choices"][0]["finish_reason"]), (1, "stop"))
-
-
-class TestAutoChatAfterAnEmptyTurn(unittest.TestCase):
-    def test_last_words_skip_the_empty_rows(self):
-        ms = MS.MessageStore()
-        for i, (role, text) in enumerate([("assistant", "real words"), ("assistant", "")]):
-            ms.append("s", {"id": f"m{i}", "sessionID": "s", "role": role, "time": {"created": i}},
-                      [{"id": f"p{i}", "type": "text", "text": text}] if text else [])
-        r = type("R", (), {"messages": ms})()
-        self.assertEqual(V._last_words(r, "s"), "real words")
-
-    def test_last_words_never_continue_from_an_error_banner(self):
-        # THE OPERATOR'S EXHIBIT (2026-10-13): the last assistant row was the
-        # stream-drop banner; every auto turn-on then read it as "the chat
-        # ended on itself" and stopped at once (rounds 0, three seconds in).
-        ms = MS.MessageStore()
-        rows = [("assistant", "real words"),
-                ("assistant", "model ladder failed: ConnectionError: dropped", True),
-                ("assistant", "model ladder failed: JSONDecodeError: torn", False)]
-        for i, row in enumerate(rows):
-            role, text = row[0], row[1]
-            info = {"id": f"m{i}", "sessionID": "s", "role": role, "time": {"created": i}}
-            if len(row) > 2:
-                info["error"] = {"name": "Error", "data": {"message": "x"}}
-            if text:
-                ms.append("s", info, [{"id": f"p{i}", "type": "text", "text": text}])
-            else:
-                ms.append("s", info, [])
-        r = type("R", (), {"messages": ms})()
-        self.assertEqual(V._last_words(r, "s"), "real words")
 
 
 if __name__ == "__main__":

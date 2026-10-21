@@ -328,25 +328,8 @@ class TestMembraneOnly(unittest.TestCase):
         self.assertNotIn("is the anchor holding?", " ".join(sent))   # not the model's history
 
 
-class TestAutoChat(unittest.TestCase):
-    def _runner(self):
-        d = tempfile.mkdtemp()
-        srv = _Srv()
-        srv._models_path = str(Path(d) / "models.json")
-        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
-        lad = _CountingLadder()
-        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), lad,
-                         lambda n, a, c: "ok", system="", model="m")
-        r.srv = srv
-        V.of(srv).bootstrap(CORPUS * 3)
-        return r, srv, lad
-
-    def setUp(self):
-        self._pause = V.AUTO_PAUSE_S
-        V.AUTO_PAUSE_S = 0.02
-
-    def tearDown(self):
-        V.AUTO_PAUSE_S = self._pause
+class TestOldVoiceRows(unittest.TestCase):
+    """Auto-chat is gone (#348); its old stored voice rows still read as the voice."""
 
     def test_a_voice_turn_brings_no_prose_to_the_field(self):
         from membrane import speakers as SP
@@ -516,54 +499,6 @@ class TestVoiceRules(unittest.TestCase):
         self.assertEqual(len(V.voice_rules(est)), 2)
 
 
-class TestExploreTogether(unittest.TestCase):
-    def test_explore_is_the_default_and_has_no_grading(self):
-        r = type("R", (), {"_auto": {}, "hub": S.SSEHub(), "_busy": {"s1": 1}, "messages": S.MessageStore()})()
-        st = V.auto_set(r, "s1", True)
-        self.assertEqual(st["mode"], "explore")
-        self.assertEqual(V.auto_set(r, "s1", True, "teach")["mode"], "teach")
-
-class TestMembranesRole(unittest.TestCase):
-    """2026-10-10, the operator: in auto-chat the LLM works on by itself
-    like an agent, never hearing membrane, and membrane predicts it (the
-    babble role and its switch are gone, #318)."""
-
-    def setUp(self):
-        self._pause = V.AUTO_PAUSE_S
-        V.AUTO_PAUSE_S = 0.02
-
-    def tearDown(self):
-        V.AUTO_PAUSE_S = self._pause
-
-    def test_auto_chat_is_the_llm_alone_and_membrane_guesses_it(self):
-        r, srv, lad = TestAutoChat._runner(self)
-        sid = r.sessions.create(title="t")["id"]
-        self.assertFalse(V.auto_state(r, sid)["on"])
-        r.messages.append(sid, {"id": "msg_u0", "sessionID": sid, "role": "user", "time": {"created": 1}},
-                          [{"id": "p0", "type": "text", "text": "check the battery"}])
-        r.messages.append(sid, {"id": "msg_a0", "sessionID": sid, "role": "assistant", "time": {"created": 2, "completed": 3}},
-                          [{"id": "p1", "type": "text", "text": "The battery is at ninety percent."}])
-        V.auto_set(r, sid, True)
-        # The order matters and is the contract: the predictor's score is
-        # recorded in the turn-end handler, which an abort can strand -- so
-        # wait for the recording to have LANDED (2 turns predicted) BEFORE
-        # aborting, not after; 30s budget because a slow runner's turns
-        # arrive later (the CI exhibit once squeezed this: 1 not >= 2).
-        end = time.time() + 30
-        while time.time() < end and (lad.n < 3
-                or srv._predictor.report().get("operator", {}).get("turns", 0) < 2):
-            time.sleep(0.05)
-        r.abort(sid)
-        self.assertGreaterEqual(lad.n, 3)
-        self.assertGreaterEqual(srv._predictor.report()["operator"]["turns"], 2)   # membrane predicted his moves
-        rows = r.messages.list(sid)
-        self.assertEqual([m["info"]["id"] for m in rows if m["info"].get("role") == "user"], ["msg_u0"])  # no new message of anyone's
-        sent = lad.last["messages"]
-        self.assertEqual(sent[-1]["role"], "assistant")                 # the turn just keeps going
-        blob = " ".join(str(m.get("content")) for m in sent)
-        self.assertNotIn(V.VOICE_PREFIX.strip(), blob)                  # Argus never hears membrane
-        self.assertNotIn("[auto]", blob)                                # and nothing invented is said for him
-
 class TestLearningFromMisses(unittest.TestCase):
     def test_a_real_turns_reply_is_the_answer_key_and_leans_the_next_aim(self):
         d = tempfile.mkdtemp()
@@ -585,64 +520,3 @@ class TestLearningFromMisses(unittest.TestCase):
         self.assertIn("s1", v.correction)                              # the next aim leans toward it
         pairs = (Path(d) / "voice" / "pairs.jsonl").read_text()
         self.assertIn("The anchor holds on sand.", pairs)
-
-
-class TestContinuationRefused(unittest.TestCase):
-    def test_a_model_that_refuses_to_continue_stops_auto_chat(self):
-        r = type("R", (), {"_auto": {"s1": {"rounds": 3, "mode": "explore"}}, "hub": S.SSEHub(),
-                           "_busy": {}, "messages": S.MessageStore(),
-                           "srv": None})()
-        srv = _Srv()
-        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
-        r.srv = srv
-        old = V.AUTO_PAUSE_S
-        V.AUTO_PAUSE_S = 0.01
-        try:
-            V.auto_next(r, "s1", "model ladder failed: HTTPError: 400 last message must be user")
-            end = time.time() + 3
-            while time.time() < end and V.auto_on(r, "s1"):
-                time.sleep(0.02)
-        finally:
-            V.AUTO_PAUSE_S = old
-        self.assertFalse(V.auto_on(r, "s1"))
-
-
-class TestTheSwitchesSurviveARestart(unittest.TestCase):
-    """2026-10-11, the operator: "does restart have to stop auto-chat and reset
-    settings? :(" -- auto-chat and its mode, saved and restored."""
-
-    def _runner(self, d):
-        srv = _Srv()
-        srv._models_path = str(Path(d) / "models.json")
-        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
-        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), _CountingLadder(),
-                         lambda n, a, c: "ok", system="", model="m")
-        r.srv = srv
-        return r
-
-    def test_auto_chat_comes_back_after_a_restart(self):
-        d = tempfile.mkdtemp()
-        r = self._runner(d)
-        sid = r.sessions.create(title="t")["id"]
-        other = r.sessions.create(title="u")["id"]
-        r._busy = {sid: 1, other: 1}                      # no rounds fire in this test
-        V.auto_set(r, sid, True, "teach")
-        V.auto_set(r, other, True)
-        V.auto_set(r, other, False)                       # a Stop is remembered too
-        # the restart: a fresh runner over the same sessions and data dir
-        r2 = self._runner(d)
-        r2.sessions = r.sessions
-        r2.messages = r.messages
-        r2._busy = {sid: 1, other: 1}
-        got = V.restore_state(r2, delay=0.0)
-        self.assertEqual(got["auto"], [sid])
-        end = time.time() + 3
-        while time.time() < end and not V.auto_on(r2, sid):
-            time.sleep(0.02)
-        self.assertTrue(V.auto_on(r2, sid))
-        self.assertEqual(V.auto_state(r2, sid)["mode"], "teach")
-        self.assertFalse(V.auto_on(r2, other))
-
-    def test_no_state_no_trouble(self):
-        r = self._runner(tempfile.mkdtemp())
-        self.assertEqual(V.restore_state(r, delay=0.0), {})

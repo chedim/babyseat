@@ -284,9 +284,6 @@ function applyEvent(st, ev) {
     case "session.idle":
       st.status = { type: "idle" };
       return true;
-    case "membrane.auto":
-      st.auto = { on: !!props.on, rounds: props.rounds || 0, mode: props.mode || "explore" };
-      return true;
     case "membrane.say": {
       // Argus speaking (voice:out): the voice log keeps it; the page says it
       const ln = props.line || {};
@@ -1714,14 +1711,6 @@ function toyPopoverHtml(t, res) {
   return out.join("");
 }
 
-/** The session auto-chat acts on: the open chat, or -- while a mind's
- *  read-only view is shown (sid "mind:<name>") -- the person's own chat
- *  behind it (#318: membrane home's ▶/⏸ posted to /session/mind:…/auto). */
-function autoSid(sid, mindPrev) {
-  if (!sid) return null;
-  return String(sid).startsWith("mind:") ? (mindPrev || null) : sid;
-}
-
 /** Membrane's guess of what Argus would DO this turn (predict.py: virtual,
  *  never run), scored against what he did: ✓ top guess, ~ in the top 3. */
 function guessHtml(line) {
@@ -1912,7 +1901,7 @@ function offlineNotice(data, zoo) {
     : { text: name + " is offline", switchTo: null };
 }
 
-const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, autoSid, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, sheetSleep, sleepBars, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -2002,7 +1991,6 @@ const STYLE = `
              padding:4px 9px; margin:4px 0; font-size:13px; white-space:pre-wrap; }
   .phantom.ptool { font-style:normal; font-family:var(--code-font-family, monospace); font-size:12px; }
   .phantom.pending { opacity:.3; } .phantom .pmark { font-style:normal; font-size:11px; }
-  .autobtn.spinning { animation:aspin 2.4s linear infinite; } @keyframes aspin { to { transform:rotate(360deg); } }
   .vedit { display:flex; gap:6px; margin-top:6px; } .vedit textarea { flex:1; font:inherit; border-radius:8px; padding:4px 8px; }
   .msg.ai.live { border-left-color:var(--primary-color,#3477d6); }
   .who { font-size:11px; opacity:.55; margin-bottom:2px; }
@@ -2082,12 +2070,8 @@ const STYLE = `
   :host([overlay]) .scroller { background:color-mix(in srgb, var(--primary-background-color,#111) 30%, transparent); }
   :host([overlay]) .msgs { padding:10px 12px 16px; }
   /* the card is narrower than a page: the bar wraps instead of clipping its
-     buttons (membrane / LLM / auto-chat / minds) off the edge */
+     buttons (membrane / LLM / minds) off the edge */
   :host([overlay]) .bar { flex-wrap:wrap; row-gap:4px; padding:6px 10px; }
-  /* OVERLAY ONLY (2026-10-13, the operator's ask): auto-chat moved out --
-     the home page's top bar drives it (a ▶/⏸ beside 💬); the panel's own
-     node stays only for its state/listener, hidden */
-  :host([overlay]) .autobtn { display:none; }
   :host([overlay]) .side { position:absolute; z-index:5; top:0; bottom:0; left:0; width:min(260px, 80%);
                            box-shadow:2px 0 14px rgba(0,0,0,.35); }
   :host([overlay]) .ctl { display:flex; flex-direction:column; gap:2px; padding:2px 8px 8px;
@@ -2096,8 +2080,6 @@ const STYLE = `
                                        border:1px solid rgba(128,128,128,.35); background:var(--secondary-background-color,#222); font:inherit; }
   :host([overlay]) .ctl .btn.icon { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:6px 8px; }
   :host([overlay]) .ctl .ico { width:1.4em; text-align:center; display:inline-block; }
-  :host([overlay]) .ctl .autobtn.spinning { animation:none; }
-  :host([overlay]) .ctl .autobtn.spinning .ico { animation:aspin 2.4s linear infinite; }
   :host([overlay]) .bar .title { flex:1 1 120px; }
   :host([overlay]) .bar select.agent { max-width:120px; }
   :host([overlay]) .hint { display:none; }
@@ -2178,7 +2160,6 @@ function definePanel() {
             <select class="modelpick" title="Model (what membrane sees on Ollama)"><option value="">model…</option></select>
             <span class="pill state">…</span>
             <button class="btn icon voicebtn" title="membrane's own voice (show / hide)">🗣</button>
-            <button class="btn icon autobtn" title="auto-chat: the LLM works on by itself; you can join any time">⟳</button>
             <button class="btn icon selfsleep" aria-pressed="false" title="${escAttr(SELF_NAME)} (#161): asleep or awake -- tap to switch">💤</button>
             <span class="selfstat" title="where ${escAttr(SELF_NAME)} is now: its rung, the bar toward the next, what it waits on"></span>
             <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
@@ -2210,10 +2191,6 @@ function definePanel() {
         // listeners come along)
         const ctl = document.createElement("div");
         ctl.className = "ctl";
-        // the auto-chat button does NOT live here any more (2026-10-13,
-        // the operator's ask): home.js's top bar carries it beside the
-        // chat button as a ▶/⏸; the panel's own node stays (hidden --
-        // never listed) so its listener and state keep working.
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"],
                                     ["selfsleep", SELF_NAME + " asleep"], ["selfstat", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
@@ -2264,8 +2241,6 @@ function definePanel() {
         this._voiceBtn.style.opacity = this._voiceOn ? "1" : ".4";
         if (this._chat) { this._chat.all = true; this._schedule(); }
       });
-      this._autoBtn = $(".autobtn");
-      this._autoBtn.addEventListener("click", (ev) => this._toggleAuto(ev && ev.shiftKey ? "teach" : "explore").catch(() => {}));
       this._jsBtn = $(".jsbtn");
       this._jsBtn.addEventListener("click", () => this._toggleJs().catch(() => {}));
       this._jsTab = "tab_" + Math.random().toString(36).slice(2, 10);
@@ -2686,11 +2661,10 @@ function definePanel() {
       if (!this._chat) return;
       if (this._mind) return this._mindTick();
       const sid = this._sid;
-      const [hist, st, vox, auto, phs] = await Promise.all([
+      const [hist, st, vox, phs] = await Promise.all([
         this._api(SERVE + "/session/" + sid + "/message"),
         this._api(SERVE + "/session/status"),
         this._api(SERVE + "/session/" + sid + "/voice").catch(() => ({ ok: false })),
-        this._api(SERVE + "/session/" + sid + "/auto").catch(() => ({ ok: false })),
         this._api(SERVE + "/session/" + sid + "/predict").catch(() => ({ ok: false })),
       ]);
       if (sid !== this._sid) return;
@@ -2700,8 +2674,6 @@ function definePanel() {
       loadVoice(this._chat, vox && vox.ok && Array.isArray(vox.data) ? vox.data : []);
       loadPhantoms(this._chat, phs && phs.ok && Array.isArray(phs.data) ? phs.data : []);
       this._loadSeat();
-      this._chat.auto = auto && auto.ok && auto.data ? auto.data : { on: false };
-      this._paintAuto();
       if (st.ok && st.data && typeof st.data === "object") {
         this._statusBy = st.data;
         const mine = st.data[sid];
@@ -2926,7 +2898,6 @@ function definePanel() {
       if (this._chat && applyEvent(this._chat, ev)) {
         this._schedule();
         this._paintStatus();
-        if (ev.type === "membrane.auto") this._paintAuto();
       }
       if (this._chat && sid === this._chat.sid && (ev.type === "session.idle" ||
           (ev.type === "session.status" && (p.status || {}).type === "idle"))) {
@@ -3253,21 +3224,6 @@ function definePanel() {
         (out ? '<div class="lbl">output</div><pre>' + escText(out) + "</pre>" + more : "") + "</div></details>";
     }
 
-    async _toggleAuto(mode) {
-      // the person's chat, even while a mind's read-only view is shown (#318)
-      const sid = autoSid(this._sid, this._mind ? this._mindPrev : null);
-      if (!sid || !this._chat) return;
-      let cur = sid === this._sid ? this._chat.auto : null;
-      if (sid !== this._sid) {
-        const g = await this._api(SERVE + "/session/" + sid + "/auto").catch(() => null);
-        cur = g && g.ok ? g.data : null;
-      }
-      const on = !(cur && cur.on);
-      const r = await this._api(SERVE + "/session/" + sid + "/auto",
-        { method: "POST", body: JSON.stringify({ on, mode: mode || "explore" }) });
-      if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
-    }
-
     /** THE SEAT'S JS (jsexec.py): opt in per tab; Argus's code then runs in this
      *  window, as you -- the switch is the consent. */
     async _toggleJs() {
@@ -3464,15 +3420,6 @@ function definePanel() {
     async _selfRecent(n) {
       const r = await this._api(SERVE + "/membrane/self/recent?n=" + encodeURIComponent(n || 15)).catch(() => null);
       return r && r.ok && r.data && Array.isArray(r.data.lines) ? r.data.lines : null;
-    }
-
-    _paintAuto() {
-      const a = (this._chat && this._chat.auto) || { on: false };
-      if (!this._autoBtn) return;
-      this._autoBtn.style.opacity = a.on ? "1" : ".4";
-      this._autoBtn.classList.toggle("spinning", !!a.on);
-      this._autoBtn.title = a.on ? "auto-chat ON: the LLM works on by itself (round " + (a.rounds || 0) + ") -- click or Stop to end"
-                                 : "auto-chat: the LLM works on by itself, round after round; you can join any time";
     }
 
     async _voiceTeach(vid, body) {

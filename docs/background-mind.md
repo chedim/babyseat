@@ -74,9 +74,9 @@ the `membrane-intents` skill.
 
 ## The pause (the operator's stable point, 2026-10-06)
 
-`membrane: pause` stands the seat's ACTING lanes down — the stable point
-from which the operator (and the model, read-only) can look around and
-plan:
+`membrane: pause` — or the ▶ in membrane home's top bar (#348) — stands
+the seat's ACTING lanes down — the stable point from which the operator
+(and the model, read-only) can look around and plan:
 
 - **Stops**: the thinking loops (listener admits hold — the events pool
   keeps, bounded by its drop-oldest cap), the dreamer, the thinker's
@@ -84,7 +84,9 @@ plan:
   NightClock's bodies (scripts/births/consolidation defer; the cadence
   continues so resume is automatic), the autonode (the file-tree diff
   accumulates silently; resume fires it as a bounded 64-burst), the claim
-  + A/B idle judges, all composed speech (held; delivers on resume).
+  + A/B idle judges, all composed speech (held; delivers on resume),
+  Blurp's own cycle (`self_loop`), and the scripts' model calls
+  (`llm.request` answers "the seat is paused").
 - **Keeps**: presence (a paused seat is ALIVE to the roster — identity
   metadata, not acting), capture (the operator talking is memory), the
   gate/recall reads, and `membrane: pause`/`resume` themselves.
@@ -104,6 +106,19 @@ plan:
   avoids). `membrane: pause` is honored only from the operator's chat
   (a listener loop can never pause the seat). Kill switch:
   `MEMBRANE_NERVE_PAUSE=0` (pause becomes a no-op).
+- **The button** (#348): membrane home's top bar shows ▶ while the seat
+  runs and ⏸ while it is paused; a press pauses or resumes. It reads
+  `GET /membrane/seat/pause` (`{paused, enabled}`; `enabled` is false under
+  the kill switch) on load, every 15 s while the page is visible, and after
+  every press, which sends `POST /membrane/seat/pause {"paused": true|false}`.
+  That write sits behind the owner's door like every write (from another
+  machine: the [seat token](auth.md#the-seat-token); through Home
+  Assistant: an admin), and it writes the same audit line as the typed
+  frames (`{"event": "nerve", "op": "pause"|"resume"}`, plus `by`: who
+  pressed it) and a `paused` / `resumed` event on the seat panel. It is
+  the same RAM-only flag, so after a restart the button shows ▶. The button
+  drove auto-chat until #348; auto-chat is gone (the LLM acts unprompted
+  through its own field scripts, #338).
 
 The banner carries one `PAUSED:` line while paused — the model sees why
 the field's voices are quiet and that its writes are refused.

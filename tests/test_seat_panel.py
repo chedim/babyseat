@@ -58,22 +58,17 @@ class TestSeatPanel(unittest.TestCase):
         self.assertEqual(ent.properties["state"]["loops"], {"running": 0, "max": 3})
         self.assertFalse(st["paused"])
         self.assertEqual(st["loops_model"], "glm-x")
-        for k in ("seat_rss_mb", "mem_available_mb", "stream_clients", "failing_scripts", "auto"):
+        for k in ("seat_rss_mb", "mem_available_mb", "stream_clients", "failing_scripts"):
             self.assertIn(k, st)
 
     def test_the_operators_controls_are_applied_by_the_seat(self):
         srv, r, seen = _seat()
-        sid = r.sessions.create(title="chat")["id"]
-        r._busy = {sid: 1}                                       # no rounds fire here
-        out = SP.control(srv, {"paused": True, "loops_max": 2, "session": sid, "auto": True})
+        out = SP.control(srv, {"paused": True, "loops_max": 2})
         self.assertTrue(srv.paused)
         self.assertEqual(srv.loops.max, 2)
-        self.assertTrue(V.auto_on(r, sid))
         self.assertTrue(out["state"]["paused"])
-        self.assertTrue(out["state"]["auto"][sid]["on"])
         kinds = [e["kind"] for e in srv.entity_store.docs[MEMBRANE_NS + "presence"].properties["events"]]
         self.assertIn("paused", kinds)
-        self.assertIn("auto-chat-on", kinds)
         self.assertTrue(any(e.get("type") == "membrane.seat" for e in seen))
         SP.control(srv, {"paused": False})
         self.assertFalse(srv.paused)
@@ -103,25 +98,6 @@ class TestSeatPanel(unittest.TestCase):
         kinds = [e["kind"] for e in srv.entity_store.docs[MEMBRANE_NS + "presence"].properties["events"]]
         self.assertEqual(kinds.count("memory-pressure"), 1)
         self.assertIn("stream-cut", kinds)
-
-    def test_a_stalled_auto_chat_is_an_event(self):
-        srv, r, _ = _seat()
-        sid = r.sessions.create(title="chat")["id"]
-        r._auto = {sid: {"rounds": 1, "mode": "explore"}}
-        from _ef_fakes import FakeEmbedder
-        srv.membrane = types.SimpleNamespace(embedder=FakeEmbedder())
-        old = V.AUTO_PAUSE_S
-        V.AUTO_PAUSE_S = 0.01
-        try:
-            V.auto_next(r, sid, "")
-            end = time.time() + 2
-            ev = lambda: [e["kind"] for e in ((getattr(srv.entity_store.docs.get(MEMBRANE_NS + "presence"), "properties", None) or {}).get("events") or [])]
-            while time.time() < end and "auto-chat-stalled" not in ev():
-                time.sleep(0.02)
-        finally:
-            V.AUTO_PAUSE_S = old
-        self.assertIn("auto-chat-stalled", ev())
-
 
 if __name__ == "__main__":
     unittest.main()

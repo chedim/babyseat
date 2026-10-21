@@ -1057,13 +1057,11 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
 
 
 def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
-                parts=None, auto_turn: bool = False) -> None:
+                parts=None) -> None:
     """The teachers speak: the operator's message and the LLM's reply are
-    heard; the line it said this turn is graded against the reply. Then,
-    in auto-chat, the next round -- with or without the voice (#318)."""
+    heard; the line it said this turn is graded against the reply."""
     srv = getattr(runner, "srv", None)
     if lane not in _CHAT_LANES:
-        _auto_after(runner, sid, reply)
         return
     v = of(srv)
     if v is None:
@@ -1072,7 +1070,6 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
             threading.Thread(target=_predict.end, args=(runner, sid, list(parts or [])), daemon=True).start()
         except Exception:
             pass
-        _auto_after(runner, sid, reply)
         return
 
     th = (getattr(runner, "_voice_threads", {}) or {}).pop(sid, None)
@@ -1081,12 +1078,11 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
         try:
             if th is not None:
                 th.join(60)              # its line first, then the grade
-            if not auto_turn:
-                v.hear(user_text)
+            v.hear(user_text)
             v.hear(strip_meant(reply), LLM_WEIGHT)
             if v._pool_booted:
                 v.pool_add(reply, "reply")                   # the recall pool grows with each reply
-                if not auto_turn and user_text and reply:
+                if user_text and reply:
                     try:
                         E = v.embedder.embed([clean(user_text)[:2000] or user_text[:2000],
                                               clean(reply)[:4000] or reply[:4000]])
@@ -1120,36 +1116,16 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
                                         "line": dict(v.lines.get(lid) or {})})
         except Exception as e:
             print(f"[voice] hear failed: {e!r}", file=sys.stderr)
-        _auto_after(runner, sid, reply)
 
     threading.Thread(target=go, daemon=True, name="voice-hear").start()
 
 
-def _auto_after(runner, sid: str, reply: str) -> None:
-    if auto_on(runner, sid):
-        auto_next(runner, sid, reply)
-
-
-# ---- AUTO-CHAT (2026-10-09, the operator: "the LLM talks to membrane and my
-# input is optional ... they loop onto each other, my messages injected as
-# they arrive"; 2026-10-11, the operator's option 2: "the turn just keeps
-# going"). Auto-chat is the LLM's turn going on by itself, round after
-# round: no message of anyone's -- the next round starts from the
-# conversation as it stands, his own last reply last (a continuation turn).
-# The operator's messages join as they arrive; Stop or the button ends it;
-# no round cap. Membrane predicts each move (predict.py) when it can; it is
-# never heard by the model. THE VOICE IS NOT NEEDED (#318): the voice is
-# opt-in (MEMBRANE_VOICE, since 0.5.1) and auto-chat ran only with it --
-# with it off nothing ran at all. The voice's own lines in auto-chat (the
-# 'babble' role: its line framed for the model, explore / teach) are gone
-# with the role switch; a missing voice degrades nothing here.
+# ---- AUTO-CHAT IS GONE (#348, decided 2026-10-21): the LLM acts unprompted
+# through its own field scripts (#338), not on a timer; its ▶ button in
+# membrane home became the seat's pause (seat_panel.set_pause). What stays:
+# the old voice rows' prefix (speakers.py reads stored rows) and the lesson
+# line old replies in the history still carry.
 VOICE_PREFIX = "[membrane voice] "     # old stored rows still carry it (speakers.py)
-AUTO_PAUSE_S = 3.0
-
-
-# The mode is kept (saved, restored, shown, shift-click = teach); since #318
-# no voice line is framed by it -- a continuation is the same in both.
-AUTO_MODES = ("explore", "teach")
 
 
 _MEANT = re.compile(r"^\W*it meant\W*:\s*(.+?)\s*$", re.I | re.M)
@@ -1166,177 +1142,3 @@ def it_meant(reply: str) -> str:
 
 def strip_meant(reply: str) -> str:
     return _MEANT.sub("", reply or "").strip()
-
-
-# THE SWITCH SURVIVES A RESTART (2026-10-11, the operator: "does restart have
-# to stop auto-chat and reset settings? :("): auto-chat on/off + its mode,
-# per session, saved beside the voice's data at every change and restored at
-# boot -- auto-chat resumes from the last reply. A Stop is a change too: what
-# was stopped stays stopped. An older file's "role" map (the removed babble /
-# predict switch, #318) is ignored and dropped at the next save.
-STATE_FILE = "auto-state.json"
-RESUME_AFTER_S = 15.0
-
-
-def _state_path(runner):
-    srv = getattr(runner, "srv", None)
-    mp = getattr(srv, "_models_path", None)
-    return Path(mp).parent / "voice" / STATE_FILE if mp else None
-
-
-def save_state(runner) -> None:
-    p = _state_path(runner)
-    if p is None:
-        return
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        d = {"auto": {sid: {"mode": (a or {}).get("mode", "explore")}
-                      for sid, a in (getattr(runner, "_auto", None) or {}).items()}}
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(d))
-        os.replace(tmp, p)
-    except Exception as e:
-        print(f"[voice] auto state not saved: {e!r}", file=sys.stderr)
-
-
-def restore_state(runner, delay: float | None = None) -> dict:
-    """Boot: every saved auto-chat resumed after the seat settles (its own
-    thread)."""
-    p = _state_path(runner)
-    if p is None or not p.exists():
-        return {}
-    try:
-        d = json.loads(p.read_text())
-    except Exception:
-        return {}
-    autos = {sid: a for sid, a in (d.get("auto") or {}).items() if runner.sessions.get(sid) is not None}
-
-    def go():
-        time.sleep(RESUME_AFTER_S if delay is None else delay)
-        for sid, a in autos.items():
-            try:
-                auto_set(runner, sid, True, str((a or {}).get("mode") or "explore"))
-                print(f"[voice] auto-chat resumed on {sid}", file=sys.stderr)
-            except Exception as e:
-                print(f"[voice] auto-chat not resumed on {sid}: {e!r}", file=sys.stderr)
-
-    if autos:
-        threading.Thread(target=go, daemon=True, name="voice-resume").start()
-    return {"auto": list(autos)}
-
-
-def _seat_note(runner, kind: str, **detail) -> None:
-    try:
-        from . import seat_panel as _SP
-        _SP.note_from(runner, kind, **detail)
-    except Exception:
-        pass
-
-
-def auto_on(runner, sid: str) -> bool:
-    return sid in (getattr(runner, "_auto", None) or {})
-
-
-def auto_state(runner, sid: str) -> dict:
-    a = (getattr(runner, "_auto", None) or {}).get(sid)
-    return {"on": a is not None, "rounds": (a or {}).get("rounds", 0),
-            "mode": (a or {}).get("mode", "explore")}
-
-
-def _publish_auto(runner, sid: str) -> None:
-    runner.hub.publish({"type": "membrane.auto", "sessionID": sid, **auto_state(runner, sid)})
-
-
-def auto_set(runner, sid: str, on: bool, mode: str = "explore") -> dict:
-    runner._auto = getattr(runner, "_auto", None) or {}
-    if not on:
-        was = runner._auto.pop(sid, None)
-        _publish_auto(runner, sid)
-        save_state(runner)
-        if was is not None:
-            _seat_note(runner, "auto-chat-off", session=sid)
-        return auto_state(runner, sid)
-    mode = mode if mode in AUTO_MODES else "explore"
-    if sid in runner._auto:
-        runner._auto[sid]["mode"] = mode
-    if sid not in runner._auto:
-        runner._auto[sid] = {"rounds": 0, "since": time.time(), "mode": mode}
-        _publish_auto(runner, sid)
-        save_state(runner)
-        _seat_note(runner, "auto-chat-on", session=sid, mode=mode)
-        if sid not in (getattr(runner, "_busy", None) or {}):
-            auto_next(runner, sid, _last_words(runner, sid))
-    return auto_state(runner, sid)
-
-
-AUTO_EMPTY_MAX = 2
-
-
-def _last_words(runner, sid: str) -> str:
-    """His last real words in the session (what a continuation aims from).
-    AN ERROR ROW IS NOT WORDS: a stream-failure banner left as the last
-    reply made every turn-on read it as a conversation that "ended on
-    itself" and stop at once (rounds 0, three seconds in; the operator's
-    exhibit, 2026-10-13) -- machine notes never continue the chat."""
-    try:
-        for r in reversed(runner.messages.list(sid) or []):
-            _i = r.get("info") or {}
-            if _i.get("role") != "assistant":
-                continue
-            t = "\n".join(p.get("text") or "" for p in r.get("parts") or [] if p.get("type") == "text")
-            if _i.get("error") or t.strip().startswith("model ladder failed"):
-                continue
-            if t.strip():
-                return t
-    except Exception:
-        pass
-    return ""
-
-
-def auto_next(runner, sid: str, reply: str) -> None:
-    """One round: after a short pause (an operator message waiting goes
-    first: its turn ends and calls this again) his turn goes on from the
-    conversation as it stands. No voice needed."""
-
-    def go():
-        nonlocal reply
-        time.sleep(AUTO_PAUSE_S)
-        if not auto_on(runner, sid):
-            return
-        try:
-            if sid in (getattr(runner, "_busy", None) or {}) or runner._queued_depth(sid):
-                return
-        except Exception:
-            pass
-        st = runner._auto.get(sid) or {}
-        if not (reply or "").strip():
-            # ONE EMPTY TURN ISN'T THE END (2026-10-11: a dropped stream left an
-            # empty reply and auto-chat stalled for good): continue from his last
-            # real words, twice at most in a row, then stall
-            st["empty"] = int(st.get("empty") or 0) + 1
-            reply = _last_words(runner, sid) if st["empty"] <= AUTO_EMPTY_MAX else ""
-            if not reply.strip():
-                _seat_note(runner, "auto-chat-stalled", session=sid, why="an empty reply: nothing to continue from")
-                return                         # nothing said yet: nothing to continue
-        else:
-            st["empty"] = 0
-        if reply.lstrip().startswith("model ladder failed"):
-            # the model refused a conversation ending on its own reply: stop, don't spin
-            print(f"[voice] auto continuation stopped: {reply.strip()[:160]}", file=sys.stderr)
-            auto_set(runner, sid, False)
-            return
-        try:
-            from .server import _gen_id
-            runner._auto_aim = getattr(runner, "_auto_aim", None) or {}
-            runner._auto_aim[sid] = clean(reply) or reply or ""      # what the guess aims from
-            agent = str((runner.sessions.get(sid) or {}).get("agent") or "build")
-            info = {"id": _gen_id("msg"), "sessionID": sid, "role": "user", "agent": agent,
-                    "autoTurn": True, "continueTurn": True,
-                    "time": {"created": int(time.time() * 1000)}}
-            runner._auto[sid]["rounds"] = runner._auto[sid].get("rounds", 0) + 1
-            _publish_auto(runner, sid)
-            runner.run(sid, "", user_info=info, user_parts=[])      # nothing stored, nothing said
-        except Exception as e:
-            print(f"[voice] auto continuation failed: {e!r}", file=sys.stderr)
-
-    threading.Thread(target=go, daemon=True, name="voice-auto").start()
