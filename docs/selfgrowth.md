@@ -110,7 +110,8 @@ channel a skill uses.
   did is never fed back: Blurp sees it only by looking.
 - **When Blurp nudges.** Once *feel itself* is accepted (the nudge skill's
   prerequisite), its aims are drawn **among the field spots of the things in
-  its world**, at random (held 300 s, as before: #343, was 30 cycles), and it nudges the
+  its world**, by what its nudges teach (part 3b, *Learned aims* below;
+  held 300 s, as before: #343, was 30 cycles), and it nudges the
   thing it aims at with its own move (the direction and the force are the
   stride it chose that cycle) **only while it is getting closer to it**: its
   distance to the aimed thing after this cycle's move fell, strictly, below
@@ -119,8 +120,7 @@ channel a skill uses.
   new aim's first cycle (and the first cycle after a restart: the previous
   distance is kept in RAM only) has nothing to compare, so no nudge. With no
   thing on the field it aims into space near where it is, as before, and
-  nudges nothing. One nudge a cycle at most. (Aims tilted by what nudges
-  taught come later.) A person's chat thing has a getter (part 3a), so it is
+  nudges nothing. One nudge a cycle at most. A person's chat thing has a getter (part 3a), so it is
   placed on the field like any looked-at thing: by its first look, or, on a
   migrated seat, where its old `chat:in` stood.
 - **Errors cost energy** ([sleep.md](sleep.md)): 0.01 for each nudge
@@ -248,6 +248,35 @@ are. The earned skills keep measuring each thing's own tempo, and a nudge
 cannot make patience slip. The sleep's summary windows count ordinary looks
 too. Ground truth (`by` on a toy's looks) is recorded beside each look as
 before, never fed to Blurp.
+
+### Learned aims (#333, part 3b)
+
+An aim is drawn among the things of its world with a field spot, once per
+aim (every `AIM_HOLD` 300 s), never per cycle:
+
+- **`AIM_EXPLORE` = 0.1** of the draws are uniform among all of them, whether
+  Blurp can look at them or not (exploration). Without it the heard words
+  (hundreds) would swamp the few things it can see.
+- **The rest** are drawn among the things it can look at (a getter),
+  weighted by the curiosity tilt on each thing's **nudge checks**: its nudged
+  looks (`nudged` ≥ 1), each scored `(o − p_n)²`. The formula is the look
+  curiosity's (`_tilt`): the fastest-improving thing gets 1, a flat or
+  worsening one `CURIO_FLOOR`, a thing too young to have progress 1; with no
+  progress anywhere above `CURIO_MIN`, the draw is uniform among them. Each
+  window's error is the interquartile mean (`CURIO_TRIM`), as for looks.
+- **`NUDGE_CURIO_WINDOW` = 10** checks a window: progress is the error over
+  the 10 checks before the latest 10, minus the error over the latest 10,
+  so a thing has progress after 20 checks (the look curiosity's 30-look
+  windows would need 60). A check's `p_n` is its k bin's share, not a rate
+  over the interval, so a record gap is no glitch of it (no stall rule).
+- **A thing it cannot look at** can teach it nothing it sees: only
+  exploration reaches it. With nothing lookable on the field, every aim
+  explores.
+
+The look curiosity is unchanged: nudged looks stay out of it, out of rungs
+2-5, the tempo and λ (part 3a). The sleep's summary keeps each thing's last
+20 nudge checks, so the tilt reads the same after a consolidation. Both
+values were approved by the operator (2026-10-21).
 
 **The level drop (LADDER_V = 3).** The audit in #333 found meet, time its
 turn, expect a reply and recognize itself to be the developer's wiring (the

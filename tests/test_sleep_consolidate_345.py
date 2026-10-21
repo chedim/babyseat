@@ -222,6 +222,9 @@ class Life:
                 if n > 700 and (not ball or r.random() < 0.95):
                     rec["llm_cal"] = [0.1, 0.2]
                     rec["p_mix"] = round(r.random(), 4)
+        if 1000 < n < 2500 and reply is None and n % 4 == 0:   # #333 part 3b: nudge checks, long ago (no draw)
+            rec["nudged"] = 1 + (n // 4) % 2
+            rec["p_n"] = round((n * 37 % 100) / 100, 4)
         self.put(rec)
         if answer in ("changed", "unchanged") and not rec.get("audit"):
             self.last_ans[eid] = rec
@@ -382,6 +385,9 @@ def _readers(srv, now):
     out["progress"] = SL._progress(recs, detail=True)
     out["curiosity"] = SL._curiosity(recs, THINGS)
     out["curiosity_stats"] = SL._curiosity_stats(recs)
+    out["nudge_progress"] = SL._nudge_progress(recs, detail=True)    # #333 part 3b: the aims' tilt
+    out["aim_tilt"] = SL._aim_tilt(recs, THINGS)
+    out["checks"] = {e: v[-2 * SL.NUDGE_CURIO_WINDOW:] for e, v in SL._check_errors(recs).items()}
     out["steer_stats"] = SL._steer_stats(recs)
     out["rung7_stats"] = SL._rung7_stats(recs)
     out["rung8_stats"] = SL._rung8_stats(recs)
