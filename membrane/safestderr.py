@@ -20,8 +20,9 @@ import threading
 class SafeStderr:
     """A sys.stderr-shaped object: write-through, lock-serialized, unbuffered."""
 
-    def __init__(self, path: str) -> None:
-        self._fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o666)
+    def __init__(self, path: str | None = None, fd: int | None = None) -> None:
+        # a path (the launch log), or #347: an already-open descriptor (a dup of 1 or 2)
+        self._fd = fd if fd is not None else os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o666)
         self._lock = threading.Lock()
         self.encoding = "utf-8"
         self.errors = "replace"
@@ -63,3 +64,27 @@ class SafeStderr:
     @property
     def closed(self) -> bool:
         return self._closed
+
+
+def install_safe_stdio() -> None:
+    """#347: the same guard on sys.stdout and sys.stderr, for every seat mode.
+    A seat child exiting while its threads still print aborted in the
+    buffered layer of STDOUT too (_enter_buffered_busy on its flush) --
+    #121 had only guarded launch mode's log. Each stream that is not
+    already safe becomes a write-through writer on a dup of its descriptor
+    (same destination: the terminal, the pipe, the redirected file).
+    Idempotent."""
+    import sys
+    for name in ("stdout", "stderr"):
+        cur = getattr(sys, name)
+        if isinstance(cur, SafeStderr):
+            continue
+        try:
+            fd = cur.fileno()
+        except Exception:                   # noqa: BLE001 -- no real descriptor (a test's capture): leave it
+            continue
+        try:
+            cur.flush()
+        except Exception:                   # noqa: BLE001
+            pass
+        setattr(sys, name, SafeStderr(fd=os.dup(fd)))
