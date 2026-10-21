@@ -3,7 +3,8 @@
 `self` is the seed of the evolving self in
 [#161](https://github.com/chedim/membrane/issues/161): a small loop that learns
 its world one skill at a time. The operator named it **Blurp** (2026-10-19,
-[#277](https://github.com/chedim/membrane/issues/277)): the page shows that name
+[#277](https://github.com/chedim/membrane/issues/277)), and the name stands for a
+**B**aby s**LURP**: the self that grows on what membrane slurps up. The page shows that name
 wherever it shows self to you (the 👶 panel and its sheet, the toy dock, the
 activity lines, the amoeba's tag, ◎ and 👁 in the camera menu); its ids, its
 record and this guide keep `self`. The name is **per seat** (#283): Blurp is the
