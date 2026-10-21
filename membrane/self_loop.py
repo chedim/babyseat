@@ -92,6 +92,7 @@ and their old passes no longer count (LADDER_V = 3, _void_old_wiring).
 """
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import shlex
@@ -1224,6 +1225,24 @@ def _queued(r) -> bool:
 def _first_look_after(recs: list[dict], eid: str, ts: float):
     return next((r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid
                  and float(r.get("ts") or 0) > ts), None)
+
+
+def _looks_after(recs: list[dict], eid):
+    """#346: _first_look_after for many stamps at one thing, from one pass:
+    its looks in record order and the running max of their stamps -- the
+    first look stamped after ts is the first whose running max passes ts."""
+    looks: list = []
+    mx: list = []
+    for r in recs:
+        if r.get("kind") == "reach" and r.get("eid") == eid:
+            t = float(r.get("ts") or 0)
+            looks.append(r)
+            mx.append(max(t, mx[-1]) if mx else t)
+
+    def first(ts: float):
+        j = bisect.bisect_right(mx, ts)
+        return looks[j] if j < len(looks) else None
+    return first
 
 
 def _pending(recs: list[dict], now: float) -> dict | None:
@@ -4125,10 +4144,11 @@ def _rung8_stats(recs: list[dict]) -> dict:
     ct = _to_carry(recs, to)                          # #345: its asks archived before the summary
     checked, paired = ct.get("checked", 0), ct.get("paired", 0)
     dropped = _dropped(recs)
+    first_look = _looks_after(recs, to)               # #346: one pass, not a scan per ask
     for p in asked:
         if float(p.get("ts") or 0) in dropped:
             continue                                  # #345: dropped at sleep -- never checked, never missed
-        look = _first_look_after(recs, to, float(p.get("ts") or 0))
+        look = first_look(float(p.get("ts") or 0))
         if look is None:
             continue
         checked += 1
