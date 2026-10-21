@@ -63,7 +63,8 @@ ownership, not its cause.)
 Read the disease backwards from that principle. Alzheimer's is staged by
 Braak: entorhinal cortex → hippocampus (CA1, subiculum) → neocortex. The
 clinical signature follows the same order, and the earliest symptom is
-**anterograde amnesia with remote memory preserved** — H.M., progressive.
+**anterograde amnesia with remote memory preserved** — H.M., progressive
+(H.M. himself, viewed from membrane: [patient-hm.md](patient-hm.md)).
 
 The standard reading is "the memory store is being destroyed." The
 membrane reading is more specific: **the converter fails first, the store
