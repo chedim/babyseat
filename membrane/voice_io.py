@@ -125,7 +125,13 @@ def stamp(srv, person: str, text: str) -> str:
 
 
 def heard(srv, person: str, text: str, sid: str = "") -> None:
-    """The person spoke (their words also start a turn, as a voiceIn message)."""
+    """The person spoke (their words also start a turn, as a voiceIn message);
+    a sleeping Blurp wakes (#345)."""
+    try:
+        from . import energy as _E          # #345: a person speaking wakes a sleeping Blurp
+        _E.person_spoke(srv, person)
+    except Exception:
+        pass
     ent = entity(srv, "in", person)
     if ent is None:
         return

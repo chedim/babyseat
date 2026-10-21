@@ -31,6 +31,11 @@ next cycle. The runaway guard: PACE_S between cycles (MEMBRANE_SELF_PACE_S,
 floor 1 s), at most BURST_PER_MIN a minute, and three failed cycles in a row
 hold it until the operator's next toggle. A paused seat runs nothing.
 
+SLEEP (#345, energy.py): each step of the loop's thread (step()) charges
+Blurp's energy for the time awake and the cycle's CPU; when a reserve runs
+out it falls asleep -- no cycle runs (cycle() returns None) while energy
+restores -- and it wakes rested or when a person speaks. Asleep is not off.
+
 THE SKILL TREE (#295; a strict ladder of rungs until then): each skill is an
 ACHIEVEMENT with a stable id, a branch and real prerequisites (ACHIEVEMENTS:
 an edge only where a test reads data or machinery another pass switches on).
@@ -689,11 +694,14 @@ def _append(srv, rec: dict) -> None:
     if p is None:
         return
     p.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(rec) + "\n"
     with _lock, open(p, "a") as fh:
-        fh.write(json.dumps(rec) + "\n")
-        cache = _rt(srv).get("recs")
+        fh.write(line)
+        rt = _rt(srv)
+        cache = rt.get("recs")
         if cache is not None:
             cache.append(rec)
+            rt["recs_bytes"] = rt.get("recs_bytes", 0) + len(line)
 
 
 def _read(srv) -> list[dict]:
@@ -703,14 +711,24 @@ def _read(srv) -> list[dict]:
     if rt.get("recs") is None:
         p = record_path(srv)
         out = []
+        size = 0
         if p is not None and p.exists():
             for ln in p.read_text().splitlines():
                 try:
                     out.append(json.loads(ln))
+                    size += len(ln) + 1
                 except ValueError:
                     pass
-        rt["recs"] = out
+        rt["recs"], rt["recs_bytes"] = out, size
     return rt["recs"]
+
+
+def record_bytes(srv) -> int:
+    """#345: the record held in memory, as the bytes of its serialized lines
+    (a running sum kept as lines are appended, never a sizeof walk)."""
+    with _lock:
+        _read(srv)
+        return int(_rt(srv).get("recs_bytes") or 0)
 
 
 def _model_path(srv) -> Path | None:
@@ -2367,7 +2385,8 @@ def cycle(srv, now: float | None = None) -> dict | None:
     naive skip it (rung 1 reads only change "world"; no aim lines)."""
     now = time.time() if now is None else now
     rt = _rt(srv)
-    if not _runs(srv) or not _guard_ok(rt, now):
+    from . import energy as _E
+    if not _runs(srv) or _E.asleep(srv) or not _guard_ok(rt, now):   # #345: asleep, no cycle
         return None
     cur = _current(srv)
     est = srv.entity_store
@@ -3896,21 +3915,41 @@ def _steer_stats(recs: list[dict]) -> dict | None:
 
 # ---- the thread -----------------------------------------------------------
 
+def step(srv, now: float | None = None) -> dict | None:
+    """One turn of the loop's thread (#345): off, paused or held, nothing runs
+    and no time counts; asleep, no cycle runs and energy restores (energy.tick);
+    awake, one cycle, charged its wall time and the CPU it used on this thread
+    (time.thread_time around it). -> the cycle line, or None."""
+    from . import energy as _E
+    if not _runs(srv):
+        _E.pause(srv)
+        return None
+    if _E.asleep(srv):
+        _E.tick(srv, time.time() if now is None else now)
+        return None
+    t0 = time.thread_time()
+    rec = cycle(srv, now)
+    cpu = time.thread_time() - t0
+    _E.tick(srv, time.time() if now is None else now, cpu_s=cpu)
+    return rec
+
+
 def start(srv) -> threading.Thread:
-    """The loop: wakes on its own change (or the switch), runs one cycle when
-    the guard allows, sleeps when off."""
+    """The loop: wakes on its own change (or the switch), runs one step when
+    the guard allows (a cycle, or a sleeping Blurp's rest, #345), nothing when off."""
     rt = _rt(srv)
+    from . import energy as _E
 
     def run():
         while True:
             rt["wake"].wait(timeout=PACE_S)
             rt["wake"].clear()
             try:
-                if _runs(srv):
+                if _runs(srv) and not _E.asleep(srv):
                     wait = (rt["last"] + PACE_S - time.time()) if rt["last"] else 0.0
                     if wait > 0:
                         time.sleep(wait)
-                    cycle(srv)
+                step(srv)
             except Exception as e:                          # noqa: BLE001
                 import sys
                 print(f"[self] cycle failed ({e!r})", file=sys.stderr)

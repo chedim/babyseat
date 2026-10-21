@@ -104,7 +104,13 @@ def entity_in(srv, person: str, create: bool = True):
 
 
 def heard(srv, person: str, text: str, sid: str = "") -> None:
-    """The other answered (or spoke) -- self's next look reads it as news."""
+    """The other answered (or spoke) -- self's next look reads it as news,
+    and a sleeping Blurp wakes (#345)."""
+    try:
+        from . import energy as _E          # #345: a person speaking wakes a sleeping Blurp
+        _E.person_spoke(srv, person)
+    except Exception:
+        pass
     ent = entity_in(srv, person)
     if ent is None:
         return
