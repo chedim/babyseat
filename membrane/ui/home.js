@@ -1462,6 +1462,26 @@ const HSTYLE = `
   .selfpanel .sheet .hdr .xpslot .xp-lv, .selfpanel .sheet .hdr .xpslot .xp-sk { display:none; }   /* the nameplate says them */
   .selfpanel .sheet .hdr .xpslot .xp { grid-template-columns:1fr auto; }
   .selfpanel .sheet .hdr .facts { display:flex; flex-wrap:wrap; gap:2px 12px; font-size:12px; opacity:.85; font-variant-numeric:tabular-nums; }
+  /* #359: the Sleep block -- the film's sleep scene: rounded bars, energy in
+     the page's gold, the others the field (primary) colour, the lowest in the
+     warning colour */
+  .selfpanel .sheet .sleep { margin:0 0 8px; padding:8px 12px 10px; border-radius:12px;
+                             border:1px solid color-mix(in srgb, var(--divider-color,#888) 60%, transparent); }
+  .selfpanel .sheet .sleep .sleh { display:flex; align-items:baseline; gap:8px; margin-bottom:4px; }
+  .selfpanel .sheet .sleep .slt { font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; font-weight:650; }
+  .selfpanel .sheet .sleep .sls { margin-left:auto; font-size:12px; font-weight:600; }
+  .selfpanel .sheet .sleep .sls.asleep { opacity:.75; }
+  .selfpanel .sheet .sleep .srow { display:grid; grid-template-columns:1fr auto; gap:2px 8px; padding:3px 0; font-size:12px; }
+  .selfpanel .sheet .sleep .sval { font-variant-numeric:tabular-nums; font-weight:600; }
+  .selfpanel .sheet .sleep .sbar { grid-column:1 / -1; position:relative; height:10px; border-radius:999px; overflow:hidden;
+                                   background:color-mix(in srgb, var(--divider-color,#888) 55%, transparent); }
+  .selfpanel .sheet .sleep .sfill { position:absolute; left:0; top:0; bottom:0; border-radius:inherit;
+                                    background:color-mix(in srgb, var(--primary-color,#3477d6) 75%, transparent); }
+  .selfpanel .sheet .sleep .sfill.s-energy { background:var(--xp-gold,#d4a017); }
+  .selfpanel .sheet .sleep .sbar.low .sfill { background:var(--warning-color,#ffa600); }
+  .selfpanel .sheet .sleep .slow { font-size:10.5px; padding:0 6px; border-radius:999px; margin-left:4px;
+                                   color:var(--warning-color,#ffa600); border:1px solid currentColor; }
+  .selfpanel .sheet .sleep .spull { margin-top:5px; font-size:12px; font-variant-numeric:tabular-nums; font-weight:600; }
   .selfpanel .sheet .skill { grid-column:1 / -1; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:2px 10px;
                              padding:6px 8px; border-radius:10px; background:color-mix(in srgb, var(--primary-text-color,#ddd) 6%, transparent); }
   .selfpanel .sheet .skill .skv { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1; }
