@@ -24,6 +24,7 @@ DEFAULTS = {
     "voice_out": False,       # the default for a new person's voice:out
     "language": "en",
     "ui_lan_open": True,      # the UI without a password from private / loopback / tailnet addresses
+    "self_cpu_share": 0.5,    # #343/#344: Blurp's CPU share, 0 < share <= 1 (options.py validates, the ⚙ window sets it)
 }
 _lock = threading.Lock()
 

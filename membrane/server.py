@@ -3051,6 +3051,10 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     _ent = _SP._entity(psrv)
                     self._json_out({"state": _SP.state(psrv), "events": list(((_ent.properties or {}) if _ent else {}).get("events") or []),
                                     "controls": list(_SP.CONTROLS)})
+            elif path == "/membrane/options":
+                # #344: the seat-wide options (options.py) -- the ⚙ window's read
+                from . import options as _OPT
+                self._json_out(_OPT.read())
             elif path == "/membrane/self/recent":
                 # #230: self's record, newest first and capped -- the 👶
                 # panel's activity feed (read-only; the gate above ran first)
@@ -3209,6 +3213,15 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                                  relay_speaker=getattr(self, "_ui_speaker", "") if getattr(self, "_ui_relay", False) else None,
                                  body=b)
                 return self._json_out(_SP.control(psrv, b, by=_by))
+            if path == "/membrane/options":
+                # #344: the ⚙ window's write -- the writable options only,
+                # validated (a 400 with the reason; nothing written), then
+                # settings.json; the owner's door above gates it like every write
+                from . import options as _OPT
+                try:
+                    return self._json_out(_OPT.apply(self._read_body()))
+                except ValueError as e:
+                    return self._json_out({"error": str(e)}, code=400)
             if path == "/membrane/models":
                 # THE MINDS' MODELS: the watch loops' and the background
                 # cortex's models, live (the chat picker sets one session)
