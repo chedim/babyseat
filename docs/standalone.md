@@ -43,6 +43,27 @@ Ollama needs one chat model and one embedding model, e.g.
 `ollama pull qwen3:8b && ollama pull mxbai-embed-large` (a cloud model Ollama serves
 works for chat too).
 
+## Reading the field (the sphere)
+
+membrane home draws every entity in one ball, nested like Russian dolls (#362):
+
+- **Direction from the centre** says *what* the entity is like: where it points
+  on the three chosen axes (the field's three main directions by default, or
+  the axes you pick — a kind, or "toward" an entity). Neighbours in direction
+  are alike on those axes.
+- **Distance from the centre** says *how well* those three axes describe it:
+  the share of the entity's vector (measured from the field's average) that
+  the three axes capture. The outer shell is what the axes explain well; the
+  core is what they barely see — pick other axes to bring it out. The share is
+  spread by rank, so the shells are evenly used instead of everyone crowding
+  near the centre.
+
+The faint rings are the shells (the whole ball, two thirds, one third); the far
+side of the ball is dimmer; the heaviest entities on the near side carry
+labels, edged in their kind's colour. A picked entity axis (`e:<id>`) is the
+signed projection toward that entity, the same as `e:<id>:toward` (before the
+sphere it was the distance to it).
+
 ## The first run
 
 1. The page asks **your** name once (kept in that browser). Every message you send

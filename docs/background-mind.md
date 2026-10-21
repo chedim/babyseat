@@ -468,7 +468,8 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   camera. See [selfgrowth.md, "The brain on the screen"](selfgrowth.md#the-brain-on-the-screen) (#237).
 
   The seat places the points into the open projection (`fieldpulse`'s
-  `self.cycle` frame: cube coordinates and numbers, never vectors or text).
+  `self.cycle` frame: positions on the field's sphere and numbers, never
+  vectors or text).
 - **The exp bar.** The panel shows the level (achievements earned) and a bar
   toward the open achievement closest to passing (#295).
   - An achievement's criteria are **stages, in order** (rung 1: pushes, then
