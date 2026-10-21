@@ -503,6 +503,8 @@ CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier wind
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
 CURIO_MIN = 0.005           # progress under this anywhere is no frontier: the base chooser runs untilted
 CURIO_TRIM = 0.25           # #259: a window's error is its interquartile mean -- a rare outlier is no progress
+AIM_EXPLORE = 0.1           # #333 part 3b, approved 2026-10-21: this share of aims is uniform among every thing with a spot
+NUDGE_CURIO_WINDOW = 10     # #333 part 3b, approved 2026-10-21: nudge checks per window of the aims' tilt
 CURIO_GAP_S = 2 * WAIT_EVERY            # #259: a record gap this long is a restart/stall; a look spanning one is no error
 ATTENTION = True            # #266: among the due, weigh a look by what it can teach (tests switch it off for the base)
 INFO_FLOOR = 0.1            # #266: a near-certain look still weighs this much: a mastered thing is re-checked now and then
@@ -2852,8 +2854,8 @@ def cycle(srv, now: float | None = None) -> dict | None:
             nudges = _practised(srv, "nudge")
             spots = _spots(srv, len(pos)) if nudges else {}   # part 3a: the chat thing is placed like any looked-at thing
             if spots:
-                import random
-                eid = random.Random(f"aim:{n}").choice(sorted(spots))
+                cands = sorted(spots)                     # part 3b: learned aims (_aim_pick)
+                eid = _aim_pick(_read(srv), cands, [e for e in _targets(srv) if e in spots], f"aim:{n}")
                 rt["aim"], rt["aim_eid"] = spots[eid], eid
             else:
                 rt["aim"], rt["aim_eid"] = _unit(pos + AIM_REACH * _seed_dir(f"aim:{n}", len(pos))), None
@@ -3420,14 +3422,79 @@ def _progress(recs: list[dict], detail: bool = False) -> dict:
     means are the smoothing; each is an interquartile mean (_window_error). A thing with fewer than two windows of looks has
     none yet. With `detail`, {eid: {progress, error}} (error: the recent mean).
     Computed from the record at the moment it is read -- never stored."""
-    W = CURIO_WINDOW
+    return _progress_of(_ordinary_errors(recs), CURIO_WINDOW, detail)
+
+
+def _progress_of(errors: dict, W: int, detail: bool = False) -> dict:
+    """_progress over any error series: eid -> early window's error - recent window's."""
     out = {}
-    for eid, errs in _ordinary_errors(recs).items():
+    for eid, errs in errors.items():
         if len(errs) < 2 * W:
             continue
         early, late = _window_error(errs[-2 * W:-W]), _window_error(errs[-W:])
         out[eid] = {"progress": early - late, "error": late} if detail else early - late
     return out
+
+
+def _tilt(lp: dict, targets: list[str]) -> dict:
+    """The curiosity formula on progress lp: the fastest-improving target 1, a
+    flat or worsening one CURIO_FLOOR, one with no progress yet 1; all 1 with
+    no progress anywhere above CURIO_MIN."""
+    rise = {e: max(0.0, lp[e]) for e in targets if e in lp}
+    top = max(rise.values(), default=0.0)
+    if top < CURIO_MIN:
+        return {e: 1.0 for e in targets}
+    return {e: (CURIO_FLOOR + (1.0 - CURIO_FLOOR) * rise[e] / top) if e in rise else 1.0
+            for e in targets}
+
+
+# ---- #333 part 3b: learned aims ----------------------------------------------
+#
+# An aim is drawn among the things of its world with a field spot. AIM_EXPLORE of the draws are
+# uniform among all of them, whether Blurp can look at them or not (exploration); the rest go to
+# the things it can look at (a getter), weighted by the curiosity tilt on each thing's NUDGE
+# CHECKS -- its nudged looks (k >= 1), each scored (o - p_n)^2 -- over NUDGE_CURIO_WINDOW checks
+# a window. A thing it cannot look at can teach it nothing it sees: only exploration reaches it.
+# Read once per aim (every AIM_HOLD s), never per cycle; the look curiosity is untouched.
+
+def _check_errors(recs: list[dict]) -> dict:
+    """eid -> the errors (answer - p_n)^2 of its nudge checks, oldest first:
+    answered nudged looks (k >= 1) outside every audit. A check's p_n is its
+    k bin's share, not a rate over the interval, so a record gap is no glitch
+    of it (no stall rule, unlike _ordinary_errors)."""
+    out: dict[str, list] = {}
+    for r in recs:
+        if (r.get("kind") == "reach" and r.get("nudged") and r.get("answer") in ("changed", "unchanged")
+                and not r.get("audit") and not r.get("audit5") and r.get("p_n") is not None):
+            x = 1.0 if r["answer"] == "changed" else 0.0
+            out.setdefault(r["eid"], []).append((x - float(r["p_n"])) ** 2)
+    return out
+
+
+def _nudge_progress(recs: list[dict], detail: bool = False) -> dict:
+    """Learning progress on the nudge checks, NUDGE_CURIO_WINDOW checks a window."""
+    return _progress_of(_check_errors(recs), NUDGE_CURIO_WINDOW, detail)
+
+
+def _aim_tilt(recs: list[dict], targets: list[str]) -> dict:
+    """The aims' tilt: _curiosity's formula on the nudge checks' progress
+    (all 1 with CURIOSITY off)."""
+    if not CURIOSITY:
+        return {e: 1.0 for e in targets}
+    return _tilt(_nudge_progress(recs), targets)
+
+
+def _aim_pick(recs: list[dict], cands: list[str], lookable: list[str], seed: str) -> str:
+    """One aim among cands (the things with a spot): AIM_EXPLORE of draws (and
+    every draw when nothing is lookable) uniform among them all, the rest among
+    the lookable ones by the aims' tilt. Deterministic by seed."""
+    import random
+    rng = random.Random(seed)
+    look = [e for e in cands if e in set(lookable)]
+    if rng.random() < AIM_EXPLORE or not look:
+        return rng.choice(cands)
+    tilt = _aim_tilt(recs, look)
+    return rng.choices(look, weights=[tilt[e] for e in look])[0]
 
 
 def _curiosity(recs: list[dict], targets: list[str]) -> dict:
@@ -3440,13 +3507,7 @@ def _curiosity(recs: list[dict], targets: list[str]) -> dict:
     chooser runs as it did. Read only when self chooses (rule 3)."""
     if not CURIOSITY:
         return {e: 1.0 for e in targets}
-    lp = _progress(recs)
-    rise = {e: max(0.0, lp[e]) for e in targets if e in lp}
-    top = max(rise.values(), default=0.0)
-    if top < CURIO_MIN:
-        return {e: 1.0 for e in targets}
-    return {e: (CURIO_FLOOR + (1.0 - CURIO_FLOOR) * rise[e] / top) if e in rise else 1.0
-            for e in targets}
+    return _tilt(_progress(recs), targets)
 
 
 def _audit_tick(srv, now: float) -> None:
@@ -4704,6 +4765,9 @@ def _keep(recs: list, ix: _Index | None = None) -> set:
     _keep_rung8(R, lo, N, K)
     _keep_rates(R, lo, N, K)
     _keep_curiosity(R, lo, N, K)
+    tail(lambda r: reach(r) and r.get("nudged") and r.get("answer") in ("changed", "unchanged")
+         and not r.get("audit") and not r.get("audit5") and r.get("p_n") is not None,
+         2 * NUDGE_CURIO_WINDOW, key=eid)               # #333 part 3b: the aims' tilt (_check_errors)
     # change itself: its window and the dreams' pending proposals, with their checks
     tail(kind("change"), 2 * CHANGE_WINDOW)
     props = {float(R[i].get("ts") or 0) for i in K if R[i].get("kind") == "change"}
