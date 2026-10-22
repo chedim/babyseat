@@ -572,9 +572,13 @@ def word_answers(field, text: str, qvec=None, k: int = 3, tools_ok: bool | None 
 
 
 def named_entities(field, text: str) -> list[tuple[str, str]]:
-    """The entities a question NAMES: a specific one (a file, a symbol, a
-    command, ...) or a word written as a name (a capital inside it, or a
-    capitalized word that is not the question's opening word)."""
+    """The entities a question NAMES, by capture's own extractor (every
+    shared class: files, symbols, models, urls, shell, ha): a specific one,
+    a shell verb the extractor harvests even outside backticks (a question
+    says 'did pytest -q pass?', not '`pytest -q`'), or a word written as a
+    name (a capital inside it, or a capitalized word that is not the
+    question's opening word)."""
+    from .entities import extract_entities
     out = []
     t = text or ""
     for eid, surf in E.mentions_of(t, field.graph_fn(), field.phrases):
@@ -589,6 +593,12 @@ def named_entities(field, text: str) -> list[tuple[str, str]]:
             if any(c.isupper() for c in w[1:]) or (w[:1].isupper() and not opener):
                 out.append((eid, surf))
                 break
+    have = {e for e, _ in out}
+    for verb in extract_entities(t).get("shell") or []:
+        eid = E.canon("c", verb)
+        if eid not in have:
+            have.add(eid)
+            out.append((eid, verb))
     return out
 
 
@@ -603,32 +613,137 @@ def _same_entity(field, eid: str) -> list[str]:
                     if e.startswith("f:") and (e.endswith(base) or e == "f:" + eid[3:])]
 
 
+# THE ENTITY POOL (the sister fork's EntityPool): entity -> the events that
+# mention it (the deltas index, and the word index for the name's own words),
+# over answering rows only (the #434/#435 rules: replies, notes, docs and
+# code; tool outputs on question-like asks; never a receipt's reply), the
+# NEWEST ENTITY_POOL_MAX of them, so one hot name cannot flood the lane.
+ENTITY_POOL_MAX = 24           # borrowed from the sister fork's EntityPool cap (awaiting approval)
+
+
+def _pool_refs(field, ix, named) -> dict:
+    """event key -> the refs (sentence ids, word-index doc ids) that tie it
+    to a named entity."""
+    from . import lexical as LX
+    refs: dict = {}
+    for eid, surf in named:
+        for e in _same_entity(field, eid):
+            for d in field.deltas_of(e):
+                if d.get("event"):
+                    refs.setdefault(d["event"], []).append(d.get("sid"))
+        words = LX.tokens(surf)
+        if words and ix is not None:
+            for did in ix.docs_with(words):
+                refs.setdefault(ix.ev[did], []).append(did)
+    return refs
+
+
+def entity_pool(field, text: str, tools_ok: bool | None = None, named=None,
+                refs: dict | None = None) -> list[str]:
+    """The answering events the ask's named entities point at, the newest
+    ENTITY_POOL_MAX, oldest first."""
+    from . import lexical as LX
+    tools_ok = ST.is_question_like(text) if tools_ok is None else tools_ok
+    named = named_entities(field, text) if named is None else named
+    if refs is None:
+        refs = _pool_refs(field, LX.index_of(field), named) if named else {}
+    if not refs:
+        return []
+    evs = field.b.get_multi("events", list(refs))
+    keep = []
+    for ek, d in evs.items():
+        if _answer_role(field, d, tools_ok) is None or _machine(field, d):
+            continue
+        keep.append((d.get("seq") or 0, ek))
+    keep.sort()
+    return [ek for _s, ek in keep[-ENTITY_POOL_MAX:]]
+
+
 def entity_answers(field, text: str, qvec=None, k: int = 3, tools_ok: bool | None = None) -> list[dict]:
-    """The entity lane: the sentences of each entity the question names
-    (its deltas' events, and the events whose sentences carry its name),
-    ranked by the question's other words."""
+    """The entity lane: the entity pool's events, those whose sentences
+    carry the question's other rare words first (by BM25), then the rest
+    by how near their sentences sit to the ask (newest first without a
+    vector); each row shows the sentences that name the entity."""
     from . import efgate as G
     from . import lexical as LX
     from .efield import unit
     ix = LX.index_of(field)
     named = named_entities(field, text)
-    if ix is None or not named:
+    if not named:
         return []
     qv = G.message_vec(field, text) if qvec is None else unit(qvec)   # None: a bare token
     tools_ok = ST.is_question_like(text) if tools_ok is None else tools_ok
-    evs: set = set()
-    drop: set = set()
-    for eid, surf in named:
-        words = LX.tokens(surf)
-        drop.update(words)
-        for e in _same_entity(field, eid):
-            evs.update(d["event"] for d in field.deltas_of(e) if d.get("event"))
-        if words:
-            evs |= ix.events_with(words)
-    if not evs:
+    refs = _pool_refs(field, ix, named)
+    pool = entity_pool(field, text, tools_ok, named, refs)
+    if not pool:
         return []
-    return _rows_from_hits(field, ix, ix.search(text, events=evs, drop=drop), text, qv, k,
-                           tools_ok, "entity")
+    drop = {w for _e, surf in named for w in LX.tokens(surf)}
+    order: list = []
+    if ix is not None:
+        inpool = set(pool)
+        for did, _sc in ix.search(text, events=inpool, drop=drop):
+            ek = ix.ev[did]
+            refs[ek].append(did)
+            if ek not in order:
+                order.append(ek)
+    rest = [ek for ek in reversed(pool) if ek not in order]          # newest first
+    if qv is not None and rest:
+        best = {ek: _best_sim(field, field.b.get("events", ek), qv) for ek in rest}
+        rest.sort(key=lambda ek: -best[ek])
+    qwords = set(LX.tokens(text))
+    out, seen_txt = [], set()
+    for ek in order + rest:
+        if len(out) >= k:
+            break
+        d = field.b.get("events", ek)
+        role = _answer_role(field, d, tools_ok)
+        if role is None:
+            continue
+        sids, dids = [], []
+        for r in refs.get(ek) or []:
+            (dids if isinstance(r, int) else sids).append(r)
+        texts = [_doc_text(field, ix, i) for i in dids] if ix is not None else []
+        matched = sorted({w for x in texts for w in LX.tokens(x)} & qwords)
+        if role == "tool":
+            wrefs = [ix.ref[i] for i in dids] + _chunks_nearest(field, d, qv)
+        else:
+            wrefs = [s for s in sids if s] + ([ix.ref[i] for i in dids] if ix is not None else [])
+        row = _word_row(field, ek, d, role, wrefs, qv, 3, "entity", matched)
+        if row is None:
+            continue
+        sig = " ".join(" ".join(row["answer"]).lower().split())
+        if sig in seen_txt:
+            continue
+        seen_txt.add(sig)
+        out.append(row)
+    return out
+
+
+def _chunks_nearest(field, d: dict, qv) -> list[str]:
+    """A tool result's chunk ids, nearest the ask first (in order without a
+    vector)."""
+    from .efield import unit
+    cids = list(d.get("chunks") or [])
+    if qv is None or len(cids) < 2:
+        return cids
+    rows = field.b.get_multi("chunks", cids)
+    sim = {c: float(unit(rows[c]["vec"]) @ qv) if (rows.get(c) or {}).get("vec") is not None
+           else -1.0 for c in cids}
+    return sorted(cids, key=lambda c: -sim[c])
+
+
+def _best_sim(field, d: dict | None, qv) -> float:
+    """The best similarity of an event's sentences (a tool result's chunks)
+    to the ask."""
+    from .efield import unit
+    if not d:
+        return -1.0
+    if d.get("stream") == "observation":
+        rows = field.b.get_multi("chunks", list(d.get("chunks") or []))
+    else:
+        rows = field.b.get_multi("sentences", list(d.get("sids") or []))
+    sims = [float(unit(r["vec"]) @ qv) for r in rows.values() if r.get("vec") is not None]
+    return max(sims) if sims else -1.0
 
 
 def recall_answers(field, text: str, qvec=None, k: int = 3,

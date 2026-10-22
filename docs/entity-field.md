@@ -149,8 +149,13 @@ instructions":
   dotted or dashed compounds count whole and by parts, plurals fold, and
   Lucene's 33 English stop words are dropped. A word in more than 1% of
   the sentences (at least 20) is skipped. The **entity lane** reads the
-  sentences of an entity the ask names (a file, a symbol, a command, or a
-  word written as a name), ranked by the ask's other words. Both answer
+  entities the ask names, found by capture's own extractor
+  (`membrane/entities.py`: files, symbols, models, urls, shell commands even
+  outside backticks, home-assistant ids) or a word written as a name. Its
+  pool is the events that mention them (the per-entity deltas, and the word
+  index for the name's words), answering rows only, the newest 24, so one
+  hot name cannot flood it. Pool events whose sentences carry the ask's
+  other rare words come first, then the rest by similarity to the ask. Both answer
   under the direct path's roles. When the ask has a vector, a word row
   counts only if it matched a word written as a name (a digit or a
   separator in it, or a capital past its first letter); such a row, and
