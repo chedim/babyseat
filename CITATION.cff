@@ -5,6 +5,14 @@ type: software
 authors:
   - given-names: "Dmitrii O."
     family-names: "Chechetkin"
+doi: "10.5281/zenodo.23550667"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.23550667"
+    description: "Concept DOI: all versions, resolves to the newest"
+  - type: doi
+    value: "10.5281/zenodo.23550668"
+    description: "Version DOI of 0.7.1"
 repository-code: "https://github.com/chedim/babyseat"
 license: PolyForm-Noncommercial-1.0.0
 abstract: >-
