@@ -346,6 +346,12 @@ class OllamaWire:
             return
         if not isinstance(obj, dict):
             return
+        if obj.get("error") and not obj.get("choices"):
+            # a turn that failed mid-stream (#431: the seat-busy error):
+            # Ollama's own NDJSON error line, never a silent empty answer
+            e = obj["error"]
+            self._emit({"error": str(e.get("message") if isinstance(e, dict) else e)})
+            return
         if isinstance(obj.get("usage"), dict) and obj["usage"]:
             self._usage = obj["usage"]
         for ch in obj.get("choices") or []:

@@ -395,6 +395,28 @@ function capHtml(info) {
         (calls ? " more calls)" : " more)") + "</button>") + "</div>";
 }
 
+/** THE BUSY SEAT (#431): the turn's delivery outlived the rung's budget and
+ *  failed visibly (never a silent answer without memory). The row says so and
+ *  offers Retry: the same message again, once per press; nothing retries it. */
+function busyHtml(info) {
+  if (!info || !info.seatBusy) return "";
+  return '<div class="ccap">⏳ The seat was too busy to answer with its memory. ' +
+    '<button class="more" data-cretry="' + escAttr(info.id || "") + '">Retry</button></div>';
+}
+
+/** The message a Retry re-sends: the person's text of the user row before the
+ *  failed answer `mid` (its speaker line off; the send adds it again). */
+function retryText(rows, mid) {
+  const i = (rows || []).findIndex((r) => r && r.info && r.info.id === mid);
+  for (let j = i - 1; i > 0 && j >= 0; j--) {
+    const r = rows[j];
+    if (!r || !r.info || r.info.role !== "user") continue;
+    const t = (r.parts || []).filter((p) => p && p.type === "text" && !p.synthetic).map((p) => p.text || "").join("\n");
+    return stripSpeaker(t).trim();
+  }
+  return "";
+}
+
 function phantomHtml(it) {
   if (!it || !it.label) return "";
   const mark = it.pending ? "…" : it.hit ? "✓" : it.top3 ? "~" : "✗";
@@ -1926,7 +1948,7 @@ function offlineNotice(data, zoo) {
     : { text: name + " is offline", switchTo: null };
 }
 
-const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, sheetSleep, sleepBars, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -3036,6 +3058,24 @@ function definePanel() {
       if (!this._live) { await this._resync(); this._startPoll(); }
     }
 
+    /** A PERSON'S RETRY (#431): the seat was too busy; the same message goes
+     *  again in this session with the same model pick -- one send per press. */
+    async _retryBusy(mid, btn) {
+      const text = retryText((this._chat || {}).rows, mid);
+      if (!text || !this._sid) return;
+      if (btn) btn.disabled = true;
+      this._err("");
+      this._stick = true;
+      if (!this._busy()) { this._chat.status = { type: "busy", since: Date.now() }; this._paintStatus(); this._schedule(); }
+      const mf = modelField(this._pick, this._sessionModel, this._seatModel());
+      const r = await this._api(SERVE + "/session/" + this._sid + "/prompt_async", {
+        method: "POST", body: JSON.stringify(Object.assign({ agent: this._agent, parts: [{ type: "text", text }] },
+          mf ? { model: mf } : {})),
+      });
+      if (!r.ok) { this._err(this._apiErr("retry failed", r)); if (btn) btn.disabled = false; }
+      if (!this._live) { await this._resync(); this._startPoll(); }
+    }
+
     async _submit() {
       const text = (this._ta.value || "").trim();
       if (!text || !this._sid) return;
@@ -3238,8 +3278,9 @@ function definePanel() {
       if (ph) for (const n of Object.keys(ph).map(Number).filter((n) => n >= k).sort((a, b) => a - b)) html += phantomHtml(ph[n]);
       const usage = fmtUsage(info);
       if (usage && (info.time || {}).completed) html += '<div class="usage">' + escText(usage) + "</div>";
-      if (info.error) html += '<div class="err">' + escText(pretty(info.error.data || info.error)) + "</div>";
+      if (info.error && !info.seatBusy) html += '<div class="err">' + escText(pretty(info.error.data || info.error)) + "</div>";
       html += capHtml(info);
+      html += busyHtml(info);
       el.innerHTML = html || '<div class="usage">…</div>';
       return el;
     }
@@ -3505,6 +3546,8 @@ function definePanel() {
       }
       const cont = ev.target.closest("[data-ccont]");
       if (cont) { this._claudeContinue(cont.dataset.ccont, cont).catch(() => {}); return; }
+      const retry = ev.target.closest("[data-cretry]");
+      if (retry) { this._retryBusy(retry.dataset.cretry, retry).catch(() => {}); return; }
       const more = ev.target.closest(".more");
       if (more) {
         this._expanded.add(more.dataset.full + ":full");

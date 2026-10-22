@@ -48,7 +48,15 @@ PROFILE_MAX_DEPTH = 200       # frames kept per stack (the root side is cut beyo
 PROFILER_THREAD = "membrane-profiler"
 
 DIAG_PATHS = ("/membrane/diag/timing", "/membrane/diag/profile",
-              "/membrane/diag/claude-agent")
+              "/membrane/diag/claude-agent", "/membrane/diag/deliver")
+
+# THE BUSY TIMEOUT (#431, option C of #429): a turn whose delivery outlives
+# the rung's budget fails visibly with this error -- never a bare resend
+# without memory -- and is counted here (GET /membrane/diag/deliver).
+SEAT_BUSY_TYPE = "seat_busy"
+SEAT_BUSY_MESSAGE = ("the seat is too busy to answer with its memory right now "
+                     "-- try again")
+_deliver = {"busy_timeouts": 0}
 
 _lock = threading.Lock()      # this module's own; never one of the seat's
 _ring: deque = deque(maxlen=TIMING_RING)
@@ -325,6 +333,22 @@ def _send(handler, code: int, obj) -> None:
     handler.wfile.write(b)
 
 
+def note_busy_timeout() -> None:
+    """One delivery timed out and was answered with SEAT_BUSY_MESSAGE."""
+    with _lock:
+        _deliver["busy_timeouts"] += 1
+
+
+def deliver_stats() -> dict:
+    with _lock:
+        return dict(_deliver)
+
+
+def reset_deliver_stats() -> None:
+    with _lock:
+        _deliver["busy_timeouts"] = 0
+
+
 def _flag(v) -> bool:
     return str(v).strip().lower() in ("1", "true", "yes", "on")
 
@@ -359,6 +383,11 @@ def route(handler, path: str) -> bool:
                              "max_tool_calls": _CA.MAX_TOOL_CALLS_PER_ANSWER,
                              "max_turns": _CA.MAX_TURNS,
                              "usage": _CA.usage_stats()})
+        return True
+    if path == "/membrane/diag/deliver":
+        # the busy timeouts (#431): deliveries that outlived the rung's budget
+        from .lanes import RUNG_BUDGET_S
+        _send(handler, 200, {**deliver_stats(), "rung_budget_s": RUNG_BUDGET_S})
         return True
     if path == "/membrane/diag/timing":
         if post:

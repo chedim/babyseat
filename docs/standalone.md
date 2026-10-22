@@ -185,11 +185,23 @@ would take the module with it). Both stay installed; to drop the old name later:
 ## Diagnosing a slow seat
 
 The seat measures itself, without root (`membrane/diag.py`). Both ports answer
-`/membrane/diag/timing`, `/membrane/diag/profile` and
-`/membrane/diag/claude-agent`, from localhost only (a call from anywhere else
-gets 403). The last one counts the claude-agent rung's turn-cap hits and
-Continues, and sums its prompt-cache split (uncached input, cache reads,
-cache writes, output) ([claude-agent.md](claude-agent.md)).
+`/membrane/diag/timing`, `/membrane/diag/profile`,
+`/membrane/diag/claude-agent` and `/membrane/diag/deliver`, from localhost only
+(a call from anywhere else gets 403). `claude-agent` counts the claude-agent
+rung's turn-cap hits and Continues, and sums its prompt-cache split (uncached
+input, cache reads, cache writes, output) ([claude-agent.md](claude-agent.md)).
+`deliver` counts `busy_timeouts`: turns whose model didn't answer inside the
+rung's budget (`rung_budget_s`, 90 s).
+
+**A busy seat fails the turn visibly.** When the model doesn't answer inside
+that budget (a loaded seat, a model swap), the turn gets an error saying the
+seat is too busy to answer with its memory right now: HTTP 503 with
+`"type": "seat_busy"`, or, on a stream that already started, an SSE error
+event before `[DONE]`. The request is never resent without memory. The chat
+marks that answer and offers **Retry**, which sends the same message again in
+the same chat with the same model, once per press. Nothing retries by itself.
+The timed-out model is cooled down as before, so the next turn goes to another
+rung, with memory.
 
 **Request timing** is off by default. Turn it on at launch with
 `MEMBRANE_TIMING=1`, or on a running seat:
