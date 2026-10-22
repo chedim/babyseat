@@ -535,9 +535,12 @@ class EntityField:
         self._ostats["seq_last"] = cand
         return cand
 
-    def event_key(self, ev: ST.Event, session: str = "") -> str:
+    def event_key(self, ev: ST.Event, session: str = "", conv: str = "") -> str:
         if ev.stream == "discourse":
-            ident = f"d|{session}|{ev.role}|{' '.join(ev.text.lower().split())}"
+            # #429: the conversation splits it too ('yes' in two chats is two
+            # events); keyless events keep their old key
+            ident = (f"d|{session}|{conv + '|' if conv else ''}{ev.role}|"
+                     f"{' '.join(ev.text.lower().split())}")
         elif ev.stream == "observation":
             ident = ("o|cid|" + ev.call_id if ev.call_id else
                      f"o|{ev.tool}|{sorted((ev.args or {}).items())}|{h16(ev.result_head)}")
@@ -549,12 +552,15 @@ class EntityField:
         return f"v:{self.o}:{h16(ident)}"
 
     @_locked
-    def write_events(self, evs: list, session: str = "", seqs: list | None = None) -> list[str]:
+    def write_events(self, evs: list, session: str = "", seqs: list | None = None,
+                     conv: str = "") -> list[str]:
         """Idempotent: a re-sent event keeps its key and is not re-applied;
-        a tool RESULT upgrades its call-only observation (same call id)."""
+        a tool RESULT upgrades its call-only observation (same call id).
+        `conv` (#429): the conversation the events belong to (the client's
+        session id or the transcript-head hash), stored as `conv`."""
         keys = []
         for i, ev in enumerate(evs):
-            key = self.event_key(ev, session)
+            key = self.event_key(ev, session, conv)
             old = self.b.get("events", key)
             if old is not None:
                 if (ev.stream == "observation" and old.get("outcome") == "call-only"
@@ -584,6 +590,8 @@ class EntityField:
                    "seq": seq, "status": "pending", "subject": ev.subject}
             if ev.author:                          # #429: who wrote a user turn
                 doc["author"] = ev.author
+            if conv:                               # #429: which chat it belongs to
+                doc["conv"] = conv
             # '#N': the short per-origin number the model and the operator cite
             # (seq orders; it is a microsecond clock, too long to quote)
             doc["n"] = int(self._ostats.get("ev_n") or 0) + 1

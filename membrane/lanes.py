@@ -43,6 +43,7 @@ from . import efgate as _efg
 from . import entities as _ents
 from . import streams as _streams
 from . import efield as _efield_mod
+from . import capture as _CAPMOD          # #429: the conversation key
 from . import diag as _DIAG                 # #346: the timing ring + the profiler
 from .entities import (EntityStore, QuantumEntity, MEMBRANE_NS,
                        CLASS_COMPONENT, CLASS_TOOL)
@@ -4975,6 +4976,15 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             body = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
             self._forward_raw(raw); return
+        # THE CONVERSATION KEY (#429): which chat this turn belongs to (the
+        # client's session id, else the transcript-head hash); every capture
+        # on this thread stamps it. Set on EVERY request: a kept-alive
+        # connection's thread must not carry the last chat's key.
+        try:
+            _CAPMOD.set_conversation(_CAPMOD.conversation_key(
+                body if isinstance(body, dict) else {}, self.headers))
+        except Exception:
+            _CAPMOD.set_conversation("")
         # THE TUI'S DICT SHAPE (the model selection: {"id": ...,
         # "providerID": ...}) vs the bare string: both resolve -- the
         # dict's modelID is the pick (the operator's selection must

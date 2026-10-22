@@ -56,9 +56,87 @@ def _served(evs: list, query: str) -> list:
     return evs
 
 
+# ---- THE CONVERSATION KEY (#429): which chat a message belongs to -----------------
+# The headers clients send naming their chat, checked in this order: opencode
+# (x-opencode-session-id always; x-session-affinity and X-Session-Id to any
+# provider not its own), Claude Code (X-Claude-Code-Session-Id). OpenAI's
+# `user` field is NOT one: it names the person, who may run many chats.
+CONV_HEADERS = ("x-opencode-session-id", "x-opencode-session", "x-session-affinity",
+                "x-session-id", "session-id", "x-claude-code-session-id")
+_CONV = threading.local()
+
+
+def _header(headers, name: str) -> str:
+    if headers is None:
+        return ""
+    try:
+        v = headers.get(name)                  # http.client.HTTPMessage: case-insensitive
+    except Exception:
+        v = None
+    if v is None and isinstance(headers, dict):
+        v = next((hv for hk, hv in headers.items() if str(hk).lower() == name), None)
+    return str(v or "").strip()
+
+
+def _first_user_text(body: dict) -> str:
+    for m in (body or {}).get("messages") or []:
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        c = m.get("content")
+        if isinstance(c, list):
+            c = " ".join(str(p.get("text") or "") for p in c
+                         if isinstance(p, dict) and p.get("type") in (None, "text"))
+        return " ".join(str(c or "").split())
+    return ""
+
+
+def conversation_key(body: dict, headers=None) -> str:
+    """'sid:<id>' when the client names its chat (the serve's loopback turn
+    rides `_turn_sid` in the body; opencode and Claude Code send headers),
+    else 'head:<hash>' of the transcript's first user message (every turn
+    of one chat repeats it), else '' (the idle-gap session is all there is)."""
+    sid = str((body or {}).get("_turn_sid") or "").strip()
+    if not sid:
+        sid = next((v for v in (_header(headers, h) for h in CONV_HEADERS) if v), "")
+    if sid:
+        return "sid:" + sid[:128]
+    head = _first_user_text(body)
+    if head:
+        from .efstore import h16
+        return "head:" + h16(head)
+    return ""
+
+
+def set_conversation(key: str) -> None:
+    """The request thread names its conversation; every capture hook called
+    on this thread afterwards stamps it on its events."""
+    _CONV.key = key or ""
+
+
+def current_conversation() -> str:
+    return getattr(_CONV, "key", "") or ""
+
+
+class conversation:
+    """`with conversation(key):` -- the captures inside name this chat; the
+    thread's earlier key comes back after (the serve's own threads)."""
+
+    def __init__(self, key: str):
+        self.key = key or ""
+
+    def __enter__(self):
+        self._prev = current_conversation()
+        set_conversation(self.key)
+        return self
+
+    def __exit__(self, *exc):
+        set_conversation(self._prev)
+        return False
+
+
 class Sessions:
-    """'s:<boot>:<n>' -- n advances after an idle gap (a heuristic until
-    the client sends a session id)."""
+    """'s:<boot>:<n>' -- n advances after an idle gap: the seat's lane, and
+    the last fallback when a request names no conversation (#429)."""
 
     def __init__(self, boot: float | None = None, gap_s: float = SESSION_GAP_S):
         self.boot = int(boot or time.time())
@@ -92,13 +170,16 @@ class Capturer:
 
     # ---- the hooks (all non-blocking, all swallow) ----------------------------------
     def on_turn(self, query: str, prose: str = "", thought: str = "",
-                ts: float | None = None, session: str | None = None) -> None:
+                ts: float | None = None, session: str | None = None,
+                conv: str | None = None) -> None:
         """The user's message + the model's prose + its reasoning. Tool calls
         ride on_calls (their full arguments), results on_tool_result.
         `session` (#337) names the events' session instead of the idle-gap
-        heuristic: Blurp's private chat tags its lines blurp:<person>."""
+        heuristic: Blurp's private chat tags its lines blurp:<person>.
+        `conv` (#429) names the conversation when the caller knows it;
+        otherwise the request thread's key (set_conversation) is used."""
         self._put(lambda: ST.split_turn(query, prose, None, thought, ts=ts), discourse=True,
-                  session=session)
+                  session=session, conv=conv)
 
     def on_self(self, text: str, session: str | None = None, ts: float | None = None) -> None:
         """Blurp's own line (#337): role `self`, never the model's prose."""
@@ -134,11 +215,14 @@ class Capturer:
         self._put(lambda: list(evs))
 
     # ---- the worker ------------------------------------------------------------------
-    def _put(self, build, discourse: bool = False, session: str | None = None) -> None:
+    def _put(self, build, discourse: bool = False, session: str | None = None,
+             conv: str | None = None) -> None:
         if self.mode == "off":
             return
         try:
-            item = (build, session or self.sessions.current())
+            # the key is read HERE, on the caller's (request) thread
+            item = (build, session or self.sessions.current(),
+                    current_conversation() if conv is None else conv)
             try:
                 self.q.put_nowait(item)
             except queue.Full:
@@ -153,14 +237,15 @@ class Capturer:
         except Exception:
             self.errors += 1
 
-    def _step(self, build, session: str) -> None:
+    def _step(self, build, session: str, conv: str = "") -> None:
         evs = build()
         after = None
         if isinstance(evs, tuple):
             evs, after = evs
         if not evs and after is None:
             return
-        keys = self.field.write_events(evs, session=session) if evs else []
+        keys = (self.field.write_events(evs, session=session, conv=conv)
+                if conv else self.field.write_events(evs, session=session)) if evs else []
         if after is not None:
             after(keys)
         if self.mode == "on":
@@ -171,12 +256,12 @@ class Capturer:
     def _run(self) -> None:
         while True:
             try:
-                build, session = self.q.get(timeout=self.IDLE_S)
+                build, session, conv = self.q.get(timeout=self.IDLE_S)
             except queue.Empty:
                 self._idle()
                 continue
             try:
-                self._step(build, session)
+                self._step(build, session, conv)
             except Exception as e:                 # never into the chat path
                 self.errors += 1
                 if self.errors <= 3 or self.errors % 100 == 0:
@@ -199,9 +284,9 @@ class Capturer:
         """Wait until the queue drains (tests, shutdown)."""
         if self._t is None:
             while not self.q.empty():
-                build, session = self.q.get()
+                build, session, conv = self.q.get()
                 try:
-                    self._step(build, session)
+                    self._step(build, session, conv)
                 except Exception:
                     self.errors += 1
                 finally:
