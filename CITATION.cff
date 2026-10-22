@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "babyseat (membrane)"
+type: software
+authors:
+  - given-names: "Dmitrii O."
+    family-names: "Chechetkin"
+repository-code: "https://github.com/chedim/babyseat"
+license: PolyForm-Noncommercial-1.0.0
+abstract: >-
+  babyseat is a local AI seat with a memory (membrane) that learns in real time:
+  it sits in front of a local model server such as Ollama, and everything a person
+  and their AI say passes through it and is parsed into per-entity memory as it
+  happens. Inside lives Blurp, a small self that grows up on that memory one tested
+  skill at a time, after Alan Turing's "child machine" idea; some of its skills
+  work today and others are still being learned or rebuilt.
+keywords:
+  - memory
+  - LLM
+  - proxy
+  - Ollama
+  - Home Assistant
+  - real-time learning
+  - child machine
+version: "0.7.1"
+date-released: "2026-10-21"
