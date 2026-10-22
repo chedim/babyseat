@@ -2017,7 +2017,10 @@ def main() -> None:
                 _SELF.bind(srv)
                 from . import toybox as _TB       # #239: self's toys, the built-in kit (toybox.add/list/...)
                 _TB.bind(srv)
-                _SELF.start(srv)
+                from . import self_super as _SUP  # #440: in-process, or (MEMBRANE_SELF_PROC=1) its own process
+                _self_host = surf_host if surf_host not in ("0.0.0.0", "::", "") else "127.0.0.1"
+                _SUP.boot(srv, f"http://{_self_host}:{serve_port or 4096}",   # the native serve: its /membrane/self/*
+                          log_path=d / "self-proc.log")
             except Exception as e:
                 print(f"[seat] seat panel not started ({e})", file=sys.stderr)
             print(f"[opencode] native serve up: session store "
@@ -2333,6 +2336,11 @@ def main() -> None:
                 child.terminate(); child.wait(timeout=10)
             except Exception:
                 pass
+        try:                                   # #440: Blurp's own process (SIGTERM, then SIGKILL)
+            from . import self_super as _SUP
+            _SUP.close_all()
+        except Exception:
+            pass
         if getattr(srv, "dreamer", None) is not None:
             try:
                 srv.dreamer.stop()
