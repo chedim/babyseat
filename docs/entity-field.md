@@ -105,7 +105,10 @@ instructions":
   `▸ f:x [file · said 41 · observed 17 · code 12 · 2h ago]`, the evidence
   sentences most relevant to the ask verbatim, the latest observation, the
   top relations, conflicts, what other seats said, commons claims. Served by
-  `/membrane/ask`, `query`, and in `--no-context` every turn.
+  `/membrane/ask`, `query`, and in `--no-context` every turn. On a
+  question-like ask (it ends with `?` or opens with a question word), tool
+  observations and lines the seat or the client wrote (receipts,
+  notifications, watch blocks) rank 0.10 below what was said and decided.
 - **SINCE YOUR LAST MESSAGE** (normal mode): the entities whose state moved
   after the watermark of the last model turn delivered. Changes from
   *outside* the conversation (code edits, entity scripts, other sessions)
@@ -258,7 +261,12 @@ derived**:
 
 `membrane/efgate.py` runs on every real turn. It finds the earlier user
 message nearest the ask and its answer (the last model message before the
-next user message). The answer is replayable only when all of these hold:
+next user message). Only a person's messages count as earlier asks: job
+receipts (`[membrane] job #`, `your job #`), task notifications
+(`<task-notification>`) and `[membrane-watch]` / `[membrane-intercept]`
+blocks also arrive as user turns, so each user event is tagged with its
+`author` at capture, and an older event with no tag is read by the same
+prefixes (#429). The same rule picks the earlier asks behind PAST ANSWERS. The answer is replayable only when all of these hold:
 
 - the similarity is ≥ 0.92;
 - the asks' specific entities agree (Jaccard ≥ 0.8);

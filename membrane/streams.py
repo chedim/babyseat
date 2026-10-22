@@ -51,6 +51,54 @@ RESULT_HEAD = 6000
 RESULT_TAIL = 2000
 MAX_SENTENCES = 40
 
+# ---- who wrote a user turn (#429) ------------------------------------------------
+# Job receipts, task notifications and watch blocks reach the field as user
+# turns. They are written by membrane or the client, never by a person, so
+# they never count as an earlier ask. The five prefixes are the shapes that
+# topped the memory probe's recall (operator-approved, 2026-10-21); a stored
+# record without an `author` tag is classified by the same prefixes on read.
+RECEIPT_PREFIXES = {
+    "[membrane] job #": "receipt",
+    "your job #": "receipt",
+    "<task-notification>": "notification",
+    "[membrane-watch]": "sensor",
+    "[membrane-intercept]": "receipt",
+}
+# On a question-like turn, observation evidence (tool results, readings,
+# receipts) ranks this much below what was said and decided (approved).
+OBSERVATION_PENALTY = 0.10
+# A turn is question-like when it ends with '?' or opens with one of these.
+QUESTION_WORDS = frozenset((
+    "what", "which", "when", "who", "whom", "whose", "how", "why", "where",
+    "did", "does", "do", "is", "are", "was", "were", "can", "could",
+    "should", "would", "will"))
+_FIRST_WORD = re.compile(r"[a-z]+")
+
+
+def author_of(text: str) -> str:
+    """'receipt' | 'notification' | 'sensor' by RECEIPT_PREFIXES, else 'person'."""
+    t = (text or "").lstrip()
+    for p, who in RECEIPT_PREFIXES.items():
+        if t.startswith(p):
+            return who
+    return "person"
+
+
+def event_author(ev: dict) -> str:
+    """A stored user event's author: its capture tag, or (an older record)
+    its text read by the same prefixes."""
+    return ev.get("author") or author_of(ev.get("text") or "")
+
+
+def is_question_like(text: str) -> bool:
+    t = " ".join((text or "").split())
+    if not t:
+        return False
+    if t.endswith("?"):
+        return True
+    m = _FIRST_WORD.match(t.lower())
+    return bool(m) and m.group(0) in QUESTION_WORDS
+
 
 @dataclass
 class Event:
@@ -70,6 +118,8 @@ class Event:
     src: str = "live"
     clipped: bool = False
     code: dict | None = None         # {file, qual, mod, line, kind, sig, doc}
+    author: str = ""                 # a user event's writer (#429): person |
+                                     # receipt | notification | sensor
     subject: str = ""                # the entity this event is ABOUT (the
                                      # script lanes name their subject
                                      # explicitly; prose mentions can't
@@ -349,7 +399,8 @@ def split_turn(query: str, prose: str = "", calls: dict | None = None,
     evs: list[Event] = []
     q = clean(query)
     if q:
-        evs.append(Event(stream="discourse", role="user", text=q, ts=ts))
+        evs.append(Event(stream="discourse", role="user", text=q, ts=ts,
+                         author=author_of(q)))
     p = discourse_clean(clean(prose))
     if p:
         evs.append(Event(stream="discourse", role="model", text=p, ts=ts))
@@ -385,7 +436,8 @@ def split_audit_record(rec: dict) -> list[Event]:
         tool, msg, raw = m.group(1), discourse_clean(clean(m.group(2))), m.group(3)
         out = [_obs(tool, raw or "", resp, "", msg, ts, src, clipped=True)]
         if msg:
-            out.insert(0, Event(stream="discourse", role="user", text=msg, ts=ts, src=src))
+            out.insert(0, Event(stream="discourse", role="user", text=msg, ts=ts, src=src,
+                                author=author_of(msg)))
         return out
     c = _CALL.match(q)
     if c:
@@ -394,7 +446,8 @@ def split_audit_record(rec: dict) -> list[Event]:
         args = m2.group(2).rstrip(")") if m2 else ""
         out = [_obs(c.group(2), args, None, "", msg, ts, src, clipped=True)]
         if msg:
-            out.insert(0, Event(stream="discourse", role="user", text=msg, ts=ts, src=src))
+            out.insert(0, Event(stream="discourse", role="user", text=msg, ts=ts, src=src,
+                                author=author_of(msg)))
         return out
     out: list[Event] = []
     pm = _PREFIX.match(q)
@@ -410,7 +463,8 @@ def split_audit_record(rec: dict) -> list[Event]:
         qc = qc[:mi.start()].strip()
     qc = discourse_clean(qc)
     if qc:
-        out.insert(0, Event(stream="discourse", role="user", text=qc, ts=ts, src=src))
+        out.insert(0, Event(stream="discourse", role="user", text=qc, ts=ts, src=src,
+                            author=author_of(qc)))
     ra = discourse_clean(clean(resp))
     mr = _INLINE.search(ra)
     if mr:
