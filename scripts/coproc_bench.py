@@ -200,9 +200,9 @@ def _ask_handler(fld, q: str, k: int) -> dict:
 
 
 def recall(facts, embedder, k: int = 3) -> dict:
-    """Two fresh fields: 'prose' holds the facts as captured chat turns only;
-    'actions' holds the same turns plus the note an applied remember writes
-    ('key: value'). Each fact's question goes through /membrane/ask; a hit is
+    """Two fresh fields: 'prose' holds each fact as a chat turn whose reply
+    restates it; 'actions' holds the same turn with a bare reply plus the
+    note an applied remember writes ('key: value'). Each fact's question goes through /membrane/ask; a hit is
     the expected value in the top-1 / top-k answers."""
     from membrane import efield as EF
     from membrane.capture import Capturer
@@ -213,11 +213,15 @@ def recall(facts, embedder, k: int = 3) -> dict:
         cap = Capturer(fld, mode="on", start=False)
         for i, f in enumerate(facts):
             cap.on_turn(CHATTER[i % len(CHATTER)], "Sure.", conv="bench")
-            cap.on_turn(f["person"], "Noted.", conv="bench")
+            # prose: the model's reply restates the fact; actions: the reply
+            # is bare and the applied remember writes its note
+            cap.on_turn(f["person"], ("Noted: " + f["person"] + ".") if arm == "prose"
+                        else "Noted.", conv="bench")
         cap.flush()
         if arm == "actions":
             for f in facts:
                 fld.learn(f"{f['key']}: {f['value']}", src="user")
+        fld.process()
         top1 = topk = 0
         for f in facts:
             res = _ask_handler(fld, f["question"], k)

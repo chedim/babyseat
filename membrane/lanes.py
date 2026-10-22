@@ -6214,7 +6214,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         tool-call deltas, usage) passes; a finish chunk waits for the reply."""
         o = json.loads(json.dumps(obj))
         fin = False
-        keep = bool(o.get("usage"))
+        keep = bool(o.get("usage")) or not o.get("choices")   # a side chunk (a tool ran)
         for ch in o.get("choices") or []:
             d = ch.get("delta") or {}
             d.pop("content", None)

@@ -581,6 +581,18 @@ class TestProxy(unittest.TestCase):
         self.assertNotIn(b"remember(", raw)
         self.assertIn("dinghy_motor", h.server.coproc_store.facts())
 
+    def test_stream_side_chunks_pass(self):
+        """A chunk with no choices (the claude rung's ran-a-tool chunk) is not
+        content: it passes through untouched."""
+        h = self._handler()
+        held = []
+        h._coproc_relay({"choices": [], "membrane_tool": {"name": "query"}}, held)
+        h._coproc_relay({"choices": [{"index": 0, "delta": {"content": "x"}}]}, held)
+        out = h.wfile.getvalue()
+        self.assertIn(b"membrane_tool", out)
+        self.assertNotIn(b'"x"', out)
+        self.assertEqual(held, [])
+
     def test_word_surface_for_qwen(self):
         self.b.reply = "Remember: the dinghy motor is a 2.5 hp Suzuki. Got it."
         with mock.patch.dict(os.environ, {"MEMBRANE_COPROC": "1"}):
