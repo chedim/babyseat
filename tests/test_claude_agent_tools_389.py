@@ -91,6 +91,10 @@ def fake_sdk(call=None, words="Done."):
             self.__dict__.update(kw)
             self.kw = kw
 
+    class HookMatcher:                  # the SDK's dataclass (#425)
+        def __init__(self, matcher=None, hooks=None, timeout=None):
+            self.matcher, self.hooks, self.timeout = matcher, list(hooks or []), timeout
+
     class SdkMcpTool:
         def __init__(self, name, description, input_schema, handler):
             self.name, self.description = name, description
@@ -125,6 +129,7 @@ def fake_sdk(call=None, words="Done."):
 
     mod.ClaudeAgentOptions = ClaudeAgentOptions
     mod.SdkMcpTool = SdkMcpTool
+    mod.HookMatcher = HookMatcher       # #425: the check-in hook's matcher
     mod.tool = tool
     mod.create_sdk_mcp_server = create_sdk_mcp_server
     mod.query = query
@@ -156,7 +161,8 @@ class TestOptions(_SDKCase):
         return self.sdk.calls[0]["options"].kw
 
     def test_max_turns_is_the_named_constant(self):
-        self.assertEqual(CA.MAX_TURNS, 4)
+        # #425: a backstop that never binds before the tool-call ceiling
+        self.assertEqual(CA.MAX_TURNS, 2 * CA.MAX_TOOL_CALLS_PER_ANSWER)
         self.assertEqual(self._opts()["max_turns"], CA.MAX_TURNS)
 
     def test_allowed_tools_are_exactly_membranes(self):

@@ -83,6 +83,10 @@ def fake_sdk(words=("Hello ", "world"), error=None):
             self.__dict__.update(kw)
             self.kw = kw
 
+    class HookMatcher:                  # the SDK's dataclass (#425)
+        def __init__(self, matcher=None, hooks=None, timeout=None):
+            self.matcher, self.hooks, self.timeout = matcher, list(hooks or []), timeout
+
     class CLINotFoundError(Exception):
         pass
 
@@ -105,6 +109,7 @@ def fake_sdk(words=("Hello ", "world"), error=None):
 
     mod.ClaudeAgentOptions = ClaudeAgentOptions
     mod.CLINotFoundError = CLINotFoundError
+    mod.HookMatcher = HookMatcher       # #425: the check-in hook's matcher
     mod.tool = tool
     mod.create_sdk_mcp_server = create_sdk_mcp_server
     mod.query = query
