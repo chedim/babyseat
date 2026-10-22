@@ -2961,6 +2961,7 @@ def _surface_block_summary(ctx: str | None) -> list[dict]:
         ("recall", "Recalled memories"),
         ("global", "Global memories"),
         ("where-we-are", "WHERE WE ARE"),
+        ("conversation", "NOW: "),               # THIS CONVERSATION (#429) opens with its NOW line
         ("intentions", "OPEN INTENTIONS"),
         ("review", "PENDING HUMAN REVIEWS"),
         ("watch", "[membrane-watch]"),
@@ -2990,7 +2991,7 @@ def _surface_block_summary(ctx: str | None) -> list[dict]:
 def _surface_block_text(ctx: str, sec: dict) -> str:
     """The FULL text of one sent block (the totality view's payload side --
     the operator reads what the memories SAY, not the header clip)."""
-    markers = ["Recalled memories", "Global memories", "WHERE WE ARE",
+    markers = ["Recalled memories", "Global memories", "WHERE WE ARE", "NOW: ",
                "OPEN INTENTIONS", "PENDING HUMAN REVIEWS",
                "[membrane-watch]", "[membrane-intercept] a sibling",
                "[membrane-intercept] your own earlier ask",

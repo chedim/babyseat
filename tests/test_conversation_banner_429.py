@@ -484,6 +484,13 @@ class TestTheTurnPath(unittest.TestCase):
         outs = [self.ctx(body, "conversation")[0] for _ in range(3)]
         self.assertTrue(all(o and "THIS CONVERSATION" in o for o in outs))
 
+    def test_the_surface_ring_names_the_block(self):
+        body = {"messages": [{"role": "user", "content": "what's next?"}]}
+        ctx, _ = self.ctx(body, "conversation")
+        secs = L._surface_block_summary(ctx)
+        self.assertEqual([s["block"] for s in secs], ["conversation"])
+        self.assertEqual(secs[0]["chars"], len(ctx))
+
     def test_the_old_banner_path_is_untouched(self):
         body = {"messages": [{"role": "user", "content": "what's next?"}]}
         ctx, _ = self.ctx(body, "banner")
