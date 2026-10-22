@@ -182,7 +182,10 @@ class TestOptions(_SDKCase):
                 {"role": "user", "content": [{"type": "text", "text": "second question"}]}]
         system, prompt = CA.split_messages(msgs)
         self.assertIn("DOCTRINE", system)
-        self.assertIn("CONTEXT BLOCK", system)
+        # #426: a per-turn block leaves the (cached) system prompt for the
+        # prompt's end, before the last message
+        self.assertNotIn("CONTEXT BLOCK", system)
+        self.assertLess(prompt.index("CONTEXT BLOCK"), prompt.index("second question"))
         self.assertIn("first question", prompt)
         self.assertIn("first answer", prompt)
         self.assertTrue(prompt.rstrip().endswith("second question"), prompt)

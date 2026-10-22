@@ -188,7 +188,8 @@ The seat measures itself, without root (`membrane/diag.py`). Both ports answer
 `/membrane/diag/timing`, `/membrane/diag/profile` and
 `/membrane/diag/claude-agent`, from localhost only (a call from anywhere else
 gets 403). The last one counts the claude-agent rung's turn-cap hits and
-Continues ([claude-agent.md](claude-agent.md)).
+Continues, and sums its prompt-cache split (uncached input, cache reads,
+cache writes, output) ([claude-agent.md](claude-agent.md)).
 
 **Request timing** is off by default. Turn it on at launch with
 `MEMBRANE_TIMING=1`, or on a running seat:

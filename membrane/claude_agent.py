@@ -132,6 +132,38 @@ def reset_stats() -> None:
     with _stats_lock:
         for k in STATS:
             STATS[k] = 0
+        for k in USAGE:
+            USAGE[k] = 0
+
+
+# ---- the prompt cache's ledger (#426) -------------------------------------------
+# Every Claude call's usage, split the way Anthropic bills it: uncached
+# input, cache reads, cache writes, output. Sums since boot (RAM).
+
+USAGE = {"calls": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0}
+
+
+def _record_usage(u: dict) -> None:
+    """One call's OpenAI-shaped usage (from _usage) onto the ledger."""
+    det = u.get("prompt_tokens_details") or {}
+    read = int(det.get("cached_tokens") or 0)
+    write = int(det.get("cache_write_tokens") or 0)
+    with _stats_lock:
+        USAGE["calls"] += 1
+        USAGE["input"] += int(u.get("prompt_tokens") or 0) - read - write
+        USAGE["cache_read"] += read
+        USAGE["cache_write"] += write
+        USAGE["output"] += int(u.get("completion_tokens") or 0)
+
+
+def usage_stats() -> dict:
+    """The ledger plus per-call averages (diag/claude-agent)."""
+    with _stats_lock:
+        out = dict(USAGE)
+    n = out["calls"]
+    out["per_call"] = {k: (round(out[k] / n) if n else 0)
+                       for k in ("input", "cache_read", "cache_write", "output")}
+    return out
 
 
 class Unavailable(RuntimeError):
@@ -337,20 +369,48 @@ def _text_of(content) -> str:
     return "" if content is None else str(content)
 
 
+CONTEXT_OPEN = "<membrane-context>"    # membrane's per-turn blocks (#426)
+CONTEXT_CLOSE = "</membrane-context>"
+
+
+def _volatile(m, seen_convo: bool) -> bool:
+    """A system message that changes per call: one membrane placed for this
+    turn (rag.Injected), or any system message after the conversation began."""
+    from .rag import Injected
+    return seen_convo or isinstance(m, Injected)
+
+
+def _context(blocks) -> str:
+    return f"{CONTEXT_OPEN}\n" + "\n\n".join(blocks) + f"\n{CONTEXT_CLOSE}"
+
+
 def split_messages(messages) -> tuple[str, str]:
-    """OpenAI messages -> (system prompt, prompt). Every system message
-    joins the system prompt (the doctrine and membrane's context blocks);
-    the rest is the conversation. A lone user message is the prompt as is;
-    a longer conversation is rendered as a transcript ending on the last
-    message."""
-    system, convo = [], []
+    """OpenAI messages -> (system prompt, prompt). The STABLE system
+    messages (the doctrine, the client's instructions) are the system
+    prompt -- byte-identical across calls, so Anthropic's prompt cache
+    (tools, then system) holds (#426). membrane's per-turn blocks (recall,
+    where-we-are, banners: _volatile) go to the END of the prompt,
+    delimited, right before the latest message (a block placed after it,
+    the speech footer, stays after it). A lone user message with no
+    per-turn block is the prompt as is; a longer conversation is rendered
+    as a transcript ending on the last message."""
+    from .rag import _RAG_SYSTEM
+    system, convo, ctx = [], [], []      # ctx: (blocks before convo item #i, text)
     for m in messages or []:
         if not isinstance(m, dict):
             continue
         role = m.get("role")
         text = _text_of(m.get("content")).strip()
         if role == "system":
-            if text:
+            if text and _volatile(m, bool(convo)):
+                head = _RAG_SYSTEM.strip()
+                if head and text.startswith(head):     # the undelivered doctrine
+                    if head not in system:
+                        system.append(head)
+                    text = text[len(head):].strip()
+                if text:
+                    ctx.append((len(convo), text))
+            elif text:
                 system.append(text)
             continue
         if role == "assistant" and m.get("tool_calls"):
@@ -364,10 +424,18 @@ def split_messages(messages) -> tuple[str, str]:
         if text:
             convo.append((role, label, text))
     sys_prompt = "\n\n".join(system)
-    if len(convo) == 1 and convo[0][0] == "user":
-        return sys_prompt, convo[0][2]
-    prompt = "\n\n".join(f"{label}\n{text}" for _r, label, text in convo)
-    if convo:
+    last = max(len(convo) - 1, 0)
+    before = [t for i, t in ctx if i <= last]
+    after = [t for i, t in ctx if i > last]
+    lone = len(convo) == 1 and convo[0][0] == "user"
+    items = [convo[0][2]] if lone else [f"{label}\n{text}"
+                                        for _r, label, text in convo]
+    if before:
+        items.insert(last, _context(before))
+    if after:
+        items.append(_context(after))
+    prompt = "\n\n".join(items)
+    if convo and not lone:
         prompt = ("The conversation so far, oldest first; answer its last "
                   "message.\n\n" + prompt)
     return sys_prompt, prompt
@@ -439,8 +507,13 @@ def _usage(u) -> dict:
         + int(u.get("cache_read_input_tokens") or 0) \
         + int(u.get("cache_creation_input_tokens") or 0)
     pout = int(u.get("output_tokens") or 0)
+    # the cache split rides the OpenAI shape (#426): cached_tokens is
+    # OpenAI's read count; cache_write_tokens the common extension
     return {"prompt_tokens": pin, "completion_tokens": pout,
-            "total_tokens": pin + pout}
+            "total_tokens": pin + pout,
+            "prompt_tokens_details": {
+                "cached_tokens": int(u.get("cache_read_input_tokens") or 0),
+                "cache_write_tokens": int(u.get("cache_creation_input_tokens") or 0)}}
 
 
 def _result_text(content) -> str:
@@ -548,6 +621,8 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
             return
         if item[0] == "error":
             raise item[1]
+        if item[0] == "usage":
+            _record_usage(item[1])
         yield item
 
 

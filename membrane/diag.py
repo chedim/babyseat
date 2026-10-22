@@ -353,7 +353,9 @@ def route(handler, path: str) -> bool:
     if path == "/membrane/diag/claude-agent":
         # the claude-agent rung's turn cap (#389): cap hits and continues
         from . import claude_agent as _CA
-        _send(handler, 200, {**_CA.stats(), "max_turns": _CA.MAX_TURNS})
+        # and the prompt cache's ledger (#426): uncached / read / write / output
+        _send(handler, 200, {**_CA.stats(), "max_turns": _CA.MAX_TURNS,
+                             "usage": _CA.usage_stats()})
         return True
     if path == "/membrane/diag/timing":
         if post:

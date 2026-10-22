@@ -108,12 +108,40 @@ The tools Claude gets:
 | `entity_watch`, `entity_unwatch`, `field_watch`, `attention`, `junk_cut` | writes tracks, watches and dials |
 | `peer_post` | posts on the peer channel |
 
-The turn's system messages become the SDK's system prompt. These are the
-doctrine, membrane's context block and the speech footer. The rest of the
-conversation goes in as the prompt, ending on the latest message. The reply
-comes back as an ordinary OpenAI response, streamed or buffered, with its
-usage. Each tool Claude ran rides the reply: a `membrane_tool` chunk when
-streamed, a `membrane_tools` list when buffered.
+The turn's stable system messages become the SDK's system prompt: the
+doctrine and the client's own instructions. The rest of the conversation goes
+in as the prompt, ending on the latest message. membrane's per-turn blocks
+(the context block with recall and where-we-are, banners, watch reports) go
+at the end of the prompt, inside `<membrane-context>` ...
+`</membrane-context>`, right before the latest message; the speech footer
+stays after it. The reply comes back as an ordinary OpenAI response, streamed
+or buffered, with its usage. Each tool Claude ran rides the reply: a
+`membrane_tool` chunk when streamed, a `membrane_tools` list when buffered.
+
+## The prompt cache
+
+Anthropic caches a request's prefix in order: the tool schemas, then the
+system prompt, then the messages. A system prompt that changed on every call
+(it used to carry the per-turn blocks) broke the cache right after the tools.
+Now the system prompt is byte-identical from call to call, so the tools and
+the system prompt can be read from the cache. The per-turn blocks cost only
+their own tokens at the end of the prompt.
+
+A block counts as per-turn when membrane placed it for this turn (the
+proxy's `rag._inject` / `rag._inject_after`) or when it is a system message
+that comes after the conversation has started. When the doctrine rides in
+front of an injected block (a client that did not get it as an instructions
+file), the doctrine part stays in the system prompt.
+
+The usage keeps Anthropic's split. The OpenAI-shaped `usage` totals are
+unchanged (`prompt_tokens` is uncached input + cache reads + cache writes);
+`usage.prompt_tokens_details` adds `cached_tokens` (reads) and
+`cache_write_tokens` (writes). The stored message tokens carry them as
+`tokens.cache.read` and `tokens.cache.write`; the uncached input is
+`tokens.input` minus both. `GET /membrane/diag/claude-agent` adds
+`usage: {calls, input, cache_read, cache_write, output, per_call}`: sums
+since the seat's boot (`input` is the uncached input) and the per-call
+averages.
 
 ## The turn cap and Continue
 
