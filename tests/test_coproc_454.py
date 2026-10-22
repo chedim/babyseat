@@ -99,6 +99,11 @@ class TestPythonSurface(unittest.TestCase):
         self.assertEqual(len(p.lint), 1)
         self.assertEqual(CP.reply_of(p, "python"), "Sure, the port is 4097.")
 
+    def test_a_one_word_prose_reply_is_still_shown(self):
+        p = CP.parse("Thanks", "python")
+        self.assertEqual(len(p.lint), 1)
+        self.assertEqual(CP.reply_of(p, "python"), "Thanks")
+
     def test_membrane_tool_calls_parse_as_tools(self):
         p = CP.parse('query(text="where is the seat token")\nassistant.says("looking")',
                      "python", tools=("query", "entity_read"))

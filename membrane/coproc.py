@@ -52,7 +52,7 @@ RESERVED_TOOL_NAMES = frozenset({"decide", "remember", "intend", "says", "say"})
 EXAMPLES = 3                 # varied examples per surface (round 2: 3 > 1)
 RECENT_EXCHANGES = 3         # this chat's compiled exchanges in the block
 FACTS_SHOWN = 20             # newest facts / decisions rendered as memory
-TRACE_MIN = 0.5              # share of an action's words the person's message holds
+TRACE_MIN = 0.3              # share of an action's words the person's message holds (measured: 60/66 right actions)
 PROPOSAL_TTL_S = 24 * 3600.0  # a held proposal stays confirmable this long
 REPEAT_LOOKBACK_TURNS = 1    # turns back an identical applied action is a loop
 ARG_MAX_CHARS = 300          # one decision / fact / intent, not a paste
@@ -189,6 +189,8 @@ def _parse_python(text: str, tools=()) -> Parsed:
             seg = (ast.get_source_segment(src, st) or "").strip()
             if why:
                 p.lint.append(Lint(lineno + st.lineno - 1, seg[:200], why))
+                if not (isinstance(st, ast.Expr) and isinstance(st.value, ast.Call)):
+                    p.loose.append(seg)           # a bare word of prose
                 continue
             if said is not None:
                 says.append(said)
