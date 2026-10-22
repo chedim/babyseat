@@ -3283,7 +3283,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
                 self._json_out(_SAPI.context(psrv, spots=_q.get("spot") or (),
                                              reach=(_q.get("reach") or [""])[0] in ("1", "true"),
-                                             only=(_q.get("only") or [None])[0]))
+                                             only=(_q.get("only") or [None])[0],
+                                             own=(_q.get("own") or [""])[0] in ("1", "true")))
             elif path == "/membrane/toybox/state":
                 # #249: the toy dock's live source -- the toys alone, cheap
                 # enough to poll every few seconds (read-only, gated)

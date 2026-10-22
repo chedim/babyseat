@@ -452,6 +452,22 @@ asks for; at most 256 KB of JSON, cut to fit with a `dropped` note) and
 position, nudges at other things, chat out). Both are for the seat's own
 token: a person's token gets a 403.
 
+Part 3 (`membrane/self_proc.py`) runs the same loop in a process of its
+own, behind `MEMBRANE_SELF_PROC=1` (default off; the seat does not start it
+yet -- part 4's supervisor will): `python -m membrane.self_proc --seat URL
+--data-dir DIR`, at niceness +10. It runs on a facade of the seat: a mirror
+of Blurp's own entities (itself and its methods, from the context's `own`
+part), the context for every read (the pause and the CPU share included),
+and effects for every act. Besides part 2's, the effects are a look (`reach`:
+the getter fires in the seat), Blurp's own method runs and properties
+(`own`), `place`, `provision`, the audits' `getter` pause and the viewer
+(`show`); the in-process loop crosses through them too. It owns `self/`,
+serves `/card`, `/sheet`, `/recent`, `/status`, `/control` and `/chat-in` on a
+loopback port it reports at start (one JSON line on stdout), and exits on
+SIGTERM or when its stdin closes. Still read in the seat directly, and so
+only in-process: the reply checks and the mirror feed of the rungs not
+rebuilt yet (meet, turns, expect, mirror).
+
 Its toys' state lives next door, in `<data dir>/toybox/` (see [Toys](#toys)),
 and is kept across a restart too.
 

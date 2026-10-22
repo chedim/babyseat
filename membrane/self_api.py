@@ -9,7 +9,8 @@ part 3 can move the loop out unchanged:
   of the seat state a cycle reads. Plain JSON: the current, Blurp's own
   entity (its position), the things in its world (eid; `chat` for a chat
   thing, `merged` for a merged one, `getter` for one it can look at -- no
-  vectors), `paused`, `nerve_paused` and `cpu_share`. On request
+  vectors), `targets` (the eids it can look at), `paused`, `nerve_paused`
+  and `cpu_share`. On request
   (`reach=True`) the field spots it can reach, each by its dimension, and
   (`spots=[eid, ...]`) the vectors of the spots it asks for; `only="spots"`
   returns just those. Never the whole field: one answer is at most
@@ -23,8 +24,15 @@ part 3 can move the loop out unchanged:
 
 The seat-side readers stay self_loop's (`_current`, `_spot`, `_targets`,
 `_paused`, `cpu_share`): this module calls them, the cycle no longer does.
-Reaches (a getter's read) and the cycle's own methods still run in-process;
-part 3's facade carries them.
+
+Part 3 (membrane.self_proc) adds what the child needs besides: `own=True`
+in the context (Blurp's own entities -- itself and its methods -- to seed
+the child's mirror), `viewer` (whether the seat's viewer watches), and the
+effects `reach` (one look: the getter fires in the seat), `own` (Blurp's own
+properties and its methods' run counts), `place`, `provision`, `getter` (the
+audits' pause of a thing's getter) and `show` (the cycle onto the viewer).
+The in-process loop crosses through the same ones. A facade srv (one with
+`self_remote`) sends both calls over HTTP instead of running them here.
 """
 from __future__ import annotations
 
@@ -40,21 +48,40 @@ def _SL():
     return SL
 
 
+def _plain_default(o):
+    if isinstance(o, (set, frozenset, tuple)):
+        return sorted(o, key=str) if isinstance(o, (set, frozenset)) else list(o)
+    if hasattr(o, "tolist"):
+        return o.tolist()
+    return str(o)
+
+
+def plain(x):
+    """x as plain JSON (what crosses the boundary): numpy scalars and arrays
+    as numbers and lists, sets sorted, anything else as its text."""
+    return json.loads(json.dumps(x, default=_plain_default))
+
+
 def _vec(v) -> list | None:
     return None if v is None else [float(x) for x in v]
 
 
 # ---- the context --------------------------------------------------------------------------
 
-def _things(srv) -> list[dict]:
+def _getters(srv) -> list[str]:
+    """What Blurp can look at (self_loop._targets: its world's things with a getter)."""
+    try:
+        return sorted(_SL()._targets(srv)) if getattr(srv, "entity_store", None) is not None else []
+    except Exception:
+        return []
+
+
+def _things(srv, getters=None) -> list[dict]:
     """The things in Blurp's world (itself left out), by eid: flags only."""
     SL = _SL()
     est = getattr(srv, "entity_store", None)
     docs = (est.docs if est is not None else None) or {}
-    try:
-        getters = set(SL._targets(srv)) if est is not None else set()
-    except Exception:
-        getters = set()
+    getters = set(_getters(srv) if getters is None else getters)
     me = SL._eid()
     out = []
     for eid, e in sorted(list(docs.items())):
@@ -125,12 +152,47 @@ def _fit(doc: dict) -> dict:
     return doc
 
 
-def context(srv, spots=(), reach: bool = False, only: str | None = None) -> dict:
+def _remote(srv):
+    """The child's way to the seat (self_proc.SeatClient) when srv is its facade."""
+    return getattr(srv, "self_remote", None)
+
+
+def _is_own(est, ent) -> bool:
+    """Blurp itself, one of its methods, or one of their nodes."""
+    me = _SL()._eid()
+    if ent.eid == me:
+        return True
+    pp = ent.properties or {}
+    if me in (pp.get("method_of") or []):
+        return True
+    host = (est.docs or {}).get(str(pp.get("node_of") or ""))
+    return host is not None and me in ((host.properties or {}).get("method_of") or [])
+
+
+def _own(srv) -> dict:
+    """Blurp's own entities: eid -> {cls, properties, position}."""
+    SL = _SL()
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return {}
+    SL._entity(srv)
+    out = {}
+    for eid, e in sorted(list((est.docs or {}).items())):
+        if _is_own(est, e):
+            out[eid] = plain({"cls": e.cls, "properties": e.properties or {},
+                              "position": _vec(e.position) if e.position is not None else None})
+    return out
+
+
+def context(srv, spots=(), reach: bool = False, only: str | None = None, own: bool = False) -> dict:
     """The per-cycle snapshot (see the module doc). Plain JSON, at most
     CONTEXT_BUDGET bytes."""
+    r = _remote(srv)
+    if r is not None:
+        return r.context(spots=list(spots or ()), reach=reach, only=only, own=own)
     SL = _SL()
     doc: dict = {"v": 1, "ts": time.time()}
-    if only != "spots":
+    if only not in ("spots", "own"):
         ent = SL._entity(srv)
         doc["self"] = {"eid": SL._eid(),
                        "position": _vec(ent.position) if ent is not None and ent.position is not None else None}
@@ -141,7 +203,12 @@ def context(srv, spots=(), reach: bool = False, only: str | None = None) -> dict
             doc["cpu_share"] = float(SL.cpu_share(srv))
         except Exception:
             doc["cpu_share"] = None
-        doc["things"] = _things(srv)
+        from . import fieldpulse as _FP
+        doc["viewer"] = _FP.of(srv) is not None
+        doc["targets"] = _getters(srv)          # #440 part 3: what its looks pick from
+        doc["things"] = _things(srv, doc["targets"])
+    if own:
+        doc["own"] = _own(srv)
     if reach:
         doc["reach"] = _reach(srv)
     doc["spots"] = _spots(srv, spots)
@@ -220,13 +287,105 @@ def _say(srv, e: dict) -> dict:
             "why": str(out.get("why") or "")}
 
 
-EFFECTS = {"position": _position, "nudge": _nudge, "say": _say}
+def _reach_effect(srv, e: dict) -> dict:
+    """One look at a thing, in the seat: its getter fires (or answers that it
+    can't). -> {read, toy?, text}; `toy` (a toybox thing) carries its log's
+    length before and after the look and who changed it since `since` (the
+    log length at Blurp's previous look at it; None: none)."""
+    SL = _SL()
+    target = str(e.get("eid") or "")
+    ent = (srv.entity_store.docs or {}).get(target)
+    if ent is None:
+        return {"read": {"fired": False, "reason": "gone"}, "text": "nothing there"}
+    if not SL._in_world(srv, target):                      # #337: outside its world, nothing is read
+        return {"read": {"fired": False, "reason": "outside its world"}, "text": "not in its world"}
+    tb = (ent.properties or {}).get("toybox") or {}
+    toy = None
+    if tb.get("name"):                                      # #244: the toy's log, before and after the look
+        from . import toybox as _TB
+        toy = {"name": tb["name"], "block": tb.get("block"), "at0": _TB.log_len(tb["name"])}
+    try:
+        read = SL._read_entity(srv, ent, e.get("now"))
+    except Exception as ex:                                 # noqa: BLE001
+        read = {"fired": False, "reason": f"error: {ex!r}"[:80]}
+    out = {"read": plain(read or {}), "text": "reached"}
+    if toy is not None:
+        toy["at1"] = _TB.log_len(tb["name"])
+        try:
+            toy["by"] = SL._toy_by_since(e.get("since"), toy)
+        except Exception:
+            toy["by"] = None
+        out["toy"] = toy
+    return out
+
+
+def _own_effect(srv, e: dict) -> dict:
+    """Blurp's own properties (itself, its methods): the keys given replace
+    the seat's, `script_data` merged key by key. Never another thing's."""
+    est = getattr(srv, "entity_store", None)
+    ent = (est.docs or {}).get(str(e.get("eid") or "")) if est is not None else None
+    props = e.get("properties")
+    if ent is None or not isinstance(props, dict) or not _is_own(est, ent):
+        return {"ok": False, "error": "not its own"}
+    pp = ent.properties or {}
+    for k, v in props.items():
+        if k == "script_data" and isinstance(v, dict):
+            sd = dict(pp.get("script_data") or {})
+            sd.update(v)
+            pp[k] = sd
+        else:
+            pp[k] = v
+    ent.properties = pp
+    est.upsert(ent, embedder=None)
+    return {"ok": True}
+
+
+def _place(srv, e: dict) -> dict:
+    """The first look places (#244): a field spot for the thing."""
+    from . import toybox as _TB
+    return {"placed": _TB.place(srv, str(e.get("eid") or ""))}
+
+
+def _provision(srv, e: dict) -> dict:
+    """Switch on the unlocked toys the seat has none of (toy_unlocks)."""
+    from . import toy_unlocks as _TU
+    return {"added": list(_TU.provision_here(srv, [str(k) for k in e.get("toys") or []], now=e.get("now")))}
+
+
+def _getter(srv, e: dict) -> dict:
+    """The blind audits: a thing's getter paused until `until` (None: resumed)."""
+    from . import watch_agents as _WA
+    eid = str(e.get("eid") or "")
+    if e.get("until") is None:
+        _WA.unpause_getter(eid)
+    else:
+        _WA.pause_getter(eid, float(e["until"]))
+    return {"ok": True}
+
+
+def _show(srv, e: dict) -> dict:
+    """The cycle onto the seat's viewer (fieldpulse.self_cycle)."""
+    import numpy as np
+    from . import fieldpulse as _FP
+    fp = _FP.of(srv)
+    if fp is None:
+        return {"ok": False, "error": "no viewer"}
+    pts = {k: (None if v is None else np.asarray(v, dtype=float)) for k, v in (e.get("points") or {}).items()}
+    fp.self_cycle(pts, dict(e.get("stats") or {}))
+    return {"ok": True}
+
+
+EFFECTS = {"position": _position, "nudge": _nudge, "say": _say, "reach": _reach_effect, "own": _own_effect,
+           "place": _place, "provision": _provision, "getter": _getter, "show": _show}
 
 
 def effects(srv, effects) -> list[dict]:
     """Run the cycle's effects in the seat, in order: one result each."""
     if not isinstance(effects, list):
         raise ValueError("effects must be a list")
+    r = _remote(srv)
+    if r is not None:
+        return r.effects(effects)
     out = []
     for e in effects:
         fn = EFFECTS.get(e.get("kind")) if isinstance(e, dict) else None
