@@ -121,8 +121,9 @@ instructions":
   observations and lines the seat or the client wrote (receipts,
   notifications, watch blocks) rank 0.10 below what was said and decided.
 - **PAST ANSWERS** (rides above ENTITIES, and fills `/membrane/ask`'s
-  `hits`): two paths merged, best similarity first, one row per answering
-  event. The ask path finds a person's earlier asks like this one and what
+  `hits`): four lists fused by reciprocal rank (k = 60), one row per
+  answering event; each row says `how` it was found (`ask`, `vector`,
+  `words`, `entity`). The ask path finds a person's earlier asks like this one and what
   was worked out after them. The direct path (#429) searches model
   replies, learn notes, ingested docs and code by similarity to the ask
   itself, because most facts were never the answer to an earlier ask like
@@ -131,6 +132,22 @@ instructions":
   restates the ask is skipped. Both paths share one floor (0.70 in the
   injected block; `/membrane/ask` takes `sim_min`). A direct hit carries
   `via: "direct"` and its `role`.
+  The **word lane** (`membrane/lexical.py`, #429) catches exact tokens the
+  embeddings blur: identifiers, env vars, issue numbers, file names. It is
+  BM25 (k1 1.2, b 0.75) over the field's own sentences, in RAM, built from
+  the events on a boot thread (recall runs without it until it is ready)
+  and kept current by capture. Words are lower-cased, snake_case and
+  dotted or dashed compounds count whole and by parts, plurals fold, and
+  Lucene's 33 English stop words are dropped. A word in more than 1% of
+  the sentences (at least 20) is skipped. The **entity lane** reads the
+  sentences of an entity the ask names (a file, a symbol, a command, or a
+  word written as a name), ranked by the ask's other words. Both answer
+  under the direct path's roles. When the ask has a vector, a word row
+  counts only if it matched a word written as a name (a digit or a
+  separator in it, or a capital past its first letter); such a row, and
+  an entity lane row, pass the floor. An ask too short for a sentence vector (a bare
+  `PACE_S`, `#171`) is answered by its words alone. Word rows carry the
+  `matched` words.
 - **SINCE YOUR LAST MESSAGE** (normal mode): the entities whose state moved
   after the watermark of the last model turn delivered. Changes from
   *outside* the conversation (code edits, entity scripts, other sessions)
