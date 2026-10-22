@@ -43,6 +43,15 @@ _TTL_RE = re.compile(r"^\s*(\d+)\s*([dwmh])\s*$", re.I)
 _TTL_UNITS = {"h": 3600.0, "d": 86400.0, "w": 7 * 86400.0, "m": 30 * 86400.0}
 
 
+def _conv_now() -> str:
+    """The chat a write belongs to (#429; capture.conversation_now)."""
+    try:
+        from .capture import conversation_now
+        return conversation_now()
+    except Exception:
+        return ""
+
+
 def parse_ttl(spec: str) -> float | None:
     """'2w' / '10d' / '48h' / '1m' -> seconds; None when not a window spec."""
     m = _TTL_RE.match(spec or "")
@@ -63,6 +72,8 @@ class Intention:
     hits: int = 0            # near turns seen (context, not auto-close)
     eid: str = ""            # the goal-backed view's goal eid ('' = json)
     last_hit: float = 0.0
+    conv: str = ""           # the chat it was planted in (#429)
+    fulfilled_conv: str = "" # the chat that closed it (#429)
 
     def describe(self) -> str:
         """The commitment's text -- what a goal entity's describe() gives (the
@@ -74,7 +85,9 @@ class Intention:
         return {"iid": self.iid, "text": self.text, "probe": self.probe,
                 "created": self.created, "expires": self.expires,
                 "status": self.status, "fulfilled": self.fulfilled,
-                "hits": self.hits, "last_hit": self.last_hit}
+                "hits": self.hits, "last_hit": self.last_hit,
+                **({"conv": self.conv} if self.conv else {}),
+                **({"fulfilled_conv": self.fulfilled_conv} if self.fulfilled_conv else {})}
 
     @classmethod
     def from_json(cls, r: dict) -> "Intention":
@@ -85,7 +98,9 @@ class Intention:
                    status=str(r.get("status", "open")),
                    fulfilled=float(r.get("fulfilled", 0.0)),
                    hits=int(r.get("hits", 0)),
-                   last_hit=float(r.get("last_hit", 0.0)))
+                   last_hit=float(r.get("last_hit", 0.0)),
+                   conv=str(r.get("conv") or ""),
+                   fulfilled_conv=str(r.get("fulfilled_conv") or ""))
 
 
 class IntentBoard:
@@ -209,6 +224,7 @@ class IntentBoard:
                 if i.status in ("fulfilled", "expired"):
                     i.status = "open"
                     i.fulfilled = 0.0
+                i.conv = i.conv or _conv_now()
                 self.save()
                 return i, None
         if len(self.open_intents(now)) >= MAX_INTENTS:
@@ -219,7 +235,7 @@ class IntentBoard:
                 evicted = victim.text
                 self.intents.pop(victim.iid, None)
         it = Intention(iid=self._next_iid, text=text, probe=probe,
-                       created=now, expires=expires)
+                       created=now, expires=expires, conv=_conv_now())
         self._next_iid += 1
         self.intents[it.iid] = it
         self.save()
@@ -242,6 +258,7 @@ class IntentBoard:
         for i in hits:
             i.status = "fulfilled"
             i.fulfilled = now
+            i.fulfilled_conv = _conv_now()
         if hits:
             self.save()
         return len(hits), (hits[0].text if hits else "nothing open matched")

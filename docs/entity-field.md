@@ -174,6 +174,34 @@ instructions":
 The seat card explains the blocks, said / observed / code, and the trust
 order: observed and code > the user > model prose.
 
+### THIS CONVERSATION
+
+Behind `MEMBRANE_INJECTION=conversation` (#429; `membrane/conv_banner.py`)
+the per-turn state is one block about the chat the turn belongs to (its
+conversation key, `conv` on events), derived from records with no model call:
+
+| line | source |
+|---|---|
+| `NOW` | the seat's local date, time and time zone |
+| `WORKING ON` | the person's latest earlier ask in this chat (its person-authored user events, speaker line cut) that names a focus entity, else the latest one; clipped to 160 chars |
+| `ABOUT` | up to 5 focus entities: named in the person's latest message, or in at least 2 of this chat's events (an identifier no code defines, `s:?`, only when the person names it) |
+| `DECIDED` | the newest 3 of: ledger entries said in this chat, goals and json-board intents fulfilled in it (`fulfilled_conv`), coproc `decide()` records made in it |
+| `OPEN` | the newest 3 goals (`convs`) or json-board intents (`conv`) planted in this chat and still open |
+| `STABLE` | up to 3 facts (coproc `remember()` values, ledger lines) seen in at least 3 chats over at least 2 days, never given another value, about a focus entity |
+| `SINCE YOUR LAST MESSAGE` | up to 3 lines (200 chars) on focus entities moved after this chat's last delivered turn by code, scripts or other chats |
+| `ALERT` | at most 2 per turn; the rest ride the next turns |
+| `MORE` | the pull pointer (`state(section=...)`, `query`, `entity_read`), only when the request carries tools |
+
+Every record line ends with its source and age: `just now` (under 5 min),
+`N min ago`, `Nh ago` (under 12 h), `this morning` / `this afternoon` /
+`yesterday`, `N days ago` (under 7), then the date. The whole block stays
+within 900 chars (lines that do not fit are dropped, least important
+first), an empty section is omitted, and a chat with nothing on record gets
+no block. It is sent every turn while it has content (no 8-turn delta
+gate); it replaces WHERE WE ARE, the entity diff and the open-intentions
+block on that path. Raw event numbers, command counts, class proposals and
+tracks stay behind `state(section=...)`.
+
 WHERE WE ARE's tracks are entities too: `track: f:x — said N · observed M,
 last 2h ago; latest: <the newest sentence that moved it>`, with boundary
 alerts on the mention count, and the now-line listing the entities moved

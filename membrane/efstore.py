@@ -133,7 +133,7 @@ def matches(d: dict, eq: dict | None) -> bool:
 # session, several times a round, over 20k+ events. Equality on an indexed
 # field now jumps to its rows -- in the collection's own order, built lazily
 # (after the boot load), kept by every write. Same results, by construction.
-SCAN_INDEX: dict[str, tuple[str, ...]] = {"events": ("session",)}
+SCAN_INDEX: dict[str, tuple[str, ...]] = {"events": ("session", "conv")}   # conv: #429
 _NOPE = object()
 # THE RANGE INDEX (the banner's 'tracks' 1-19 s a round): changes_since()
 # asks entity_deltas for seq > N -- a walk over 160k+ rows every round. A
