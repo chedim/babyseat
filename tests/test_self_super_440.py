@@ -1,6 +1,6 @@
 """#440 part 4: THE SEAT SUPERVISES BLURP'S PROCESS (membrane.self_super).
 
-Behind MEMBRANE_SELF_PROC=1 (default off: the seat runs the in-process loop
+Behind MEMBRANE_SELF_PROC (default ON since #440 part 5; =0 keeps the in-process loop
 as before). With the flag on the seat does not start the in-process loop: a
 supervisor spawns membrane.self_proc only while Blurp's mode is on or watch,
 restarts it on a crash (2 s, doubling, capped at 60 s), holds it off after 5
@@ -78,7 +78,7 @@ def test_the_backoff_is_capped():
 # ---- flag off: nothing changes --------------------------------------------------------------
 
 def test_with_the_flag_off_the_seat_runs_the_loop_in_process(monkeypatch):
-    monkeypatch.delenv(SUP.FLAG, raising=False)
+    monkeypatch.setenv(SUP.FLAG, "0")            # #440 part 5: unset now means on; "0" is off
     srv = _felt()
     started = []
     monkeypatch.setattr(SL, "start", lambda s: started.append(s))

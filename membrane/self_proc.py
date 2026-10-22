@@ -1,4 +1,4 @@
-"""BLURP IN ITS OWN PROCESS (#440 part 3), behind MEMBRANE_SELF_PROC=1.
+"""BLURP IN ITS OWN PROCESS (#440 part 3); the seat starts it by default since part 5 (MEMBRANE_SELF_PROC=0 keeps the loop in the seat).
 
 Blurp's cycles are pure Python over its record; inside the seat they hold
 the GIL the /v1 proxy needs. This module is the child that runs them in a
@@ -424,7 +424,8 @@ def spawn(seat_url: str, data_dir, env: dict | None = None, log_path=None, wait_
                      os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_CLOEXEC, 0o600)
     argv = [sys.executable, "-m", "membrane.self_proc", "--seat", str(seat_url), "--data-dir", str(data_dir)]
     try:
-        pid = os.posix_spawn(sys.executable, argv, dict(os.environ if env is None else env),
+        child_env = dict(os.environ, **{FLAG: "1"}) if env is None else dict(env)   # the seat's own env: the child's flag set
+        pid = os.posix_spawn(sys.executable, argv, child_env,
                              file_actions=[(os.POSIX_SPAWN_DUP2, in_r, 0), (os.POSIX_SPAWN_DUP2, out_w, 1),
                                            (os.POSIX_SPAWN_DUP2, log_fd, 2)])
     except Exception:
