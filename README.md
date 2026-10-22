@@ -1,5 +1,7 @@
 ![babyseat](docs/logo/logo-1280x640.png)
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23550667.svg)](https://doi.org/10.5281/zenodo.23550667)
+
 **Talk to it. It remembers.**
 
 babyseat is an AI seat with a memory that learns in real time. Everything you
@@ -583,3 +585,11 @@ move. Licensing: **PolyForm Noncommercial 1.0.0** (see [LICENSE](LICENSE)) —
 free to use, modify and share for any noncommercial purpose (personal, hobby,
 research, education, charities and public institutions); commercial use needs
 the author's written permission — ask.
+
+## Cite
+
+If you use babyseat in research, please cite it. The citation metadata is in
+[CITATION.cff](CITATION.cff) (GitHub's "Cite this repository" reads it), and
+every release is archived on Zenodo under the concept DOI
+[10.5281/zenodo.23550667](https://doi.org/10.5281/zenodo.23550667), which
+always resolves to the newest version.
