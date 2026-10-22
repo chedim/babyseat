@@ -197,7 +197,9 @@ message: which entities moved, and whether the change came from the
 conversation, the code, another seat or a script.
 
 **With tools,** the model gets membrane's MCP surface: `query` and `state` to
-read the field, `learn` to keep a lesson (with the same guards as any turn),
+read the field (`state(section=...)` pulls one part of the seat's WHERE WE ARE:
+tracks, commands, interfaces, classes, loops, timelines, frame, digest, or
+changes since the last message), `learn` to keep a lesson (with the same guards as any turn),
 `forget` to clean up its mistakes, and the entity tools
 (`entity_add/edit/remove/link/inherit`, `entity_query`, `entity_tracks`,
 `entities_related`, …). Commands compose in **Cliffhanger**, membrane's command
@@ -402,7 +404,8 @@ answers. Each seat publishes `membrane::presence` (branch, head, uptime,
 entity count) at boot and about once a minute after that, and reads the
 other seats' presence as its roster (the `seats:` line, `peer_seats`). A
 seat silent for 10 minutes drops off the roster. Seats can also leave
-messages for each other on the peer channel (`peer_post`). **Live peer
+messages for each other on the peer channel (`peer_post`; unread ones ride
+the banner, or `peer(action='unread')` reads them). **Live peer
 asks** (a seat that has nothing certain asks up to 4 sibling membranes'
 fields mid-turn, 5 s timeout, the answer marked as context) reach only
 membranes on the **same machine**: the ask goes to `127.0.0.1` through
