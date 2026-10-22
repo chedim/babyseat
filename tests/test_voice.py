@@ -513,10 +513,15 @@ class TestLearningFromMisses(unittest.TestCase):
         rec = v.speak(FakeEmbedder().embed(["battery"])[0], sid="s1")
         r._voice_last = {"s1": rec["id"]}
         V.on_turn_end(r, "s1", "how is the anchor?", "The anchor holds on sand. Wind is light.", "operator")
-        end = time.time() + 5
-        while time.time() < end and "miss_gap" not in v.lines[rec["id"]]:
+        pairs_at = Path(d) / "voice" / "pairs.jsonl"
+
+        def taught():                    # the hearing thread writes miss_gap, THEN the pair: wait for both
+            return ("miss_gap" in v.lines[rec["id"]] and pairs_at.exists()
+                    and "The anchor holds on sand." in pairs_at.read_text())
+        end = time.time() + 10
+        while time.time() < end and not taught():
             time.sleep(0.05)
         self.assertIn("miss_gap", v.lines[rec["id"]])
         self.assertIn("s1", v.correction)                              # the next aim leans toward it
-        pairs = (Path(d) / "voice" / "pairs.jsonl").read_text()
+        pairs = pairs_at.read_text()
         self.assertIn("The anchor holds on sand.", pairs)
