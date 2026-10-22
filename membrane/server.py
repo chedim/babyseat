@@ -3270,6 +3270,20 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # (read-only; the gate above ran first)
                 from . import self_sheet as _SHEET
                 self._json_out(_SHEET.card(getattr(runner, "srv", None) if runner is not None else None))
+            elif path == "/membrane/self/context":
+                # #440 part 2: the per-cycle snapshot Blurp's own process reads
+                # (self_api.context; the in-process loop calls the same code).
+                # The seat's own token (or open mode) only: never a person's
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if self._jwt_person() is not None:
+                    return self._json_err(403, "for the seat's own token")
+                if psrv is None:
+                    return self._json_err(503, "no seat")
+                from . import self_api as _SAPI
+                _q = urllib.parse.parse_qs(self.path.partition("?")[2])
+                self._json_out(_SAPI.context(psrv, spots=_q.get("spot") or (),
+                                             reach=(_q.get("reach") or [""])[0] in ("1", "true"),
+                                             only=(_q.get("only") or [None])[0]))
             elif path == "/membrane/toybox/state":
                 # #249: the toy dock's live source -- the toys alone, cheap
                 # enough to poll every few seconds (read-only, gated)
@@ -3339,6 +3353,23 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     from . import self_sheet as _SHEET           # #249: the dock shows the poke at once
                     _SHEET.forget_dock(getattr(runner, "srv", None) if runner is not None else None)
                 return self._json_out(out, code=200 if out.get("ok") else 400)
+            if path == "/membrane/self/effects":
+                # #440 part 2: the cycle's acts, run in the seat in order
+                # (self_api.effects; the in-process loop calls the same code):
+                # {"effects": [...]} -> {"results": [...]}. The seat's own
+                # token (or open mode) only: never a person's
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if self._jwt_person() is not None:
+                    return self._json_err(403, "for the seat's own token")
+                if psrv is None:
+                    return self._json_err(503, "no seat")
+                from . import self_api as _SAPI
+                b = self._read_body()
+                try:
+                    res = _SAPI.effects(psrv, b.get("effects") if isinstance(b, dict) else None)
+                except ValueError as e:
+                    return self._json_out({"error": str(e)}, code=400)
+                return self._json_out({"results": res})
             if path == "/membrane/self/chat":
                 # #337: the caller's private chat with Blurp (the PM with
                 # Blurp), made on first use -- the session row (marked blurp).

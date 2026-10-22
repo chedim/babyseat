@@ -443,6 +443,15 @@ The loop, the panel's switch, accept and growth limit, the toy unlocks,
 energy and the chat thing's tempo all write through it, so the files can
 later be owned by Blurp's own process (#440).
 
+The cycle crosses the seat through two routes (#440 part 2,
+`membrane/self_api.py`), already in-process: `GET /membrane/self/context`
+(once a cycle: the current, its own position, the things in its world, the
+pause and the CPU share; on request the spots it can reach and the vectors it
+asks for; at most 256 KB of JSON, cut to fit with a `dropped` note) and
+`POST /membrane/self/effects` (its acts, run in the seat in order: its
+position, nudges at other things, chat out). Both are for the seat's own
+token: a person's token gets a 403.
+
 Its toys' state lives next door, in `<data dir>/toybox/` (see [Toys](#toys)),
 and is kept across a restart too.
 
