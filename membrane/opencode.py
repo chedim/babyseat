@@ -1587,16 +1587,21 @@ def main() -> None:
                 if not key:
                     continue
                 if prov.get("kind") == "agent-sdk":
-                    # issue #384: Claude through the Agent SDK -- no key, no
-                    # listing; opt-in rungs with membrane's tools only,
-                    # learned like any model (membrane/claude_agent.py)
+                    # issue #384: Claude through the Agent SDK -- no listing;
+                    # on the anthropic API key by default (#413), the CLI
+                    # login only as an explicit opt-in; opt-in rungs with
+                    # membrane's tools only, learned like any model
+                    # (membrane/claude_agent.py)
                     try:
                         from . import claude_agent as _CA
                         _CA.register_rungs(srv.router)
                         srv.cloud_models.append(pname)
                         try:
                             _CA.check_available()
-                            _ok = "SDK + CLI found"
+                            _ok = ("CLI login (development opt-in)"
+                                   if _CA.auth_mode() == _CA.MODE_LOGIN
+                                   else "Anthropic API key")
+                            _ok = f"SDK + CLI found, {_ok}"
                         except _CA.Unavailable as _ue:
                             _ok = f"NOT usable yet: {_ue}"
                         print(f"[opencode] {pname}: rungs "

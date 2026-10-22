@@ -439,8 +439,9 @@ def _auth(argv: list[str]) -> int:
     """`membrane auth <provider>`: store a cloud API key outside the repo.
 
     Providers come from auth.PROVIDERS (anthropic, openrouter, gemini, groq,
-    github, mistral; claude-agent from auth.AGENT_PROVIDERS needs no key --
-    it checks the `claude` CLI login, issue #384). The key goes to
+    github, mistral; claude-agent from auth.AGENT_PROVIDERS stores no key of
+    its own -- it runs on the anthropic key, issues #384 / #413). The key
+    goes to
     ~/.membrane/auth.json (600); the
     provider's env var always wins over the stored value (the shell is the
     louder authority). Probes the provider's model listing on success so a
@@ -450,7 +451,7 @@ def _auth(argv: list[str]) -> int:
     import getpass as _getpass
     provider = argv[0] if argv and not argv[0].startswith("-") else None
     if provider in AGENT_PROVIDERS:
-        return _auth_claude_agent(provider)
+        return _auth_claude_agent(provider, "--login" in argv[1:])
     if not provider or provider not in PROVIDERS:
         provs = ", ".join(sorted(PROVIDERS) + sorted(AGENT_PROVIDERS))
         print(f"usage: membrane auth <{provs}>   "
@@ -493,18 +494,38 @@ def _auth(argv: list[str]) -> int:
     return 0
 
 
-def _auth_claude_agent(provider: str) -> int:
-    """`membrane auth claude-agent` (issue #384): no key. Checks that the
-    Claude Agent SDK is installed and that the `claude` CLI is installed
-    and logged in, then stores only a non-secret mark that enables the
-    rungs at the next boot. The login stays the CLI's own."""
+def _auth_claude_agent(provider: str, login: bool = False) -> int:
+    """`membrane auth claude-agent` (issues #384, #413): enables the rungs
+    on the Anthropic API key (the default): checks that the Claude Agent
+    SDK is installed, that the CLI it drives is found, and that a key is set
+    (ANTHROPIC_API_KEY or `membrane auth anthropic`), then stores only the
+    non-secret mode mark. The key is never printed and never copied.
+
+    `--login` (development / personal use only): the `claude` CLI's own
+    login instead -- checks `claude auth status` and stores the opt-in mark.
+    The login stays the CLI's own; membrane never reads its token."""
     from . import claude_agent as CA
-    from .auth import save_api_key
+    from .auth import save_api_key, has_key
     try:
         CA.load_sdk()
     except CA.Unavailable as e:
         print(f"[membrane] {e}", file=sys.stderr)
         return 1
+    if not login:
+        if not has_key(CA.KEY_PROVIDER):
+            print(f"[membrane] claude-agent: no Anthropic API key; "
+                  f"{CA.KEY_HINT}", file=sys.stderr)
+            return 1
+        if not CA.find_cli():
+            print(f"[membrane] claude-agent: the `claude` CLI was not found; "
+                  f"{CA.CLI_HINT}", file=sys.stderr)
+            return 1
+        p = save_api_key(provider, CA.MODE_KEY)
+        print(f"[membrane] claude-agent: enabled with your Anthropic API key "
+              f"(ANTHROPIC_API_KEY, else the stored `membrane auth anthropic` "
+              f"key); mode mark stored in {p}, no key copied")
+        _claude_agent_rungs_line(CA)
+        return 0
     st = CA.cli_status()
     if not st.get("installed"):
         print(f"[membrane] claude-agent: the `claude` CLI was not found; "
@@ -517,16 +538,22 @@ def _auth_claude_agent(provider: str) -> int:
               + "; run `claude` (or `claude auth login`) once, then this "
                 "command again", file=sys.stderr)
         return 1
-    p = save_api_key(provider, CA.ENABLED_MARK)
+    p = save_api_key(provider, CA.MODE_LOGIN)
     plan = f", {st['plan']} plan" if st.get("plan") else ""
     print(f"[membrane] claude-agent: `claude` is logged in "
-          f"({st.get('method') or 'login'}{plan}); enabled in {p} "
-          f"(no key or token stored)")
+          f"({st.get('method') or 'login'}{plan}); the CLI login is enabled "
+          f"in {p} for development / personal use (no key or token stored; "
+          f"`membrane auth claude-agent` without --login goes back to the "
+          f"API key)")
+    _claude_agent_rungs_line(CA)
+    return 0
+
+
+def _claude_agent_rungs_line(CA) -> None:
     print(f"[membrane] rungs at the next boot: "
           f"{', '.join(CA.rung_names())} -- opt-in: pick one, or add it to "
           f"the ladder with --ladder-include <rung>; Claude gets only "
           f"membrane's tools; its replies are learned like any model's")
-    return 0
 
 
 def _doctor() -> int:
@@ -617,7 +644,9 @@ def main() -> None:
         "             project (creds go to ~/.membrane/projects/, not the repo)\n"
         "  auth       store a cloud API key (anthropic, openrouter, gemini,\n"
         "             groq, github, zen, mistral): ~/.membrane/auth.json (600);\n"
-        "             its models become routable rungs + picker entries\n"
+        "             its models become routable rungs + picker entries;\n"
+        "             `auth claude-agent` enables Claude through the Agent SDK\n"
+        "             on the anthropic key (docs/claude-agent.md)\n"
         "  move       move the entity field's collections (cb->cb, cb->json\n"
         "             dumps); see --help for endpoint forms\n"
         "  migrate    interactive migration front door: detects where this\n"

@@ -111,15 +111,24 @@ def fake_sdk(words=("Hello ", "world"), error=None):
     return mod
 
 
+def key_fixture():
+    """The rung's credential (#413: an API key by default) as a fixture:
+    a fake key, never the real home's store or the shell's key."""
+    return mock.patch.object(CA, "credential_env",
+                             lambda *a, **k: {"ANTHROPIC_API_KEY": "sk-ant-test-fixture"})
+
+
 class _SDKCase(unittest.TestCase):
-    """Every test runs against a stubbed SDK and a CLI that 'exists'."""
+    """Every test runs against a stubbed SDK, a CLI that 'exists' and a
+    fake API key (#413)."""
 
     words = ("Hello ", "world")
 
     def setUp(self):
         self.sdk = fake_sdk(self.words)
         self._p = [mock.patch.dict(sys.modules, {"claude_agent_sdk": self.sdk}),
-                   mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude")]
+                   mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude"),
+                   key_fixture()]
         for p in self._p:
             p.start()
 
@@ -233,7 +242,7 @@ class TestMissing(unittest.TestCase):
         self.assertFalse(st["installed"])
         self.assertFalse(st["logged_in"])
 
-    def test_auth_command_checks_and_stores_nothing_secret(self):
+    def test_auth_login_opt_in_checks_and_stores_nothing_secret(self):
         from membrane import cli as C
         home = Path(self._tmp())
         st = {"installed": True, "logged_in": True, "method": "claude.ai",
@@ -241,13 +250,13 @@ class TestMissing(unittest.TestCase):
         with mock.patch.object(CA, "cli_status", lambda **k: st), \
                 mock.patch.object(Path, "home", lambda: home), \
                 mock.patch.dict(sys.modules, {"claude_agent_sdk": fake_sdk()}):
-            rc = C._auth(["claude-agent"])
+            rc = C._auth(["claude-agent", "--login"])
         self.assertEqual(rc, 0)
         store = json.loads((home / ".membrane" / "auth.json").read_text())
-        self.assertEqual(store.get("claude-agent"), CA.ENABLED_MARK)
+        self.assertEqual(store.get("claude-agent"), CA.MODE_LOGIN)
         self.assertTrue(A.has_key("claude-agent", home=home, environ={}))
 
-    def test_auth_command_refuses_without_login(self):
+    def test_auth_login_opt_in_refuses_without_login(self):
         from membrane import cli as C
         home = Path(self._tmp())
         st = {"installed": True, "logged_in": False, "method": "",
@@ -255,7 +264,7 @@ class TestMissing(unittest.TestCase):
         with mock.patch.object(CA, "cli_status", lambda **k: st), \
                 mock.patch.object(Path, "home", lambda: home), \
                 mock.patch.dict(sys.modules, {"claude_agent_sdk": fake_sdk()}):
-            rc = C._auth(["claude-agent"])
+            rc = C._auth(["claude-agent", "--login"])
         self.assertNotEqual(rc, 0)
         self.assertFalse((home / ".membrane" / "auth.json").exists())
 

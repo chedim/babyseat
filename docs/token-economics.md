@@ -102,8 +102,8 @@ load. Scoring:
   (`membrane auth <provider>` or its env var) registers its models as cloud
   rungs at boot (OpenAI-compatible chat, memory-only keys).
   `auth.AGENT_PROVIDERS` holds the providers that are not APIs. Today that
-  is `claude-agent`: Claude through the Agent SDK and the local `claude`
-  CLI login, with no key. Its rungs (`claude-agent:sonnet|opus|haiku`) are
+  is `claude-agent`: Claude through the Agent SDK, run on the `anthropic`
+  API key. Its rungs (`claude-agent:sonnet|opus|haiku`) are
   **opt-in**: autoselect, the ceiling and the failover ladder skip them
   unless you pin one or name it with `--ladder-include`. Claude gets only
   membrane's own tools, background lanes never use them, and their replies

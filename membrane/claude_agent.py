@@ -1,9 +1,8 @@
 """THE CLAUDE-AGENT RUNG (issue #384): Claude through the Claude Agent SDK.
 
 The SDK (`claude-agent-sdk`, an OPTIONAL extra: `pip install
-'babyseat[claude-agent]'`) drives the local `claude` CLI with that CLI's own
-login. membrane never reads the login's token and never calls an Anthropic
-API itself: a turn routed to a `claude-agent:<model>` rung is handed to the
+'babyseat[claude-agent]'`) drives the `claude` CLI (the SDK bundles one).
+membrane never calls an Anthropic API itself: a turn routed to a `claude-agent:<model>` rung is handed to the
 SDK's query() -- the turn's system messages as the system prompt, the rest
 as the prompt -- and the reply comes back as an ordinary OpenAI chat
 response, streamed (chat.completion.chunk SSE lines) or buffered.
@@ -40,8 +39,23 @@ Opt-in: the router never escalates to a claude-agent rung on its own (see
 router.OPT_IN_BACKENDS); the operator pins it or adds it to the ladder
 (--ladder-include). Background lanes never use it.
 
-Policy note: this relies on Anthropic allowing Agent SDK use with a Claude
-plan login; see docs/claude-agent.md.
+THE API KEY (issue #413, a release gate): the rung authenticates with an
+Anthropic API key by default -- the one membrane already reads
+(ANTHROPIC_API_KEY, else `membrane auth anthropic`'s store) -- handed to the
+CLI subprocess as ANTHROPIC_API_KEY in ClaudeAgentOptions.env (the SDK merges
+options.env over the inherited environment). In that mode the credentials
+the CLI ranks ABOVE the key (ANTHROPIC_AUTH_TOKEN, the Bedrock / Vertex /
+Foundry switches) and CLAUDE_CODE_OAUTH_TOKEN are blanked, so the CLI cannot
+fall back to a login: with the key in its env the CLI reports
+authMethod "api_key" even where a claude.ai login is stored. No key: the rung
+refuses (Unavailable, KEY_HINT) and no model is called. The key is never
+printed, logged or written anywhere new; an error text is scrubbed of it.
+
+The CLI's own login is a development / personal opt-in only (`membrane auth
+claude-agent --login`, mark MODE_LOGIN): never chosen silently. In that mode
+ANTHROPIC_API_KEY is blanked so the login answers; membrane still never reads
+the login's token. The old `cli-login` mark (stored before #413 with no
+choice offered) is NOT the opt-in: it means the default, the API key.
 """
 from __future__ import annotations
 
@@ -60,12 +74,24 @@ RUNG_PREFIX = PROVIDER + ":"
 DEFAULT_MODELS = ("sonnet", "opus", "haiku")   # the CLI's own model aliases
 MARK_KEY = "madeBy"                 # transcript rows: info[MARK_KEY] == PROVIDER
 RESP_KEY = "membrane_provider"      # proxy responses/chunks: the answering provider
-ENABLED_MARK = "cli-login"          # what `membrane auth claude-agent` stores:
-                                    # not a secret, only "use the CLI's login"
+MODE_KEY = "api-key"                # `membrane auth claude-agent`: the default
+MODE_LOGIN = "login"                # `... --login`: the CLI's login (opt-in)
+ENABLED_MARK = MODE_KEY             # the mark the plain command stores (not a secret)
+KEY_PROVIDER = "anthropic"          # auth.load_api_key's row for the key
+KEY_ENV = "ANTHROPIC_API_KEY"       # how the CLI subprocess gets the key
+# credentials the CLI would use instead of ANTHROPIC_API_KEY: blanked in the
+# subprocess env so the mode is what it says (#413)
+OVERRIDING_ENV = ("ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK",
+                  "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
+LOGIN_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)   # a login token: never in key mode
+KEY_HINT = ("run `membrane auth anthropic` (or set ANTHROPIC_API_KEY), then "
+            "`membrane auth claude-agent`")
 INSTALL_HINT = ("pip install 'babyseat[claude-agent]' (or: pip install "
                 "claude-agent-sdk)")
-LOGIN_HINT = ("install Claude Code, run `claude` once to log in, then "
-              "`membrane auth claude-agent`")
+CLI_HINT = ("reinstall the SDK (it bundles the `claude` CLI) or install "
+            "Claude Code, then `membrane auth claude-agent`")
+LOGIN_HINT = ("run `claude` once to log in, then "
+              "`membrane auth claude-agent --login`")
 STATUS_TIMEOUT_S = 20
 MAX_TURNS = 4                       # agent turns per answer (#389; approved
                                     # 2026-10-21, with Continue)
@@ -228,13 +254,53 @@ def find_cli() -> str | None:
     return None
 
 
+def auth_mode(home=None, environ=None) -> str:
+    """MODE_LOGIN only on the explicit opt-in (the mark `membrane auth
+    claude-agent --login` stores, or MEMBRANE_CLAUDE_AGENT=login); anything
+    else -- the old `cli-login` mark included -- is MODE_KEY (#413)."""
+    from . import auth as _auth
+    mark = _auth.load_api_key(PROVIDER, home, environ).strip().lower()
+    return MODE_LOGIN if mark == MODE_LOGIN else MODE_KEY
+
+
+def credential_env(home=None, environ=None) -> dict:
+    """The CLI subprocess's credential env (ClaudeAgentOptions.env). Key
+    mode: ANTHROPIC_API_KEY = the key, every credential that would win over
+    it or stand in for it blanked; no key -> Unavailable(KEY_HINT). Login
+    mode: ANTHROPIC_API_KEY blanked so the CLI's own login answers."""
+    from . import auth as _auth
+    blank = {k: "" for k in OVERRIDING_ENV}
+    if auth_mode(home, environ) == MODE_LOGIN:
+        return {**blank, KEY_ENV: ""}
+    key = _auth.load_api_key(KEY_PROVIDER, home, environ)
+    if not key:
+        raise Unavailable(f"claude-agent: no Anthropic API key; {KEY_HINT}")
+    return {**blank, **{k: "" for k in LOGIN_ENV}, KEY_ENV: key}
+
+
+def scrub(text) -> str:
+    """`text` with the Anthropic key masked: for every error or log line
+    that may echo what the SDK or the CLI said."""
+    text = str(text)
+    try:
+        from . import auth as _auth
+        key = _auth.load_api_key(KEY_PROVIDER)
+    except Exception:
+        key = ""
+    if key and key in text:
+        text = text.replace(key, _auth.mask(key))
+    return text
+
+
 def check_available():
-    """Raise Unavailable (with what to do) unless the SDK and the CLI are
-    both here. Returns the SDK module."""
+    """Raise Unavailable (with what to do) unless the SDK, the CLI and the
+    credentials (the API key, or the login opt-in) are all here. Returns
+    the SDK module."""
     sdk = load_sdk()
     if not find_cli():
         raise Unavailable(f"claude-agent: the `claude` CLI was not found; "
-                          f"{LOGIN_HINT}")
+                          f"{LOGIN_HINT if auth_mode() == MODE_LOGIN else CLI_HINT}")
+    credential_env()
     return sdk
 
 
@@ -350,10 +416,11 @@ def build_mcp_server(sdk, port):
 
 
 def build_options(sdk, system: str, model: str, stream: bool, port=None,
-                  resume=None):
+                  resume=None, env=None):
     extra = {"resume": str(resume)} if resume else {}   # Continue: the same session
     return sdk.ClaudeAgentOptions(
         **extra,
+        env=credential_env() if env is None else dict(env),   # the key (#413)
         system_prompt=system or None,
         tools=[],                  # Claude Code's built-in tools: off
         allowed_tools=tool_names(),  # only membrane's tools (#389)
@@ -390,11 +457,12 @@ def _bare(name: str) -> str:
     return n[len(TOOL_PREFIX):] if n.startswith(TOOL_PREFIX) else n
 
 
-async def _consume(sdk, messages, model, stream, put, port=None, resume=None):
+async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
+                   env=None):
     system, prompt = split_messages(messages)
     if resume:
         prompt = CONTINUE_PROMPT         # the session already holds the task
-    opts = build_options(sdk, system, model, stream, port, resume)
+    opts = build_options(sdk, system, model, stream, port, resume, env)
     partial = False
     pending: dict = {}                   # tool_use id -> (name, input)
     session = str(resume or "")
@@ -460,13 +528,16 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
     The async SDK runs on its own thread and loop (the proxy's handler
     threads are synchronous); an SDK error re-raises here."""
     sdk = sdk or check_available()
+    env = credential_env()                  # no key -> Unavailable, no call
     q: queue.Queue = queue.Queue()
 
     def run():
         try:
-            asyncio.run(_consume(sdk, messages, model, stream, q.put, port, resume))
-        except BaseException as e:          # carried to the reader
-            q.put(("error", e))
+            asyncio.run(_consume(sdk, messages, model, stream, q.put, port, resume,
+                                 env))
+        except BaseException as e:          # carried to the reader, key-free
+            clean = scrub(e)
+            q.put(("error", e if clean == str(e) else RuntimeError(clean)))
         finally:
             q.put(_END)
 
@@ -499,7 +570,7 @@ def _chunk(model: str, delta: dict, finish=None, usage=None, tool=None,
 
 
 def _error_text(e: BaseException) -> str:
-    return f"[claude-agent] the turn failed: {str(e)[:300]}"
+    return f"[claude-agent] the turn failed: {scrub(e)[:300]}"
 
 
 class SSEReply:
@@ -554,7 +625,7 @@ class SSEReply:
                 yield _chunk(self.model, d)
                 yield b"\n"
         except Exception as e:
-            print(f"[claude-agent] {e}", file=sys.stderr)
+            print(f"[claude-agent] {scrub(e)}", file=sys.stderr)
             self.failed = True
             yield _chunk(self.model, {"role": "assistant", "content": _error_text(e)})
             yield b"\n"
@@ -601,7 +672,7 @@ class JSONReply:
                 elif kind == "usage":
                     usage = val
         except Exception as e:
-            print(f"[claude-agent] {e}", file=sys.stderr)
+            print(f"[claude-agent] {scrub(e)}", file=sys.stderr)
             self.failed = True
             text = [_error_text(e)]
         msg = {"role": "assistant", "content": "".join(text)}

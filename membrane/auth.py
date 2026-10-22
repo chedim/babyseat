@@ -158,10 +158,12 @@ PROVIDERS: dict[str, dict] = {
 }
 
 # ---- the agent-SDK providers (beside PROVIDERS, not API rows) ----------------
-# Claude through the Claude Agent SDK (issue #384): NOT an API. The SDK
-# drives the local `claude` CLI with that CLI's own login; membrane never
-# holds a key or token for it. `membrane auth claude-agent` checks the CLI
-# and stores only a non-secret "enabled" mark. The rungs are opt-in
+# Claude through the Claude Agent SDK (issue #384): NOT an API row. The SDK
+# drives the `claude` CLI; by default (#413) the CLI runs on the anthropic
+# row's API key, handed to it in the SDK's options env -- no key of its own.
+# `membrane auth claude-agent` checks that key exists and stores only a
+# non-secret mode mark (`--login`: the CLI's own login, a development opt-in;
+# membrane never reads its token). The rungs are opt-in
 # (router.OPT_IN_BACKENDS); Claude gets only membrane's own tools, and its
 # replies are learned like any model's (#389; membrane/claude_agent.py,
 # docs/claude-agent.md).
@@ -174,7 +176,7 @@ AGENT_PROVIDERS: dict[str, dict] = {
         "auth_style": "none",
         "env": ("MEMBRANE_CLAUDE_AGENT",),
         "default_price": None,
-        "key_hint": "no key: the `claude` CLI's own login",
+        "key_hint": "no key of its own: the anthropic API key",
     },
 }
 
