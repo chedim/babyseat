@@ -21,6 +21,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -1055,11 +1056,15 @@ def _digest_lines(srv, drain: bool = True) -> list[str]:
 
 
 def _injection_mode(srv) -> str:
-    """'massage' (the field's words, picked) or 'banner' (the old state block)."""
+    """'massage' (the field's words, picked), 'conversation' (THIS
+    CONVERSATION, #429: the chat's own state, conv_banner.py) or 'banner'
+    (the old state block)."""
     # the BANNER stays the default until the massage is proven on the live
-    # field (it picked nothing there and left the seat without context)
+    # field (it picked nothing there and left the seat without context), and
+    # until the conversation block is measured (#429)
     m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "banner")
-    return "massage" if str(m).strip().lower() == "massage" else "banner"
+    m = str(m).strip().lower()
+    return m if m in ("massage", "conversation") else "banner"
 
 
 def _note_massage(srv, stats: dict) -> None:
@@ -1626,6 +1631,15 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = "",
             goal = e
             break
     created = False
+    from .capture import conversation_now
+    _conv = conversation_now()              # #429: the chats a goal was planted in
+    if goal is not None and _conv and _conv not in ((goal.properties or {}).get("convs") or []):
+        goal.properties = {**(goal.properties or {}),
+                           "convs": list((goal.properties or {}).get("convs") or []) + [_conv]}
+        try:
+            est.upsert(goal, embedder=None)
+        except Exception:
+            pass
     if goal is not None and planted_by == "operator" and \
             (goal.properties or {}).get("planted_by") != "operator":
         # the operator re-planting the seat's own goal makes it theirs too
@@ -1644,7 +1658,8 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = "",
             properties={"name": (text or "")[:120], "summary": (text or "")[:600],
                         "status": "open", "born": time.time(),
                         # outcome learning: whose goal (operator / auto / loop / model / script:x)
-                        "planted_by": planted_by or "model"},
+                        "planted_by": planted_by or "model",
+                        **({"convs": [_conv]} if _conv else {})},
         )
         try:
             # THE STEERING COORDINATE (the pin half's fix, the loop's
@@ -1740,6 +1755,9 @@ def _intent_cmd(srv, q: str) -> str:
                 goal.properties["status"] = "fulfilled"
                 goal.properties["fulfilled_ts"] = time.time()
                 goal.properties["fulfilled_by"] = "operator"     # the frame is the operator's own close
+                from .capture import conversation_now
+                if conversation_now():
+                    goal.properties["fulfilled_conv"] = conversation_now()   # #429
                 try:
                     est.upsert(goal)
                 except Exception:
@@ -2314,7 +2332,8 @@ def _learn_report(srv, payload: str) -> str:
     ledger = getattr(srv, "user_ledger", None)
     if ledger is not None:
         try:
-            ledger.append(payload)          # the operator's verbatim words
+            from .capture import conversation_now
+            ledger.append(payload, conv=conversation_now())   # the operator's verbatim words, and the chat (#429)
         except Exception:
             pass
     _write_audit(srv.membrane, {"event": "operator-learn", "tag": _LEARN_TAG,
@@ -4071,6 +4090,91 @@ def _entity_points(srv, fld, m: int = 400) -> list[dict]:
             for i, d in enumerate(rows)]
 
 
+def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
+    """The turn's state blocks -> (ctx, the field watermark to keep once the
+    turn is delivered). MEMBRANE_INJECTION picks the block: 'banner' (the
+    default: WHERE WE ARE behind its delta gate, the entity diff, the open
+    intentions), 'massage', or 'conversation' (#429: THIS CONVERSATION,
+    sent every turn while it has content; it replaces all three)."""
+    mark = mark or (lambda name: None)
+    _st = types.SimpleNamespace(mark=mark)
+    _is_tool_round = is_tool_round
+    ctx = None
+    if _injection_mode(srv) == "conversation":
+        fld = _efield_on(srv)
+        efield_mark = None
+        if fld is not None:
+            try:
+                from .entity_block import watermark
+                efield_mark = watermark(fld)
+            except Exception as e:
+                print(f"[efield] watermark error: {e}", file=sys.stderr)
+        if not getattr(srv, "no_banner", False):
+            try:
+                from . import conv_banner as _CB
+                ctx = _CB.build(srv, body, _CAPMOD.current_conversation(),
+                                on_alert=lambda ln: speak(srv, ln, kind="alert"))
+            except Exception as e:
+                print(f"[conv-banner] error: {e}", file=sys.stderr)
+        mark("recall+banner")
+        return ctx, efield_mark
+    _massage = _injection_mode(srv) == "massage"
+    banner_block = (None if getattr(srv, "no_banner", False)
+                    else _where_delta(srv, _where_we_are(srv, vec, events_only=_massage)))
+    if banner_block:
+        ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
+    _st.mark("recall+banner")
+    srv._massage_last = None
+    if _massage and not _is_tool_round:
+        _mf = _efield_of(srv)
+        if _mf is not None:
+            try:
+                from . import massage as _MSG
+                _own = [str(m.get("content") or "") for m in (body.get("messages") or [])
+                        if isinstance(m, dict) and isinstance(m.get("content"), str)]
+                _mo = _MSG.build(_mf, query_vec=vec, exclude_texts=_own)
+                srv._massage_last = {k: _mo[k] for k in ("alignment", "tokens", "candidates")}
+                srv._massage_last["picked"] = len(_mo["picked"])
+                _note_massage(srv, srv._massage_last)
+                if _mo["block"]:
+                    ctx = (ctx + "\n\n" + _mo["block"]) if ctx else _mo["block"]
+            except Exception as e:
+                srv._massage_last = {"error": f"{type(e).__name__}: {e}"[:200]}
+                print(f"[massage] error: {e}", file=sys.stderr)
+    # THE ENTITY DIFF (normal mode): what changed in the entities since
+    # the last message the model processed -- code, entity scripts and
+    # other sessions quoted, this conversation's own turns counted. The
+    # watermark advances only once this turn is delivered.
+    _st.mark("massage")
+    fld = _efield_on(srv)
+    efield_mark = None
+    if fld is not None:
+        try:
+            from .entity_block import state_diff, watermark
+            efield_mark = watermark(fld)
+            if not getattr(srv, "no_context", False):
+                diff = state_diff(fld, getattr(srv, "_efield_mark", None) or efield_mark,
+                                  _own_session_prefix(srv),
+                                  include_own=not _is_tool_round)
+                if diff and not _massage:
+                    ctx = (ctx + "\n\n" + diff) if ctx else diff
+        except Exception as e:
+            print(f"[efield] diff error: {e}", file=sys.stderr)
+    _st.mark("field")
+    # THE INTENTIONS BLOCK (the plan channel rewired, 2026-10-06: the
+    # builder existed and was never called -- the OPEN INTENTIONS view
+    # and the empty-board nudge ride turns only from now; the nudge
+    # is rate-limited inside the builder).
+    if not _is_tool_round and not _massage:
+        try:
+            i_block = _intents_context_block(srv)
+            if i_block:
+                ctx = (ctx + "\n\n" + i_block) if ctx else i_block
+        except Exception as e:
+            print(f"[opencode] intent block error: {e}", file=sys.stderr)
+    return ctx, efield_mark
+
+
 class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the timing ring
     """The RAG handler + the OpenAI-compatible surface: /v1/models,
     /v1/chat/completions (the RAG gate + the internal state/math intercept),
@@ -5434,60 +5538,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # the field is -- not its state verbatim. Only the EVENTS keep the
         # banner (pause, alerts, announcements, the digest, peers).
         # MEMBRANE_INJECTION=banner restores the old block (the A/B arm).
-        _massage = _injection_mode(srv) == "massage"
-        banner_block = (None if getattr(srv, "no_banner", False)
-                        else _where_delta(srv, _where_we_are(srv, vec, events_only=_massage)))
-        if banner_block:
-            ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
-        _st.mark("recall+banner")
-        srv._massage_last = None
-        if _massage and not _is_tool_round:
-            _mf = _efield_of(srv)
-            if _mf is not None:
-                try:
-                    from . import massage as _MSG
-                    _own = [str(m.get("content") or "") for m in (body.get("messages") or [])
-                            if isinstance(m, dict) and isinstance(m.get("content"), str)]
-                    _mo = _MSG.build(_mf, query_vec=vec, exclude_texts=_own)
-                    srv._massage_last = {k: _mo[k] for k in ("alignment", "tokens", "candidates")}
-                    srv._massage_last["picked"] = len(_mo["picked"])
-                    _note_massage(srv, srv._massage_last)
-                    if _mo["block"]:
-                        ctx = (ctx + "\n\n" + _mo["block"]) if ctx else _mo["block"]
-                except Exception as e:
-                    srv._massage_last = {"error": f"{type(e).__name__}: {e}"[:200]}
-                    print(f"[massage] error: {e}", file=sys.stderr)
-        # THE ENTITY DIFF (normal mode): what changed in the entities since
-        # the last message the model processed -- code, entity scripts and
-        # other sessions quoted, this conversation's own turns counted. The
-        # watermark advances only once this turn is delivered.
-        _st.mark("massage")
+        ctx, efield_mark = _state_ctx(srv, body, vec, _is_tool_round, _st.mark)
         fld = _efield_on(srv)
-        efield_mark = None
-        if fld is not None:
-            try:
-                from .entity_block import state_diff, watermark
-                efield_mark = watermark(fld)
-                if not getattr(srv, "no_context", False):
-                    diff = state_diff(fld, getattr(srv, "_efield_mark", None) or efield_mark,
-                                      _own_session_prefix(srv),
-                                      include_own=not _is_tool_round)
-                    if diff and not _massage:
-                        ctx = (ctx + "\n\n" + diff) if ctx else diff
-            except Exception as e:
-                print(f"[efield] diff error: {e}", file=sys.stderr)
-        _st.mark("field")
-        # THE INTENTIONS BLOCK (the plan channel rewired, 2026-10-06: the
-        # builder existed and was never called -- the OPEN INTENTIONS view
-        # and the empty-board nudge ride turns only from now; the nudge
-        # is rate-limited inside the builder).
-        if not _is_tool_round and not _massage:
-            try:
-                i_block = _intents_context_block(srv)
-                if i_block:
-                    ctx = (ctx + "\n\n" + i_block) if ctx else i_block
-            except Exception as e:
-                print(f"[opencode] intent block error: {e}", file=sys.stderr)
         # THE SPEECH RELAY: membrane's held messages ride the next
         # model-bound request as a marked block -- the model relays them
         # into the conversation verbatim (the mouth), where they enter the
@@ -5696,6 +5748,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                   f"(the backend's own)", file=sys.stderr)
             if efield_mark is not None:
                 srv._efield_mark = efield_mark
+                from . import conv_banner as _CB
+                _CB.note_delivered(srv, _CAPMOD.current_conversation(), efield_mark)
             if thought_asks:
                 _serve_thoughts_served(srv, thought_asks)
             if w_events is not None:
@@ -7173,6 +7227,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         props["fulfilled_ts"] = time.time()
         props["fulfilled_by"] = str(body.get("by") or "listener")[:40]
         props["fulfilled_evidence"] = evidence[:500]
+        from .capture import conversation_now
+        if conversation_now():
+            props["fulfilled_conv"] = conversation_now()     # #429: the chat that closed it
         goal.properties = props
         try:
             est.upsert(goal, embedder=None)

@@ -300,8 +300,8 @@ class TestGather(unittest.TestCase):
 
     def test_focus_caps_at_five(self):
         names = " ".join(f"`d/f{i}.py`" for i in range(8))
-        _turn(self.f, "sid:a", names, ts=NOW - 900)
-        _turn(self.f, "sid:a", names, ts=NOW - 800)
+        _turn(self.f, "sid:a", "look at " + names, ts=NOW - 900)
+        _turn(self.f, "sid:a", "again " + names, ts=NOW - 800)   # two events (a same text is one)
         self.assertEqual(len(CB.focus(self.f, CB.conv_events(self.f, "sid:a"), "ok")), 5)
 
     def test_decided_comes_from_this_chats_records_newest_first(self):

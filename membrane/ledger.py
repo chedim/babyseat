@@ -59,8 +59,10 @@ class UserLedger:
                         rec = json.loads(ln)
                         t = str(rec.get("text") or "").strip()
                         if t:
-                            out.append({"ts": str(rec.get("ts") or ""),
-                                        "text": t})
+                            e = {"ts": str(rec.get("ts") or ""), "text": t}
+                            if rec.get("conv"):          # #429: the chat it was said in
+                                e["conv"] = str(rec["conv"])
+                            out.append(e)
                     except (json.JSONDecodeError, ValueError):
                         continue        # mid-edit / hand-pruned line
         except OSError:
@@ -69,14 +71,17 @@ class UserLedger:
         self._cache_key, self._entries = key, out
         return out
 
-    def append(self, text: str) -> bool:
+    def append(self, text: str, conv: str = "") -> bool:
         """One operator decision, verbatim (only edge whitespace trimmed --
-        the operator's exact words are the point). Returns True when written."""
+        the operator's exact words are the point). `conv` (#429) names the
+        chat it was said in. Returns True when written."""
         t = (text or "").strip()
         if not t:
             return False
         t = t[: self.MAX_TEXT]
         rec = {"ts": _now_iso(), "text": t}
+        if conv:
+            rec["conv"] = conv
         try:
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -84,6 +89,10 @@ class UserLedger:
             return False
         self._cache_key = None                # force re-read on next use
         return True
+
+    def entries(self) -> list[dict]:
+        """The entries, oldest first: {ts (ISO UTC), text[, conv]}."""
+        return list(self._read())
 
     # ---- recall ----
     def _vecs(self, embedder):

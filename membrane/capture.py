@@ -107,14 +107,26 @@ def conversation_key(body: dict, headers=None) -> str:
     return ""
 
 
+_LAST = {"key": ""}          # the newest chat any thread named (#429)
+
+
 def set_conversation(key: str) -> None:
     """The request thread names its conversation; every capture hook called
     on this thread afterwards stamps it on its events."""
     _CONV.key = key or ""
+    if key:
+        _LAST["key"] = key
 
 
 def current_conversation() -> str:
     return getattr(_CONV, "key", "") or ""
+
+
+def conversation_now() -> str:
+    """This thread's chat, else the newest chat any thread named: a record
+    written off the chat thread (an MCP tool's HTTP call carries no chat)
+    belongs to the chat that is talking (#429)."""
+    return current_conversation() or _LAST["key"]
 
 
 class conversation:

@@ -196,6 +196,17 @@ the things it names. On later turns it sees only what changed since the last
 message: which entities moved, and whether the change came from the
 conversation, the code, another seat or a script.
 
+**`MEMBRANE_INJECTION=conversation`** (opt-in; the default is still the
+WHERE WE ARE banner) replaces that state with one small block about *this*
+chat, built from records only (no model call), at most 900 chars, sent every
+turn while it has content: `NOW`, `WORKING ON` (the person's latest earlier
+ask), `ABOUT` (the chat's focus entities), `DECIDED` (the ledger, goals
+fulfilled and coproc decisions made in this chat), `OPEN` (goals planted in
+it), `STABLE` (facts seen in 3 chats over 2 days, never contradicted),
+`SINCE YOUR LAST MESSAGE` (focus entities moved from outside the chat),
+alerts and a pointer to `state(section=...)`. Each record line says its
+source and age, e.g. `(person · 2h ago)` ([details](docs/entity-field.md#this-conversation)).
+
 **With tools,** the model gets membrane's MCP surface: `query` and `state` to
 read the field (`state(section=...)` pulls one part of the seat's WHERE WE ARE:
 tracks, commands, interfaces, classes, loops, timelines, frame, digest, or
