@@ -1,4 +1,4 @@
-"""THE SEAT SUPERVISES BLURP'S PROCESS (#440 part 4), behind MEMBRANE_SELF_PROC=1.
+"""THE SEAT SUPERVISES BLURP'S PROCESS (#440 part 4); the default since part 5 (MEMBRANE_SELF_PROC=0 keeps the loop in the seat).
 
 With the flag off nothing changes: the seat runs Blurp's loop on a thread of
 its own (self_loop.start). With it on, the seat does not start that loop; a
@@ -60,7 +60,9 @@ def _SL():
 
 
 def enabled() -> bool:
-    return os.environ.get(FLAG) == "1"
+    """#440 part 5: Blurp's own process is the default; MEMBRANE_SELF_PROC=0
+    keeps the loop in the seat."""
+    return os.environ.get(FLAG, "1") != "0"
 
 
 def of(srv):

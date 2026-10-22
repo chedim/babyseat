@@ -453,7 +453,7 @@ position, nudges at other things, chat out). Both are for the seat's own
 token: a person's token gets a 403.
 
 Part 3 (`membrane/self_proc.py`) runs the same loop in a process of its
-own, behind `MEMBRANE_SELF_PROC=1` (default off): `python -m membrane.self_proc --seat URL
+own, started by the seat by default since part 5 (`MEMBRANE_SELF_PROC=0` keeps the loop in the seat): `python -m membrane.self_proc --seat URL
 --data-dir DIR`, at niceness +10. It runs on a facade of the seat: a mirror
 of Blurp's own entities (itself and its methods, from the context's `own`
 part), the context for every read (the pause and the CPU share included),
@@ -469,7 +469,7 @@ cross the boundary too (part 4): `facts` (a thing's `heard_ts` and
 `llm_answer`, the mirror toy's name), `ask` (rung 8's question to the model,
 asked in the seat) and `mirror_feed`.
 
-Part 4 (`membrane/self_super.py`): with `MEMBRANE_SELF_PROC=1` the seat does
+Part 4 (`membrane/self_super.py`): by default (unless `MEMBRANE_SELF_PROC=0`) the seat does
 not start the in-process loop; it supervises the child instead. It runs one
 only while Blurp's mode is on or watch (switching on spawns it, switching off
 stops it), with posix_spawn, and logs it to `self-proc.log` beside the
