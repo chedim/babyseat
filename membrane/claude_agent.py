@@ -570,7 +570,7 @@ def build_options(sdk, system: str, model: str, stream: bool, port=None,
         tools=[],                  # Claude Code's built-in tools: off
         allowed_tools=tool_names(),  # only membrane's tools (#389)
         mcp_servers={MCP_NAME: build_mcp_server(sdk, port)},
-        strict_mcp_config=True,    # never the user's configured MCP servers
+        strict_mcp_config=True,    # no user MCP config, no claude.ai connectors (#455)
         setting_sources=[],        # no settings files, no CLAUDE.md
         max_turns=MAX_TURNS,       # a backstop: the check-in hook paces (#425)
         hooks={"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[answer.hook])]},
