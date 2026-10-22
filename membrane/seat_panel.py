@@ -203,6 +203,10 @@ def _self_name() -> str:
 
 def _self_status(srv) -> dict:
     try:
+        from . import self_super as _SUP           # #440 part 4: Blurp's own process, when it has one
+        sup = _SUP.of(srv)
+        if sup is not None:
+            return sup.status()
         from . import self_loop as _SELF
         return _SELF.status(srv)
     except Exception:
@@ -306,6 +310,33 @@ def set_pause(srv, on: bool, by: str = "operator") -> dict:
     return pause_state(srv)
 
 
+def _self_via(sup, srv, body: dict, done: dict, by: str) -> None:
+    """#440 part 4: the self controls, as one request to the supervisor (the
+    child's /control: mode, accept, limit, name)."""
+    req = {k2: body[k1] for k1, k2 in (("self", "mode"), ("accept", "accept"), ("self_limit", "limit"),
+                                       ("self_name", "name")) if k1 in body}
+    if not req:
+        return
+    req["by"] = by
+    code, out = sup.control(req)
+    ap = (out or {}).get("applied") or {}
+    if "mode" in ap:
+        done["self"] = ap["mode"]
+        note(srv, "self", value=ap["mode"], by=by)
+    if "accept" in ap:
+        done["accept"] = ap["accept"]
+        if (ap["accept"] or {}).get("ok") and not ap["accept"].get("already"):
+            note(srv, "self-accept", value=ap["accept"].get("id"), by=by)
+    if "limit" in ap:
+        done["self_limit"] = ap["limit"]
+        note(srv, "self", value=sup.mode, limit=ap["limit"], by=by)
+    if "name" in ap:
+        done["self_name"] = ap["name"]
+        note(srv, "self-name", value=ap["name"], by=by)
+    if code != 200 or not (out or {}).get("ok"):
+        done["self_error"] = (out or {}).get("error") or (out or {}).get("refused") or f"HTTP {code}"
+
+
 def control(srv, body: dict, by: str = "operator") -> dict:
     """The operator's switches, applied by the seat (never by an edit)."""
     done = {}
@@ -320,6 +351,11 @@ def control(srv, body: dict, by: str = "operator") -> dict:
             note(srv, "loops-cap", value=n, by=by)
         except (TypeError, ValueError):
             pass
+    from . import self_super as _SUP               # #440 part 4: Blurp's own process takes its controls
+    sup = _SUP.of(srv)
+    if sup is not None:
+        _self_via(sup, srv, body, done, by)
+        body = {k: v for k, v in body.items() if k not in ("self", "accept", "self_limit", "self_name")}
     if "self" in body:                             # #161: the self loop's switch (off / on / watch)
         from . import self_writer as _W        # #440: self/'s one writer
         m = str(body["self"] or "")

@@ -24,9 +24,8 @@ process of its own (its own GIL, its own CPU, a lower priority):
 - It exits on SIGTERM, and when its stdin closes (macOS has no
   parent-death signal: a seat killed outright closes the pipe).
 
-In this part the seat does not start it: part 4's supervisor will (spawn /
-stop below, with posix_spawn -- no fork of the threaded seat), and until then
-a test does. The flag gates the entry point itself, so nothing runs a second
+The seat starts it through part 4's supervisor (membrane.self_super: spawn /
+stop below, with posix_spawn -- no fork of the threaded seat). The flag gates the entry point itself, so nothing runs a second
 loop over self/ by accident.
 """
 from __future__ import annotations
@@ -411,11 +410,14 @@ class Child:
         return True
 
 
-def spawn(seat_url: str, data_dir, env: dict | None = None, log_path=None, wait_s: float = 0.0) -> Child:
+def spawn(seat_url: str, data_dir, env: dict | None = None, log_path=None, wait_s: float = 0.0,
+          on_spawn=None) -> Child:
     """Start the child with posix_spawn (no fork of a threaded seat): its
     stdin a pipe the caller holds, its stdout the handshake pipe, its stderr
     `log_path` (else nowhere). Waits up to wait_s for the handshake. ->
-    the Child, its port set. SpawnError (the child stopped) when none came."""
+    the Child, its port set. SpawnError (the child stopped) when none came.
+    `on_spawn(child)` is told of the process before its handshake (so a
+    supervisor closing meanwhile can stop it)."""
     in_r, in_w = os.pipe()
     out_r, out_w = os.pipe()
     log_fd = os.open(str(log_path) if log_path else os.devnull,
@@ -433,6 +435,8 @@ def spawn(seat_url: str, data_dir, env: dict | None = None, log_path=None, wait_
         os.close(fd)
     kid = Child(pid, in_w)
     try:
+        if on_spawn is not None:
+            on_spawn(kid)
         kid.port = _handshake(out_r, kid, float(wait_s))
     except BaseException:
         stop(kid)

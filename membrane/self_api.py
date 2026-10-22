@@ -33,6 +33,10 @@ properties and its methods' run counts), `place`, `provision`, `getter` (the
 audits' pause of a thing's getter) and `show` (the cycle onto the viewer).
 The in-process loop crosses through the same ones. A facade srv (one with
 `self_remote`) sends both calls over HTTP instead of running them here.
+
+Part 4 moves the reply checks and the mirror feed across too: `facts` (a
+thing's heard_ts and llm_answer, the mirror toy's name), `ask` (rung 8's
+question to the model) and `mirror_feed` (the cycle's move, to the mirror).
 """
 from __future__ import annotations
 
@@ -375,8 +379,42 @@ def _show(srv, e: dict) -> dict:
     return {"ok": True}
 
 
+FACT_KEYS = ("heard_ts", "llm_answer")
+
+
+def _facts(srv, e: dict) -> dict:
+    """Part 4: what the reply checks and the mirror read of the seat. `eid`:
+    that thing's FACT_KEYS (when it last spoke, the model's answer about it;
+    `props` None when there is no such thing); `mirror`: the mirror toy self
+    feeds (self_loop._mirror_toy_here; None without one)."""
+    out: dict = {}
+    if e.get("eid"):
+        est = getattr(srv, "entity_store", None)
+        doc = (est.docs or {}).get(str(e["eid"])) if est is not None else None
+        pp = (doc.properties or {}) if doc is not None else {}
+        out["props"] = plain({k: pp[k] for k in FACT_KEYS if k in pp}) if doc is not None else None
+    if e.get("mirror"):
+        out["mirror"] = _SL()._mirror_toy_here(srv)
+    return out
+
+
+def _ask(srv, e: dict) -> dict:
+    """Part 4: rung 8's question to the model, asked in the seat (llm.request:
+    its caps and its lanes are the seat's; the answer lands on the thing)."""
+    from . import llm as _LLM
+    out = _LLM.request(srv, str(e.get("prompt") or ""), about=str(e.get("eid") or ""), caller="self", readonly=True)
+    return plain(out) if isinstance(out, dict) else {"rc": None, "text": str(out)}
+
+
+def _mirror_feed(srv, e: dict) -> dict:
+    """Part 4: this cycle's move, fed to the mirror toy in the seat (toybox.mirror_feed)."""
+    from . import toybox as _TB
+    return plain(_TB.mirror_feed(str(e.get("toy") or ""), float(e.get("s") or 0.0), now=e.get("now")))
+
+
 EFFECTS = {"position": _position, "nudge": _nudge, "say": _say, "reach": _reach_effect, "own": _own_effect,
-           "place": _place, "provision": _provision, "getter": _getter, "show": _show}
+           "place": _place, "provision": _provision, "getter": _getter, "show": _show,
+           "facts": _facts, "ask": _ask, "mirror_feed": _mirror_feed}
 
 
 def effects(srv, effects) -> list[dict]:

@@ -312,7 +312,12 @@ def error(srv, why: str, now: float | None = None) -> float:
 
 def person_spoke(srv, person: str, now: float | None = None, free: int | None = None,
                  avail: int | None = None) -> bool:
-    """A person spoke (chat or voice): a sleeping Blurp wakes. -> woke."""
+    """A person spoke (chat or voice): a sleeping Blurp wakes. -> woke.
+    #440 part 4: with Blurp in its own process, the child hears it (chat-in)."""
+    from . import self_super as _SUP
+    sup = _SUP.of(srv)
+    if sup is not None and sup.chat_in(person):
+        return False
     SL = _SL()
     now = time.time() if now is None else float(now)
     if not asleep(srv):

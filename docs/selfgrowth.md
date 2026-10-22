@@ -453,8 +453,7 @@ position, nudges at other things, chat out). Both are for the seat's own
 token: a person's token gets a 403.
 
 Part 3 (`membrane/self_proc.py`) runs the same loop in a process of its
-own, behind `MEMBRANE_SELF_PROC=1` (default off; the seat does not start it
-yet -- part 4's supervisor will): `python -m membrane.self_proc --seat URL
+own, behind `MEMBRANE_SELF_PROC=1` (default off): `python -m membrane.self_proc --seat URL
 --data-dir DIR`, at niceness +10. It runs on a facade of the seat: a mirror
 of Blurp's own entities (itself and its methods, from the context's `own`
 part), the context for every read (the pause and the CPU share included),
@@ -464,9 +463,29 @@ the getter fires in the seat), Blurp's own method runs and properties
 (`show`); the in-process loop crosses through them too. It owns `self/`,
 serves `/card`, `/sheet`, `/recent`, `/status`, `/control` and `/chat-in` on a
 loopback port it reports at start (one JSON line on stdout), and exits on
-SIGTERM or when its stdin closes. Still read in the seat directly, and so
-only in-process: the reply checks and the mirror feed of the rungs not
-rebuilt yet (meet, turns, expect, mirror).
+SIGTERM or when its stdin closes. The reply checks and the mirror feed
+(meet, turns, expect and mirror, not rebuilt yet, and speak's reply checks)
+cross the boundary too (part 4): `facts` (a thing's `heard_ts` and
+`llm_answer`, the mirror toy's name), `ask` (rung 8's question to the model,
+asked in the seat) and `mirror_feed`.
+
+Part 4 (`membrane/self_super.py`): with `MEMBRANE_SELF_PROC=1` the seat does
+not start the in-process loop; it supervises the child instead. It runs one
+only while Blurp's mode is on or watch (switching on spawns it, switching off
+stops it), with posix_spawn, and logs it to `self-proc.log` beside the
+seat's files. The child follows the seat's pause through its context. A
+crash restarts it after 2 s, doubling per crash, capped at 60 s; 5 crashes
+in 10 minutes hold it off until the person switches Blurp on again (the
+card's and the panel status's `proc` says `held`). It stops with SIGTERM,
+then SIGKILL after 10 s, and exits by itself when the seat dies (its stdin
+closes). The seat forwards `/membrane/self/card`, `sheet`, `recent`, the
+panel's self status, the self controls (mode, accept, limit, name) and a
+person speaking (chat-in) to the child's port with a 5 s timeout; a view
+that does not come back in time is the last good one (`proc.stale`). While
+a child process exists the seat writes nothing under `self/`; while none
+does (Blurp off, held, or between restarts) it applies the controls and
+serves the views itself. `world.json` stays the seat's: things join Blurp's
+world in the seat (a toy provisioned, a person speaking).
 
 Its toys' state lives next door, in `<data dir>/toybox/` (see [Toys](#toys)),
 and is kept across a restart too.
