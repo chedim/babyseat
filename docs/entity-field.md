@@ -35,6 +35,17 @@ loop calls the proxy's own `/v1` on loopback, so gate, injection, capture
 and banner are never bypassed), and the desktop seat. There is no second
 capture path.
 
+Each captured event also carries its **conversation** (`conv`, #429): the
+client's own session id when it sends one (`sid:<id>`: the serve's loopback
+turn, opencode's `x-opencode-session-id` / `x-session-affinity` /
+`X-Session-Id`, Claude Code's `X-Claude-Code-Session-Id`), else a hash of
+the transcript's first user message (`head:<hash>`), which every turn of one
+chat repeats. OpenAI's `user` field names a person, not a chat, and is not
+used. A request with neither carries no `conv`; its events keep only the
+seat's idle-gap `session` (a new one after 30 idle minutes), which alone
+would merge two chats running at once. A discourse event's content key
+includes the conversation, so the same "yes" said in two chats is two events.
+
 ## Entities
 
 `membrane/eids.py` gives every mention a canonical id `kind:norm`:

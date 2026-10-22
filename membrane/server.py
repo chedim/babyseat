@@ -1281,7 +1281,9 @@ class TurnRunner:
             _cap = getattr(getattr(self, "srv", None), "capturer", None)
             if _cap is not None and str(text or "").strip():
                 _owner = str((self.sessions.get(sid) or {}).get("owner") or "")
-                _cap.on_turn(text, session=_CIO.blurp_tag(_owner))
+                from . import capture as _CAPMOD
+                with _CAPMOD.conversation(f"sid:{sid}"):    # #429: this chat
+                    _cap.on_turn(text, session=_CIO.blurp_tag(_owner))
         except Exception:
             pass
         self._busy.pop(sid, None)
@@ -1858,7 +1860,9 @@ class TurnRunner:
             try:
                 _cap = getattr(getattr(self, "srv", None), "capturer", None)
                 if _cap is not None:
-                    _cap.on_turn(text)
+                    from . import capture as _CAPMOD
+                    with _CAPMOD.conversation(f"sid:{sid}"):    # #429: this chat
+                        _cap.on_turn(text)
             except Exception:
                 pass
             try:
