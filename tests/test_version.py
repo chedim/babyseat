@@ -38,6 +38,21 @@ class TestTheVersionIsOneVersion(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertEqual(m.group(1), _pyproject_version())
 
+    def test_the_citation_names_a_release_of_this_line(self):
+        # #417: CITATION.cff is what GitHub's "Cite this repository" and Zenodo
+        # read. On a release branch it names exactly the package's version; on
+        # main it may name the newest patch release of the same line (main is
+        # bumped only at the next minor), never an older one.
+        cff = (ROOT / "CITATION.cff").read_text()
+        m = re.search(r'(?m)^version: "?([0-9]+\.[0-9]+\.[0-9]+)"?\s*$', cff)
+        self.assertIsNotNone(m)
+        cite = tuple(int(x) for x in m.group(1).split("."))
+        pkg = tuple(int(x) for x in _pyproject_version().split("."))
+        self.assertEqual(cite[:2], pkg[:2])
+        self.assertGreaterEqual(cite, pkg)
+        lic = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["license"]
+        self.assertRegex(cff, rf"(?m)^license: \"?{re.escape(lic)}\"?\s*$")
+
     def test_the_publish_lane_refuses_a_tag_that_is_not_the_version(self):
         wf = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
         self.assertIn("tomllib", wf)
