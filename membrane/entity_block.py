@@ -372,21 +372,287 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
     return out
 
 
+# ---- HYBRID RECALL (#429): exact words and named entities ---------------------
+# Embeddings blur exact tokens (an identifier, an env var, a license name,
+# an issue number, a file name). The word lane (lexical.py, BM25 over the
+# field's own sentences and tool chunks) finds the rows that carry the
+# very word; the entity lane reads the sentences of an entity the question
+# names, ranked by the question's other words. Both answer through the
+# direct path's rules (DIRECT_ROLES; tool outputs on question-like asks
+# only) and are fused with the embedding lists by reciprocal rank. A row
+# found by its words needs no similarity floor: matching a rare word of
+# the question is its evidence (awaiting the operator's approval).
+RRF_K = 60                     # reciprocal-rank fusion (Cormack et al. 2009), borrowed
+
+
+def _machine(field, d: dict) -> bool:
+    f = globals().get("_to_a_machine")
+    return bool(f and f(field, d))
+
+
+def rrf(lists, key) -> list[tuple[dict, float]]:
+    """Reciprocal-rank fusion: each row scores sum(1 / (RRF_K + rank)) over
+    the lists it is in (rank from 1); best first, the first-seen row of a
+    key stands for it."""
+    score: dict = {}
+    rep: dict = {}
+    for rows in lists:
+        for rank, r in enumerate(rows, 1):
+            kk = key(r)
+            rep.setdefault(kk, r)
+            score[kk] = score.get(kk, 0.0) + 1.0 / (RRF_K + rank)
+    return sorted(((rep[kk], s) for kk, s in score.items()), key=lambda t: -t[1])
+
+
+def _answer_role(field, d: dict | None, tools_ok: bool) -> str | None:
+    """The label an event answers under, or None: the direct path's roles
+    (and tool outputs, on question-like asks)."""
+    if d is None or d.get("origin") != field.origin or d.get("status") == "forgotten":
+        return None
+    if d.get("stream") == "observation":
+        return "tool" if tools_ok and d.get("outcome") != "call-only" else None
+    if d.get("role") in DIRECT_ROLES and d.get("status") == "applied" and not _title_like(d):
+        return d["role"]
+    return None
+
+
+def _word_row(field, key: str, d: dict, role: str, refs: list, qv, n_sent: int,
+              how: str, matched: list) -> dict | None:
+    """One answering event as a recall row: the sentences (or tool chunks)
+    that carry the words first, then the event's sentences nearest the
+    ask, in their order; sim = the best of them."""
+    from .efield import unit
+    if role == "tool":
+        chunks = [r for r in dict.fromkeys(refs) if str(r).startswith("k:")]
+        rows = field.b.get_multi("chunks", chunks) if chunks else {}
+        texts = []
+        for c in chunks:
+            x, v = str((rows.get(c) or {}).get("text") or ""), (rows.get(c) or {}).get("vec")
+            sc = float(unit(v) @ qv) if v is not None and qv is not None else 0.0
+            if x and sc < ECHO_COS:             # a chunk restating the ask is no answer
+                texts.append((x, sc))
+        texts = texts[:n_sent]
+        if not texts:
+            return None
+        return {"sim": round(max(sc for _, sc in texts), 3), "q": "", "q_n": None,
+                "a_n": [d.get("n")], "ts": d.get("ts"), "answer": [x for x, _ in texts],
+                "via": "direct", "role": "tool", "tool": d.get("tool") or "?",
+                "how": [how], "matched": matched}
+    sids = list(dict.fromkeys(d.get("sids") or []))
+    got = field.b.get_multi("sentences", sids)
+    want = [s for s in dict.fromkeys(refs) if s in got]
+    scored = []
+    for order, sid in enumerate(sids):
+        x = str((got.get(sid) or {}).get("text") or "")
+        if not x or sid not in got:
+            continue
+        sc = float(unit(got[sid]["vec"]) @ qv) if qv is not None else 0.0
+        if role == "model" and (sc >= ECHO_COS or _RESTATE.match(x)):
+            continue                            # the ask restated, not answered
+        scored.append((sid in want, sc, order, x))
+    top = sorted(sorted(scored, key=lambda t: (not t[0], -t[1]))[:n_sent], key=lambda t: t[2])
+    if not top or not any(t[0] for t in top):
+        return None                             # the worded sentence was an echo
+    return {"sim": round(max(t[1] for t in top), 3), "q": "", "q_n": None, "a_n": [d.get("n")],
+            "ts": d.get("ts"), "answer": [t[3] for t in top], "via": "direct", "role": role,
+            "how": [how], "matched": matched}
+
+
+def _rows_from_hits(field, ix, hits, text: str, qv, k: int, tools_ok: bool, how: str,
+                    n_sent: int = 3) -> list[dict]:
+    """Hits (doc id, score) -> at most k rows, one per answering event, in
+    hit order, drawing on the first k x 12 answering documents (the
+    sentence pool's size)."""
+    from . import lexical as LX
+    qwords = set(LX.tokens(text))
+    roles: dict = {}
+    by_ev: dict = {}
+    seen_docs = 0
+    for did, _sc in hits:
+        ek = ix.ev[did]
+        if ek not in roles:
+            roles[ek] = _answer_role(field, field.b.get("events", ek), tools_ok)
+        if roles[ek] is None:
+            continue
+        by_ev.setdefault(ek, []).append(did)
+        seen_docs += 1
+        if seen_docs >= k * 12:
+            break
+    out, seen_txt = [], set()
+    for ek, dids in by_ev.items():
+        if len(out) >= k:
+            break
+        d = field.b.get("events", ek)
+        if _machine(field, d):
+            continue                            # a reply to a receipt or a notice
+        matched = sorted({w for i in dids for w in LX.tokens(_doc_text(field, ix, i))} & qwords)
+        row = _word_row(field, ek, d, roles[ek], [ix.ref[i] for i in dids], qv, n_sent, how,
+                        matched)
+        if row is None:
+            continue
+        sig = " ".join(" ".join(row["answer"]).lower().split())
+        if sig in seen_txt:
+            continue                            # the same words in another event
+        seen_txt.add(sig)
+        out.append(row)
+    return out
+
+
+def _doc_text(field, ix, did: int) -> str:
+    ref = ix.ref[did]
+    coll = "chunks" if str(ref).startswith("k:") else "sentences"
+    return str((field.b.get(coll, ref) or {}).get("text") or "")
+
+
+def word_answers(field, text: str, qvec=None, k: int = 3, tools_ok: bool | None = None) -> list[dict]:
+    """The word lane: answering events whose sentences carry the ask's rare
+    words, by BM25."""
+    from . import efgate as G
+    from . import lexical as LX
+    from .efield import unit
+    ix = LX.index_of(field)
+    if ix is None:
+        return []
+    qv = G.message_vec(field, text) if qvec is None else unit(qvec)   # None: a bare token
+    tools_ok = ST.is_question_like(text) if tools_ok is None else tools_ok
+    return _rows_from_hits(field, ix, ix.search(text), text, qv, k, tools_ok, "words")
+
+
+def named_entities(field, text: str) -> list[tuple[str, str]]:
+    """The entities a question NAMES: a specific one (a file, a symbol, a
+    command, ...) or a word written as a name (a capital inside it, or a
+    capitalized word that is not the question's opening word)."""
+    out = []
+    t = text or ""
+    for eid, surf in E.mentions_of(t, field.graph_fn(), field.phrases):
+        if E.is_specific(eid):
+            out.append((eid, surf))
+            continue
+        if eid.split(":", 1)[0] not in ("w", "p"):
+            continue
+        for m in re.finditer(re.escape(surf), t, re.IGNORECASE):
+            w = m.group(0)
+            opener = not t[:m.start()].strip(" \t\"'(") or t[:m.start()].rstrip()[-1:] in ".?!"
+            if any(c.isupper() for c in w[1:]) or (w[:1].isupper() and not opener):
+                out.append((eid, surf))
+                break
+    return out
+
+
+def _same_entity(field, eid: str) -> list[str]:
+    """The eid, and for a bare file name ('f:~x.py', no code graph to place
+    it) every known path ending in it."""
+    if not eid.startswith("f:~"):
+        return [eid]
+    field.deltas_of(eid)                         # (re)builds the per-entity index
+    base = "/" + eid[3:]
+    return [eid] + [e for e in list(getattr(field, "_deltas_index", None) or ())
+                    if e.startswith("f:") and (e.endswith(base) or e == "f:" + eid[3:])]
+
+
+def entity_answers(field, text: str, qvec=None, k: int = 3, tools_ok: bool | None = None) -> list[dict]:
+    """The entity lane: the sentences of each entity the question names
+    (its deltas' events, and the events whose sentences carry its name),
+    ranked by the question's other words."""
+    from . import efgate as G
+    from . import lexical as LX
+    from .efield import unit
+    ix = LX.index_of(field)
+    named = named_entities(field, text)
+    if ix is None or not named:
+        return []
+    qv = G.message_vec(field, text) if qvec is None else unit(qvec)   # None: a bare token
+    tools_ok = ST.is_question_like(text) if tools_ok is None else tools_ok
+    evs: set = set()
+    drop: set = set()
+    for eid, surf in named:
+        words = LX.tokens(surf)
+        drop.update(words)
+        for e in _same_entity(field, eid):
+            evs.update(d["event"] for d in field.deltas_of(e) if d.get("event"))
+        if words:
+            evs |= ix.events_with(words)
+    if not evs:
+        return []
+    return _rows_from_hits(field, ix, ix.search(text, events=evs, drop=drop), text, qv, k,
+                           tools_ok, "entity")
+
+
 def recall_answers(field, text: str, qvec=None, k: int = 3,
                    sim_min: float = PAST_SIM_MIN) -> list[dict]:
-    """The ask path (earlier asks like this one and what followed them) and
-    the direct path (replies, notes, docs and code near the ask) merged:
-    best similarity first, one row per answering event, at most k."""
+    """The ask path (earlier asks like this one and what followed them),
+    the direct path (replies, notes, docs and code near the ask), the word
+    lane and the entity lane, fused by reciprocal rank: one row per
+    answering event (an event an earlier ask's answer holds joins that
+    ask's row), at most k. Each row says how it was found ('how'). An ask
+    too short for a sentence vector is answered by its words alone."""
     from . import efgate as G
+    from . import lexical as LX
     from .efield import unit
     qv = G.message_vec(field, text) if qvec is None else unit(qvec)
-    if qv is None:
-        return []
-    asks = past_answers(field, text, qv, k=k, sim_min=sim_min)
-    used = {n for r in asks for n in r["a_n"]}
-    direct = [r for r in direct_answers(field, text, qv, k=k, sim_min=sim_min)
-              if not used & set(r["a_n"])]
-    return sorted(asks + direct, key=lambda r: -r["sim"])[:k]
+    question = ST.is_question_like(text)
+    if qv is not None:
+        asks = past_answers(field, text, qv, k=k, sim_min=sim_min)
+        direct = direct_answers(field, text, qv, k=k, sim_min=sim_min)
+        tool_fn = globals().get("tool_answers")
+        tools = (tool_fn(field, text, qv, k=min(k, globals().get("TOOL_HITS_MAX", k)),
+                         sim_min=sim_min) if tool_fn and question else [])
+    else:
+        asks, direct, tools = [], [], []
+    try:
+        words = word_answers(field, text, qv, k=k, tools_ok=question)
+        named = entity_answers(field, text, qv, k=k, tools_ok=question)
+    except Exception as e:                       # the lane never breaks recall
+        print(f"[efield] word lane failed ({e})", file=__import__("sys").stderr)
+        words, named = [], []
+    if qv is not None:
+        # with a vector, a word row must have matched a word written as a
+        # name (lexical.exact_words): ordinary words are the embeddings'
+        # job, and rows matched by them alone crowded vector answers out
+        # of the top k on the probe. Such a row passes the floor, and so
+        # does the entity lane's (the ask names its entity).
+        names = LX.exact_words(text)
+        words = [r for r in words if names & set(r.get("matched") or ())]
+    for r in asks:
+        r["how"] = ["ask"]
+    for r in direct + tools:
+        r["how"] = ["vector"]
+    owner = {n: ("q", r["q_n"]) for r in asks for n in r["a_n"]}
+
+    def key(r):
+        if r.get("via") != "direct":
+            return ("q", r["q_n"])
+        return owner.get(r["a_n"][0], ("e", r["a_n"][0]))
+    # the embedding rows stay ONE list in #435's approved order (raw
+    # similarity, no weight): fused list by list, a lower earlier-ask row
+    # interleaved past a better direct row (probe: 21 -> 19/53)
+    emb = sorted(asks + [r for r in direct + tools if key(r)[0] == "e"], key=lambda r: -r["sim"])
+    lists = [words, named, emb]
+    rows: dict = {}
+    for lst in lists + [direct, tools]:
+        for r in lst:
+            rows.setdefault(key(r), []).append(r)
+    # the row that speaks for an event: an earlier ask's, else a word or
+    # entity row (it holds the worded sentences), else the vector row
+    rows = {kk: sorted(g, key=lambda r: (r.get("via") == "direct", r.get("how") == ["vector"]))
+            for kk, g in rows.items()}
+    out, n_tool = [], 0
+    for rep, _score in sorted(rrf(lists, key), key=lambda t: (-t[1], -t[0]["sim"])):
+        group = rows[key(rep)]
+        rep = dict(group[0])
+        rep["how"] = list(dict.fromkeys(h for r in group for h in r.get("how") or []))
+        rep["sim"] = max(r["sim"] for r in group)
+        m = [w for r in group for w in r.get("matched") or []]
+        if m:
+            rep["matched"] = list(dict.fromkeys(m))
+        if rep.get("role") == "tool":
+            if n_tool >= globals().get("TOOL_HITS_MAX", k):
+                continue
+            n_tool += 1
+        out.append(rep)
+        if len(out) >= k:
+            break
+    return out
 
 
 _RESTATE = re.compile(r"\s*(?:the user(?:'s)?|they|so the user)\b.{0,40}\b(?:ask|want|say|wonder)",
@@ -409,7 +675,8 @@ def render_past(rows: list[dict], budget: int = 1600, now: float | None = None) 
         body = " ".join(" ".join(x.split()) for x in r["answer"])[:600]
         nums = ", ".join(f"#{n}" for n in dict.fromkeys(r["a_n"]))
         if r.get("via") == "direct":
-            ln = (f"▸ {nums} ({_age(r['ts'], now)}, sim {r['sim']:.2f}) "
+            words = f", words {' '.join(r['matched'][:4])}" if r.get("matched") else ""
+            ln = (f"▸ {nums} ({_age(r['ts'], now)}, sim {r['sim']:.2f}{words}) "
                   f"{DIRECT_LABEL.get(r.get('role'), r.get('role'))}: {body}")
         else:
             ln = (f"▸ #{r['q_n']} ({_age(r['ts'], now)}, sim {r['sim']:.2f}) asked: \"{q}\"\n"

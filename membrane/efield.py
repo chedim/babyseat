@@ -866,6 +866,12 @@ class EntityField:
             else:
                 ev["status"] = "embedded"
             self.b.upsert("events", key, ev)
+            if sids:
+                try:                                  # the word index (#429), if live
+                    from . import lexical as LX
+                    LX.note_event(self, key, ev, sents)
+                except Exception:
+                    pass
             if ev.get("role") in ("model", "note"):
                 try:
                     from . import claims as CL

@@ -6340,7 +6340,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                               f"#{r['a_n'][0]}"),
                                 "action": " ".join(r["answer"])[:1200], "q_event": r["q_n"],
                                 "events": r["a_n"], "seat": fld.origin, "src": "field",
-                                "via": r.get("via", "ask"), "role": r.get("role")}
+                                "via": r.get("via", "ask"), "role": r.get("role"),
+                                "how": r.get("how") or [], "matched": r.get("matched") or []}
                                for r in rows]
                 if out["hits"]:
                     out.update({"hit": True, **{kk: out["hits"][0][kk] for kk in

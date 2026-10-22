@@ -204,20 +204,8 @@ def _same_dir(srv) -> bool:
 
 
 def provision(srv, kinds: list[str], now: float | None = None) -> list[str]:
-    """Switch on each unlocked built-in kind the seat has none of (any name),
-    in the seat (#440: self_api's `provision` effect -- from Blurp's own
-    process, over HTTP). -> the names added. Never raises."""
-    from . import self_api as _API
-    try:
-        out = _API.effects(srv, [{"kind": "provision", "toys": list(kinds), "now": now}])[0]
-    except Exception as e:                      # noqa: BLE001
-        print(f"[toy_unlocks] provision failed ({e!r})", file=sys.stderr)
-        return []
-    return list(out.get("added") or [])
-
-
-def provision_here(srv, kinds: list[str], now: float | None = None) -> list[str]:
-    """The seat's side of provision. -> the names added. Never raises."""
+    """Switch on each unlocked built-in kind the seat has none of (any name).
+    -> the names added. Never raises."""
     from . import toybox as TB
     if getattr(srv, "entity_store", None) is None or not _same_dir(srv):
         return []
