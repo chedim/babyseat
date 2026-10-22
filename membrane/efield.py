@@ -582,6 +582,8 @@ class EntityField:
                    "ts": ev.ts if (ev.ts is not None or seqs is not None) else time.time(),
                    "src": ev.src, "clipped": ev.clipped, "code": ev.code,
                    "seq": seq, "status": "pending", "subject": ev.subject}
+            if ev.author:                          # #429: who wrote a user turn
+                doc["author"] = ev.author
             # '#N': the short per-origin number the model and the operator cite
             # (seq orders; it is a microsecond clock, too long to quote)
             doc["n"] = int(self._ostats.get("ev_n") or 0) + 1
@@ -2245,6 +2247,7 @@ class EntityField:
             ev = evs.get(d["event"]) or {}
             rows.append({"sid": d["sid"], "text": s["text"], "stream": d["stream"],
                          "role": ev.get("role") or "", "n": ev.get("n"),
+                         "author": ST.event_author(ev) if ev.get("role") == "user" else "",
                          "speaker": (ev.get("speaker") or [""])[0], "tool": ev.get("tool") or "",
                          "event": d["event"], "ts": d["ts"], "seq": d["seq"], "score": score})
         uniq = {}

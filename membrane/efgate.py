@@ -106,7 +106,9 @@ def answer_of(field, q_ev: dict) -> tuple[str, dict] | None:
 
 def _user_events_near(field, qvec, k: int):
     """Earlier user events whose sentences are nearest the ask (sentence ANN
-    -> the deltas that name those sentences -> their events)."""
+    -> the deltas that name those sentences -> their events). Only a
+    person's: job receipts, task notifications and watch blocks ride the
+    user role too, and are never an earlier ask (#429)."""
     hits = field.b.vector_top_k("sentences", "vec", qvec, k * 12)
     sids = [sid for sid, _ in hits]
     if not sids:
@@ -115,7 +117,8 @@ def _user_events_near(field, qvec, k: int):
         "entity_deltas", {"origin": field.origin, "sid": sids})))
     evs = field.b.get_multi("events", evkeys)
     return [(key, d) for key, d in evs.items()
-            if d.get("role") == "user" and d.get("status") == "applied"]
+            if d.get("role") == "user" and d.get("status") == "applied"
+            and ST.event_author(d) == "person"]
 
 
 def near_asks(field, qv, k: int = TOP_K) -> list[tuple[float, str, dict]]:

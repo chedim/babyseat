@@ -146,7 +146,8 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
 CODE_SLOTS = 2           # nearest code/file entities added to every ask
 
 
-def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
+def entity_view(field, eid: str, qvec=None, n_evidence: int = 2,
+                question_like: bool = False) -> dict:
     st = field.get(eid)
     m = field.merged(eid)
     seats = [o for o in (m or {}).get("origins", []) if o["origin"] != field.origin]
@@ -165,7 +166,8 @@ def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
                 "last_ts": max((o.get("last_ts") or 0 for o in seats), default=None),
                 "evidence": [], "observed": None, "relations": [], "conflicts": [], **shared}
     said = pick_evidence(field.evidence(eid, k=n_evidence * 6, query_vec=qvec,
-                                        streams=("discourse", "code")), n_evidence)
+                                        streams=("discourse", "code")), n_evidence,
+                         question_like)
     observed = field.evidence(eid, k=1, streams=("observation",))    # the latest
     rels = []
     for r in [r for r in field.relations_of(eid)
@@ -194,17 +196,23 @@ def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
 ECHO_COS = 0.88          # a sentence this close to the ask is the ask, asked before
 
 
-def pick_evidence(rows: list[dict], n: int) -> list[dict]:
+def pick_evidence(rows: list[dict], n: int, question_like: bool = False) -> list[dict]:
     """The evidence worth showing for an ask: answers over restatements. A
     sentence nearly identical to the ask is an earlier asking of it; the
     user's own sentences rank below what the model, the code and the notes
-    said; near-duplicates of a kept sentence are skipped."""
+    said; near-duplicates of a kept sentence are skipped. On a question-like
+    ask, observations (tool results, and the receipts, notifications and
+    watch readings that ride the user role) take OBSERVATION_PENALTY (#429):
+    what was said and decided answers a question first."""
     def rank(r):
         s = float(r.get("score") or 0.0)
         if s >= ECHO_COS:
             s -= 0.5
         if r.get("role") == "user":
             s -= 0.15
+        if question_like and (r.get("stream") == "observation"
+                              or r.get("author") not in (None, "", "person")):
+            s -= ST.OBSERVATION_PENALTY
         return -s
     out, seen = [], []
     for r in sorted(rows, key=rank):
@@ -219,7 +227,9 @@ def pick_evidence(rows: list[dict], n: int) -> list[dict]:
 
 
 def entities_for(field, text: str, qvec=None, k: int = 5) -> list[dict]:
-    return [entity_view(field, e, qvec) for e in question_entities(field, text, qvec, k)]
+    ql = ST.is_question_like(text)
+    return [entity_view(field, e, qvec, question_like=ql)
+            for e in question_entities(field, text, qvec, k)]
 
 
 def render(views: list[dict], budget: int = 2400, now: float | None = None) -> str | None:
