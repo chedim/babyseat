@@ -119,6 +119,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import self_api as _API     # #440 part 2: the seat's state in, the cycle's acts out
 from . import self_writer as _W   # #440: the one writer for self/
 
 ENT = "self"
@@ -2007,8 +2008,28 @@ def _practised(srv, i: str) -> bool:
     return all(p in acc for p in ACHIEVEMENTS[i]["prereqs"])
 
 
+def _seat(srv) -> dict:
+    """#440: the seat as the cycle sees it -- the cycle's snapshot
+    (self_api.context, taken once at its start); outside a cycle, a fresh one."""
+    s = _rt(srv).get("seat")
+    return s if s is not None else _API.context(srv)
+
+
+def _seat_thing(srv, eid: str) -> dict | None:
+    """#440: a thing of its world, as the seat's context lists it (None: not there)."""
+    return next((t for t in _seat(srv).get("things") or () if t.get("eid") == eid), None)
+
+
+def _seat_spot(srv, eid: str):
+    """#440: a thing's live field spot, read through the seat's context
+    (only its spots part, at the moment of asking); None when it has none."""
+    v = (_API.context(srv, spots=[eid], only="spots").get("spots") or {}).get(eid)
+    return None if v is None else np.asarray(v, dtype=float)
+
+
 def _spot(srv, eid: str):
-    """A thing's live field spot (a unit vector), None when it has none."""
+    """A thing's live field spot (a unit vector), None when it has none.
+    Seat-side: self_api reads it for the context; the cycle reads _seat_spot."""
     fld = getattr(srv, "efield", None)
     get = getattr(fld, "get", None)
     if get is None:
@@ -2041,38 +2062,17 @@ def _nudge(srv, target: str) -> dict:
     """self::nudge -- the thing decides (see above); the outcome lands on the
     cycle's context (`rc`, `did`), never in what Blurp reads."""
     c = _ctx.cycle
-    est = srv.entity_store
-    ent = (est.docs or {}).get(target)
-    if ent is None:
-        c["rc"], c["did"] = NUDGE_NOTHING, "nothing there"
-        return {"rc": 0, "text": "nothing there"}
-    if not _in_world(srv, target):
-        c["rc"], c["did"] = NUDGE_REFUSED, "outside its world"
-        return {"rc": 0, "text": "not in its world"}
-    dr = _rt(srv).get("draft")
-    if (ent.properties or {}).get("chat_io") in ("chat", "out") and (dr is None or dr["eid"] == target):
-        return _nudge_chat(srv, ent, c)
-    if dr is not None:
-        return _capture(srv, target, dr, c)
-    tb = (ent.properties or {}).get("toybox") or {}
-    if tb.get("name"):
-        from . import toybox as _TB
-        try:
-            out = _TB.nudge(tb["name"], block=tb.get("block"), now=c.get("now"))
-        except Exception as e:                              # noqa: BLE001
-            out = {"ok": False, "refused": False, "changed": False, "error": repr(e)}
-        c["rc"] = (NUDGE_REFUSED if out.get("refused") else NUDGE_MOVED if out.get("changed")
-                   else NUDGE_NOTHING)
-        c["did"] = str(out.get("did") or out.get("error") or "")
-        return {"rc": 0, "text": "nudged"}
-    from .night import method_call, resolve_method
-    if resolve_method(est, ent, "nudge")[0] is None:
-        c["rc"], c["did"] = NUDGE_NOTHING, "it takes no nudge"
-        return {"rc": 0, "text": "nudged"}
-    out = method_call(srv, est, None, None, target, "nudge", {})
-    c["rc"] = NUDGE_MOVED if out.get("rc") == 0 else NUDGE_REFUSED
-    c["did"] = str(out.get("head") or out.get("error") or out.get("outcome") or "")[:120]
-    return {"rc": 0, "text": "nudged"}
+    thing = _seat_thing(srv, target)          # #440: in its world, as the seat's context lists it
+    if thing is not None:
+        dr = _rt(srv).get("draft")
+        if thing.get("chat") and (dr is None or dr["eid"] == target):
+            return _nudge_chat(srv, target, c)
+        if dr is not None:
+            return _capture(srv, target, dr, c)
+    # #440: the thing's own nudge runs in the seat (nothing there, outside its world, the toybox, its method)
+    out = _API.effects(srv, [{"kind": "nudge", "eid": target, "now": c.get("now")}])[0]
+    c["rc"], c["did"] = out["rc"], out["did"]
+    return {"rc": 0, "text": out.get("text") or "nudged"}
 
 
 def _capture(srv, target: str, dr: dict, c: dict) -> dict:
@@ -2081,7 +2081,7 @@ def _capture(srv, target: str, dr: dict, c: dict) -> dict:
     no position yet), in order. A thing with no spot has no position: nothing
     is captured."""
     c["draft"] = dr["n"]
-    v = _spot(srv, target)
+    v = _seat_spot(srv, target)
     if v is None or (dr["sum"] is not None and len(v) != len(dr["sum"])):
         c["rc"], c["did"] = NUDGE_NOTHING, "drafting: it has no spot, nothing captured"
         return {"rc": 0, "text": "nudged"}
@@ -2091,35 +2091,31 @@ def _capture(srv, target: str, dr: dict, c: dict) -> dict:
     return {"rc": 0, "text": "nudged"}
 
 
-def _nudge_chat(srv, ent, c: dict) -> dict:
+def _nudge_chat(srv, eid: str, c: dict) -> dict:
     """#333 part 2: the chat thing's own nudge (chat:out's until part 3a) --
-    open a draft, or send the open one."""
+    open a draft, or send the open one (#440: the line goes out through the
+    seat's `say` effect)."""
     rt = _rt(srv)
     dr = rt.get("draft")
     if dr is None:
-        rt["draft"] = {"n": c.get("n"), "eid": ent.eid, "eids": [], "sum": None}
+        rt["draft"] = {"n": c.get("n"), "eid": eid, "eids": [], "sum": None}
         c["rc"], c["did"], c["draft"] = NUDGE_MOVED, "draft opened", c.get("n")
         return {"rc": 0, "text": "nudged"}
     c["draft"], c["moves"], c["said"] = dr["n"], len(dr["eids"]), []
     from . import energy as _E
-    if _paused(srv) or _E.asleep(srv):                      # never out of a paused (or sleeping) seat
+    if _seat(srv).get("nerve_paused") or _E.asleep(srv):    # never out of a paused (or sleeping) seat
         c["rc"], c["did"] = NUDGE_NOTHING, "paused: not sent, the draft stays open"
         return {"rc": 0, "text": "nudged"}
     rt.pop("draft", None)                                  # a send closes the draft, whatever it says
     if not dr["eids"]:
         c["rc"], c["did"] = NUDGE_REFUSED, "an empty draft"
         return {"rc": 0, "text": "nudged"}
-    from . import chat_io as CIO
-    person = str((ent.properties or {}).get("person") or "")
-    picked = _compose(srv, dr["sum"], CIO.blurp_tag(person))
-    if not picked:
+    out = _API.effects(srv, [{"kind": "say", "eid": eid,
+                              "sum": [float(x) for x in dr["sum"]]}])[0]
+    if not out.get("said"):
         c["rc"], c["did"] = NUDGE_NOTHING, "no heard words fit: nothing said"
         return {"rc": 0, "text": "nudged"}
-    c["said"] = [sid for sid, _ in picked]
-    pp = ent.properties or {}
-    pp["say"] = " ".join(t for _, t in picked)
-    ent.properties = pp
-    out = CIO.on_edit(srv, ent, by="self") or {"posted": False, "why": "empty"}
+    c["said"] = list(out["said"])
     if out.get("posted"):
         c["rc"], c["did"] = NUDGE_MOVED, "sent"
     else:
@@ -2150,7 +2146,7 @@ def _dist(srv, eid: str):
     either has none, or they live in different spaces)."""
     me = _entity(srv)
     pos = np.asarray(me.position, dtype=float) if me is not None and me.position is not None else None
-    spot = _spot(srv, eid)
+    spot = _seat_spot(srv, eid)
     return (round(float(np.linalg.norm(_unit(pos) - spot)), 4)
             if pos is not None and spot is not None and len(pos) == len(spot) else None)
 
@@ -2309,6 +2305,7 @@ def _notice(srv, seed: str) -> dict:
     sd["pull"] = round(-m["cov"] / m["var"], 4) if m["var"] > 1e-9 else None
     pp["script_data"] = sd
     ent.properties = pp
+    c["pull"] = sd["pull"]                   # #440: the position effect carries it to the seat
     c["observed"] = got
     c["push"] = float(np.linalg.norm(push))
     return {"rc": 0, "text": "noticed"}
@@ -2798,16 +2795,21 @@ def cycle(srv, now: float | None = None) -> dict | None:
     t0 = time.perf_counter()                                     # #343: the cycle's own wall time
     rt = _rt(srv)
     from . import energy as _E
-    if not _runs(srv) or _E.asleep(srv):                          # #345: asleep, no cycle
+    if rt["mode"] == "off" or rt["held"] or _E.asleep(srv):       # #345: asleep, no cycle
         return None
-    cur = _current(srv)
+    seat = _API.context(srv)                 # #440: the seat's state, once a cycle (GET /membrane/self/context)
+    if seat.get("over_budget") or seat.get("nerve_paused"):
+        return None
+    rt["seat"] = seat                        # ...what the cycle's reads see (_seat), until it returns (_seated)
+    cur = None if seat.get("current") is None else np.asarray(seat["current"], dtype=float)
     est = srv.entity_store
     ent = _entity(srv)
-    pos = np.asarray(ent.position, dtype=float) if ent.position is not None else None
+    me = (seat.get("self") or {}).get("position")
+    pos = np.asarray(me, dtype=float) if me is not None else None
     still = cur is None
     if still:
         if pos is None or not len(pos):
-            return None                                           # never born into a still world
+            return _seated(rt, None)                              # never born into a still world
         pos = _unit(pos)
         cur = pos                                                 # the world is still: no push
     elif pos is None or len(pos) != len(cur):
@@ -2822,11 +2824,17 @@ def cycle(srv, now: float | None = None) -> dict | None:
             # #333: once it nudges, an aim is a thing of its world's field spot, at random among
             # them (none on the field: a spot near where it is, as before, and nothing to nudge)
             nudges = _practised(srv, "nudge")
-            spots = _spots(srv, len(pos)) if nudges else {}   # part 3a: the chat thing is placed like any looked-at thing
-            if spots:
-                cands = sorted(spots)                     # part 3b: learned aims (_aim_pick)
-                eid = _aim_pick(_read(srv), cands, [e for e in _targets(srv) if e in spots], f"aim:{n}")
-                rt["aim"], rt["aim_eid"] = spots[eid], eid
+            # part 3a: the chat thing is placed like any looked-at thing; #440: the spots it can
+            # reach come from the seat's context (their dimensions), the chosen one's vector after
+            reach = (_API.context(srv, reach=True, only="spots").get("reach") or {}) if nudges else {}
+            cands = sorted(e for e, dim in reach.items() if dim == len(pos))
+            spot = None
+            if cands:
+                lookable = [t["eid"] for t in seat.get("things") or () if t.get("getter")]
+                eid = _aim_pick(_read(srv), cands, [e for e in lookable if e in reach], f"aim:{n}")   # part 3b
+                spot = _seat_spot(srv, eid)
+            if spot is not None:
+                rt["aim"], rt["aim_eid"] = spot, eid
             else:
                 rt["aim"], rt["aim_eid"] = _unit(pos + AIM_REACH * _seed_dir(f"aim:{n}", len(pos))), None
             rt["aim_n"], rt["aim_at"] = n, now                # #343: held AIM_HOLD s from here
@@ -2850,7 +2858,7 @@ def cycle(srv, now: float | None = None) -> dict | None:
         _append(srv, {"ts": now, "kind": "error", "n": n,
                       "why": next((str(o.get("head") or o.get("error") or "") for o in outs
                                    if o.get("rc") != 0), "")[:200]})
-        return None
+        return _seated(rt, None)
     rt["fails"] = 0
     gap = float(np.linalg.norm(c["observed"] - c["expected"]))
     naive = float(np.linalg.norm(c["observed"] - c["intent"]))
@@ -2869,7 +2877,8 @@ def cycle(srv, now: float | None = None) -> dict | None:
                     "aim_naive": float(np.linalg.norm(naive_land - aim))})
     if aim is not None and rt.get("aim_eid"):
         rec["aim_eid"] = rt["aim_eid"]       # #333: the thing it aims at (and nudges)
-    est.upsert(ent, embedder=None)
+    _API.effects(srv, [{"kind": "position", "position": [float(x) for x in ent.position]}   # #440: its move, in the seat
+                       | ({"pull": c["pull"]} if "pull" in c else {})])
     try:
         _mark_rung7_restart(srv, now)
         _mark_glitch_fix(srv, now)
@@ -2889,7 +2898,13 @@ def cycle(srv, now: float | None = None) -> dict | None:
     _unlock_toys(srv)
     _show(srv, ent, pos, c, rec)
     rt["wake"].set()                      # my state changed: that is what wakes the next try
-    return rec
+    return _seated(rt, rec)
+
+
+def _seated(rt: dict, out):
+    """#440: the cycle is over -- its seat snapshot goes (a read after it asks the seat afresh)."""
+    rt.pop("seat", None)
+    return out
 
 
 def _unlock_toys(srv) -> None:
