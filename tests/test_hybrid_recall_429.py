@@ -207,6 +207,68 @@ class TestNamedEntity(unittest.TestCase):
         self.assertIn("entity", row["how"])
 
 
+class TestEntityPool(unittest.TestCase):
+    """The entity lane as in the sister fork's EntityPool: the ask's keys come
+    from capture's own extractor (every shared class), the pool is the
+    entity -> events index over answering rows only, the newest 24."""
+
+    def test_pool_cap_value(self):
+        self.assertEqual(EB.ENTITY_POOL_MAX, 24)
+
+    def test_every_shared_class_is_named_on_the_query_side(self):
+        f = _field()
+        asks = {"f": "what does membrane/lexical.py do?",
+                "s": "why does EntityField.deltas_of rebuild?",
+                "m": "is qwen3:14b slow on the box?",
+                "u": "what did https://example.com/api/v1 return?",
+                "c": "what did pytest -q report last time?",
+                "ha": "what is sensor.boat_battery reading?"}
+        for kind, ask in asks.items():
+            kinds = {eid.split(":", 1)[0] for eid, _ in EB.named_entities(f, ask)}
+            self.assertIn(kind, kinds, ask)
+
+    def _many(self, f, n, text="membrane/lexical.py keeps the word index, cycle {i}."):
+        for i in range(n):
+            f.write_events([ST.Event(stream="discourse", role="note", ts=T0 + i,
+                                     text=text.format(i=i))], session=f"s:{i}")
+
+    def test_the_pool_is_the_newest_24_answering_events(self):
+        f = _field()
+        self._many(f, 40)
+        f.process()
+        pool = EB.entity_pool(f, "what does membrane/lexical.py do?")
+        self.assertEqual(len(pool), 24)
+        ns = sorted(f.b.get("events", k)["n"] for k in pool)
+        self.assertEqual(ns, list(range(17, 41)))           # the newest 24 of 40
+
+    def test_rows_that_never_answer_do_not_take_pool_slots(self):
+        f = _field()
+        self._many(f, 3)                                    # notes #1-#3, the oldest
+        for i in range(30):                                 # a person's lines, newer
+            f.write_events([ST.Event(stream="discourse", role="user", ts=T0 + 100 + i,
+                                     text=f"open membrane/lexical.py again please, try {i}.")],
+                           session=f"u:{i}")
+        f.process()
+        pool = EB.entity_pool(f, "what does membrane/lexical.py do?")
+        self.assertEqual(sorted(f.b.get("events", k)["n"] for k in pool), [1, 2, 3])
+
+    def test_a_pool_row_needs_no_other_rare_word(self):
+        f = _field()
+        self._many(f, 1, "membrane/lexical.py keeps a BM25 index over the field's sentences.")
+        f.process()
+        rows = EB.entity_answers(f, "what about membrane/lexical.py?", k=3)
+        self.assertIn("BM25 index", _texts(rows))
+        self.assertEqual(rows[0]["how"], ["entity"])
+
+    def test_a_command_named_in_prose_reads_its_rows(self):
+        f = _field()
+        f.write_events([ST.Event(stream="discourse", role="model", ts=T0, text=(
+            "I ran `pytest -q` and it reported 812 passed, 3 skipped."))], session="s:1:0")
+        f.process()
+        rows = EB.entity_answers(f, "what did pytest -q report last time?", k=3)
+        self.assertIn("812 passed", _texts(rows))
+
+
 class TestFusion(unittest.TestCase):
     def test_reciprocal_rank_fusion(self):
         a = [{"key": "x"}, {"key": "y"}]

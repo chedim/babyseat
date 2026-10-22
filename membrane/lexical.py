@@ -163,14 +163,14 @@ class LexIndex:
         p = self.post.get(word)
         return [] if p is None else [p >> 4] if isinstance(p, int) else [x >> 4 for x in p]
 
-    def events_with(self, words) -> set:
-        """The events whose documents carry every one of `words`."""
+    def docs_with(self, words) -> list[int]:
+        """The documents that carry every one of `words`."""
         with self.lock:
             docs = None
             for w in words:
                 ids = set(self._ids(w))
                 docs = ids if docs is None else docs & ids
-            return {self.ev[i] for i in docs or ()}
+            return sorted(docs or ())
 
     def search(self, query: str, n: int | None = None, events=None,
                drop=()) -> list[tuple[int, float]]:
