@@ -1893,6 +1893,7 @@ def main() -> None:
     if args.serve:
         _serve_board(serve_port, args.serve_host)
     native_up = False
+    _absorb_th = None                  # #436: the boot's absorb thread
     if serve_wanted and not legacy_serve:
         # THE REPLACEMENT (stage 3): no opencode child -- the native
         # server (membrane/server.py) IS the serve surface:
@@ -2008,22 +2009,22 @@ def main() -> None:
                   "the turn lane", file=sys.stderr)
             # ---- absorb external-agent sessions (part of the seat's
             # boot breath): anything OpenCode/Claude Code did since the
-            # seat's last run lands in the store (the hard filter
-            # refuses Anthropic's models wholesale), and the newest
+            # seat's last run lands in the store, and the newest
             # absorbed session wins -c purely by recency. Flagged
             # off --no-absorb / --new-session; lab seats never absorb.
+            # #436: ON ITS OWN THREAD -- the scan reads every transcript
+            # of the project (1+ GB on a long-lived one); inline it held
+            # the main thread before the proxy's serve loop, so :11500
+            # sat in LISTEN accepting nothing. A TUI launch waits for it
+            # before its child (below), so -c still finds the newest.
             try:
-                from .absorb import absorb_gate
-                if absorb_gate(str(args.field), args.new_session,
-                               args.no_absorb, native_up):
-                    from .absorb import absorb as _absorb, \
-                        banner as _absorb_banner
-                    _rep = _absorb(sess_store, msg_store,
-                                   getattr(srv, "efield", None),
-                                   cwd=os.getcwd(),
-                                   marker_path=str(d / "serve-absorb.json"),
-                                   model_id=_srv_model)
-                    print(_absorb_banner(_rep), file=sys.stderr)
+                from .absorb import boot_absorb
+                _absorb_th = boot_absorb(
+                    sess_store, msg_store, getattr(srv, "efield", None),
+                    field_path=str(args.field), new_session=args.new_session,
+                    no_absorb=args.no_absorb, native_up=native_up,
+                    cwd=os.getcwd(), marker_path=str(d / "serve-absorb.json"),
+                    model_id=_srv_model)
             except Exception as _e:
                 print(f"[absorb] failed ({_e}) -- seat continues",
                       file=sys.stderr)
@@ -2082,6 +2083,12 @@ def main() -> None:
                              daemon=True).start()
         if args.launch:
             tui_direct = os.environ.get("MEMBRANE_TUI_DIRECT") == "1"
+            # #436: a TUI child resumes the newest session (-c), so it
+            # waits for the absorb; a launch serves the proxy on the main
+            # thread only after the child starts, so nothing waits longer
+            # than it did before
+            if _absorb_th is not None and not args.standalone:
+                _absorb_th.join()
             if args.serve and legacy_serve:
                 # MEMBRANE_LEGACY_SERVE=1: the OLD lane -- `opencode serve`
                 # as a child (the generated config's provider baseURL -> the

@@ -32,7 +32,11 @@ the session doc with an `absorbed: {source, sid}` provenance key and
 uses a watermark marker (serve-absorb.json beside serve-sessions.json:
 {last_run_ts, sessions}) so nothing is imported twice and a session
 that GREW while the seat was up is topped up (MessageStore rows upsert
-by id, so re-import is safe by construction).
+by id, so re-import is safe by construction). The marker also keeps each
+Claude Code transcript's modification time as the last run accounted for it
+(`claude_mtimes`, #436): a file still at that time is not opened again, so a
+long history is not re-parsed on every boot. The boot runs the whole step on
+its own thread (boot_absorb).
 """
 from __future__ import annotations
 
@@ -189,11 +193,16 @@ def _res_content(r) -> str:
 
 
 def claude_sessions(cwd: str, since_s: float,
-                    home: Path | None = None) -> list[AbsorbSession]:
+                    home: Path | None = None, done: dict | None = None,
+                    mtimes: dict | None = None) -> list[AbsorbSession]:
     """Parse ~/.claude/projects/<slug(cwd)>/*.jsonl for sessions (any
     model, issue #396) whose last activity is newer than
     `since_s`. Sidechains, subagent dirs, compact/meta lines and noise
-    line types are skipped."""
+    line types are skipped.
+
+    #436: `done` maps a transcript's id to the modification time the last
+    absorb fully accounted for; a file still at that time is not opened.
+    Every file seen lands in `mtimes` (id -> its modification time)."""
     base = home if home is not None else Path.home() / ".claude" / "projects"
     slugs = _project_slugs(cwd)
     old_slug = _old_project_slug(cwd)
@@ -205,6 +214,15 @@ def claude_sessions(cwd: str, since_s: float,
         for fp in sorted(proj.glob("*.jsonl")):
             if fp.stem in seen:
                 continue                 # one session, listed once
+            try:
+                mt = fp.stat().st_mtime
+            except OSError:
+                continue
+            if mtimes is not None:
+                mtimes[fp.stem] = mt
+            if done is not None and done.get(fp.stem) == mt:
+                seen.add(fp.stem)
+                continue                 # unchanged since the last absorb accounted for it
             try:
                 a = _parse_claude_file(fp)
             except Exception:
@@ -647,6 +665,10 @@ def stamp_marker(path: str, rep: dict) -> None:
                 "n_msgs": imp.get("n_msgs", 0)}
         doc = {"version": int(rep.get("version") or 1), "last_run_ts": rep.get("last_run_ts") or
                time.time(), "sessions": sessions}
+        if "claude_mtimes" in rep:                 # #436: unchanged transcripts are not re-parsed
+            doc["claude_mtimes"] = rep["claude_mtimes"]
+        elif prior.get("claude_mtimes"):
+            doc["claude_mtimes"] = prior["claude_mtimes"]
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
             json.dump(doc, f)
@@ -682,8 +704,10 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
     # sessions keep their per-session watermark (no re-import).
     rescan = bool(mk) and int(mk.get("version") or 1) < MARKER_VERSION
     cands = []
+    done = dict(mk.get("claude_mtimes") or {})
+    mtimes: dict = {}
     try:
-        cands += claude_sessions(cwd, 0.0, home=home)
+        cands += claude_sessions(cwd, 0.0, home=home, done=done, mtimes=mtimes)
     except Exception as e:
         print(f"[absorb] claude scan failed ({str(e)[:80]})", file=sys.stderr)
     try:
@@ -708,6 +732,7 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
     # newest first, so the cap falls on the OLDEST
     cands.sort(key=lambda a: a.updated_ms, reverse=True)
     rescan_pending = False
+    cut: list = []
     if len(cands) > max_sessions:
         skipped_n = len(cands) - max_sessions
         cut = cands[max(1, max_sessions):]
@@ -721,6 +746,7 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
         rep["skipped"].append({"source": "absorb", "sid": "-",
                                "reason": f"{skipped_n} older session(s) "
                                          "past the cap"})
+    owed = {a.sid for a in cut if a.source == "claude"}   # #436: still owed a look
     for a in cands:
         try:
             r = import_session(sessions, messages, a, model_id,
@@ -730,6 +756,8 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
                                    "reason": str(e)[:120]})
             continue
         except Exception as e:
+            if a.source == "claude":
+                owed.add(a.sid)
             rep["skipped"].append({"source": a.source, "sid": a.sid,
                                    "reason": str(e)[:120]})
             continue
@@ -742,6 +770,9 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
             r["last_ts_s"] = a.updated_ms / 1000.0
             rep["imported"].append(r)
     rep["version"] = 1 if rescan_pending else MARKER_VERSION
+    # #436: the transcripts this run accounted for, at the time it saw them
+    # (one the cap cut or whose import failed is parsed again next boot)
+    rep["claude_mtimes"] = {k: v for k, v in mtimes.items() if k not in owed}
     stamp_marker(marker_path, rep)
     return rep
 
@@ -763,3 +794,32 @@ def absorb_gate(field_path: str, new_session: bool, no_absorb: bool,
     """Lab/tempdir seats NEVER absorb the operator's real sessions."""
     return bool(native_up and not new_session and not no_absorb
                 and not _is_lab_field_path(field_path))
+
+def boot_absorb(sessions, messages, efield, field_path: str, new_session: bool,
+                no_absorb: bool, native_up: bool, cwd: str, marker_path: str,
+                model_id: str, emit=None):
+    """The boot's absorb step on its own daemon thread (#436), or None when
+    gated off. It reads every transcript of the project (1+ GB of Claude Code
+    history on a long-lived project), so it must never hold the boot: run
+    inline, it kept the main thread busy before the proxy's serve loop
+    started, and :11500 sat in LISTEN accepting nothing. The banner, or the
+    failure, is one stderr line when it ends."""
+    if emit is None:
+        def emit(line):
+            print(line, file=sys.stderr)
+    if not absorb_gate(field_path, new_session, no_absorb, native_up):
+        return None
+
+    def run():
+        try:
+            emit(banner(absorb(sessions, messages, efield, cwd=cwd,
+                               marker_path=marker_path, model_id=model_id)))
+        except Exception as e:
+            try:
+                emit(f"[absorb] failed ({e}) -- seat continues")
+            except Exception:
+                pass
+    import threading
+    th = threading.Thread(target=run, daemon=True, name="absorb-boot")
+    th.start()
+    return th
