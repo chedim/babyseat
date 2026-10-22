@@ -153,12 +153,13 @@ def _rename_tempo(srv, old: str, new: str) -> None:
     """tempo.json (a state file): chat:in's rates become the chat thing's."""
     try:
         from . import self_loop as SL
+        from . import self_writer as _W
         t = SL._load_json(srv, "tempo.json")
         if isinstance(t, dict) and old in t:
             if new not in t:
                 t[new] = t[old]
             t.pop(old, None)
-            SL._save_json(srv, "tempo.json", t)
+            _W.save_json(srv, "tempo.json", t)
         live = SL._RT.get(id(srv), {}).get("tempo")
         if isinstance(live, dict) and old in live:
             live.setdefault(new, live[old])

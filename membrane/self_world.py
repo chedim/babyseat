@@ -48,7 +48,6 @@ A thing outside the world is never looked at or acted on."""
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 
@@ -76,10 +75,8 @@ def _save(srv, doc: dict) -> None:
     if p is None:
         return                                       # no data dir: the world lives in memory only
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(doc, sort_keys=True))
-        os.replace(tmp, p)
+        from . import self_writer as _W                # #440: the one writer for self/
+        _W.write_json(p, doc, sort_keys=True)
     except Exception:
         pass
 

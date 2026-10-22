@@ -70,6 +70,7 @@ import time
 from pathlib import Path
 
 from . import self_loop as _SL
+from . import self_writer as _W   # #440: the one writer for self/
 from .self_sheet import NAME as _NAME
 
 UNLOCKS = {"body": 0, "fast": 0, "slow": 0, "tower": 3, "burst": 4, "die": 5, "drift": 5,
@@ -267,7 +268,7 @@ def _built_late(srv, recs: list[dict], now: float) -> list[dict]:
             line = {"ts": now, "kind": "unlock_built", "rung": r.get("rung"), "toys": [k]}
             if got:
                 line["added"] = got
-            SL._append(srv, line)
+            _W.append(srv, line)
             seen.add(k)
             out.append(line)
     return out
@@ -305,7 +306,7 @@ def _sync_new(srv, recs, now):
         added = provision(srv, toys, now=now)
         if added:
             line["added"] = added
-        SL._append(srv, line)
+        _W.append(srv, line)
         out.append(line)
     return out
 

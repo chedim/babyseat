@@ -119,6 +119,8 @@ from pathlib import Path
 
 import numpy as np
 
+from . import self_writer as _W   # #440: the one writer for self/
+
 ENT = "self"
 MODES = ("off", "on", "watch")
 METHODS = {
@@ -621,8 +623,7 @@ def _rt(srv) -> dict:
 # ---- the mode and the record (the data dir) --------------------------------
 
 def _dir(srv) -> Path | None:
-    mp = getattr(srv, "_models_path", None)
-    return Path(mp).parent / "self" if mp else None
+    return _W.dir_of(srv)
 
 
 def record_path(srv) -> Path | None:
@@ -643,13 +644,7 @@ def _load_mode(srv) -> str:
 
 
 def _save_mode(srv, mode: str) -> None:
-    d = _dir(srv)
-    if d is None:
-        return
-    d.mkdir(parents=True, exist_ok=True)
-    tmp = d / "mode.json.tmp"
-    tmp.write_text(json.dumps({"mode": mode, "ts": time.time()}))
-    os.replace(tmp, d / "mode.json")
+    _W.save_json(srv, "mode.json", {"mode": mode, "ts": time.time()})
 
 
 # ---- the skill tree (#295) ----------------------------------------------------
@@ -835,20 +830,7 @@ def _missing(i: str, got: set) -> list[str]:
 
 
 def _append(srv, rec: dict) -> None:
-    p = record_path(srv)
-    if p is None:
-        return
-    p.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(rec) + "\n"
-    with _lock, open(p, "a") as fh:
-        fh.write(line)
-        rt = _rt(srv)
-        cache = rt.get("recs")
-        if cache is not None:
-            cache.append(rec)
-            rt["recs_bytes"] = rt.get("recs_bytes", 0) + len(line)
-            if rec.get("kind") == "cycle":
-                rt["recs_cycles"] = rt.get("recs_cycles", 0) + 1     # the running count (cycle_count)
+    _W.append(srv, rec)                     # #440: the one writer for self/
 
 
 def _read(srv) -> list[dict]:
@@ -982,13 +964,7 @@ def _load_model(srv) -> dict | None:
 
 
 def _save_model(srv, m: dict) -> None:
-    p = _model_path(srv)
-    if p is None:
-        return
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(m))
-    os.replace(tmp, p)
+    _W.save_json(srv, "model.json", m)
 
 
 def _load_json(srv, name: str):
@@ -1000,13 +976,7 @@ def _load_json(srv, name: str):
 
 
 def _save_json(srv, name: str, doc) -> None:
-    d = _dir(srv)
-    if d is None:
-        return
-    d.mkdir(parents=True, exist_ok=True)
-    tmp = d / (name + ".tmp")
-    tmp.write_text(json.dumps(doc))
-    os.replace(tmp, d / name)
+    _W.save_json(srv, name, doc)
 
 
 def _tempo(srv) -> dict:
@@ -5039,10 +5009,7 @@ def _merge(a: dict, b: dict) -> dict:
 
 
 def _sync_write(path: Path, data: bytes, mode: str = "ab") -> None:
-    with open(path, mode) as fh:
-        fh.write(data)
-        fh.flush()
-        os.fsync(fh.fileno())
+    _W.sync_write(path, data, mode)
 
 
 def _journal(srv, doc: dict) -> None:
@@ -5050,7 +5017,7 @@ def _journal(srv, doc: dict) -> None:
     d = _dir(srv)
     tmp = d / (CONSOLIDATING + ".tmp")
     _sync_write(tmp, json.dumps(doc).encode(), "wb")
-    os.replace(tmp, d / CONSOLIDATING)
+    _W.replace(tmp, d / CONSOLIDATING)
 
 
 def _c_append(path: Path, lines: list) -> None:
@@ -5063,11 +5030,11 @@ def _c_manifest(srv, entry: dict) -> None:
 
 
 def _c_swap(tmp: Path, p: Path) -> None:
-    os.replace(tmp, p)
+    _W.replace(tmp, p)
 
 
 def _c_done(srv) -> None:
-    (_dir(srv) / CONSOLIDATING).unlink(missing_ok=True)
+    _W.unlink(_dir(srv) / CONSOLIDATING)
 
 
 def _undo(srv, j: dict) -> None:
@@ -5076,12 +5043,11 @@ def _undo(srv, j: dict) -> None:
     for name, size in list((j.get("sizes") or {}).items()) + [(MANIFEST, j.get("manifest"))]:
         f = a / name
         if size is None:
-            f.unlink(missing_ok=True)
+            _W.unlink(f)
         elif f.exists():
-            with open(f, "r+b") as fh:
-                fh.truncate(int(size))
+            _W.truncate(f, size)
     p = record_path(srv)
-    (p.with_name(p.name + ".next")).unlink(missing_ok=True)
+    _W.unlink(p.with_name(p.name + ".next"))
 
 
 def _recover(srv) -> float | None:
@@ -5096,11 +5062,11 @@ def _recover(srv) -> float | None:
     tmp = p.with_name(p.name + ".next")
     if j.get("stage") == "swap":
         if tmp.exists():
-            os.replace(tmp, p)
-        (d / CONSOLIDATING).unlink(missing_ok=True)
+            _W.replace(tmp, p)
+        _W.unlink(d / CONSOLIDATING)
         return None
     _undo(srv, j)
-    (d / CONSOLIDATING).unlink(missing_ok=True)
+    _W.unlink(d / CONSOLIDATING)
     return float(j.get("at") or time.time())
 
 
@@ -5150,7 +5116,7 @@ def consolidate(srv, now: float | None = None) -> dict | None:
                 else:
                     runs.append([name, 1])
             a = _dir(srv) / ARCHIVE
-            a.mkdir(parents=True, exist_ok=True)
+            _W.mkdir(a)
             j = {"id": cid, "at": now, "stage": "archive",
                  "sizes": {n: ((a / n).stat().st_size if (a / n).exists() else None) for n in files},
                  "manifest": (a / MANIFEST).stat().st_size if (a / MANIFEST).exists() else None}
@@ -5171,9 +5137,9 @@ def consolidate(srv, now: float | None = None) -> dict | None:
                 j = _load_json(srv, CONSOLIDATING)
                 if isinstance(j, dict) and j.get("id") == cid:
                     _undo(srv, j)
-                (_dir(srv) / CONSOLIDATING).unlink(missing_ok=True)
+                _W.unlink(_dir(srv) / CONSOLIDATING)
                 return None
-            (_dir(srv) / CONSOLIDATING).unlink(missing_ok=True)
+            _W.unlink(_dir(srv) / CONSOLIDATING)
         rt = _rt(srv)
         rt["recs"], rt["recs_bytes"] = [head] + lines, len(text)
         rt["recs_cycles"] = _cycles(rt["recs"])     # #343: the carry + the window: the same count, once a sleep

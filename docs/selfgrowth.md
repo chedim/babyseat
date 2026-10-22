@@ -438,6 +438,11 @@ Everything is in `<data dir>/self/` (`.membrane/self/` in a seat's directory):
 | `nudged.json` | per thing (#333 part 3a): its own nudges since its last look at it, and its changed share per nudge bin (`p_n`'s counts) | kept |
 | `world.json` | Blurp's world (#337): the field ids it may look at or act on, each with when and why it joined | kept: it only grows |
 
+One module writes these files: `membrane/self_writer.py` (#440 part 1).
+The loop, the panel's switch, accept and growth limit, the toy unlocks,
+energy and the chat thing's tempo all write through it, so the files can
+later be owned by Blurp's own process (#440).
+
 Its toys' state lives next door, in `<data dir>/toybox/` (see [Toys](#toys)),
 and is kept across a restart too.
 
