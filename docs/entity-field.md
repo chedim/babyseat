@@ -183,10 +183,10 @@ conversation key, `conv` on events), derived from records with no model call:
 | line | source |
 |---|---|
 | `NOW` | the seat's local date, time and time zone |
-| `WORKING ON` | the person's latest earlier ask in this chat (its person-authored user events), clipped to 160 chars |
-| `ABOUT` | up to 5 focus entities: named in the person's latest message, or in at least 2 of this chat's events |
-| `DECIDED` | the newest 3 of: ledger entries said in this chat, goals fulfilled in it (`fulfilled_conv`), coproc `decide()` records made in it |
-| `OPEN` | the newest 3 goals planted in this chat (`convs`) and still open |
+| `WORKING ON` | the person's latest earlier ask in this chat (its person-authored user events, speaker line cut) that names a focus entity, else the latest one; clipped to 160 chars |
+| `ABOUT` | up to 5 focus entities: named in the person's latest message, or in at least 2 of this chat's events (an identifier no code defines, `s:?`, only when the person names it) |
+| `DECIDED` | the newest 3 of: ledger entries said in this chat, goals and json-board intents fulfilled in it (`fulfilled_conv`), coproc `decide()` records made in it |
+| `OPEN` | the newest 3 goals (`convs`) or json-board intents (`conv`) planted in this chat and still open |
 | `STABLE` | up to 3 facts (coproc `remember()` values, ledger lines) seen in at least 3 chats over at least 2 days, never given another value, about a focus entity |
 | `SINCE YOUR LAST MESSAGE` | up to 3 lines (200 chars) on focus entities moved after this chat's last delivered turn by code, scripts or other chats |
 | `ALERT` | at most 2 per turn; the rest ride the next turns |
