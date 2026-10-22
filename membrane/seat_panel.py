@@ -321,20 +321,21 @@ def control(srv, body: dict, by: str = "operator") -> dict:
         except (TypeError, ValueError):
             pass
     if "self" in body:                             # #161: the self loop's switch (off / on / watch)
-        from . import self_loop as _SELF
+        from . import self_writer as _W        # #440: self/'s one writer
         m = str(body["self"] or "")
-        if _SELF.set_mode(srv, m, by=by):
+        if _W.set_mode(srv, m, by=by):
             done["self"] = m
             note(srv, "self", value=m, by=by)
     if "accept" in body:                           # #299: the operator accepts an earned achievement
-        from . import self_loop as _SELF
-        out = _SELF.accept(srv, body["accept"], by=by)
+        from . import self_writer as _W
+        out = _W.accept(srv, body["accept"], by=by)
         done["accept"] = out
         if out.get("ok") and not out.get("already"):
             note(srv, "self-accept", value=out["id"], by=by)
     if "self_limit" in body:                       # DEPRECATED (#299): a bulk accept of the closure;
         from . import self_loop as _SELF           # 0 / "off" sleeps (an id, "all"; a number is the old ladder's)
-        if _SELF.set_limit(srv, body["self_limit"], by=by):
+        from . import self_writer as _W
+        if _W.set_limit(srv, body["self_limit"], by=by):
             n = _SELF.limit(srv)
             done["self_limit"] = n
             done["self_allow"] = _SELF.allow(srv)

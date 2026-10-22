@@ -66,6 +66,8 @@ import subprocess
 import sys
 import time
 
+from . import self_writer as _W   # #440: the one writer for self/
+
 FILE = "energy.json"
 BASAL_PER_S = 1 / (16 * 3600)
 CPU_PER_S = 1 / (16 * 3600)
@@ -105,7 +107,7 @@ def _state(srv) -> dict:
 
 
 def _save(srv, st: dict) -> None:
-    _SL()._save_json(srv, FILE, {**st, "ts": time.time()})
+    _W.save_json(srv, FILE, {**st, "ts": time.time()})
 
 
 def _free(srv) -> int | None:
@@ -239,9 +241,9 @@ def _fall_asleep(srv, st: dict, now: float, why: str, rs: dict) -> None:
     SL = _SL()
     st.update(asleep=True, since=now)
     dropped = SL._open_at_sleep(srv, now)
-    SL._append(srv, {"ts": now, "kind": "sleep", "why": why, "energy": st["energy"], "reserves": rs,
+    _W.append(srv, {"ts": now, "kind": "sleep", "why": why, "energy": st["energy"], "reserves": rs,
                      "dropped": dropped})
-    SL.consolidate(srv, now)
+    _W.consolidate(srv, now)
     _changed(srv)
 
 
@@ -251,7 +253,7 @@ def _wake(srv, st: dict, now: float, why: str, free, avail, who: str | None = No
     rec = {"ts": now, "kind": "wake", "why": why, "energy": st["energy"]}
     if who is not None:
         rec["who"] = who
-    _SL()._append(srv, rec)
+    _W.append(srv, rec)
     _changed(srv)
     _SL()._rt(srv)["wake"].set()            # the loop runs its next cycle
 
@@ -303,7 +305,7 @@ def error(srv, why: str, now: float | None = None) -> float:
     with SL._lock:
         st = _state(srv)
         st["energy"] = max(0.0, st["energy"] - ERROR_COST)
-        SL._append(srv, {"ts": now, "kind": "error", "why": str(why or "")[:200], "cost": ERROR_COST,
+        _W.append(srv, {"ts": now, "kind": "error", "why": str(why or "")[:200], "cost": ERROR_COST,
                          "energy": st["energy"]})
         _save(srv, st)
         return st["energy"]
