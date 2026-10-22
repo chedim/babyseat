@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import claude_agent as CA  # noqa: E402
 from membrane import server as MS  # noqa: E402
+from tests.test_claude_agent_384 import key_fixture  # noqa: E402
 from tests.test_claude_agent_tools_389 import (  # noqa: E402
     AssistantMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage,
     fake_sdk as _base_sdk)
@@ -70,7 +71,8 @@ class _SDKCase(unittest.TestCase):
     def setUp(self):
         self.sdk = capping_sdk(self.capped)
         self._p = [mock.patch.dict(sys.modules, {"claude_agent_sdk": self.sdk}),
-                   mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude")]
+                   mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude"),
+                   key_fixture()]                       # #413: a fake key
         for p in self._p:
             p.start()
         CA.reset_stats()

@@ -2,8 +2,9 @@
 
 The seat can route a turn to Claude through the
 [Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/) (issue #384).
-The SDK drives your local `claude` CLI with the CLI's own login. membrane
-does not read that login's token and does not call an Anthropic API itself.
+The rung runs on your **Anthropic API key** (issue #413). The SDK drives
+the `claude` CLI, and membrane hands that CLI your key. membrane does not
+call an Anthropic API itself.
 
 **The rules (issue #389):** Claude's replies are learned like any other
 model's. Claude gets membrane's own tools, and only those, inside the SDK's
@@ -13,22 +14,49 @@ agent loop.
 
 1. Install the optional extra on the seat's Python:
    `pip install 'babyseat[claude-agent]'` (or `pip install claude-agent-sdk`).
-2. Install Claude Code and log in once: run `claude`, or `claude auth login`.
-   The SDK also ships its own copy of the CLI. membrane uses the `claude`
-   on your PATH first, and that bundled copy if there is none.
-3. Run `membrane auth claude-agent`. It checks that the SDK is installed and
-   that `claude auth status` reports a login. Then it stores a non-secret
-   mark (`"claude-agent": "cli-login"`) in `~/.membrane/auth.json`. No key or
-   token is stored. You can set `MEMBRANE_CLAUDE_AGENT=1` instead.
+   The SDK ships its own copy of the `claude` CLI. membrane uses the
+   `claude` on your PATH first, and that bundled copy if there is none.
+2. Give membrane your Anthropic API key: run `membrane auth anthropic`
+   (it asks for the key and stores it in `~/.membrane/auth.json`, mode
+   600), or set `ANTHROPIC_API_KEY` in the seat's environment. The
+   environment variable wins over the stored key.
+3. Run `membrane auth claude-agent`. It checks that the SDK is installed,
+   that the CLI is found and that a key is set. Then it stores a non-secret
+   mode mark (`"claude-agent": "api-key"`) in `~/.membrane/auth.json`. The
+   key is not copied or printed. You can set `MEMBRANE_CLAUDE_AGENT=1`
+   instead.
 4. Restart the seat when it is idle. At boot it registers three rungs:
    `claude-agent:sonnet`, `claude-agent:opus` and `claude-agent:haiku`. They
    use the CLI's model aliases.
 
-A missing SDK or CLI gives a clear error. The boot line says
+**How the key reaches Claude.** For each turn, membrane passes the key to
+the CLI subprocess as `ANTHROPIC_API_KEY` in the SDK's
+`ClaudeAgentOptions.env`. The SDK sets that env over the seat's own
+environment. The same env blanks every credential the CLI would use
+instead of the key: `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and
+the Bedrock, Vertex and Foundry switches. So the CLI cannot fall back to a
+`claude` login stored on the machine. With the key in its environment,
+`claude auth status` reports `authMethod: "api_key"` even where a
+claude.ai login is stored. The key is never printed or logged, and an
+error that echoes it is masked before it is shown.
+
+A missing SDK, CLI or key gives a clear error. The boot line says
 `NOT usable yet: …`. A turn sent to the rung gets HTTP 503 with what to
-install or log in to, and no model is called. If Claude fails during a turn
-(for example, you are logged out or hit a limit), the reply says
+do (for a missing key: run `membrane auth anthropic` or set
+`ANTHROPIC_API_KEY`), and no model is called. If Claude fails during a
+turn (for example, the key is wrong or hit a limit), the reply says
 `[claude-agent] the turn failed: …`.
+
+### Development opt-in: the CLI login
+
+For development and personal use only, `membrane auth claude-agent --login`
+runs the rung on the `claude` CLI's own login instead of a key. It checks
+that `claude auth status` reports a login, then stores the mark
+`"claude-agent": "login"` (or set `MEMBRANE_CLAUDE_AGENT=login`). In this
+mode `ANTHROPIC_API_KEY` is blanked for the CLI, so the login answers.
+membrane never reads the login's token. It is never chosen on its own: a
+mark stored before #413 (`"cli-login"`) means the API key, and
+`membrane auth claude-agent` without `--login` goes back to the key.
 
 ## When it answers
 
@@ -145,17 +173,12 @@ Claude's turn is learned like any other model's turn:
   the seat's own (OpenCode provider `membrane`), so the seat's turns do
   not come back to it.
 
-## Policy
+## Billing
 
-This rung relies on Anthropic allowing Agent SDK use with a Claude plan.
-Anthropic's help article
-[Use the Claude Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540)
-describes the SDK as usable with Pro and Max plans. Its usage counts
-against the plan's limits; as of the article's 2026-10-07 update, Max and
-Team plans also include monthly API credits that cover the Agent SDK. Check
-the article and Anthropic's current terms before turning the rung on; they
-can change.
+The rung's usage is billed to the Anthropic API key, like any API call on
+that key.
 
 The rules above are enforced in code (`membrane/claude_agent.py`,
-`membrane/lanes.py`, `membrane/server.py`) and tested
-(`tests/test_claude_agent_384.py`, `tests/test_claude_agent_tools_389.py`).
+`membrane/lanes.py`, `membrane/server.py`, `membrane/cli.py`) and tested
+(`tests/test_claude_agent_384.py`, `tests/test_claude_agent_tools_389.py`,
+`tests/test_claude_agent_apikey_413.py`).

@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from membrane import claude_agent as CA  # noqa: E402
 from membrane import mcp_server as MCP  # noqa: E402
 from membrane import server as MS  # noqa: E402
+from tests.test_claude_agent_384 import key_fixture  # noqa: E402
 
 BUILTINS = ("Bash", "Read", "Edit", "Write", "MultiEdit", "Glob", "Grep",
             "WebFetch", "WebSearch", "Task", "NotebookEdit", "TodoWrite",
@@ -136,7 +137,8 @@ class _SDKCase(unittest.TestCase):
     def setUp(self):
         self.sdk = fake_sdk(self.call)
         self._p = [mock.patch.dict(sys.modules, {"claude_agent_sdk": self.sdk}),
-                   mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude")]
+                   mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude"),
+                   key_fixture()]                       # #413: a fake key
         for p in self._p:
             p.start()
 
