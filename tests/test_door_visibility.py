@@ -48,12 +48,17 @@ def _tail(path, n=60):
 def quiet_seat():
     """A booted serve on a RAM field (ephemeral, cheap)."""
     import os
-    import socket as _sock
 
-    _probe = _sock.socket()
-    _probe.bind(("127.0.0.1", 0))
-    port = _probe.getsockname()[1]
-    _probe.close()
+    sys.path.insert(0, os.path.dirname(__file__))
+    from _ports import quiet_port
+    from _seat_env import seat_env
+    # its serve and proxy ports: two distinct ports below the ephemeral range
+    # -- a released bind(0) port is the next one the OS hands a parallel
+    # connection, and the seat then walked off the port this fixture polls
+    # ("seat never became ready"); the proxy no longer walks up from the
+    # live seat's default either (#408)
+    port = quiet_port()
+    listen = quiet_port(avoid=(port,))
     env = dict(os.environ)
     env["MEMBRANE_EFIELD_STORE"] = "mem"
     env["MEMBRANE_LAN"] = "0"
@@ -62,7 +67,10 @@ def quiet_seat():
     # its own fresh dir per seat: a fixed shared dir let a stale seat's (or a
     # parallel run's) files leak into this one (#408)
     seat_dir = tempfile.mkdtemp(prefix="door-seat-")
-    sys.path.insert(0, os.path.dirname(__file__))
+    # ... and nothing of it lands outside that dir: the inherited environment
+    # pointed its home files (~/.membrane/peers.jsonl, the commons, auth) and
+    # any inherited MEMBRANE_DATA_DIR at the operator's real ones (#408)
+    env = seat_env(seat_dir, env)
     from _fake_ollama import FakeOllama
     fake = FakeOllama().__enter__()
     so = open(os.path.join(seat_dir, "seat.stdout"), "wb")
@@ -73,8 +81,8 @@ def quiet_seat():
          "--no-launch", "--no-thinker", "--no-dreamer", "--no-autonode",
          "--no-router", "--model", "granite4:latest",
          "--field", f"{seat_dir}/f.json", "--audit", f"{seat_dir}/a.jsonl",
-         "--backend", fake.url],
-        env=env, stdout=so, stderr=se)
+         "--backend", fake.url, "--listen", str(listen)],
+        env=env, cwd=seat_dir, stdout=so, stderr=se)
 
     def _boot_failure(why):
         so.flush()
@@ -112,7 +120,7 @@ def quiet_seat():
         def new_session():
             return _post(_mk["url"] + "/session", {})
 
-        yield _mk["url"], _get, _post, new_session
+        yield _mk["url"], _get, _post, new_session, seat_dir
     finally:
         proc.terminate()
         try:
@@ -129,7 +137,7 @@ def quiet_seat():
 
 
 def test_direct_post_announces_and_stores(quiet_seat):
-    base, _get, _post, new_session = quiet_seat
+    base, _get, _post, new_session, _seat_dir = quiet_seat
     s = new_session()
     sid = s["id"]
     out = _post(f"{base}/session/{sid}/message",
@@ -141,7 +149,7 @@ def test_direct_post_announces_and_stores(quiet_seat):
 
 
 def test_busy_session_announces_at_acceptance(quiet_seat):
-    base, _get, _post, new_session = quiet_seat
+    base, _get, _post, new_session, _seat_dir = quiet_seat
     s = new_session()
     sid = s["id"]
     _post(f"{base}/session/{sid}/message",
@@ -154,7 +162,7 @@ def test_busy_session_announces_at_acceptance(quiet_seat):
 
 
 def test_no_double_announce(quiet_seat):
-    base, _get, _post, new_session = quiet_seat
+    base, _get, _post, new_session, _seat_dir = quiet_seat
     s = new_session()
     sid = s["id"]
     _post(f"{base}/session/{sid}/message",
@@ -162,3 +170,19 @@ def test_no_double_announce(quiet_seat):
     rows = _get(f"{base}/session/{sid}/message")
     ids = [r["info"]["id"] for r in rows]
     assert len(ids) == len(set(ids)), ids
+
+def test_the_door_seat_keeps_to_its_own_dir(quiet_seat):
+    """The seat these tests boot writes only under its own temp dir: it
+    registers as a peer in that dir, never in the real home's
+    ~/.membrane/peers.jsonl (the operator's live seat reads that roster)."""
+    base, _get, _post, new_session, seat_dir = quiet_seat
+    sid = new_session()["id"]                     # one turn: the fixture checks it reached the fake
+    _post(f"{base}/session/{sid}/message", {"parts": [{"type": "text", "text": "reply: pong"}]})
+    own = os.path.join(seat_dir, "peers.jsonl")
+    assert os.path.exists(own), os.listdir(seat_dir)
+    with open(own) as f:
+        assert seat_dir in f.read()
+    real = os.path.expanduser("~/.membrane/peers.jsonl")
+    if os.path.exists(real):
+        with open(real) as f:
+            assert seat_dir not in f.read()
