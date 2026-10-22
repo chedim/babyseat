@@ -148,7 +148,7 @@ membrane/server.py):
   flood gates (2026-10-08): reads (`query`, `state`, `graph`,
   `entities_related`, `entity_query`, `entity_read`, `entity_tracks`),
   memory (`learn`, `forget`), steering (`intend`, `intents`,
-  `fulfill`), room (`peer_post`, `peer_seats`, `junk_cut`), the watches
+  `fulfill`), room (`peer_post`, `peer_seats`, `peer_read`, `junk_cut`), the watches
   (`entity_watch`, `entity_unwatch`, `field_watch`, `attention`) and the
   entity hands (`entity_add`, `entity_edit`, `entity_remove`,
   `entity_inherit`, `entity_link`, `entity_unlink`). The chat runs a

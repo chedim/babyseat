@@ -724,7 +724,7 @@ OPERATOR_TOOLS = frozenset((
     # with a receipt, the listeners' too: their landed work moves the board)
     "intend", "intents", "fulfill",
     # room
-    "peer_post", "peer_seats", "junk_cut",
+    "peer_post", "peer_seats", "peer_read", "junk_cut",
     # the banner tracks (the operator's header)
     "entity_watch", "entity_unwatch",
     # the seat's own alert dial (2026-10-08): how many watch events may

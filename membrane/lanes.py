@@ -1084,15 +1084,59 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
     (exactly-once delivery to a real model turn). The /membrane/state
     reader passes drain=False -- a PEEK: it shows pending counts without
     consuming them (the state-instrument read must never eat the model's
-    alerts -- the curl-drained-the-ALERT bug)."""
-    lines: list[str] = []
+    alerts -- the curl-drained-the-ALERT bug).
+
+    Each part is also pullable on its own (#429): where_section()."""
+    lines = [ln for _sec, ln in _where_lines(srv, vec, drain, events_only)]
+    if not lines:
+        return None
+    return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
+
+
+# THE PULL SURFACE (#429): the parts of WHERE WE ARE a model may pull one at a
+# time (state(section=...)), plus `changes` (SINCE YOUR LAST MESSAGE, peeked).
+# The pause line, ALERTs and the null-recall notice are events, not state;
+# the seats line and peer messages are peer(action='seats' / 'unread').
+PULL_SECTIONS = ("tracks", "commands", "interfaces", "classes", "loops",
+                 "timelines", "frame", "digest", "changes")
+
+
+def where_section(srv, section: str) -> str | None:
+    """One part of WHERE WE ARE: exactly the lines the banner holds for it,
+    as a peek (no ALERT, digest or peer-message drain; the banner's stage
+    clock untouched). `changes` is the entity diff since the last turn the
+    model was handed (the watermark does not move). None when empty;
+    ValueError naming the sections on an unknown one."""
+    sec = str(section or "").strip().lower()
+    if sec not in PULL_SECTIONS:
+        raise ValueError(f"unknown section {section!r}: one of {', '.join(PULL_SECTIONS)}")
+    if sec == "changes":
+        fld = _efield_on(srv)
+        mark = getattr(srv, "_efield_mark", None)
+        if fld is None or not mark:
+            return None
+        from .entity_block import state_diff
+        return state_diff(fld, mark, _own_session_prefix(srv)) or None
+    lines = [ln for _s, ln in _where_lines(srv, None, drain=False, only=sec)]
+    return "\n".join("- " + ln for ln in lines) if lines else None
+
+
+def _where_lines(srv, vec, drain: bool = True, events_only: bool = False,
+                 only: str | None = None) -> list[tuple[str, str]]:
+    """WHERE WE ARE's lines as (section, line), in banner order. `only` names
+    one section: the others are not computed at all (nothing of theirs is
+    drained, read or timed)."""
+    def want(sec: str) -> bool:
+        return only is None or only == sec
+
+    lines: list[tuple[str, str]] = []
     # THE PAUSE LINE (the stable point is visible: the model sees why
     # the field's voices are quiet -- and that its writes are refused).
-    if nerve_paused(srv):
-        lines.append("PAUSED: the seat's acting lanes are down (the "
+    if want("paused") and nerve_paused(srv):
+        lines.append(("paused", "PAUSED: the seat's acting lanes are down (the "
                      "operator's stable point) -- reads/memory/intend "
                      "work; your writes are refused; the held events "
-                     "deliver on resume.")
+                     "deliver on resume."))
     # THE MINIMAL HEADER (the operator's call: 'only tracks and
     # notifications'): the focus/commitments/field-stats lines moved to
     # /membrane/state (the operator's instrument) -- the MODEL's header
@@ -1105,12 +1149,14 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
     #    drain=False and shows nothing, consuming nothing). The unified
     #    banner's event lane.
     _bt = [time.time()]
-    _bs = srv._banner_stages = {}
+    _bs = {}
+    if only is None:                        # a pull never resets the banner's clock
+        srv._banner_stages = _bs
 
     def _bmark(name):                       # the banner's own splits (the gate's 'recall+banner')
         now = time.time(); _bs[name] = round(now - _bt[0], 3); _bt[0] = now
     est = getattr(srv, "entity_store", None)
-    if est is not None and getattr(est, "tracks", None):
+    if est is not None and getattr(est, "tracks", None) and (want("alerts") or want("tracks")):
         try:
             # 1. EVENTS: boundary ALERTS + entity ANNOUNCEMENTS (exactly-
             #    once drains -- the chat path is the only consumer; a
@@ -1124,10 +1170,10 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                 from .entity_block import track_count
                 est.evaluate_tracks(count_fn=lambda k: track_count(fld, k))
                 _bmark("t.evaluate")
-                if drain:
+                if drain and want("alerts"):
                     for a in est.take_alerts():
-                        lines.append(f"ALERT: {a['label']} {a['kind']} its "
-                                     f"boundary ({a['boundary']}; {a['detail']})")
+                        lines.append(("alerts", f"ALERT: {a['label']} {a['kind']} its "
+                                     f"boundary ({a['boundary']}; {a['detail']})"))
                         # THE SPEECH LANE (the baby's voice): alerts speak in
                         # the room -- the same event, two deliveries (the
                         # banner whisper + the chat message)
@@ -1135,23 +1181,23 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                                    f"boundary ({a['boundary']})", kind="alert")
                     for a in est.take_announcements():
                         ln = announce_line(a)
-                        lines.append(ln)
+                        lines.append(("alerts", ln))
                         speak(srv, ln, kind="note")
                 _bmark("t.alerts")
                 from .entity_block import now_line, track_line
                 # THE MASSAGE MODE: the events stay (they happened); the
                 # track stories are state, and the massage replaces state
-                for t in ([] if events_only else est.list_tracks()):
+                for t in ([] if (events_only or not want("tracks")) else est.list_tracks()):
                     if t["key"] == "session:now":
                         _t0 = time.time(); fld.flush(); _bs["t.flush"] = round(time.time() - _t0, 3)
                         _t0 = time.time()
                         ln = now_line(fld, getattr(srv, "_efield_boot_seq", 0))
                         _bs["t.now"] = round(time.time() - _t0, 3)
                         if ln:
-                            lines.append(ln)
+                            lines.append(("tracks", ln))
                         continue
                     _t0 = time.time()
-                    lines.append(track_line(fld, t["key"], t.get("label") or ""))
+                    lines.append(("tracks", track_line(fld, t["key"], t.get("label") or "")))
                     _bs["t.lines"] = round(_bs.get("t.lines", 0) + time.time() - _t0, 3)
                     _bs["t.n"] = _bs.get("t.n", 0) + 1
         except Exception as e:
@@ -1164,18 +1210,18 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
     #    or when a real hit lands); scoped wording because the fork's
     #    shared-bucket recall may still find what this local field lacks.
     rn = getattr(srv, "_recall_null", None) or {}
-    if rn.get("query") and (time.time() - float(rn.get("ts", 0.0))
+    if want("recall") and rn.get("query") and (time.time() - float(rn.get("ts", 0.0))
                             ) < RECALL_NULL_FRESH_S:
-        lines.append(
+        lines.append(("recall",
             f"field: no SAFE memory near {rn['query']!r} "
             f"(top sim {rn.get('sim')}) — this field holds nothing on "
             f"that; absence is information ({rn.get('count', 1)} null "
-            f"recall(s) this session)")
+            f"recall(s) this session)"))
     # 6. THE OPEN TIMELINES (the dreamer's render): quarantined + confirmed
     #    branches under the true timeline, as tracks -- the model sees what
     #    futures are open from the present (suggestions, never lived).
     est = getattr(srv, "entity_store", None)
-    if est is not None and not events_only:
+    if est is not None and not events_only and want("timelines"):
         try:
             tls = est.open_timelines(limit=3)
             if tls:
@@ -1186,32 +1232,33 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                     sim = props.get("branch_sim")
                     sim_s = (f"{float(sim):.2f}" if isinstance(sim, (int, float))
                              else "?")
-                    lines.append(f"timeline ({status}, branch_sim {sim_s}): "
-                                 f"{term}")
+                    lines.append(("timelines", f"timeline ({status}, branch_sim {sim_s}): "
+                                               f"{term}"))
         except Exception as e:
             print(f"[opencode] timeline render error: {e}", file=sys.stderr)
     _bmark("timelines")
     # 4.5. THE LOOPS LINE (the reactive layer's ambient load): the
     # thinking loops' running + queued counts + their agent titles.
     try:
-        _loops_line = None if events_only else loops_banner_line(srv)
+        _loops_line = None if (events_only or not want("loops")) else loops_banner_line(srv)
         if _loops_line:
-            lines.append(_loops_line)
+            lines.append(("loops", _loops_line))
     except Exception:
         pass
     _bmark("loops")
     # THE ALERT DIGEST (2026-10-08): the watch events past the seat's
     # alert budget, folded here instead of N interrupt turns
-    for _dl in _digest_lines(srv, drain=drain):
-        lines.append(_dl)
+    for _dl in (_digest_lines(srv, drain=drain) if want("digest") else []):
+        lines.append(("digest", _dl))
     # THE WATCH FRAME (2026-10-08, entities as axes): the axes the talk
     # leans along now, measured on what the seat chose to watch
     try:
         _fr = getattr(srv, "_frame", None)
         from .frame import Frame as _Frame
-        _fl = _fr.line() if (isinstance(_fr, _Frame) and not events_only) else ""
+        _fl = (_fr.line() if (isinstance(_fr, _Frame) and not events_only and want("frame"))
+               else "")
         if _fl:
-            lines.append(_fl)
+            lines.append(("frame", _fl))
     except Exception:
         pass
     _bmark("digest+frame")
@@ -1220,7 +1267,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
     #    unread PEER-CHANNEL messages (cross-seat chatter, read-once per
     #    seat, visible to the operator on every connected opencode).
     peers = getattr(srv, "peers", None)
-    if peers is not None:
+    if peers is not None and want("peers"):
         try:
             from .peers import CHANNEL_TEXT_CAP
             peers.heartbeat()
@@ -1231,34 +1278,32 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                 who = ", ".join(
                     f"{str(s.get('cwd', '?')).rsplit('/', 1)[-1]}"
                     f"(:{s.get('port')})" for s in others[:3])
-                lines.append(f"seats: {who} also connected")
+                lines.append(("peers", f"seats: {who} also connected"))
             for m in peers.fetch_unread():
                 frm = str(m.get("from", "?")).replace("proxy-", "")
                 text = str(m.get("text", ""))[:CHANNEL_TEXT_CAP]
-                lines.append(f"peer[{frm}]: {text}")
+                lines.append(("peers", f"peer[{frm}]: {text}"))
         except Exception:
             pass
     _bmark("peers")
     if not events_only:
         try:
             from .night import command_library
-            lib = command_library(getattr(srv, "entity_store", None))
+            lib = command_library(getattr(srv, "entity_store", None)) if want("commands") else None
             if lib:
-                lines.append(lib)
+                lines.append(("commands", lib))
             from .night import interfaces_line
-            il = interfaces_line(srv)
+            il = interfaces_line(srv) if want("interfaces") else None
             if il:
-                lines.append(il)
+                lines.append(("interfaces", il))
             from .classes import proposals_line
-            cp = proposals_line(srv)
+            cp = proposals_line(srv) if want("classes") else None
             if cp:
-                lines.append(cp)
+                lines.append(("classes", cp))
         except Exception:
             pass
     _bmark("library")
-    if not lines:
-        return None
-    return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
+    return lines
 
 
 # ---- the watch layer (spatial triggers, docs: membrane/watch.py) -----------
@@ -4202,6 +4247,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._entity_add(); return
         if path == "/membrane/peer/post":
             self._peer_post(); return
+        if path == "/membrane/peer/read":
+            self._peer_read(); return
         if path == "/membrane/junk-cut":
             self._junk_cut_set(); return
         if path == "/membrane/watch":
@@ -6484,6 +6531,19 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             return
         self._json_out({"ok": ok})
 
+    def _peer_read(self) -> None:
+        """POST /membrane/peer/read (#429): the unread peer-channel messages,
+        oldest first -- read-once per seat, like the banner's peer lines
+        (a POST: reading moves this seat's cursor)."""
+        peers = getattr(self.server, "peers", None)
+        if peers is None:
+            self._json_err_raw(503, "peer substrate unavailable"); return
+        from .peers import CHANNEL_TEXT_CAP
+        msgs = [{"from": str(m.get("from", "?")).replace("proxy-", ""),
+                 "text": str(m.get("text", ""))[:CHANNEL_TEXT_CAP]}
+                for m in (peers.fetch_unread() or [])]
+        self._json_out({"messages": msgs})
+
     def _peer_seats(self) -> None:
         """GET /membrane/peer/seats: the registry read (who else is
         connected; dead proxies expire by TTL)."""
@@ -7216,6 +7276,17 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
 
     def _membrane_state(self) -> None:
         srv = self.server
+        # THE PULL (#429): ?section=<name> returns one part of WHERE WE ARE,
+        # computed now (never the cached full read) and consuming nothing
+        if "?" in self.path:
+            from urllib.parse import parse_qs
+            _sec = (parse_qs(self.path.split("?", 1)[1]).get("section") or [""])[0].strip()
+            if _sec:
+                try:
+                    _txt = where_section(srv, _sec)
+                except ValueError as e:
+                    self._json_err_raw(400, str(e)); return
+                self._json_out({"section": _sec.lower(), "text": _txt or ""}); return
         # THE STATE CACHE (the slow-endpoint fix): the state query builds
         # the full trajectory hydration + WHERE WE ARE + the surface ring
         # -- O(field_size) per call, 20+ seconds on a fresh boot. Cached

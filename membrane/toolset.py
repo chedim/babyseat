@@ -19,6 +19,7 @@ RETIRED = {"junk_cut"}          # an operator tuning knob, not the model's
 _S = lambda d: {"type": "string", "description": d}       # noqa: E731
 _I = lambda d: {"type": "integer", "description": d}      # noqa: E731
 _B = lambda d: {"type": "boolean", "description": d}      # noqa: E731
+_T = lambda t: {"type": t}                                 # noqa: E731  (a name that says it all)
 
 
 def _pick(args: dict, *keys) -> dict:
@@ -87,7 +88,7 @@ FAMILIES: dict[str, dict] = {
                    "read_only": _B("define: a read"), "guard": _S("define: guard"),
                    "abstract": _B("define: f(a,b), no command"),
                    "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"},
-                   "executor": _S("optional"), "create": _B("optional")},
+                   "executor": _T("string"), "create": _T("boolean")},
         "map": {"call": lambda a: _pick(a, "object", "method", "args"),
                 "inspect": lambda a: _pick(a, "object", "method", "args"),
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
@@ -99,7 +100,8 @@ FAMILIES: dict[str, dict] = {
     },
     "goal": {
         "description": "Your commitments: plant one, list the board, close one with its "
-                       "receipt (evidence). Loops: help('goals').",
+                       "receipt (evidence). An empty board leaves the idle mind unsteered: "
+                       "help('goals').",
         "actions": {"plant": "intend", "list": "intents", "close": "fulfill"},
         "params": {"text": _S("plant: the goal"), "ttl": _S("plant: optional, e.g. '2w'"),
                    "spec": _S("close: the goal's id"), "evidence": _S("close: the receipt")},
@@ -119,7 +121,7 @@ FAMILIES: dict[str, dict] = {
                        "like 'enter 3'), unwatch, list.",
         "actions": {"watch": "entity_watch", "unwatch": "entity_unwatch", "list": "entity_tracks"},
         "params": {"key": _S("the entity"), "boundary": _S("optional: 'enter N' / 'exit N'"),
-                   "label": _S("optional label"), "owner": _S("optional owner")},
+                   "label": _T("string"), "owner": _T("string")},
         "map": {"watch": lambda a: _pick(a, "key", "boundary", "label", "owner"),
                 "unwatch": lambda a: _pick(a, "key"), "list": lambda a: _pick(a, "owner")},
     },
@@ -129,7 +131,7 @@ FAMILIES: dict[str, dict] = {
         "actions": {"plant": "field_watch", "drop": "field_watch", "list": "field_watch",
                     "dial": "attention"},
         "params": {"topic": _S("plant: what to watch"), "spec": _S("drop: which watch"),
-                   "owner": _S("optional owner"), "budget": _I("dial: interrupts per window"),
+                   "owner": _T("string"), "budget": _I("dial: interrupts per window"),
                    "window_min": _I("dial: window minutes"), "mode": _S("dial: interrupt | digest")},
         "map": {"plant": lambda a: {"action": "plant", **_pick(a, "topic", "owner")},
                 "drop": lambda a: {"action": "drop", **_pick(a, "spec")},
@@ -139,13 +141,16 @@ FAMILIES: dict[str, dict] = {
     },
     "state": {
         "description": "Membrane's own vitals (the field, the gate, the night pass).",
-        "actions": {"": "state"}, "params": {}, "map": {"": lambda a: {}},
+        "actions": {"": "state"}, "params": {"section": _S("one part only: help('state')")},
+        "map": {"": lambda a: _pick(a, "section")},
     },
     "peer": {
-        "description": "Other seats: post to the peer channel, or list seats (there may be none).",
-        "actions": {"post": "peer_post", "seats": "peer_seats"},
-        "params": {"text": _S("post: the message"), "reply_to": _S("optional")},
-        "map": {"post": lambda a: _pick(a, "text", "reply_to"), "seats": lambda a: {}},
+        "description": "Other seats: post to the peer channel, read what is unread, or list "
+                       "seats (there may be none).",
+        "actions": {"post": "peer_post", "unread": "peer_read", "seats": "peer_seats"},
+        "params": {"text": _S("post: the message"), "reply_to": _T("string")},
+        "map": {"post": lambda a: _pick(a, "text", "reply_to"), "unread": lambda a: {},
+                "seats": lambda a: {}},
     },
 }
 
@@ -180,7 +185,16 @@ HELP = {
         "goal(action='plant') makes a commitment; the watch loops take it up. A loop ends each pass "
         "with one line: DONE <receipt> / STEP <what moved> / BLOCKED <on whom, or 'on <entity>', or "
         "'retry after 2h'> / ignored: <reason>. Close with goal(action='close', spec=<id>, "
-        "evidence=<receipt>) -- no receipt, no close."),
+        "evidence=<receipt>) -- no receipt, no close. An EMPTY board leaves membrane's dream loop and "
+        "think-ahead unsteered (nothing guides the idle mind's branches): when your work has a "
+        "direction worth keeping across sessions, plant it; plant only when it serves the work."),
+    "state": (
+        "state() is membrane's vitals plus the seat's whole WHERE WE ARE. state(section=...) pulls "
+        "one part: tracks (the watched entities' stories), commands (your most-run, with counts), "
+        "interfaces, classes (class proposals), loops (the thinking loops), timelines (open "
+        "branches), frame (the watch frame), digest (watch events past your alert budget), "
+        "changes (what moved since your last message). Other seats: peer(action='seats' / "
+        "'unread')."),
     "watches": (
         "Three ways to watch, one budget of 12: track (header lines, entity_watch boundaries), "
         "field_watch (spatial: new memories near a topic), and an entity's watch_ops "
@@ -260,7 +274,7 @@ def _family_def(name: str, fam: dict, actions: list[str]) -> dict:
     props.update(fam["params"])
     return {"name": name, "description": fam["description"],
             "inputSchema": {"type": "object", "properties": props,
-                            "required": ["action"] if any(actions) else []}}
+                            **({"required": ["action"]} if any(actions) else {})}}
 
 
 def advertised(lane_tools) -> list[dict]:

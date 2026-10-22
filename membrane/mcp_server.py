@@ -48,6 +48,11 @@ HTTP_TIMEOUT_S = 120.0   # the relay headroom: a live turn's tool call may
                          # The handlers' own caps (subprocess 20s/600s)
                          # bound the real work.
 
+# the parts of WHERE WE ARE state(section=...) pulls (#429); the same names
+# as lanes.PULL_SECTIONS (this module stays a thin HTTP client: no import)
+_PULL_SECTIONS = ("tracks", "commands", "interfaces", "classes", "loops",
+                  "timelines", "frame", "digest", "changes")
+
 TOOLS: list[dict] = [
     {
         "name": "query",
@@ -75,8 +80,14 @@ TOOLS: list[dict] = [
             "(live entities, events by stream, entities by tier, "
             "conflicts), the replay A/B ledger, and the last night pass. "
             "Read-only, computed from the running proxy. Use for "
-            "memory-health checks."),
-        "inputSchema": {"type": "object", "properties": {}},
+            "memory-health checks. With `section`, just that part of the "
+            "seat's WHERE WE ARE: tracks, commands (your most-run, with "
+            "counts), interfaces, classes (class proposals), loops, "
+            "timelines, frame, digest, or changes (what moved since your "
+            "last message)."),
+        "inputSchema": {"type": "object", "properties": {
+            "section": {"type": "string", "enum": list(_PULL_SECTIONS),
+                        "description": "Optional: one part instead of all."}}},
     },
     {
         "name": "intend",
@@ -857,6 +868,13 @@ def tool_query(args: dict, port: int) -> str:
 
 
 def tool_state(args: dict, port: int) -> str:
+    section = str((args or {}).get("section") or "").strip().lower()
+    if section:                                  # #429: pull one part
+        from urllib.parse import quote
+        out = _http(port, "GET", f"/membrane/state?mcp=1&section={quote(section)}")
+        text = str(out.get("text") or "").strip()
+        return (f"WHERE WE ARE ({section}):\n{text}" if text
+                else f"Nothing in {section} right now.")
     out = _http(port, "GET", "/membrane/state?mcp=1")
     ef = out.get("efield") or {}
     lines = [
@@ -1350,6 +1368,15 @@ def tool_entity_inherit(args: dict, port: int) -> str:
     return f"Entity {out['child']} parents refreshed (no new links)." + contract
 
 
+def tool_peer_read(args: dict, port: int) -> str:
+    out = _http(port, "POST", "/membrane/peer/read", {})
+    msgs = out.get("messages") or []
+    if not msgs:
+        return "No unread peer messages."
+    return "\n".join([f"{len(msgs)} unread peer message(s):"]
+                     + [f"peer[{m.get('from', '?')}]: {m.get('text', '')}" for m in msgs])
+
+
 def tool_peer_seats(args: dict, port: int) -> str:
     out = _http(port, "GET", "/membrane/peer/seats")
     seats = out.get("seats") or []
@@ -1667,6 +1694,7 @@ TOOL_IMPLS = {
     "junk_cut": tool_set_junk_cut,
     "peer_post": tool_peer_post,
     "peer_seats": tool_peer_seats,
+    "peer_read": tool_peer_read,
     "graph": tool_graph,
     "entity_query": tool_entity_query,
     "entity_inherit": tool_entity_inherit,
