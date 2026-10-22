@@ -4149,6 +4149,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._entity_track_list(); return
         if path == "/membrane/intents":
             self._membrane_intents(); return
+        if path == "/membrane/coproc":                # #454: facts, decisions, proposals, maps
+            from . import coproc as _COP
+            self._json_out(_COP.state(self.server)); return
         if path == "/membrane/entity/read":
             self._entity_read(); return
         if path in STRANGER_PATHS:
@@ -4290,6 +4293,15 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._membrane_intend(); return
         if path == "/membrane/fulfill":
             self._membrane_fulfill(); return
+        if path in ("/membrane/coproc/map", "/membrane/coproc/confirm"):   # #454
+            from . import coproc as _COP
+            b = self._json_body()
+            if path.endswith("/map"):
+                self._json_out(_COP.set_map(
+                    self.server, str(b.get("model") or ""),
+                    None if b.get("surface") is None else str(b.get("surface")),
+                    None if b.get("examples") is None else str(b.get("examples")))); return
+            self._json_out(_COP.confirm(self.server, str(b.get("id") or ""))); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -5745,6 +5757,13 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         routed_model = route.get("route")
         orig_model = str(up.get("model") or "membrane")
         t0 = time.monotonic()
+        # THE COPROCESSOR (#454, MEMBRANE_COPROC=1; off = nothing changes):
+        # the compiled block rides the request; the reply's actions run as
+        # cliffhanger words and the person sees the decompiled reply.
+        from . import coproc as _COP
+        _cp = _COP.begin(srv, up)
+        _cp_held: list = []
+        _cp_done = False
         # THE CLAUDE-AGENT RUNG (issue #384): Claude through the Agent SDK.
         # Its reply is shown and learned like any rung's (#389); the tools it
         # ran in its own loop (membrane's, relaying back to this proxy) ride
@@ -5907,12 +5926,20 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 for line in r:                      # SSE, tee verbatim
                     if not line:
                         continue
-                    self.wfile.write(line)
-                    self.wfile.flush()
+                    if _cp is None:
+                        self.wfile.write(line)
+                        self.wfile.flush()
                     s = line.strip()
                     if not s.startswith(b"data:"):
+                        if _cp is not None:
+                            self.wfile.write(line)
                         continue
                     payload = s[len(b"data:"):].strip()
+                    if _cp is not None and payload == b"[DONE]" and not _cp_done:
+                        _cp_done = True
+                        self._coproc_flush(_cp, parts, _cp_held, up)
+                        self.wfile.write(line)
+                        self.wfile.flush()
                     if not payload or payload == b"[DONE]":
                         # THE USAGE PASS-THROUGH (the 0-token display fix):
                         # the backend's own usage already tees through
@@ -5940,7 +5967,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                     try:
                         obj = json.loads(payload)
                     except json.JSONDecodeError:
+                        if _cp is not None:
+                            self.wfile.write(line)
                         continue
+                    if _cp is not None:
+                        self._coproc_relay(obj, _cp_held)
                     if usage_seen is None and isinstance(obj.get("usage"), dict)                             and obj["usage"]:
                         usage_seen = obj["usage"]
                     for ch in obj.get("choices", []) or []:
@@ -5961,6 +5992,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                 tgt["name"] = (tgt.get("name") or "") + fn["name"]
                             if fn.get("arguments"):
                                 tgt["arguments"] = (tgt.get("arguments") or "") + fn["arguments"]
+            if _cp is not None and not _cp_done:
+                _cp_done = True                 # a stream that ended without [DONE]
+                self._coproc_flush(_cp, parts, _cp_held, up)
             self.wfile.flush()
             # THE STREAMING REGISTRATION (the receipt lane's missing half):
             # the tee path accumulated `calls` from deltas but never
@@ -6034,6 +6068,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 resp_obj = json.loads(resp_bytes or b"{}")
             except json.JSONDecodeError:
                 resp_obj = None
+            if _cp is not None and isinstance(resp_obj, dict):
+                _m0 = ((resp_obj.get("choices") or [{}])[0] or {}).get("message") or {}
+                if isinstance(_m0.get("content"), str):
+                    _m0["content"] = _cp.finish(_m0["content"])
+                    resp_bytes = json.dumps(resp_obj).encode()
             # THE USAGE PASS-THROUGH (the 0-token display fix): the
             # backend's own usage stays verbatim; when it gives none, an
             # estimate rides along so no client ever reads a hardcoded zero
@@ -6167,6 +6206,41 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         except Exception as s_e:
             print(f"[opencode] surface-log error: {s_e}", file=sys.stderr)
         self._log_turn(verdict, ctx, None)
+
+    # ---- the coprocessor's stream seam (#454) ------------------------------
+    def _coproc_relay(self, obj: dict, held: list) -> None:
+        """A streamed chunk under coproc: its content is held back (the
+        extension is decompiled at the end); everything else (reasoning,
+        tool-call deltas, usage) passes; a finish chunk waits for the reply."""
+        o = json.loads(json.dumps(obj))
+        fin = False
+        keep = bool(o.get("usage"))
+        for ch in o.get("choices") or []:
+            d = ch.get("delta") or {}
+            d.pop("content", None)
+            if ch.get("finish_reason"):
+                fin = True
+            if any(v not in (None, "", [], {}) for k, v in d.items() if k != "role"):
+                keep = True
+        if fin:
+            held.append(o)
+        elif keep:
+            self.wfile.write(_sse_line(o))
+            self.wfile.flush()
+
+    def _coproc_flush(self, cp, parts: list, held: list, up: dict) -> None:
+        """The decompiled reply as content chunks, then the held finish."""
+        reply = cp.finish("".join(parts))
+        parts[:] = [reply]
+        head = {"id": "chatcmpl-membrane-coproc", "object": "chat.completion.chunk",
+                "created": 0, "model": up.get("model", "membrane")}
+        for i in range(0, len(reply), 128):
+            self.wfile.write(_sse_line({**head, "choices": [{
+                "index": 0, "delta": {"content": reply[i:i + 128]}, "finish_reason": None}]}))
+        for o in held:
+            self.wfile.write(_sse_line(o))
+        held.clear()
+        self.wfile.flush()
 
     # ---- the [membrane] monologue (thinking channel) ----------------------
     def _gate_monologue(self, verdict: dict, ctx: str | None, query: str,
