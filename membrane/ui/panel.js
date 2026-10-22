@@ -1793,8 +1793,10 @@ function fmtUsage(info) {
  * 'membrane->ollama'), in its own order; the router's catalogue stays out. */
 function ollamaModels(rows) {
   // ('@explore' rides the same owner: membrane's lane sentinel, not a model)
-  return (rows || []).filter((r) => r && r.owned_by === "membrane->ollama" && r.id && !String(r.id).startsWith("@"))
-    .map((r) => String(r.id));
+  // the claude-agent rungs (#384) follow the Ollama models: opt-in, a pick here
+  const ok = (r, owner) => r && r.owned_by === owner && r.id && !String(r.id).startsWith("@");
+  const ids = (owner) => (rows || []).filter((r) => ok(r, owner)).map((r) => String(r.id));
+  return ids("membrane->ollama").concat(ids("membrane->claude-agent"));
 }
 
 /** The message body's model: a pick rides as {providerID, modelID}; no pick
