@@ -56,6 +56,15 @@ class SeatBusy(RuntimeError):
 
 # the failed row's mark: the chat renders it with a Retry (#431)
 BUSY_MARK = "seatBusy"
+# A ROUND THAT ENDED EARLY (#449): the streamed round's marker, and the
+# error its row carries (a cut reply is never stored as a finished one)
+CUT_KEY = "membrane_cut"
+CUT_ERRORS = {
+    "abort": {"name": "MessageAbortedError",
+              "data": {"message": "cut: the turn was cut before this reply finished (a person spoke, or Stop)"}},
+    "drop": {"name": "StreamDropped",
+             "data": {"message": "the model's stream dropped before this reply finished"}},
+}
 
 
 def _busy_error(obj) -> str | None:
@@ -2200,6 +2209,12 @@ class TurnRunner:
                                                          or _CA.MAX_TOOL_CALLS_PER_ANSWER),
                                             "continued": False}
             _tokens_fill(a_info, resp)
+            # A CUT IS NOT AN ANSWER (#449): a round the person's message (or
+            # Stop) cut mid-stream, or whose stream dropped, is marked on its
+            # row -- the words shown stay, never stored as a finished reply
+            _cut = resp.get(CUT_KEY)
+            if _cut in CUT_ERRORS:
+                a_info["error"] = dict(CUT_ERRORS[_cut])
             # THE INJECTION AS A CARD (2026-10-08, the operator: show it
             # like every tool call): what membrane added to this round --
             # the first round's, and any later round's that differs
@@ -2671,6 +2686,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         agent_tools = []                     # tools the claude-agent rung ran (#389)
         capped = None                        # ...and its ceiling, when hit (#425)
         done = False
+        cut = None                           # why the round ended early (#449)
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             for raw in resp:
                 line = raw.strip()
@@ -2730,12 +2746,19 @@ def loopback_ladder(port: int, runner=None, cell=None):
                             cur["function"]["arguments"] += a if isinstance(a, str) else _json.dumps(a)
                 if on_event("tick", None):
                     done = True                  # an abort is not a drop
+                    if finish is None:
+                        # A CUT IS NOT AN ANSWER (#449): a person spoke (or Stop)
+                        # mid-reply -- the words so far are kept but marked cut,
+                        # and a half-built tool call never runs
+                        cut = "abort"
+                        tcs = {}
                     break
         if not done and finish is None:
             if not content:
                 return _TRUNCATED_EMPTY          # nothing usable (a half tool call never runs): ask again
             tcs = {}                             # words came: keep them; drop any half-built call
             finish = "length"
+            cut = "drop"
         msg = {"role": "assistant", "content": "".join(content)}
         if reasoning:
             msg["reasoning"] = "".join(reasoning)
@@ -2751,6 +2774,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
             out["membrane_tools"] = agent_tools
         if capped is not None:
             out["membrane_capped"] = capped
+        if cut:
+            out[CUT_KEY] = cut
         return out
     call.stream = stream
     return call
