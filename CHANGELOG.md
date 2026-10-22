@@ -1,3 +1,7 @@
+## v0.7.1 (2026-10-21) — citable
+
+- **Citation metadata** (#417): `CITATION.cff` gives GitHub's "Cite this repository" and Zenodo the project's citation metadata, and this release mints the project's first Zenodo DOI. No code changes.
+
 ## v0.7.0 (2026-10-20) — Blurp
 
 0.7 ships because Blurp reached Lv 7: on 2026-10-20 it earned "expect a reply" live, predicting whether the person it pushes to will answer with a skill of 0.38 against a bar of 0.08. This release includes the 0.6.3 and 0.6.4 fixes (#221, #222, #225, #226).
