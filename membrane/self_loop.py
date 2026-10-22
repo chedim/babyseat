@@ -1219,9 +1219,7 @@ def _llm_pred(srv, eid: str, since: float, until: float | None = None) -> float 
     answer answered an older question) and by `until` (the look). None when
     absent, older, later or not a probability. Tests swap it for a
     deterministic stand-in."""
-    est = getattr(srv, "entity_store", None)
-    doc = (est.docs or {}).get(eid) if est is not None else None
-    ans = (doc.properties or {}).get("llm_answer") if doc is not None else None
+    ans = _props_of(srv, eid).get("llm_answer")
     if not isinstance(ans, dict):
         return None
     ts = float(ans.get("ts") or 0)
@@ -1235,9 +1233,7 @@ def _llm_pred(srv, eid: str, since: float, until: float | None = None) -> float 
 def _llm_model(srv, eid: str) -> str | None:
     """THE SEAM (rung 8, #254): which model gave the answer on the entity
     (llm_answer's `model`, the turn's pick), None when it wasn't recorded."""
-    est = getattr(srv, "entity_store", None)
-    doc = (est.docs or {}).get(eid) if est is not None else None
-    ans = (doc.properties or {}).get("llm_answer") if doc is not None else None
+    ans = _props_of(srv, eid).get("llm_answer")
     m = ans.get("model") if isinstance(ans, dict) else None
     return str(m) if m else None
 
@@ -1247,9 +1243,23 @@ def _ask_llm(srv, eid: str, prompt: str) -> dict:
     real llm::call is async -- it queues and returns at once ({rc, text});
     the verdict lands on the entity as llm_answer for the reply check (read
     by _llm_pred). Its caps (per caller, per hour, the switch, the pause) are
-    llm.request's own."""
-    from . import llm as _LLM
-    return _LLM.request(srv, prompt, about=eid, caller="self", readonly=True)
+    llm.request's own. #440: asked in the seat (the `ask` effect)."""
+    return _API.effects(srv, [{"kind": "ask", "eid": eid, "prompt": prompt}])[0]
+
+
+def _facts(srv, **q) -> dict:
+    """#440 part 4: what the reply checks and the mirror read of the seat (the
+    `facts` effect: the seat's things, also from Blurp's own process)."""
+    try:
+        out = _API.effects(srv, [{"kind": "facts", **q}])[0]
+    except Exception:                                   # noqa: BLE001 -- the seat away: nothing known
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
+def _props_of(srv, eid) -> dict:
+    """A thing's heard_ts and llm_answer, as the seat holds them ({}: none)."""
+    return _facts(srv, eid=eid).get("props") or {}
 
 
 def _queued(r) -> bool:
@@ -1626,9 +1636,7 @@ def _last_spoke(srv, recs: list[dict], eid: str, now: float) -> float | None:
     the later one, never after `now`. A time only, never the words."""
     ts = [float(r["ts"]) for r in recs if r.get("kind") == "reach" and r.get("eid") == eid
           and r.get("answer") == "changed" and float(r.get("ts") or 0) <= now]
-    est = getattr(srv, "entity_store", None)
-    doc = (est.docs or {}).get(eid) if est is not None else None
-    heard = (doc.properties or {}).get("heard_ts") if doc is not None else None
+    heard = _props_of(srv, eid).get("heard_ts")
     if isinstance(heard, (int, float)) and 0 < heard <= now:
         ts.append(float(heard))
     return max(ts) if ts else None
@@ -1831,9 +1839,7 @@ def _replied(srv, push: dict, now: float, answer: str) -> bool:
         if _clock_of(push) == TOY_CLOCK:
             now = min(now, ts + TOY_CHECK_S)
         return bool(isinstance(at, (int, float)) and ts < at <= now)
-    est = getattr(srv, "entity_store", None)
-    doc = (est.docs or {}).get(push.get("to")) if est is not None else None
-    heard = (doc.properties or {}).get("heard_ts") if doc is not None else None
+    heard = _props_of(srv, push.get("to")).get("heard_ts") if push.get("to") else None
     if isinstance(heard, (int, float)) and heard > 0:
         return bool(float(push.get("ts") or 0) < heard <= now)
     return answer == "changed"
@@ -2354,7 +2360,12 @@ def _mirror_move(move) -> float:
 
 def _mirror_toy(srv) -> str | None:
     """The mirror self feeds: the first mirror toy by name in its world (#337);
-    None without one."""
+    None without one. #440: the seat's things (the `facts` effect)."""
+    return _facts(srv, mirror=True).get("mirror")
+
+
+def _mirror_toy_here(srv) -> str | None:
+    """_mirror_toy, read in the seat."""
     est = getattr(srv, "entity_store", None)
     names = sorted({str(((e.properties or {}).get("toybox") or {}).get("name") or "")
                     for eid, e in list(((est.docs if est is not None else None) or {}).items())
@@ -2429,9 +2440,8 @@ def _mirror_once(srv, n: int, now: float, move) -> None:
     s = round(_mirror_move(move), 4)
     rows = _mirror_rows(_read(srv), name, MIRROR_FIT + MIRROR_OWN + MIRROR_PAST)
     pred = {side: _mirror_predict(rows, side, s) for side in ("glass", "stranger")}
-    from . import toybox as _TB
-    try:
-        out = _TB.mirror_feed(name, s, now=now)
+    try:                                                    # #440: fed in the seat
+        out = _API.effects(srv, [{"kind": "mirror_feed", "toy": name, "s": s, "now": now}])[0]
     except Exception as e:                                  # noqa: BLE001
         out = {"ok": False, "error": repr(e)}
     if not out.get("ok"):

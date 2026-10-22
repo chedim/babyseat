@@ -3255,20 +3255,31 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # #230: self's record, newest first and capped -- the 👶
                 # panel's activity feed (read-only; the gate above ran first)
                 from . import self_loop as _SELF
+                from . import self_super as _SUP
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
+                if _SUP.of(psrv) is not None:          # #440 part 4: Blurp's own process
+                    return self._json_out(_SUP.of(psrv).view("/recent", n=(_q.get("n") or [30])[0]))
                 self._json_out({"lines": _SELF.recent(psrv, (_q.get("n") or [30])[0]) if psrv is not None else []})
             elif path == "/membrane/self/sheet":
                 # #249: self's character sheet -- the 👶 panel's numbers,
                 # computed from the record + status() + the toybox, cached
                 # ~30 s (read-only; the gate above ran first)
                 from . import self_sheet as _SHEET
+                from . import self_super as _SUP
+                _sup = _SUP.of(getattr(runner, "srv", None) if runner is not None else None)
+                if _sup is not None:                   # #440 part 4: Blurp's own process
+                    return self._json_out(_sup.view("/sheet"))
                 self._json_out(_SHEET.sheet(getattr(runner, "srv", None) if runner is not None else None))
             elif path == "/membrane/self/card":
                 # #283: the zoo's card -- self's name (per seat), level, rung
                 # name, mode, last activity; cheap to poll across seats
                 # (read-only; the gate above ran first)
                 from . import self_sheet as _SHEET
+                from . import self_super as _SUP
+                _sup = _SUP.of(getattr(runner, "srv", None) if runner is not None else None)
+                if _sup is not None:                   # #440 part 4: Blurp's own process (its last good card)
+                    return self._json_out(_sup.view("/card"))
                 self._json_out(_SHEET.card(getattr(runner, "srv", None) if runner is not None else None))
             elif path == "/membrane/self/context":
                 # #440 part 2: the per-cycle snapshot Blurp's own process reads
