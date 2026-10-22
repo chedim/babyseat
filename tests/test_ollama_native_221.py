@@ -437,11 +437,15 @@ _PY = os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python")
 _SPAWN = _PY if os.path.exists(_PY) else sys.executable
 
 
+_SEAT_DIR: list = []      # the module seat's dir, for the test that it keeps to it
+
+
 @pytest.fixture(scope="module")
 def seat(tmp_path_factory):
     sys.path.insert(0, os.path.dirname(__file__))
     from _fake_ollama import FakeOllama
     d = str(tmp_path_factory.mktemp("ollama221-seat"))
+    _SEAT_DIR[:] = [d]
     fake = FakeOllama().__enter__()
     import socket
     s = socket.socket()
@@ -452,9 +456,9 @@ def seat(tmp_path_factory):
     env.update({"MEMBRANE_EFIELD_STORE": "mem", "MEMBRANE_LAN": "0", "MEMBRANE_EF_ANN": "0",
                 "MEMBRANE_NO_OPEN": "1"})
     # THIS checkout's membrane, never whatever the venv installed (an editable install
-    # of another tree would boot the old proxy)
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env["PYTHONPATH"] = os.pathsep.join([root] + [p for p in [env.get("PYTHONPATH")] if p])
+    # of another tree would boot the old proxy), writing only under d (#408)
+    from _seat_env import seat_env
+    env = seat_env(d, env)
     out_path, err_path = os.path.join(d, "seat.stdout"), os.path.join(d, "seat.stderr")
     so, se = open(out_path, "wb"), open(err_path, "wb")
     proc = subprocess.Popen(
@@ -546,3 +550,18 @@ def test_real_seat_api_generate(seat):
     assert out["response"] == "pong" and out["done"] is True
     turn = fake.served[before:]
     assert ("POST", "/v1/chat/completions") in turn and ("POST", "/api/generate") not in turn, turn
+
+
+def test_the_seat_keeps_to_its_own_dir(seat):
+    """The booted seat registers as a peer under its own temp dir, never in
+    the real home's ~/.membrane/peers.jsonl (the live seat's roster) (#408)."""
+    base, _fake = seat
+    d = _SEAT_DIR[0]
+    own = os.path.join(d, "peers.jsonl")
+    assert os.path.exists(own), os.listdir(d)
+    with open(own) as f:
+        assert d in f.read()
+    real = os.path.expanduser("~/.membrane/peers.jsonl")
+    if os.path.exists(real):
+        with open(real) as f:
+            assert d not in f.read()

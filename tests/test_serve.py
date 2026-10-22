@@ -8,22 +8,23 @@ import socket
 import unittest
 
 from membrane import opencode
+from tests._ports import quiet_port
 
 
 def _free_port() -> int:
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    # not bind(0): an ephemeral port just released is the next one the OS
+    # hands a parallel connection, between the pick and the check (#408)
+    return quiet_port()
 
 
 class TestServePortWalk(unittest.TestCase):
     def test_taken_port_walks_up(self):
+        # held, with its upper neighbour free, below the ephemeral range: the
+        # neighbour of an ephemeral port is the next one the OS hands out (#408)
+        taken = quiet_port(span=2)
         hold = socket.socket()
-        hold.bind(("127.0.0.1", 0))
+        hold.bind(("127.0.0.1", taken))
         hold.listen(1)
-        taken = hold.getsockname()[1]
         try:
             got = opencode._pick_serve_port(taken)
             # The held port must be skipped, and the walk only ever moves

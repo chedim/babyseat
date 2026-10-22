@@ -46,14 +46,15 @@ def seat(tmp_path):
     import time
 
     port = 11641
-    env = dict(os.environ)
-    env["MEMBRANE_HOME"] = str(tmp_path)
+    sys.path.insert(0, os.path.dirname(__file__))
+    from _seat_env import seat_env
+    env = seat_env(tmp_path)                 # writes only under tmp_path (#408)
     env["MEMBRANE_EF_ANN"] = "0"
     proc = subprocess.Popen(
         [_SPAWN, "-m", "membrane.opencode",
          "--serve", "--serve-port", str(port), "--serve-host", "127.0.0.1",
          "--field", str(tmp_path / "rag-field.json")],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        env=env, cwd=str(tmp_path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
     deadline = time.time() + 40
     ready = False
