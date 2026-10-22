@@ -665,5 +665,55 @@ class TestRoutes(unittest.TestCase):
         self.assertIn("motor", self.srv.coproc_store.facts())
 
 
+class TestBenchHarness(unittest.TestCase):
+    """scripts/coproc_bench.py scores a labelled set: right / missed / extra /
+    unparsed per surface, with no model in the loop for the test."""
+
+    def _bench(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "coproc_bench", Path(__file__).resolve().parent.parent / "scripts" / "coproc_bench.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_score(self):
+        B = self._bench()
+        item = {"person": "the chain is 50 m, and from now on we anchor bow-first",
+                "expected": [{"words": ["remember"], "match": "50"},
+                             {"words": ["decide"], "match": "bow"}]}
+        s = B.score(item, 'remember("chain", "50 m")\nintend("buy rope")\nbogus\n'
+                          'assistant.says("ok")', "python")
+        self.assertEqual((s["right"], s["missed"], s["extra"], s["unparsed"]), (1, 1, 1, 1))
+        self.assertEqual(s["expected"], 2)
+        self.assertEqual(s["guard_applied"], 1)      # the right one is the person's
+
+    def test_run_with_a_fake_model(self):
+        B = self._bench()
+        items = [{"id": 1, "person": "what's the license?", "expected": []},
+                 {"id": 2, "person": "remind me to mark the chain",
+                  "expected": [{"words": ["intend"], "match": "chain"}]}]
+        answers = {"python": 'assistant.says("PolyForm.")',
+                   "text": "INTEND: mark the chain\nSAY: ok", "words": "Remind: mark the chain."}
+        tot = B.run(items, lambda sys_, user, surface: (answers[surface], 0, 0),
+                    surfaces=("python", "text", "words"))
+        self.assertEqual(tot["python"]["right"], 0)
+        self.assertEqual(tot["python"]["missed"], 1)
+        self.assertEqual(tot["text"]["right"], 1)
+        self.assertEqual(tot["text"]["extra"], 1)    # the license turn wrongly files an intent
+        self.assertEqual(tot["words"]["calls"], 2)
+
+    def test_recall_arms_build_fields(self):
+        B = self._bench()
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from _ef_fakes import FakeEmbedder
+        facts = [{"person": "the dinghy motor is a 2.5 hp suzuki", "key": "dinghy_motor",
+                  "value": "2.5 hp Suzuki", "question": "what motor does the dinghy have?",
+                  "expect": "suzuki"}]
+        out = B.recall(facts, FakeEmbedder())
+        self.assertEqual(set(out), {"prose", "actions"})
+        self.assertEqual(out["actions"]["n"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
