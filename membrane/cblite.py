@@ -111,6 +111,33 @@ def lib_paths(d: Path | None = None) -> tuple[Path, Path] | None:
     return None
 
 
+def extension_binary(vs_path: Path) -> Path | None:
+    """The vector search extension's loadable file inside what lib_paths()
+    names: the framework's binary, or the .so in the directory."""
+    vs_path = Path(vs_path)
+    for cand in (vs_path / "Versions" / "A" / "CouchbaseLiteVectorSearch",
+                 vs_path / "CouchbaseLiteVectorSearch",
+                 vs_path / "libCouchbaseLiteVectorSearch.so",
+                 vs_path / "CouchbaseLiteVectorSearch.so"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def pin_extension(vs_path: Path):
+    """Load the vector search extension once, RTLD_NODELETE, and never let
+    it go (issue #442). It registers a pthread_atfork handler; LiteCore
+    loads it into each SQLite connection and SQLite dlcloses it when the
+    connection closes, so after the last store closed it was unmapped with
+    its handler still registered, and the next fork() (every subprocess
+    with close_fds on macOS) jumped into unmapped memory. Pinned, the
+    loader's own reference keeps it mapped for the life of the process."""
+    binary = extension_binary(vs_path)
+    if binary is None:
+        return None
+    return C.CDLL(str(binary), mode=os.RTLD_NOW | os.RTLD_GLOBAL | getattr(os, "RTLD_NODELETE", 0))
+
+
 _LIB = None
 _LIB_LOCK = threading.Lock()
 
@@ -187,6 +214,7 @@ class Lib:
             self._init = CBLInitContext(home.encode(), tmp.encode())
             err = CBLError()
             self.check(L.CBL_Init(self._init, C.byref(err)), err, "init")
+        self._vs_pin = pin_extension(Path(vs_path))      # before anything can load it (#442)
         err = CBLError()
         self.check(L.CBL_EnableVectorSearch(S(vs_path), C.byref(err)), err, "enable vector search")
 
