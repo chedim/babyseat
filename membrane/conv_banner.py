@@ -54,6 +54,7 @@ MORE_LINE = ("MORE: state(section='changes'|'tracks'|'commands'|...) for the sea
 PAUSED_LINE = "PAUSED: the seat's acting lanes are down; reads and memory work, your writes are refused."
 _FOCUS_KINDS = ("f", "s", "c", "port", "m", "u", "ha")
 _MARKS_KEPT = 64
+_EIDS_KEPT = 20000           # memo of events already read for focus (bookkeeping, not a threshold)
 
 
 @dataclass
@@ -247,8 +248,14 @@ def focus(fld, events, latest_text: str = "", k: int = FOCUS_K) -> list[str]:
             pass
     counts: dict[str, int] = {}
     last: dict[str, int] = {}
-    for _k, d in events or []:
-        for eid in _event_eids(fld, d):
+    memo = fld.__dict__.setdefault("_conv_eids", {}) if fld is not None else {}
+    for key, d in events or []:
+        got = memo.get(key)
+        if got is None:                         # an event's entities never change: read once
+            got = memo[key] = _event_eids(fld, d)
+            if len(memo) > _EIDS_KEPT:
+                memo.pop(next(iter(memo)))
+        for eid in got:
             counts[eid] = counts.get(eid, 0) + 1
             last[eid] = int(d.get("seq") or 0)
     rest = sorted((e for e, n in counts.items() if n >= FOCUS_MIN_EVENTS and e not in named),
