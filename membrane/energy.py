@@ -181,8 +181,7 @@ def _record_cap(avail, srv=None) -> float | None:
     x the RAM available now."""
     if not isinstance(avail, (int, float)) or avail <= 0:
         return None
-    from . import options as O
-    return O.cpu_share(srv) * float(avail)
+    return _SL().cpu_share(srv) * float(avail)      # options.cpu_share; #440: the context's, in Blurp's own process
 
 
 def level(srv) -> float:

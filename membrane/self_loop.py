@@ -606,6 +606,15 @@ def bind(srv) -> None:
     _CIO.migrate(srv)                       # #333 part 3a: once -- chat:in + chat:out -> the chat thing
     _void_old_wiring(srv)                   # #333: once -- the old wiring's passes, voided on the record
     _migrate_accept(srv)                    # #299: once -- what was earned before acceptance counts as accepted
+    load_state(srv)
+
+
+def load_state(srv) -> None:
+    """Blurp's runtime from its own files under self/: the mode, the model,
+    the tempo, its nudges, its settings. The seat's bind ends with it, and
+    Blurp's own process (#440, self_proc) boots with it alone."""
+    rt = _rt(srv)
+    rt["mode"] = _load_mode(srv)
     rt["model"] = _load_model(srv)
     rt["tempo"] = _load_json(srv, "tempo.json") or {}
     rt["nudged"] = _load_json(srv, NUDGED_FILE) or {}   # #333 part 3a: nudges since each thing's last look
@@ -1906,26 +1915,16 @@ def _turn_score(rows: list[dict]) -> dict:
 
 
 def _reach(srv, target: str) -> dict:
-    """Read one thing: its getter fires (or answers that it can't)."""
+    """Read one thing: its getter fires (or answers that it can't). #440: the
+    look runs in the seat (self_api's `reach` effect), which also says who
+    changed a toy since Blurp's previous look at it."""
     c = _ctx.cycle
-    ent = (srv.entity_store.docs or {}).get(target)
-    if ent is None:
-        c["read"] = {"fired": False, "reason": "gone"}
-        return {"rc": 0, "text": "nothing there"}
-    if not _in_world(srv, target):                         # #337: outside its world, nothing is read
-        c["read"] = {"fired": False, "reason": "outside its world"}
-        return {"rc": 0, "text": "not in its world"}
-    tb = (ent.properties or {}).get("toybox") or {}
-    if tb.get("name"):                                      # #244: the toy's log, before and after the look
-        from . import toybox as _TB
-        c["toy"] = {"name": tb["name"], "block": tb.get("block"), "at0": _TB.log_len(tb["name"])}
-    try:
-        c["read"] = _read_entity(srv, ent, c.get("now"))
-    except Exception as e:                                  # noqa: BLE001
-        c["read"] = {"fired": False, "reason": f"error: {e!r}"[:80]}
-    if c.get("toy"):
-        c["toy"]["at1"] = _TB.log_len(tb["name"])
-    return {"rc": 0, "text": "reached"}
+    out = _API.effects(srv, [{"kind": "reach", "eid": target, "now": c.get("now"),
+                              "since": _prev_log_at(_read(srv), target)}])[0]
+    c["read"] = out.get("read") or {"fired": False, "reason": "no answer"}
+    if out.get("toy"):
+        c["toy"] = out["toy"]
+    return {"rc": 0, "text": out.get("text") or "reached"}
 
 
 # ---- #333: the nudge -- its one act on a thing ------------------------------------------
@@ -2201,14 +2200,23 @@ def _nudge_once(srv, n: int, now: float, eid: str, move) -> None:
         _E.error(srv, f"nudge refused: {_short(eid)}: {c.get('did') or ''}", now=now)
 
 
+def _prev_log_at(recs: list[dict], eid: str):
+    """The toy log's length at self's last look at this thing (None: none)."""
+    return next((r.get("log_at") for r in reversed(recs)
+                 if r.get("kind") == "reach" and r.get("eid") == eid and r.get("log_at") is not None), None)
+
+
 def _toy_by(recs: list[dict], eid: str, toy: dict) -> list[str]:
     """WHO CHANGED IT (#244), the ground truth on self's reach record: every
     `by` on the toy's log (its block's lines, for a block) since self's last
     look at this thing, through this look's own act. Kept beside the answer,
     never in the reading -- self predicts from what it saw, not from who did it."""
+    return _toy_by_since(_prev_log_at(recs, eid), toy)
+
+
+def _toy_by_since(prev, toy: dict) -> list[str]:
+    """_toy_by from the log length at the last look (seat-side: the reach effect)."""
     from . import toybox as _TB
-    prev = next((r.get("log_at") for r in reversed(recs)
-                 if r.get("kind") == "reach" and r.get("eid") == eid and r.get("log_at") is not None), None)
     start = toy["at0"] if prev is None or prev > toy["at0"] else prev   # a reset starts a fresh log
     return _TB.causes(toy["name"], start, toy["at1"], toy.get("block"))
 
@@ -2221,8 +2229,7 @@ def _place_once(srv, eid: str) -> None:
     done = rt.setdefault("placed", set())
     if eid in done:
         return
-    from . import toybox as _TB
-    if _TB.place(srv, eid) is not None:
+    if _API.effects(srv, [{"kind": "place", "eid": eid}])[0].get("placed") is not None:   # #440: in the seat
         done.add(eid)
         rt.pop("off_field", None)
 
@@ -2737,7 +2744,11 @@ def _dream_tick(srv, n: int, now: float) -> None:
 # ---- the cycle and its CPU share (#343) -----------------------------------------
 
 def _paused(srv) -> bool:
-    """The seat's pause (lanes.nerve_paused; the bare flag when it can't say)."""
+    """The seat's pause (lanes.nerve_paused; the bare flag when it can't say).
+    #440: in Blurp's own process, the seat's context says (step's start check)."""
+    r = _API._remote(srv)
+    if r is not None:
+        return bool(r.nerve_paused())
     from .lanes import nerve_paused
     try:
         return bool(nerve_paused(srv))
@@ -2753,7 +2764,11 @@ def _runs(srv) -> bool:
 def cpu_share(srv) -> float:
     """#343: self's CPU share, a seat setting (`self_cpu_share` in the seat's
     <data dir>/settings.json, beside self/): options.cpu_share(srv), the one
-    reader, so the loop, the record cap and the options window agree."""
+    reader, so the loop, the record cap and the options window agree.
+    #440: in Blurp's own process, the seat's context carries it."""
+    r = _API._remote(srv)
+    if r is not None:
+        return float(r.cpu_share())
     from . import options as O
     return O.cpu_share(srv)
 
@@ -2957,12 +2972,22 @@ def _targets(srv) -> list[str]:
     return sorted(out)
 
 
+def _seat_targets(srv) -> list[str]:
+    """#440: _targets as the cycle sees it -- the seat's context's `targets`."""
+    return list(_seat(srv).get("targets") or ())
+
+
+def _getter_pause(srv, eid: str, until: float | None) -> None:
+    """#440: the audits pause (until a time) or resume (None) a thing's getter, in the seat."""
+    _API.effects(srv, [{"kind": "getter", "eid": eid, "until": until}])
+
+
 def _reach_once(srv, est, ent, n: int, now: float) -> None:
     """Rung 2's practice: expect -> reach -> notice on one thing, then the
     blind audit's bookkeeping."""
     import random
     _audit_tick(srv, now)
-    targets = _targets(srv)
+    targets = _seat_targets(srv)
     if not targets:
         return
     steer = _available(srv, 3)
@@ -3028,12 +3053,9 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         rec["fid"] = field_id(eid)                       # #244: where the page finds it on the field
     except Exception:
         pass
-    if c.get("toy") and c["toy"].get("at1") is not None:  # #244: who changed the toy (ground truth)
-        try:
-            rec["by"] = _toy_by(recs, eid, c["toy"])
-            rec["log_at"] = c["toy"]["at1"]
-        except Exception:
-            pass
+    if c.get("toy") and c["toy"].get("at1") is not None and c["toy"].get("by") is not None:
+        rec["by"] = c["toy"]["by"]                         # #244: who changed the toy (ground truth, the seat's)
+        rec["log_at"] = c["toy"]["at1"]
     if reply is not None:                                # rung 7: the reply check after a push
         rec["reply"] = True
         rec["replied"] = _replied(srv, reply, now, c["answer"])   # #258: they spoke AFTER the push
@@ -3227,14 +3249,13 @@ def _audit5_tick(srv, now: float) -> None:
     restarted for AUDIT5_LOOKS more. Self isn't told -- and here it DOES learn
     (re-learning is the point). It passes if self flagged "went still" during
     the pause and "moves again" after it."""
-    from . import watch_agents as _WA
     rt = _rt(srv)
     au = rt.get("audit")
     if au is not None:
         if au.get("rung") != 5:
             return
         if au["phase"] == "pause" and (au["looks"] >= AUDIT5_LOOKS or time.time() >= au["until"]):
-            _WA.unpause_getter(au["eid"])
+            _getter_pause(srv, au["eid"], None)
             au.update({"phase": "resume", "paused_looks": au["looks"], "looks": 0,
                        "until": time.time() + AUDIT5_RESUME_S})
             _append(srv, {"ts": now, "kind": "audit", "rung": 5, "phase": "resume", "eid": au["eid"]})
@@ -3261,7 +3282,7 @@ def _audit5_tick(srv, now: float) -> None:
         return
     eid = max(sorted(moving), key=lambda e: _p_changed(srv, e))   # the surest mover: its stop is unmistakable
     until = time.time() + AUDIT5_PAUSE_S
-    _WA.pause_getter(eid, until)
+    _getter_pause(srv, eid, until)
     rt["audit"] = {"rung": 5, "eid": eid, "phase": "pause", "looks": 0, "until": until, "shifts": []}
     _append(srv, {"ts": now, "kind": "audit", "rung": 5, "phase": "pause", "eid": eid})
 
@@ -3500,7 +3521,6 @@ def _audit_tick(srv, now: float) -> None:
     I have reached for it AUDIT_REACHES more times; a change recorded while
     the source is stopped is a mark that can't fail -- the audit fails. Self
     isn't told: its reaches answer "unchanged", and it learns nothing inside."""
-    from . import watch_agents as _WA
     rt = _rt(srv)
     au = rt.get("audit")
     if au is not None and au.get("rung", 2) != 2:
@@ -3508,7 +3528,7 @@ def _audit_tick(srv, now: float) -> None:
     if au is not None:
         done = au["reaches"] >= AUDIT_REACHES
         if done or time.time() >= au["until"]:
-            _WA.unpause_getter(au["eid"])
+            _getter_pause(srv, au["eid"], None)
             rt["audit"] = None
             _append(srv, {"ts": now, "kind": "audit", "phase": "end", "eid": au["eid"],
                           "reaches": au["reaches"], "changes": au["changes"],
@@ -3523,7 +3543,7 @@ def _audit_tick(srv, now: float) -> None:
         if eid in audited or not st["candidate"] or not st["auditable"] or not _in_world(srv, eid):
             continue
         until = time.time() + AUDIT_MAX_S
-        _WA.pause_getter(eid, until)
+        _getter_pause(srv, eid, until)
         rt["audit"] = {"eid": eid, "until": until, "reaches": 0, "changes": 0, "rung": 2}
         _append(srv, {"ts": now, "kind": "audit", "phase": "start", "eid": eid, "rung": 2})
         return
@@ -3545,20 +3565,23 @@ def _show(srv, ent, pos, c, rec) -> None:
     """The cycle onto the viewer (fieldpulse.self_cycle): the points as
     vectors for the beat to place, the rest as numbers -- never text."""
     try:
-        from . import fieldpulse as _FP
-        fp = _FP.of(srv)
-        if fp is None:
+        if not _seat(srv).get("viewer"):                   # #440: the viewer is the seat's
             return
         st = status(srv)
-        fp.self_cycle({"from": pos, "intent": c["intent"], "expected": c["expected"],
-                       "at": c["observed"], "pull": _pull(srv, len(pos)), "aim": c.get("aim")},
-                      {"n": rec["n"], "gap": rec["gap"], "naive": rec["naive"], "push": rec["push"],
-                       "rung": st["rung"], "level": st["level"], "bar": st["bar"], "skill": st["skill"],
-                       "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
-                       "next": st["next"], "cycles": st["cycles"], "held": st["held"],
-                       "rung_name": st["rung_name"], "limit": st["limit"], "awaiting": st["awaiting"],
-                       "split": st.get("split"), "meets": st.get("meets"),
-                       "steer": (st.get("steer") or {}).get("skill")})
+
+        def vec(v):
+            return None if v is None else [float(x) for x in v]
+        pts = {"from": pos, "intent": c["intent"], "expected": c["expected"],
+               "at": c["observed"], "pull": _pull(srv, len(pos)), "aim": c.get("aim")}
+        stats = {"n": rec["n"], "gap": rec["gap"], "naive": rec["naive"], "push": rec["push"],
+                 "rung": st["rung"], "level": st["level"], "bar": st["bar"], "skill": st["skill"],
+                 "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
+                 "next": st["next"], "cycles": st["cycles"], "held": st["held"],
+                 "rung_name": st["rung_name"], "limit": st["limit"], "awaiting": st["awaiting"],
+                 "split": st.get("split"), "meets": st.get("meets"),
+                 "steer": (st.get("steer") or {}).get("skill")}
+        _API.effects(srv, [{"kind": "show", "points": {k: vec(v) for k, v in pts.items()},
+                            "stats": _API.plain(stats)}])     # #440: onto the seat's viewer
     except Exception:
         pass
 
