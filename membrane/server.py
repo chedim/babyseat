@@ -56,6 +56,15 @@ class SeatBusy(RuntimeError):
 
 # the failed row's mark: the chat renders it with a Retry (#431)
 BUSY_MARK = "seatBusy"
+# A ROUND THAT ENDED EARLY (#449): the streamed round's marker, and the
+# error its row carries (a cut reply is never stored as a finished one)
+CUT_KEY = "membrane_cut"
+CUT_ERRORS = {
+    "abort": {"name": "MessageAbortedError",
+              "data": {"message": "cut: the turn was cut before this reply finished (a person spoke, or Stop)"}},
+    "drop": {"name": "StreamDropped",
+             "data": {"message": "the model's stream dropped before this reply finished"}},
+}
 
 
 def _busy_error(obj) -> str | None:
@@ -2200,6 +2209,12 @@ class TurnRunner:
                                                          or _CA.MAX_TOOL_CALLS_PER_ANSWER),
                                             "continued": False}
             _tokens_fill(a_info, resp)
+            # A CUT IS NOT AN ANSWER (#449): a round the person's message (or
+            # Stop) cut mid-stream, or whose stream dropped, is marked on its
+            # row -- the words shown stay, never stored as a finished reply
+            _cut = resp.get(CUT_KEY)
+            if _cut in CUT_ERRORS:
+                a_info["error"] = dict(CUT_ERRORS[_cut])
             # THE INJECTION AS A CARD (2026-10-08, the operator: show it
             # like every tool call): what membrane added to this round --
             # the first round's, and any later round's that differs
@@ -2671,6 +2686,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         agent_tools = []                     # tools the claude-agent rung ran (#389)
         capped = None                        # ...and its ceiling, when hit (#425)
         done = False
+        cut = None                           # why the round ended early (#449)
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             for raw in resp:
                 line = raw.strip()
@@ -2730,12 +2746,19 @@ def loopback_ladder(port: int, runner=None, cell=None):
                             cur["function"]["arguments"] += a if isinstance(a, str) else _json.dumps(a)
                 if on_event("tick", None):
                     done = True                  # an abort is not a drop
+                    if finish is None:
+                        # A CUT IS NOT AN ANSWER (#449): a person spoke (or Stop)
+                        # mid-reply -- the words so far are kept but marked cut,
+                        # and a half-built tool call never runs
+                        cut = "abort"
+                        tcs = {}
                     break
         if not done and finish is None:
             if not content:
                 return _TRUNCATED_EMPTY          # nothing usable (a half tool call never runs): ask again
             tcs = {}                             # words came: keep them; drop any half-built call
             finish = "length"
+            cut = "drop"
         msg = {"role": "assistant", "content": "".join(content)}
         if reasoning:
             msg["reasoning"] = "".join(reasoning)
@@ -2751,6 +2774,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
             out["membrane_tools"] = agent_tools
         if capped is not None:
             out["membrane_capped"] = capped
+        if cut:
+            out[CUT_KEY] = cut
         return out
     call.stream = stream
     return call
@@ -3255,20 +3280,31 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # #230: self's record, newest first and capped -- the 👶
                 # panel's activity feed (read-only; the gate above ran first)
                 from . import self_loop as _SELF
+                from . import self_super as _SUP
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
+                if _SUP.of(psrv) is not None:          # #440 part 4: Blurp's own process
+                    return self._json_out(_SUP.of(psrv).view("/recent", n=(_q.get("n") or [30])[0]))
                 self._json_out({"lines": _SELF.recent(psrv, (_q.get("n") or [30])[0]) if psrv is not None else []})
             elif path == "/membrane/self/sheet":
                 # #249: self's character sheet -- the 👶 panel's numbers,
                 # computed from the record + status() + the toybox, cached
                 # ~30 s (read-only; the gate above ran first)
                 from . import self_sheet as _SHEET
+                from . import self_super as _SUP
+                _sup = _SUP.of(getattr(runner, "srv", None) if runner is not None else None)
+                if _sup is not None:                   # #440 part 4: Blurp's own process
+                    return self._json_out(_sup.view("/sheet"))
                 self._json_out(_SHEET.sheet(getattr(runner, "srv", None) if runner is not None else None))
             elif path == "/membrane/self/card":
                 # #283: the zoo's card -- self's name (per seat), level, rung
                 # name, mode, last activity; cheap to poll across seats
                 # (read-only; the gate above ran first)
                 from . import self_sheet as _SHEET
+                from . import self_super as _SUP
+                _sup = _SUP.of(getattr(runner, "srv", None) if runner is not None else None)
+                if _sup is not None:                   # #440 part 4: Blurp's own process (its last good card)
+                    return self._json_out(_sup.view("/card"))
                 self._json_out(_SHEET.card(getattr(runner, "srv", None) if runner is not None else None))
             elif path == "/membrane/self/context":
                 # #440 part 2: the per-cycle snapshot Blurp's own process reads
@@ -3283,7 +3319,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
                 self._json_out(_SAPI.context(psrv, spots=_q.get("spot") or (),
                                              reach=(_q.get("reach") or [""])[0] in ("1", "true"),
-                                             only=(_q.get("only") or [None])[0]))
+                                             only=(_q.get("only") or [None])[0],
+                                             own=(_q.get("own") or [""])[0] in ("1", "true")))
             elif path == "/membrane/toybox/state":
                 # #249: the toy dock's live source -- the toys alone, cheap
                 # enough to poll every few seconds (read-only, gated)
