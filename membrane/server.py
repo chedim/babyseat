@@ -952,6 +952,8 @@ def _tokens_fill(a_info: dict, resp: dict) -> None:
     c = t.setdefault("cache", {"read": 0, "write": 0})
     c["read"] = _i(c.get("read")) + (
         _i(pdet.get("cached_tokens")) if isinstance(pdet, dict) else 0)
+    c["write"] = _i(c.get("write")) + (            # claude-agent's split (#426)
+        _i(pdet.get("cache_write_tokens")) if isinstance(pdet, dict) else 0)
 
 
 def _tokens_estimate(history: list, parts: list) -> dict:

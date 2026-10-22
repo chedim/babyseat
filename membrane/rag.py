@@ -100,6 +100,13 @@ def strip_machinery_text(text: str) -> str:
     return " ".join(t.split())
 
 
+class Injected(dict):
+    """A system message membrane placed for THIS turn (_inject /
+    _inject_after): recall, where-we-are, banners, watch reports. On the
+    wire it is a plain dict; the claude-agent rung reads the type to keep
+    these per-turn blocks out of its cached system prompt (#426)."""
+
+
 def _inject(messages, block: str) -> list:
     """Insert a context block as a system message near the END of the
     conversation -- just before the last user turn -- instead of after the
@@ -131,7 +138,7 @@ def _inject(messages, block: str) -> list:
     i = len(msgs)
     while i > 0 and msgs[i - 1].get("role") == "user":
         i -= 1
-    msgs.insert(i, {"role": "system", "content": content})
+    msgs.insert(i, Injected(role="system", content=content))
     return msgs
 
 
@@ -143,7 +150,7 @@ def _inject_after(messages, block: str) -> list:
     exchange) instead of inside the context block that sits above the
     user's message."""
     msgs = list(messages) if isinstance(messages, list) else []
-    msgs.append({"role": "system", "content": str(block)})
+    msgs.append(Injected(role="system", content=str(block)))
     return msgs
 
 
