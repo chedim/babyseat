@@ -52,6 +52,14 @@ COLD = ("sentences",)
 VEC = {"sentences": ("vec", "sent_vec")}            # coll -> (field, index name)
 DIM = 1024
 META = "meta"
+# THE PROBES (#429, the recall-gap exhibit): the sentence index is IVF
+# (sqrt(n) centroids, SQ8); a query left at the index's default probes read
+# 8 of its clusters, and on a copy of a live field (120k sentences) its
+# top-100 held 71% of the exact top-100 -- a true nearest sentence missed the
+# top 2000. Probes ride each query (APPROX_VECTOR_DISTANCE's 4th argument),
+# so no index is rebuilt. Measured there: 16 -> 0.86, 32 -> 0.97 (every
+# probe question's exact #1 found), 64 -> 0.987 at 1.7x the time.
+NPROBES = 32
 CACHE_N = 16384                                    # decoded cold docs kept (~50 MB: the gate and the banner re-read their sids)
 
 
@@ -513,8 +521,8 @@ class CBLiteBackend(MemBackend):
             return []
         q = (q / n).tolist()
         want = int(k) * (4 if eq else 1)
-        sql = (f"SELECT META().id AS k, APPROX_VECTOR_DISTANCE(d.{field}, $q, 'COSINE') AS dist "
-               f"FROM membrane.{coll} ORDER BY APPROX_VECTOR_DISTANCE(d.{field}, $q, 'COSINE') LIMIT {want}")
+        dist = f"APPROX_VECTOR_DISTANCE(d.{field}, $q, 'COSINE', {NPROBES})"
+        sql = f"SELECT META().id AS k, {dist} AS dist FROM membrane.{coll} ORDER BY {dist} LIMIT {want}"
         try:
             rows = self.db.query(sql, {"q": q})
         except CB.CBLException as e:

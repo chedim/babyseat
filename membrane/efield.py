@@ -453,6 +453,20 @@ def _locked(fn):
     return wrap
 
 
+def _link_sids(m: dict, sids, key: str) -> None:
+    """sid -> the event key (a str, the common case: a sentence said once),
+    or a tuple of keys when more than one event said it."""
+    for sid in sids or ():
+        got = m.get(sid)
+        if got is None:
+            m[sid] = key
+        elif isinstance(got, str):
+            if got != key:
+                m[sid] = (got, key)
+        elif key not in got:
+            m[sid] = got + (key,)
+
+
 class EntityField:
     """The facade: write events, embed them, apply them, read the field."""
 
@@ -1221,6 +1235,8 @@ class EntityField:
             except Exception:
                 pass
         sids = ev.get("sids") or []
+        if self._sid_map is not None:            # the sentence->event map (#429)
+            _link_sids(self._sid_map, sids, key)
         got = self.b.get_multi("sentences", sids)
         X = [unit(got[s]["vec"]) if s in got else None for s in sids]
         boiler = self._ostats["boiler"]
@@ -1913,18 +1929,52 @@ class EntityField:
                        and str(d.get("session") or "").startswith(session_prefix)),
                       key=lambda d: d.get("seq") or 0)
 
+    # THE SENTENCE->EVENT MAP (#429, the long-reply exhibit): the delta rows
+    # link an event's FIRST sentence (the event-index row), the speaker's
+    # first 8 and the sentences that name a specific entity -- about 9 of a
+    # 20-32 sentence reply, so a fact further down never led back to its
+    # event. The applied events' own sid lists, inverted ONCE from the RAM
+    # rows and kept by _apply, link every sentence; nothing new is stored.
+    _sid_map = None
+    _sid_map_lock = threading.Lock()
+
+    def _sid_events(self) -> dict:
+        m = self._sid_map
+        if m is not None:
+            return m
+        with self._sid_map_lock:
+            if self._sid_map is None:
+                m = {}
+                for key, d in self.b.scan("events", {"origin": self.origin, "status": "applied"}):
+                    _link_sids(m, d.get("sids"), key)
+                self._sid_map = m
+        return self._sid_map
+
+    def events_of_sentences(self, sids) -> list[str]:
+        """This origin's applied events that said any of sids (every sentence
+        of them, not only the ones a delta row names), delta order first."""
+        sids = list(sids)
+        out = dict.fromkeys(d["event"] for _, d in self.b.scan(
+            "entity_deltas", {"origin": self.origin, "sid": sids}))
+        m = self._sid_events()
+        for sid in sids:
+            got = m.get(sid)
+            for key in ((got,) if isinstance(got, str) else got or ()):
+                out.setdefault(key)
+        return list(out)
+
     def events_near(self, vec, k: int = 40, sim_min: float = 0.55) -> list[tuple[dict, float]]:
         """This origin's events with a sentence near vec (sentence ANN), best
         first, one row per event."""
         hits = dict(self.b.vector_top_k("sentences", "vec", vec, k * 4))
         if not hits:
             return []
+        evs = self.b.get_multi("events", self.events_of_sentences(hits))
         best: dict = {}
-        for _, d in self.b.scan("entity_deltas", {"origin": self.origin, "sid": list(hits)}):
-            s = hits.get(d["sid"], 0.0)
-            if s >= sim_min and s > best.get(d["event"], -1):
-                best[d["event"]] = s
-        evs = self.b.get_multi("events", list(best))
+        for k2, d in evs.items():
+            s = max((hits[sid] for sid in d.get("sids") or () if sid in hits), default=0.0)
+            if s >= sim_min:
+                best[k2] = s
         rows = [(evs[k2], s) for k2, s in best.items()
                 if k2 in evs and evs[k2].get("status") != "forgotten"
                 and evs[k2].get("stream") != "code"]

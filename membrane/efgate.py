@@ -43,8 +43,13 @@ TOP_K = 6
 
 def message_vec(field, text: str, embed_missing: bool = True):
     """unit(sum of the message's sentence vectors); sentences the field has
-    not seen are embedded and cached (the capture would embed them anyway)."""
-    sents = ST.sentences(ST.discourse_clean(text or ""))
+    not seen are embedded and cached (the capture would embed them anyway).
+    A person's speaker line is cut first, as the field cut it when it
+    embedded the line (speakers.prose_of): kept, the first sentence is one
+    the field never stored and an earlier ask drops out of near_asks (#429).
+    The event keeps its text, so who said it is unchanged."""
+    from .speakers import split_speaker
+    sents = ST.sentences(ST.discourse_clean(split_speaker(text or "")[1]))
     if not sents:
         return None
     sids = [field.sentence_id(s) for s in sents]
@@ -106,14 +111,12 @@ def answer_of(field, q_ev: dict) -> tuple[str, dict] | None:
 
 def sentence_events(field, qvec, n: int) -> tuple[dict, dict]:
     """The n sentences nearest qvec (sentence ANN) and this origin's events
-    that carry them (via the deltas that name those sentences):
+    that said them (every sentence of an event leads to it, #429):
     ({sid: sim}, {event key: event})."""
     hits = dict(field.b.vector_top_k("sentences", "vec", qvec, n))
     if not hits:
         return {}, {}
-    evkeys = list(dict.fromkeys(d["event"] for _, d in field.b.scan(
-        "entity_deltas", {"origin": field.origin, "sid": list(hits)})))
-    return hits, field.b.get_multi("events", evkeys)
+    return hits, field.b.get_multi("events", field.events_of_sentences(hits))
 
 
 def _user_events_near(field, qvec, k: int):
