@@ -522,7 +522,16 @@ def split_messages(messages) -> tuple[str, str]:
 def tool_names() -> list[str]:
     """allowed_tools: exactly membrane's MCP tools, as the SDK names them."""
     from . import mcp_server as _mcp
-    return [TOOL_PREFIX + t["name"] for t in _mcp.TOOLS]
+    hide = _coproc_hidden()
+    return [TOOL_PREFIX + t["name"] for t in _mcp.TOOLS if t["name"] not in hide]
+
+
+def _coproc_hidden() -> frozenset:
+    """MEMBRANE_COPROC=1 (#454): no tool named like a coproc call
+    (decide/remember/intend/says) is exposed -- a python-shaped `intend(...)`
+    line must stay text the proxy parses, never a tool Claude calls."""
+    from . import coproc as _cp
+    return _cp.RESERVED_TOOL_NAMES if _cp.enabled() else frozenset()
 
 
 def _tool_handler(name: str, port):
@@ -554,7 +563,8 @@ def build_mcp_server(sdk, port):
     from . import mcp_server as _mcp
     tools = [sdk.tool(t["name"], t["description"], t["inputSchema"])(
                  _tool_handler(t["name"], port))
-             for t in _mcp.TOOLS if t["name"] in _mcp.TOOL_IMPLS]
+             for t in _mcp.TOOLS if t["name"] in _mcp.TOOL_IMPLS
+             and t["name"] not in _coproc_hidden()]
     return sdk.create_sdk_mcp_server(name=MCP_NAME, version=_mcp.SERVER_VERSION,
                                      tools=tools)
 
