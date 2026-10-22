@@ -110,7 +110,9 @@ The tools Claude gets:
 
 The turn's stable system messages become the SDK's system prompt: the
 doctrine and the client's own instructions. The rest of the conversation goes
-in as the prompt, ending on the latest message. membrane's per-turn blocks
+in as the prompt, ending on the latest message (or, when the conversation's
+SDK session already holds the earlier turns, only the latest message: see
+[The conversation cache](#the-conversation-cache)). membrane's per-turn blocks
 (the context block with recall and where-we-are, banners, watch reports) go
 at the end of the prompt, inside `<membrane-context>` ...
 `</membrane-context>`, right before the latest message; the speech footer
@@ -142,6 +144,51 @@ unchanged (`prompt_tokens` is uncached input + cache reads + cache writes);
 `usage: {calls, input, cache_read, cache_write, output, per_call}`: sums
 since the seat's boot (`input` is the uncached input) and the per-call
 averages.
+
+## The conversation cache
+
+The system prompt alone is not enough: a call that renders the whole
+conversation as one new text pays for all of it again (or writes it to the
+cache again, at 1.25x) on every turn. So each conversation keeps one SDK
+session, the way Claude Code keeps its own:
+
+- The first turn (or any turn membrane cannot match, below) is rendered in
+  full, as described above, in a fresh SDK session.
+- A turn that continues that conversation resumes the session (the SDK's
+  `resume`) and sends only the tail: membrane's per-turn blocks in
+  `<membrane-context>`, then the latest message, then the speech footer if
+  any. The CLI replays the session's earlier turns as real messages, its own
+  tool calls and results included, and puts its cache breakpoint at the end
+  of every request. The next call's request starts with the previous one
+  byte for byte, so the earlier turns are read from the cache and only the
+  tail and the last answer are new.
+
+membrane stays the source of truth. It keeps, in RAM, the conversation each
+session carries (roles and texts). A turn resumes a session only when the
+conversation it sends, minus the latest message, ends on an answer and is a
+window of that session's conversation: the same roles and texts in order,
+where a text may be the capped head of the held one (the chat replays the
+last `HISTORY_MAX_MESSAGES` rows, each capped). A session is taken by one
+turn at a time, so a regenerate (the same conversation again, with a new
+last message) finds nothing to resume. Everything else is rendered in full in
+a fresh session: an edited answer, an answer another rung gave, an
+unknown conversation, a seat restart, a session that stopped at the ceiling.
+A resume that fails before Claude says anything (the CLI lost the session,
+or refused it) is retried once, rendered in full, in the same answer.
+
+Two consequences. The session holds every turn since it began, not the
+chat's sliding window (the CLI compacts it when it nears the model's
+context), and each turn's per-turn blocks stay in the session as they were
+sent: rewriting them would break the cache from that point on. Up to
+`CONVO_SESSIONS_MAX` (64) conversations are remembered, each by its last
+`CONVO_HELD_MAX` (24) messages; the oldest goes first, and its next turn is
+rendered in full.
+
+`GET /membrane/diag/claude-agent` adds `conversation: {resumed, full, lost,
+sessions, sessions_max}`: turns that resumed a session, turns rendered in
+full, resumes that failed and fell back, and the sessions held now. The
+per-call `usage` there shows the effect: on a resumed turn `cache_read`
+carries the earlier turns.
 
 ## Check-ins instead of a turn cap
 

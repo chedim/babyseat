@@ -41,6 +41,13 @@ and a fresh ceiling, and each capped answer continues at most once.
 STATS counts check-in denials, ceiling hits and continues (RAM,
 /membrane/diag/claude-agent).
 
+ONE SDK SESSION PER CONVERSATION (issue #428, the operator's 2026-10-21):
+a turn that continues a conversation whose SDK session membrane holds
+resumes that session and sends only the per-turn tail, so the CLI replays
+the earlier turns as real messages and they are read from the prompt cache;
+anything membrane cannot match is rendered in full in a fresh session (see
+the "one SDK session per conversation" section below).
+
 LEARNED LIKE ANY MODEL (issue #389, the operator's 2026-10-21): Claude's
 reply, its reasoning and its tool calls and results are learned like any
 other model's. The transcript row keeps the Claude-made mark (MARK_KEY,
@@ -460,18 +467,12 @@ def _context(blocks) -> str:
     return f"{CONTEXT_OPEN}\n" + "\n\n".join(blocks) + f"\n{CONTEXT_CLOSE}"
 
 
-def split_messages(messages) -> tuple[str, str]:
-    """OpenAI messages -> (system prompt, prompt). The STABLE system
-    messages (the doctrine, the client's instructions) are the system
-    prompt -- byte-identical across calls, so Anthropic's prompt cache
-    (tools, then system) holds (#426). membrane's per-turn blocks (recall,
-    where-we-are, banners: _volatile) go to the END of the prompt,
-    delimited, right before the latest message (a block placed after it,
-    the speech footer, stays after it). A lone user message with no
-    per-turn block is the prompt as is; a longer conversation is rendered
-    as a transcript ending on the last message."""
+def _parse(messages):
+    """OpenAI messages -> (system prompt, convo, ctx): the stable system
+    text, the conversation's items (role, label, text) in order, and the
+    per-turn blocks as (index of the convo item they precede, text)."""
     from .rag import _RAG_SYSTEM
-    system, convo, ctx = [], [], []      # ctx: (blocks before convo item #i, text)
+    system, convo, ctx = [], [], []
     for m in messages or []:
         if not isinstance(m, dict):
             continue
@@ -499,7 +500,32 @@ def split_messages(messages) -> tuple[str, str]:
             label = f"[{role}]"
         if text:
             convo.append((role, label, text))
-    sys_prompt = "\n\n".join(system)
+    return "\n\n".join(system), convo, ctx
+
+
+def _render_tail(convo, ctx) -> str:
+    """The per-turn tail a resumed session gets (#428): the per-turn blocks
+    placed before the latest message, the message itself, then any block
+    placed after it (the speech footer)."""
+    last = len(convo) - 1
+    before = [t for i, t in ctx if i <= last]
+    after = [t for i, t in ctx if i > last]
+    items = ([_context(before)] if before else []) + [convo[-1][2]] \
+        + ([_context(after)] if after else [])
+    return "\n\n".join(items)
+
+
+def split_messages(messages) -> tuple[str, str]:
+    """OpenAI messages -> (system prompt, prompt). The STABLE system
+    messages (the doctrine, the client's instructions) are the system
+    prompt -- byte-identical across calls, so Anthropic's prompt cache
+    (tools, then system) holds (#426). membrane's per-turn blocks (recall,
+    where-we-are, banners: _volatile) go to the END of the prompt,
+    delimited, right before the latest message (a block placed after it,
+    the speech footer, stays after it). A lone user message with no
+    per-turn block is the prompt as is; a longer conversation is rendered
+    as a transcript ending on the last message."""
+    sys_prompt, convo, ctx = _parse(messages)
     last = max(len(convo) - 1, 0)
     before = [t for i, t in ctx if i <= last]
     after = [t for i, t in ctx if i > last]
@@ -515,6 +541,83 @@ def split_messages(messages) -> tuple[str, str]:
         prompt = ("The conversation so far, oldest first; answer its last "
                   "message.\n\n" + prompt)
     return sys_prompt, prompt
+
+
+# ---- one SDK session per conversation (#428) -------------------------------------
+# A call that rendered the whole conversation as one new text re-billed it
+# every time: nothing past the system prompt was read from Anthropic's cache.
+# Now a conversation keeps its SDK session. A turn that CONTINUES what the
+# session holds resumes it and sends only the tail (_render_tail): the CLI
+# replays the session's turns as real messages and puts its cache breakpoint
+# at the end of each request, so the next call reads every earlier turn from
+# cache. membrane stays the source of truth: the table holds, per session,
+# the conversation it carries (role, whitespace-free text); a turn resumes a
+# session only when the conversation it sends, minus the latest message, is
+# a window of that one (the chat's window slides, its texts are capped).
+# Anything else -- a regenerate, an edited or another rung's answer, a
+# restart, a lost session -- is rendered in full in a fresh session.
+
+CONVO_SESSIONS_MAX = 64             # conversations remembered (RAM); the oldest
+                                    # goes first -- its next turn is rendered in full
+CONVO_HELD_MAX = 24                 # messages kept per conversation for matching
+_convo_lock = threading.Lock()
+_SESSIONS: dict = {}                # SDK session id -> [(role, text)], oldest
+                                    # conversation first (insertion order)
+CONVO = {"resumed": 0, "full": 0, "lost": 0}    # diagnostics (RAM)
+
+
+def _held(convo) -> list:
+    return [(role, "".join(text.split())) for role, _label, text in convo]
+
+
+def _continues(held, sent) -> bool:
+    """`sent` (a conversation minus its latest message) is a window of
+    `held`: their last items line up, same roles, each sent text equal to
+    the held one or its capped head. It must end on an answer and carry at
+    least one exchange."""
+    if len(sent) < 2 or not held or sent[-1][0] != "assistant":
+        return False
+    n = min(len(sent), len(held))
+    return all(hr == sr and st and ht.startswith(st)
+               for (hr, ht), (sr, st) in zip(held[-n:], sent[-n:]))
+
+
+def _claim(sent):
+    """The session whose conversation `sent` continues, taken out of the
+    table (one turn resumes it; a second turn with the same prefix -- a
+    regenerate -- finds nothing), or (None, None)."""
+    with _convo_lock:
+        for sid in reversed(list(_SESSIONS)):
+            if _continues(_SESSIONS[sid], sent):
+                return sid, _SESSIONS.pop(sid)
+    return None, None
+
+
+def _keep(sid: str, held) -> None:
+    if not sid:
+        return
+    with _convo_lock:
+        _SESSIONS.pop(sid, None)
+        _SESSIONS[sid] = list(held)[-CONVO_HELD_MAX:]
+        while len(_SESSIONS) > CONVO_SESSIONS_MAX:
+            _SESSIONS.pop(next(iter(_SESSIONS)))
+
+
+def _convo_count(key: str) -> None:
+    with _convo_lock:
+        CONVO[key] += 1
+
+
+def convo_stats() -> dict:
+    with _convo_lock:
+        return dict(CONVO, sessions=len(_SESSIONS))
+
+
+def reset_sessions() -> None:
+    with _convo_lock:
+        _SESSIONS.clear()
+        for k in CONVO:
+            CONVO[k] = 0
 
 
 # ---- membrane's tools, served to the SDK in-process (#389) ----------------------
@@ -610,9 +713,57 @@ def _bare(name: str) -> str:
 
 async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
                    env=None):
-    system, prompt = split_messages(messages)
-    if resume:
-        prompt = CONTINUE_PROMPT         # the session already holds the task
+    """One answer. A person's Continue resumes its session with
+    CONTINUE_PROMPT; a turn that continues a held conversation resumes that
+    session with only the tail (#428); anything else is rendered in full in
+    a fresh session. A resumed session that fails before saying anything
+    (lost, or refused) is retried once rendered in full."""
+    system, convo, ctx = _parse(messages)
+    said = []                            # the reply's words, as they came
+    shown = [False]
+
+    def tee(item):
+        if item[0] in ("text", "reasoning", "tool"):
+            shown[0] = True
+        if item[0] == "text":
+            said.append(item[1])
+        put(item)
+
+    def reply():
+        return [("assistant", "".join("".join(said).split()))]
+
+    if resume:                           # the session already holds the task
+        session, capped = await _run(sdk, CONTINUE_PROMPT, system, model,
+                                     stream, tee, port, resume, env)
+        if not capped:
+            _keep(session, _held(convo) + reply())
+        return
+    held = sid = None
+    if len(convo) > 2 and convo[-1][0] == "user":
+        sid, held = _claim(_held(convo[:-1]))
+    if sid:
+        try:
+            session, capped = await _run(sdk, _render_tail(convo, ctx), system,
+                                         model, stream, tee, port, sid, env)
+        except Exception:
+            if shown[0]:
+                raise                    # words already out: a real failure
+            _convo_count("lost")
+        else:
+            _convo_count("resumed")
+            if not capped:
+                _keep(session, held + _held(convo[-1:]) + reply())
+            return
+    _convo_count("full")
+    session, capped = await _run(sdk, split_messages(messages)[1], system, model,
+                                 stream, tee, port, None, env)
+    if not capped:
+        _keep(session, _held(convo) + reply())
+
+
+async def _run(sdk, prompt, system, model, stream, put, port, resume, env):
+    """One SDK run: its messages -> put(...) items. Returns (the SDK
+    session id, whether the answer stopped at the ceiling)."""
     answer = _Answer()                   # a fresh ceiling, Continue too (#425)
     opts = build_options(sdk, system, model, stream, port, resume, env, answer)
     partial = False
@@ -676,6 +827,8 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
     if capped or answer.ceiling:
         _count("ceiling_hits")
         put(("capped", {"session": session, "calls": MAX_TOOL_CALLS_PER_ANSWER}))
+        return session, True
+    return session, False
 
 
 _END = object()

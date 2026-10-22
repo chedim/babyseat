@@ -358,7 +358,12 @@ def route(handler, path: str) -> bool:
         _send(handler, 200, {**_CA.stats(), "checkin_tool_calls": _CA.CHECKIN_TOOL_CALLS,
                              "max_tool_calls": _CA.MAX_TOOL_CALLS_PER_ANSWER,
                              "max_turns": _CA.MAX_TURNS,
-                             "usage": _CA.usage_stats()})
+                             "usage": _CA.usage_stats(),
+                             # one SDK session per conversation (#428): turns
+                             # resumed with only the tail, rendered in full,
+                             # and resumes that failed (lost) and fell back
+                             "conversation": {**_CA.convo_stats(),
+                                              "sessions_max": _CA.CONVO_SESSIONS_MAX}})
         return True
     if path == "/membrane/diag/timing":
         if post:
