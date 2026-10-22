@@ -160,7 +160,9 @@ class Capturer:
         self.sessions = sessions or Sessions()
         self.q: queue.Queue = queue.Queue(maxsize=maxsize)
         self.errors = 0
-        self.idle_hooks: list = []
+        # the tool results captured before chunking (#429): cut a batch
+        # whenever the queue idles
+        self.idle_hooks: list = [field.chunk_backlog] if hasattr(field, "chunk_backlog") else []
         self._lock = threading.Lock()
         self._busy = 0
         self._t = None

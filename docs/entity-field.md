@@ -127,11 +127,20 @@ instructions":
   was worked out after them. The direct path (#429) searches model
   replies, learn notes, ingested docs and code by similarity to the ask
   itself, because most facts were never the answer to an earlier ask like
-  this one. A person's lines, receipts, notifications, sensor readings and
-  tool observations are never a direct answer, and a reply sentence that
-  restates the ask is skipped. Both paths share one floor (0.70 in the
-  injected block; `/membrane/ask` takes `sim_min`). A direct hit carries
-  `via: "direct"` and its `role`.
+  this one. A person's lines, receipts, notifications and sensor readings
+  are never a direct answer; a reply to a receipt, a watch reading or the
+  seat's restart notice (`[membrane seat notice]`) is skipped (a reply to a
+  task notification stays: it reports a background task's result to the
+  person), and a sentence that restates the ask is skipped. On a question-like ask the direct path
+  also reads tool outputs: each tool result is cut at capture into
+  600-char chunks overlapping by 120 (`streams.tool_chunks`; results stored
+  before this are cut by the capturer's idle step), each chunk embedded in
+  the `chunks` collection, never in an entity's state. A tool row carries
+  the result's best chunk, one row per result; it joins the embedding
+  rows' one similarity-sorted list, and at most 4 tool rows
+  enter the top k. Both paths share one floor (0.70 in the injected block;
+  `/membrane/ask` takes `sim_min`). A direct hit carries `via: "direct"`
+  and its `role` (`tool` for a tool output, with the tool's name).
   The **word lane** (`membrane/lexical.py`, #429) catches exact tokens the
   embeddings blur: identifiers, env vars, issue numbers, file names. It is
   BM25 (k1 1.2, b 0.75) over the field's own sentences, in RAM, built from
@@ -302,8 +311,9 @@ derived**:
 message nearest the ask and its answer (the last model message before the
 next user message). Only a person's messages count as earlier asks: job
 receipts (`[membrane] job #`, `your job #`), task notifications
-(`<task-notification>`) and `[membrane-watch]` / `[membrane-intercept]`
-blocks also arrive as user turns, so each user event is tagged with its
+(`<task-notification>`), `[membrane-watch]` / `[membrane-intercept]`
+blocks and the seat's restart notice (`[membrane seat notice]`) also
+arrive as user turns, so each user event is tagged with its
 `author` at capture, and an older event with no tag is read by the same
 prefixes (#429). The same rule picks the earlier asks behind PAST ANSWERS. The answer is replayable only when all of these hold:
 

@@ -64,6 +64,10 @@ RECEIPT_PREFIXES = {
     "[membrane-watch]": "sensor",
     "[membrane-intercept]": "receipt",
 }
+# The seat's restart notice (restarts.SIGN) reaches the model through the
+# /v1 door like a person's turn; it is the seat's notice, never a person's
+# (#429 PR 3, for approval). Kept apart from the five approved prefixes.
+NOTICE_PREFIXES = {"[membrane seat notice]": "notice"}
 # On a question-like turn, observation evidence (tool results, readings,
 # receipts) ranks this much below what was said and decided (approved).
 OBSERVATION_PENALTY = 0.10
@@ -76,9 +80,10 @@ _FIRST_WORD = re.compile(r"[a-z]+")
 
 
 def author_of(text: str) -> str:
-    """'receipt' | 'notification' | 'sensor' by RECEIPT_PREFIXES, else 'person'."""
+    """'receipt' | 'notification' | 'sensor' by RECEIPT_PREFIXES, 'notice' by
+    NOTICE_PREFIXES, else 'person'."""
     t = (text or "").lstrip()
-    for p, who in RECEIPT_PREFIXES.items():
+    for p, who in (*RECEIPT_PREFIXES.items(), *NOTICE_PREFIXES.items()):
         if t.startswith(p):
             return who
     return "person"
@@ -342,6 +347,44 @@ def observation_fact(ev: Event) -> str:
             break
     base = f"{ev.tool} {target}".strip()
     return f"{base}: {ev.outcome or 'pending'}." + (f" {detail}" if detail else "")
+
+
+# ---- tool-output chunks (#429 PR 3) ------------------------------------------------
+# A tool result (a git log, an issue view, a file read) is embedded as one
+# observation sentence: its tool, target and first line. The facts sit
+# further in. Recall also cuts the stored result into overlapping chunks,
+# each embedded, so a fact-sized piece can match a question. The result is
+# already capped at RESULT_HEAD + RESULT_TAIL chars, so at most ~17 chunks.
+TOOL_CHUNK_CHARS = 600                 # one chunk: ~150 tokens, inside the embedder window
+TOOL_CHUNK_OVERLAP = 120               # a fact cut at one edge is whole in the next
+
+
+def tool_chunks(text: str) -> list[str]:
+    """The result text in chunks of at most TOOL_CHUNK_CHARS (whitespace
+    folded, cut at a space where one is near), each starting
+    TOOL_CHUNK_OVERLAP chars before the last one ended; a chunk shorter
+    than 25 chars (an 'ok', a bare rc) is no chunk."""
+    t = " ".join((text or "").split())
+    out, i = [], 0
+    while i < len(t):
+        j = min(len(t), i + TOOL_CHUNK_CHARS)
+        if j < len(t):
+            sp = t.rfind(" ", i + TOOL_CHUNK_CHARS // 2, j)
+            if sp > i:
+                j = sp
+        c = t[i:j].strip()
+        if len(c) >= 25 and c not in out:
+            out.append(c)
+        if j >= len(t):
+            break
+        i = max(j - TOOL_CHUNK_OVERLAP, i + 1)
+    return out
+
+
+def result_text(ev: dict) -> str:
+    """A stored observation's result: its head, and its tail when clipped."""
+    head, tail = ev.get("result_head") or "", ev.get("result_tail") or ""
+    return head + ("\n" + tail if tail else "")
 
 
 # ---- sentences -------------------------------------------------------------------

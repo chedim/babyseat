@@ -6337,7 +6337,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 out["hits"] = [{"sim": r["sim"],
                                 "situation": (r["q"][:400] if r.get("via") != "direct" else
                                               f"{DIRECT_LABEL.get(r.get('role'), r.get('role'))} "
-                                              f"#{r['a_n'][0]}"),
+                                              + (f"{r['tool']} " if r.get("tool") else "")
+                                              + f"#{r['a_n'][0]}"),
                                 "action": " ".join(r["answer"])[:1200], "q_event": r["q_n"],
                                 "events": r["a_n"], "seat": fld.origin, "src": "field",
                                 "via": r.get("via", "ask"), "role": r.get("role"),

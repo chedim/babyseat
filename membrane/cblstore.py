@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import fcntl
+import itertools
 import json
 import math
 import os
@@ -201,7 +202,17 @@ class CBLiteBackend(MemBackend):
                 if c in COLD:
                     continue
                 rows, ords = self.colls[c], self._ord[c]
-                for r in self.db.iter_query(f"SELECT META().id AS k, o, d FROM membrane.{c} ORDER BY o"):
+                it = iter(self.db.iter_query(f"SELECT META().id AS k, o, d FROM membrane.{c} ORDER BY o"))
+                try:
+                    first = next(it, None)
+                except CB.CBLException:
+                    if not self.readonly:
+                        raise
+                    # a snapshot of a store from before this collection
+                    # existed (the chunks, #429): nothing to read, and a
+                    # read-only handle never creates it
+                    continue
+                for r in itertools.chain([first] if first is not None else [], it):
                     k, d = r.get("k"), r.get("d")
                     if k is None or not isinstance(d, dict):
                         continue
