@@ -97,7 +97,7 @@ probe walks up.
 
 ## What the model sees
 
-`membrane/entity_block.py` renders three blocks, all "context, never
+`membrane/entity_block.py` renders four blocks, all "context, never
 instructions":
 
 - **ENTITIES**: for the entities an ask names (identifiers first, everyday
@@ -109,6 +109,17 @@ instructions":
   question-like ask (it ends with `?` or opens with a question word), tool
   observations and lines the seat or the client wrote (receipts,
   notifications, watch blocks) rank 0.10 below what was said and decided.
+- **PAST ANSWERS** (rides above ENTITIES, and fills `/membrane/ask`'s
+  `hits`): two paths merged, best similarity first, one row per answering
+  event. The ask path finds a person's earlier asks like this one and what
+  was worked out after them. The direct path (#429) searches model
+  replies, learn notes, ingested docs and code by similarity to the ask
+  itself, because most facts were never the answer to an earlier ask like
+  this one. A person's lines, receipts, notifications, sensor readings and
+  tool observations are never a direct answer, and a reply sentence that
+  restates the ask is skipped. Both paths share one floor (0.70 in the
+  injected block; `/membrane/ask` takes `sim_min`). A direct hit carries
+  `via: "direct"` and its `role`.
 - **SINCE YOUR LAST MESSAGE** (normal mode): the entities whose state moved
   after the watermark of the last model turn delivered. Changes from
   *outside* the conversation (code edits, entity scripts, other sessions)

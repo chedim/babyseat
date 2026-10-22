@@ -104,18 +104,24 @@ def answer_of(field, q_ev: dict) -> tuple[str, dict] | None:
     return ans
 
 
+def sentence_events(field, qvec, n: int) -> tuple[dict, dict]:
+    """The n sentences nearest qvec (sentence ANN) and this origin's events
+    that carry them (via the deltas that name those sentences):
+    ({sid: sim}, {event key: event})."""
+    hits = dict(field.b.vector_top_k("sentences", "vec", qvec, n))
+    if not hits:
+        return {}, {}
+    evkeys = list(dict.fromkeys(d["event"] for _, d in field.b.scan(
+        "entity_deltas", {"origin": field.origin, "sid": list(hits)})))
+    return hits, field.b.get_multi("events", evkeys)
+
+
 def _user_events_near(field, qvec, k: int):
     """Earlier user events whose sentences are nearest the ask (sentence ANN
     -> the deltas that name those sentences -> their events). Only a
     person's: job receipts, task notifications and watch blocks ride the
     user role too, and are never an earlier ask (#429)."""
-    hits = field.b.vector_top_k("sentences", "vec", qvec, k * 12)
-    sids = [sid for sid, _ in hits]
-    if not sids:
-        return []
-    evkeys = list(dict.fromkeys(d["event"] for _, d in field.b.scan(
-        "entity_deltas", {"origin": field.origin, "sid": sids})))
-    evs = field.b.get_multi("events", evkeys)
+    _hits, evs = sentence_events(field, qvec, k * 12)
     return [(key, d) for key, d in evs.items()
             if d.get("role") == "user" and d.get("status") == "applied"
             and ST.event_author(d) == "person"]

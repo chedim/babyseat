@@ -6275,11 +6275,15 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         fld = _efield_of(srv)
         if q and fld is not None:
             try:
-                from .entity_block import past_answers
-                rows = past_answers(fld, q, k=k, sim_min=sim_min)
-                out["hits"] = [{"sim": r["sim"], "situation": r["q"][:400],
+                from .entity_block import DIRECT_LABEL, recall_answers
+                rows = recall_answers(fld, q, k=k, sim_min=sim_min)
+                out["hits"] = [{"sim": r["sim"],
+                                "situation": (r["q"][:400] if r.get("via") != "direct" else
+                                              f"{DIRECT_LABEL.get(r.get('role'), r.get('role'))} "
+                                              f"#{r['a_n'][0]}"),
                                 "action": " ".join(r["answer"])[:1200], "q_event": r["q_n"],
-                                "events": r["a_n"], "seat": fld.origin, "src": "field"}
+                                "events": r["a_n"], "seat": fld.origin, "src": "field",
+                                "via": r.get("via", "ask"), "role": r.get("role")}
                                for r in rows]
                 if out["hits"]:
                     out.update({"hit": True, **{kk: out["hits"][0][kk] for kk in

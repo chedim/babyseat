@@ -266,8 +266,9 @@ def render(views: list[dict], budget: int = 2400, now: float | None = None) -> s
     return "\n".join(lines) if len(lines) > 1 else None
 
 
-PAST_HEADER = ("PAST ANSWERS (earlier asks like this one and what was answered then; "
-               "newer evidence below may supersede them):")
+PAST_HEADER = ("PAST ANSWERS (earlier asks like this one and what was answered then, and "
+               "replies, notes, docs and code that match it; newer evidence below may "
+               "supersede them):")
 PAST_SIM_MIN = 0.70
 
 
@@ -312,6 +313,82 @@ def past_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAST_
     return out
 
 
+# THE DIRECT PATH (#429): most facts were never the answer to an earlier
+# ask like this one -- they sit in a reply to some other ask, a learn note,
+# an ingested doc or the code. These roles are searched by similarity to
+# the ask itself. A person's lines (the ask path's), the receipts,
+# notifications and sensor readings that ride the user role, and
+# observations are never a direct answer.
+DIRECT_ROLES = ("model", "note", "doc", "code")
+DIRECT_LABEL = {"model": "reply", "note": "note", "doc": "doc", "code": "code"}
+
+
+def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAST_SIM_MIN,
+                   n_sent: int = 3) -> list[dict]:
+    """Replies, notes, docs and code whose own sentences are nearest the ask
+    (sim >= sim_min), each with its sentences closest to the ask, best
+    first. A reply sentence that restates the ask is not an answer."""
+    from . import efgate as G
+    from .efield import unit
+    qv = G.message_vec(field, text) if qvec is None else unit(qvec)
+    if qv is None:
+        return []
+    hits, evs = G.sentence_events(field, qv, k * 12)
+    cands = []
+    for _key, d in evs.items():
+        if (d.get("role") not in DIRECT_ROLES or d.get("status") != "applied"
+                or _title_like(d)):
+            continue
+        best = max((hits[s] for s in d.get("sids") or [] if s in hits), default=None)
+        if best is not None and best >= sim_min:
+            cands.append((best, d))
+    cands.sort(key=lambda t: -t[0])
+    out, seen = [], set()
+    for _best, d in cands:
+        if len(out) >= k:
+            break
+        sids = list(dict.fromkeys(d.get("sids") or []))
+        got = field.b.get_multi("sentences", sids)
+        reply = d.get("role") == "model"
+        scored = []
+        for order, sid in enumerate(sids):
+            x = str((got.get(sid) or {}).get("text") or "")
+            if not x or sid not in got:
+                continue
+            sc = float(unit(got[sid]["vec"]) @ qv)
+            if reply and (len(x.split()) < 5 or sc >= ECHO_COS or _RESTATE.match(x)):
+                continue                        # the ask restated, not answered
+            scored.append((sc, order, x))
+        top = sorted(sorted(scored, key=lambda t: -t[0])[:n_sent], key=lambda t: t[1])
+        if not top or max(t[0] for t in top) < sim_min:
+            continue
+        sig = " ".join(" ".join(x for _, _, x in top).lower().split())
+        if sig in seen:
+            continue                            # the same words in another event
+        seen.add(sig)
+        out.append({"sim": round(max(t[0] for t in top), 3), "q": "", "q_n": None,
+                    "a_n": [d.get("n")], "ts": d.get("ts"), "answer": [x for _, _, x in top],
+                    "via": "direct", "role": d.get("role")})
+    return out
+
+
+def recall_answers(field, text: str, qvec=None, k: int = 3,
+                   sim_min: float = PAST_SIM_MIN) -> list[dict]:
+    """The ask path (earlier asks like this one and what followed them) and
+    the direct path (replies, notes, docs and code near the ask) merged:
+    best similarity first, one row per answering event, at most k."""
+    from . import efgate as G
+    from .efield import unit
+    qv = G.message_vec(field, text) if qvec is None else unit(qvec)
+    if qv is None:
+        return []
+    asks = past_answers(field, text, qv, k=k, sim_min=sim_min)
+    used = {n for r in asks for n in r["a_n"]}
+    direct = [r for r in direct_answers(field, text, qv, k=k, sim_min=sim_min)
+              if not used & set(r["a_n"])]
+    return sorted(asks + direct, key=lambda r: -r["sim"])[:k]
+
+
 _RESTATE = re.compile(r"\s*(?:the user(?:'s)?|they|so the user)\b.{0,40}\b(?:ask|want|say|wonder)",
                       re.IGNORECASE)
 
@@ -331,8 +408,12 @@ def render_past(rows: list[dict], budget: int = 1600, now: float | None = None) 
         q = " ".join(r["q"].split())[:160]
         body = " ".join(" ".join(x.split()) for x in r["answer"])[:600]
         nums = ", ".join(f"#{n}" for n in dict.fromkeys(r["a_n"]))
-        ln = (f"▸ #{r['q_n']} ({_age(r['ts'], now)}, sim {r['sim']:.2f}) asked: \"{q}\"\n"
-              f"  worked out ({nums}): {body}")
+        if r.get("via") == "direct":
+            ln = (f"▸ {nums} ({_age(r['ts'], now)}, sim {r['sim']:.2f}) "
+                  f"{DIRECT_LABEL.get(r.get('role'), r.get('role'))}: {body}")
+        else:
+            ln = (f"▸ #{r['q_n']} ({_age(r['ts'], now)}, sim {r['sim']:.2f}) asked: \"{q}\"\n"
+                  f"  worked out ({nums}): {body}")
         if sum(len(x) + 1 for x in lines) + len(ln) > budget:
             break
         lines.append(ln)
@@ -342,7 +423,7 @@ def render_past(rows: list[dict], budget: int = 1600, now: float | None = None) 
 def render_for(field, text: str, qvec=None, budget: int = 2400, k: int = 5) -> str | None:
     """The full ask-time block: past answers first (they answer), then the
     entities (they ground and correct)."""
-    past = render_past(past_answers(field, text, qvec), budget=budget // 2)
+    past = render_past(recall_answers(field, text, qvec), budget=budget // 2)
     ents = render(entities_for(field, text, qvec, k), budget - (len(past) + 2 if past else 0))
     return "\n\n".join(x for x in (past, ents) if x) or None
 
