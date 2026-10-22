@@ -49,6 +49,20 @@ from .entities import (EntityStore, QuantumEntity, MEMBRANE_NS,
 
 
 CLOUD_DEFAULT_PRICE = 3.0   # an unknown cloud model's relative money/turn
+# THE PER-RUNG BUDGET: a rung that doesn't answer inside it is DOWN for this
+# turn. Its value predates #431 (named there so a test can shorten its clock).
+RUNG_BUDGET_S = 90
+
+
+def _is_timeout(e) -> bool:
+    """Did a delivery fail on the clock (the budget ran out), not on an
+    answer? urlopen raises the socket's TimeoutError bare, or wrapped in a
+    URLError when it fires while connecting."""
+    import urllib.error
+    if isinstance(e, TimeoutError):
+        return True
+    return isinstance(e, urllib.error.URLError) and isinstance(
+        getattr(e, "reason", None), TimeoutError)
 
 _NON_CHAT_MARKERS = ("embed", "minilm", "bge", "whisper", "nomic-embed")
 
@@ -5621,7 +5635,47 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             print(f"[proxy] turn FAILED at deliver "
                   f"({round(time.time()-_t_del,2)}s): "
                   f"{str(e)[:160]}", file=sys.stderr)
-            self._forward_raw(raw)
+            self._deliver_failed(e, raw, up)
+
+    def _deliver_failed(self, e, raw: bytes, up: dict) -> None:
+        """A delivery raised. A TIMEOUT (the rung's budget ran out: a loaded
+        seat, a model swap) fails the turn VISIBLY (#431, option C of #429):
+        the bare request is never resent without memory. Any other failure
+        keeps the transparent forward."""
+        if _is_timeout(e):
+            self._serve_busy(str(up.get("model") or "membrane"),
+                             mid_stream=bool(getattr(self, "_v1_stream_open", False)),
+                             err=e)
+            return
+        self._forward_raw(raw)
+
+    def _serve_busy(self, model: str, mid_stream: bool, err=None) -> None:
+        """The busy answer (#431): HTTP 503 type seat_busy before any byte,
+        or an SSE error event + [DONE] once the stream has begun; counted on
+        /membrane/diag/deliver. The rung was already outage-noted by
+        _open_backend, so the router's next pick skips it (memory kept)."""
+        _DIAG.note_busy_timeout()
+        msg = _DIAG.SEAT_BUSY_MESSAGE
+        print(f"[proxy] seat busy: {model} outlived {RUNG_BUDGET_S}s "
+              f"({str(err)[:120]}); the turn fails visibly, no bare resend",
+              file=sys.stderr)
+        err_obj = {"error": {"message": msg, "type": _DIAG.SEAT_BUSY_TYPE,
+                             "code": "busy_timeout"}}
+        try:
+            if mid_stream:
+                self.wfile.write(_sse_line(err_obj))
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+                return
+            out = json.dumps(err_obj).encode()
+            self.send_response(503, "seat busy")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            self.wfile.flush()
+        except OSError as we:                 # the client left: nothing to tell
+            print(f"[proxy] seat busy: the client is gone ({we})", file=sys.stderr)
 
     def _v1_deliver(self, up: dict, raw: bytes, query: str, vec, verdict: dict,
                     ctx: str | None) -> None:
@@ -5629,6 +5683,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         to the client, then learn the exchange into the field."""
         srv = self.server
         mem = srv.membrane
+        self._v1_stream_open = False          # set once the SSE headers go out (#431)
         route = verdict.get("route") or {}
         routed_model = route.get("route")
         orig_model = str(up.get("model") or "membrane")
@@ -5703,7 +5758,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             # guard must free -- the queue's room cannot wait behind
             # a single socket for 300s); the ladder descends.
             try:
-                return urllib.request.urlopen(rq, timeout=90)
+                return urllib.request.urlopen(rq, timeout=RUNG_BUDGET_S)
             except urllib.error.HTTPError as he:
                 # rung-down codes: bad/absent model (400/404), auth or
                 # payment (401/402/403), rate limit / quota (429), 5xx.
@@ -5747,6 +5802,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self.send_header("Connection", "close")
             self.close_connection = True
             self.end_headers()
+            self._v1_stream_open = True       # a later failure answers in-stream (#431)
             # THE TRANSPARENCY CONTRACT, restored: stream the FULL composed
             # injection (recall + where-we-are + the banner -- everything
             # membrane appended to ctx) as reasoning deltas, so the operator
@@ -5772,6 +5828,10 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 if route.get("ladder_exhausted"):
                     self._serve_field_only(up.get("model", "membrane"), vec,
                                            route, mid_stream=True, err=e)
+                    return
+                if _is_timeout(e):
+                    self._serve_busy(up.get("model", "membrane"),
+                                     mid_stream=True, err=e)
                     return
                 raise
             # THE ABORT'S REGISTER (the wedged round's fast kill): the
@@ -5896,6 +5956,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                     self._serve_field_only(
                         up.get("model", "membrane"), vec, route,
                         mid_stream=False, err=e)
+                    return
+                if _is_timeout(e):
+                    self._serve_busy(model_name, mid_stream=False, err=e)
                     return
                 raise
             if resp_bytes and not _resp_has_content(resp_bytes):

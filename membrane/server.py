@@ -45,6 +45,25 @@ from pathlib import Path
 from . import mcp_server as _mcp
 from . import jwtauth as _JWT
 from . import seatauth as _SA
+from . import diag as _BUSY                 # #431: the seat-busy error's shape
+
+
+class SeatBusy(RuntimeError):
+    """The /v1 proxy answered 'too busy to answer with its memory' (#431):
+    the rung outlived its budget. The turn fails visibly; nothing retries
+    it -- the person's Retry does."""
+
+
+# the failed row's mark: the chat renders it with a Retry (#431)
+BUSY_MARK = "seatBusy"
+
+
+def _busy_error(obj) -> str | None:
+    """The seat-busy message in a proxy error body, or None."""
+    e = obj.get("error") if isinstance(obj, dict) else None
+    if isinstance(e, dict) and e.get("type") == _BUSY.SEAT_BUSY_TYPE:
+        return str(e.get("message") or _BUSY.SEAT_BUSY_MESSAGE)
+    return None
 
 VERSION = "1.0"
 PROJECT_ID = "membrane"
@@ -2112,6 +2131,10 @@ class TurnRunner:
                         resp = _stream(body, _on_event)
                         for _pid in list(_pend):
                             _flush(_pid)                 # the tail of every part, before it closes
+                    except SeatBusy:
+                        for _pid in list(_pend):
+                            _flush(_pid)
+                        raise                        # the busy seat: no second (buffered) call (#431)
                     except Exception:
                         for _pid in list(_pend):
                             _flush(_pid)
@@ -2128,6 +2151,17 @@ class TurnRunner:
                     raise RuntimeError(
                         f"call_ladder returned {type(resp).__name__}, "
                         f"not a response object")
+            except SeatBusy as e:
+                # THE BUSY SEAT (#431): the turn failed visibly, marked so
+                # the chat offers the person's Retry; nothing retries it
+                now = int(time.time() * 1000)
+                mkpart({"type": "text", "text": str(e)[:300],
+                        "time": {"start": now, "end": now}})
+                a_info["error"] = {"name": "SeatBusy", "data":
+                                   {"message": str(e)[:300]}}
+                a_info[BUSY_MARK] = True
+                _thinking(self, sid, "end")
+                break
             except Exception as e:
                 now = int(time.time() * 1000)
                 mkpart({"type": "text",
@@ -2585,8 +2619,17 @@ def loopback_ladder(port: int, runner=None, cell=None):
         req = urllib.request.Request(
             url, data=data, method="POST",
             headers={"Content-Type": "application/json", **_JWT.internal_headers()})
-        with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
-            return _json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
+                return _json.loads(resp.read())
+        except urllib.error.HTTPError as he:
+            try:
+                busy = _busy_error(_json.loads(he.read() or b"{}"))
+            except ValueError:
+                busy = None
+            if busy:
+                raise SeatBusy(busy) from None
+            raise
 
     def stream(body: dict, on_event) -> dict:
         """THE STREAMED ROUND (2026-10-10: the buffered call showed nothing
@@ -2637,6 +2680,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     d = _json.loads(payload)
                 except ValueError:
                     continue
+                if _busy_error(d):
+                    raise SeatBusy(_busy_error(d))   # never a truncation: no re-ask (#431)
                 if isinstance(d.get("membrane"), dict) and not d.get("choices"):
                     ext = d["membrane"]
                     on_event("ext", ext)
