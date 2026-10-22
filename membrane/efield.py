@@ -858,6 +858,8 @@ class EntityField:
                     ev["speaker"] = [spk[0], spk[1]]
             ev["sids"] = sids
             ev["mentions"] = mentions
+            if ev.get("stream") == "observation" and ev.get("outcome") != "call-only":
+                ev["chunks"] = self._chunk(key, ev, batch)
             surfaces.update(m[2] for m in mentions)
             if ev.get("stream") == "distilled":
                 ev["status"] = "distilled"
@@ -880,6 +882,64 @@ class EntityField:
                     pass                              # claims never block intake
         self._prefetch_seeds(surfaces, batch)
         return len(evs)
+
+    # ---- tool-output chunks (#429 PR 3) ----------------------------------------------
+    def chunk_id(self, text: str) -> str:
+        return "k:" + h16(self.model + "|" + text)
+
+    def _chunk(self, key: str, ev: dict, batch: int = 64) -> list[str]:
+        """Cut a tool result into chunks, embed the new ones and point each
+        at this event (the newest event carrying the same text wins): the
+        chunk ids. The chunks feed recall only -- never an entity's state."""
+        texts = {self.chunk_id(c): c for c in ST.tool_chunks(ST.result_text(ev))}
+        have = self.b.get_multi("chunks", list(texts))
+        miss = [cid for cid in texts if cid not in have]
+        for lo in range(0, len(miss), batch):
+            part = miss[lo:lo + batch]
+            for cid, v in zip(part, self.emb.embed([texts[c] for c in part])):
+                have[cid] = {"_k": "chunk", "text": texts[cid], "model": self.model,
+                             "vec": pack_f16(unit(v))}
+        for cid in texts:
+            row = have[cid]
+            if row.get("event") != key:
+                row["event"] = key
+                self.b.upsert("chunks", cid, row)
+            try:
+                from . import lexical as LX
+                LX.note_chunk(self, cid, key, texts[cid])
+            except Exception:
+                pass                                  # the word lane never blocks intake
+        return list(texts)
+
+    def _drop_chunks(self, ev: dict) -> None:
+        """A forgotten tool result's chunks go with its text (a chunk row is
+        text; another event carrying the same text loses it too)."""
+        for cid in ev.get("chunks") or []:
+            self.b.delete("chunks", cid)
+        if "chunks" in ev:
+            ev["chunks"] = []
+
+    def chunk_backlog(self, limit: int = 64) -> int:
+        """Tool results captured before chunking (no 'chunks' key) get their
+        chunks, up to `limit` a call (the capturer's idle step): how many
+        were chunked. Idempotent: a chunked result is never re-cut; once a
+        pass finds none, later calls return at once (new results are cut
+        at capture)."""
+        if getattr(self, "_chunk_backlog_done", False):
+            return 0
+        n = 0
+        for key, ev in list(self.b.scan("events", {"origin": self.origin,
+                                                   "stream": "observation"})):
+            if n >= limit:
+                break
+            if "chunks" in ev or ev.get("outcome") == "call-only" or \
+                    ev.get("status") not in ("embedded", "applied", "empty"):
+                continue
+            ev["chunks"] = self._chunk(key, ev)
+            self.b.upsert("events", key, ev)
+            n += 1
+        self._chunk_backlog_done = n == 0
+        return n
 
     def _term_key(self, surface: str) -> str:
         return "t:" + h16(self.model + "|" + surface.lower())
@@ -1828,6 +1888,7 @@ class EntityField:
         for f in ("text", "result_head", "result_tail", "served"):
             if ev.get(f):
                 ev[f] = ""
+        self._drop_chunks(ev)
         ev.update({"status": "forgotten", "sids": [], "mentions": [], "forgotten_ts": time.time()})
         self.b.upsert("events", key, ev)
         for eid in touched:
@@ -1919,6 +1980,7 @@ class EntityField:
                 for f in ("text", "result_head", "result_tail", "served"):
                     if ev.get(f):
                         ev[f] = ""
+                self._drop_chunks(ev)
                 ev.update({"status": "forgotten", "sids": [], "mentions": [],
                            "forgotten_ts": time.time()})
                 self.b.upsert("events", key, ev)

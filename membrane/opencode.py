@@ -1015,6 +1015,14 @@ def main() -> None:
                 _LX.warm(srv.efield)
             except Exception as e:
                 print(f"[seat] word index off ({e})", file=sys.stderr)
+            # the tool-output chunks (#429) are read only on question-like
+            # asks: build their vector matrix now, not on the first question
+            _wv = getattr(srv.efield.b, "warm_vectors", None)
+            if _wv is not None:
+                try:
+                    _wv("chunks", "vec")
+                except Exception:
+                    pass
             # THE FIELD'S PULSE (viewer v3): field + mind frames on the
             # serve's hub (the hub binds once the runner exists)
             try:

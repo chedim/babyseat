@@ -25,7 +25,7 @@ from typing import Callable, Iterator
 import numpy as np
 
 COLLECTIONS = ("events", "sentences", "terms", "entity_states", "entity_deltas",
-               "relations", "claims", "annotations", "origin_stats")
+               "relations", "claims", "annotations", "origin_stats", "chunks")
 
 def _json_line(coll: str, key: str, doc) -> str:
     """One journal line, json-safe ALWAYS (the 'when serializing dict
@@ -175,6 +175,11 @@ class MemBackend:
         # them too (it used to refresh EXISTING matrices only, so a big
         # never-built collection answered empty forever)
         self._vec_want: set[tuple[str, str]] = set()
+
+    def warm_vectors(self, coll: str, field: str) -> None:
+        """Start the coll/field matrix build now (a big one builds in the
+        background), so the first real read does not answer empty."""
+        self._vec_matrix(coll, field, None)
 
     def _vec_matrix(self, coll: str, field: str, eq: dict | None):
         """(keys, normed f32 matrix) for the coll/field -- cached,

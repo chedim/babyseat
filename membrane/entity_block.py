@@ -267,7 +267,7 @@ def render(views: list[dict], budget: int = 2400, now: float | None = None) -> s
 
 
 PAST_HEADER = ("PAST ANSWERS (earlier asks like this one and what was answered then, and "
-               "replies, notes, docs and code that match it; newer evidence below may "
+               "replies, notes, docs, code and tool outputs that match it; newer evidence below may "
                "supersede them):")
 PAST_SIM_MIN = 0.70
 
@@ -320,7 +320,28 @@ def past_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAST_
 # notifications and sensor readings that ride the user role, and
 # observations are never a direct answer.
 DIRECT_ROLES = ("model", "note", "doc", "code")
-DIRECT_LABEL = {"model": "reply", "note": "note", "doc": "doc", "code": "code"}
+DIRECT_LABEL = {"model": "reply", "note": "note", "doc": "doc", "code": "code", "tool": "tool"}
+# TOOL OUTPUTS (#429 PR 3): a tool result's chunks (streams.tool_chunks)
+# answer question-like asks only, and at most this many of them enter the
+# top k, so a pile of near-identical log reads cannot push out what was
+# said, noted or coded (awaiting the operator's approval).
+TOOL_HITS_MAX = 4
+
+
+def _to_a_machine(field, ev: dict) -> bool:
+    """A model reply whose preceding user turn in its session was the
+    seat's (a job receipt, a watch reading, a restart notice): it answers
+    the machine, not a question (#429). A reply to a task notification
+    stays: the client's background task finished and the reply reports its
+    result to the person (measured: such a reply held a pinned answer)."""
+    if ev.get("role") != "model":
+        return False
+    prev = None
+    for _, d in field.b.scan("events", {"origin": field.origin, "session": ev.get("session"),
+                                        "role": "user", "seq": {"lt": int(ev.get("seq") or 0)}},
+                             order=("seq",)):
+        prev = d
+    return prev is not None and ST.event_author(prev) not in ("person", "notification")
 
 
 def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAST_SIM_MIN,
@@ -337,7 +358,7 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
     cands = []
     for _key, d in evs.items():
         if (d.get("role") not in DIRECT_ROLES or d.get("status") != "applied"
-                or _title_like(d)):
+                or _title_like(d) or _to_a_machine(field, d)):
             continue
         best = max((hits[s] for s in d.get("sids") or [] if s in hits), default=None)
         if best is not None and best >= sim_min:
@@ -369,6 +390,38 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
         out.append({"sim": round(max(t[0] for t in top), 3), "q": "", "q_n": None,
                     "a_n": [d.get("n")], "ts": d.get("ts"), "answer": [x for _, _, x in top],
                     "via": "direct", "role": d.get("role")})
+    return out
+
+
+def tool_answers(field, text: str, qvec=None, k: int = 3,
+                 sim_min: float = PAST_SIM_MIN) -> list[dict]:
+    """Tool results whose chunks are nearest the ask (sim >= sim_min), one
+    row per result carrying its best chunk, best first. A chunk that
+    restates the ask (>= ECHO_COS) is not an answer."""
+    from . import efgate as G
+    from .efield import unit
+    qv = G.message_vec(field, text) if qvec is None else unit(qvec)
+    if qv is None:
+        return []
+    hits = [(cid, s) for cid, s in field.b.vector_top_k("chunks", "vec", qv, k * 12)
+            if sim_min <= s < ECHO_COS]
+    rows = field.b.get_multi("chunks", [cid for cid, _ in hits])
+    evs = field.b.get_multi("events", list({r.get("event") for r in rows.values() if r.get("event")}))
+    out, seen_ev, seen_txt = [], set(), set()
+    for cid, s in hits:
+        r = rows.get(cid) or {}
+        d = evs.get(r.get("event"))
+        if (d is None or d.get("origin") != field.origin or d.get("stream") != "observation"
+                or d.get("status") == "forgotten" or r.get("event") in seen_ev
+                or r.get("text") in seen_txt):
+            continue
+        seen_ev.add(r.get("event"))
+        seen_txt.add(r.get("text"))
+        out.append({"sim": round(float(s), 3), "q": "", "q_n": None, "a_n": [d.get("n")],
+                    "ts": d.get("ts"), "answer": [r.get("text") or ""], "via": "direct",
+                    "role": "tool", "tool": d.get("tool") or "?"})
+        if len(out) >= k:
+            break
     return out
 
 
@@ -676,8 +729,10 @@ def render_past(rows: list[dict], budget: int = 1600, now: float | None = None) 
         nums = ", ".join(f"#{n}" for n in dict.fromkeys(r["a_n"]))
         if r.get("via") == "direct":
             words = f", words {' '.join(r['matched'][:4])}" if r.get("matched") else ""
-            ln = (f"▸ {nums} ({_age(r['ts'], now)}, sim {r['sim']:.2f}{words}) "
-                  f"{DIRECT_LABEL.get(r.get('role'), r.get('role'))}: {body}")
+            src = DIRECT_LABEL.get(r.get("role"), r.get("role"))
+            if r.get("tool"):
+                src += f" {r['tool']}"
+            ln = f"▸ {nums} ({_age(r['ts'], now)}, sim {r['sim']:.2f}{words}) {src}: {body}"
         else:
             ln = (f"▸ #{r['q_n']} ({_age(r['ts'], now)}, sim {r['sim']:.2f}) asked: \"{q}\"\n"
                   f"  worked out ({nums}): {body}")
