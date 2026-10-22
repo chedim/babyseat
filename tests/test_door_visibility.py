@@ -17,13 +17,13 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
 import pytest
 
 PORT = 11671
-SEAT_DIR = "/tmp/door-seat"
 
 # THESE BOOT A REAL SEAT -- against a FAKE OLLAMA (tests/_fake_ollama.py): they
 # used to run real model turns on the operator's live ollama under 30 s timeouts,
@@ -59,29 +59,27 @@ def quiet_seat():
     env["MEMBRANE_LAN"] = "0"
     env["MEMBRANE_EF_ANN"] = "0"
     env["MEMBRANE_NO_OPEN"] = "1"
-    os.makedirs(SEAT_DIR, exist_ok=True)
-    for stale in ("f.json", "f.json.seed.json", "seat.stdout", "seat.stderr"):
-        p = os.path.join(SEAT_DIR, stale)
-        if os.path.exists(p):
-            os.unlink(p)
+    # its own fresh dir per seat: a fixed shared dir let a stale seat's (or a
+    # parallel run's) files leak into this one (#408)
+    seat_dir = tempfile.mkdtemp(prefix="door-seat-")
     sys.path.insert(0, os.path.dirname(__file__))
     from _fake_ollama import FakeOllama
     fake = FakeOllama().__enter__()
-    so = open(os.path.join(SEAT_DIR, "seat.stdout"), "wb")
-    se = open(os.path.join(SEAT_DIR, "seat.stderr"), "wb")
+    so = open(os.path.join(seat_dir, "seat.stdout"), "wb")
+    se = open(os.path.join(seat_dir, "seat.stderr"), "wb")
     proc = subprocess.Popen(
         [_SPAWN, "-m", "membrane.opencode",
          "--serve", "--serve-port", str(port), "--serve-host", "127.0.0.1",
          "--no-launch", "--no-thinker", "--no-dreamer", "--no-autonode",
          "--no-router", "--model", "granite4:latest",
-         "--field", f"{SEAT_DIR}/f.json", "--audit", f"{SEAT_DIR}/a.jsonl",
+         "--field", f"{seat_dir}/f.json", "--audit", f"{seat_dir}/a.jsonl",
          "--backend", fake.url],
         env=env, stdout=so, stderr=se)
 
     def _boot_failure(why):
         so.flush()
         se.flush()
-        tail = _tail(os.path.join(SEAT_DIR, "seat.stderr"))
+        tail = _tail(os.path.join(seat_dir, "seat.stderr"))
         return AssertionError(
             f"{why} (rc={proc.poll()})\n--- seat stderr ---\n{tail or '(empty)'}")
 
@@ -123,7 +121,7 @@ def quiet_seat():
             proc.kill()
         so.close()
         se.close()
-        shutil.rmtree(SEAT_DIR, ignore_errors=True)
+        shutil.rmtree(seat_dir, ignore_errors=True)
         fake.__exit__(None, None, None)
     # the seat talked to the fake, never to a real model (success path only)
     assert any(p in ("/api/chat", "/v1/chat/completions")

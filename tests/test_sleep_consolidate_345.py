@@ -344,6 +344,10 @@ def _twin(steps=STEPS, seed=345):
     for kind in ("die", "slow"):                       # toys on both seats (one toybox: the data dir)
         TB.add(a, kind, locked_ok=True)
         SW.join(b, [TB._put(b.entity_store, "toy:" + kind, kind, n=0)], "toy")
+    # TB.add saves the store; the bare _put only arms its 10 s save debounce, so a
+    # restart of B inside those 10 s read a store without its toys (#408): flush
+    # it, as TB.add does, so the files are what the seat holds
+    b.entity_store.flush()
     return life, (a, da), (b, db)
 
 
