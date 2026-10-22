@@ -275,6 +275,16 @@ class TestGather(unittest.TestCase):
         self.assertEqual(w2.text, "make the backup job skip files over 2 GB")
         self.assertIsNone(CB.working_on(CB.conv_events(self.f, "sid:new"), "hi"))
 
+    def test_working_on_never_names_the_speaker(self):
+        # a person's chat handle is not what we are working on (the probe's
+        # Q19 echo was a handle the old banner carried)
+        _turn(self.f, "sid:a", "[user: Some Name] make the report weekly", ts=NOW - 900)
+        _turn(self.f, "sid:a", "[HA user: Other Person]\nturn the hall light off", ts=NOW - 800)
+        w = CB.working_on(CB.conv_events(self.f, "sid:a"), "[user: Some Name] what's next?")
+        self.assertEqual(w.text, "turn the hall light off")
+        w2 = CB.working_on(CB.conv_events(self.f, "sid:a"), "[user: Some Name] turn the hall light off")
+        self.assertEqual(w2.text, "make the report weekly")
+
     def test_focus_needs_two_events_or_the_latest_message(self):
         _turn(self.f, "sid:a", "look at `tools/backup.py` please", ts=NOW - 900)
         _turn(self.f, "sid:a", "now `tools/backup.py` again, and `notes/once.md`", ts=NOW - 800)

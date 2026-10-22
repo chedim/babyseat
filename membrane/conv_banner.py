@@ -189,17 +189,19 @@ def _norm(s: str) -> str:
 def working_on(events, current_text: str = "") -> Item | None:
     """The person's latest earlier ask: a person-authored user event that is
     not the message being answered now and not a membrane frame."""
+    from .speakers import strip_speaker_lines
     from .streams import event_author
-    cur = _norm(current_text)
+    cur = _norm(strip_speaker_lines(current_text or ""))
     for _k, d in reversed(events or []):
         if d.get("stream") != "discourse" or d.get("role") != "user":
             continue
         if event_author(d) != "person":
             continue
-        t = _norm(d.get("text"))
+        raw = strip_speaker_lines(str(d.get("text") or ""))     # who spoke is not the work
+        t = _norm(raw)
         if not t or t == cur or t.startswith("membrane:"):
             continue
-        return Item(" ".join(str(d.get("text")).split()), "person", d.get("ts"))
+        return Item(" ".join(raw.split()), "person", d.get("ts"))
     return None
 
 
