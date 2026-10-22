@@ -87,9 +87,9 @@ opencode) as an in-process SDK MCP server named `membrane`:
 - Claude Code's own tools stay off: `tools=[]` (no Bash, Read, Edit, Write,
   WebFetch or any other built-in). No MCP servers from your config
   (`strict_mcp_config`) and no settings files or `CLAUDE.md`.
-- `MAX_TURNS = 4` caps the agent turns for one answer
-  (`membrane/claude_agent.py`). When an answer hits it, you can press
-  Continue (see "The turn cap and Continue" below).
+- Claude checks in with the person at least every 7 tool calls, and an
+  answer stops at 50 tool calls, where you can press Continue (see
+  "Check-ins instead of a turn cap" below).
 - The turn's own tool definitions (the chat lane's surface) are not passed
   on. The reply never carries `tool_calls` for the caller to run, and the
   bullet-salvage that turns written calls into real ones stays off for
@@ -143,24 +143,51 @@ unchanged (`prompt_tokens` is uncached input + cache reads + cache writes);
 since the seat's boot (`input` is the uncached input) and the per-call
 averages.
 
-## The turn cap and Continue
+## Check-ins instead of a turn cap
 
-An answer that reaches `MAX_TURNS` stops there. The SDK reports this as a
-result of subtype `error_max_turns`. membrane does not treat that as an
-error, and the answer is not cut off without a word:
+One answer is **one continuous SDK run**. There is no fixed batch of turns.
+Instead, a `PreToolUse` hook (the SDK's `hooks` option, `membrane/claude_agent.py`)
+keeps Claude talking to the person while it works:
 
-- The reply carries `membrane_capped: {session, turns}` (an SSE chunk when
+- **Check-ins:** Claude may make at most `CHECKIN_TOOL_CALLS = 7` tool calls
+  in a row without writing text to the person. Any assistant text, such as
+  a progress or status line in the reply, resets the count to 0. The 8th
+  call in a row is denied with "Tell the person where you are first (one
+  or two lines), then continue." Claude gets that as the tool's result,
+  says where it is, and goes on in the same run. The denied call never
+  runs. The chat shows no error for it: a denied call is Claude's
+  feedback, not a tool part.
+- **The ceiling:** at most `MAX_TOOL_CALLS_PER_ANSWER = 50` tool calls per
+  answer (about seven check-ins). The call past it is denied and the hook
+  stops the run.
+- `max_turns` is only a backstop: `MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER`.
+  Every allowed call may take a turn and be denied once first, so it never
+  binds before the ceiling. If it ever does, the answer is marked the same
+  way as at the ceiling.
+- Both values were approved by the operator on 2026-10-21.
+- Calls in one assistant message count one by one. The hook waits until
+  membrane has read the message that carries the call, so words in the
+  same message count first.
+
+## The ceiling and Continue
+
+An answer that stops at the ceiling (or the backstop) is not an error, and
+it is not cut off without a word:
+
+- The reply carries `membrane_capped: {session, calls}` (an SSE chunk when
   streamed, a top-level key when buffered). `session` is the SDK's session
   id.
-- The transcript row keeps it as `claudeCapped: {session, turns, continued}`.
-  The chat shows "Claude stopped at the turn cap (4 turns)" under the answer,
-  with a **Continue** button.
+- The transcript row keeps it as `claudeCapped: {session, calls, continued}`.
+  The chat shows "Claude stopped at the tool-call ceiling (50 calls)" under
+  the answer, with a **Continue** button. Rows from before the check-ins
+  (`turns`) still show the old turn-cap line.
 - Continue posts the person's message `Continue` with
   `claudeContinue: <message id>`. The seat claims that capped answer once
   and starts a turn that resumes the **same** SDK session (the SDK's
   `resume` option), with a short continue prompt. The turn gets the same
-  tools and options and another `MAX_TURNS` turns. If it hits the cap again,
-  the new answer offers its own Continue.
+  tools and options, a fresh ceiling of 50 calls, and a fresh check-in
+  count. If it reaches the ceiling again, the new answer offers its own
+  Continue.
 - Nothing runs twice. Each capped answer can be continued only once: a
   second press gets HTTP 409 and makes no call. The resumed session already
   holds the earlier tool calls and their results, and none of them is run
@@ -169,8 +196,10 @@ error, and the answer is not cut off without a word:
   session on a background lane (a watch loop, a mind) refuses it. Typing
   "Continue" as an ordinary message does not resume a session.
 - Diagnostics: `GET /membrane/diag/claude-agent` (localhost only) returns
-  `{cap_hits, continues, max_turns}`. The counters live in RAM since the
-  seat's boot, so you can see whether 4 turns is too tight.
+  `{checkin_denials, ceiling_hits, continues, checkin_tool_calls,
+  max_tool_calls, max_turns}`, plus the cache `usage` above. The counters
+  live in RAM since the seat's boot, so you can see how often Claude is
+  asked to check in and whether 50 calls is too tight.
 
 ## What is learned, what is shown
 

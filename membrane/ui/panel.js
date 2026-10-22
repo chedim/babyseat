@@ -380,16 +380,19 @@ function isMove(p) {
 
 /** A phantom: membrane's guess of a move, greyed -- a phrase it expected him
  *  to write, or a tool call; ✓ / ~ (in its top 3) / ✗ once the move is made. */
-/** THE TURN CAP (#389): a claude-agent answer that stopped at its turn
- *  limit says so, with a Continue the person can press (once per answer). */
+/** THE CEILING (#389, #425): a claude-agent answer that stopped at its
+ *  tool-call ceiling says so, with a Continue the person can press (once per
+ *  answer; it gives a fresh ceiling). A row from before #425 says turns. */
 function capHtml(info) {
   const cap = info && info.claudeCapped;
   if (!cap || typeof cap !== "object") return "";
-  const n = cap.turns || 4;
-  return '<div class="ccap">⏸ Claude stopped at the turn cap (' + escText(String(n)) + " turns). " +
+  const calls = !cap.turns || !!cap.calls;
+  const n = String(cap.calls || cap.turns || 50);
+  const what = calls ? "the tool-call ceiling (" + escText(n) + " calls)" : "the turn cap (" + escText(n) + " turns)";
+  return '<div class="ccap">⏸ Claude stopped at ' + what + ". " +
     (cap.continued ? '<span class="usage">continued</span>'
-      : '<button class="more" data-ccont="' + escAttr(info.id || "") + '">Continue (' + escText(String(n)) +
-        " more)</button>") + "</div>";
+      : '<button class="more" data-ccont="' + escAttr(info.id || "") + '">Continue (' + escText(n) +
+        (calls ? " more calls)" : " more)") + "</button>") + "</div>";
 }
 
 function phantomHtml(it) {
@@ -3018,7 +3021,7 @@ function definePanel() {
       if (!this._live) { await this._resync(); this._startPoll(); }
     }
 
-    /** A PERSON'S CONTINUE (#389): Claude stopped at its turn cap; this
+    /** A PERSON'S CONTINUE (#389): Claude stopped at its ceiling (#425); this
      *  answer gets another round of turns in the same Claude session. */
     async _claudeContinue(mid, btn) {
       if (!mid || !this._sid) return;

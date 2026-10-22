@@ -14,21 +14,32 @@ unexecuted, so Claude gets membrane's MCP tool surface (mcp_server.TOOLS,
 run by mcp_server.TOOL_IMPLS, write tools included) as an in-process SDK
 MCP server, and allowed_tools is exactly that mcp__membrane__* set. The
 tools relay to this seat's proxy like the stdio MCP server's do, so every
-proxy-side guard applies. MAX_TURNS caps the loop. The turn's own tool
-definitions (the caller's surface) are not passed on; the reply never
+proxy-side guard applies. Check-ins pace the loop (below). The turn's own
+tool definitions (the caller's surface) are not passed on; the reply never
 carries tool_calls for the caller to run. Each tool Claude ran rides the
 reply as a TOOL_KEY chunk (streamed) or TOOLS_KEY list (buffered), so the
 transcript shows it and the proxy captures it.
 
-THE TURN CAP AND CONTINUE (issue #389, approved 2026-10-21): an answer
-that reaches MAX_TURNS stops there. The SDK says so (a result of subtype
-error_max_turns): that is neither an error nor a silent cut. The reply
-carries CAPPED_KEY {session, turns}; the transcript row keeps it as CAP_MARK
+CHECK-INS INSTEAD OF A TURN CAP (issue #425, the operator's 2026-10-21,
+values approved; it replaced #389's fixed 4-turn batches): one answer is ONE
+continuous SDK run. A PreToolUse hook (_Answer.hook) counts Claude's tool
+calls since its last words to the person: at most CHECKIN_TOOL_CALLS in a
+row; any assistant text resets the count; the next call is denied with
+CHECKIN_MESSAGE, which Claude gets as that tool's result (the person never
+sees it as an error), so Claude says where it is and goes on. A hard
+ceiling, MAX_TOOL_CALLS_PER_ANSWER, stops the run: the call past it is
+denied and the hook stops the loop. MAX_TURNS is only the SDK's backstop,
+sized never to bind before the ceiling.
+
+THE CEILING AND CONTINUE (#389's machinery): an answer that stops at the
+ceiling (or the backstop) is neither an error nor a silent cut. The reply
+carries CAPPED_KEY {session, calls}; the transcript row keeps it as CAP_MARK
 and the chat offers Continue. Continue is a person's action only (never
 automatic, never on a background lane): it resumes the SAME SDK session
-(the SDK's `resume`, RESUME_KEY on the turn) for another MAX_TURNS with the
-same tools and options, and each capped answer continues at most once.
-STATS counts cap hits and continues (RAM, /membrane/diag/claude-agent).
+(the SDK's `resume`, RESUME_KEY on the turn) with the same tools and options
+and a fresh ceiling, and each capped answer continues at most once.
+STATS counts check-in denials, ceiling hits and continues (RAM,
+/membrane/diag/claude-agent).
 
 LEARNED LIKE ANY MODEL (issue #389, the operator's 2026-10-21): Claude's
 reply, its reasoning and its tool calls and results are learned like any
@@ -93,13 +104,26 @@ CLI_HINT = ("reinstall the SDK (it bundles the `claude` CLI) or install "
 LOGIN_HINT = ("run `claude` once to log in, then "
               "`membrane auth claude-agent --login`")
 STATUS_TIMEOUT_S = 20
-MAX_TURNS = 4                       # agent turns per answer (#389; approved
-                                    # 2026-10-21, with Continue)
+CHECKIN_TOOL_CALLS = 7              # tool calls in a row without words to the
+                                    # person (#425; approved 2026-10-21)
+MAX_TOOL_CALLS_PER_ANSWER = 50      # the hard ceiling per answer; Continue
+                                    # gives a fresh one (#425; approved 2026-10-21)
+MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: every
+                                    # allowed call may take a turn and be
+                                    # denied once first, so it never binds
+                                    # before the ceiling (#425)
+CHECKIN_MESSAGE = ("Tell the person where you are first (one or two lines), "
+                   "then continue.")
+CEILING_MESSAGE = (f"This answer reached its ceiling of "
+                   f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
+                   f"person can press Continue.")
+SEEN_WAIT_S = 2.0                   # the hook waits this long for the reader to
+                                    # see the call's message (its words first)
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
 TOOLS_KEY = "membrane_tools"        # a buffered response: every tool Claude ran
-CAPPED_KEY = "membrane_capped"      # reply: the answer stopped at MAX_TURNS
+CAPPED_KEY = "membrane_capped"      # reply: the answer stopped at the ceiling (#425)
 CAP_MARK = "claudeCapped"           # transcript row: {session, turns, continued}
 RESUME_KEY = "claude_resume"        # turn/body: resume this SDK session
 CONTINUE_FIELD = "claudeContinue"   # a person's POST: the capped message's id
@@ -115,7 +139,7 @@ class ContinueRefused(ValueError):
 
 
 _stats_lock = threading.Lock()
-STATS = {"cap_hits": 0, "continues": 0}     # diagnostics only (RAM)
+STATS = {"checkin_denials": 0, "ceiling_hits": 0, "continues": 0}   # diagnostics (RAM)
 
 
 def _count(key: str) -> None:
@@ -164,6 +188,58 @@ def usage_stats() -> dict:
     out["per_call"] = {k: (round(out[k] / n) if n else 0)
                        for k in ("input", "cache_read", "cache_write", "output")}
     return out
+
+
+class _Answer:
+    """One answer's check-ins (#425): the PreToolUse hook's state. The
+    reader (_consume) notes Claude's words and each tool_use it sees; the
+    hook, run by the SDK before each call, waits until the reader has seen
+    that call's message -- so words in the same message count first --
+    then allows, denies (a check-in) or stops (the ceiling)."""
+
+    def __init__(self):
+        self.calls = 0                  # allowed calls in this answer
+        self.streak = 0                 # allowed calls since Claude's last words
+        self.denied: set = set()        # tool_use ids the hook refused
+        self.ceiling = False
+        self._seen: dict = {}           # tool_use id -> asyncio.Event
+
+    def _event(self, tid: str):
+        ev = self._seen.get(tid)
+        if ev is None:
+            ev = self._seen[tid] = asyncio.Event()
+        return ev
+
+    def note_text(self, text) -> None:
+        if str(text or "").strip():
+            self.streak = 0
+
+    def note_use(self, tid: str) -> None:
+        self._event(str(tid)).set()
+
+    async def hook(self, hook_input, tool_use_id=None, context=None):
+        tid = str((hook_input or {}).get("tool_use_id") or tool_use_id or "")
+        try:
+            await asyncio.wait_for(self._event(tid).wait(), SEEN_WAIT_S)
+        except asyncio.TimeoutError:
+            pass                        # counted on what the reader has seen
+        self._seen.pop(tid, None)
+        if self.calls >= MAX_TOOL_CALLS_PER_ANSWER:
+            self.ceiling = True
+            self.denied.add(tid)
+            return {"continue_": False, "stopReason": CEILING_MESSAGE,
+                    "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                           "permissionDecision": "deny",
+                                           "permissionDecisionReason": CEILING_MESSAGE}}
+        if self.streak >= CHECKIN_TOOL_CALLS:
+            self.denied.add(tid)
+            _count("checkin_denials")
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                           "permissionDecision": "deny",
+                                           "permissionDecisionReason": CHECKIN_MESSAGE}}
+        self.calls += 1
+        self.streak += 1
+        return {}
 
 
 class Unavailable(RuntimeError):
@@ -484,7 +560,8 @@ def build_mcp_server(sdk, port):
 
 
 def build_options(sdk, system: str, model: str, stream: bool, port=None,
-                  resume=None, env=None):
+                  resume=None, env=None, answer=None):
+    answer = answer if answer is not None else _Answer()
     extra = {"resume": str(resume)} if resume else {}   # Continue: the same session
     return sdk.ClaudeAgentOptions(
         **extra,
@@ -495,7 +572,8 @@ def build_options(sdk, system: str, model: str, stream: bool, port=None,
         mcp_servers={MCP_NAME: build_mcp_server(sdk, port)},
         strict_mcp_config=True,    # never the user's configured MCP servers
         setting_sources=[],        # no settings files, no CLAUDE.md
-        max_turns=MAX_TURNS,
+        max_turns=MAX_TURNS,       # a backstop: the check-in hook paces (#425)
+        hooks={"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[answer.hook])]},
         model=sdk_model(model) or None,
         include_partial_messages=bool(stream),
     )
@@ -535,8 +613,10 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
     system, prompt = split_messages(messages)
     if resume:
         prompt = CONTINUE_PROMPT         # the session already holds the task
-    opts = build_options(sdk, system, model, stream, port, resume, env)
+    answer = _Answer()                   # a fresh ceiling, Continue too (#425)
+    opts = build_options(sdk, system, model, stream, port, resume, env, answer)
     partial = False
+    capped = False
     pending: dict = {}                   # tool_use id -> (name, input)
     session = str(resume or "")
     async for m in sdk.query(prompt=prompt, options=opts):
@@ -549,6 +629,7 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
                 d = ev.get("delta") or {}
                 if d.get("type") == "text_delta" and d.get("text"):
                     partial = True
+                    answer.note_text(d["text"])          # words: a check-in
                     put(("text", d["text"]))
                 elif d.get("type") == "thinking_delta" and d.get("thinking"):
                     put(("reasoning", d["thinking"]))
@@ -561,9 +642,11 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
                 if bk == "ToolUseBlock":
                     pending[str(getattr(b, "id", ""))] = (
                         _bare(getattr(b, "name", "")), getattr(b, "input", None) or {})
+                    answer.note_use(str(getattr(b, "id", "")))
                 elif partial:
                     continue                  # the words already came as deltas
                 elif bk == "TextBlock" and getattr(b, "text", ""):
+                    answer.note_text(b.text)
                     put(("text", b.text))
                 elif bk == "ThinkingBlock" and getattr(b, "thinking", ""):
                     put(("reasoning", b.thinking))
@@ -574,21 +657,25 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
                     continue
                 tid = str(getattr(b, "tool_use_id", ""))
                 name, args = pending.pop(tid, ("", {}))
+                if tid in answer.denied:
+                    continue          # the hook's denial: Claude's, never run (#425)
                 put(("tool", {"id": tid, "name": name, "input": args,
                               "output": _result_text(getattr(b, "content", None)),
                               "is_error": bool(getattr(b, "is_error", False))}))
         elif kind == "ResultMessage":
-            if getattr(m, "subtype", "") == MAX_TURNS_SUBTYPE:
-                # the turn cap: marked, never an error (#389)
-                _count("cap_hits")
+            if answer.ceiling or getattr(m, "subtype", "") == MAX_TURNS_SUBTYPE:
+                # the ceiling (or the backstop): marked, never an error
                 put(("usage", _usage(getattr(m, "usage", None))))
-                put(("capped", {"session": session, "turns": MAX_TURNS}))
+                capped = True
                 continue
             if getattr(m, "is_error", False):
                 why = getattr(m, "result", None) or getattr(m, "errors", None) \
                     or getattr(m, "subtype", "error")
                 raise RuntimeError(f"claude-agent: {why}")
             put(("usage", _usage(getattr(m, "usage", None))))
+    if capped or answer.ceiling:
+        _count("ceiling_hits")
+        put(("capped", {"session": session, "calls": MAX_TOOL_CALLS_PER_ANSWER}))
 
 
 _END = object()
@@ -771,7 +858,7 @@ def open_reply(body: dict, port=None):
     messages (the caller's tool definitions dropped: Claude's tools are
     membrane's, relaying to `port`) -> a streaming or buffered reply.
     RESUME_KEY (a person's Continue, set by the turn runner) resumes that
-    SDK session for another MAX_TURNS."""
+    SDK session with a fresh ceiling."""
     sdk = check_available()
     model = str(body.get("model") or "")
     msgs = body.get("messages") or []

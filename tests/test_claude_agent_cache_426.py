@@ -122,8 +122,8 @@ class TestUsageSplit(_Case):
         self.assertEqual(avg["cache_read"], 9000)
         self.assertEqual(avg["cache_write"], 700)
         self.assertEqual(avg["output"], 40)
-        # the cap counters are still there
-        self.assertIn("cap_hits", sent["obj"])
+        # the cap counters are still there (#425: cap_hits is now ceiling_hits)
+        self.assertIn("ceiling_hits", sent["obj"])
 
     def test_reset_clears_the_usage_sums(self):
         list(CA.iter_reply([{"role": "user", "content": "go"}],

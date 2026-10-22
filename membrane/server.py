@@ -1210,7 +1210,7 @@ class TurnRunner:
             info = (row or {}).get("info") or {}
             cap = info.get(_CA.CAP_MARK)
             if not isinstance(cap, dict) or not cap.get("session"):
-                raise _CA.ContinueRefused("that message did not stop at the turn cap")
+                raise _CA.ContinueRefused("that message did not stop at the tool-call ceiling")
             if cap.get("continued"):
                 raise _CA.ContinueRefused("that answer was already continued")
             info[_CA.CAP_MARK] = dict(cap, continued=True)
@@ -2152,12 +2152,14 @@ class TurnRunner:
                 a_info[_CA.MARK_KEY] = _CA.PROVIDER
                 for _t in resp.get(_CA.TOOLS_KEY) or []:
                     _agent_tool_part(_t)
-                # THE TURN CAP (#389): stopped at MAX_TURNS, not an error;
-                # the chat offers the person a Continue on this row
+                # THE CEILING (#389, #425): stopped at the tool-call
+                # ceiling, not an error; the chat offers the person a
+                # Continue on this row
                 _cap = resp.get(_CA.CAPPED_KEY)
                 if isinstance(_cap, dict) and _cap.get("session"):
                     a_info[_CA.CAP_MARK] = {"session": str(_cap["session"]),
-                                            "turns": int(_cap.get("turns") or _CA.MAX_TURNS),
+                                            "calls": int(_cap.get("calls")
+                                                         or _CA.MAX_TOOL_CALLS_PER_ANSWER),
                                             "continued": False}
             _tokens_fill(a_info, resp)
             # THE INJECTION AS A CARD (2026-10-08, the operator: show it
@@ -2620,7 +2622,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         usage, ext, finish = None, None, None
         provider = None                      # the answering provider's stamp (#384)
         agent_tools = []                     # tools the claude-agent rung ran (#389)
-        capped = None                        # ...and its turn cap, when hit
+        capped = None                        # ...and its ceiling, when hit (#425)
         done = False
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             for raw in resp:

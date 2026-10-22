@@ -1,5 +1,7 @@
 """THE TURN CAP AND CONTINUE (issue #389, the operator's 2026-10-21):
-MAX_TURNS = 4 per Claude answer, with a Continue.
+MAX_TURNS = 4 per Claude answer, with a Continue. (#425 replaced the 4-turn
+cap with check-ins and a tool-call ceiling; the cap here is the SDK's
+backstop, marked the same way: tests/test_claude_agent_checkin_425.py.)
 
 - a claude-agent answer that hits the cap is MARKED (the SDK's
   error_max_turns result is neither an error nor a silent cut): the reply
@@ -89,9 +91,9 @@ class TestCapMarked(_SDKCase):
         got = list(CA.iter_reply([{"role": "user", "content": "go"}],
                                  "claude-agent:sonnet", stream=False, port=9))
         capped = [v for k, v in got if k == "capped"]
-        self.assertEqual(capped, [{"session": "sess-1", "turns": CA.MAX_TURNS}])
+        self.assertEqual(capped, [{"session": "sess-1", "calls": CA.MAX_TOOL_CALLS_PER_ANSWER}])   # #425: calls
         self.assertIn("still working", "".join(v for k, v in got if k == "text"))
-        self.assertEqual(CA.stats()["cap_hits"], 1)
+        self.assertEqual(CA.stats()["ceiling_hits"], 1)   # #425
 
     def test_buffered_reply_carries_the_cap_and_no_error(self):
         body = json.loads(CA.open_reply({"model": "claude-agent:sonnet", "stream": False,
@@ -99,7 +101,7 @@ class TestCapMarked(_SDKCase):
                                         port=9).read())
         msg = body["choices"][0]["message"]["content"]
         self.assertNotIn("the turn failed", msg)
-        self.assertEqual(body[CA.CAPPED_KEY], {"session": "sess-1", "turns": CA.MAX_TURNS})
+        self.assertEqual(body[CA.CAPPED_KEY], {"session": "sess-1", "calls": CA.MAX_TOOL_CALLS_PER_ANSWER})   # #425
 
     def test_streamed_reply_carries_the_cap(self):
         lines = b"".join(CA.open_reply({"model": "claude-agent:sonnet", "stream": True,
@@ -108,7 +110,7 @@ class TestCapMarked(_SDKCase):
         chunks = [json.loads(ln[5:]) for ln in lines.split(b"\n")
                   if ln.startswith(b"data:") and ln[5:].strip() != b"[DONE]"]
         caps = [c[CA.CAPPED_KEY] for c in chunks if c.get(CA.CAPPED_KEY)]
-        self.assertEqual(caps, [{"session": "sess-1", "turns": CA.MAX_TURNS}])
+        self.assertEqual(caps, [{"session": "sess-1", "calls": CA.MAX_TOOL_CALLS_PER_ANSWER}])   # #425
         text = "".join((c.get("choices") or [{}])[0].get("delta", {}).get("content") or ""
                        for c in chunks if c.get("choices"))
         self.assertNotIn("the turn failed", text)
@@ -121,7 +123,7 @@ class TestNotCapped(_SDKCase):
         got = list(CA.iter_reply([{"role": "user", "content": "go"}],
                                  "claude-agent:sonnet", stream=False, port=9))
         self.assertFalse([v for k, v in got if k == "capped"])
-        self.assertEqual(CA.stats()["cap_hits"], 0)
+        self.assertEqual(CA.stats()["ceiling_hits"], 0)   # #425
 
 
 # ---- continue resumes the same SDK session -----------------------------------
@@ -139,13 +141,14 @@ class TestResume(_SDKCase):
         self.assertNotIn("resume", first)
         self.assertEqual(second["resume"], "sess-1")
         self.assertEqual(second["max_turns"], CA.MAX_TURNS)
-        self.assertEqual(second["max_turns"], 4)
+        self.assertEqual(second["max_turns"], 2 * CA.MAX_TOOL_CALLS_PER_ANSWER)   # #425 backstop
         self.assertEqual(second["allowed_tools"], first["allowed_tools"])
         self.assertEqual(second["tools"], [])
         self.assertEqual(set(second["mcp_servers"]), {"membrane"})
         self.assertEqual(self.sdk.calls[1]["prompt"], CA.CONTINUE_PROMPT)
         self.assertEqual(self.sdk.tool_runs, ["learn"])        # nothing ran twice
-        self.assertEqual(CA.stats(), {"cap_hits": 2, "continues": 1})
+        self.assertEqual(CA.stats(), {"checkin_denials": 0, "ceiling_hits": 2,
+                                      "continues": 1})   # #425 counters
 
 
 # ---- the transcript and the person's Continue -------------------------------
@@ -180,7 +183,8 @@ class TestTranscriptAndContinue(_Runner):
         self.r.run(self.sid, "do the long thing")
         info = self._asst()["info"]
         self.assertTrue(CA.is_claude_made(info))
-        self.assertEqual(info[CA.CAP_MARK], {"session": "sess-1", "turns": CA.MAX_TURNS,
+        self.assertEqual(info[CA.CAP_MARK], {"session": "sess-1",   # #425: calls
+                                             "calls": CA.MAX_TOOL_CALLS_PER_ANSWER,
                                              "continued": False})
         self.assertFalse(info.get("error"))                       # not an error
 
@@ -291,7 +295,7 @@ class TestDiagCounter(_SDKCase):
                 mock.patch("membrane.seatauth.is_loopback", lambda hh: True):
             self.assertTrue(D.route(h, "/membrane/diag/claude-agent"))
         self.assertEqual(sent["code"], 200)
-        self.assertEqual(sent["obj"]["cap_hits"], 1)
+        self.assertEqual(sent["obj"]["ceiling_hits"], 1)   # #425
         self.assertEqual(sent["obj"]["continues"], 0)
         self.assertEqual(sent["obj"]["max_turns"], CA.MAX_TURNS)
 
