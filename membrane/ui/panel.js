@@ -1824,14 +1824,28 @@ function ollamaModels(rows) {
   return ids("membrane->ollama").concat(ids("membrane->claude-agent"));
 }
 
-/** The message body's model: a pick rides as {providerID, modelID}; no pick
- * (the seat's default) sends nothing -- unless the session holds another
- * pick, which the seat's own model then replaces. */
+/** The model the picker shows (#453): the person's pick since the session
+ * opened ("" = the seat default), else -- no pick yet (null), as after a
+ * reload or a seat restart -- the session's own model. */
+function shownModel(pick, sessionModel, seatModel) {
+  if (pick !== null && pick !== undefined) return pick;
+  return sessionModel && sessionModel !== seatModel ? sessionModel : "";
+}
+
+/** The message body's model: always the one the picker shows (#453). A model
+ * rides as {providerID, modelID}; the seat default sends nothing -- unless
+ * the session holds another model, which the seat's own model then replaces. */
 function modelField(pick, sessionModel, seatModel) {
-  if (pick) return { providerID: "membrane", modelID: pick };
+  const cur = shownModel(pick, sessionModel, seatModel);
+  if (cur) return { providerID: "membrane", modelID: cur };
   if (sessionModel && seatModel && sessionModel !== seatModel) return { providerID: "membrane", modelID: seatModel };
   return null;
 }
+
+// a model list the seat could not give at load (it was restarting, #453)
+// is read again every MODELS_RETRY_MS, at most MODELS_RETRIES times
+const MODELS_RETRY_MS = 5000;
+const MODELS_RETRIES = 24;
 
 // MEMBRANE HOME IS THE LANDING (2026-10-10, the operator: "make the
 // /membrane renderer default ui for everyone unless they switch to HA thru
@@ -1948,7 +1962,7 @@ function offlineNotice(data, zoo) {
     : { text: name + " is offline", switchTo: null };
 }
 
-const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, shownModel, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, sheetSleep, sleepBars, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -2463,14 +2477,25 @@ function definePanel() {
       try {
         const r = await this._api(SERVE + "/config");
         const m = r.ok && r.data && (r.data.model || (r.data.agent && r.data.agent.build && r.data.agent.build.model));
-        if (m) { this._model = String(m); this._foot.textContent = this._model + " · " + this._foot.textContent; }
+        if (m) {
+          const first = !this._model;                    // a retry (#453) does not name it twice
+          this._model = String(m);
+          if (first) this._foot.textContent = this._model + " · " + this._foot.textContent;
+        }
       } catch (e) { /* cosmetic */ }
       // THE MODEL PICKER (2026-10-08): what membrane sees on Ollama
+      let got = false;
       try {
         const r = await this._api(SERVE + "/v1/models");
-        this._models = ollamaModels(r.ok && r.data ? r.data.data : []);
-      } catch (e) { this._models = []; }
+        got = !!(r.ok && r.data);
+        if (got) this._models = ollamaModels(r.data.data);
+      } catch (e) { /* the seat is away: tried again below */ }
       this._paintModels();
+      // #453: a list read that failed at load (the seat restarting) is tried again
+      if (!got) {
+        this._modelsTries = (this._modelsTries || 0) + 1;
+        if (this._modelsTries <= MODELS_RETRIES) setTimeout(() => this._loadModel(), MODELS_RETRY_MS);
+      } else this._modelsTries = 0;
     }
 
     _seatModel() { return String(this._model || "").replace(/^membrane\//, ""); }
@@ -2482,7 +2507,7 @@ function definePanel() {
         .concat((this._models || []).filter((m) => m !== seat).map((m) =>
           '<option value="' + escAttr(m) + '">' + escText(m) + (/:cloud$|-cloud$/.test(m) ? " ☁" : "") + "</option>"));
       this._modelSel.innerHTML = opts.join("");
-      const cur = this._pick || (this._sessionModel && this._sessionModel !== seat ? this._sessionModel : "");
+      const cur = shownModel(this._pick, this._sessionModel, seat);
       if (cur && !(this._models || []).includes(cur)) {
         this._modelSel.insertAdjacentHTML("beforeend", '<option value="' + escAttr(cur) + '">' + escText(cur) + " (session)</option>");
       }
@@ -2495,7 +2520,7 @@ function definePanel() {
         const m = r.ok && r.data && r.data.model;
         this._sessionModel = m ? String(m.id || m.modelID || "") : "";
       } catch (e) { this._sessionModel = ""; }
-      if (sid === this._sid) { this._pick = ""; this._paintModels(); }
+      if (sid === this._sid) { this._pick = null; this._paintModels(); }   // no pick yet: the session's model shows and is sent
     }
 
     // THE MINDS' MODELS: the watch loops' and the background cortex's
