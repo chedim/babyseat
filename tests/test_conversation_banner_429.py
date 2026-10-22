@@ -297,6 +297,27 @@ class TestGather(unittest.TestCase):
         self.assertNotIn("f:other/x.py", foc)              # another chat's
         self.assertEqual(foc[0], "f:lib/new.py")           # the latest message leads
 
+    def test_working_on_prefers_the_latest_ask_about_the_focus(self):
+        # a distractor ('a poem about rain') is not what the chat works on
+        _turn(self.f, "sid:a", "make `tools/backup.py` skip big files", ts=NOW - 900)
+        _turn(self.f, "sid:a", "now `tools/backup.py` logs what it skipped", ts=NOW - 800)
+        _turn(self.f, "sid:a", "unrelated: give me a poem about rain", ts=NOW - 700)
+        evs = CB.conv_events(self.f, "sid:a")
+        foc = CB.focus(self.f, evs, "what next?")
+        w = CB.working_on(evs, "what next?", foc, self.f)
+        self.assertEqual(w.text, "now `tools/backup.py` logs what it skipped")
+        # no focus: the latest ask
+        self.assertEqual(CB.working_on(evs, "what next?").text,
+                         "unrelated: give me a poem about rain")
+
+    def test_unresolved_identifiers_from_prose_are_not_focus(self):
+        # 's:?' ids are names the model wrote that no code defines (os.path.getsize,
+        # file_path): only a person naming one now makes it a subject
+        _turn(self.f, "sid:a", "x", "use `os.path.getsize(file_path)` here", ts=NOW - 900)
+        _turn(self.f, "sid:a", "y", "then `os.path.getsize(file_path)` again", ts=NOW - 800)
+        foc = CB.focus(self.f, CB.conv_events(self.f, "sid:a"), "ok")
+        self.assertFalse(any(e.startswith("s:?") for e in foc), foc)
+
     def test_focus_counts_tool_args_and_keeps_tool_names_out(self):
         calls = {0: {"id": "c1", "function": {"name": "read",
                                               "arguments": '{"filePath": "tools/backup.py"}'}}}
@@ -536,6 +557,30 @@ class TestRecordsCarryTheConversation(unittest.TestCase):
         L._intent_cmd(self.srv, "membrane: fulfill report skipped")
         self.assertEqual(g.properties["status"], "fulfilled")
         self.assertEqual(g.properties["fulfilled_conv"], "sid:b")
+
+    def test_the_json_board_keeps_the_chat_too(self):
+        # a seat without the goal layer plants on the json board (the probe's
+        # standalone seat did): OPEN and DECIDED must still see it
+        from membrane.intent import IntentBoard
+        mem = types.SimpleNamespace(audit_path=self.srv.membrane.audit_path, embedder=FakeEmbedder(),
+                                    field_path=self.srv.membrane.field_path)
+        srv = types.SimpleNamespace(membrane=mem, entity_store=None,
+                                    _intent_board=IntentBoard(Path(self.tmp) / "intents.json",
+                                                              embedder=FakeEmbedder()))
+        C.set_conversation("sid:a")
+        L._intent_cmd(srv, "membrane: intend that the importer writes a daily reject report")
+        self.assertEqual([i.text for i in CB.open_items(srv, "sid:a")],
+                         ["the importer writes a daily reject report"])
+        self.assertEqual(CB.open_items(srv, "sid:b"), [])
+        C.set_conversation("sid:b")
+        L._intent_cmd(srv, "membrane: fulfill daily reject")
+        self.assertEqual(CB.open_items(srv, "sid:a"), [])
+        self.assertEqual([i.text for i in CB.decided(srv, "sid:b")],
+                         ["goal fulfilled: the importer writes a daily reject report"])
+        # it survives a reload of the board
+        b2 = IntentBoard.load(Path(self.tmp) / "intents.json")
+        it = next(iter(b2.intents.values()))
+        self.assertEqual((it.conv, it.fulfilled_conv), ("sid:a", "sid:b"))
 
     def test_a_request_without_a_key_falls_back_to_the_last_chat(self):
         # the MCP tool's HTTP call carries no chat; the last chat request names it

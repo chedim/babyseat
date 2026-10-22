@@ -186,12 +186,15 @@ def _norm(s: str) -> str:
     return " ".join(str(s or "").lower().split())
 
 
-def working_on(events, current_text: str = "") -> Item | None:
+def working_on(events, current_text: str = "", focus_ids=None, fld=None) -> Item | None:
     """The person's latest earlier ask: a person-authored user event that is
-    not the message being answered now and not a membrane frame."""
+    not the message being answered now and not a membrane frame. With focus
+    entities, the latest such ask that names one of them (an aside is not
+    the work); none names one: the latest ask."""
     from .speakers import strip_speaker_lines
     from .streams import event_author
     cur = _norm(strip_speaker_lines(current_text or ""))
+    first = None
     for _k, d in reversed(events or []):
         if d.get("stream") != "discourse" or d.get("role") != "user":
             continue
@@ -201,14 +204,25 @@ def working_on(events, current_text: str = "") -> Item | None:
         t = _norm(raw)
         if not t or t == cur or t.startswith("membrane:"):
             continue
-        return Item(" ".join(raw.split()), "person", d.get("ts"))
-    return None
+        it = Item(" ".join(raw.split()), "person", d.get("ts"))
+        if not focus_ids:
+            return it
+        if first is None:
+            first = it
+        if _event_eids(fld, d) & set(focus_ids):
+            return it
+    return first
 
 
-def _focus_ok(eid: str) -> bool:
+def _focus_ok(eid: str, named: bool = False) -> bool:
+    """A focus candidate: a specific identifier, never the seat's own tool
+    names. An unresolved identifier ('s:?', a name no code defines, often
+    the model's own prose) counts only when the person names it now."""
     from . import entity_block as EB
     kind = eid.split(":", 1)[0]
     if kind not in _FOCUS_KINDS:
+        return False
+    if eid.startswith("s:?") and not named:
         return False
     if eid.startswith("s:?"):                  # the seat's own tool and method names
         name = eid[3:]
@@ -244,7 +258,7 @@ def focus(fld, events, latest_text: str = "", k: int = FOCUS_K) -> list[str]:
         from .entity_block import named_entities
         try:
             for eid, _s in named_entities(fld, latest_text):
-                if _focus_ok(eid) and eid not in named:
+                if _focus_ok(eid, named=True) and eid not in named:
                     named.append(eid)
         except Exception:
             pass
@@ -311,6 +325,16 @@ def _goals(srv) -> list:
     return [e for e in list(docs.values()) if getattr(e, "cls", None) == CLASS_GOAL]
 
 
+def _board_intents(srv) -> list:
+    """The json intent board's entries (a seat without the goal layer plants
+    there; the goal layer's own entries are the Goal entities)."""
+    from .intent import IntentBoard, Intention
+    b = getattr(srv, "_intent_board", None)
+    if not isinstance(b, IntentBoard):
+        return []
+    return [i for i in list(b.intents.values()) if isinstance(i, Intention)]
+
+
 def decided(srv, conv: str) -> list[Item]:
     """This chat's decisions, newest first: the operator ledger's entries
     said here, goals fulfilled here, coproc decide() records made here."""
@@ -327,6 +351,9 @@ def decided(srv, conv: str) -> list[Item]:
                 who = str(r.get("who") or "person")
                 out.append(Item(str((r.get("args") or {}).get("text") or ""),
                                 "person" if who.startswith("person") else who, r.get("ts")))
+    for i in _board_intents(srv):
+        if i.status == "fulfilled" and i.fulfilled_conv == conv:
+            out.append(Item("goal fulfilled: " + i.text, "goal", i.fulfilled or None))
     for g in _goals(srv):
         p = g.properties or {}
         if p.get("status") == "fulfilled" and p.get("fulfilled_conv") == conv:
@@ -341,7 +368,9 @@ def open_items(srv, conv: str) -> list[Item]:
     """Goals planted in this chat that are still open, newest first."""
     if not conv:
         return []
-    out = []
+    out = [Item(i.text, "goal", i.created or None) for i in _board_intents(srv)
+           if i.status == "open" and i.conv == conv
+           and not (i.expires and time.time() >= i.expires)]
     for g in _goals(srv):
         p = g.properties or {}
         if (p.get("status") or "open") == "open" and conv in (p.get("convs") or []):
@@ -494,7 +523,7 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
     sec = {
         "paused": _L.nerve_paused(srv),
         "alerts": take_alerts(srv, on_alert),
-        "working": working_on(events, latest),
+        "working": working_on(events, latest, about, fld),
         "about": about,
         "decided": decided(srv, conv),
         "open": open_items(srv, conv),
