@@ -223,3 +223,12 @@ def test_no_pass_before_feel_is_accepted(_data):
     SL.set_mode(srv, "on")
     SL._open_rungs(srv)
     assert not [r for r in _lines(srv) if r.get("kind") == "achieve" and r.get("id") == "nudge"]
+
+
+def test_nudge_is_built_at_the_merge_of_its_test():
+    """#475 merged 2026-10-23 04:43:02 UTC: first reach is built from then."""
+    import datetime as _dt
+    from membrane import self_sheet as SS
+    assert SS.BUILT_AT["nudge"]["pr"] == 475
+    assert SS.BUILT_AT["nudge"]["merged"] == _dt.datetime(2026, 10, 23, 4, 43, 2,
+                                                          tzinfo=_dt.timezone.utc).timestamp()
