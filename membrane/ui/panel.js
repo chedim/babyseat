@@ -2203,12 +2203,16 @@ const STYLE = `
   :host([cockpit]) .app { height:auto; }
   :host([cockpit]) .main { position:relative; }
   :host([cockpit]) .composer { order:-2; border:0; padding:4px 0 8px; background:transparent; }
-  :host([cockpit]) .composer .box { max-width:none; }
-  :host([cockpit]) .composer textarea { border-radius:24px; min-height:48px; padding:12px 18px;
+  /* the one button sits INSIDE the input bar at its right end (a search box's
+     icon): pinned bottom-right, so it is centered on the one-line bar and stays
+     at the last line as the text grows; the text keeps clear of it */
+  :host([cockpit]) .composer .box { max-width:none; position:relative; }
+  :host([cockpit]) .composer textarea { border-radius:24px; min-height:48px; padding:12px 96px 12px 18px;
     border:1px solid var(--ck-line); background:color-mix(in srgb, var(--card-background-color,#0b0f16) 88%, transparent);
     box-shadow:0 0 0 1px rgba(0,0,0,.35), 0 0 18px color-mix(in srgb, var(--ck-line) 35%, transparent); }
   :host([cockpit]) .composer textarea:focus { outline:none; border-color:var(--cockpit-accent, #5fd6ff); }
-  :host([cockpit]) .composer .btn.send { border-radius:999px; min-height:48px; padding:0 18px; color:var(--cockpit-accent, #5fd6ff);
+  :host([cockpit]) .composer .btn.send { position:absolute; right:6px; bottom:6px; width:76px; height:36px; padding:0;
+    border-radius:999px; color:var(--cockpit-accent, #5fd6ff);
     background:transparent; border:1px solid var(--cockpit-accent, #5fd6ff); }
   :host([cockpit]) .composer .btn.send:hover {
     background:color-mix(in srgb, var(--cockpit-accent, #5fd6ff) 16%, transparent); }
