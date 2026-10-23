@@ -84,6 +84,15 @@ class TestCeilingAndFooter(unittest.TestCase):
         self.assertEqual(CA.MAX_TOOL_CALLS_PER_ANSWER, 2048)
         self.assertGreaterEqual(CA.MAX_TURNS, 2 * CA.MAX_TOOL_CALLS_PER_ANSWER)
 
+    def test_the_reader_strips_the_footer_from_the_stored_output(self):
+        # #469 review: the footer is for Claude only; the stored tool part
+        # output must not carry it (chat, field recall, replayed history).
+        foot = "\n\n\u00b7 47 calls left \u00b7 check-in in 5"
+        self.assertEqual(CA._result_text("the result" + foot), "the result")
+        self.assertEqual(CA._result_text([{"text": "a"}, {"text": "b" + foot}]), "a\nb")
+        self.assertEqual(CA._result_text("keeps \u00b7 3 calls left mid-text"),
+                         "keeps \u00b7 3 calls left mid-text")
+
     def test_a_result_carries_the_calls_left_and_the_checkin_distance(self):
         from membrane import mcp_server as M
         a = CA._Answer()

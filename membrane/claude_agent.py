@@ -73,6 +73,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -619,13 +620,20 @@ def _usage(u) -> dict:
                 "cache_write_tokens": int(u.get("cache_creation_input_tokens") or 0)}}
 
 
+_FOOTER_RE = re.compile(r"\n\n\u00b7 \d+ calls left \u00b7 check-in in \d+$")
+
+
 def _result_text(content) -> str:
+    """A tool result as stored: the calls-left footer (#467) is for Claude
+    only, so it is stripped where the result is read back (#469)."""
     if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(str(c.get("text") or "") for c in content
-                         if isinstance(c, dict) and c.get("text"))
-    return "" if content is None else str(content)
+        out = content
+    elif isinstance(content, list):
+        out = "\n".join(str(c.get("text") or "") for c in content
+                        if isinstance(c, dict) and c.get("text"))
+    else:
+        out = "" if content is None else str(content)
+    return _FOOTER_RE.sub("", out)
 
 
 def _bare(name: str) -> str:
