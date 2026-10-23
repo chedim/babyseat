@@ -3845,6 +3845,15 @@ function definePanel() {
       return true;
     }
 
+    /** Mark the message without scrolling to it (a hover's hint); false when it is not shown. */
+    markMessage(mid) {
+      const el = mid && this._rowEls ? this._rowEls[mid] : null;
+      if (!el || !el.parentNode) return false;
+      if (this._found && this._found !== el) this._found.classList.remove("found");
+      this._found = el; el.classList.add("found");
+      return true;
+    }
+
     /** Let go of the marked message. */
     clearFound() {
       if (this._found) this._found.classList.remove("found");

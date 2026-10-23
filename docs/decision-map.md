@@ -60,7 +60,7 @@ Agents can't decide through any write path. `entity_add` takes no properties (th
    - An open card's one input is pre-filled with the pick, and ✓ answers it.
    - Clicking a card loads a message about the decision into the center bar, pre-filled and never sent. If the card has its own `chat` and it isn't the one open, the center chat switches to it first. Otherwise the open session is recorded on the card with `POST /membrane/decision/chat`.
    - ✓ pressed while the card's chat is open sends that chat's newest message id as `message`.
-   - Hovering (or focusing) a decided card highlights it. If its chat is the one open and it has a `message`, the chat scrolls to that message and marks it. Clicking it opens its chat and then scrolls.
+   - Hovering (or focusing) a decided card highlights it. If its chat is the one open and it has a `message`, that message is marked, without scrolling: the cockpit is one scrolling page, so a scroll would move the page under the pointer. Clicking the card opens its chat if needed and scrolls to the message.
    - Every card→card edge is a line, drawn in SVG under the cards and over the background field.
      - Lines touching the past are amber; lines between the work and the open questions are cyan; `blocks` lines are dashed. Each line has an arrowhead.
      - A line between two cards on the same side loops through the page margin.
