@@ -2659,28 +2659,11 @@ function definePanel() {
       }
     }
 
+    // THE MINDS' MODELS moved to the ⚙ window (2026-10-23, the operator:
+    // "Minds -> background loops" was badly named and placed): Background work
+    // -> Goal worker / Idle thinker. The strip keeps the live minds and says where.
     _mindsModelsHtml() {
-      const mm = this._mindsModels;
-      if (!mm || !(this._models || []).length) return "";
-      const admin = !!(this._hass && this._hass.user && this._hass.user.is_admin);
-      const sel = (mind, label, title) => {
-        const cur = mm[mind] || "";
-        const opts = (this._models || []).slice();
-        if (cur && !opts.includes(cur)) opts.unshift(cur);
-        return '<label class="mm" title="' + escAttr(title) + '">' + escText(label) + ' <select data-mind="' + mind + '"' +
-          (admin ? "" : " disabled") + ">" + opts.map((m) => '<option value="' + escAttr(m) + '"' + (m === cur ? " selected" : "") + ">" +
-          escText(m) + (/:cloud$|-cloud$/.test(m) ? " ☁" : "") + "</option>").join("") + "</select></label>";
-      };
-      return '<div class="mmrow">' + sel("loops", "watch loops", "the model the goal / watch loops run on") + " " +
-        sel("cortex", "cortex", "the background cortex: thinker, dreamer, claim judges (keep it local: it runs often)") +
-        (admin ? "" : ' <span style="opacity:.6">(admins switch these)</span>') + "</div>";
-    }
-
-    async _setMindModel(mind, model) {
-      const r = await this._api(SERVE + "/membrane/models", { method: "POST", body: JSON.stringify({ [mind]: model }) });
-      if (r.ok) this._mindsModels = r.data;
-      else this._err("model switch refused: " + (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 160));
-      this._paintMinds();
+      return '<span class="mind" style="opacity:.75">their models: ⚙ options → Background work</span>';
     }
 
     _toggleMinds() {
@@ -2697,8 +2680,6 @@ function definePanel() {
             "</b> " + escText((a.description || "").replace(/^A thinking-loop worker /, "").slice(0, 90)) + "</span>").join("")
         : '<span class="mind">no live minds reported</span>';
       this._mindsEl.insertAdjacentHTML("beforeend", this._mindsModelsHtml());
-      this._mindsEl.querySelectorAll("select[data-mind]").forEach((sel) =>
-        sel.addEventListener("change", () => this._setMindModel(sel.dataset.mind, sel.value)));
     }
 
     // ---------------------------------------------------------- sessions

@@ -89,6 +89,8 @@ MARK_KEY = "madeBy"                 # transcript rows: info[MARK_KEY] == PROVIDE
 RESP_KEY = "membrane_provider"      # proxy responses/chunks: the answering provider
 MODE_KEY = "api-key"                # `membrane auth claude-agent`: the default
 MODE_LOGIN = "login"                # `... --login`: the CLI's login (opt-in)
+AUTH_KEY = "membrane_claude_auth"   # a turn body: this call's credentials (a mind's
+                                    # override, minds_models); absent = auth_mode()
 ENABLED_MARK = MODE_KEY             # the mark the plain command stores (not a secret)
 KEY_PROVIDER = "anthropic"          # auth.load_api_key's row for the key
 KEY_ENV = "ANTHROPIC_API_KEY"       # how the CLI subprocess gets the key
@@ -443,14 +445,18 @@ def auth_mode(home=None, environ=None) -> str:
     return MODE_LOGIN if mark == MODE_LOGIN else MODE_KEY
 
 
-def credential_env(home=None, environ=None) -> dict:
+def credential_env(home=None, environ=None, mode=None) -> dict:
     """The CLI subprocess's credential env (ClaudeAgentOptions.env). Key
     mode: ANTHROPIC_API_KEY = the key, every credential that would win over
     it or stand in for it blanked; no key -> Unavailable(KEY_HINT). Login
-    mode: ANTHROPIC_API_KEY blanked so the CLI's own login answers."""
+    mode: ANTHROPIC_API_KEY blanked so the CLI's own login answers. `mode`
+    (MODE_KEY / MODE_LOGIN) overrides auth_mode() for this call only: a
+    background mind's own credentials; None = the chat's path."""
     from . import auth as _auth
     blank = {k: "" for k in OVERRIDING_ENV}
-    if auth_mode(home, environ) == MODE_LOGIN:
+    if mode not in (MODE_KEY, MODE_LOGIN):
+        mode = auth_mode(home, environ)
+    if mode == MODE_LOGIN:
         return {**blank, KEY_ENV: ""}
     key = _auth.load_api_key(KEY_PROVIDER, home, environ)
     if not key:
@@ -472,15 +478,16 @@ def scrub(text) -> str:
     return text
 
 
-def check_available():
+def check_available(mode=None):
     """Raise Unavailable (with what to do) unless the SDK, the CLI and the
-    credentials (the API key, or the login opt-in) are all here. Returns
-    the SDK module."""
+    credentials (the API key, or the login opt-in; `mode` as credential_env)
+    are all here. Returns the SDK module."""
     sdk = load_sdk()
     if not find_cli():
+        login = (mode or auth_mode()) == MODE_LOGIN
         raise Unavailable(f"claude-agent: the `claude` CLI was not found; "
-                          f"{LOGIN_HINT if auth_mode() == MODE_LOGIN else CLI_HINT}")
-    credential_env()
+                          f"{LOGIN_HINT if login else CLI_HINT}")
+    credential_env(mode=mode)
     return sdk
 
 
@@ -873,13 +880,13 @@ _END = object()
 
 
 def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
-               resume=None):
+               resume=None, auth=None):
     """The SDK's reply as ("text"|"reasoning"|"tool"|"usage", value) items,
     in order. `port` is this seat's proxy, where membrane's tools relay.
     The async SDK runs on its own thread and loop (the proxy's handler
     threads are synchronous); an SDK error re-raises here."""
-    sdk = sdk or check_available()
-    env = credential_env()                  # no key -> Unavailable, no call
+    sdk = sdk or check_available(auth)
+    env = credential_env(mode=auth)         # no key -> Unavailable, no call
     q: queue.Queue = queue.Queue()
 
     def run():
@@ -941,9 +948,10 @@ class SSEReply:
     abort) stops it. After the iteration: .tools (every tool Claude ran)
     and .failed (the turn failed: the reply is the error line)."""
 
-    def __init__(self, messages, model: str, sdk=None, port=None, resume=None):
+    def __init__(self, messages, model: str, sdk=None, port=None, resume=None,
+                 auth=None):
         self.messages, self.model, self.sdk, self.port = messages, model, sdk, port
-        self.resume = resume
+        self.resume, self.auth = resume, auth
         self.closed = False
         self.tools: list = []
         self.failed = False
@@ -964,7 +972,7 @@ class SSEReply:
         first = True
         try:
             for kind, val in iter_reply(self.messages, self.model, True, self.sdk,
-                                        self.port, self.resume):
+                                        self.port, self.resume, self.auth):
                 if self.closed:
                     break
                 if kind == "usage":
@@ -1008,9 +1016,10 @@ class JSONReply:
     whole chat.completion body, with TOOLS_KEY when Claude ran tools.
     After read(): .tools and .failed, as SSEReply's."""
 
-    def __init__(self, messages, model: str, sdk=None, port=None, resume=None):
+    def __init__(self, messages, model: str, sdk=None, port=None, resume=None,
+                 auth=None):
         self.messages, self.model, self.sdk, self.port = messages, model, sdk, port
-        self.resume = resume
+        self.resume, self.auth = resume, auth
         self.tools: list = []
         self.failed = False
         self.capped = None
@@ -1028,7 +1037,7 @@ class JSONReply:
         text, reasoning, usage = [], [], None
         try:
             for kind, val in iter_reply(self.messages, self.model, False, self.sdk,
-                                        self.port, self.resume):
+                                        self.port, self.resume, self.auth):
                 if kind == "capped":
                     self.capped = val
                 elif kind == "text":
@@ -1067,15 +1076,16 @@ def open_reply(body: dict, port=None):
     membrane's, relaying to `port`) -> a streaming or buffered reply.
     RESUME_KEY (a person's Continue, set by the turn runner) resumes that
     SDK session with a fresh ceiling."""
-    sdk = check_available()
+    auth = body.get(AUTH_KEY) if body.get(AUTH_KEY) in (MODE_KEY, MODE_LOGIN) else None
+    sdk = check_available(auth)
     model = str(body.get("model") or "")
     msgs = body.get("messages") or []
     resume = str(body.get(RESUME_KEY) or "") or None
     if resume:
         _count("continues")
     if body.get("stream"):
-        return SSEReply(msgs, model, sdk, port, resume)
-    return JSONReply(msgs, model, sdk, port, resume)
+        return SSEReply(msgs, model, sdk, port, resume, auth)
+    return JSONReply(msgs, model, sdk, port, resume, auth)
 
 
 def captured_calls(tools) -> dict:

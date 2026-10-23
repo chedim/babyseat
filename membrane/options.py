@@ -19,6 +19,13 @@ Per-device state (the last open chat tab, the camera) stays in the browser.
   energy           Blurp's energy, 0..1, and whether it is asleep (#345, #363):
                    READ-ONLY, from energy.report() for the seat's self; None
                    with no seat or no self yet. Energy replaced health.
+  background       the minds' models and credentials (2026-10-23): the
+                   Goal worker (`loops`, the watch / goal loops' model) and
+                   the Idle thinker (`cortex`), each with `<mind>_auth`
+                   (chat | api-key | login, for a claude-agent rung). Read
+                   and written through minds_models -- the same state
+                   /membrane/models serves, kept in the seat's models.json;
+                   POST {"loops": ..., "cortex_auth": ...} at the top level.
 """
 from __future__ import annotations
 
@@ -36,6 +43,7 @@ READ_ONLY = {
     "energy": "energy is read-only: it is Blurp's to report (#345), not a setting",
 }
 TAU_NOTE = "changing it needs the operator's approval"
+MIND_KEYS = ("loops", "cortex", "loops_auth", "cortex_auth")   # -> minds_models
 
 
 def _share_ok(v) -> bool:
@@ -76,22 +84,51 @@ def _energy(srv):
         return None
 
 
+def _background(srv):
+    """The Background work section, or None with no seat: the minds' models
+    and credentials as minds_models holds them, the models they may take,
+    which of those are claude-agent rungs, and the chat rung's own mode."""
+    if srv is None or getattr(srv, "_loop_runner", None) is None:
+        return None
+    from . import claude_agent as CA
+    from . import minds_models as MM
+    mm = MM.read(srv)
+    models = list(MM.pickable(srv) or [])
+    for cur in (mm["loops"], mm["cortex"]):
+        if cur and cur not in models:
+            models.insert(0, cur)
+    try:
+        chat_auth = CA.auth_mode()
+    except Exception:
+        chat_auth = CA.MODE_KEY
+    return {"loops": mm["loops"], "cortex": mm["cortex"],
+            "loops_auth": mm["loops_auth"], "cortex_auth": mm["cortex_auth"],
+            "models": models, "claude": [m for m in models if CA.is_claude_rung(srv, m)],
+            "chat_auth": chat_auth}
+
+
 def read(srv=None) -> dict:
     from .efield import CURRENT_TAU_S
     return {CPU_SHARE_KEY: cpu_share(),
             "defaults": {CPU_SHARE_KEY: CPU_SHARE_DEFAULT},
-            "writable": list(WRITABLE),
+            "writable": list(WRITABLE) + (list(MIND_KEYS) if _background(srv) is not None else []),
             "current_tau_s": float(CURRENT_TAU_S), "current_tau_note": TAU_NOTE,
-            "energy": _energy(srv)}
+            "energy": _energy(srv), "background": _background(srv)}
 
 
-def apply(body) -> dict:
+def apply(body, srv=None) -> dict:
     """Validate every key first, then write them together; ValueError (the
-    reason) on anything else, with nothing written. -> read()."""
+    reason) on anything else, with nothing written. The minds' keys go to
+    minds_models (validated against the models the seat may pick). -> read()."""
     if not isinstance(body, dict) or not body:
         raise ValueError("expected a JSON object of options, e.g. {\"self_cpu_share\": 0.5}")
-    changes = {}
+    changes, minds = {}, {}
     for k, v in body.items():
+        if k in MIND_KEYS:
+            if srv is None or getattr(srv, "_loop_runner", None) is None:
+                raise ValueError(f"{k}: no running seat to set it on")
+            minds[k] = v
+            continue
         if k in READ_ONLY:
             raise ValueError(READ_ONLY[k])
         if k not in WRITABLE:
@@ -100,5 +137,9 @@ def apply(body) -> dict:
             if not _share_ok(v):
                 raise ValueError(f"self_cpu_share must be a number in (0, 1], got {v!r}")
             changes[k] = float(v)
-    S.save(changes)
-    return read()
+    if minds:                            # validates every mind key before setting any
+        from . import minds_models as MM
+        MM.apply(srv, known=MM.pickable(srv), **minds)
+    if changes:
+        S.save(changes)
+    return read(srv)
