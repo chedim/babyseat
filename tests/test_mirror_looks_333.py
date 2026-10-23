@@ -106,7 +106,7 @@ def test_mirror_is_built_on_feel_and_first_reach():
     assert "mirror" in SL.BUILT and SL.PROGRESS[9] is SL._rung9
     assert SS.BUILT_AT["mirror"]["pr"] == 477                        # rebuilt: built from this PR, not #312's (#314)
     import datetime as _dt
-    assert SS.BUILT_AT["mirror"]["merged"] == _dt.datetime(2026, 10, 23, 6, 51, 58,      # the PR's opening time
+    assert SS.BUILT_AT["mirror"]["merged"] == _dt.datetime(2026, 10, 23, 7, 7, 50,      # #477 merged
                                                            tzinfo=_dt.timezone.utc).timestamp()   # until its merge's
 
 
@@ -296,3 +296,12 @@ def test_the_tilt_reads_the_glass_errors_not_the_looks_answers():
               "p": (0.1 if i < W else 0.99)} for i in range(2 * W)]   # its answers' error falls fast...
     recs = _errs_rows([0.1] * (2 * W)) + looks + _other_looks(2 * W, 0.6, 0.7)
     assert SL._curiosity(recs, [MIRROR, OTHER])[MIRROR] == pytest.approx(SL.CURIO_FLOOR)   # ...the glass's is flat
+
+
+def test_mirror_is_built_at_the_merge_of_its_test():
+    """#477 merged 2026-10-23 07:07:50 UTC: recognize itself is built from then."""
+    import datetime as _dt
+    from membrane import self_sheet as SS
+    assert SS.BUILT_AT["mirror"]["pr"] == 477
+    assert SS.BUILT_AT["mirror"]["merged"] == _dt.datetime(2026, 10, 23, 7, 7, 50,
+                                                           tzinfo=_dt.timezone.utc).timestamp()
