@@ -46,5 +46,5 @@ Agents can't decide through any write path. `entity_add` takes no properties (th
 ## Build order
 
 1. **The entity convention and the answer route** (this page, `membrane/decision_map.py`).
-2. **The board view:** the reversed kanban in the web UI. Clicking a card opens it (no small buttons), and the value is edited on the card.
+2. **The board view** (`membrane/ui/decisions.js`, the standalone menu's 🗂 Decisions, `/?view=decisions`): three columns, decided · in flight · open. In the open column, a card that blocks another sits above it. Lines show the edges between cards, and chips show work outside the board (`carried_by: PR #468`). An open card's one input is pre-filled with the pick, and ✓ answers it. Clicking the card itself opens its chat: the card's `chat` session, or a new one titled `Decision: <title>`, recorded on the card with `entity_edit`. The chat opens with a message about the decision pre-filled, never sent. The board re-reads the seat every 5 s while it's shown.
 3. **The field view and timelines:** decision edges drawn on the field. Changing a past decision creates a new `Timeline` branch (`TimelineOps` in `membrane/entities.py`).

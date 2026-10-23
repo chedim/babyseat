@@ -129,6 +129,17 @@ sphere it was the distance to it).
 | `ui_lan_open` | `true` (default): the page reads without a login on the local network; writes from another machine need the [seat token](auth.md#the-seat-token) either way (ignored in [JWT mode](auth.md), where the token decides) |
 | `self_cpu_share` | Blurp's CPU share, `0 < share <= 1` (default `0.5`); set in the ⚙ options window (#343, #344) |
 
+## The decision board (🗂)
+
+The babyseat menu (top left) opens the page's views: *Chat only*, *Graph only*,
+**Decisions** (`/?view=decisions`) and *Everything*. Decisions is the project
+decision map as a reversed kanban: how did we get here (decided), what are we
+doing (in flight), what do we need to do next (open questions). An open card
+asks for one value, pre-filled with the agent's pick; ✓ decides it (from
+another machine, the seat token first). Clicking a card opens its chat, with a
+message about the decision pre-filled, never sent. See
+[decision-map.md](decision-map.md).
+
 ## The options window (⚙)
 
 The ⚙ in membrane home's top bar opens the seat's long-term settings (#344).
