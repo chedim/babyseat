@@ -105,6 +105,8 @@ The tools Claude gets:
 | `intend`, `fulfill` | writes goals |
 | `entity_add`, `entity_edit`, `entity_remove`, `entity_inherit` | writes entities (`entity_edit` can set scripts) |
 | `entity_link`, `entity_unlink` | runs command entities / retires the links |
+| `method_call` | runs a Cliffhanger method on an object, e.g. `presence.exec` (JS in the person's opted-in page) or `presence.restart`; defining methods (`method_define`, `method_each`) stays off the MCP surface |
+| `method_inspect` | read-only: where a call would resolve, and its template |
 | `entity_watch`, `entity_unwatch`, `field_watch`, `attention`, `junk_cut` | writes tracks, watches and dials |
 | `peer_post` | posts on the peer channel |
 
