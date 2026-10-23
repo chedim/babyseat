@@ -234,6 +234,36 @@ def _openai_chat(url: str, headers: dict, model: str, messages: list,
     return c.strip() if isinstance(c, str) else ""
 
 
+def _claude_cortex_chat(srv, model: str, messages: list, lane: str) -> str:
+    """One buffered claude-agent answer for the Idle thinker (an explicit
+    pick only, minds_models.claude_allowed); '' on any failure."""
+    from . import claude_agent as _CA
+    from . import minds_models as _MM
+    body = {"model": model, "messages": list(messages or []), "stream": False}
+    auth = _MM.credential_mode(srv, "cortex")
+    if auth:
+        body[_CA.AUTH_KEY] = auth
+    try:
+        port = getattr(srv, "listen_port", None)
+        if port is None:
+            port = (getattr(srv, "server_address", None) or (None, None))[1]
+        rep = _CA.open_reply(body, port=port)
+        resp = json.loads(rep.read() or b"{}")
+    except Exception as e:
+        print(f"[bg] {model}: claude-agent call failed ({_CA.scrub(e)})", file=sys.stderr)
+        return ""
+    try:
+        from . import bgusage
+        bgusage.from_openai(lane, model, resp)
+    except Exception:
+        pass
+    ch = resp.get("choices") if isinstance(resp, dict) else None
+    msg = (ch[0].get("message") if isinstance(ch, list) and ch
+           and isinstance(ch[0], dict) else None)
+    c = msg.get("content") if isinstance(msg, dict) else None
+    return c.strip() if isinstance(c, str) else ""
+
+
 def _model_chat(srv):
     """A model-aware chat(backend, model, messages) for the background
     lanes (idle judge, synthesis, the night). The rung resolver: a cloud
@@ -252,7 +282,13 @@ def _model_chat(srv):
         think = getattr(srv, "think", None)
         from . import claude_agent as _CA
         if _CA.is_claude_rung(router, model):
+            from . import minds_models as _MM
+            if _MM.claude_allowed(srv, "cortex", model):
+                # the operator picked this rung for the Idle thinker (⚙,
+                # 2026-10-23): it runs with the cortex's own credentials
+                return _claude_cortex_chat(srv, model, messages, lane)
             # issue #384: background lanes never use the claude-agent rung
+            # unless it is the mind's explicit pick
             print(f"[bg] {model}: background lanes never use the "
                   f"claude-agent rung ({lane}); no call made", file=sys.stderr)
             return ""

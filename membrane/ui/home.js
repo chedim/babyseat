@@ -762,6 +762,44 @@ function optShareFromPct(pct) {
   return Math.round(Math.min(OPT_SHARE_MAX, Math.max(OPT_SHARE_MIN, v))) / 100;
 }
 
+// BACKGROUND WORK (2026-10-23, the operator): the two minds' models, moved here
+// from the chat's 🧠 strip ("Minds -> background loops"). The seat routes each
+// key to minds_models -- the same state GET /membrane/models reads. A mind on a
+// claude-agent rung also picks its credentials; a local model needs none.
+const BG_MINDS = [
+  ["loops", "Goal worker", "the model that works your open goals"],
+  ["cortex", "Idle thinker", "thinks ahead between your messages"],
+];
+const BG_AUTH = [["chat", "Same as the chat"], ["api-key", "API key"], ["login", "CLI login"]];
+
+/** The Background work section from GET /membrane/options' `background`
+ * (null: no seat -> ""). */
+function backgroundRows(bg) {
+  if (!bg) return "";
+  const claude = new Set(bg.claude || []);
+  const chatNow = bg.chat_auth === "login" ? "CLI login" : bg.chat_auth === "api-key" ? "API key" : "";
+  const opt = (v, label, cur) => `<option value="${zooEsc(v)}"${v === cur ? " selected" : ""}>${zooEsc(label)}</option>`;
+  let html = '<h3 class="osec">Background work</h3>';
+  for (const [mind, label, hint] of BG_MINDS) {
+    const cur = String(bg[mind] || "");
+    const models = (bg.models || []).slice();
+    if (cur && !models.includes(cur)) models.unshift(cur);
+    html += `<div class="orow"><label class="olab" for="opt-${mind}">${zooEsc(label)}</label>` +
+      `<select id="opt-${mind}" class="osel" data-opt="${mind}" aria-describedby="opt-${mind}-h">` +
+      models.map((m) => opt(m, m + (/:cloud$|-cloud$/.test(m) ? " ☁" : ""), cur)).join("") + "</select>" +
+      `<p class="ohint" id="opt-${mind}-h">${zooEsc(hint)}</p>`;
+    if (claude.has(cur)) {
+      const a = String(bg[mind + "_auth"] || "chat");
+      html += `<label class="olab osub" for="opt-${mind}-auth">credentials</label>` +
+        `<select id="opt-${mind}-auth" class="osel" data-opt="${mind}_auth">` +
+        BG_AUTH.map(([v, l]) => opt(v, v === "chat" && chatNow ? l + " (" + chatNow + ")" : l, a)).join("") + "</select>" +
+        '<p class="ohint">a Claude rung here makes background turns call Claude, billed to these credentials</p>';
+    }
+    html += "</div>";
+  }
+  return html;
+}
+
 /** The window's rows from GET /membrane/options. */
 function optionsRows(o) {
   o = o || {};
@@ -775,7 +813,8 @@ function optionsRows(o) {
       `aria-describedby="opt-share-h"><p class="ohint" id="opt-share-h">how much of one CPU its cycles may use (default ${def}%)</p></div>` +
     `<div class="orow"><span class="olab">the field current's fade</span><span class="oval">${tau}</span>` +
       `<p class="ohint">read-only: ${zooEsc(o.current_tau_note || "changing it needs the operator's approval")}</p></div>` +
-    `<div class="orow"><span class="olab">${zooEsc(SELF_NAME)}'s energy</span><span class="oval">${zooEsc(energy)}</span></div>`;
+    `<div class="orow"><span class="olab">${zooEsc(SELF_NAME)}'s energy</span><span class="oval">${zooEsc(energy)}</span></div>` +
+    backgroundRows(o.background);
 }
 
 class OptionsWindow {
@@ -816,6 +855,23 @@ class OptionsWindow {
   paint(o) {
     this.state = o || this.state;
     this.body.innerHTML = optionsRows(this.state);
+  }
+
+  /** A Background work pick (`key`: loops | cortex | loops_auth | cortex_auth):
+   * post that one key, repaint with what the seat saved (or its refusal, the
+   * rows back at the seat's value). -> the saved options, or null. */
+  async setOption(key, value) {
+    this.msg.textContent = "saving…";
+    try {
+      const o = await this.post(OPT_PATH, { [key]: value });
+      this.paint(o);
+      this.msg.textContent = "saved";
+      return o;
+    } catch (e) {
+      this.paint(this.state);
+      this.msg.textContent = "not saved: " + (e && e.message || e);
+      return null;
+    }
   }
 
   /** The slider let go at `pct`: post the share, show what the seat saved
@@ -1274,7 +1330,7 @@ const HomeLogic = { knownView, standaloneMenu, pauseView, PauseButton, PAUSE_PAT
   rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView,
   achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody,
   ballAlert, ballAlertText, ballNotifyBody, ballChimeNotes, titleFlash,
-  optSharePct, optShareFromPct, optionsRows, OptionsWindow,
+  optSharePct, optShareFromPct, optionsRows, backgroundRows, OptionsWindow,
   blurpPose, blurpEyes, blurpLookAngle, blurpBlink, blurpZs, blurpRuns, drawBlurp, BlurpBodies };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
@@ -1449,6 +1505,10 @@ const HSTYLE = `
   .optpanel .oval { font-variant-numeric:tabular-nums; white-space:nowrap; opacity:.9; }
   .optpanel .oshare { grid-column:1 / -1; width:100%; min-width:0; margin:4px 0; accent-color:var(--primary-color,#3477d6); }
   .optpanel .ohint { grid-column:1 / -1; margin:0; font-size:12px; opacity:.7; }
+  .optpanel .osec { margin:10px 2px 0; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
+  .optpanel .osel { min-width:0; max-width:190px; font:inherit; padding:2px 4px; border-radius:6px; }
+  .optpanel .osub { font-weight:400; opacity:.85; margin-top:4px; }
+  .optpanel .osel:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
   .optpanel .omsg { margin:4px 2px 0; font-size:12px; opacity:.85; }
   .optpanel .omsg:empty { display:none; }
   .optpanel .ox:focus-visible, .optpanel .oshare:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
@@ -3054,6 +3114,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._opt.panel.addEventListener("change", (e) => {         // let go: save it
         if (e.target.classList.contains("oshare")) this._opt.setShare(e.target.value);
+        else if (e.target.dataset && e.target.dataset.opt) this._opt.setOption(e.target.dataset.opt, e.target.value);
       });
       this._zooList.addEventListener("click", (e) => {
         const c = e.target.closest(".zcard");

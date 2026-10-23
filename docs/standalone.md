@@ -160,7 +160,10 @@ The ⚙ in membrane home's top bar opens the seat's long-term settings (#344).
 The 🔔 and the pause (⏸) stay in the top bar. The window reads `GET /membrane/options` when
 it opens and saves each change with `POST /membrane/options` at once; the seat
 validates it, and a bad value is refused (400) with the reason, which the
-window shows. They live in `settings.json`, so a restart keeps them. Per-device
+window shows. They live in `settings.json`, so a restart keeps them. The Background work
+rows are the exception: they are the minds' models (`minds_models.py`, the
+same state as `GET /membrane/models`) and are kept in `models.json`. The
+chat's 🧠 strip used to hold these pickers and now points to ⚙. Per-device
 state (the last open chat tab, the camera) stays in the browser. On a phone the
 window fills the screen; × or Escape closes it.
 
@@ -169,6 +172,9 @@ window fills the screen; × or Escape closes it.
 | Blurp's CPU share | a slider, 10–100 % (default 50 %): `self_cpu_share`. The self loop and the record cap read the file through one reader, `options.cpu_share(srv)` (the settings.json beside the seat's `self/`), so a change needs no restart (#343 throttles the cycles to it × Blurp's energy) |
 | The field current's fade | read-only, `CURRENT_TAU_S` (180 s today): it is a threshold, and changing it needs the operator's approval |
 | Blurp's energy | read-only: its energy as a percentage and whether it is awake or asleep (#345, #363); "not running yet" before Blurp has run |
+| Background work: Goal worker | the model the watch and goal loops run on (`loops`); every loop turn runs on it, whatever its session remembers, and is stamped with it. A person's chat keeps its own model |
+| Background work: Idle thinker | the model of the idle cortex (`cortex`): the thinker, the dreamer and the claim judges |
+| Background work: credentials | shown only when that mind's model is a claude-agent rung: Same as the chat (default), API key, CLI login (`loops_auth`, `cortex_auth`). See [claude-agent.md](claude-agent.md) |
 
 Writes go through the owner's door like every other write: from another
 machine they need the [seat token](auth.md#the-seat-token). Home Assistant's

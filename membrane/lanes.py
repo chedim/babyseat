@@ -5839,7 +5839,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         _ca = _CA.is_claude_rung(srv, orig_model)
         if _ca:
             try:
-                _CA.check_available()
+                _auth = up.get(_CA.AUTH_KEY)       # a mind's own credentials
+                _CA.check_available(_auth if _auth in (_CA.MODE_KEY, _CA.MODE_LOGIN) else None)
             except _CA.Unavailable as ua:
                 # a clear error before any byte: the SDK or the CLI is missing
                 msg = str(ua)
@@ -5882,6 +5883,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 if _port is None:
                     _port = (getattr(srv, "server_address", None) or (None, None))[1]
                 return _CA.open_reply(u2, port=_port)
+            u2.pop(_CA.AUTH_KEY, None)         # the rung's own field, never a backend's
             if rec is not None and rec.backend:
                 from .auth import PROVIDERS as _PROV
                 prov = _PROV.get(rec.backend) or {}

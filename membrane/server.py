@@ -1327,6 +1327,60 @@ class TurnRunner:
             return sid[len("loop::"):] or "build"
         return "build"
 
+    def _turn_model(self, sid: str, text: str) -> tuple:
+        """THE TURN'S MODEL, ONE RULE for the round and the reply's stamp ->
+        (model, claude credentials override or None).
+
+        A person's chat: the session's own model (the operator's pick on the
+        session holds over the boot default -- the TUI and the chat picker
+        pin it, #457), then the active-model entities. A background lane (the
+        watch / goal loops): the loop runner's current model, the Goal
+        worker in ⚙ (2026-10-23: a loop session that remembered another
+        model ran on it while the picker said otherwise). The claude-agent
+        rung on a background lane only on an explicit pick for that mind,
+        with that mind's credentials (minds_models); else the #384 guard."""
+        agent = (self._agents or {}).get(sid)
+        lane = _lane_of(agent)
+        srv = getattr(self, "srv", None)
+        turn_model = self.model
+        if lane != "listener":
+            try:
+                _sess = self.sessions.sessions.get(sid) or {}
+                _sm = _sess.get("model") or {}
+                _pick = (_sm.get("id") if isinstance(_sm, dict)
+                         else str(_sm or "")) or ""
+                _pick = _pick.strip()
+                if _pick and _pick not in ("", "membrane"):
+                    turn_model = _pick
+            except Exception:
+                pass
+            # THE ACTIVE MODELS (membrane/active_models.py): the role's entity
+            # decides -- the seat can switch its own models, per person too
+            try:
+                from . import active_models as _AM
+                _am = _AM.for_turn(srv, text, lane)
+                if _am:
+                    turn_model = _am
+            except Exception:
+                pass
+        auth = None
+        try:
+            from . import claude_agent as _CA
+            from . import minds_models as _MM
+            if lane == "listener" and _CA.is_claude_rung(srv, turn_model) \
+                    and _MM.claude_allowed(srv, "loops", turn_model):
+                auth = _MM.credential_mode(srv, "loops")
+            else:
+                # THE CLAUDE-AGENT RUNG IS A PERSON'S (issue #384): a loop
+                # or a mind not picked onto it falls back to the seat's model
+                fb = str(getattr(srv, "default_seat_model", "") or "")
+                if not fb or _CA.is_claude_rung(srv, fb):
+                    fb = self.model if not _CA.is_claude_rung(srv, self.model) else "membrane"
+                turn_model = _CA.guard_turn_model(srv, turn_model, agent, fb)
+        except Exception:
+            pass
+        return turn_model, auth
+
     def blurp_message(self, sid: str, text: str, user_info: dict) -> dict:
         """BLURP'S PRIVATE CHAT (#337, the PM with Blurp): the person's message
         is stored and shown like any other (the caller stored and announced
@@ -1939,15 +1993,8 @@ class TurnRunner:
         # model): the assistant row's modelID = the TURN'S pick (the
         # session's model -- the operator's switch holds in the
         # provenance), not the boot's
-        _turn_pick = "glm-5.3-flash:cloud"
         try:
-            _sess = self.sessions.sessions.get(sid) or {}
-            _sm = _sess.get("model") or {}
-            _pick = (_sm.get("id") if isinstance(_sm, dict)
-                     else str(_sm or "")) or ""
-            _pick = _pick.strip()
-            if _pick and _pick not in ("", "membrane"):
-                _turn_pick = _pick
+            _turn_pick = self._turn_model(sid, text)[0]
         except Exception:
             _turn_pick = self.model
         a_info = {"id": aid, "sessionID": sid, "role": "assistant",
@@ -2044,39 +2091,13 @@ class TurnRunner:
             sid_flag = sid in self._aborting
             if sid in self._aborting or sid_flag:
                 break
-            # THE SESSION'S MODEL IS THE TURN'S (the operator's pick
-            # on the session holds over the boot default -- the TUI
-            # pins its session's model; the dict shape's id carries)
-            turn_model = self.model
+            # THE TURN'S MODEL (_turn_model: a person's chat -> its
+            # session's model; a loop -> the Goal worker's), read every
+            # round, so a switch lands on the next round
             try:
-                _sess = self.sessions.sessions.get(sid) or {}
-                _sm = _sess.get("model") or {}
-                _pick = (_sm.get("id") if isinstance(_sm, dict)
-                         else str(_sm or "")) or ""
-                _pick = _pick.strip()
-                if _pick and _pick not in ("", "membrane"):
-                    turn_model = _pick
+                turn_model, _turn_auth = self._turn_model(sid, text)
             except Exception:
-                pass
-            # THE ACTIVE MODELS (membrane/active_models.py): the role's entity
-            # decides -- the seat can switch its own models, per person too
-            try:
-                from . import active_models as _AM
-                _am = _AM.for_turn(getattr(self, "srv", None), text,
-                                   _lane_of((self._agents or {}).get(sid)))
-                if _am:
-                    turn_model = _am
-            except Exception:
-                pass
-            # THE CLAUDE-AGENT RUNG IS A PERSON'S (issue #384): a loop or a
-            # mind pinned to it falls back to the seat's model
-            try:
-                from . import claude_agent as _CA
-                turn_model = _CA.guard_turn_model(
-                    getattr(self, "srv", None), turn_model,
-                    (self._agents or {}).get(sid), self.model)
-            except Exception:
-                pass
+                turn_model, _turn_auth = self.model, None
             # MEMBRANE PREDICTS THIS MOVE (predict.py): every round Argus takes
             # is guessed before the model runs -- a virtual action, never run
             try:
@@ -2094,6 +2115,9 @@ class TurnRunner:
             body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}
+            if _turn_auth:                 # a mind's own Claude credentials
+                from . import claude_agent as _CA
+                body[_CA.AUTH_KEY] = _turn_auth
             # THE LANE'S TOOLS (the division of hands): the registry
             # filtered to the session's agent lane (operator/plan/
             # listener). An EXPLICIT tools param = the constructor's own
@@ -3665,7 +3689,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # settings.json; the owner's door above gates it like every write
                 from . import options as _OPT
                 try:
-                    return self._json_out(_OPT.apply(self._read_body()))
+                    psrv = getattr(runner, "srv", None) if runner is not None else None
+                    return self._json_out(_OPT.apply(self._read_body(), srv=psrv))
                 except ValueError as e:
                     return self._json_out({"error": str(e)}, code=400)
             if path == "/membrane/models":
@@ -3676,14 +3701,12 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 if psrv is None:
                     self.send_response(503); self.send_header("Content-Length", "0"); self.end_headers(); return
-                try:
-                    from .lanes import _chat_capable_models
-                    known = _chat_capable_models(getattr(psrv, "backend", ""))
-                except Exception:
-                    known = None
+                known = _MM.pickable(psrv)     # the served models + the claude-agent rungs
                 try:
                     out = _MM.apply(psrv, loops=b.get("loops"), cortex=b.get("cortex"),
-                                    think=b.get("think"), known=known or None)
+                                    think=b.get("think"), known=known or None,
+                                    loops_auth=b.get("loops_auth"),
+                                    cortex_auth=b.get("cortex_auth"))
                 except ValueError as e:
                     body = json.dumps({"error": str(e)}).encode()
                     self.send_response(400); self.send_header("Content-Type", "application/json")

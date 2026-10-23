@@ -69,11 +69,29 @@ claude-agent rung answers only when:
 - you **add it to the ladder** with `--ladder-include claude-agent:haiku`
   (repeatable). Only then can autoselect and the ladder reach it.
 
-**Background lanes never use it.** This covers the thinker, the dreamer, the
-night, the judges, the watch loops and the field's own calls. A background
-chat call to the rung returns nothing and makes no call. A loop session
-pinned to it falls back to the seat's model. Only a person's lanes can take
-it: the chat, plan, the phone and a speaker.
+**Background lanes use it only when you pick it for them.** This covers the
+thinker, the dreamer, the night, the judges, the watch loops and the field's
+own calls. Without a pick, a background chat call to the rung returns nothing
+and makes no call, and a loop session pinned to it falls back to the seat's
+model. A person's lanes can always take it: the chat, plan, the phone and a
+speaker. The exception is an explicit pick in the ⚙ options window, under
+Background work (or `POST /membrane/models`, or an active-model entity). There
+you can set the **Goal worker** (the watch and goal loops) or the **Idle
+thinker** (the background chat calls of the thinker, dreamer and night) to a
+claude-agent rung. That mind's background turns then call Claude, billed to
+the credentials picked on its row:
+
+- **Same as the chat** (the default) uses whatever the chat's rung uses: the
+  API key, or the CLI login when you opted in with `--login`.
+- **API key** always uses the Anthropic key for that mind.
+- **CLI login** always uses the `claude` CLI login for that mind.
+
+The credentials row only appears when the mind's model is a claude-agent
+rung. The choice is saved in `models.json` next to the minds' models
+(`loops_auth`, `cortex_auth`). A turn carries the override as
+`membrane_claude_auth`, which reaches `claude_agent.credential_env(mode=)`.
+The chat's own path is unchanged. The claim judges still call Ollama
+directly, so a Claude rung does not answer them.
 
 **It gets membrane's tools, and only those.** The SDK runs its own agent
 loop, and it cannot hand a tool call back to membrane unexecuted. So Claude
