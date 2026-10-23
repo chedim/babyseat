@@ -1800,8 +1800,11 @@ function toolView(p) {
            input: s.input && Object.keys(s.input).length ? pretty(s.input) : "", output, ms };
 }
 
-function shouldStick(el, slack) {
-  return el.scrollHeight - el.scrollTop - el.clientHeight < (slack == null ? 80 : slack);
+/** At the latest message (within slack px)? reversed (#470, the cockpit: the
+ * newest message right under the bar): the latest is the scroller's top. */
+function shouldStick(el, slack, reversed) {
+  const s = slack == null ? 80 : slack;
+  return reversed ? el.scrollTop < s : el.scrollHeight - el.scrollTop - el.clientHeight < s;
 }
 
 function fmtElapsed(ms) {
@@ -2156,6 +2159,28 @@ const STYLE = `
   :host([overlay]) .hint { display:none; }
   :host([overlay]) .msg:not(.user) .bub, :host([overlay]) .msg:not(.user) > .md {
     text-shadow:0 1px 2px color-mix(in srgb, var(--primary-background-color,#000) 85%, transparent); }
+  /* THE COCKPIT (#470, the decision cockpit): the same chat, turned for the
+     cockpit's time axis -- the composer on top (the input bar, the NOW line),
+     the conversation below it newest first, older messages falling down */
+  :host([cockpit]) { height:100%; background:transparent; --ck-line:var(--cockpit-line, rgba(255,176,64,.55)); }
+  :host([cockpit]) .main { position:relative; }
+  :host([cockpit]) .composer { order:-2; border:0; padding:4px 0 8px; background:transparent; }
+  :host([cockpit]) .composer .box { max-width:none; }
+  :host([cockpit]) .composer textarea { border-radius:24px; min-height:48px; padding:12px 18px;
+    border:1px solid var(--ck-line); background:color-mix(in srgb, var(--card-background-color,#0b0f16) 88%, transparent);
+    box-shadow:0 0 0 1px rgba(0,0,0,.35), 0 0 18px color-mix(in srgb, var(--ck-line) 35%, transparent); }
+  :host([cockpit]) .composer textarea:focus { outline:none; border-color:var(--cockpit-accent, #5fd6ff); }
+  :host([cockpit]) .composer .btn.send { border-radius:999px; min-height:48px; padding:0 18px; color:var(--cockpit-accent, #5fd6ff);
+    background:transparent; border:1px solid var(--cockpit-accent, #5fd6ff); }
+  :host([cockpit]) .composer .btn.send:hover { background:color-mix(in srgb, var(--cockpit-accent, #5fd6ff) 16%, transparent); }
+  :host([cockpit]) .bar { order:-1; min-height:0; border:0; padding:0 4px 4px; font-size:12px; background:transparent; }
+  :host([cockpit]) .bar .title { font-weight:500; opacity:.7; }
+  :host([cockpit]) .scroller { background:transparent;
+    border-top:1px solid color-mix(in srgb, var(--ck-line) 45%, transparent); }
+  :host([cockpit]) .msgs { display:flex; flex-direction:column-reverse; max-width:none; padding:6px 8px 16px; }
+  :host([cockpit]) .jump { display:none !important; }
+  :host([cockpit]) .msg.found { outline:1px solid var(--cockpit-accent, #5fd6ff); outline-offset:4px; border-radius:8px;
+    background:color-mix(in srgb, var(--cockpit-accent, #5fd6ff) 10%, transparent); }
 `;
 
 function definePanel() {
@@ -2336,7 +2361,7 @@ function definePanel() {
       this._stopBtn.addEventListener("click", () => this._abort());
       this._jump.addEventListener("click", () => { this._stick = true; this._toBottom(); });
       this._scroller.addEventListener("scroll", () => {
-        this._stick = shouldStick(this._scroller);
+        this._stick = shouldStick(this._scroller, null, this.hasAttribute("cockpit"));
         this._jump.classList.toggle("show", !this._stick);
       }, { passive: true });
       this._msgs.addEventListener("click", (ev) => this._onMsgClick(ev));
@@ -3591,8 +3616,55 @@ function definePanel() {
     }
 
     _toBottom() {
-      this._scroller.scrollTop = this._scroller.scrollHeight;
+      // the cockpit's chat is reversed: its latest message is at the top
+      this._scroller.scrollTop = this.hasAttribute("cockpit") ? 0 : this._scroller.scrollHeight;
       this._jump.classList.remove("show");
+    }
+
+    // ---------------------------------------------------------- the cockpit's handles
+    // (#470): the decision cockpit drives this same chat from its cards
+    /** The person's open chat session (not a mind's view), null before boot. */
+    get sessionId() { return this._mind ? (this._mindPrev || null) : this._sid; }
+
+    /** Open another of the person's sessions. */
+    async openSession(sid) {
+      if (this._mind) this.endMind();
+      await this._switchTo(sid);
+    }
+
+    /** Pre-fill the composer (never sent) and focus it. */
+    prefill(text) {
+      if (!this._ta) return;
+      this._ta.value = String(text == null ? "" : text);
+      this._grow();
+      this._ta.focus();
+      const n = this._ta.value.length;
+      try { this._ta.setSelectionRange(n, n); } catch (e) { /* not a text input */ }
+    }
+
+    /** The id of the open chat's newest message ("" when none). */
+    lastMessageId() {
+      const rows = (this._chat && !this._mind && this._chat.rows) || [];
+      const r = rows[rows.length - 1];
+      return (r && r.info && r.info.id) || "";
+    }
+
+    /** Scroll the message into view and mark it for a moment; false when it
+     * is not shown (another session, or older than the rows kept). */
+    scrollToMessage(mid) {
+      const el = mid && this._rowEls ? this._rowEls[mid] : null;
+      if (!el || !el.parentNode) return false;
+      const still = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+      if (this._found && this._found !== el) this._found.classList.remove("found");
+      this._found = el; el.classList.add("found");
+      return true;
+    }
+
+    /** Let go of the marked message. */
+    clearFound() {
+      if (this._found) this._found.classList.remove("found");
+      this._found = null;
     }
   }
   customElements.define("ai-terminal-panel", AiTerminalPanel);

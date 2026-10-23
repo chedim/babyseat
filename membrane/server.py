@@ -3355,6 +3355,20 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 from . import decision_map as _DM
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 self._json_out(_DM.board(getattr(psrv, "entity_store", None)))
+            elif path == "/membrane/goals":
+                # #470: the cockpit's goals -- the open Goal entities, the
+                # seat's active set (the intent board's selection) first
+                from . import decision_map as _DM
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                _act = []
+                try:
+                    from .lanes import _intents_board
+                    _ib = _intents_board(psrv) if psrv is not None else None
+                    if _ib is not None and _ib.selection is not None:
+                        _act = [i.eid for i in _ib.open_intents()]
+                except Exception:
+                    _act = []                              # no board: the goals, unranked
+                self._json_out(_DM.goals(getattr(psrv, "entity_store", None), _act))
             elif path == "/membrane/options":
                 # #344: the seat-wide options (options.py) -- the ⚙ window's read
                 from . import options as _OPT
@@ -3613,7 +3627,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 est = getattr(psrv, "entity_store", None)
                 if path.endswith("/answer"):
                     res = _DM.answer(est, getattr(psrv, "user_ledger", None), str(b.get("card") or ""),
-                                     b.get("value"), conv=str(b.get("conv") or ""))
+                                     b.get("value"), conv=str(b.get("conv") or ""),
+                                     message=str(b.get("message") or ""))
                 else:
                     res = _DM.set_chat(est, str(b.get("card") or ""), str(b.get("chat") or ""))
                 if not res.get("ok"):

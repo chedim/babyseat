@@ -1,9 +1,8 @@
 """#470 step 2: the decision board, a view of the standalone page (🗂 Decisions,
-/?view=decisions). The board (membrane/ui/decisions.js, DecisionLogic) lays the
-Decision cards out as a reversed kanban: decided on the left, in flight in the
-middle, open questions on the right (a card that blocks another above it). An
-open card's one variable is entered on the card, pre-filled with the agent's
-pick; clicking the card opens its chat with a message about it pre-filled."""
+/?view=decisions), now the decision cockpit (membrane/ui/decisions.js,
+DecisionLogic; its layout is tested in test_decision_cockpit_470.py). An open
+card's one variable is entered on the card, pre-filled with the agent's pick;
+clicking the card loads a message about it into the chat, pre-filled."""
 import json
 import shutil
 import subprocess
@@ -44,13 +43,11 @@ BOARD = {
 
 
 @NODE
-def test_columns_run_decided_in_flight_open():
-    cols = _js("D.columns(%s)" % json.dumps(BOARD))
-    assert [c["eid"] for c in cols["decided"]] == ["c:new", "c:old"]      # the newest first
-    assert [c["eid"] for c in cols["in_flight"]] == ["c:banner"]
-    # "Release when" sorts first by title, but the limit blocks it: the limit comes first
-    assert [c["eid"] for c in cols["open"]] == ["c:limit", "c:release"]
-    assert [k["key"] for k in _js("D.COLS")] == ["decided", "in_flight", "open"]
+def test_open_cards_put_the_first_to_decide_first():
+    # the cockpit's future band (test_decision_cockpit_470 has the rest): the limit blocks the release
+    b = _js("D.bands(%s)" % json.dumps(BOARD))
+    assert [c["eid"] for c in b["future"]] == ["c:limit", "c:release"]
+    assert [c["eid"] for c in b["past"]] == ["c:new", "c:old"]      # the newest first
 
 
 @NODE

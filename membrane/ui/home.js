@@ -61,6 +61,7 @@ function standaloneMenu(current) {
   return rows.map((r) => Object.assign(r, { current: r.v === current }));
 }
 const VIEW = typeof window !== "undefined" ? knownView(window.MEMBRANE_VIEW) : "";
+const COCKPIT_FIELD_BUDGET = 1500;   // #470: the cockpit's small field draws at most this many points
 
 /** The orbit angles that put the camera on the ray from the field's centre
  * through p (beyond it), so it looks at the centre THROUGH p -- the
@@ -1329,9 +1330,10 @@ const HSTYLE = `
   .view-chat .chat { left:12px; width:auto; }
   .view-chat .sbox, .view-chat .me, .view-chat .chatbtn,
   .view-chat .card, .view-chat .tip, .view-chat .field { display:none; }
-  /* #470: the decision board's view -- the board alone under the top bar */
+  /* #470: the decision cockpit's view -- the cockpit under the top bar; the
+   * chat and a small field live inside it (moved there, the same elements) */
   .view-decisions .chat, .view-decisions .sbox, .view-decisions .me, .view-decisions .chatbtn,
-  .view-decisions .card, .view-decisions .tip, .view-decisions .field { display:none; }
+  .view-decisions .card, .view-decisions .tip, .view-decisions .brainline { display:none; }
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card { position:absolute; z-index:3; left:12px; bottom:12px; max-width:min(420px, calc(100% - 24px));
@@ -1388,6 +1390,7 @@ const HSTYLE = `
     .chat { top:auto; left:8px; right:8px; bottom:8px; width:auto; height:56vh; height:56dvh; }
     .voice { bottom:calc(56dvh + 16px); }
     .chat.hidden ~ .voice { bottom:12px; }
+    .view-decisions .voice { bottom:12px; }   /* #470: the cockpit's chat is inside it, no sheet to clear */
     .card { bottom:calc(56dvh + 80px) !important; }
     .chat.hidden ~ .card { bottom:76px !important; }
     .status { display:none; }
@@ -2900,6 +2903,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const $ = (q) => root.querySelector(q);
       this._host3d = $(".field"); this._msgEl = $(".msg"); this._statusEl = $(".status");
       this._chatBox = $(".chat"); this._chat = $("ai-terminal-panel");
+      if (VIEW === "decisions") this._buildCockpit(root);   // #470: before the chat boots (hass below)
       this._card = $(".card"); this._tip = $(".tip");
       this._brainEl = $(".brainline"); this._brainText = $(".bl-t"); this._brainCite = $(".bl-c");
       this._q = $(".q"); this._hits = $(".hits");
@@ -2931,8 +2935,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       } else if (VIEW === "chat") {
         root.classList.add("view-chat");
       } else if (VIEW === "decisions") {
-        root.classList.add("view-decisions");      // #470: the board fills the screen
-        this._mountDecisions(root);
+        root.classList.add("view-decisions");      // #470: the cockpit fills the screen
+        this._mountDecisions();
       }
       this._menu = $(".hamenu"); this._haBtn = $(".ha");
       this._haBtn.title = window.MEMBRANE_STANDALONE
@@ -3145,11 +3149,24 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       return out;
     }
 
-    /** #470: the decision board, mounted in its own view. Clicking a card opens
-     * its chat: the card's own session, or a new one titled after the card
-     * (recorded on the card), with a message about the decision pre-filled. */
-    async _mountDecisions(root) {
-      try { await import("/ui/www/decisions.js"); } catch (e) { this._msgEl.textContent = "the board failed to load"; return; }
+    /** #470: the decision cockpit. The real chat (in its cockpit mode:
+     * composer on top, newest message first) and the field's host move into
+     * it -- the same elements, slotted, so nothing is forked. Built before
+     * the chat is handed hass, so the chat boots once, already in place. */
+    _buildCockpit(root) {
+      const el = this._cockpit = document.createElement("membrane-decisions");
+      this._chat.setAttribute("cockpit", "");
+      this._chat.slot = "chat";
+      this._host3d.slot = "field";
+      el.append(this._host3d, this._chat);
+      root.appendChild(el);
+    }
+
+    /** #470: the cockpit's API once decisions.js is loaded. Clicking a card
+     * loads its question into the chat's bar; the cockpit records the chat on
+     * the card (POST /membrane/decision/chat) and answers on it. */
+    async _mountDecisions() {
+      try { await import("/ui/www/decisions.js"); } catch (e) { this._msgEl.textContent = "the cockpit failed to load"; return; }
       const post = async (p, b) => {
         const r = await this._hass.fetchWithAuth(HSERVE + p, { method: "POST",
           headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
@@ -3157,22 +3174,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (!r.ok) throw new Error((d && d.error) || (r.status === 401 ? "the seat token is needed to decide" : String(r.status)));
         return d;
       };
-      const el = document.createElement("membrane-decisions");
-      el.api = {
-        get: (p) => this._get(p),
-        post,
-        openChat: async (card) => {
-          let sid = card.chat || "";
-          if (!sid) {
-            const s = await post("/session", { title: "Decision: " + String(card.title).slice(0, 60) });
-            sid = (s && s.id) || "";
-            if (sid) { try { await post("/membrane/decision/chat", { card: card.eid, chat: sid }); } catch (e) { /* the chat still opens */ } }
-          }
-          if (sid) lsSet("membrane.chat.sid", sid);       // the chat panel reopens this session
-          location.href = "/?view=chat&ask=" + encodeURIComponent(window.DecisionLogic ? window.DecisionLogic.askText(card) : card.title);
-        },
-      };
-      root.appendChild(el);
+      this._cockpit.api = { get: (p) => this._get(p), post, chat: this._chat, logo: SEAT_LOGO };
       this._msgEl.style.display = "none";
     }
 
@@ -3188,7 +3190,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._started = true;
       const hass = this._hass;
       this._me = "person:" + personSlug(hass.user && hass.user.name);
-      if (VIEW === "chat" || VIEW === "decisions") {   // THE VIEW: chat-only (and the board) never boots the
+      if (VIEW === "chat") {                           // THE VIEW: chat-only never boots the
         this._msgEl.style.display = "none"; return;   // field -- the camera
       }                                                 // loop is a no-op anyway
       try {
@@ -3213,12 +3215,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         };
         const v = this._v3 = new window.MembraneField3D(this._host3d, api);
         if (window.matchMedia("(max-width: 760px)").matches) { v.maxBudget = 3000; v._applyBudget(3000); }
+        if (VIEW === "decisions") { v.maxBudget = COCKPIT_FIELD_BUDGET; v._applyBudget(COCKPIT_FIELD_BUDGET); }   // #470: the small field
         v.selfEyes = this._mode === "eyes"; v.selfFollow = this._mode === "self" || this._mode === "eyes"; v.selfName = SELF_NAME;
         await v.start();
         if (!this._started) { v.stop(); return; }
         await this._aim(true);
         this._glide();
-        this._brainStart();
+        if (VIEW !== "decisions") this._brainStart();    // the cockpit has no brain caption
       } catch (e) {
         this._msgEl.style.display = ""; this._msgEl.textContent = "the field is unavailable\n" + ((e && e.message) || e);
         return;

@@ -33,6 +33,7 @@ AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT)    # what entity_edit may set
 ANSWER_OWNED = ("value", "set_by", "set_at")        # only answer() writes these
 EDGE_KEYS = ("blocks", "led_to", "carried_by")
 VAR_TYPES = ("int", "float", "bool", "string", "option")
+MESSAGE_ID_MAX = 200                # a chat message id's clip (ids are short; never a paste)
 LEDGER_TITLE_MAX = 160              # the title's clip in the ledger line (one line, never a paste)
 _ANSWER_LOCK = threading.Lock()     # one answer at a time: a card is decided once
 
@@ -110,7 +111,7 @@ def _card_of(ent) -> dict:
             "var": p.get("var") if isinstance(p.get("var"), dict) else None,
             "pick": p.get("pick"), "value": p.get("value"),
             "set_by": p.get("set_by"), "set_at": p.get("set_at"),
-            "chat": p.get("chat")}
+            "chat": p.get("chat"), "message": p.get("message")}
 
 
 def board(est) -> dict:
@@ -160,15 +161,17 @@ def _one_line(s, cap: int) -> str:
     return s if len(s) <= cap else s[: cap - 1] + "…"
 
 
-def answer(est, ledger, spec: str, value, conv: str = "") -> dict:
+def answer(est, ledger, spec: str, value, conv: str = "", message: str = "") -> dict:
     """The operator answers a card: validate the value against its var, append
     the decision to the ledger, then mark the card decided. Nothing changes on
-    a refusal or a failed ledger write; one answer at a time."""
+    a refusal or a failed ledger write; one answer at a time. ``message`` (the
+    cockpit's ✓ while the card's chat is open) is the id of that chat's newest
+    message: where the card was decided. It is kept only with its ``conv``."""
     with _ANSWER_LOCK:
-        return _answer(est, ledger, spec, value, conv)
+        return _answer(est, ledger, spec, value, conv, message)
 
 
-def _answer(est, ledger, spec: str, value, conv: str = "") -> dict:
+def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "") -> dict:
     from .entities import CLASS_DECISION
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
@@ -193,6 +196,31 @@ def _answer(est, ledger, spec: str, value, conv: str = "") -> dict:
               "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     if conv:
         p["chat"] = p.get("chat") or conv     # a card keeps the chat it already has
+        message = str(message or "").strip()[:MESSAGE_ID_MAX]
+        if message and p["chat"] == conv:     # the message is in the card's own chat
+            p["message"] = message
     ent.properties = p
     est.upsert(ent)
     return {"ok": True, "card": _card_of(ent)}
+
+
+def goals(est, active=()) -> dict:
+    """The cockpit's goals (#470): the open Goal entities, the seat's active
+    set first (in its rank order, ``active`` eids, flagged), then the rest,
+    the newest first."""
+    from .entities import CLASS_GOAL
+    act = [str(a) for a in (active or ())]
+    out = []
+    for ent in list((getattr(est, "docs", None) or {}).values()):
+        p = ent.properties or {}
+        if ent.cls != CLASS_GOAL or p.get("merged_into") or p.get("status", "open") != "open":
+            continue
+        out.append({"eid": ent.eid, "title": p.get("name") or ent.eid,
+                    "summary": p.get("summary") or "", "active": ent.eid in act,
+                    "born": p.get("born")})
+
+    def rank(g):
+        born = g["born"] if isinstance(g["born"], (int, float)) else 0.0
+        return (act.index(g["eid"]) if g["active"] else len(act), -born, g["title"])
+    out.sort(key=rank)
+    return {"goals": out}

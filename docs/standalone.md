@@ -129,16 +129,25 @@ sphere it was the distance to it).
 | `ui_lan_open` | `true` (default): the page reads without a login on the local network; writes from another machine need the [seat token](auth.md#the-seat-token) either way (ignored in [JWT mode](auth.md), where the token decides) |
 | `self_cpu_share` | Blurp's CPU share, `0 < share <= 1` (default `0.5`); set in the ⚙ options window (#343, #344) |
 
-## The decision board (🗂)
+## The decision cockpit (🗂)
 
 The babyseat menu (top left) opens the page's views: *Chat only*, *Graph only*,
 **Decisions** (`/?view=decisions`) and *Everything*. Decisions is the project
-decision map as a reversed kanban: how did we get here (decided), what are we
-doing (in flight), what do we need to do next (open questions). An open card
-asks for one value, pre-filled with the agent's pick; ✓ decides it (from
-another machine, the seat token first). Clicking a card opens its chat, with a
-message about the decision pre-filled, never sent. See
-[decision-map.md](decision-map.md).
+decision map as a cockpit: the time axis runs top to bottom and the chat's
+input bar is *now*. The center column holds the open goals the seat steers
+toward, a small field with the babyseat over it, the input bar, and the chat
+below the bar, newest message first. On both sides, open questions pile up
+above the bar's line (the first to decide nearest it), the cards in flight sit
+on the line, and decided cards fall below it (the newest nearest; the oldest
+are pushed out of view). New cards alternate left and right.
+
+An open card asks for one value, pre-filled with the agent's pick; ✓ decides it
+(from another machine, the seat token first). Clicking a card loads a message
+about the decision into the center bar, pre-filled and never sent, so the talk
+happens in the center chat. Hovering a decided card scrolls the chat to the
+message where it was decided, when that chat is open; clicking it opens its
+chat. On a phone the cockpit is one column: goals, open questions, in flight,
+the bar and the chat, then the past. See [decision-map.md](decision-map.md).
 
 ## The options window (⚙)
 

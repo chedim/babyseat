@@ -66,6 +66,32 @@ class TestTheBoardOnTheServePort(_Env):
         code, _ = self._go("POST", "/membrane/decision/chat", {"card": self.card, "chat": ""})
         self.assertEqual(code, 400)
 
+    def test_an_answer_from_the_chat_names_its_message(self):
+        # the cockpit: the card was talked over in its chat, and ✓ came with that chat's newest message
+        code, out = self._go("POST", "/membrane/decision/answer",
+                             {"card": self.card, "value": 1800, "conv": "ses_abc", "message": "msg_42"})
+        self.assertEqual(code, 200, out)
+        p = self.srv.entity_store.docs[self.card].properties
+        self.assertEqual((p["chat"], p["message"]), ("ses_abc", "msg_42"))
+        code, out = self._go("GET", "/membrane/decisions")
+        self.assertEqual(out["cards"][0]["message"], "msg_42")
+
+    def test_a_message_without_its_chat_is_not_kept(self):
+        code, out = self._go("POST", "/membrane/decision/answer", {"card": self.card, "value": 1800, "message": "msg_42"})
+        self.assertEqual(code, 200, out)
+        self.assertNotIn("message", self.srv.entity_store.docs[self.card].properties)
+
+    def test_the_cockpit_reads_the_open_goals(self):
+        est = self.srv.entity_store
+        g = est.add(cls="Goal", name="ship the cockpit", summary="the board turned 90 degrees")["eid"]
+        done = est.add(cls="Goal", name="an old goal")["eid"]
+        est.edit(done, properties={"status": "fulfilled"})
+        code, out = self._go("GET", "/membrane/goals")
+        self.assertEqual(code, 200, out)
+        self.assertEqual([(x["eid"], x["title"], x["summary"]) for x in out["goals"]],
+                         [(g, "ship the cockpit", "the board turned 90 degrees")])
+        self.assertIn("active", out["goals"][0])
+
     def test_off_box_an_answer_needs_the_seat_token(self):
         SA.ensure()
         code, _ = self._go("POST", "/membrane/decision/answer", {"card": self.card, "value": 1800}, offbox=True)
@@ -74,6 +100,7 @@ class TestTheBoardOnTheServePort(_Env):
 
 
 def test_the_board_records_its_chat_through_the_serve_route():
-    src = (Path(__file__).resolve().parent.parent / "membrane" / "ui" / "home.js").read_text()
+    ui = Path(__file__).resolve().parent.parent / "membrane" / "ui"
+    src = (ui / "decisions.js").read_text() + (ui / "home.js").read_text()
     assert '"/membrane/decision/chat"' in src
     assert '"/membrane/entity/edit"' not in src
