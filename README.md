@@ -1,6 +1,5 @@
-![babyseat](docs/logo/logo-1280x640.png)
-
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23550667.svg)](https://doi.org/10.5281/zenodo.23550667)
+![babyseat](docs/logo/logo-1280x640.png)
 
 **Talk to it. It remembers.**
 
