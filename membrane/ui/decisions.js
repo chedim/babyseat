@@ -116,6 +116,93 @@ function pastLink(card, chatSid) {
            open: chat && chat !== chatSid ? chat : null, message };
 }
 
+// ---------------------------------------------------------------- the graph
+// (#470 round 2, "chomping through uncertainty by making decisions"): past
+// decisions led_to the work in flight, which the open decisions above block.
+// The bands keep their own order (the first to decide / the newest nearest
+// the bar); the graph picks each card's SIDE, and orders the in-flight band.
+
+/** The card->card adjacency: eid -> sorted neighbour eids (either direction). */
+function adjacency(board) {
+  const ids = new Set(((board && board.cards) || []).map((c) => c.eid)), adj = new Map();
+  for (const id of ids) adj.set(id, new Set());
+  for (const e of (board && board.edges) || []) {
+    if (ids.has(e.from) && ids.has(e.to) && e.from !== e.to) { adj.get(e.from).add(e.to); adj.get(e.to).add(e.from); }
+  }
+  return adj;
+}
+
+/** The cards a card is linked to (for the hover), sorted. */
+function graphNeighbors(board, eid) {
+  const n = adjacency(board).get(eid);
+  return n ? [...n].sort() : [];
+}
+
+/** Sides for one band: each card goes where its placed neighbours are (left
+ * counts +1, right -1); the card with the strongest pull is placed first (ties
+ * in the band's order), so a card linked only within its band follows the
+ * neighbour once that one is placed; no pull: the emptier side; no side takes
+ * more than half (rounded up). */
+function assignSides(list, adj, sideOf) {
+  const cap = Math.ceil(list.length / 2), n = { left: 0, right: 0 };
+  const score = (c) => {
+    let v = 0;
+    for (const nb of adj.get(c.eid) || []) v += sideOf[nb] === "left" ? 1 : sideOf[nb] === "right" ? -1 : 0;
+    return v;
+  };
+  const left = list.slice();
+  while (left.length) {
+    let best = 0, bs = score(left[0]);
+    for (let i = 1; i < left.length; i++) { const v = score(left[i]); if (Math.abs(v) > Math.abs(bs)) { best = i; bs = v; } }
+    const [c] = left.splice(best, 1);
+    let side = bs > 0 ? "left" : bs < 0 ? "right" : (n.left <= n.right ? "left" : "right");
+    if (n[side] >= cap) side = side === "left" ? "right" : "left";
+    n[side]++; sideOf[c.eid] = side;
+  }
+}
+
+/** The cockpit's graph layout: {future, now, past: {left, right}, gone}, each
+ * side list nearest the bar first. opts: narrow (one column, the bands' own
+ * order), pastRows (the past rows kept in view, PAST_ROWS by default). */
+function graphLayout(board, opts) {
+  const o = opts || {}, b = bands(board);
+  const past = pushOut(b.past, o.pastRows == null ? PAST_ROWS : o.pastRows);
+  if (o.narrow) {
+    return { future: { left: b.future, right: [] }, now: { left: b.now, right: [] },
+             past: { left: past.shown, right: [] }, gone: past.gone };
+  }
+  const adj = adjacency(board), sideOf = {};
+  const split = (list) => ({ left: list.filter((c) => sideOf[c.eid] === "left"), right: list.filter((c) => sideOf[c.eid] === "right") });
+  b.now.forEach((c, i) => { sideOf[c.eid] = i % 2 ? "right" : "left"; });    // a first guess: alternation
+  const outer = () => {
+    for (const c of b.future.concat(past.shown)) delete sideOf[c.eid];
+    assignSides(b.future, adj, sideOf);
+    assignSides(past.shown, adj, sideOf);
+  };
+  outer();
+  // the work in flight follows its decisions and questions...
+  for (const c of b.now) delete sideOf[c.eid];
+  assignSides(b.now, adj, sideOf);
+  outer();                                                                    // the outer bands again, against the final work
+  const fut = split(b.future), pst = split(past.shown), row = {};
+  for (const l of [fut.left, fut.right, pst.left, pst.right]) l.forEach((c, i) => { row[c.eid] = i; });
+  // ...ordered by its neighbours' rows (a card with none after the linked ones), then by title
+  const bary = (c) => {
+    const r = [...(adj.get(c.eid) || [])].filter((x) => x in row).map((x) => row[x]);
+    return r.length ? r.reduce((a, x) => a + x, 0) / r.length : Infinity;
+  };
+  const nowOrder = b.now.slice().sort((x, y) => (bary(x) - bary(y)) || String(x.title).localeCompare(String(y.title)));
+  const now = { left: nowOrder.filter((c) => sideOf[c.eid] === "left"), right: nowOrder.filter((c) => sideOf[c.eid] === "right") };
+  return { future: fut, now, past: pst, gone: past.gone };
+}
+
+/** An edge's HUD style: amber when it touches the past (what led here), cyan
+ * between the work and the questions; dashed for blocks. */
+function edgeStyle(e, bandOf) {
+  const past = bandOf[e.from] === "past" || bandOf[e.to] === "past";
+  return { tone: past ? "amber" : "cyan", dashed: e.rel === "blocks" };
+}
+
 function blockersFirst(cards, edges) {
   const ids = new Set(cards.map((c) => c.eid));
   const blockedBy = new Map(cards.map((c) => [c.eid, new Set()]));
@@ -198,7 +285,7 @@ function age(iso, now) {
   return Math.round(s / 86400) + " days ago";
 }
 
-const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, goalsShown, loadCard, answerLink, pastLink,
+const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
   blockersFirst, cardEdges, inputSpec, pickText, valueText, askText, age, POLL_MS, PAST_ROWS, GOALS_MAX };
 if (typeof module !== "undefined" && module.exports) module.exports = DecisionLogic;
 if (typeof window !== "undefined") window.DecisionLogic = DecisionLogic;   // home.js builds the chat's message with it
@@ -223,8 +310,17 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     /* the NOW line: across the page at the bar's height */
     .nowline { grid-row:2; grid-column:1 / -1; align-self:start; margin-top:28px; height:1px; pointer-events:none;
                background:linear-gradient(90deg, transparent, var(--line) 12%, var(--line) 88%, transparent); }
-    .band { position:relative; min-height:0; display:flex; flex-direction:column; gap:10px; padding:6px 2px;
+    .band { position:relative; z-index:1; min-height:0; display:flex; flex-direction:column; gap:10px; padding:6px 2px;
             perspective:900px; }
+    /* THE GRAPH: the card->card edges, under the cards and the center column,
+       over the background field; faded where they pass behind the bar and chat */
+    svg.graph { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; overflow:visible; }
+    svg.graph path.e { fill:none; stroke-width:1.4; opacity:.7; transition:opacity .2s ease, stroke-width .2s ease; }
+    svg.graph path.e.amber { stroke:var(--amber); } svg.graph path.e.cyan { stroke:var(--cyan); }
+    svg.graph path.e.dashed { stroke-dasharray:5 4; }
+    svg.graph marker path { stroke:none; } svg.graph #ck-arrow-amber path { fill:var(--amber); } svg.graph #ck-arrow-cyan path { fill:var(--cyan); }
+    svg.graph.hl path.e { opacity:.12; } svg.graph.hl path.e.on { opacity:1; stroke-width:2.2; }
+    .dc.nb { border-color:var(--cyan); box-shadow:0 0 12px rgba(95,214,255,.35); }
     .band.future { flex-direction:column-reverse; overflow-y:auto; scrollbar-width:thin; padding-bottom:10px; }
     .band.now { padding:4px 2px 10px; min-height:64px; }
     .band.past { overflow:hidden; padding-top:10px; }
@@ -267,7 +363,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .empty { font-size:12px; opacity:.4; letter-spacing:.04em; }
     .fr .empty, .nr .empty, .pr .empty { text-align:right; }
     /* the center column */
-    .ct { display:flex; flex-direction:column; min-height:0; }
+    .ct { position:relative; z-index:1; display:flex; flex-direction:column; min-height:0; }
     .goals { flex:none; text-align:center; padding:4px 12px 6px; margin:0 auto; max-width:100%; border-radius:4px;
              background:var(--ck-backing); text-shadow:0 1px 2px #000; }
     .goals ul { list-style:none; margin:4px 0 0; padding:0; display:flex; flex-direction:column; gap:2px; align-items:center; }
@@ -278,7 +374,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .mark { position:relative; flex:1; min-height:80px; pointer-events:none; }
     .logo { position:absolute; left:50%; top:50%; width:56px; height:56px; transform:translate(-50%,-50%);
             pointer-events:none; filter:drop-shadow(0 0 10px rgba(95,214,255,.45)); opacity:.95; }
-    .cc { position:relative; min-height:0; display:flex; flex-direction:column; }
+    .cc { position:relative; z-index:1; min-height:0; display:flex; flex-direction:column; }
     .cc ::slotted(ai-terminal-panel) { flex:1; min-height:0; height:auto; }
     .msg { position:absolute; left:0; right:0; bottom:4px; text-align:center; font-size:12px; opacity:.6; pointer-events:none; }
     @media (prefers-reduced-motion: reduce) { .dc { transition:none; } }
@@ -286,7 +382,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     @media ${NARROW} {
       :host { overflow-y:auto; }
       .ck { display:flex; flex-direction:column; height:auto; min-height:100%; padding:8px 12px 16px; gap:8px; }
-      .fr, .nr, .pr, .nowline { display:none; }
+      .fr, .nr, .pr, .nowline, svg.graph { display:none; }   /* a phone: no lines, the links are chips */
       .band.future, .band.past { overflow:visible; }
       .fl { order:2; } .ct { order:1; } .nl { order:3; } .cc { order:4; height:72vh; height:72dvh; } .pl { order:5; }
       .mark { flex:none; height:84px; }
@@ -311,6 +407,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     connectedCallback() {
       if (!this._root) {
         this.shadowRoot.innerHTML = `<style>${STYLE}</style><div class="ck">
+          <svg class="graph" aria-hidden="true"></svg>
           <div class="nowline" aria-hidden="true"></div>
           <section class="band future fl" aria-label="to decide, left"></section>
           <div class="ct"><div class="goals" aria-label="goals"></div>
@@ -334,9 +431,20 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         });
         this._root.addEventListener("submit", (e) => { e.preventDefault(); this._answer(e.target); });
         // a past card: hover (or focus) finds where it was decided
-        this._root.addEventListener("pointerover", (e) => this._hover(e.target.closest && e.target.closest(".past .dc")));
-        this._root.addEventListener("focusin", (e) => this._hover(e.target.closest && e.target.closest(".past .dc")));
-        this._root.addEventListener("pointerleave", () => this._hover(null));
+        // any card: hover (or focus) lights its edges and its neighbours
+        const over = (e) => {
+          const c = e.target.closest && e.target.closest(".dc");
+          this._hover(c && c.closest(".past") ? c : null);
+          this._graphHover(c || null);
+        };
+        this._root.addEventListener("pointerover", over);
+        this._root.addEventListener("focusin", over);
+        this._root.addEventListener("pointerleave", () => { this._hover(null); this._graphHover(null); });
+        // the lines follow the cards: a resize, a scrolled pile, a card's depth transition
+        this._redraw = () => { if (!this._rafG) this._rafG = requestAnimationFrame(() => { this._rafG = 0; this._drawGraph(); }); };
+        window.addEventListener("resize", this._redraw);
+        this._root.addEventListener("scroll", this._redraw, true);
+        this._root.addEventListener("transitionend", this._redraw);
         this._mq = window.matchMedia(NARROW);
         this._onMq = () => this._paint();
         if (this._mq.addEventListener) this._mq.addEventListener("change", this._onMq);
@@ -346,7 +454,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       this._timer = setInterval(() => { if (!document.hidden && !this._editing()) this._load(); }, POLL_MS);
     }
 
-    disconnectedCallback() { clearInterval(this._timer); }
+    disconnectedCallback() { clearInterval(this._timer); window.removeEventListener("resize", this._redraw); }
 
     _chat() { return (this._api && this._api.chat) || null; }
     _sid() { const c = this._chat(); return (c && c.sessionId) || ""; }
@@ -406,11 +514,13 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       const narrow = !!(this._mq && this._mq.matches);
       const b = bands(this._board), titles = {};
       for (const c of (this._board && this._board.cards) || []) titles[c.eid] = c.title;
-      // every edge is a chip on its card (to another card: its title)
+      // the graph: card->card edges are lines (on a phone, chips naming the other card);
+      // an edge to work outside the board (carried_by: PR #468) is a chip either way
       const ce = cardEdges(this._board), chips = ce.chips;
-      for (const e of ce.lines) (chips[e.from] = chips[e.from] || []).push({ rel: e.rel, to: e.to });
-      const past = pushOut(b.past, narrow ? PAST_ROWS * 2 : PAST_ROWS);
-      const lists = { future: sideLists(b.future, narrow), now: sideLists(b.now, narrow), past: sideLists(past.shown, narrow) };
+      if (narrow) for (const e of ce.lines) (chips[e.from] = chips[e.from] || []).push({ rel: e.rel, to: e.to });
+      const lay = graphLayout(this._board, { narrow, pastRows: narrow ? PAST_ROWS * 2 : PAST_ROWS });
+      const past = { gone: lay.gone };
+      const lists = { future: lay.future, now: lay.now, past: lay.past };
       const label = { future: "to decide ▲", now: "in flight", past: "decided ▼" };
       const empty = { future: "no open questions", now: "nothing in flight", past: "nothing decided yet" };
       const keepFocus = this.shadowRoot.activeElement && this.shadowRoot.activeElement.closest &&
@@ -431,10 +541,77 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         }
       }
       this._paintGoals();
+      this._lines = narrow ? [] : ce.lines;
+      this._bandOf = {};
+      for (const k of ["future", "now", "past"]) for (const c of b[k]) this._bandOf[c.eid] = k;
+      this._redraw();
       if (focusEid) {
         const again = this._root.querySelector(`.dc[data-eid="${CSS.escape(focusEid)}"]`);
         if (again) again.focus({ preventScroll: true });
       }
+    }
+
+    /** The edges as lines between the cards' rects: the same side, a loop out
+     * into the page margin; across, from inner edge to inner edge, through
+     * (behind) the center column, which a mask fades them under. */
+    _drawGraph() {
+      const svg = this._root && this._root.querySelector("svg.graph");
+      if (!svg) return;
+      const lines = this._lines || [];
+      if (!lines.length) { svg.innerHTML = ""; return; }
+      const box = this._root.getBoundingClientRect();
+      const rect = (eid) => {
+        const el = this._root.querySelector(`.dc[data-eid="${CSS.escape(eid)}"]`);
+        if (!el) return null;
+        const r = el.getBoundingClientRect(), band = el.closest(".band").getBoundingClientRect();
+        if (r.bottom < band.top || r.top > band.bottom) return null;           // scrolled out of its pile
+        return { l: r.left - box.left, r: r.right - box.left, t: r.top - box.top, b: r.bottom - box.top,
+                 cx: (r.left + r.right) / 2 - box.left, cy: (r.top + r.bottom) / 2 - box.top };
+      };
+      const mid = box.width / 2, paths = [];
+      for (const e of lines) {
+        const a = rect(e.from), z = rect(e.to);
+        if (!a || !z) continue;
+        const aLeft = a.cx < mid, zLeft = z.cx < mid;
+        let d;
+        if (aLeft === zLeft) {                                              // one side: a loop in the margin
+          const x1 = aLeft ? a.l : a.r, x2 = aLeft ? z.l : z.r, bulge = aLeft ? -26 : 26;
+          const x = (aLeft ? Math.min(x1, x2) : Math.max(x1, x2)) + bulge;
+          d = `M${x1},${a.cy} C${x},${a.cy} ${x},${z.cy} ${x2},${z.cy}`;
+        } else {                                                            // across the center
+          const x1 = aLeft ? a.r : a.l, x2 = zLeft ? z.r : z.l, mx = (x1 + x2) / 2;
+          d = `M${x1},${a.cy} C${mx},${a.cy} ${mx},${z.cy} ${x2},${z.cy}`;
+        }
+        const st = edgeStyle(e, this._bandOf || {});
+        paths.push(`<path class="e ${st.tone}${st.dashed ? " dashed" : ""}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${d}" ` +
+          `marker-end="url(#ck-arrow-${st.tone})" mask="url(#ck-fade)"><title>${esc(e.rel.replace("_", " "))}</title></path>`);
+      }
+      // the mask: full strength everywhere but the center column (the goals, the bar, the chat)
+      const cc = this._root.querySelector(".cc").getBoundingClientRect();
+      const fx = cc.left - box.left - 4, fw = cc.width + 8;
+      svg.innerHTML = `<defs><mask id="ck-fade" maskUnits="userSpaceOnUse" x="0" y="0" width="${box.width}" height="${box.height}">` +
+        `<rect x="0" y="0" width="${box.width}" height="${box.height}" fill="#fff"></rect>` +
+        `<rect x="${fx}" y="0" width="${fw}" height="${box.height}" fill="#383838"></rect></mask>` +
+        ["amber", "cyan"].map((t) => `<marker id="ck-arrow-${t}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker>`).join("") +
+        `</defs>` + paths.join("");
+      if (this._hl) this._graphHover(this._hl, true);
+    }
+
+    /** A hovered card lights its edges and its neighbours (null: all lines again). */
+    _graphHover(el, again) {
+      const eid = el && el.dataset ? el.dataset.eid : null;
+      if (!again && (this._hl ? this._hl.dataset.eid : null) === eid) return;
+      this._hl = el || null;
+      const svg = this._root.querySelector("svg.graph");
+      for (const n of this._root.querySelectorAll(".dc.nb")) n.classList.remove("nb");
+      if (svg) for (const p of svg.querySelectorAll("path.e.on")) p.classList.remove("on");
+      if (!eid) { if (svg) svg.classList.remove("hl"); return; }
+      const nbs = graphNeighbors(this._board, eid);
+      if (svg) {
+        svg.classList.toggle("hl", nbs.length > 0);
+        for (const p of svg.querySelectorAll("path.e")) if (p.dataset.from === eid || p.dataset.to === eid) p.classList.add("on");
+      }
+      for (const n of nbs) { const c = this._root.querySelector(`.dc[data-eid="${CSS.escape(n)}"]`); if (c) c.classList.add("nb"); }
     }
 
     _paintGoals() {
