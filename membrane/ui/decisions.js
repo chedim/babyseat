@@ -231,12 +231,18 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .gone { font-size:11px; opacity:.45; text-align:center; letter-spacing:.08em; }
     /* a card: a chamfered HUD panel */
     .dc { position:relative; flex:none; cursor:pointer; padding:9px 12px; outline:none; background:var(--panel);
-          border:1px solid var(--line); clip-path:polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+          --edge:var(--line); border:1px solid; border-color:var(--edge);
+          clip-path:polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
           transition:transform .45s ease, opacity .45s ease, border-color .2s ease; }
+    /* the clip cuts the border at the two chamfers: each draws its own diagonal */
+    .dc::before, .dc::after { content:""; position:absolute; width:14.2px; height:2px; margin-top:-1px;
+          background:var(--edge); transform:rotate(-45deg); transform-origin:0 50%; pointer-events:none; }
+    .dc::before { left:0; top:10px; }
+    .dc::after { left:calc(100% - 10px); top:100%; }
     .future .dc { transform-origin:50% 100%; } .past .dc { transform-origin:50% 0; }
-    .dc:hover, .dc.lit { border-color:var(--cyan); }
-    .dc:focus-visible { border-color:var(--cyan); box-shadow:inset 0 0 0 1px var(--cyan); }
-    .now .dc { border-color:var(--cyan); box-shadow:inset 3px 0 0 var(--cyan); }
+    .dc:hover, .dc.lit { --edge:var(--cyan); }
+    .dc:focus-visible { --edge:var(--cyan); box-shadow:inset 0 0 0 1px var(--cyan); }
+    .now .dc { --edge:var(--cyan); box-shadow:inset 3px 0 0 var(--cyan); }
     .nr .dc { box-shadow:inset -3px 0 0 var(--cyan); }
     .dc .t { font-weight:600; overflow-wrap:anywhere; line-height:1.3; }
     .dc .d { font-size:12.5px; opacity:.75; margin-top:3px; overflow-wrap:anywhere;

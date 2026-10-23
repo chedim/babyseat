@@ -144,3 +144,19 @@ def test_the_cockpit_view_reuses_the_chat_and_the_field():
     assert "/membrane/goals" in (UI / "decisions.js").read_text()
     # the decisions view boots the field (a small one), the chat view still doesn't
     assert 'VIEW === "chat") {' in src
+
+
+def test_the_camera_hint_never_shows_over_the_cockpit():
+    """'Blurp is not moving yet' is the 3D view's camera hint; in the cockpit it
+    landed right under the input bar (operator, 2026-10-23)."""
+    src = (UI / "home.js").read_text()
+    assert ".view-decisions .msg" in src
+
+
+def test_the_chamfered_corners_draw_their_edge():
+    """The cards' cut corners are clipped with clip-path, which cut the border
+    too: the top-left and bottom-right edges never rendered. Each corner draws
+    its own diagonal in the card's edge colour."""
+    src = (UI / "decisions.js").read_text()
+    assert ".dc::before" in src and ".dc::after" in src
+    assert "border-color:var(--edge)" in src
