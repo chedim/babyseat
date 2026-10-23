@@ -98,8 +98,8 @@ def _expect_passes_turns_not(t0=1000.0, n=110):
 def test_the_tree_has_stable_ids_branches_and_real_edges():
     A = SL.ACHIEVEMENTS
     assert list(A) == ORDER
-    assert [a for a in A if A[a]["built"]] == [a for a in BUILT if a not in ("meet", "turns", "expect", "mirror")]   # #333
-    assert A["nudge"]["prereqs"] == ("feel",) and not A["nudge"]["built"]    # #333: first reach, its test to come
+    assert [a for a in A if A[a]["built"]] == [a for a in BUILT if a not in ("meet", "turns", "expect", "mirror")] + ["nudge"]   # #333
+    assert A["nudge"]["prereqs"] == ("feel",) and A["nudge"]["built"]    # #333 part 3c: first reach, its test built
     br = {a: A[a]["branch"] for a in A}
     assert br["feel"] == "self"
     assert {br[a] for a in ("reach", "kinds", "patience", "shift")} == {"world"}
@@ -165,7 +165,7 @@ def test_expect_is_earned_while_turns_stays_open():
     st = SL.status(srv)
     assert st["level"] == 7
     assert st["rung_name"] == "expect a reply"                     # #300
-    assert st["next"] == ["turns", "mirror"]                       # #312: mirror opens with feel + meet
+    assert st["next"] == ["turns", "mirror", "nudge"]              # #312: mirror opens with feel + meet; #333: first reach with feel
     assert [e["id"] for e in st["earned"]][-1] == "expect"
     tree = {t["id"]: t for t in SS.compute(srv)["tree"]}
     assert tree["expect"]["state"] == "earned" and tree["turns"]["state"] == "open"
@@ -260,7 +260,7 @@ def test_the_card_counts_achievements():
     srv = _seat(rungs=(1, 2, 3, 4, 5, 6), limit="all", lines=_expect_passes_turns_not())
     SL._open_rungs(srv)
     c = SS.card(srv)
-    assert c["level"] == 7 and c["rung_name"] == "expect a reply" and c["next"] == ["turns", "mirror"]   # #300, #312
+    assert c["level"] == 7 and c["rung_name"] == "expect a reply" and c["next"] == ["turns", "mirror", "nudge"]   # #300, #312, #333
 
 
 # ---- 6. the toys unlock by achievement -------------------------------------------------------

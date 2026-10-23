@@ -124,7 +124,8 @@ def _world(seed, n, summary=False, things=6, voids=True):
     words = [C + f"w:t{j}" for j in range(things)]
     ts = T0 + 10
     asked_ts = []
-    ids = [i for i, a in SL.ACHIEVEMENTS.items() if a["rung"] in SL.PROGRESS]   # a pass status() can read
+    ids = [i for i, a in SL.ACHIEVEMENTS.items() if a["rung"] in SL.PROGRESS
+           and a["rung"] != 13]   # a pass status() can read (#333 3c: the pinned worlds predate first reach's test)
     for i in range(n):
         ts += rng.uniform(0.5, 30.0) if rng.random() > 0.01 else rng.uniform(700, 2000)   # a stall now and then
         t = ts

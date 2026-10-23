@@ -45,7 +45,7 @@ rule.
 | `mirror` | recognize itself (9, #312; not built, #333) | self (#329) | feel, meet | feel: what the mirror shows is its own moves, the body whose steering feel's pass switches on; meet: it labels the glass and the stranger with meet's self/other split (Brier-style skill ≥ 0.9: my body) | ~18 mo: the mirror test (Amsterdam 1972) |
 | `change` | change itself (10, #320) | self (#329) | mirror, patience | mirror: it changes only a self it recognizes -- its own learning's settings, by replaying its own record; patience: the looks its dream replays are patience's timed looks, whose p reads the rate fit it tunes | ~4-5 y: picks how it learns by its own track record, keeping a change only when it works better (adaptive strategy choice, Siegler & Shrager 1984). Until #320 the tree said ~4 y, metacognition in general; the test measures strategy choice |
 | `speak` | speak (11, #311) | later | turns, expect | its words take turns: its timing is time its turn's policy, and one stage is that skill's contingency; its outcome is expect a reply's reply check after each push | ~12 mo: first referential words, naming a thing to an other (Bates, Camaioni & Volterra 1975). Until #311 the tree said ~4 y, autobiographical narrative; the test measures first words, not a story |
-| `nudge` | first reach (13, #333; its test comes with the rebuilt rungs, so not built yet) | world | feel | a nudge is its own move into a thing (the direction and the force are its stride), and it aims only once feel's pass switches steering on | ~2-3 mo: its kicks move a mobile (Rovee-Collier, contingency learning) |
+| `nudge` | first reach (13, #333; its test: [part 3c](#first-reach-rung-13-333-part-3c)) | world | feel | a nudge is its own move into a thing (the direction and the force are its stride), and it aims only once feel's pass switches steering on | ~2-3 mo: its kicks move a mobile (Rovee-Collier, contingency learning) |
 | `invent` | invent | later, not built | change, speak | planned | ~5 y: games with its own rules |
 
 - **Earning** appends `{"kind": "achieve", "id": "expect", "rung": 8, "ts": ...,
@@ -275,8 +275,38 @@ aim (every `AIM_HOLD` 300 s), never per cycle:
 
 The look curiosity is unchanged: nudged looks stay out of it, out of rungs
 2-5, the tempo and λ (part 3a). The sleep's summary keeps each thing's last
-20 nudge checks, so the tilt reads the same after a consolidation. Both
+20 nudge checks (30 since part 3c, for first reach), so the tilt reads the same after a consolidation. Both
 values were approved by the operator (2026-10-21).
+
+### First reach (rung 13, #333, part 3c)
+
+The nudge skill's test: **does its nudge change what it next sees, beyond
+the thing's tempo?** It reads Blurp's nudge checks (nudged looks, `nudged`
+≥ 1, answered, outside every audit) at one thing, the last
+`RUNG13_LOOKS` of them, in three stages:
+
+1. **Looks:** at least `RUNG13_LOOKS` = 30 (about one `LAM_LOOKS`: enough
+   for the prequential `p_n` to warm up and still be scored).
+2. **Skill:** the Brier skill of `p_n` over the tempo prediction `p` on
+   those same looks, `1 − B(p_n)/B(p)`, at least `RUNG13_SKILL` = 0.2
+   (rung 2's bar).
+3. **Audit** (ground truth, the toy log's changers, never fed to Blurp):
+   among those looks that found a change and carry `by`, at least
+   `RUNG13_AUDIT_SHARE` = 0.9 include `self`, over at least
+   `RUNG13_AUDIT_MIN` = 5 such looks. The change was its nudge, not the
+   person (`self` among the changers counts even when the person played at
+   the same moment; the 0.1 is the slack for that).
+
+The best thing counts, as in rung 2; the pass line names it (`eid`) and,
+like every pass, carries `"ladder": 3`. A thing on its own tempo (body,
+fast, slow, drift) can't pass: its tempo already predicts it, so `p_n` adds
+nothing however often it is nudged. A tower block passes when a nudge
+reliably moves it. A thing the person changes right after each nudge has the
+skill but fails the audit. The sheet lists the three stages (nudged looks,
+nudge-aware skill over its tempo, its own changes). The sleep's summary
+keeps each thing's last 30 nudge checks whole (with `by`), so the test reads
+the same after a consolidation. All four values were approved by the
+operator (2026-10-21).
 
 **The level drop (LADDER_V = 3).** The audit in #333 found meet, time its
 turn, expect a reply and recognize itself to be the developer's wiring (the

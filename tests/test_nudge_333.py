@@ -136,7 +136,7 @@ def test_the_ladder_version_is_3_and_the_rebuilt_rungs_are_not_built_yet():
     assert SL.ACHIEVEMENTS["reach"]["name"] == "look"           # rung 2's pass, kept as the look
     assert SL.ACHIEVEMENTS["reach"]["built"] is True
     nd = SL.ACHIEVEMENTS["nudge"]
-    assert nd["name"] == "first reach" and nd["prereqs"] == ("feel",) and nd["built"] is False
+    assert nd["name"] == "first reach" and nd["prereqs"] == ("feel",) and nd["built"] is True   # part 3c
 
 
 def test_an_old_blurp_drops_to_level_5_feel_look_kinds_patience_shift():

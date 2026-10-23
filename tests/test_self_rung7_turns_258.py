@@ -370,7 +370,7 @@ def test_the_voided_old_rung_seven_pass_stays_void_and_counts_for_neither_rung()
     done = SL._passed(SL._read(srv))
     assert 7 not in done and 8 not in done
     st = SL.status(srv)
-    assert st["rung"] == 6 and st["next"] == ["turns", "expect", "mirror"] and st["rung_name"] == "meet an other"   # #295: siblings (#312: mirror)
+    assert st["rung"] == 6 and st["next"] == ["turns", "expect", "mirror", "nudge"] and st["rung_name"] == "meet an other"   # #295: siblings (#312: mirror)
     assert next(r for r in st["ladder"] if r["rung"] == 7)["name"] == "time its turn"     # #300
 
 
@@ -402,7 +402,7 @@ def test_the_numbering():
         "notice the world changed", "meet an other"]                  # rungs 0-6 unchanged
     assert SL.RUNG_NAMES[7] == "time its turn" and SL.RUNG_NAMES[8] == "expect a reply"   # #300: named for their tests
     assert SL.RUNG_NAMES[9] == "recognize itself"
-    assert sorted(SL.LADDER) == list(range(12))                 # #311: speak; #312: recognize itself; #320: change
+    assert sorted(SL.LADDER) == list(range(12)) + [13]          # #311: speak; #312: recognize itself; #320: change; #333: first reach
     assert SL.PROGRESS[7] is SL._rung7 and SL.PROGRESS[8] is SL._rung8
     for n, fn in ((1, SL._rung1), (2, SL._rung2), (3, SL._rung3), (4, SL._rung4), (5, SL._rung5), (6, SL._rung6)):
         assert SL.PROGRESS[n] is fn

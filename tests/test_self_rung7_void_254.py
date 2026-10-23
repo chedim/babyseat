@@ -65,7 +65,7 @@ def test_the_old_scorers_pass_is_voided_not_deleted():
     assert [r["ts"] for r in _lines(srv, "rung") if r["rung"] == 7] == [OLD7]   # the line stays
     assert 7 not in SL._passed(SL._read(srv)) and 8 not in SL._passed(SL._read(srv))
     st = SL.status(srv)
-    assert st["rung"] == 6 and st["next"] == ["turns", "expect", "mirror"]   # #295: siblings (#312: and the mirror)
+    assert st["rung"] == 6 and st["next"] == ["turns", "expect", "mirror", "nudge"]   # #295: siblings (#312: and the mirror)
 
 
 def test_earlier_rungs_are_unaffected():
