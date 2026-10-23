@@ -106,14 +106,17 @@ LOGIN_HINT = ("run `claude` once to log in, then "
 STATUS_TIMEOUT_S = 20
 CHECKIN_TOOL_CALLS = 7              # tool calls in a row without words to the
                                     # person (#425; approved 2026-10-21)
-MAX_TOOL_CALLS_PER_ANSWER = 50      # the hard ceiling per answer; Continue
-                                    # gives a fresh one (#425; approved 2026-10-21)
+MAX_TOOL_CALLS_PER_ANSWER = 2048    # the hard ceiling per answer; Continue
+                                    # gives a fresh one (#425; 50 -> 2048 approved
+                                    # 2026-10-23, #467)
 MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: every
                                     # allowed call may take a turn and be
                                     # denied once first, so it never binds
                                     # before the ceiling (#425)
-CHECKIN_MESSAGE = ("Tell the person where you are first (one or two lines), "
-                   "then continue.")
+CHECKIN_MESSAGE = ("Check in: write one line telling the person where you "
+                   "are, in the same message as your next tool call (words "
+                   "first, then the call), not as a separate text-only "
+                   "reply; then continue.")
 CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
                    f"person can press Continue.")
@@ -534,7 +537,17 @@ def _coproc_hidden() -> frozenset:
     return _cp.RESERVED_TOOL_NAMES if _cp.enabled() else frozenset()
 
 
-def _tool_handler(name: str, port):
+def _footer(answer) -> str:
+    """The live count within this answer (#467): calls left before the
+    ceiling, and calls until the next check-in. No answer, no footer."""
+    if answer is None:
+        return ""
+    left = max(MAX_TOOL_CALLS_PER_ANSWER - answer.calls, 0)
+    nxt = max(CHECKIN_TOOL_CALLS - answer.streak, 0)
+    return f"\n\n\u00b7 {left} calls left \u00b7 check-in in {nxt}"
+
+
+def _tool_handler(name: str, port, answer=None):
     """The SDK tool's handler: the stdio MCP server's own function for
     `name` (mcp_server.TOOL_IMPLS), run off the event loop, relaying to this
     seat's proxy on `port`. A failure goes back to Claude as an error
@@ -547,22 +560,24 @@ def _tool_handler(name: str, port):
             if port is None:
                 raise _mcp.ProxyError(503, "the seat's proxy port is unknown")
             text = await asyncio.to_thread(impl, dict(args or {}), int(port))
-            return {"content": [{"type": "text", "text": str(text)}]}
+            return {"content": [{"type": "text",
+                                 "text": str(text) + _footer(answer)}]}
         except _mcp.ProxyError as e:
             msg = f"membrane tool error: {e.message}"
         except Exception as e:
             msg = f"membrane tool error: {e}"
-        return {"content": [{"type": "text", "text": msg}], "is_error": True}
+        return {"content": [{"type": "text", "text": msg + _footer(answer)}],
+                "is_error": True}
     return handler
 
 
-def build_mcp_server(sdk, port):
+def build_mcp_server(sdk, port, answer=None):
     """membrane's MCP surface as an in-process SDK MCP server: one SDK tool
     per mcp_server.TOOLS entry (its name, description and JSON schema),
     each run by the matching mcp_server.TOOL_IMPLS function."""
     from . import mcp_server as _mcp
     tools = [sdk.tool(t["name"], t["description"], t["inputSchema"])(
-                 _tool_handler(t["name"], port))
+                 _tool_handler(t["name"], port, answer))
              for t in _mcp.TOOLS if t["name"] in _mcp.TOOL_IMPLS
              and t["name"] not in _coproc_hidden()]
     return sdk.create_sdk_mcp_server(name=MCP_NAME, version=_mcp.SERVER_VERSION,
@@ -579,7 +594,7 @@ def build_options(sdk, system: str, model: str, stream: bool, port=None,
         system_prompt=system or None,
         tools=[],                  # Claude Code's built-in tools: off
         allowed_tools=tool_names(),  # only membrane's tools (#389)
-        mcp_servers={MCP_NAME: build_mcp_server(sdk, port)},
+        mcp_servers={MCP_NAME: build_mcp_server(sdk, port, answer)},
         strict_mcp_config=True,    # no user MCP config, no claude.ai connectors (#455)
         setting_sources=[],        # no settings files, no CLAUDE.md
         max_turns=MAX_TURNS,       # a backstop: the check-in hook paces (#425)
@@ -840,7 +855,9 @@ class JSONReply:
                 elif kind == "reasoning":
                     reasoning.append(val)
                 elif kind == "tool":
-                    self.tools.append(val)
+                    # where in the words the call came (#467): the stored
+                    # reply keeps text, call, text, call in order
+                    self.tools.append(dict(val, at=len("".join(text))))
                 elif kind == "usage":
                     usage = val
         except Exception as e:

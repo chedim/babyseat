@@ -6,7 +6,7 @@ answer, and a PreToolUse hook keeps Claude talking to the person.
   text; any text resets the count; the 8th consecutive call is DENIED with
   CHECKIN_MESSAGE -- the denial reaches Claude (the tool result it sees),
   never the person as an error -- and Claude speaks and goes on;
-- MAX_TOOL_CALLS_PER_ANSWER = 50: the hard ceiling; at it the run stops the
+- MAX_TOOL_CALLS_PER_ANSWER = 2048: the hard ceiling; at it the run stops the
   way the old cap did (the reply's cap mark, the row's claudeCapped, the
   person's Continue), and Continue resumes the same session with a fresh 50;
 - max_turns is only a backstop that never binds before the ceiling;
@@ -118,12 +118,15 @@ def scripted_sdk(plans, session_id="sess-1"):
 
 class _Case(unittest.TestCase):
     plans = [[("tools", 1), ("text", "done")]]
+    ceiling = None      # a class pins a small ceiling to reach it (the real one is 2048)
 
     def setUp(self):
         self.sdk = scripted_sdk(self.plans)
         self._p = [mock.patch.dict(sys.modules, {"claude_agent_sdk": self.sdk}),
                    mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude"),
                    key_fixture()]
+        if self.ceiling:
+            self._p.append(mock.patch.object(CA, "MAX_TOOL_CALLS_PER_ANSWER", self.ceiling))
         for p in self._p:
             p.start()
         CA.reset_stats()
@@ -143,7 +146,7 @@ class _Case(unittest.TestCase):
 class TestOptions(_Case):
     def test_the_approved_values(self):
         self.assertEqual(CA.CHECKIN_TOOL_CALLS, 7)
-        self.assertEqual(CA.MAX_TOOL_CALLS_PER_ANSWER, 50)
+        self.assertEqual(CA.MAX_TOOL_CALLS_PER_ANSWER, 2048)
 
     def test_max_turns_never_binds_before_the_ceiling(self):
         self._items()
@@ -178,7 +181,7 @@ class TestEighthDenied(_Case):
     def test_the_eighth_call_is_denied_with_the_message(self):
         got = self._items()
         self.assertEqual(self.sdk.seen_by_model, [CA.CHECKIN_MESSAGE])
-        self.assertIn("Tell the person where you are", CA.CHECKIN_MESSAGE)
+        self.assertIn("in the same message as your next tool call", CA.CHECKIN_MESSAGE)
         # Claude spoke, then the call ran: all 8, each once
         self.assertEqual(self.sdk.tool_runs, [f"l{n}" for n in range(1, 9)])
         self.assertIn(STATUS, "".join(v for k, v in got if k == "text"))
@@ -218,6 +221,7 @@ _TALKATIVE = [s for _ in range(12) for s in (("tools", 5), ("text", "five more d
 
 
 class TestCeiling(_Case):
+    ceiling = 50
     plans = [_TALKATIVE, [("tools", 10), ("text", "done")]]
 
     def test_the_ceiling_stops_the_run_and_offers_continue(self):
@@ -245,6 +249,7 @@ class TestCeiling(_Case):
 
 
 class TestBackstop(_Case):
+    ceiling = 50
     def test_the_sdk_turn_backstop_still_marks_the_cap(self):
         mod = self.sdk
 
@@ -262,6 +267,7 @@ class TestBackstop(_Case):
 # ---- the transcript ------------------------------------------------------------
 
 class TestTranscript(_Case):
+    ceiling = 50
     plans = [_TALKATIVE]
 
     def test_the_capped_row_and_no_error_parts(self):

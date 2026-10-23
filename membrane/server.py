@@ -2068,7 +2068,7 @@ class TurnRunner:
                         and _CA.person_agent((self._agents or {}).get(sid)):
                     body[_CA.RESUME_KEY] = str(_resume)
             mkpart({"type": "step-start"})
-            live = {"text": None, "reasoning": None}
+            live = {"text": None, "reasoning": None, "placed": 0}
             # THE DELTAS, BATCHED (2026-10-11, the operator: "the whole chat dynamics
             # is broken ... idle, offline, flaaaaky"): one event per token was ~100
             # a second -- HA's relay on a memory-starved agdroid fell behind and the
@@ -2095,6 +2095,19 @@ class TurnRunner:
                     # a tool Claude ran in its own loop (#389): shown, never re-run
                     for other in [k for k in _pend if _pend[k][0]]:
                         _flush(other)
+                    # THE REAL SEQUENCE (#467): the words up to this call are
+                    # their own part, closed here; the call's part follows;
+                    # the next words open a new part after it
+                    _lp = _live.get("text")
+                    if _lp is not None:
+                        _flush(_lp["id"])
+                        _lp["time"]["end"] = int(time.time() * 1000)
+                        self.hub.publish({"type": "message.part.updated",
+                                          "part": dict(_lp),
+                                          "time": int(time.time() * 1000),
+                                          "sessionID": sid})
+                        _live["placed"] += len(_lp["text"])
+                        _live["text"] = None
                     _agent_tool_part(val)
                     return False
                 p = _live.get(kind)
@@ -2197,7 +2210,22 @@ class TurnRunner:
             _ca_round = resp.get(_CA.RESP_KEY) == _CA.PROVIDER
             if _ca_round:
                 a_info[_CA.MARK_KEY] = _CA.PROVIDER
+                _raw = msg.get("content") or ""
                 for _t in resp.get(_CA.TOOLS_KEY) or []:
+                    # a buffered reply says where in the words each call came
+                    # (`at`, #467): the text before it is a part first
+                    _at = _t.get("at") if isinstance(_t, dict) else None
+                    if isinstance(_at, int) and live["text"] is None \
+                            and _at > live["placed"]:
+                        _seg = _raw[live["placed"]:_at]
+                        live["placed"] = _at
+                        if _seg.strip():
+                            _n = int(time.time() * 1000)
+                            _sp = mkpart({"type": "text", "text": _seg.strip(),
+                                          "time": {"start": _n, "end": _n}})
+                            self.hub.publish({"type": "message.part.updated",
+                                              "part": dict(_sp), "time": _n,
+                                              "sessionID": sid})
                     _agent_tool_part(_t)
                 # THE CEILING (#389, #425): stopped at the tool-call
                 # ceiling, not an error; the chat offers the person a
@@ -2500,7 +2528,11 @@ class TurnRunner:
                 mkpart({"type": "step-finish", "reason": "tool-calls",
                         "cost": 0, "tokens": dict(a_info["tokens"])})
                 continue
-            if content:
+            # the words after the last closed part (#467; all of them when no
+            # call split the reply)
+            _tail = (msg.get("content") or "")[live["placed"]:].strip() \
+                if live["placed"] else content
+            if _tail:
                 now = int(time.time() * 1000)
                 # real serve streams the text part: it opens EMPTY with
                 # time.start, the deltas ride, a final part.updated closes
@@ -2509,13 +2541,13 @@ class TurnRunner:
                 if part is None:
                     part = mkpart({"type": "text", "text": "",
                                    "time": {"start": now}})
-                    part["text"] = content
+                    part["text"] = _tail
                     self.hub.publish({"type": "message.part.delta",
                                       "sessionID": sid, "messageID": aid,
                                       "partID": part["id"], "field": "text",
-                                      "delta": content})
+                                      "delta": _tail})
                 else:
-                    part["text"] = content
+                    part["text"] = _tail
                 part["time"]["end"] = int(time.time() * 1000)
                 self.hub.publish({"type": "message.part.updated",
                                   "part": dict(part),
