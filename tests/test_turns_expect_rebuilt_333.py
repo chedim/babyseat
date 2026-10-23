@@ -130,8 +130,8 @@ def test_turns_and_expect_are_built_on_meet():
         assert i in SL.BUILT
         assert SL.PROGRESS[n] is getattr(SL, f"_rung{n}")
         assert SS.BUILT_AT[i]["pr"] == 481                          # rebuilt: built from this PR, not #281's
-        assert SS.BUILT_AT[i]["merged"] == dt.datetime(2026, 10, 23, 9, 0, 44,      # the PR's opening time
-                                                       tzinfo=dt.timezone.utc).timestamp()   # until its merge's
+        assert SS.BUILT_AT[i]["merged"] == dt.datetime(2026, 10, 23, 11, 52, 55,    # #481 merged
+                                                       tzinfo=dt.timezone.utc).timestamp()
     assert SL.ACHIEVEMENTS["speak"]["prereqs"] == ("turns", "expect")
     assert SL.SKILL_PASS[7] == SL.RUNG7_PAY_MARGIN and SL.SKILL_PASS[8] == SL.RUNG8_MARGIN
 

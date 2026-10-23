@@ -136,8 +136,8 @@ BUILT_AT = {
     "mirror": {"pr": 477, "merged": _utc(2026, 10, 23, 7, 7, 50)},
     # time its turn and expect a reply (#333 part 3f), rebuilt on meet's other -- the PR's opening time until
     # its merge's is set
-    "turns": {"pr": 481, "merged": _utc(2026, 10, 23, 9, 0, 44)},
-    "expect": {"pr": 481, "merged": _utc(2026, 10, 23, 9, 0, 44)},
+    "turns": {"pr": 481, "merged": _utc(2026, 10, 23, 11, 52, 55)},
+    "expect": {"pr": 481, "merged": _utc(2026, 10, 23, 11, 52, 55)},
 }
 RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop wrote a line every PACE_S (#343: faster now)
 WALL_WHY = "no built skill to learn: {next} not built yet"

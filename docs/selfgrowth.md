@@ -978,8 +978,8 @@ other turns is built only when the version that counts merged:
 | patience | #180 | 2026-10-16 16:29:14 | rungs 4 + 5 together |
 | notice the world changed | #180 | 2026-10-16 16:29:14 | there but broken until #191 (a bug window) |
 | meet an other | #479 | 2026-10-23 08:18:12 | #333 part 3e: rebuilt on delayed contingency; #187 (2026-10-16 19:24:02) built the old test, voided as the old wiring |
-| time its turn | #481 | 2026-10-23 09:00:44 | #333 part 3f: rebuilt on meet's other (the PR's opening time until a follow-up sets its merge); #281 (2026-10-19 15:19:43) built the old test, voided as the old wiring |
-| expect a reply | #481 | 2026-10-23 09:00:44 | #333 part 3f: rebuilt on meet's other (the PR's opening time until a follow-up sets its merge); #281 built the old test, voided as the old wiring |
+| time its turn | #481 | 2026-10-23 11:52:55 | #333 part 3f: rebuilt on meet's other; #281 (2026-10-19 15:19:43) built the old test, voided as the old wiring |
+| expect a reply | #481 | 2026-10-23 11:52:55 | #333 part 3f: rebuilt on meet's other; #281 built the old test, voided as the old wiring |
 | speak | #313 | 2026-10-20 12:55:39 | #311: its turns carry words from its record |
 | recognize itself | #477 | 2026-10-23 07:07:50 | #333 part 3d: rebuilt on looks at the mirror (its merge, #478); #314 (2026-10-20 13:21:13) built #312's, voided as the old wiring |
 | change itself | #326 | 2026-10-20 20:21:28 | #320, the dream and its test |
