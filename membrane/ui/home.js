@@ -48,8 +48,19 @@ const ACTIVITY_EVERY_MS = 1500;
 // THE VIEW (2026-10-13, the operator: the standalone burger menu "just with
 // links to chat-only and graph-only interfaces"): the standalone page puts
 // ?view= in the URL (index.html) -- chat alone (no field) or the field
-// alone (no chat); anything else is everything.
-const VIEW = (typeof window !== "undefined" && (window.MEMBRANE_VIEW === "chat" || window.MEMBRANE_VIEW === "graph")) ? window.MEMBRANE_VIEW : "";
+// alone (no chat); #470: ?view=decisions -- the project decision board;
+// anything else is everything.
+const VIEWS = ["chat", "graph", "decisions"];
+/** The view a ?view= value names ("" = everything). */
+function knownView(v) { return VIEWS.includes(v) ? v : ""; }
+/** The standalone menu's rows: the views, and Everything while one is shown. */
+function standaloneMenu(current) {
+  const rows = [{ v: "chat", icon: "💬", title: "Chat only" }, { v: "graph", icon: "🕸", title: "Graph only" },
+    { v: "decisions", icon: "🗂", title: "Decisions" }];
+  if (current) rows.push({ v: "", icon: "◎", title: "Everything" });
+  return rows.map((r) => Object.assign(r, { current: r.v === current }));
+}
+const VIEW = typeof window !== "undefined" ? knownView(window.MEMBRANE_VIEW) : "";
 
 /** The orbit angles that put the camera on the ray from the field's centre
  * through p (beyond it), so it looks at the centre THROUGH p -- the
@@ -1256,7 +1267,7 @@ class BlurpBodies {
   }
 }
 
-const HomeLogic = { pauseView, PauseButton, PAUSE_PATH, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
+const HomeLogic = { knownView, standaloneMenu, pauseView, PauseButton, PAUSE_PATH, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
@@ -1318,6 +1329,9 @@ const HSTYLE = `
   .view-chat .chat { left:12px; width:auto; }
   .view-chat .sbox, .view-chat .me, .view-chat .chatbtn,
   .view-chat .card, .view-chat .tip, .view-chat .field { display:none; }
+  /* #470: the decision board's view -- the board alone under the top bar */
+  .view-decisions .chat, .view-decisions .sbox, .view-decisions .me, .view-decisions .chatbtn,
+  .view-decisions .card, .view-decisions .tip, .view-decisions .field { display:none; }
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card { position:absolute; z-index:3; left:12px; bottom:12px; max-width:min(420px, calc(100% - 24px));
@@ -2763,12 +2777,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         // nothing to log out of -- the three views of the same page; the
         // view rides ?view= (VIEW). No <ha-icon> in standalone (HA's own
         // element): the icon is a plain span.
-        const self = new URLSearchParams(location.search).get("view") || "";
-        const row = (v, icon, title) => '<a role="menuitem" href="/' + (v ? "?view=" + v : "") + '"' +
-          (self === v ? ' aria-current="page"' : "") + '><span class="mi">' + icon +
-          '</span><span>' + esc(title) + "</span></a>";
-        this._menu.innerHTML = row("chat", "💬", "Chat only") + row("graph", "🕸", "Graph only") +
-          (self || VIEW ? row("", "◎", "Everything") : "");
+        const row = (r) => '<a role="menuitem" href="/' + (r.v ? "?view=" + r.v : "") + '"' +
+          (r.current ? ' aria-current="page"' : "") + '><span class="mi">' + r.icon +
+          '</span><span>' + esc(r.title) + "</span></a>";
+        this._menu.innerHTML = standaloneMenu(knownView(new URLSearchParams(location.search).get("view") || "") || VIEW)
+          .map(row).join("");
         return;
       }
       let order = [], hidden = [];
@@ -2917,10 +2930,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         $(".chatbtn").style.display = "none";
       } else if (VIEW === "chat") {
         root.classList.add("view-chat");
+      } else if (VIEW === "decisions") {
+        root.classList.add("view-decisions");      // #470: the board fills the screen
+        this._mountDecisions(root);
       }
       this._menu = $(".hamenu"); this._haBtn = $(".ha");
       this._haBtn.title = window.MEMBRANE_STANDALONE
-        ? "Membrane's interfaces: chat only, graph only, everything" : this._haBtn.title;
+        ? "Membrane's interfaces: chat only, graph only, decisions, everything" : this._haBtn.title;
       this._haBtn.addEventListener("click", () => this._toggleMenu());
       this._menu.addEventListener("click", (e) => {
         if (e.target.closest("a[data-logout]")) { e.preventDefault(); this._logout(); return; }
@@ -3129,6 +3145,37 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       return out;
     }
 
+    /** #470: the decision board, mounted in its own view. Clicking a card opens
+     * its chat: the card's own session, or a new one titled after the card
+     * (recorded on the card), with a message about the decision pre-filled. */
+    async _mountDecisions(root) {
+      try { await import("/ui/www/decisions.js"); } catch (e) { this._msgEl.textContent = "the board failed to load"; return; }
+      const post = async (p, b) => {
+        const r = await this._hass.fetchWithAuth(HSERVE + p, { method: "POST",
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+        let d = null; try { d = await r.json(); } catch (e) { /* no body */ }
+        if (!r.ok) throw new Error((d && d.error) || (r.status === 401 ? "the seat token is needed to decide" : String(r.status)));
+        return d;
+      };
+      const el = document.createElement("membrane-decisions");
+      el.api = {
+        get: (p) => this._get(p),
+        post,
+        openChat: async (card) => {
+          let sid = card.chat || "";
+          if (!sid) {
+            const s = await post("/session", { title: "Decision: " + String(card.title).slice(0, 60) });
+            sid = (s && s.id) || "";
+            if (sid) { try { await post("/membrane/entity/edit", { spec: card.eid, properties: { chat: sid } }); } catch (e) { /* the chat still opens */ } }
+          }
+          if (sid) lsSet("membrane.chat.sid", sid);       // the chat panel reopens this session
+          location.href = "/?view=chat&ask=" + encodeURIComponent(window.DecisionLogic ? window.DecisionLogic.askText(card) : card.title);
+        },
+      };
+      root.appendChild(el);
+      this._msgEl.style.display = "none";
+    }
+
     async _get(path) {
       const r = await this._hass.fetchWithAuth(HSERVE + path);
       const t = await r.text();
@@ -3141,7 +3188,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._started = true;
       const hass = this._hass;
       this._me = "person:" + personSlug(hass.user && hass.user.name);
-      if (VIEW === "chat") {          // THE VIEW: chat-only never boots the
+      if (VIEW === "chat" || VIEW === "decisions") {   // THE VIEW: chat-only (and the board) never boots the
         this._msgEl.style.display = "none"; return;   // field -- the camera
       }                                                 // loop is a no-op anyway
       try {
