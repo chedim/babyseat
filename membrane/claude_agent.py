@@ -162,6 +162,9 @@ def reset_stats() -> None:
             STATS[k] = 0
         for k in USAGE:
             USAGE[k] = 0
+        for led in STEPS.values():
+            for k in led:
+                led[k] = 0
 
 
 # ---- the prompt cache's ledger (#426) -------------------------------------------
@@ -184,13 +187,45 @@ def _record_usage(u: dict) -> None:
         USAGE["output"] += int(u.get("completion_tokens") or 0)
 
 
+# THE STEP LEDGER (#450): an answer is many API round trips (steps); the
+# SDK reports usage on each AssistantMessage. An answer's FIRST step writes
+# the fresh prompt to the cache (the transcript window, the banner, the
+# recall); its later steps append only the last reply and tool result.
+_SPLIT = ("input", "cache_read", "cache_write", "output")
+STEPS = {"first": {"steps": 0, **{k: 0 for k in _SPLIT}},
+         "later": {"steps": 0, **{k: 0 for k in _SPLIT}}}
+
+
+def _record_step(u: dict, first: bool) -> None:
+    """One API step's raw Anthropic usage onto the step ledger."""
+    led = STEPS["first" if first else "later"]
+    with _stats_lock:
+        led["steps"] += 1
+        led["input"] += int(u.get("input_tokens") or 0)
+        led["cache_read"] += int(u.get("cache_read_input_tokens") or 0)
+        led["cache_write"] += int(u.get("cache_creation_input_tokens") or 0)
+        led["output"] += int(u.get("output_tokens") or 0)
+
+
+def _avg(led: dict, n: int) -> dict:
+    return {k: (round(led[k] / n) if n else 0) for k in _SPLIT}
+
+
 def usage_stats() -> dict:
-    """The ledger plus per-call averages (diag/claude-agent)."""
+    """The ledger plus averages (diag/claude-agent): `per_answer` (also
+    `per_call`, its old name: one answer's summed usage) and, per API step,
+    the first steps apart from the later ones (#450)."""
     with _stats_lock:
         out = dict(USAGE)
-    n = out["calls"]
-    out["per_call"] = {k: (round(out[k] / n) if n else 0)
-                       for k in ("input", "cache_read", "cache_write", "output")}
+        first, later = dict(STEPS["first"]), dict(STEPS["later"])
+    out["per_answer"] = _avg(out, out["calls"])
+    out["per_call"] = dict(out["per_answer"])
+    nf, nl = first.pop("steps"), later.pop("steps")
+    both = {k: first[k] + later[k] for k in _SPLIT}
+    out["steps"] = {"steps": nf + nl, "first": first, "later": later,
+                    "per_step": _avg(both, nf + nl),
+                    "per_first_step": _avg(first, nf),
+                    "per_later_step": _avg(later, nl)}
     return out
 
 
@@ -652,8 +687,14 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
     capped = False
     pending: dict = {}                   # tool_use id -> (name, input)
     session = str(resume or "")
+    steps_seen: set = set()              # #450: one API response, counted once
     async for m in sdk.query(prompt=prompt, options=opts):
         kind = type(m).__name__
+        if kind == "AssistantMessage" and isinstance(getattr(m, "usage", None), dict):
+            mid = getattr(m, "message_id", None) or id(m)
+            if mid not in steps_seen:
+                steps_seen.add(mid)
+                put(("step", {"usage": m.usage, "first": len(steps_seen) == 1}))
         if getattr(m, "session_id", None):
             session = str(m.session_id)
         if kind == "StreamEvent":
@@ -743,6 +784,9 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
             raise item[1]
         if item[0] == "usage":
             _record_usage(item[1])
+        if item[0] == "step":                # the ledger's only (#450)
+            _record_step(item[1]["usage"], item[1]["first"])
+            continue
         yield item
 
 

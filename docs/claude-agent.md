@@ -139,9 +139,15 @@ unchanged (`prompt_tokens` is uncached input + cache reads + cache writes);
 `cache_write_tokens` (writes). The stored message tokens carry them as
 `tokens.cache.read` and `tokens.cache.write`; the uncached input is
 `tokens.input` minus both. `GET /membrane/diag/claude-agent` adds
-`usage: {calls, input, cache_read, cache_write, output, per_call}`: sums
-since the seat's boot (`input` is the uncached input) and the per-call
-averages.
+`usage: {calls, input, cache_read, cache_write, output, per_answer, per_call,
+steps}`: sums since the seat's boot (`input` is the uncached input). `calls`
+counts answers, and `per_answer` (still also `per_call`, its old name) is one
+answer's summed usage. One answer is many API round trips, so `steps` (#450)
+measures per step from the usage the SDK reports on each response:
+`{steps, first, later, per_step, per_first_step, per_later_step}`. An answer's
+**first** step writes the fresh prompt to the cache (the transcript window,
+the banner, the recall). Its **later** steps append only the last reply and
+tool result, and read the rest from the cache.
 
 ## Check-ins instead of a turn cap
 
