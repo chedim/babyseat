@@ -189,7 +189,7 @@ def test_the_cockpit_button_is_a_hud_pill_in_both_tones():
     # button's amber tone, the same pill as Send
     src = (UI / "panel.js").read_text()
     send = _cockpit_rule(src, ":host([cockpit]) .composer .btn.send")
-    assert "border-radius:999px" in send and "background:transparent" in send and "min-height:48px" in send
+    assert "border-radius:999px" in send and "background:transparent" in send
     assert "border:1px solid var(--cockpit-accent" in send and "color:var(--cockpit-accent" in send
     amber = _cockpit_rule(src, ':host([cockpit]) .composer .btn.send[data-tone="amber"]')
     assert "color:var(--cockpit-amber" in amber and "border-color:var(--cockpit-amber" in amber
@@ -236,3 +236,31 @@ def test_the_morphing_button_is_wired_in_cockpit_mode_only():
     assert "morphButton(" in src
     # Enter still only sends / queues: the keydown handler calls _submit, never the morph's stop
     assert 'ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); this._submit(); }' in src
+
+
+def test_the_cockpits_button_sits_inside_the_input_at_its_right_end():
+    # the morphing button lives inside the input bar, like a search box's icon:
+    # the box is its positioning frame, the button is pinned bottom-right in it
+    # (centered on the one-line bar, staying at the last line as the text grows),
+    # and the textarea keeps its text clear of the button
+    import re
+    src = (UI / "panel.js").read_text()
+    box = _cockpit_rule(src, ":host([cockpit]) .composer .box")
+    assert "position:relative" in box
+    send = _cockpit_rule(src, ":host([cockpit]) .composer .btn.send")
+    assert "position:absolute" in send
+    right = re.search(r"right:(\d+)px", send)
+    bottom = re.search(r"bottom:(\d+)px", send)
+    height = re.search(r"(?<![-\w])height:(\d+)px", send)
+    assert right and bottom and height
+    ta = _cockpit_rule(src, ":host([cockpit]) .composer textarea")
+    ta_min = int(re.search(r"min-height:(\d+)px", ta).group(1))
+    # one line: the pill is vertically centered in the bar
+    assert int(bottom.group(1)) * 2 + int(height.group(1)) == ta_min
+    # the text stops before the button (its padding covers the button's width and inset)
+    pad = re.search(r"padding:\d+px (\d+)px \d+px \d+px", ta)
+    btn_w = re.search(r"(?<![-\w])width:(\d+)px", send)
+    assert pad and btn_w
+    assert int(pad.group(1)) >= int(btn_w.group(1)) + int(right.group(1)) + 8
+    # the normal chat keeps its button beside the input
+    assert "position:absolute" not in _cockpit_rule(src, ".composer .box")
