@@ -149,9 +149,9 @@ they block. Linked cards share a side, and hovering a card lights its links.
 An open card asks for one value, pre-filled with the agent's pick; ✓ decides it
 (from another machine, the seat token first). Clicking a card loads a message
 about the decision into the center bar, pre-filled and never sent, so the talk
-happens in the center chat. Hovering a decided card scrolls the chat to the
-message where it was decided, when that chat is open; clicking it opens its
-chat. On a phone the cockpit is one column: goals, open questions, in flight,
+happens in the center chat. Hovering a decided card marks the message where it
+was decided, when that chat is open; clicking it opens its chat and scrolls
+there. On a phone the cockpit is one column: goals, open questions, in flight,
 the bar and the chat, then the past. See [decision-map.md](decision-map.md).
 
 ## The options window (⚙)

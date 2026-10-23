@@ -811,7 +811,9 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       } finally { chat.prefill(l.text); }
     }
 
-    /** A past card's hover: scroll the chat to where it was decided (its chat is open), or just light it. */
+    /** A past card's hover: mark where it was decided (its chat is open) and light it -- never scroll:
+     * the cockpit is one scrolling page (#496), so a scroll would move the page under the pointer.
+     * Clicking the card is what scrolls to it (_openPast). */
     _hover(el) {
       if (el === this._lit) return;
       if (this._lit) this._lit.classList.remove("lit");
@@ -822,7 +824,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       const card = this._byEid(el.dataset.eid);
       if (!card || !chat) return;
       const l = pastLink(card, this._sid());
-      if (l.hover === "scroll") chat.scrollToMessage(l.message);
+      if (l.hover === "scroll" && chat.markMessage) chat.markMessage(l.message);
       else if (chat.clearFound) chat.clearFound();
     }
 
