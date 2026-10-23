@@ -927,7 +927,7 @@ other turns is built only when the version that counts merged:
 | tell things apart | #177 | 2026-10-16 16:23:05 | self passed under it before #184/#185 changed it |
 | patience | #180 | 2026-10-16 16:29:14 | rungs 4 + 5 together |
 | notice the world changed | #180 | 2026-10-16 16:29:14 | there but broken until #191 (a bug window) |
-| meet an other | #479 | 2026-10-23 07:54:22 | #333 part 3e: rebuilt on delayed contingency (the PR's opening time until a follow-up sets its merge); #187 (2026-10-16 19:24:02) built the old test, voided as the old wiring |
+| meet an other | #479 | 2026-10-23 08:18:12 | #333 part 3e: rebuilt on delayed contingency; #187 (2026-10-16 19:24:02) built the old test, voided as the old wiring |
 | time its turn | #281 | 2026-10-19 15:19:43 | #278, the ball's own clock: rung 7 reads only the current clock's turns |
 | expect a reply | #281 | 2026-10-19 15:19:43 | #254's fix (#256) graded self; since #278 it reads only the ball clock's checks |
 | speak | #313 | 2026-10-20 12:55:39 | #311: its turns carry words from its record |

@@ -103,7 +103,7 @@ def test_meet_is_built_on_look_and_first_reach():
     assert order.index("nudge") < order.index("meet")          # a prerequisite comes first
     assert SS.BUILT_AT["meet"]["pr"] == 479                    # rebuilt: built from this PR, not #187's
     import datetime as _dt
-    assert SS.BUILT_AT["meet"]["merged"] == _dt.datetime(2026, 10, 23, 7, 54, 22,      # the PR's opening time
+    assert SS.BUILT_AT["meet"]["merged"] == _dt.datetime(2026, 10, 23, 8, 18, 12,      # #479 merged
                                                          tzinfo=_dt.timezone.utc).timestamp()   # until its merge's
 
 
