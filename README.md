@@ -308,7 +308,8 @@ observations as events), entities move as the conversation names them, and the
 model is grounded by what those entities hold —
 [docs/entity-field.md](docs/entity-field.md) is the design doc. The project's
 decisions are entities too: [docs/decision-map.md](docs/decision-map.md) is the
-reversed kanban of what was decided, what is in flight and what is still open.
+decision cockpit: what is still open above the chat's input bar, what is in
+flight on its line, what was decided below it.
 
 The proxy speaks both APIs through the same memory turn: OpenAI's
 `/v1/chat/completions` and Ollama's native `/api/chat` and `/api/generate`
