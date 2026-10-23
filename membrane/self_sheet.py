@@ -125,7 +125,7 @@ BUILT_AT = {
     # #333: meet (PR #187), time its turn and expect a reply (#281) and recognize itself (#314) were the
     # developer's wiring: not built until they are rebuilt on the nudge, so they are listed again then
     # meet an other (#333 part 3e), rebuilt on delayed contingency -- the PR's opening time until its merge's is set
-    "meet": {"pr": 479, "merged": _utc(2026, 10, 23, 7, 54, 22)},
+    "meet": {"pr": 479, "merged": _utc(2026, 10, 23, 8, 18, 12)},
     # speak (#311): its turns carry words from its record
     "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 55, 39)},
     # change itself (#320): the dream and its test
