@@ -146,9 +146,9 @@ class TestAges(unittest.TestCase):
         self.assertEqual(CB.age(None, NOW, tz=UTC), "")
 
     def test_now_line(self):
-        self.assertEqual(CB.now_line(NOW, tz=UTC), "NOW: 2026-10-22 15:00 UTC")
+        self.assertEqual(CB.now_line(NOW, tz=UTC), "NOW (for reference, not an event): 2026-10-22 15:00 UTC")
         cet = timezone(timedelta(hours=2), "CEST")
-        self.assertEqual(CB.now_line(NOW, tz=cet), "NOW: 2026-10-22 17:00 CEST")
+        self.assertEqual(CB.now_line(NOW, tz=cet), "NOW (for reference, not an event): 2026-10-22 17:00 CEST")
 
 
 class TestTheConstants(unittest.TestCase):
@@ -187,7 +187,7 @@ class TestRender(unittest.TestCase):
                      alerts=["ALERT: disk crossed its boundary (90%)"],
                      more=True)
         lines = out.split("\n")
-        self.assertEqual(lines[0], "NOW: 2026-10-22 15:00 UTC")
+        self.assertEqual(lines[0], "NOW (for reference, not an event): 2026-10-22 15:00 UTC")
         self.assertTrue(lines[1].startswith("THIS CONVERSATION"))
         self.assertIn('WORKING ON: "make the backup skip big files" (person · 6 min ago)', lines)
         self.assertIn("ABOUT: f:tools/backup.py · s:should_skip", lines)
@@ -219,7 +219,7 @@ class TestRender(unittest.TestCase):
                      since=[CB.Item(long, "code", NOW - i) for i in range(3)],
                      alerts=["ALERT: " + long, "ALERT: " + long], more=True)
         self.assertLessEqual(len(out), CB.BANNER_CHAR_BUDGET)
-        self.assertIn("NOW:", out)
+        self.assertIn("NOW (for reference, not an event):", out)
         self.assertIn("WORKING ON:", out)
         # every record line that made it still says when and where from
         for ln in out.split("\n"):
@@ -430,7 +430,7 @@ class TestBuild(unittest.TestCase):
 
     def test_a_conversation_gets_its_own_state(self):
         out = CB.build(self.srv, self.body("what's next?"), "sid:a", now=NOW, tz=UTC)
-        self.assertTrue(out.startswith("NOW: 2026-10-22 15:00 UTC\nTHIS CONVERSATION"))
+        self.assertTrue(out.startswith("NOW (for reference, not an event): 2026-10-22 15:00 UTC\nTHIS CONVERSATION"))
         self.assertIn('WORKING ON: "and have `tools/backup.py` log what it skipped"', out)
         self.assertIn("ABOUT: f:tools/backup.py", out)
         self.assertIn("- size limit stays 2 GB (person · 13 min ago)", out)
@@ -499,7 +499,9 @@ class TestTheTurnPath(unittest.TestCase):
             self.assertEqual(L._injection_mode(s), "massage")
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("MEMBRANE_INJECTION", None)
-            self.assertEqual(L._injection_mode(s), "banner")      # the default stays
+            self.assertEqual(L._injection_mode(s), "conversation")   # the default since the measurement (#429)
+        with mock.patch.dict(os.environ, {"MEMBRANE_INJECTION": "banner"}):
+            self.assertEqual(L._injection_mode(s), "banner")         # the old block stays one switch away
 
     def test_conversation_mode_sends_only_the_conversation_block(self):
         body = {"messages": [{"role": "user", "content": "what's next?"}]}

@@ -1,5 +1,5 @@
 """THIS CONVERSATION: the per-turn banner that carries the chat's own state
-(#429), behind MEMBRANE_INJECTION=conversation (the old WHERE WE ARE banner
+(#429), the default per-turn block (MEMBRANE_INJECTION=banner restores the old WHERE WE ARE banner
 stays the default until this one is measured).
 
 Everything is derived from records; no LLM runs anywhere:
@@ -98,7 +98,7 @@ def age(ts, now: float | None = None, tz=None) -> str:
 
 def now_line(now: float | None = None, tz=None) -> str:
     now = time.time() if now is None else now
-    return "NOW: " + _local(now, tz).strftime("%Y-%m-%d %H:%M %Z").strip()
+    return "NOW (for reference, not an event): " + _local(now, tz).strftime("%Y-%m-%d %H:%M %Z").strip()
 
 
 # ---- rendering ---------------------------------------------------------------

@@ -176,8 +176,8 @@ order: observed and code > the user > model prose.
 
 ### THIS CONVERSATION
 
-Behind `MEMBRANE_INJECTION=conversation` (#429; `membrane/conv_banner.py`)
-the per-turn state is one block about the chat the turn belongs to (its
+By default (#429; `membrane/conv_banner.py`; `MEMBRANE_INJECTION=banner` restores the
+old block) the per-turn state is one block about the chat the turn belongs to (its
 conversation key, `conv` on events), derived from records with no model call:
 
 | line | source |

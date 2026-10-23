@@ -1059,12 +1059,12 @@ def _injection_mode(srv) -> str:
     """'massage' (the field's words, picked), 'conversation' (THIS
     CONVERSATION, #429: the chat's own state, conv_banner.py) or 'banner'
     (the old state block)."""
-    # the BANNER stays the default until the massage is proven on the live
-    # field (it picked nothing there and left the seat without context), and
-    # until the conversation block is measured (#429)
-    m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "banner")
+    # the CONVERSATION block is the default since its measurement (#429:
+    # 0 banner echoes vs 9, decided 5/5, open 5/5); MEMBRANE_INJECTION=banner
+    # restores the old state block
+    m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "conversation")
     m = str(m).strip().lower()
-    return m if m in ("massage", "conversation") else "banner"
+    return m if m in ("massage", "banner") else "conversation"
 
 
 def _note_massage(srv, stats: dict) -> None:
@@ -2961,7 +2961,7 @@ def _surface_block_summary(ctx: str | None) -> list[dict]:
         ("recall", "Recalled memories"),
         ("global", "Global memories"),
         ("where-we-are", "WHERE WE ARE"),
-        ("conversation", "NOW: "),               # THIS CONVERSATION (#429) opens with its NOW line
+        ("conversation", "NOW (for reference"),   # THIS CONVERSATION (#429) opens with its NOW line
         ("intentions", "OPEN INTENTIONS"),
         ("review", "PENDING HUMAN REVIEWS"),
         ("watch", "[membrane-watch]"),
@@ -2991,7 +2991,7 @@ def _surface_block_summary(ctx: str | None) -> list[dict]:
 def _surface_block_text(ctx: str, sec: dict) -> str:
     """The FULL text of one sent block (the totality view's payload side --
     the operator reads what the memories SAY, not the header clip)."""
-    markers = ["Recalled memories", "Global memories", "WHERE WE ARE", "NOW: ",
+    markers = ["Recalled memories", "Global memories", "WHERE WE ARE", "NOW (for reference",
                "OPEN INTENTIONS", "PENDING HUMAN REVIEWS",
                "[membrane-watch]", "[membrane-intercept] a sibling",
                "[membrane-intercept] your own earlier ask",
