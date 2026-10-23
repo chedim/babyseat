@@ -88,7 +88,7 @@ opencode) as an in-process SDK MCP server named `membrane`:
   WebFetch or any other built-in). No MCP servers from your config
   (`strict_mcp_config`) and no settings files or `CLAUDE.md`.
 - Claude checks in with the person at least every 7 tool calls, and an
-  answer stops at 50 tool calls, where you can press Continue (see
+  answer stops at 2048 tool calls, where you can press Continue (see
   "Check-ins instead of a turn cap" below).
 - The turn's own tool definitions (the chat lane's surface) are not passed
   on. The reply never carries `tool_calls` for the caller to run, and the
@@ -152,13 +152,14 @@ keeps Claude talking to the person while it works:
 - **Check-ins:** Claude may make at most `CHECKIN_TOOL_CALLS = 7` tool calls
   in a row without writing text to the person. Any assistant text, such as
   a progress or status line in the reply, resets the count to 0. The 8th
-  call in a row is denied with "Tell the person where you are first (one
-  or two lines), then continue." Claude gets that as the tool's result,
-  says where it is, and goes on in the same run. The denied call never
+  call in a row is denied with a message telling Claude to write its one-line
+  status in the same message as its next tool call (words first, then the
+  call), not as a separate text-only reply. Claude gets that as the tool's
+  result and goes on in the same run. The denied call never
   runs. The chat shows no error for it: a denied call is Claude's
   feedback, not a tool part.
-- **The ceiling:** at most `MAX_TOOL_CALLS_PER_ANSWER = 50` tool calls per
-  answer (about seven check-ins). The call past it is denied and the hook
+- **The ceiling:** at most `MAX_TOOL_CALLS_PER_ANSWER = 2048` tool calls per
+  answer (about 290 check-ins). The call past it is denied and the hook
   stops the run.
 - `max_turns` is only a backstop: `MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER`.
   Every allowed call may take a turn and be denied once first, so it never
@@ -168,6 +169,14 @@ keeps Claude talking to the person while it works:
 - Calls in one assistant message count one by one. The hook waits until
   membrane has read the message that carries the call, so words in the
   same message count first.
+
+## Check-ins ride with the next call (#467)
+
+When a check-in is due, the denial tells Claude to write its one-line status
+in the same message as its next tool call, not as a separate text-only reply.
+Every membrane tool result ends with a footer, `· N calls left · check-in in
+M`, the live count within the answer. The stored reply keeps its parts in the
+order they happened: text up to a call, that call, the next text, and so on.
 
 ## The ceiling and Continue
 
