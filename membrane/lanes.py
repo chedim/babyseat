@@ -6038,8 +6038,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                         continue
                     if _cp is not None:
                         self._coproc_relay(obj, _cp_held)
-                    if usage_seen is None and isinstance(obj.get("usage"), dict)                             and obj["usage"]:
-                        usage_seen = obj["usage"]
+                    if isinstance(obj.get("usage"), dict) and obj["usage"]:
+                        usage_seen = obj["usage"]     # the last wins: a claude-agent reply
+                                                      # streams its usage so far per step (#472)
                     for ch in obj.get("choices", []) or []:
                         d = ch.get("delta") or {}
                         t = d.get("content")

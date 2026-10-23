@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import queue
 import re
 import shutil
@@ -143,7 +144,8 @@ class ContinueRefused(ValueError):
 
 
 _stats_lock = threading.Lock()
-STATS = {"checkin_denials": 0, "ceiling_hits": 0, "continues": 0}   # diagnostics (RAM)
+STATS = {"checkin_denials": 0, "ceiling_hits": 0, "continues": 0,
+         "head_refused": 0}                # diagnostics (RAM)
 
 
 def _count(key: str) -> None:
@@ -162,6 +164,11 @@ def reset_stats() -> None:
             STATS[k] = 0
         for k in USAGE:
             USAGE[k] = 0
+        for led in STEPS.values():
+            for k in led:
+                led[k] = 0
+        for k in PROMPT:
+            PROMPT[k] = 0 if k != "system_hash" else ""
 
 
 # ---- the prompt cache's ledger (#426) -------------------------------------------
@@ -184,13 +191,74 @@ def _record_usage(u: dict) -> None:
         USAGE["output"] += int(u.get("completion_tokens") or 0)
 
 
+# THE STEP LEDGER (#450): an answer is many API round trips (steps); the
+# SDK reports usage on each AssistantMessage. An answer's FIRST step writes
+# the fresh prompt to the cache (the transcript window, the banner, the
+# recall); its later steps append only the last reply and tool result.
+_SPLIT = ("input", "cache_read", "cache_write", "output")
+STEPS = {"first": {"steps": 0, **{k: 0 for k in _SPLIT}},
+         "later": {"steps": 0, **{k: 0 for k in _SPLIT}}}
+
+
+def _record_step(u: dict, first: bool) -> None:
+    """One API step's raw Anthropic usage onto the step ledger."""
+    led = STEPS["first" if first else "later"]
+    with _stats_lock:
+        led["steps"] += 1
+        led["input"] += int(u.get("input_tokens") or 0)
+        led["cache_read"] += int(u.get("cache_read_input_tokens") or 0)
+        led["cache_write"] += int(u.get("cache_creation_input_tokens") or 0)
+        led["output"] += int(u.get("output_tokens") or 0)
+
+
+def _avg(led: dict, n: int) -> dict:
+    return {k: (round(led[k] / n) if n else 0) for k in _SPLIT}
+
+
+# THE PROMPT'S SHAPE (#450): what each answer's first step sends, in chars --
+# the system prompt (cached unless it changes: system_changes counts the
+# answers whose system differed from the one before), the head (the earlier
+# messages, cached across answers when the CLI keeps our breakpoint) and the
+# tail (the per-turn blocks and the latest message).
+PROMPT = {"answers": 0, "system_chars": 0, "head_chars": 0, "tail_chars": 0,
+          "system_changes": 0, "system_hash": ""}
+
+
+def _note_prompt(system: str, prompt: str, blocks) -> None:
+    import hashlib as _h
+    sh = _h.sha256((system or "").encode()).hexdigest()[:16]
+    head = sum(len(b["text"]) for b in blocks[:-1]) if blocks else 0
+    with _stats_lock:
+        PROMPT["answers"] += 1
+        PROMPT["system_chars"] += len(system or "")
+        PROMPT["head_chars"] += head
+        PROMPT["tail_chars"] += len(prompt or "") - head
+        if PROMPT["system_hash"] and PROMPT["system_hash"] != sh:
+            PROMPT["system_changes"] += 1
+        PROMPT["system_hash"] = sh
+
+
 def usage_stats() -> dict:
-    """The ledger plus per-call averages (diag/claude-agent)."""
+    """The ledger plus averages (diag/claude-agent): `per_answer` (also
+    `per_call`, its old name: one answer's summed usage) and, per API step,
+    the first steps apart from the later ones (#450)."""
     with _stats_lock:
         out = dict(USAGE)
-    n = out["calls"]
-    out["per_call"] = {k: (round(out[k] / n) if n else 0)
-                       for k in ("input", "cache_read", "cache_write", "output")}
+        first, later = dict(STEPS["first"]), dict(STEPS["later"])
+    out["per_answer"] = _avg(out, out["calls"])
+    out["per_call"] = dict(out["per_answer"])
+    nf, nl = first.pop("steps"), later.pop("steps")
+    both = {k: first[k] + later[k] for k in _SPLIT}
+    with _stats_lock:
+        pr = dict(PROMPT)
+    na = pr["answers"]
+    out["prompt"] = {"answers": na, "system_changes": pr["system_changes"],
+                     "per_answer": {k: (round(pr[k] / na) if na else 0)
+                                    for k in ("system_chars", "head_chars", "tail_chars")}}
+    out["steps"] = {"steps": nf + nl, "first": first, "later": later,
+                    "per_step": _avg(both, nf + nl),
+                    "per_first_step": _avg(first, nf),
+                    "per_later_step": _avg(later, nl)}
     return out
 
 
@@ -464,16 +532,12 @@ def _context(blocks) -> str:
     return f"{CONTEXT_OPEN}\n" + "\n\n".join(blocks) + f"\n{CONTEXT_CLOSE}"
 
 
-def split_messages(messages) -> tuple[str, str]:
-    """OpenAI messages -> (system prompt, prompt). The STABLE system
-    messages (the doctrine, the client's instructions) are the system
-    prompt -- byte-identical across calls, so Anthropic's prompt cache
-    (tools, then system) holds (#426). membrane's per-turn blocks (recall,
-    where-we-are, banners: _volatile) go to the END of the prompt,
-    delimited, right before the latest message (a block placed after it,
-    the speech footer, stays after it). A lone user message with no
-    per-turn block is the prompt as is; a longer conversation is rendered
-    as a transcript ending on the last message."""
+def _layout(messages):
+    """The prompt's parts in order: (system prompt, items, n_head, plain).
+    items are the transcript's entries (a whole message each, or a per-turn
+    context block); the first n_head of them are whole earlier messages, the
+    rest is the tail (the context blocks before the latest message, the
+    latest message, and any block placed after it)."""
     from .rag import _RAG_SYSTEM
     system, convo, ctx = [], [], []      # ctx: (blocks before convo item #i, text)
     for m in messages or []:
@@ -510,15 +574,72 @@ def split_messages(messages) -> tuple[str, str]:
     lone = len(convo) == 1 and convo[0][0] == "user"
     items = [convo[0][2]] if lone else [f"{label}\n{text}"
                                         for _r, label, text in convo]
+    n_head = 0 if lone else last
     if before:
         items.insert(last, _context(before))
     if after:
         items.append(_context(after))
+    return sys_prompt, items, n_head, (lone or not convo)
+
+
+def split_messages(messages) -> tuple[str, str]:
+    """OpenAI messages -> (system prompt, prompt). The STABLE system
+    messages (the doctrine, the client's instructions) are the system
+    prompt -- byte-identical across calls, so Anthropic's prompt cache
+    (tools, then system) holds (#426). membrane's per-turn blocks (recall,
+    where-we-are, banners: _volatile) go to the END of the prompt,
+    delimited, right before the latest message (a block placed after it,
+    the speech footer, stays after it). A lone user message with no
+    per-turn block is the prompt as is; a longer conversation is rendered
+    as a transcript ending on the last message."""
+    sys_prompt, items, _n, plain = _layout(messages)
     prompt = "\n\n".join(items)
-    if convo and not lone:
-        prompt = ("The conversation so far, oldest first; answer its last "
-                  "message.\n\n" + prompt)
+    if not plain:
+        prompt = _INTRO + "\n\n" + prompt
     return sys_prompt, prompt
+
+
+# THE STABLE CACHED HEAD (#450): the prompt as content blocks, one per earlier
+# message, a cache breakpoint on the last of them; the per-turn blocks and the
+# latest message ride after it. The CLI keeps our cache_control (it adds its
+# own on its trailing environment message: 4 breakpoints with the system's 2,
+# the API's maximum -- measured by capturing the CLI's request). An answer
+# the API refuses for it is sent again as plain text, and the head stays off
+# (_HEAD_REFUSED) until the seat restarts. MEMBRANE_CLAUDE_CACHE_HEAD=0 turns
+# it off.
+_HEAD_REFUSED: set = set()
+_INTRO = "The conversation so far, oldest first; answer its last message."
+
+
+def cache_head_on() -> bool:
+    v = os.environ.get("MEMBRANE_CLAUDE_CACHE_HEAD", "1").strip().lower()
+    return v not in ("0", "false", "no", "off") and not _HEAD_REFUSED
+
+
+def prompt_blocks(messages) -> tuple[str, list | None]:
+    """(system prompt, content blocks) -- the same words as split_messages,
+    split for the cache; None when there is no earlier message to cache (a
+    lone message) or the head is off."""
+    system, items, n_head, plain = _layout(messages)
+    if plain or n_head < 1 or not cache_head_on():
+        return system, None
+    blocks = [{"type": "text", "text": _INTRO + "\n\n"}]
+    blocks += [{"type": "text", "text": t + "\n\n"} for t in items[:n_head]]
+    blocks[-1]["cache_control"] = {"type": "ephemeral"}
+    blocks.append({"type": "text", "text": "\n\n".join(items[n_head:])})
+    return system, blocks
+
+
+def _blocks_prompt(blocks):
+    async def gen():
+        yield {"type": "user", "session_id": "", "parent_tool_use_id": None,
+               "message": {"role": "user", "content": blocks}}
+    return gen()
+
+
+def _refused_breakpoint(e: BaseException) -> bool:
+    t = str(e).lower()
+    return "cache_control" in t or "cache control" in t
 
 
 # ---- membrane's tools, served to the SDK in-process (#389) ----------------------
@@ -644,16 +765,48 @@ def _bare(name: str) -> str:
 async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
                    env=None):
     system, prompt = split_messages(messages)
+    blocks = None
     if resume:
         prompt = CONTINUE_PROMPT         # the session already holds the task
+    else:
+        blocks = prompt_blocks(messages)[1]
+        _note_prompt(system, prompt, blocks)
+    if blocks:
+        sent: list = []
+
+        def put_seen(item):
+            sent.append(item[0])
+            put(item)
+        try:
+            await _consume_run(sdk, system, _blocks_prompt(blocks), model, stream,
+                               put_seen, port, resume, env)
+            return
+        except Exception as e:
+            if [k for k in sent if k != "step"] or not _refused_breakpoint(e):
+                raise
+            _HEAD_REFUSED.add(True)          # the plain prompt from now on (#450)
+            _count("head_refused")
+            print(f"[claude-agent] the cache head was refused ({str(e)[:160]}); "
+                  f"plain prompts from now on", file=sys.stderr)
+    await _consume_run(sdk, system, prompt, model, stream, put, port, resume, env)
+
+
+async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
+                       resume=None, env=None):
     answer = _Answer()                   # a fresh ceiling, Continue too (#425)
     opts = build_options(sdk, system, model, stream, port, resume, env, answer)
     partial = False
     capped = False
     pending: dict = {}                   # tool_use id -> (name, input)
     session = str(resume or "")
+    steps_seen: set = set()              # #450: one API response, counted once
     async for m in sdk.query(prompt=prompt, options=opts):
         kind = type(m).__name__
+        if kind == "AssistantMessage" and isinstance(getattr(m, "usage", None), dict):
+            mid = getattr(m, "message_id", None) or id(m)
+            if mid not in steps_seen:
+                steps_seen.add(mid)
+                put(("step", {"usage": m.usage, "first": len(steps_seen) == 1}))
         if getattr(m, "session_id", None):
             session = str(m.session_id)
         if kind == "StreamEvent":
@@ -735,6 +888,7 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
             q.put(_END)
 
     threading.Thread(target=run, daemon=True, name="claude-agent").start()
+    so_far: dict = {}                       # the answer's usage, step by step (#472)
     while True:
         item = q.get()
         if item is _END:
@@ -743,6 +897,14 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
             raise item[1]
         if item[0] == "usage":
             _record_usage(item[1])
+        if item[0] == "step":                # the ledger (#450) and the usage so far (#472)
+            u = item[1]["usage"]
+            _record_step(u, item[1]["first"])
+            for k in ("input_tokens", "cache_read_input_tokens",
+                      "cache_creation_input_tokens", "output_tokens"):
+                so_far[k] = so_far.get(k, 0) + int(u.get(k) or 0)
+            yield ("progress", _usage(so_far))
+            continue
         yield item
 
 
@@ -802,6 +964,12 @@ class SSEReply:
                     break
                 if kind == "usage":
                     usage = val
+                    continue
+                if kind == "progress":
+                    # the usage so far, after each API step (#472): a reply
+                    # the watchdog cuts still told what its steps cost
+                    yield _chunk(self.model, {}, usage=val)
+                    yield b"\n"
                     continue
                 if kind == "capped":
                     self.capped = val

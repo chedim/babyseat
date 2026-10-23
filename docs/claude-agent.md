@@ -139,9 +139,42 @@ unchanged (`prompt_tokens` is uncached input + cache reads + cache writes);
 `cache_write_tokens` (writes). The stored message tokens carry them as
 `tokens.cache.read` and `tokens.cache.write`; the uncached input is
 `tokens.input` minus both. `GET /membrane/diag/claude-agent` adds
-`usage: {calls, input, cache_read, cache_write, output, per_call}`: sums
-since the seat's boot (`input` is the uncached input) and the per-call
-averages.
+`usage: {calls, input, cache_read, cache_write, output, per_answer, per_call,
+steps}`: sums since the seat's boot (`input` is the uncached input). `calls`
+counts answers, and `per_answer` (still also `per_call`, its old name) is one
+answer's summed usage. One answer is many API round trips, so `steps` (#450)
+measures per step from the usage the SDK reports on each response:
+`{steps, first, later, per_step, per_first_step, per_later_step}`. An answer's
+**first** step writes the fresh prompt to the cache (the transcript window,
+the banner, the recall). Its **later** steps append only the last reply and
+tool result, and read the rest from the cache. `prompt` (#450) measures
+what each answer's first step sends, in chars per answer (`system_chars`,
+`head_chars`, `tail_chars`), and `system_changes` counts the answers whose
+system prompt differed from the answer before: each one rewrites the cached
+system prompt.
+
+**The stable cached head (#450).** The conversation goes to the SDK as content
+blocks, one per earlier message, with a cache breakpoint on the last of them.
+The per-turn blocks (the banner) and the latest message follow it. The next
+answer starts with the same blocks, so the prompt cache reads the head the
+answer before wrote, instead of writing it again. The serve window advances in
+steps of `HISTORY_ANCHOR_STEP = 4` messages (`membrane/server.py`): its first
+row is a multiple of 4, so the window holds 9-12 earlier messages instead of
+exactly 12, and its start (the head's first block) stays put for a few
+answers. The bundled CLI keeps our `cache_control` and adds its own on its
+trailing environment message. With the system prompt's 2 that is 4, the API's
+maximum, checked by capturing the CLI's requests. If the API ever refuses the
+answer for its breakpoints, the answer is sent again as one plain text prompt,
+and the head stays off until the seat restarts (`head_refused` in the
+diag). Switches: `MEMBRANE_CLAUDE_CACHE_HEAD=0` turns the head off,
+`MEMBRANE_HISTORY_ANCHOR=1` restores the plain last-12 window, and
+`MEMBRANE_HISTORY_MAX` sets the window's size (default 12).
+
+**Aborted answers keep their usage (#472).** After every API step the reply
+streams the answer's usage so far (cumulative; its last chunk still carries
+the whole answer's). The proxy keeps the last usage it saw. A serve round
+whose stream breaks (the turn watchdog closing its socket) records the usage
+it had, instead of the ~2K estimate.
 
 ## Check-ins instead of a turn cap
 

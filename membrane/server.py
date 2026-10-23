@@ -83,6 +83,28 @@ HISTORY_MAX_MESSAGES = 12             # prior conversation rows replayed
                                       # narrative: 'it' needs an
                                       # antecedent in the transcript)
 HISTORY_TEXT_CAP = 4000               # per-prior-message text cap
+HISTORY_ANCHOR_STEP = 4               # the window's first row is a multiple of
+                                      # this (#450): its start holds while the
+                                      # chat grows, so a cached prompt head is
+                                      # read again; 9-12 rows instead of 12
+
+
+def _env_int(name: str, default: int, low: int = 1) -> int:
+    try:
+        return max(low, int(os.environ.get(name, "") or default))
+    except ValueError:
+        return default
+
+
+def history_max_messages() -> int:
+    """The replay window's size (MEMBRANE_HISTORY_MAX overrides, #450)."""
+    return _env_int("MEMBRANE_HISTORY_MAX", HISTORY_MAX_MESSAGES)
+
+
+def history_anchor_step() -> int:
+    """The window's start step (MEMBRANE_HISTORY_ANCHOR overrides; 1 = the
+    plain last-N window, #450)."""
+    return _env_int("MEMBRANE_HISTORY_ANCHOR", HISTORY_ANCHOR_STEP)
 
 
 def _gen_id(prefix: str) -> str:
@@ -1179,7 +1201,14 @@ class TurnRunner:
             if not text:
                 continue
             out.append({"role": role, "content": text[:HISTORY_TEXT_CAP]})
-        win = out[-HISTORY_MAX_MESSAGES:]
+        # THE STEPPED WINDOW (#450): the last N rows, its first row rounded
+        # UP to a multiple of the anchor step -- the start holds for a few
+        # turns, so the prompt's head is the same bytes and its cache is read
+        start = max(0, len(out) - history_max_messages())
+        step = history_anchor_step()
+        if start and step > 1:
+            start = -(-start // step) * step
+        win = out[start:]
         # THE ANCHOR (2026-10-11, "why is auto-chat not auto-chatting?"): a
         # continuation (auto-chat's rounds until #348; a job's turn) adds
         # only his own replies -- after 12 the window held no user message
@@ -2161,11 +2190,13 @@ class TurnRunner:
                         for _pid in list(_pend):
                             _flush(_pid)
                         raise                        # the busy seat: no second (buffered) call (#431)
-                    except Exception:
+                    except Exception as _se:
                         for _pid in list(_pend):
                             _flush(_pid)
                         if live["text"] is not None or live["reasoning"] is not None:
                             raise                    # words already shown: the round failed for real
+                        # the lost stream's steps were spent (#472)
+                        _tokens_fill(a_info, {"usage": getattr(_se, "membrane_usage", None)})
                         resp = self.call_ladder(body)   # nothing shown yet: the buffered call, as before
                 else:
                     resp = self.call_ladder(body)
@@ -2189,6 +2220,8 @@ class TurnRunner:
                 _thinking(self, sid, "end")
                 break
             except Exception as e:
+                # an aborted round keeps the usage of the steps it finished (#472)
+                _tokens_fill(a_info, {"usage": getattr(e, "membrane_usage", None)})
                 now = int(time.time() * 1000)
                 mkpart({"type": "text",
                         "text": f"model ladder failed: "
@@ -2712,6 +2745,20 @@ def loopback_ladder(port: int, runner=None, cell=None):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/chat/completions", data=_json.dumps(body).encode(),
             method="POST", headers={"Content-Type": "application/json", **_JWT.internal_headers()})
+        seen: dict = {}                      # this round's last usage (#472)
+        try:
+            return _read_stream(req, on_event, seen)
+        except Exception as e:
+            # A BROKEN ROUND KEEPS ITS COST (#472): the usage the stream had
+            # carried so far rides the exception to the turn
+            if seen.get("usage") and getattr(e, "membrane_usage", None) is None:
+                try:
+                    e.membrane_usage = seen["usage"]
+                except Exception:
+                    pass
+            raise
+
+    def _read_stream(req, on_event, seen):
         content, reasoning, tcs = [], [], {}
         usage, ext, finish = None, None, None
         provider = None                      # the answering provider's stamp (#384)
@@ -2739,7 +2786,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     on_event("ext", ext)
                     continue
                 if d.get("usage"):
-                    usage = d["usage"]
+                    usage = seen["usage"] = d["usage"]
                 if d.get("membrane_provider"):
                     provider = d["membrane_provider"]
                 if isinstance(d.get("membrane_tool"), dict):
