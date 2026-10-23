@@ -711,6 +711,52 @@ def build_mcp_server(sdk, port, answer=None):
                                      tools=tools)
 
 
+# THE TOOLS NOTE (2026-10-23): the rung's built-in tools are off, and with
+# only tool names to go on Claude told the operator it had "no tools to work".
+# Fixed text, after the stable system prompt, so the prompt cache still holds.
+TOOLS_NOTE = (
+    "Your tools: Claude Code's own tools (Read, Edit, Bash...) are off here; "
+    "membrane's tools are your hands. entity_link runs shell commands on the "
+    "seat's machine (commands=['<command line>']): read files (cat, sed -n, "
+    "grep), edit them (python3, sed), run tests, git and gh -- for code work, "
+    "use a git worktree in a temp folder, never the main checkout. "
+    "method_call runs a method on an object (e.g. object='presence', "
+    "method='exec', args={'code': ...} for JS in the person's opted-in page). "
+    "query, entity_read and graph read the field (memory); intend and fulfill "
+    "keep goals; entity_add and entity_edit write entities. To ask the person "
+    "for a decision, make it a card on their decision board, not a list in "
+    "chat, in one call, e.g. entity_add class='Decision' name='Which test "
+    "runner' summary='pytest or unittest for the new suite' "
+    "properties={'status': 'open', 'var': {'type': 'option', 'options': "
+    "['pytest', 'unittest']}, 'pick': 'pytest'}. The name is the question, "
+    "with no quotes or apostrophes (they are refused); var.type is int, "
+    "float, bool, string or option; pick is your recommendation; add 'blocks': "
+    "[<eids it blocks>] when it holds work up. One variable per card; only "
+    "the person answers.\n\n"
+    "The doctrine names the seat's tool families; here they are: "
+    "exec(action='link'/'call'/'inspect') -> entity_link/method_call/"
+    "method_inspect; goal(action='plant'/'list'/'close') -> "
+    "intend/intents/fulfill; entity(action='add'/'edit'/'read'/'remove'/"
+    "'inherit') -> entity_add/entity_edit/entity_read/entity_remove/"
+    "entity_inherit; find(action='memory'/'query'/'graph'/'related') -> "
+    "query/entity_query/graph/entities_related; memory(action='learn'/"
+    "'forget') -> learn/forget; track(action='watch'/'unwatch'/'list') -> "
+    "entity_watch/entity_unwatch/entity_tracks; field_watch -> field_watch; "
+    "state -> state; peer(action='post') -> peer_post.\n\n"
+    "How you work: when the person gives you a task, carry it out to the end "
+    "in this turn. Don't ask permission for steps that are part of the task, "
+    "and don't end a reply with \"next I'll...\" -- do it. End your turn only "
+    "when the task is done, when you need the person's decision (make it a "
+    "Decision card, then stop), or when you are blocked. Say which. A status "
+    "update goes in the same message as your next tool call, never as a "
+    "reply on its own. No \"Open decisions\" footers: questions for the "
+    "person are Decision cards.")
+
+
+def _with_tools_note(system: str) -> str:
+    return (system.rstrip() + "\n\n" + TOOLS_NOTE) if system else TOOLS_NOTE
+
+
 def build_options(sdk, system: str, model: str, stream: bool, port=None,
                   resume=None, env=None, answer=None):
     answer = answer if answer is not None else _Answer()
@@ -718,7 +764,7 @@ def build_options(sdk, system: str, model: str, stream: bool, port=None,
     return sdk.ClaudeAgentOptions(
         **extra,
         env=credential_env() if env is None else dict(env),   # the key (#413)
-        system_prompt=system or None,
+        system_prompt=_with_tools_note(system),
         tools=[],                  # Claude Code's built-in tools: off
         allowed_tools=tool_names(),  # only membrane's tools (#389)
         mcp_servers={MCP_NAME: build_mcp_server(sdk, port, answer)},

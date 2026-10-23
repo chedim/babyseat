@@ -207,7 +207,7 @@ class TestCacheOrder(_Case):
         sp = [c["options"].kw["system_prompt"] for c in self.sdk.calls]
         self.assertEqual(len(sp), 2)
         self.assertEqual(sp[0], sp[1])
-        self.assertEqual(sp[0], DOCTRINE)
+        self.assertEqual(sp[0], CA._with_tools_note(DOCTRINE))   # the doctrine, then the fixed tools note
         self.assertIn("the boat is blue", self.sdk.calls[0]["prompt"])
         self.assertIn("the mast is 12m", self.sdk.calls[1]["prompt"])
 
