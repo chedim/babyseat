@@ -965,6 +965,25 @@ def _tool_title(name: str, args: dict) -> str:
     return f"{name}({s[:80]})"
 
 
+MESSAGE_PAGE_MAX = 500     # the most rows one paged read returns (#470: the cockpit's chat)
+
+
+def message_page(rows: list, limit, before: str = "") -> list:
+    """A page of chronological rows (#470): the `limit` rows before the message
+    `before` (exclusive; an unknown id reads nothing), or the newest `limit`
+    without it; no limit: every row (the unpaged read, unchanged)."""
+    if before:
+        idx = next((i for i, r in enumerate(rows)
+                    if str((r.get("info") or {}).get("id") or "") == before), None)
+        if idx is None:
+            return []
+        rows = rows[:idx]
+    if limit is None:
+        return list(rows)
+    n = max(1, min(MESSAGE_PAGE_MAX, int(limit)))
+    return list(rows[-n:])
+
+
 def _chronological(rows: list) -> list:
     """Replay rows in arrival order (completed-when-set, else created-ts): the user's message rides above the
     reply it prompted, even if a multi-writer race left the store scrambled
@@ -3171,6 +3190,12 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # without tokens is mended ON THE WIRE (the reducer's
                 # findLast never lands on undefined)
                 _rows = _chronological(messages.list(sid))
+                # #470: a page when asked (?limit=N&before=<message id>), else every row
+                _pq = urllib.parse.parse_qs(self.path.partition("?")[2])
+                _lim = (_pq.get("limit") or [""])[0]
+                if _lim.isdigit() or (_pq.get("before") or [""])[0]:
+                    _rows = message_page(_rows, int(_lim) if _lim.isdigit() else None,
+                                         (_pq.get("before") or [""])[0])
                 for _r in _rows:
                     _i = _r.get("info") or {}
                     if _i.get("role") == "assistant" and \
