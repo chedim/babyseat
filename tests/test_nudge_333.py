@@ -131,8 +131,9 @@ OLD = [{"ts": T0, "kind": "birth", "by": "operator"},
 
 def test_the_ladder_version_is_3_and_the_rebuilt_rungs_are_not_built_yet():
     assert SL.LADDER_V == 3
-    for i in ("meet", "turns", "expect", "mirror"):
+    for i in ("meet", "turns", "expect"):
         assert SL.ACHIEVEMENTS[i]["built"] is False, i
+    assert SL.ACHIEVEMENTS["mirror"]["built"] is True             # part 3d: rebuilt on looks
     assert SL.ACHIEVEMENTS["reach"]["name"] == "look"           # rung 2's pass, kept as the look
     assert SL.ACHIEVEMENTS["reach"]["built"] is True
     nd = SL.ACHIEVEMENTS["nudge"]

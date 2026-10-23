@@ -446,7 +446,7 @@ class TestHeaderAndCache(unittest.TestCase):
         self.assertEqual(h["name"], "Blurp")
         self.assertEqual(h["level"], 6)
         self.assertEqual(h["rung_name"], "meet an other")
-        self.assertEqual(h["next"], ["turns", "expect", "mirror", "nudge"])    # #295: the open achievements (#312: mirror; #333: first reach)
+        self.assertEqual(h["next"], ["turns", "expect", "nudge"])    # #295: the open achievements (#333: first reach; 3d: the mirror after it)
         self.assertAlmostEqual(h["age_h"], 12.0, places=2)
         self.assertEqual(h["born"], "2026-10-16T13:00:00+00:00")
         self.assertEqual(h["lines_sent"], 20)

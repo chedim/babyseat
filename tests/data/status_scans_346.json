@@ -241,7 +241,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "change",
@@ -611,7 +611,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "change",
@@ -1599,7 +1599,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "change",
@@ -1908,7 +1908,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "change",
@@ -3108,7 +3108,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "change",
@@ -4406,7 +4406,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "passed"
 },
 {
 "id": "change",
@@ -5460,15 +5460,15 @@
 "feel",
 "reach",
 "patience",
-"change",
-"nudge"
+"nudge",
+"change"
 ],
 "allowed": [
 "feel",
 "reach",
 "patience",
-"change",
-"nudge"
+"nudge",
+"change"
 ],
 "awaiting": [],
 "bar": 0.1333,
@@ -5596,7 +5596,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "passed"
 },
 {
 "id": "change",
@@ -6831,7 +6831,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "passed"
 },
 {
 "id": "change",
@@ -7250,7 +7250,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "change",
@@ -8205,7 +8205,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "passed"
 },
 {
 "id": "change",
@@ -8652,7 +8652,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "change",
@@ -8897,7 +8897,7 @@
 "id": "mirror",
 "name": "recognize itself",
 "rung": 9,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "change",
@@ -14519,9 +14519,8 @@
 "patience",
 "turns",
 "expect",
-"mirror",
-"change",
-"nudge"
+"nudge",
+"change"
 ],
 "allowed": [
 "feel",
@@ -14529,9 +14528,8 @@
 "patience",
 "turns",
 "expect",
-"mirror",
-"change",
-"nudge"
+"nudge",
+"change"
 ],
 "awaiting": [],
 "bar": 0.1333,
@@ -15751,7 +15749,6 @@
 "patience",
 "turns",
 "expect",
-"mirror",
 "nudge"
 ],
 "allowed": [
@@ -15760,7 +15757,6 @@
 "patience",
 "turns",
 "expect",
-"mirror",
 "nudge"
 ],
 "awaiting": [

@@ -94,6 +94,7 @@ line NNLS picks over the sentences heard in the person's private chat
 (_nudge_chat, _compose). meet, turns, expect and mirror were the
 developer's wiring: they are not built until they are rebuilt on the nudge,
 and their old passes no longer count (LADDER_V = 3, _void_old_wiring).
+Recognize itself is rebuilt (part 3d) on Blurp's looks at the mirror.
 
 NUDGE-AWARE LOOKS (#333 part 3a): each look records `nudged`, Blurp's own
 nudges at that thing since its previous look at it (it knows what it did:
@@ -204,12 +205,24 @@ ACHIEVEMENTS = {
                "why_prereqs": ("meet an other: it predicts whether the other meet found replies to a "
                                "push, read at the reply check after it; it does not need time its turn's "
                                "learned timing -- a push by the timer is checked and predicted the same")},
-    "mirror": {"rung": 9, "name": "recognize itself", "branch": "self", "prereqs": ("feel", "meet"), "built": False,
+    # #333: the nudge skill -- Blurp's one act on things (listed before recognize itself, its child
+    # since part 3d: a prerequisite comes first). Practised once feel itself is
+    # accepted (it nudges the thing it aims at while closing in on it); its test (part 3c, _rung13):
+    # its nudged looks at one thing beat that thing's tempo. Rung 13 is its test's number (12 was
+    # taken by invent).
+    "nudge": {"rung": 13, "name": "first reach", "branch": "world", "prereqs": ("feel",), "built": True,
+              "child_age": "~2-3 mo",
+              "child_ability": "learns its kicks move a mobile (Rovee-Collier, contingency learning)",
+              "why_prereqs": ("feel itself: a nudge is its own move into a thing (the direction and the "
+                              "force are its stride), and it aims only once feel's pass switches steering on")},
+    # #333 part 3d: rebuilt on looks at the mirror -- rows only from its looks, the test #312's
+    "mirror": {"rung": 9, "name": "recognize itself", "branch": "self", "prereqs": ("feel", "nudge"), "built": True,
                "child_age": "~18 mo",
                "child_ability": "passes the mirror test (Amsterdam 1972)",
                "why_prereqs": ("feel itself: what the mirror shows is its own moves -- the body whose steering "
-                               "feel's pass switches on; meet an other: it labels the glass and the stranger "
-                               "with meet's self/other split (BODY_SKILL: predicted this well, it is my body)")},
+                               "feel's pass switches on; first reach: it tells the glass from the stranger with "
+                               "first reach's own-act predictor (its own act -> that thing's change), and labels "
+                               "them with BODY_SKILL (predicted this well, it is my body) -- no person needed")},
     # #320: the test measures choosing how it learns by its own track record, so the child is adaptive
     # strategy choice (~4-5 y), not metacognition in general
     "change": {"rung": 10, "name": "change itself", "branch": "self", "prereqs": ("mirror", "patience"), "built": True,
@@ -228,24 +241,15 @@ ACHIEVEMENTS = {
               "why_prereqs": ("its words take turns (time its turn: its timing is that skill's policy, and one "
                               "stage is that skill's contingency) with an other it can predict (expect a reply: "
                               "its outcome is the reply check after each push)")},
-    # #333: the nudge skill -- Blurp's one act on things. Practised once feel itself is
-    # accepted (it nudges the thing it aims at while closing in on it); its test (part 3c, _rung13):
-    # its nudged looks at one thing beat that thing's tempo. Rung 13 is its test's number (12 was
-    # taken by invent).
-    "nudge": {"rung": 13, "name": "first reach", "branch": "world", "prereqs": ("feel",), "built": True,
-              "child_age": "~2-3 mo",
-              "child_ability": "learns its kicks move a mobile (Rovee-Collier, contingency learning)",
-              "why_prereqs": ("feel itself: a nudge is its own move into a thing (the direction and the "
-                              "force are its stride), and it aims only once feel's pass switches steering on")},
     "invent": {"rung": 12, "name": "invent", "branch": "self", "prereqs": ("change", "speak"), "built": False,
                "child_age": "~5 y",
                "child_ability": "makes up games with its own rules",
                "why_prereqs": "not built yet; planned: rules of its own (change itself), said to others (speak)"},
 }
 RUNG_ID = {a["rung"]: i for i, a in ACHIEVEMENTS.items()}            # the record's rung numbers -> ids
-# #333: meet, turns, expect and mirror are not built until they are rebuilt on the nudge (see
-# LADDER_V); their practice (the chat push, the ball turns, the reply checks, the mirror feed)
-# runs only for a built skill, so it stops with them
+# #333: meet, turns and expect are not built until they are rebuilt on the nudge (see
+# LADDER_V); their practice (the chat push, the ball turns, the reply checks) runs only for a
+# built skill, so it stops with them. Mirror is rebuilt on looks (part 3d).
 BUILT = [i for i, a in ACHIEVEMENTS.items() if a["built"]]
 
 # #343: no longer the loop's pace (the CPU share is): the 10 s a cycle took until #343, at which the
@@ -443,7 +447,10 @@ RUNG8_RECENT = 6            # reply checks the RECENT rate is over, next to the 
 # seeded jitter, and only the glass depends on what self does now. A move is one scalar: the
 # DIRECTION of its displacement this cycle on a fixed seeded axis, x sqrt(dim) (~N(0, 1); its
 # size is left out -- an aim switch's long stride would swamp every other move; no move is 0).
-# Each cycle (_mirror_once) self predicts both sides with the same learner, before it reads them:
+# #333 part 3d: the mirror shows self's move every cycle (_mirror_feed_once: the world's physics,
+# no line), and a row is written only at self's LOOK at it (its getter): before the read, self
+# predicts both sides from its own last MIRROR_OWN moves (_mirror_before, _mirror_look; #312's
+# rows, fed every cycle, carry no `look` and count for nothing). The learner, as in #312:
 # p_* is a ridge regression of the side on its own moves (lags 0..MIRROR_OWN-1) and the side's
 # last MIRROR_PAST values; b_*, the no-self baseline, the same without its own moves; both fitted
 # on the side's last MIRROR_FIT rows (prequential). THE TEST over the last MIRROR_LOOKS rows with
@@ -2379,11 +2386,17 @@ def _mirror_toy_here(srv) -> str | None:
     return names[0] if names else None
 
 
+def _mirror_row(r: dict) -> bool:
+    """#333 part 3d: a mirror row -- one written at Blurp's look at the mirror
+    (`look`). #312's rows, fed every cycle before the void, are history."""
+    return r.get("kind") == "mirror" and bool(r.get("look"))
+
+
 def _mirror_rows(recs: list[dict], toy: str | None = None, n: int | None = None) -> list[dict]:
-    """The latest mirror lines (of one toy), oldest first; at most n."""
+    """The latest looked mirror rows (of one toy), oldest first; at most n."""
     out = []
     for r in reversed(recs):
-        if r.get("kind") == "mirror" and (toy is None or r.get("toy") == toy):
+        if _mirror_row(r) and (toy is None or r.get("toy") == toy):
             out.append(r)
             if n is not None and len(out) >= n:
                 break
@@ -2396,22 +2409,31 @@ def _ridge(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     return np.linalg.solve(X.T @ X + P, X.T @ y)
 
 
-def _mirror_predict(rows: list[dict], side: str, s_now: float):
+def _mirror_predict(rows: list[dict], side: str, s_now: float, own: list | None = None):
     """SELF'S PREDICTION of a side's next value, before it reads it, from the
     rows before only (prequential): (p, b) -- p from its own moves (this one,
     s_now, and the MIRROR_OWN-1 before) and the side's last MIRROR_PAST values,
     b (the no-self baseline) from the side's values alone. The same learner
     on both sides: nothing tells it which is the glass. None before
-    MIRROR_MIN_FIT rows to fit on."""
+    MIRROR_MIN_FIT rows to fit on. #333 part 3d: a row taken at a look
+    carries its own last MIRROR_OWN moves (`own`, newest first; `own` here
+    for the row being predicted) -- looks are cycles apart, so the rows
+    before it are not its moves before; a row without `own` (#312's, fed
+    every cycle) reads them off the rows before it, as it did."""
     k = max(MIRROR_OWN - 1, MIRROR_PAST)
     rows = rows[-(MIRROR_FIT + k):]
 
     def feats(i, s_i):                                     # row i's features (its own move s_i)
         past = [rows[i - j][side] for j in range(1, MIRROR_PAST + 1)]
-        own = [s_i] + [rows[i - j].get("s") for j in range(1, MIRROR_OWN)]
-        if any(v is None for v in past + own):
+        if rows[i].get("own") is not None:
+            mine = list(rows[i]["own"])[:MIRROR_OWN]
+            if len(mine) < MIRROR_OWN:
+                return None
+        else:
+            mine = [s_i] + [rows[i - j].get("s") for j in range(1, MIRROR_OWN)]
+        if any(v is None for v in past + mine):
             return None
-        return [1.0] + [float(v) for v in past] + [float(v) for v in own]
+        return [1.0] + [float(v) for v in past] + [float(v) for v in mine]
 
     X, y = [], []
     for i in range(k, len(rows)):
@@ -2423,7 +2445,7 @@ def _mirror_predict(rows: list[dict], side: str, s_now: float):
             y.append(float(rows[i][side]))
     if len(X) < MIRROR_MIN_FIT or len(rows) < k:
         return None
-    rows = rows + [{"s": s_now}]                            # the row being predicted
+    rows = rows + [{"s": s_now, **({"own": list(own)} if own is not None else {})}]   # the row being predicted
     f = feats(len(rows) - 1, s_now)
     if f is None:
         return None
@@ -2435,28 +2457,99 @@ def _mirror_predict(rows: list[dict], side: str, s_now: float):
         return None
 
 
-def _mirror_once(srv, n: int, now: float, move) -> None:
-    """RUNG 9'S PRACTICE (#312), each cycle while recognize itself is open:
-    predict both sides of the mirror, feed it this cycle's move, read both,
-    and write one `mirror` line: {s, glass, stranger, p_*, b_*} (scalars)."""
+def _mirror_feed_once(srv, now: float, move) -> None:
+    """THE MIRROR'S PHYSICS (#333 part 3d): each cycle the mirror in its world
+    shows Blurp's move, as a real mirror reflects -- whether it looks or not,
+    whatever it has earned. No record line: rows come only from its looks
+    (_mirror_look). Blurp knows its own moves: the last MIRROR_OWN it fed are
+    kept in RAM (newest first) for its prediction at a look; a restart starts
+    them afresh."""
+    rt = _rt(srv)
     name = _mirror_toy(srv)
+    rt["mirror_toy"] = name
     if name is None:
         return
     s = round(_mirror_move(move), 4)
-    rows = _mirror_rows(_read(srv), name, MIRROR_FIT + MIRROR_OWN + MIRROR_PAST)
-    pred = {side: _mirror_predict(rows, side, s) for side in ("glass", "stranger")}
     try:                                                    # #440: fed in the seat
         out = _API.effects(srv, [{"kind": "mirror_feed", "toy": name, "s": s, "now": now}])[0]
     except Exception as e:                                  # noqa: BLE001
         out = {"ok": False, "error": repr(e)}
-    if not out.get("ok"):
+    if out.get("ok"):
+        rt["mirror_own"] = ([s] + list(rt.get("mirror_own") or []))[:MIRROR_OWN]
+
+
+def _mirror_eid(srv) -> str | None:
+    """The eid of the mirror fed this cycle (None without one)."""
+    name = _rt(srv).get("mirror_toy")
+    if not name:
+        return None
+    from .entities import CLASS_COMPONENT, entity_id
+    return entity_id(CLASS_COMPONENT, name)
+
+
+def _mirror_before(srv, recs: list[dict]) -> dict:
+    """RUNG 9'S PRACTICE, before a look at the mirror (#333 part 3d): its
+    prediction of both sides from its own last MIRROR_OWN moves and the rows
+    of its earlier looks (_mirror_predict), made before it reads them."""
+    rt = _rt(srv)
+    own = list(rt.get("mirror_own") or [])
+    name = rt.get("mirror_toy")
+    rows = _mirror_rows(recs, name, MIRROR_FIT + MIRROR_OWN + MIRROR_PAST)
+    s = own[0] if own else 0.0
+    return {"toy": name, "s": s, "own": own,
+            "pred": {side: _mirror_predict(rows, side, s, own=own) for side in ("glass", "stranger")}}
+
+
+def _mirror_look(srv, n: int, now: float, before: dict, read: dict) -> None:
+    """...and after it: one `mirror` row, {look, s, own, glass, stranger,
+    p_*, b_*} -- the sides as its getter read them."""
+    st = (read or {}).get("state") or {}
+    if not isinstance(st, dict) or "glass" not in st:
         return
-    rec = {"ts": now, "kind": "mirror", "n": n, "toy": name, "s": s,
-           "glass": out.get("glass"), "stranger": out.get("stranger")}
-    for side, pb in pred.items():
+    rec = {"ts": now, "kind": "mirror", "n": n, "look": True, "toy": before["toy"],
+           "eid": _mirror_eid(srv), "s": before["s"], "own": before["own"],
+           "glass": st.get("glass"), "stranger": st.get("stranger")}
+    for side, pb in before["pred"].items():
         if pb is not None:
             rec[f"p_{side}"], rec[f"b_{side}"] = round(pb[0], 4), round(pb[1], 4)
     _append(srv, rec)
+
+
+def _mirror_info(rows: list[dict]) -> float:
+    """WHAT A LOOK AT THE MIRROR CAN TEACH (#333 part 3d), in place of the
+    changed/unchanged entropy (a mirror always changes, so the entropy would
+    never send Blurp there): the glass prediction's expected error -- its
+    squared residual over the glass's variance, on the last MIRROR_FIT looked
+    rows it predicted; 1 (all to learn) before two of them, at most 1."""
+    rs = [r for r in rows if r.get("glass") is not None and r.get("p_glass") is not None][-MIRROR_FIT:]
+    if len(rs) < 2:
+        return 1.0
+    g = np.array([float(r["glass"]) for r in rs])
+    res = float(((g - np.array([float(r["p_glass"]) for r in rs])) ** 2).sum())
+    var = float(((g - g.mean()) ** 2).sum())
+    return 1.0 if var <= 1e-12 else min(1.0, res / var)
+
+
+def _teach(recs: list[dict], eid: str, p: float, mirror: str | None = None) -> float:
+    """What a look at eid can teach: the entropy of its p (_info); at the
+    mirror, while recognize itself is practised (`mirror`: its eid), the glass
+    prediction's expected error (_mirror_info)."""
+    if mirror is not None and eid == mirror:
+        return _mirror_info([r for r in _mirror_rows(recs) if r.get("eid") == eid])
+    return _info(p)
+
+
+def _glass_errors(recs: list[dict]) -> dict:
+    """eid -> the squared errors of its glass predictions, oldest first: the
+    series the curiosity tilt reads for a mirror (#333 part 3d). A mirror
+    with looked rows has an entry (empty before its first prediction)."""
+    out: dict[str, list] = {}
+    for r in recs:
+        if _mirror_row(r) and r.get("eid"):
+            e = out.setdefault(r["eid"], [])
+            if r.get("glass") is not None and r.get("p_glass") is not None:
+                e.append((float(r["glass"]) - float(r["p_glass"])) ** 2)
+    return out
 
 
 # ---- #320: change itself -- its own learning settings, and the dream ----------------
@@ -2916,10 +3009,9 @@ def cycle(srv, now: float | None = None) -> dict | None:
                 and _closing(srv, rt["aim_eid"])):
             # #333: its own move nudges what it aims at -- only while it is getting closer to it
             _nudge_once(srv, n, now, rt["aim_eid"], c["mine"])
+        _mirror_feed_once(srv, now, c["observed"] - pos)        # #333 part 3d: the mirror shows its move (physics)
         if _available(srv, 2):
             _reach_once(srv, est, ent, n, now)
-        if _available(srv, 9):
-            _mirror_once(srv, n, now, c["observed"] - pos)      # #312: its move, to the mirror
         _dream_tick(srv, n, now)                                # #320: off the cycle's thread
     finally:
         rec["dur_s"] = round(time.perf_counter() - t0, 4)       # #343: the whole cycle, so its line comes last
@@ -3042,6 +3134,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     inside = bool(au and au.get("rung", 2) == 2 and au["eid"] == eid)
     in5 = bool(au and au.get("rung") == 5 and au["eid"] == eid)
     k = int((_nudge_state(srv).get(eid) or {}).get("k") or 0)   # #333 part 3a: its own nudges since its last look
+    mirror = (_mirror_before(srv, recs)                  # #333 part 3d: rung 9 predicts the mirror before it looks
+              if _available(srv, 9) and eid == _mirror_eid(srv) else None)
     from .night import method_call
     _ctx.cycle = {"srv": srv, "act": "reach", "eid": eid, "audit": inside, "now": now, "reply": reply,
                   "lam": lam, "dt": (now - float(last)) if last is not None else None, "nudged": k}
@@ -3117,6 +3211,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         if c["answer"] != "none" and not k:
             au["looks"] += 1
     _append(srv, rec)
+    if mirror is not None and c["answer"] != "none":
+        _mirror_look(srv, n, now, mirror, c.get("read") or {})   # rung 9's row: only at a look
     _place_once(srv, eid)
     if watch and c["answer"] != "none" and not inside and not k:    # a nudged look is no evidence of a shift
         _shift_check(srv, eid, now)
@@ -3350,7 +3446,8 @@ def _due(srv, recs, targets, kinds, now, rng):
     def p_of(e, lam):                              # a nudged thing: what the look can teach about p_n
         p = _due_p(srv, tempo, e, lam, now)
         return _p_n(srv, e, nudged[e], p) if nudged[e] else p
-    weights = [max(INFO_FLOOR, _info(p_of(e, lam))) * tilt[e] for e, lam in due]
+    mirror = _mirror_eid(srv) if _available(srv, 9) else None   # #333 part 3d: the mirror, by its glass error
+    weights = [max(INFO_FLOOR, _teach(recs, e, p_of(e, lam), mirror)) * tilt[e] for e, lam in due]
     return rng.choices(due, weights=weights)[0]   # #266: what the look can teach x the frontier
 
 
@@ -3442,8 +3539,10 @@ def _progress(recs: list[dict], detail: bool = False) -> dict:
     the latest ones (positive: its prediction is getting better). The window
     means are the smoothing; each is an interquartile mean (_window_error). A thing with fewer than two windows of looks has
     none yet. With `detail`, {eid: {progress, error}} (error: the recent mean).
-    Computed from the record at the moment it is read -- never stored."""
-    return _progress_of(_ordinary_errors(recs), CURIO_WINDOW, detail)
+    #333 part 3d: a mirror's series is its glass prediction's errors
+    (_glass_errors), not its looks' answers. Computed from the record at the
+    moment it is read -- never stored."""
+    return _progress_of({**_ordinary_errors(recs), **_glass_errors(recs)}, CURIO_WINDOW, detail)
 
 
 def _progress_of(errors: dict, W: int, detail: bool = False) -> dict:
@@ -3897,8 +3996,8 @@ def _rung9(recs: list[dict], tempo: dict | None = None) -> dict:
     reads as body, self) and do NOT so predict the STRANGER -- its own old
     moves, the same statistics -- (it reads as other). Staged: looks, self,
     other. The headline skill is the glass's. Reads the current mirror only
-    (the latest line's toy)."""
-    last = next((r for r in reversed(recs) if r.get("kind") == "mirror"), None)
+    (the latest line's toy). #333 part 3d: only rows of its looks count."""
+    last = next((r for r in reversed(recs) if _mirror_row(r)), None)
     keys = ("glass", "stranger", "p_glass", "b_glass", "p_stranger", "b_stranger")
     rows = [r for r in _mirror_rows(recs, last.get("toy") if last else None)
             if all(r.get(k) is not None for k in keys)][-MIRROR_LOOKS:]
@@ -4521,15 +4620,12 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
             got = reads[r["eid"]]
             if len(got) < TOY_READS:
                 got.append(r.get("answer"))
-    fed = {r.get("toy") for r in recs[-TOY_SCAN:] if r.get("kind") == "mirror"}   # #312: self's mirror
     out = []
     for eid, getter, kind, toy, block in cached[1]:
         got = reads[eid]
         answered = sum(1 for a in got if a in ("changed", "unchanged"))
         health = ("no getter" if not getter else "unread" if not got
                   else "empty" if not answered else "ok")
-        if kind == "mirror":                               # no getter by design: self sees it by feeding it
-            health = "ok" if toy in fed else "unread"
         row = {"eid": eid, "kind": kind, "getter": getter, "reads": len(got), "answered": answered,
                "health": health}
         if toy:                                            # #244: the play buttons' target
