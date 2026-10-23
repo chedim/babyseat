@@ -184,13 +184,15 @@ def _cockpit_rule(src, sel):
     return m.group(1) if m else ""
 
 
-def test_the_stop_button_wears_the_cockpit_hud_like_send():
-    # round 2: Stop (shown while a turn runs) kept the panel's red fill in the cockpit
+def test_the_cockpit_button_is_a_hud_pill_in_both_tones():
+    # Stop stopped wearing the panel's red fill (#488); now it is the morphing
+    # button's amber tone, the same pill as Send
     src = (UI / "panel.js").read_text()
-    rule = _cockpit_rule(src, ":host([cockpit]) .composer .btn.stop")
-    assert "border-radius:999px" in rule and "background:transparent" in rule
-    assert "border:1px solid var(--cockpit-accent" in rule and "color:var(--cockpit-accent" in rule
-    assert "min-height:48px" in rule
+    send = _cockpit_rule(src, ":host([cockpit]) .composer .btn.send")
+    assert "border-radius:999px" in send and "background:transparent" in send and "min-height:48px" in send
+    assert "border:1px solid var(--cockpit-accent" in send and "color:var(--cockpit-accent" in send
+    amber = _cockpit_rule(src, ':host([cockpit]) .composer .btn.send[data-tone="amber"]')
+    assert "color:var(--cockpit-amber" in amber and "border-color:var(--cockpit-amber" in amber
 
 
 def test_the_field_is_the_cockpits_full_page_background():
@@ -210,3 +212,27 @@ def test_the_field_is_the_cockpits_full_page_background():
     assert "background:var(--ck-backing" in _cockpit_rule((UI / "panel.js").read_text(), ":host([cockpit]) .scroller")
     # no small-field point cap any more: the page's own adaptive budget
     assert "COCKPIT_FIELD_BUDGET" not in home
+
+
+@NODE
+def test_the_cockpits_one_button_morphs_between_send_and_stop():
+    # round 2: one button replaces Queue + Stop in the cockpit
+    m = lambda text, busy: _js("P.morphButton(%s, %s)" % (json.dumps(text), json.dumps(busy)), "panel.js", "P")
+    assert m("", False) == {"label": "Send", "action": "send", "tone": "cyan"}
+    assert m("hello", False) == {"label": "Send", "action": "send", "tone": "cyan"}
+    # answering with an empty input: Stop, amber
+    assert m("", True) == {"label": "Stop", "action": "stop", "tone": "amber"}
+    assert m("  \n ", True) == {"label": "Stop", "action": "stop", "tone": "amber"}
+    # answering and the person types: Send, which queues
+    assert m("one more thing", True) == {"label": "Send", "action": "queue", "tone": "cyan"}
+
+
+def test_the_morphing_button_is_wired_in_cockpit_mode_only():
+    src = (UI / "panel.js").read_text()
+    stop = _cockpit_rule(src, ":host([cockpit]) .composer .btn.stop")
+    assert "display:none" in stop                                    # the separate Stop is gone in the cockpit
+    amber = _cockpit_rule(src, ':host([cockpit]) .composer .btn.send[data-tone="amber"]')
+    assert "--cockpit-line" in amber or "amber" in amber or "#ffb040" in amber
+    assert "morphButton(" in src
+    # Enter still only sends / queues: the keydown handler calls _submit, never the morph's stop
+    assert 'ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); this._submit(); }' in src
