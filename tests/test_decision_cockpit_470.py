@@ -176,3 +176,18 @@ def test_the_side_lanes_clear_blurps_tab_and_toys():
     margin is 1.5x the first cut's 44px (operator, 2026-10-23)."""
     src = (UI / "decisions.js").read_text()
     assert "padding:8px 66px 0;" in src
+
+
+def _cockpit_rule(src, sel):
+    import re
+    m = re.search(re.escape(sel) + r"\s*\{([^}]*)\}", src)
+    return m.group(1) if m else ""
+
+
+def test_the_stop_button_wears_the_cockpit_hud_like_send():
+    # round 2: Stop (shown while a turn runs) kept the panel's red fill in the cockpit
+    src = (UI / "panel.js").read_text()
+    rule = _cockpit_rule(src, ":host([cockpit]) .composer .btn.stop")
+    assert "border-radius:999px" in rule and "background:transparent" in rule
+    assert "border:1px solid var(--cockpit-accent" in rule and "color:var(--cockpit-accent" in rule
+    assert "min-height:48px" in rule

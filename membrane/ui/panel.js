@@ -2172,7 +2172,11 @@ const STYLE = `
   :host([cockpit]) .composer textarea:focus { outline:none; border-color:var(--cockpit-accent, #5fd6ff); }
   :host([cockpit]) .composer .btn.send { border-radius:999px; min-height:48px; padding:0 18px; color:var(--cockpit-accent, #5fd6ff);
     background:transparent; border:1px solid var(--cockpit-accent, #5fd6ff); }
-  :host([cockpit]) .composer .btn.send:hover { background:color-mix(in srgb, var(--cockpit-accent, #5fd6ff) 16%, transparent); }
+  :host([cockpit]) .composer .btn.send:hover, :host([cockpit]) .composer .btn.stop:hover {
+    background:color-mix(in srgb, var(--cockpit-accent, #5fd6ff) 16%, transparent); }
+  /* Stop (a turn runs) wears the same HUD pill as Send, not the panel's red fill */
+  :host([cockpit]) .composer .btn.stop { border-radius:999px; min-height:48px; padding:0 18px; color:var(--cockpit-accent, #5fd6ff);
+    background:transparent; border:1px solid var(--cockpit-accent, #5fd6ff); }
   :host([cockpit]) .bar { order:-1; min-height:0; border:0; padding:0 4px 4px; font-size:12px; background:transparent; }
   :host([cockpit]) .bar .title { font-weight:500; opacity:.7; }
   :host([cockpit]) .scroller { background:transparent;
