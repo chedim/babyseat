@@ -196,8 +196,8 @@ the things it names. On later turns it sees only what changed since the last
 message: which entities moved, and whether the change came from the
 conversation, the code, another seat or a script.
 
-**`MEMBRANE_INJECTION=conversation`** (opt-in; the default is still the
-WHERE WE ARE banner) replaces that state with one small block about *this*
+**The conversation block** (the default since #429's measurement;
+`MEMBRANE_INJECTION=banner` restores the WHERE WE ARE banner) replaces that state with one small block about *this*
 chat, built from records only (no model call), at most 900 chars, sent every
 turn while it has content: `NOW`, `WORKING ON` (the person's latest earlier
 ask), `ABOUT` (the chat's focus entities), `DECIDED` (the ledger, goals
