@@ -139,7 +139,7 @@ def test_p_self_with_no_history_is_a_coin():
 # ---- 2. no LLM: passable on structure, not on a coin ------------------------------
 
 def test_without_a_model_self_passes_on_an_other_with_timing_structure():
-    out = SL._rung8(_recs(_sessions(3)))
+    out = SL._reply_check_score(_recs(_sessions(3)))
     assert out["passed"] is True, out
     assert out["skill"] >= SL.RUNG8_MARGIN
 
@@ -150,7 +150,7 @@ def test_without_a_model_self_cant_pass_on_a_coin_flip_other(seed, rate):
     # every window end the live test would have read, not just the last one
     ends = [i for i, r in enumerate(recs) if r.get("kind") == "reach"]
     for e in ends[SL.RUNG8_LOOKS - 1::5]:
-        assert SL._rung8(recs[:e + 1])["passed"] is False
+        assert SL._reply_check_score(recs[:e + 1])["passed"] is False
 
 
 # ---- 3. the advisor ----------------------------------------------------------------
@@ -158,8 +158,8 @@ def test_without_a_model_self_cant_pass_on_a_coin_flip_other(seed, rate):
 def test_an_always_wrong_advisor_gets_no_weight_and_does_not_sink_self():
     checks = _sessions(5)
     wrong = [0.95 if o == 0 else 0.05 for o, _ in checks]
-    alone = SL._rung8(_recs(checks))
-    mixed = SL._rung8(_recs(checks, p_llm=wrong, model="m1"))
+    alone = SL._reply_check_score(_recs(checks))
+    mixed = SL._reply_check_score(_recs(checks, p_llm=wrong, model="m1"))
     rows = SL._rung8_series(_recs(checks, p_llm=wrong, model="m1"), RESP)
     assert max(r["w"] for r in rows[30:]) < 0.05
     assert mixed["passed"] is True
@@ -173,7 +173,7 @@ def test_a_good_advisor_earns_weight():
     assert rows[0]["w"] == 0.0 and rows[0]["p"] == rows[0]["p_self"]   # trust is earned, not given
     assert rows[-1]["w"] > 0.5
     assert rows[-1]["w"] > rows[5]["w"]                                 # it rises
-    out = SL._rung8(_recs(checks, p_llm=good, model="m1"))
+    out = SL._reply_check_score(_recs(checks, p_llm=good, model="m1"))
     assert out["passed"] is True
 
 
@@ -185,7 +185,7 @@ def test_a_biased_but_informative_advisor_is_useful_after_calibration():
     rows = SL._rung8_series(recs, RESP)[-SL.RUNG8_LOOKS:]
     os_ = [r["o"] for r in rows]
     assert _brier([r["p"] for r in rows], os_) < _brier([r["p_llm"] for r in rows], os_)
-    assert SL._rung8(recs)["passed"] is True
+    assert SL._reply_check_score(recs)["passed"] is True
     assert rows[-1]["w"] > 0.3
 
 
@@ -195,8 +195,8 @@ def test_an_uninformative_biased_advisor_has_no_influence():
     rows = SL._rung8_series(_recs(checks, p_llm=[0.2] * len(checks), model="m1"), RESP)
     infl = sum(abs(r["p"] - r["p_self"]) for r in rows) / len(rows)
     assert infl < 0.03
-    alone = SL._rung8(_recs(checks))
-    assert SL._rung8(_recs(checks, p_llm=[0.2] * len(checks), model="m1"))["skill"] == \
+    alone = SL._reply_check_score(_recs(checks))
+    assert SL._reply_check_score(_recs(checks, p_llm=[0.2] * len(checks), model="m1"))["skill"] == \
         pytest.approx(alone["skill"], abs=0.03)
 
 
@@ -240,7 +240,7 @@ def test_the_baseline_is_the_running_rate_with_no_lookahead():
 def test_echoing_the_running_rate_scores_zero():
     checks = _sessions(13)
     rows = SL._rung8_series(_recs(checks), RESP)
-    out = SL._rung8(_recs(checks, p_self=[r["rate"] for r in rows]))
+    out = SL._reply_check_score(_recs(checks, p_self=[r["rate"] for r in rows]))
     assert out["skill"] == pytest.approx(0.0, abs=1e-9)
     assert out["passed"] is False
 
@@ -249,7 +249,7 @@ def test_echoing_the_running_rate_scores_zero():
                                  lambda: _sessions(4)])
 def test_always_saying_half_does_not_pass(gen):
     checks = gen()
-    out = SL._rung8(_recs(checks, p_self=[0.5] * len(checks)))
+    out = SL._reply_check_score(_recs(checks, p_self=[0.5] * len(checks)))
     assert out["passed"] is False
 
 
@@ -297,7 +297,7 @@ def test_status_reports_self_mix_rate_and_the_advisor():
     good = [0.9 if o else 0.1 for o, _ in checks]
     for r in _recs(checks, p_llm=good, model="qwen3"):
         SL._append(srv, r)
-    r7 = SL.status(srv)["rung8"]
+    r7 = SL._reply_check_stats(SL._read(srv))
     rows = SL._rung8_series(SL._read(srv), RESP)[-SL.RUNG8_LOOKS:]
     os_ = [r["o"] for r in rows]
     assert r7["brier_self"] == pytest.approx(_brier([r["p_self"] for r in rows], os_), abs=1e-4)
@@ -305,13 +305,14 @@ def test_status_reports_self_mix_rate_and_the_advisor():
     assert r7["brier_rate"] == pytest.approx(_brier([r["rate"] for r in rows], os_), abs=1e-4)
     assert r7["advisor_model"] == "qwen3"
     assert r7["advisor_weight"] > 0.5
-    st = SL.status(srv)
-    assert st["skill_rung"] == 8
-    assert st["skill"] == pytest.approx(1 - r7["brier_mix"] / r7["brier_rate"], abs=1e-3)
+    assert SL._reply_check_score(SL._read(srv))["skill"] == pytest.approx(1 - r7["brier_mix"] / r7["brier_rate"],
+                                                                         abs=1e-3)
+    st = SL.status(srv)                                  # #333 part 3f: the rebuilt rung 8 reads none of it
+    assert st["rung8"]["checks"] == 0
 
 
 def test_status_without_checks_is_quiet():
-    r7 = SL.status(_seat())["rung8"]
+    r7 = SL._reply_check_stats(SL._read(_seat()))
     for k in ("brier_self", "brier_mix", "brier_rate", "advisor_model"):
         assert r7[k] is None
     assert r7["advisor_weight"] == 0.0
@@ -334,7 +335,7 @@ def test_a_legacy_check_gets_its_p_self_recomputed_from_the_record():
     recorded = SL._rung8_series(_recs(checks, p_self=[r["p_self"] for r in rows]), RESP)
     assert [r["p_self"] for r in rows] == pytest.approx([r["p_self"] for r in recorded])
     assert all(0.0 < r["p_self"] < 1.0 for r in rows)
-    assert not math.isnan(SL._rung8(_recs(checks))["skill"])
+    assert not math.isnan(SL._reply_check_score(_recs(checks))["skill"])
 
 
 @pytest.fixture(autouse=True)
@@ -342,12 +343,3 @@ def _chat_medium(monkeypatch):
     """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
     rung 7's turns to the ball by default, so they switch the toy medium off."""
 
-
-@pytest.fixture(autouse=True)
-def _rebuilt_333(monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the scoring and the readers tested here run on the
-    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
-    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
-    from tests._self_cap import rebuilt
-    rebuilt(monkeypatch)

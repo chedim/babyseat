@@ -28,19 +28,6 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SH  # noqa: E402
 from tests.test_self_sheet_249 import T0, H, _lived, _seat, _sheet  # noqa: E402
 from tests.test_skill_tree_295 import _seat as _tree_seat  # noqa: E402
-from tests._self_cap import start_rebuilt, stop_rebuilt  # noqa: E402
-
-_REBUILT: list = []
-
-
-def setUpModule():
-    """#333: the card is tested on the whole tree (meet, turns, expect and mirror
-    built as their rebuild, part 3, will build them; passes on ladder 3)."""
-    _REBUILT[:] = start_rebuilt()
-
-
-def tearDownModule():
-    stop_rebuilt(_REBUILT)
 
 UI = ROOT / "membrane" / "ui"
 NODE = unittest.skipUnless(shutil.which("node"), "node not installed")
@@ -168,8 +155,8 @@ class TestSkillsOnTheCard(unittest.TestCase):
         self.assertEqual(ids, ["turns"])                # expect is open but the limit holds it; earned ones are gone
         k = s["skills"][0]
         self.assertEqual(k["name"], "time its turn")
-        self.assertEqual([c["key"] for c in k["criteria"]], ["pushes", "contingency", "payoff"])
-        self.assertEqual(k["waiting_on"], "pushes")
+        self.assertEqual([c["key"] for c in k["criteria"]], ["nudges", "contingency", "payoff"])
+        self.assertEqual(k["waiting_on"], "nudges")
         self.assertIn("bar", k)
         self.assertEqual(len(k["trend"]["series"]), SH.SKILL_POINTS)
 
@@ -234,7 +221,7 @@ class TestTreeLabel(unittest.TestCase):
                    {"allow": "all", "allowed": [], "mode": "on"}):
             t = {n["id"]: n for n in SH.tree(recs, st, progs)}
             self.assertEqual(t["turns"]["state"], "open")
-            self.assertEqual(t["turns"]["waiting_on"], "pushes", st)
+            self.assertEqual(t["turns"]["waiting_on"], "nudges", st)
 
     def test_one_the_accept_holds_says_so(self):            # #299: the limit's job is the operator's accept
         srv = _tree_seat(rungs=(1, 2, 3, 4, 5), lines=[{"ts": 9.5, "kind": "accept_migrated",

@@ -240,7 +240,7 @@ def test_a_base_rate_model_beats_an_always_098_one_on_the_live_outcomes():
         # #254: status no longer carries habit (rung 7 doesn't read it): habit's
         # Brier over the same checks is computed here, from what it said
         b_habit = sum((o - h) ** 2 for o, h, _ in LIVE) / len(LIVE)
-        return SL.status(srv)["rung8"]["brier_model"], b_habit
+        return SL._reply_check_stats(SL._read(srv))["brier_model"], b_habit
 
     b_rate, b_habit = brier(_base_rate)
     b_conf, _ = brier(lambda prompt: 0.98)
@@ -263,7 +263,7 @@ def test_status_reports_pairs_per_asked_push_and_both_briers():
         SL._append(srv, rec)
         t += 300
     SL._append(srv, {"ts": t, "kind": "push", "n": 1, "eid": "chat:out", "to": RESP, "asked": True})  # in flight
-    r7 = SL.status(srv)["rung8"]
+    r7 = SL._reply_check_stats(SL._read(srv))
     assert r7["asked"] == 8 and r7["checked"] == 7 and r7["paired"] == 4
     assert r7["pair_rate"] == pytest.approx(4 / 7, abs=1e-3)
     pairs = [x for x in LIVE if x[2] is not None]
@@ -281,7 +281,7 @@ def test_status_reports_pairs_per_asked_push_and_both_briers():
 
 def test_status_without_asks_is_quiet():
     srv = _seat()
-    r7 = SL.status(srv)["rung8"]
+    r7 = SL._reply_check_stats(SL._read(srv))
     assert r7["asked"] == 0 and r7["paired"] == 0
     assert r7["brier_model"] is None and r7["brier_self"] is None
 
@@ -305,12 +305,3 @@ def _chat_medium(monkeypatch):
     """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
     rung 7's turns to the ball by default, so they switch the toy medium off."""
 
-
-@pytest.fixture(autouse=True)
-def _rebuilt_333(monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the scoring and the readers tested here run on the
-    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
-    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
-    from tests._self_cap import rebuilt
-    rebuilt(monkeypatch)

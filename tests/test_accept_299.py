@@ -40,17 +40,11 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane import toy_unlocks as TU  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
-from tests._self_cap import ladder3, rebuilt  # noqa: E402
+from tests._self_cap import ladder3  # noqa: E402
 
 NODE = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 LIVE7 = ["feel", "reach", "kinds", "patience", "shift", "meet", "expect"]   # the live seat, 2026-10-19 (Lv 7)
 
-
-@pytest.fixture(autouse=True)
-def _whole_tree(monkeypatch):
-    """#333: acceptance walks the whole tree -- meet, turns, expect and mirror
-    built as their rebuild (part 3) will, their passes on ladder 3."""
-    rebuilt(monkeypatch)
 
 
 def _new_seat(d=None):

@@ -49,6 +49,19 @@ from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E
 
 RESP = MEMBRANE_NS + "Component:chat:operator"
 NB = len(SL.TURN_BINS) + 1
+CHAT_BINS = (120.0, 600.0, 1800.0)       # #258's chat clock: 0-2 min, 2-10, 10-30, 30+
+CHAT_NAMES = ("0-2m", "2-10m", "10-30m", "30m+")
+
+
+@pytest.fixture(autouse=True)
+def _chat_clock_258(monkeypatch):
+    """#333 part 3f moved every turn to the ball's clock (TURN_BINS (20, 60, 180) s,
+    payoff t >= 5) and onto meet's other. These are #258's measurements of the
+    bandit and the test on the chat's clock, as they were made: its bins and
+    its payoff bar (4.0), pinned here."""
+    monkeypatch.setattr(SL, "TURN_BINS", CHAT_BINS)
+    monkeypatch.setattr(SL, "TURN_NAMES", CHAT_NAMES)
+    monkeypatch.setattr(SL, "RUNG7_PAY_Z", 4.0)
 
 
 # ---- synthetic others, driven at the cycle's pace -----------------------------------
@@ -104,7 +117,7 @@ def _drive(kind, pusher, hours, seed):
         if since < every:
             continue
         age = (t - o.last) if o.last is not None else None
-        b = SL._turn_bin(age)
+        b = SL._turn_bin(age, CHAT_BINS)
         dwell[b] += 1
         if pusher == "policy":
             if aim is None:
@@ -129,8 +142,8 @@ def _ever_passes(rows):
     """Does the test pass at ANY push of the run (the live test reads every
     window, not just the last)?"""
     d = SL._turn_deltas(rows)
-    for j in range(SL.RUNG7_PUSHES, len(d) + 1):
-        if SL._turn_window(d[j - SL.RUNG7_PUSHES:j])["passed"]:
+    for j in range(SL.RUNG7_NUDGES, len(d) + 1):
+        if SL._turn_window(d[j - SL.RUNG7_NUDGES:j])["passed"]:
             return True
     return False
 
@@ -229,8 +242,8 @@ def test_a_timer_never_passes_even_with_a_turn_taker(seed):
 def test_the_score_parts():
     # in-window pushes against the shuffled share, payoff against timing-blind
     rows = _drive("early", "policy", 96, 1)
-    w = SL._turn_window(SL._turn_deltas(rows)[-SL.RUNG7_PUSHES:])
-    assert w["n"] == SL.RUNG7_PUSHES
+    w = SL._turn_window(SL._turn_deltas(rows)[-SL.RUNG7_NUDGES:])
+    assert w["n"] == SL.RUNG7_NUDGES
     assert w["share"] > w["chance"] + SL.RUNG7_CONT_MARGIN
     assert w["z"] >= SL.RUNG7_CONT_Z
     assert w["payoff"] >= SL.RUNG7_PAY_MARGIN
@@ -240,7 +253,7 @@ def test_the_score_parts():
 def test_a_push_with_no_waiting_has_no_contingency():
     # a timer's push has nothing to choose: its window share IS the shuffled share
     rows = [{"bin": i % NB, "best": i % NB, "dwell": [int(b == i % NB) for b in range(NB)], "replied": True}
-            for i in range(SL.RUNG7_PUSHES)]
+            for i in range(SL.RUNG7_NUDGES)]
     w = SL._turn_window(SL._turn_deltas(rows))
     assert w["z"] == 0.0 and w["share"] == w["chance"] == 1.0
     assert not w["passed"]
@@ -250,7 +263,7 @@ def test_the_bar_and_window_follow_the_replay():
     # experiments/rung7_turns: 100 pushes, contingency z >= 3 and +0.10 over
     # chance, payoff t >= 4 (a coin-flip other's best window over a week
     # reaches q99 ~4.1) and +0.05
-    assert SL.RUNG7_PUSHES == 100
+    assert SL.RUNG7_NUDGES == 100
     assert SL.RUNG7_CONT_Z >= 3.0 and SL.RUNG7_CONT_MARGIN >= 0.1
     assert SL.RUNG7_PAY_Z >= 4.0 and SL.RUNG7_PAY_MARGIN > 0.0
 
@@ -429,11 +442,11 @@ def test_status_shows_both_blocks(monkeypatch):
     r7 = st["rung7"]
     assert [b["bin"] for b in r7["bins"]] == list(SL.TURN_NAMES)
     assert sum(b["pushes"] for b in r7["bins"]) == r7["checked"]
-    for k in ("pushes", "checked", "best", "share", "chance", "z", "payoff", "payoff_z", "reply_rate", "blind_rate"):
-        assert k in r7
+    for k in ("nudges", "checked", "best", "share", "chance", "z", "payoff", "payoff_z", "reply_rate", "blind_rate"):
+        assert k in r7                                    # #333 part 3f: its timed nudges at meet's other
     r8 = st["rung8"]
-    for k in ("asked", "checked", "paired", "brier_self", "brier_mix", "brier_rate", "advisor_weight"):
-        assert k in r8
+    for k in ("checks", "brier_self", "brier_rate", "base_rate", "recent_rate"):
+        assert k in r8                                    # ...its predicted follow-ups (the advisor out)
     assert st["skill_rung"] == 7 and st["skill_pass"] == SL.RUNG7_PAY_MARGIN
 
 
@@ -447,8 +460,8 @@ def test_the_sheet_follows_the_numbering(monkeypatch):
     assert sk["turns"]["trend"]["pass"] == SL.RUNG7_PAY_MARGIN
     assert {n["id"]: n for n in s["tree"]}["expect"]["name"] == "expect a reply"   # the limit (7) holds it off the card
     assert s["quest"]["rung"] == 7 and s["quest"]["name"] == "time its turn"
-    assert [c["key"] for c in s["quest"]["criteria"]] == ["pushes", "contingency", "payoff"]
-    assert "timed lines" in s["quest"]["criteria"][0]["text"]
+    assert [c["key"] for c in s["quest"]["criteria"]] == ["nudges", "contingency", "payoff"]   # #333 part 3f
+    assert "timed nudges" in s["quest"]["criteria"][0]["text"]
     months7, what7 = SS.CHILD[7]
     assert 2.0 <= months7 <= 6.0 and "turn" in what7
     assert SS.CHILD[8][0] == 2.5 and "still-face" in SS.CHILD[8][1]   # #300: expects a caregiver's reply (~2-3 mo)
@@ -486,12 +499,3 @@ def _chat_medium(monkeypatch):
     """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
     rung 7's turns to the ball by default, so they switch the toy medium off."""
 
-
-@pytest.fixture(autouse=True)
-def _rebuilt_333(monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the scoring and the readers tested here run on the
-    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
-    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
-    from tests._self_cap import rebuilt
-    rebuilt(monkeypatch)

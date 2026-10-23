@@ -395,6 +395,7 @@ def _readers(srv, now):
     out["steer_stats"] = SL._steer_stats(recs)
     out["rung7_stats"] = SL._rung7_stats(recs)
     out["rung8_stats"] = SL._rung8_stats(recs)
+    out["reply_check_stats"] = SL._reply_check_stats(recs)    # #333 part 3f: the old wiring's rung 8, as history
     out["speak_stats"] = SL._speak_stats(recs)
     out["latest_unlock"] = SL._latest_unlock(recs)
     out["candidate"] = SL._candidate(recs, {"lam_looks": 30, "lam_prior_looks": 3.0}, 3)
@@ -420,7 +421,7 @@ def _readers(srv, now):
             o["clock_" + m] = SL._cur_clock(recs, e, m)
             o["checks_" + m] = SL._reply_checks(recs, e, m)[-SL.RUNG8_LOOKS:]
             for c in (1, 2):
-                o[f"turns_{m}{c}"] = SL._turn_rows(recs, e, m, c)[-(SL.RUNG7_PUSHES + SL.TURN_MEMORY):]
+                o[f"turns_{m}{c}"] = SL._turn_rows(recs, e, m, c)[-(SL.RUNG7_NUDGES + SL.TURN_MEMORY):]
         o["base_rate"] = SL._base_rate(recs, e)
         o["recent_rate"] = SL._recent_rate(recs, e)
         series = SL._rung8_series(recs, e)
@@ -677,7 +678,7 @@ class TestOpenTurnsAreDropped(unittest.TestCase):
 
     def test_a_turn_awaiting_its_check_is_dropped_and_named(self):
         srv, d, push, t = self._seat_mid_turn()
-        stats0 = SL._rung8_stats(SL._read(srv))
+        stats0 = SL._reply_check_stats(SL._read(srv))
         rows0 = SL._turn_rows(SL._read(srv), BALL, "toy", 2)
         E.tick(srv, t + 10, free=FREE)
         E.tick(srv, t + 11, cpu_s=1 / E.CPU_PER_S, free=FREE)
@@ -690,7 +691,7 @@ class TestOpenTurnsAreDropped(unittest.TestCase):
                          "why": "", "dt": 50.0})
         recs = SL._read(srv)
         self.assertEqual(SL._turn_rows(recs, BALL, "toy", 2), rows0)
-        stats = SL._rung8_stats(recs)
+        stats = SL._reply_check_stats(recs)
         self.assertEqual(stats["asked"], stats0["asked"])
         self.assertEqual((stats["checked"], stats["paired"]), (stats0["checked"], stats0["paired"]))
 

@@ -161,9 +161,9 @@ def test_the_toy_medium_has_its_own_clock_and_the_chat_keeps_todays():
     assert SL.TOY_MEET_MAX > SL.TOY_TURN_BINS[-1] + SL.TOY_CHECK_S       # ...that still lets 3m+ be chosen
     assert SL.TOY_CHECK_S < SL.TOY_TURN_BINS[1]
     assert SL.TOY_CLOCK == 2
-    # the chat medium: today's clock, untouched
+    # the chat medium: its gaps untouched; #333 part 3f: its bins are the ball's clock (every turn is a nudge)
     assert (SL.MEET_EVERY, SL.MEET_MAX) == (300.0, 1800.0)                # #343: 30 and 180 cycles, in s
-    assert SL.TURN_BINS == (120.0, 600.0, 1800.0) and SL.TURN_NAMES == ("0-2m", "2-10m", "10-30m", "30m+")
+    assert SL.TURN_BINS == SL.TOY_TURN_BINS and SL.TURN_NAMES == SL.TOY_TURN_NAMES
     assert SL.RUNG8_CHECK_S == 120.0
 
 
@@ -175,7 +175,7 @@ def test_the_bins_of_each_clock():
     assert chat["bins"] == SL.TURN_BINS and chat["names"] == SL.TURN_NAMES
     assert (chat["every"], chat["max"]) == (SL.MEET_EVERY, SL.MEET_MAX)
     assert (toy["every"], toy["max"]) == (SL.TOY_MEET_EVERY, SL.TOY_MEET_MAX)
-    assert [SL._turn_bin(a) for a in (100.0, 200.0, 1000.0, 5000.0)] == [0, 1, 2, 3]   # the default: the chat's
+    assert [SL._turn_bin(a) for a in (10.0, 30.0, 100.0, 500.0)] == [0, 1, 2, 3]   # the default (#333 part 3f: s)
     assert SL._clock_of({"kind": "push", "medium": "toy", "clock": 2}) == SL.TOY_CLOCK
     assert SL._clock_of({"kind": "push", "medium": "toy"}) == 1                  # #264's turns: the chat's clock
     assert SL._clock_of({"kind": "push"}) == 1
@@ -261,19 +261,13 @@ def test_new_turns_carry_the_clock_and_the_window_starts_fresh_with_it():
     assert len(rows) == 12 and all(r["bin"] == 1 for r in rows)          # no old-clock bin 0 mixed in
     assert [r["o"] for r in SL._rung8_rows(recs, BALL)] == [0.0 if i % 3 == 0 else 1.0 for i in range(12)]
     assert SL._base_rate(recs, BALL)[2] == 12
-    out = SL._rung7(recs)
-    assert out["eid"] == BALL and out["n"] == 12
-    st = SL._rung7_stats(recs)
-    assert st["medium"] == "toy" and st["clock"] == SL.TOY_CLOCK and st["checked"] == 12
-    assert [b["bin"] for b in st["bins"]] == list(SL.TOY_TURN_NAMES)
-    assert st["best"] == "20-60s"
+    assert SL._rung7(recs)["crit"]["nudges"] == 0.0         # #333 part 3f: the old turns are history, no turns
 
 
 def test_the_old_clocks_turns_still_read_as_they_were_until_a_new_one():
     recs = _clock_record(new=0)
     assert len(SL._turn_rows(recs, BALL)) == 40
-    st = SL._rung7_stats(recs)
-    assert st["clock"] == 1 and [b["bin"] for b in st["bins"]] == list(SL.TURN_NAMES)
+    assert SL._cur_clock(recs, BALL, "toy") == 1
     assert SL._turn_rows(recs + _clock_record(old=0, new=3)[6:], BALL)[0]["bin"] == 1
 
 
@@ -312,11 +306,12 @@ def test_chance_still_never_passes_at_the_new_pace(seed):
 
 # ---- 5. the sheet and the page name the toy clock -------------------------------------------
 
-def test_the_sheet_counts_the_toy_clocks_pace():
-    assert SS._dur(SL.TOY_MEET_EVERY) in SS._needs()[7] and "ball" in SS._needs()[7]   # #343: "20 s"
+def test_the_sheet_counts_the_follow_ups_pace():
+    """#333 part 3f: a turn is a timed nudge, its check and its follow-up FOLLOW_S later."""
+    assert SS._dur(SL.FOLLOW_S) in SS._needs()[7] and "timed nudges" in SS._needs()[7]   # #343: "30 s"
     floors = SS.fastest_cycles()
-    assert floors[7] == SL.RUNG7_PUSHES * SL.TOY_MEET_EVERY / SL.PACE_S                 # cycles at the old pace
-    assert floors[8] == SL.RUNG8_LOOKS * SL.TOY_MEET_EVERY / SL.PACE_S
+    assert floors[7] == SL.RUNG7_NUDGES * (2 + SL.FOLLOW_S / SL.PACE_S)                # cycles at the old pace
+    assert floors[8] == SL.RUNG8_LOOKS * (2 + SL.FOLLOW_S / SL.PACE_S)
 
 
 def _js(expr, f="panel.js"):
@@ -336,12 +331,3 @@ class TestPage(unittest.TestCase):
         chat = {"kind": "push", "to": "x", "aim": 0, "bin": 0, "why": "aim"}
         self.assertIn("0-2m after they spoke", _js("L.selfLine(%s)" % json.dumps(chat)))
 
-
-@pytest.fixture(autouse=True)
-def _rebuilt_333(monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the scoring and the readers tested here run on the
-    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
-    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
-    from tests._self_cap import rebuilt
-    rebuilt(monkeypatch)

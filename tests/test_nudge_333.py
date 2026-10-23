@@ -129,10 +129,10 @@ OLD = [{"ts": T0, "kind": "birth", "by": "operator"},
 
 # ---- the ladder: the old wiring's passes are voided ---------------------------------
 
-def test_the_ladder_version_is_3_and_the_rebuilt_rungs_are_not_built_yet():
+def test_the_ladder_version_is_3_and_the_rebuilt_rungs_are_built():
     assert SL.LADDER_V == 3
     for i in ("turns", "expect"):
-        assert SL.ACHIEVEMENTS[i]["built"] is False, i
+        assert SL.ACHIEVEMENTS[i]["built"] is True, i           # part 3f: rebuilt on meet's other
     assert SL.ACHIEVEMENTS["mirror"]["built"] is True             # part 3d: rebuilt on looks
     assert SL.ACHIEVEMENTS["meet"]["built"] is True               # part 3e: rebuilt on delayed contingency
     assert SL.ACHIEVEMENTS["reach"]["name"] == "look"           # rung 2's pass, kept as the look

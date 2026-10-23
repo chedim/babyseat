@@ -38,7 +38,6 @@ from membrane import seat_panel as SP  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
 from membrane import self_writer as W  # noqa: E402
 from membrane import toy_unlocks as TU  # noqa: E402
-from tests._self_cap import rebuilt  # noqa: E402
 from tests.test_accept_299 import _boot, _kinds, _live_record, _pass  # noqa: E402
 
 PKG = ROOT / "membrane"
@@ -49,10 +48,6 @@ SEAT_SIDE = ("toy_unlocks", "energy", "chat_io", "seat_panel")
 REACH_PAST = {"_append", "_save_json", "_save_mode", "_save_model", "_save_settings", "set_mode", "accept",
               "set_limit", "consolidate"}
 
-
-@pytest.fixture(autouse=True)
-def _whole_tree(monkeypatch):
-    rebuilt(monkeypatch)
 
 
 # ---- the run-time guard -----------------------------------------------------------------------

@@ -32,7 +32,6 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane import toy_unlocks as TU  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
-from tests._self_cap import rebuilt  # noqa: E402
 
 OTHER = MEMBRANE_NS + "Component:chat:in:someone"
 BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect", "mirror", "change",
@@ -42,14 +41,6 @@ ORDER = ["feel", "reach", "kinds", "patience", "shift", "nudge", "meet", "turns"
 # #333: first reach, the nudge skill, before its children (3e: meet; 3d: mirror)
 
 
-@pytest.fixture(autouse=True)
-def _whole_tree(request, monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the tree's mechanics are tested on the whole tree,
-    built as part 3 will build it, their passes on ladder 3. The tree's own
-    contract (the first test) reads the real one."""
-    if request.node.name != "test_the_tree_has_stable_ids_branches_and_real_edges":
-        rebuilt(monkeypatch)
 CONTRACT = {"id", "name", "branch", "prereqs", "built", "state", "earned_at", "skill", "bar",
             "waiting_on", "child_age", "child_ability", "why_prereqs"}
 
@@ -80,17 +71,19 @@ def _seat(rungs=(), limit=None, lines=()):
 
 
 def _expect_passes_turns_not(t0=1000.0, n=110):
-    """A small synthetic record: pushes to the other by the timer (no learned
-    timing, so turns has nothing to score) and a reply check after each, whose
+    """A small synthetic record: nudges at meet's other with no learned timing
+    (turns has nothing to score) and a follow-up after each check, whose
     outcome self's recorded prediction tracks far better than the running rate."""
-    out = []
+    # #333 part 3f: meet's pass names the other; an untimed nudge at it, its check and the follow-up
+    out = [{"ts": t0 - 1.0, "kind": "achieve", "id": "meet", "rung": 6, "skill": 0.5, "ladder": 3, "eid": OTHER}]
     for i in range(n):
         t = t0 + 300.0 * i
         o = (i % 2 == 0)
-        out.append({"ts": t, "kind": "push", "n": i, "eid": "chat:out", "to": OTHER})
-        out.append({"ts": t + 130.0, "kind": "reach", "n": i, "eid": OTHER, "p": 0.5,
-                    "answer": "changed" if o else "unchanged", "reply": True, "replied": o,
-                    "p_self": 0.9 if o else 0.1})
+        out.append({"ts": t, "kind": "nudge", "n": i, "eid": OTHER, "rc": 0})
+        out.append({"ts": t + 1.0, "kind": "reach", "n": i, "eid": OTHER, "p": 0.5, "nudged": 1,
+                    "answer": "changed"})
+        out.append({"ts": t + 31.0, "kind": "reach", "n": i, "eid": OTHER, "p": 0.5, "nudged": 0, "follow": True,
+                    "answer": "changed" if o else "unchanged", "p_self": 0.9 if o else 0.1})
     return out
 
 
@@ -99,8 +92,7 @@ def _expect_passes_turns_not(t0=1000.0, n=110):
 def test_the_tree_has_stable_ids_branches_and_real_edges():
     A = SL.ACHIEVEMENTS
     assert list(A) == ORDER
-    assert [a for a in A if A[a]["built"]] == [a for a in ORDER if a in BUILT + ["nudge"]
-                                               and a not in ("turns", "expect")]   # #333 (3d: mirror; 3e: meet)
+    assert [a for a in A if A[a]["built"]] == [a for a in ORDER if a in BUILT + ["nudge"]]   # #333 (3d-3f: rebuilt)
     assert A["nudge"]["prereqs"] == ("feel",) and A["nudge"]["built"]    # #333 part 3c: first reach, its test built
     br = {a: A[a]["branch"] for a in A}
     assert br["feel"] == "self"
@@ -162,7 +154,7 @@ def test_expect_is_earned_while_turns_stays_open():
     recs = SL._read(srv)
     assert SL._rung8(recs)["passed"] and not SL._rung7(recs)["passed"]
     SL._open_rungs(srv)
-    got = [r for r in SL._read(srv) if r.get("kind") == "achieve"]
+    got = [r for r in SL._read(srv) if r.get("kind") == "achieve" and r["id"] != "meet"]   # meet's: the record's
     assert [r["id"] for r in got] == ["expect"]
     assert got[0]["skill"] > SL.RUNG8_MARGIN and isinstance(got[0]["ts"], float)
     st = SL.status(srv)
@@ -185,16 +177,16 @@ def test_a_root_needs_nothing_and_a_child_waits_for_its_parent():
     assert not SL._available(srv, 4)                               # patience waits for kinds
 
 
-def test_the_reply_checks_run_for_either_sibling():
+def test_both_siblings_open_once_meet_is_accepted():
     srv = _seat(rungs=(2, 6))                                       # meet earned and accepted: both siblings open
     assert SL._available(srv, 8) and SL._available(srv, 7)
-    assert SL._replies(srv)
+    assert not SL._replies(srv)                                    # #333 part 3f: a push's reply checks are speak's
     srv = _seat(rungs=(2,), lines=[{"ts": 2.5, "kind": "accept_migrated", "ids": ["reach"]},
                                    {"ts": 9.0, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0,
                                     "ladder": 3}])
-    assert not SL._replies(srv)                                    # #299: meet earned, not accepted: no reply checks
+    assert not SL._available(srv, 7) and not SL._available(srv, 8)   # #299: meet earned, not accepted
     SL.accept(srv, "meet")
-    assert SL._replies(srv)
+    assert SL._available(srv, 7) and SL._available(srv, 8)
 
 
 # ---- 4. the growth limit, deprecated (#299): a bulk accept of its closure -------------------

@@ -156,7 +156,7 @@ def test_a_phase_aware_advisor_lifts_self_over_the_running_rate():
     # the other runs period-4 (C, C, U, U): self's own inputs (rates, the last
     # bit) can't see the phase; an advisor that does earns its weight
     outcomes = [1 if i % 4 in (0, 1) else 0 for i in range(SL.RUNG8_LOOKS + 20)]
-    out = SL._rung8(_checks(outcomes, [0.9 if o else 0.1 for o in outcomes]))
+    out = SL._reply_check_score(_checks(outcomes, [0.9 if o else 0.1 for o in outcomes]))
     assert out["passed"] is True and out["skill"] > 0.3
 
 
@@ -169,7 +169,7 @@ def test_an_advisor_that_echoes_the_rate_adds_nothing():
     for i, o in enumerate(outcomes):
         echo.append((k + 0.5) / (i + 1.0))
         k += o
-    out = SL._rung8(_checks(outcomes, echo))
+    out = SL._reply_check_score(_checks(outcomes, echo))
     assert out["skill"] < SL.RUNG8_MARGIN and out["passed"] is False
 
 
@@ -190,12 +190,3 @@ def _chat_medium(monkeypatch):
     """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
     rung 7's turns to the ball by default, so they switch the toy medium off."""
 
-
-@pytest.fixture(autouse=True)
-def _rebuilt_333(monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the scoring and the readers tested here run on the
-    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
-    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
-    from tests._self_cap import rebuilt
-    rebuilt(monkeypatch)
