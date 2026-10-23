@@ -1802,6 +1802,16 @@ function toolView(p) {
 
 /** At the latest message (within slack px)? reversed (#470, the cockpit: the
  * newest message right under the bar): the latest is the scroller's top. */
+/** The cockpit's one composer button (#470): {label, action, tone}. Idle:
+ * Send. While an answer runs: Stop (amber) when the input is empty, Send
+ * (it queues) when the person has typed something. */
+function morphButton(text, busy) {
+  if (!busy) return { label: "Send", action: "send", tone: "cyan" };
+  return String(text == null ? "" : text).trim()
+    ? { label: "Send", action: "queue", tone: "cyan" }
+    : { label: "Stop", action: "stop", tone: "amber" };
+}
+
 function shouldStick(el, slack, reversed) {
   const s = slack == null ? 80 : slack;
   return reversed ? el.scrollTop < s : el.scrollHeight - el.scrollTop - el.clientHeight < s;
@@ -1980,7 +1990,7 @@ const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
                        skillTree, treeLayout, nodeCard, nodeStateText, achievementsList, ringDash, childAge, renderSkillTree, TREE_LADDER,
                        treeStates, newlyEarned, edgeClass, nodeClass,
-                       loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
+                       loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, morphButton, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
 // ------------------------------------------------------------ the element
@@ -2172,11 +2182,15 @@ const STYLE = `
   :host([cockpit]) .composer textarea:focus { outline:none; border-color:var(--cockpit-accent, #5fd6ff); }
   :host([cockpit]) .composer .btn.send { border-radius:999px; min-height:48px; padding:0 18px; color:var(--cockpit-accent, #5fd6ff);
     background:transparent; border:1px solid var(--cockpit-accent, #5fd6ff); }
-  :host([cockpit]) .composer .btn.send:hover, :host([cockpit]) .composer .btn.stop:hover {
+  :host([cockpit]) .composer .btn.send:hover {
     background:color-mix(in srgb, var(--cockpit-accent, #5fd6ff) 16%, transparent); }
-  /* Stop (a turn runs) wears the same HUD pill as Send, not the panel's red fill */
-  :host([cockpit]) .composer .btn.stop { border-radius:999px; min-height:48px; padding:0 18px; color:var(--cockpit-accent, #5fd6ff);
-    background:transparent; border:1px solid var(--cockpit-accent, #5fd6ff); }
+  /* ONE MORPHING BUTTON in the cockpit (morphButton): the separate Stop is
+     gone; while an answer runs and the input is empty, Send becomes Stop, amber */
+  :host([cockpit]) .composer .btn.stop { display:none !important; }
+  :host([cockpit]) .composer .btn.send[data-tone="amber"] { color:var(--cockpit-amber, #ffb040);
+    border-color:var(--cockpit-amber, #ffb040); }
+  :host([cockpit]) .composer .btn.send[data-tone="amber"]:hover {
+    background:color-mix(in srgb, var(--cockpit-amber, #ffb040) 16%, transparent); }
   :host([cockpit]) .bar { order:-1; min-height:0; border:0; padding:0 4px 4px; font-size:12px; background:transparent; }
   :host([cockpit]) .bar .title { font-weight:500; opacity:.7; }
   :host([cockpit]) .scroller { background:var(--ck-backing, rgba(6,10,16,.74));
@@ -2364,7 +2378,11 @@ function definePanel() {
       this._agentSel.addEventListener("change", () => { this._agent = this._agentSel.value; });
       this._modelSel = this.shadowRoot.querySelector(".modelpick");
       this._modelSel.addEventListener("change", () => { this._pick = this._modelSel.value || ""; });
-      this._sendBtn.addEventListener("click", () => this._submit());
+      // the cockpit's one button does what it says (morphButton): Stop stops, Send sends / queues
+      this._sendBtn.addEventListener("click", () => {
+        if (this.hasAttribute("cockpit") && morphButton(this._ta.value, this._busy()).action === "stop") this._abort();
+        else this._submit();
+      });
       this._stopBtn.addEventListener("click", () => this._abort());
       this._jump.addEventListener("click", () => { this._stick = true; this._toBottom(); });
       this._scroller.addEventListener("scroll", () => {
@@ -2378,7 +2396,7 @@ function definePanel() {
           if (d.open) this._expanded.add(d.dataset.key); else this._expanded.delete(d.dataset.key);
         }
       }, true);
-      this._ta.addEventListener("input", () => this._grow());
+      this._ta.addEventListener("input", () => { this._grow(); if (this.hasAttribute("cockpit")) this._paintSend(); });
       this._ta.addEventListener("keydown", (ev) => {
         ev.stopPropagation();                 // keep HA's global shortcuts out
         if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); this._submit(); }
@@ -3196,11 +3214,28 @@ function definePanel() {
     }
 
     // ---------------------------------------------------------- painting
+    /** The composer's button: Send / Queue beside Stop; in the cockpit, one
+     * button that morphs (morphButton) as the turn runs and the input fills. */
+    _paintSend() {
+      if (!this._sendBtn) return;
+      const busy = this._busy();
+      if (this.hasAttribute("cockpit")) {
+        const m = morphButton(this._ta && this._ta.value, busy);
+        this._sendBtn.textContent = m.label;
+        this._sendBtn.dataset.tone = m.tone;
+        this._sendBtn.title = m.action === "stop" ? "Stop the answer (Esc)"
+          : m.action === "queue" ? "The brain is working: this message waits in its queue (Enter)" : "Send (Enter)";
+        return;
+      }
+      delete this._sendBtn.dataset.tone;
+      this._sendBtn.textContent = busy ? "Queue" : "Send";
+      this._sendBtn.title = busy ? "The brain is working: this message waits in its queue" : "Send (Enter)";
+    }
+
     _paintStatus() {
       if (!this._pill) return;
       const busy = this._busy();
-      this._sendBtn.textContent = busy ? "Queue" : "Send";
-      this._sendBtn.title = busy ? "The brain is working: this message waits in its queue" : "Send (Enter)";
+      this._paintSend();
       this._stopBtn.style.display = busy ? "" : "none";
       let txt, cls = "pill state";
       if (busy) {
@@ -3644,6 +3679,7 @@ function definePanel() {
       if (!this._ta) return;
       this._ta.value = String(text == null ? "" : text);
       this._grow();
+      this._paintSend();
       this._ta.focus();
       const n = this._ta.value.length;
       try { this._ta.setSelectionRange(n, n); } catch (e) { /* not a text input */ }

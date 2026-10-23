@@ -211,7 +211,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
   const STYLE = `
     :host { position:absolute; inset:58px 0 0 0; display:block; overflow:hidden; color:#dfe8f1;
             --amber:#ffb040; --cyan:#5fd6ff; --line:rgba(255,176,64,.5); --dim:rgba(255,176,64,.18);
-            --panel:rgba(8,13,20,.86); --cockpit-line:rgba(255,176,64,.55); --cockpit-accent:#5fd6ff;
+            --panel:rgba(8,13,20,.86); --cockpit-line:rgba(255,176,64,.55); --cockpit-accent:#5fd6ff; --cockpit-amber:#ffb040;
             --ck-backing:rgba(6,10,16,.74);
             background:transparent; }
     .ck { position:relative; height:100%; display:grid; gap:0 18px; padding:8px 66px 0;
