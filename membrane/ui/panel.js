@@ -2172,7 +2172,9 @@ const STYLE = `
   /* THE COCKPIT (#470, the decision cockpit): the same chat, turned for the
      cockpit's time axis -- the composer on top (the input bar, the NOW line),
      the conversation below it newest first, older messages falling down */
-  :host([cockpit]) { height:100%; background:transparent; --ck-line:var(--cockpit-line, rgba(255,176,64,.55)); }
+  :host([cockpit]) { height:auto; overflow:visible; background:transparent; --ck-line:var(--cockpit-line, rgba(255,176,64,.55)); }
+  /* one document (the cockpit scrolls, not the chat): the chat grows with its messages */
+  :host([cockpit]) .app { height:auto; }
   :host([cockpit]) .main { position:relative; }
   :host([cockpit]) .composer { order:-2; border:0; padding:4px 0 8px; background:transparent; }
   :host([cockpit]) .composer .box { max-width:none; }
@@ -2193,7 +2195,7 @@ const STYLE = `
     background:color-mix(in srgb, var(--cockpit-amber, #ffb040) 16%, transparent); }
   :host([cockpit]) .bar { order:-1; min-height:0; border:0; padding:0 4px 4px; font-size:12px; background:transparent; }
   :host([cockpit]) .bar .title { font-weight:500; opacity:.7; }
-  :host([cockpit]) .scroller { background:var(--ck-backing, rgba(6,10,16,.74));
+  :host([cockpit]) .scroller { flex:none; overflow:visible; background:var(--ck-backing, rgba(6,10,16,.74));
     border-top:1px solid color-mix(in srgb, var(--ck-line) 45%, transparent); }
   :host([cockpit]) .msgs { display:flex; flex-direction:column-reverse; max-width:none; padding:6px 8px 16px; }
   :host([cockpit]) .jump { display:none !important; }
@@ -3658,8 +3660,10 @@ function definePanel() {
     }
 
     _toBottom() {
-      // the cockpit's chat is reversed: its latest message is at the top
-      this._scroller.scrollTop = this.hasAttribute("cockpit") ? 0 : this._scroller.scrollHeight;
+      // the cockpit's chat has no scroll of its own (the cockpit page scrolls), and its
+      // latest message is right under the bar: nothing to do
+      if (this.hasAttribute("cockpit")) return;
+      this._scroller.scrollTop = this._scroller.scrollHeight;
       this._jump.classList.remove("show");
     }
 
