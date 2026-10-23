@@ -21,6 +21,8 @@ view is another.
 """
 from __future__ import annotations
 
+import math
+import threading
 import time
 
 STATUS_OPEN = "open"
@@ -31,19 +33,25 @@ AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT)    # what entity_edit may set
 ANSWER_OWNED = ("value", "set_by", "set_at")        # only answer() writes these
 EDGE_KEYS = ("blocks", "led_to", "carried_by")
 VAR_TYPES = ("int", "float", "bool", "string", "option")
+LEDGER_TITLE_MAX = 160              # the title's clip in the ledger line (one line, never a paste)
+_ANSWER_LOCK = threading.Lock()     # one answer at a time: a card is decided once
 
 _TRUE = ("true", "yes", "y", "on", "1")
 _FALSE = ("false", "no", "n", "off", "0")
 
 
-def refusal(cls: str, key: str, value) -> str | None:
-    """Why entity_edit may not set ``key`` on an entity of class ``cls``
-    (None = it may)."""
+def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
+    """Why entity_edit may not set ``key`` on an entity of class ``cls`` whose
+    properties are ``props`` (None = it may)."""
     from .entities import CLASS_DECISION
     if cls != CLASS_DECISION:
         return None
     if key in ANSWER_OWNED:
         return "answer-owned (only the operator answers a Decision card)"
+    # an answered card is locked; a legacy Decision (no status yet) may become a card
+    if key == "status" and (props or {}).get("status") == STATUS_DECIDED:
+        return ("the card is decided; changing a past decision comes with "
+                "timelines (#470 step 3)")
     if key == "status" and value not in AGENT_STATUSES:
         return (f"a card's status is set to one of {', '.join(AGENT_STATUSES)} "
                 f"here; only the operator's answer makes it decided")
@@ -71,6 +79,8 @@ def validate(var, value):
             num = float(str(value).strip())
         except (TypeError, ValueError):
             return None, f"{value!r} is not a number"
+        if not math.isfinite(num):
+            return None, f"{value!r} is not a finite number"
         if t == "int":
             if num != int(num):
                 return None, f"{value!r} is not a whole number"
@@ -80,7 +90,9 @@ def validate(var, value):
     if not s:
         return None, "the value is empty"
     if t == "option":
-        opts = [str(o) for o in (var.get("options") or [])]
+        if not isinstance(var.get("options"), list):
+            return None, "the card's options are not a list"
+        opts = [str(o) for o in var["options"]]
         if s not in opts:
             return None, f"{s!r} is not one of {', '.join(map(repr, opts))}"
     return s[:2000], None
@@ -126,10 +138,20 @@ def _shown(value, var: dict) -> str:
     return f"{s} {unit}" if unit else s
 
 
+def _one_line(s, cap: int) -> str:
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= cap else s[: cap - 1] + "…"
+
+
 def answer(est, ledger, spec: str, value, conv: str = "") -> dict:
-    """The operator answers a card: validate the value against its var, mark
-    it decided, append the decision to the ledger. Nothing changes on a
-    refusal."""
+    """The operator answers a card: validate the value against its var, append
+    the decision to the ledger, then mark the card decided. Nothing changes on
+    a refusal or a failed ledger write; one answer at a time."""
+    with _ANSWER_LOCK:
+        return _answer(est, ledger, spec, value, conv)
+
+
+def _answer(est, ledger, spec: str, value, conv: str = "") -> dict:
     from .entities import CLASS_DECISION
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
@@ -138,20 +160,22 @@ def answer(est, ledger, spec: str, value, conv: str = "") -> dict:
         return {"ok": False, "error": f"no Decision card {spec!r}"}
     p = ent.properties or {}
     if _status(p) == STATUS_DECIDED:
-        return {"ok": False, "error": "this card is already decided (changing a past "
-                                      "decision comes with timelines, #470 step 3)"}
+        return {"ok": False, "conflict": True,
+                "error": "this card is already decided (changing a past "
+                         "decision comes with timelines, #470 step 3)"}
     raw = p.get("var")
     var: dict = raw if isinstance(raw, dict) else {}
     v, err = validate(var, value)
     if err:
         return {"ok": False, "error": err}
+    title = _one_line(p.get("name") or ent.eid, LEDGER_TITLE_MAX)
+    shown = _one_line(_shown(v, var), LEDGER_TITLE_MAX)
+    if ledger is not None and not ledger.append(f"decided: {title} = {shown}", conv=conv):
+        return {"ok": False, "error": "the ledger could not be written; the card stays open"}
     p.update({"value": v, "status": STATUS_DECIDED, "set_by": "operator",
               "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     if conv:
-        p["chat"] = p.get("chat") or conv
+        p["chat"] = p.get("chat") or conv     # a card keeps the chat it already has
     ent.properties = p
     est.upsert(ent)
-    title = p.get("name") or ent.eid
-    if ledger is not None:
-        ledger.append(f"decided: {title} = {_shown(v, var)}", conv=conv)
     return {"ok": True, "card": _card_of(ent)}

@@ -37,7 +37,11 @@ entity_edit  spec=<eid>  properties={"status": "open", "var": {"type": "int", "u
 On a `Decision`, `entity_edit` refuses `value`, `set_by`, `set_at` and any `status` other than `open` or `in_flight`. Only the operator answers:
 
 - `GET /membrane/decisions` returns `{cards: [...], edges: [{from, to, rel}]}`.
-- `POST /membrane/decision/answer {card, value, conv}` (seat owner only) validates the value against the card's `var`. It then marks the card `decided` and appends `decided: <title> = <value>` to the operator ledger (`<field>.ledger.jsonl`), so the decision is recalled verbatim, as law. A decided card refuses another answer; changing a past decision will create a timeline (step 3).
+- `POST /membrane/decision/answer {card, value, conv}` (seat owner only) validates the value against the card's `var`. It then marks the card `decided` and appends `decided: <title> = <value>` to the operator ledger (`<field>.ledger.jsonl`), so the decision is recalled verbatim, as law. The ledger line is one line, and the title and value are each clipped to 160 characters. The ledger is written first, so a failed write leaves the card open. Answers run one at a time, so a card is decided once. A decided card refuses another answer (409), and `entity_edit` can't reopen it. Changing a past decision will create a timeline (step 3). A `Decision` with no status yet (made before the map) can be given one and become a card.
+
+`GET /membrane/decisions` is a read, open to the same callers as the seat's other reads (localhost, the LAN in standalone, a token in JWT mode). Only answering needs the owner.
+
+Agents can't decide through any write path. `entity_add` takes no properties (the MCP tool sends extra properties through `entity_edit`, which refuses), and a script's `patch` admits only `position`, `script_data` and `links`. An older `Decision` that already carries a `value` keeps it, but `entity_edit` can no longer change it.
 
 ## Build order
 

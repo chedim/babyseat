@@ -6900,7 +6900,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                          str(body.get("card") or ""), body.get("value"),
                          conv=str(body.get("conv") or ""))
         if not res.get("ok"):
-            self._json_err_raw(400, str(res.get("error"))); return
+            self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
         self._json_out(res)
 
     def _filetool(self) -> None:

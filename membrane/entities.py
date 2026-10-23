@@ -2580,7 +2580,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                                          "script_cooldown_s are settable)")
                     continue
                 from .decision_map import refusal as _dm_refusal
-                _why = _dm_refusal(ent.cls, kk, v)    # #470: agents ask, never decide
+                _why = _dm_refusal(ent.cls, kk, v, ent.properties)    # #470: agents ask, never decide
                 if _why:
                     props_refused[kk] = _why
                     continue
