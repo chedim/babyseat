@@ -136,7 +136,8 @@ The babyseat menu (top left) opens the page's views: *Chat only*, *Graph only*,
 decision map as a cockpit: the time axis runs top to bottom and the chat's
 input bar is *now*. The page's 3D field fills the background behind it all
 and takes no clicks there; the cockpit
-scrolls over it as one page (up: the future, down: older chat and the past). The center column holds the open goals the seat
+scrolls over it as one page (up: the future, down: older chat and the past);
+long lists load as you scroll, older chat messages in pages. The center column holds the open goals the seat
 steers toward, the babyseat, the input bar, and the chat below the bar,
 newest message first. On both sides, open questions pile up
 above the bar's line (the first to decide nearest it), the cards in flight sit

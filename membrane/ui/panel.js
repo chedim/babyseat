@@ -1802,6 +1802,25 @@ function toolView(p) {
 
 /** At the latest message (within slack px)? reversed (#470, the cockpit: the
  * newest message right under the bar): the latest is the scroller's top. */
+/** THE COCKPIT CHAT'S WINDOW (#470, virtualized): ids are the loaded rows,
+ * oldest first; the cockpit shows them newest first from the bar down, so the
+ * view [viewTop, viewBottom) counts px down from the newest. Returns the ids to
+ * render (oldest first), the spacers' px (newer: above them, older: below)
+ * and nearEnd: the view nears the oldest loaded row (read the next page). */
+function chatWindow(o) {
+  const ids = o.ids || [], n = ids.length, est = Number(o.estimate) || 0, hs = o.heights || {};
+  const ov = Number(o.overscan) || 0, top = Number(o.viewTop) - ov, bottom = Number(o.viewBottom) + ov;
+  const h = (k) => { const v = hs[ids[n - 1 - k]]; return v != null ? Number(v) : est; };   // k: 0 = newest
+  let y = 0, start = n, end;
+  const offs = new Array(n + 1);
+  for (let k = 0; k < n; k++) { offs[k] = y; y += h(k); }
+  offs[n] = y;
+  for (let k = 0; k < n; k++) if (offs[k + 1] > top) { start = k; break; }
+  end = start;
+  while (end < n && offs[end] < bottom) end++;
+  return { ids: ids.slice(n - end, n - start), newer: offs[start], older: y - offs[end], nearEnd: bottom >= y };
+}
+
 /** The cockpit's one composer button (#470): {label, action, tone}. Idle:
  * Send. While an answer runs: Stop (amber) when the input is empty, Send
  * (it queues) when the person has typed something. */
@@ -1990,12 +2009,19 @@ const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
                        skillTree, treeLayout, nodeCard, nodeStateText, achievementsList, ringDash, childAge, renderSkillTree, TREE_LADDER,
                        treeStates, newlyEarned, edgeClass, nodeClass,
-                       loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, morphButton, fmtElapsed, fmtUsage };
+                       loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, morphButton, chatWindow, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
 // ------------------------------------------------------------ the element
 
 const OVERLAY_ROWS = 200;
+// #470, the cockpit's virtualized chat: a page of older messages per read, a row's
+// height before it is measured, the margin between rows, and how far past the
+// view (px, each way) rows stay rendered
+const CHAT_PAGE = 40;
+const CHAT_ROW_EST = 140;
+const CHAT_ROW_GAP = 28;
+const CHAT_OVERSCAN = 900;
 
 const STYLE = `
   :host { display:block; height:100vh; height:100dvh; overflow:hidden;
@@ -2795,14 +2821,18 @@ function definePanel() {
       if (!this._chat) return;
       if (this._mind) return this._mindTick();
       const sid = this._sid;
+      // the cockpit reads a page: the newest rows, as many as it already holds (#470)
+      const cockpit = this.hasAttribute("cockpit");
+      const lim = cockpit ? Math.max(CHAT_PAGE, (this._chat.rows || []).length) : 0;
       const [hist, st, vox, phs] = await Promise.all([
-        this._api(SERVE + "/session/" + sid + "/message"),
+        this._api(SERVE + "/session/" + sid + "/message" + (cockpit ? "?limit=" + lim : "")),
         this._api(SERVE + "/session/status"),
         this._api(SERVE + "/session/" + sid + "/voice").catch(() => ({ ok: false })),
         this._api(SERVE + "/session/" + sid + "/predict").catch(() => ({ ok: false })),
       ]);
       if (sid !== this._sid) return;
       loadRows(this._chat, hist.ok && Array.isArray(hist.data) ? hist.data : []);
+      if (cockpit) this._chat.more = hist.ok && Array.isArray(hist.data) && hist.data.length >= lim;
       // what was already said is not announced again (only replies from now on)
       { const r0 = replyToSpeak(this._chat.rows); this._spokenId = r0 ? r0.id : null; this._repliesArmed = true; }
       loadVoice(this._chat, vox && vox.ok && Array.isArray(vox.data) ? vox.data : []);
@@ -3264,6 +3294,7 @@ function definePanel() {
     _paint() {
       const st = this._chat;
       if (!st) return;
+      if (this.hasAttribute("cockpit") && !this._mind) return this._paintWindow();
       const stick = this._stick;
       // the overlay keeps only the newest OVERLAY_ROWS in the DOM: an endless
       // auto-chat grew the transcript without bound (2026-10-10)
@@ -3313,6 +3344,101 @@ function definePanel() {
         }
       }
       if (stick) this._toBottom();
+    }
+
+    // ---------------------------------------------------------- the cockpit's window
+    // (#470, virtualized): only the messages near the page's view are in the DOM,
+    // spacers keep the page height; older ones are read in pages as the view nears
+    // the oldest loaded. The cockpit page scrolls and calls onViewport().
+    _paintWindow() {
+      const st = this._chat;
+      this._mh = this._mh || {};
+      const box = this._msgs.getBoundingClientRect(), vh = window.innerHeight || 800;
+      const w = chatWindow({ ids: st.rows.map((r) => r.info.id), heights: this._mh, estimate: CHAT_ROW_EST,
+                             viewTop: -box.top, viewBottom: vh - box.top, overscan: CHAT_OVERSCAN });
+      const key = w.ids.join(",");
+      const full = st.all || !this._rowEls || key !== this._winKey;
+      if (full) {
+        this._msgs.innerHTML = "";
+        this._rowEls = {};
+        const older = document.createElement("div"); older.className = "spacer older"; older.style.height = w.older + "px";
+        this._msgs.appendChild(older);                               // column-reverse: first in the DOM = the bottom
+        for (const id of w.ids) { const el = this._rowEl(st.byId[id]); this._msgs.appendChild(el); this._rowEls[id] = el; }
+        const newer = document.createElement("div"); newer.className = "spacer newer"; newer.style.height = w.newer + "px";
+        this._msgs.appendChild(newer);
+        this._winKey = key; st.all = false;
+      } else {
+        for (const mid of st.dirty) {                                 // a streaming reply: its row in place
+          const old = this._rowEls[mid], row = st.byId[mid];
+          if (old && old.parentNode && row) { const el = this._rowEl(row); old.replaceWith(el); this._rowEls[mid] = el; }
+        }
+        const o = this._msgs.querySelector(".spacer.older"), n = this._msgs.querySelector(".spacer.newer");
+        if (o) o.style.height = w.older + "px";
+        if (n) n.style.height = w.newer + "px";
+      }
+      st.dirty.clear();
+      for (const id in this._rowEls) {                                // measured heights replace the estimate
+        const el = this._rowEls[id];
+        if (el.isConnected) this._mh[id] = el.offsetHeight + CHAT_ROW_GAP;
+      }
+      const tail = this._msgs.querySelector(".working, .empty");
+      if (tail) tail.remove();
+      if (!st.rows.length && !this._busy()) {
+        const e = document.createElement("div"); e.className = "empty"; e.textContent = "New conversation with the brain.";
+        this._msgs.appendChild(e);
+      }
+      if (this._busy()) {
+        const last = st.rows[st.rows.length - 1];
+        const streaming = last && last.info.role === "assistant" && !(last.info.time || {}).completed &&
+          last.parts.some((p) => (p.text || "").length || p.type === "tool");
+        if (!streaming) {
+          const wk = document.createElement("div"); wk.className = "working";
+          wk.innerHTML = '<span class="spin"></span><span class="lbl">working…</span>';
+          this._msgs.appendChild(wk);
+        }
+      }
+      if (this._found && this._foundId && this._rowEls[this._foundId]) {
+        this._found = this._rowEls[this._foundId]; this._found.classList.add("found");
+      }
+      if (w.nearEnd) this._loadOlder();
+    }
+
+    /** The cockpit page scrolled (or resized): re-window the chat (one paint a frame). */
+    onViewport() {
+      if (!this.hasAttribute("cockpit") || !this._chat || this._mind) return;
+      this._schedule();
+    }
+
+    /** Read the page of messages before the oldest loaded one (cockpit only). */
+    async _loadOlder() {
+      const st = this._chat;
+      if (!st || st.more === false || this._olderBusy || !st.rows.length) return;
+      this._olderBusy = true;
+      const sid = this._sid, oldest = st.rows[0].info.id;
+      try {
+        const r = await this._api(SERVE + "/session/" + sid + "/message?limit=" + CHAT_PAGE + "&before=" + encodeURIComponent(oldest));
+        if (sid !== this._sid || this._chat !== st) return;
+        const rows = r.ok && Array.isArray(r.data) ? r.data : [];
+        st.more = rows.length >= CHAT_PAGE;
+        for (const x of rows) {
+          const info = (x && (x.info || x.message)) || {};
+          if (!info.id || st.byId[info.id]) continue;
+          const row = { info: Object.assign({}, info), parts: ((x && x.parts) || []).map((p) => Object.assign({}, p)) };
+          st.byId[info.id] = row; st.rows.push(row);
+        }
+        sortRows(st);
+        this._schedule();
+      } finally { this._olderBusy = false; }
+    }
+
+    /** The cockpit page's scroll container (the nearest scrolling ancestor). */
+    _scrollParent() {
+      let el = this.parentElement || (this.getRootNode() && this.getRootNode().host);
+      while (el) {
+        if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
+        el = el.parentElement || (el.getRootNode() && el.getRootNode().host) || null;
+      }
+      return null;
     }
 
     _insertRow(row, el) {
@@ -3699,19 +3825,30 @@ function definePanel() {
     /** Scroll the message into view and mark it for a moment; false when it
      * is not shown (another session, or older than the rows kept). */
     scrollToMessage(mid) {
-      const el = mid && this._rowEls ? this._rowEls[mid] : null;
-      if (!el || !el.parentNode) return false;
+      let el = mid && this._rowEls ? this._rowEls[mid] : null;
       const still = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if ((!el || !el.parentNode) && this.hasAttribute("cockpit") && this._chat && this._chat.byId[mid]) {
+        // the cockpit's window: not rendered yet -- scroll the page to where it is; the window renders it
+        const rows = this._chat.rows, k = rows.findIndex((r) => r.info.id === mid);
+        let off = 0;
+        for (let i = rows.length - 1; i > k; i--) off += (this._mh && this._mh[rows[i].info.id]) || CHAT_ROW_EST;
+        const sp = this._scrollParent();
+        if (sp) sp.scrollTop += this._msgs.getBoundingClientRect().top + off - (window.innerHeight || 800) / 2;
+        this._foundId = mid;
+        this._paintWindow();
+        el = this._rowEls[mid];
+      }
+      if (!el || !el.parentNode) return false;
       el.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
       if (this._found && this._found !== el) this._found.classList.remove("found");
-      this._found = el; el.classList.add("found");
+      this._found = el; this._foundId = mid; el.classList.add("found");
       return true;
     }
 
     /** Let go of the marked message. */
     clearFound() {
       if (this._found) this._found.classList.remove("found");
-      this._found = null;
+      this._found = null; this._foundId = null;
     }
   }
   customElements.define("ai-terminal-panel", AiTerminalPanel);

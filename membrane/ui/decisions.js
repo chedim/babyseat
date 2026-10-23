@@ -30,7 +30,11 @@ const GOALS_PATH = "/membrane/goals";
 const ANSWER_PATH = "/membrane/decision/answer";
 const CHAT_PATH = "/membrane/decision/chat";
 const POLL_MS = 5000;               // the cockpit re-reads the seat this often while shown
-const PAST_ROWS = 5;                // past rows kept in view; each new decision pushes the oldest out
+const PAST_ROWS = 5;                // (unused by the cockpit now: the past is virtualized, every card kept)
+const PAST_EST = 84;                // a past card's height before it's measured (px, its margin included)
+const PAST_GAP = 10;                // the margin under each past card
+const PAST_OVERSCAN = 700;          // past cards stay rendered this far (px) beyond the view
+const STUB_PX = 44;                 // a line to an unrendered card: this long a stub toward it                // past rows kept in view; each new decision pushes the oldest out
 const GOALS_MAX = 4;                // goals listed above the field; the rest are counted
 
 /** The cards by band, each nearest the bar first. future: a card that blocks
@@ -88,6 +92,39 @@ function pushOut(past, rows) {
 function goalsShown(goals, max) {
   const list = (goals || []).slice().sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
   return { shown: list.slice(0, max), more: Math.max(0, list.length - max) };
+}
+
+/** THE WINDOW (#470, virtualized lists): which of `count` stacked items to
+ * render for a view [viewTop, viewBottom) given in the list's own coordinates
+ * (0 = its first item's top), widened by `overscan` px each way. heights:
+ * the measured ones by index; the rest count as `estimate`. Returns
+ * {start, end (exclusive), before, after (the spacers' px), total}. */
+function windowRange(o) {
+  const n = Math.max(0, o.count | 0), est = Number(o.estimate) || 0, hs = o.heights || {};
+  const h = (i) => (hs[i] != null ? Number(hs[i]) : est);
+  const top = Number(o.viewTop) - (Number(o.overscan) || 0), bottom = Number(o.viewBottom) + (Number(o.overscan) || 0);
+  let y = 0, start = n, end = n, total = 0;
+  const offs = new Array(n + 1);
+  for (let i = 0; i < n; i++) { offs[i] = y; y += h(i); }
+  offs[n] = total = y;
+  for (let i = 0; i < n; i++) if (offs[i + 1] > top) { start = i; break; }
+  end = start;
+  while (end < n && offs[end] < bottom) end++;
+  return { start, end, before: offs[start], after: total - offs[end], total };
+}
+
+/** An item's offset from its list's top (heights: measured by index, else `estimate`). */
+function itemOffset(i, heights, estimate) {
+  let y = 0;
+  for (let k = 0; k < i; k++) y += heights && heights[k] != null ? Number(heights[k]) : Number(estimate) || 0;
+  return y;
+}
+
+/** A line to a card that isn't rendered: a stub of `len` px from the rendered
+ * end toward where the other one is. */
+function stubLine(from, toward, len) {
+  const dx = toward.x - from.x, dy = toward.y - from.y, d = Math.hypot(dx, dy) || 1, k = Math.min(1, len / d);
+  return { x1: from.x, y1: from.y, x2: Math.round(from.x + dx * k), y2: Math.round(from.y + dy * k) };
 }
 
 /** Where the page scrolls on load: the bar's line a little above the middle
@@ -172,7 +209,8 @@ function assignSides(list, adj, sideOf) {
  * order), pastRows (the past rows kept in view, PAST_ROWS by default). */
 function graphLayout(board, opts) {
   const o = opts || {}, b = bands(board);
-  const past = pushOut(b.past, o.pastRows == null ? PAST_ROWS : o.pastRows);
+  // every decided card (the list is virtualized); pastRows pushes the oldest out when given
+  const past = pushOut(b.past, o.pastRows == null ? Infinity : o.pastRows);
   if (o.narrow) {
     return { future: { left: b.future, right: [] }, now: { left: b.now, right: [] },
              past: { left: past.shown, right: [] }, gone: past.gone };
@@ -291,7 +329,7 @@ function age(iso, now) {
   return Math.round(s / 86400) + " days ago";
 }
 
-const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, barScrollTop, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
+const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, windowRange, itemOffset, stubLine, barScrollTop, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
   blockersFirst, cardEdges, inputSpec, pickText, valueText, askText, age, POLL_MS, PAST_ROWS, GOALS_MAX };
 if (typeof module !== "undefined" && module.exports) module.exports = DecisionLogic;
 if (typeof window !== "undefined") window.DecisionLogic = DecisionLogic;   // home.js builds the chat's message with it
@@ -331,6 +369,9 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     svg.graph path.e.amber { stroke:var(--amber); } svg.graph path.e.cyan { stroke:var(--cyan); }
     svg.graph path.e.dashed { stroke-dasharray:5 4; }
     svg.graph marker path { stroke:none; } svg.graph #ck-arrow-amber path { fill:var(--amber); } svg.graph #ck-arrow-cyan path { fill:var(--cyan); }
+    svg.graph circle.stubend.amber { fill:var(--amber); } svg.graph circle.stubend.cyan { fill:var(--cyan); }
+    .vlist { display:flex; flex-direction:column; } .vlist .spacer { flex:none; }
+    .vrows { display:flex; flex-direction:column; } .vrows > .dc { margin-bottom:${PAST_GAP}px; }
     svg.graph.hl path.e { opacity:.12; } svg.graph.hl path.e.on { opacity:1; stroke-width:2.2; }
     .dc.nb { border-color:var(--cyan); box-shadow:0 0 12px rgba(95,214,255,.35); }
     .band.future { flex-direction:column-reverse; padding-bottom:10px; align-self:end; }   /* the pile sits on the bar's line */
@@ -465,6 +506,17 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
           for (const el of this._root.querySelectorAll(".band, .cc, .ct")) this._ro.observe(el);
         }
         for (const ev of ["wheel", "touchstart", "keydown"]) this.addEventListener(ev, () => { this._touched = true; }, { passive: true });
+        // the windows follow the page's scroll: one re-window a frame (the past here, the chat's in the panel)
+        this._onScroll = () => {
+          if (this._rafS) return;
+          this._rafS = requestAnimationFrame(() => {
+            this._rafS = 0;
+            this._paintPast(false);
+            const c = this._chat(); if (c && c.onViewport) c.onViewport();
+          });
+        };
+        this.addEventListener("scroll", this._onScroll, { passive: true });
+        window.addEventListener("resize", this._onScroll);
         this._mq = window.matchMedia(NARROW);
         this._onMq = () => this._paint();
         if (this._mq.addEventListener) this._mq.addEventListener("change", this._onMq);
@@ -558,8 +610,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       // an edge to work outside the board (carried_by: PR #468) is a chip either way
       const ce = cardEdges(this._board), chips = ce.chips;
       if (narrow) for (const e of ce.lines) (chips[e.from] = chips[e.from] || []).push({ rel: e.rel, to: e.to });
-      const lay = graphLayout(this._board, { narrow, pastRows: narrow ? PAST_ROWS * 2 : PAST_ROWS });
-      const past = { gone: lay.gone };
+      const lay = graphLayout(this._board, { narrow });                     // every decided card
       const lists = { future: lay.future, now: lay.now, past: lay.past };
       const label = { future: "to decide ▲", now: "in flight", past: "decided ▼" };
       const empty = { future: "no open questions", now: "nothing in flight", past: "nothing decided yet" };
@@ -567,6 +618,12 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         this.shadowRoot.activeElement.closest(".dc");
       const focusEid = keepFocus ? keepFocus.dataset.eid : "";
       for (const band of ["future", "now", "past"]) {
+        if (band === "past") {
+          // THE PAST, VIRTUALIZED: every decided card, only the rows near the view in the DOM
+          this._past = { lists: lists.past, chips, titles, narrow, count: b.past.length };
+          this._paintPast(true);
+          continue;
+        }
         for (const side of ["left", "right"]) {
           const el = this._root.querySelector(`.band.${band}.${side === "left" ? band[0] + "l" : band[0] + "r"}`);
           const cards = lists[band][side];
@@ -575,7 +632,6 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
           let html = cards.map((c, i) => this._card(c, band, narrow ? Math.floor(i / 2) : i, chips, titles)).join("");
           const lbl = `<div class="lbl">${label[band]}${side === "left" || narrow ? ` · ${band === "past" ? b.past.length : b[band].length}` : ""}</div>`;
           if (!cards.length && side === "left") html = `<div class="empty">${empty[band]}</div>`;
-          if (band === "past" && past.gone && (side === "left" || narrow)) html += `<div class="gone">${past.gone} older out of view</div>`;
           // the future pile grows upward (column-reverse): its label is last in the DOM, on top
           el.innerHTML = band === "future" ? html + lbl : lbl + html;
         }
@@ -611,6 +667,16 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       const mid = box.width / 2, paths = [];
       for (const e of lines) {
         const a = rect(e.from), z = rect(e.to);
+        if (!a !== !z) {                                                    // one end not rendered: a stub toward it
+          const real = a || z, spot = this._pastSpot(a ? e.to : e.from, box);
+          if (!spot) continue;
+          const from = { x: real.cx, y: spot.y > real.cy ? real.b : real.t };
+          const s = stubLine(from, spot, STUB_PX), st = edgeStyle(e, this._bandOf || {});
+          paths.push(`<path class="e stub ${st.tone}${st.dashed ? " dashed" : ""}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" ` +
+            `d="M${s.x1},${s.y1} L${s.x2},${s.y2}" mask="url(#ck-fade)"><title>${esc(e.rel.replace("_", " "))} (scroll to see)</title></path>` +
+            `<circle class="stubend ${st.tone}" cx="${s.x2}" cy="${s.y2}" r="2.5"></circle>`);
+          continue;
+        }
         if (!a || !z) continue;
         const aLeft = a.cx < mid, zLeft = z.cx < mid;
         let d;
@@ -652,6 +718,61 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         for (const p of svg.querySelectorAll("path.e")) if (p.dataset.from === eid || p.dataset.to === eid) p.classList.add("on");
       }
       for (const n of nbs) { const c = this._root.querySelector(`.dc[data-eid="${CSS.escape(n)}"]`); if (c) c.classList.add("nb"); }
+    }
+
+    /** The past band's two lists, windowed (windowRange): a spacer above and
+     * below the rendered cards keeps the page height. force: re-render even if
+     * the window didn't move (new cards). */
+    _paintPast(force) {
+      const P = this._past;
+      if (!P || !this._root) return;
+      this._ph = this._ph || {};
+      const host = this.getBoundingClientRect();
+      let changed = false;
+      for (const side of ["left", "right"]) {
+        const el = this._root.querySelector(`.band.past.${side === "left" ? "pl" : "pr"}`);
+        const cards = P.lists[side];
+        if (force || !el.querySelector(".vlist")) {
+          const lbl = `<div class="lbl">decided ▼${side === "left" || P.narrow ? ` · ${P.count}` : ""}</div>`;
+          el.innerHTML = lbl + (cards.length ? `<div class="vlist"><div class="spacer" data-s="before"></div><div class="vrows"></div><div class="spacer" data-s="after"></div></div>`
+            : side === "left" ? `<div class="empty">nothing decided yet</div>` : "");
+          el._win = null;
+        }
+        const vl = el.querySelector(".vlist");
+        if (!vl) continue;
+        const origin = vl.getBoundingClientRect().top;
+        const heights = {};
+        cards.forEach((c, i) => { if (this._ph[c.eid] != null) heights[i] = this._ph[c.eid]; });
+        const w = windowRange({ count: cards.length, heights, estimate: PAST_EST, viewTop: host.top - origin,
+                                viewBottom: host.bottom - origin, overscan: PAST_OVERSCAN });
+        vl.querySelector('[data-s="before"]').style.height = w.before + "px";
+        vl.querySelector('[data-s="after"]').style.height = w.after + "px";
+        if (!el._win || el._win.start !== w.start || el._win.end !== w.end) {
+          vl.querySelector(".vrows").innerHTML = cards.slice(w.start, w.end)
+            .map((c, k) => this._card(c, "past", w.start + k, P.chips, P.titles)).join("");
+          el._win = { start: w.start, end: w.end };
+          changed = true;
+          for (const d of vl.querySelectorAll(".vrows > .dc")) this._ph[d.dataset.eid] = d.offsetHeight + PAST_GAP;
+        }
+      }
+      if (changed && !force) { if (this._hl) this._graphHover(this._hl, true); this._redraw(); }
+    }
+
+    /** Where an unrendered past card is (its estimated box), for a stub line. */
+    _pastSpot(eid, box) {
+      const P = this._past;
+      if (!P) return null;
+      for (const side of ["left", "right"]) {
+        const i = P.lists[side].findIndex((c) => c.eid === eid);
+        if (i < 0) continue;
+        const vl = this._root.querySelector(`.band.past.${side === "left" ? "pl" : "pr"} .vlist`);
+        if (!vl) return null;
+        const r = vl.getBoundingClientRect(), heights = {};
+        P.lists[side].forEach((c, k) => { if (this._ph[c.eid] != null) heights[k] = this._ph[c.eid]; });
+        const y = r.top - box.top + itemOffset(i, heights, PAST_EST) + PAST_EST / 2;
+        return { x: (r.left + r.right) / 2 - box.left, y };
+      }
+      return null;
     }
 
     _paintGoals() {
