@@ -58,3 +58,59 @@ def test_the_note_alone_when_there_is_no_system_prompt():
 
 def test_the_note_is_fixed_text():
     assert _system("x") == _system("x")
+
+
+# ---- one call makes a card (2026-10-23: "Memo really struggles with decisions")
+# entity_add applies `properties` itself (tool_entity_add follows the add with
+# an entity/edit), so the note teaches the ONE-CALL form, with a concrete
+# option card -- and that a name can't hold quotes or apostrophes.
+
+CARD = {"class": "Decision", "name": "Which test runner",
+        "summary": "pytest or unittest for the new suite",
+        "properties": {"status": "open",
+                       "var": {"type": "option", "options": ["pytest", "unittest"]},
+                       "pick": "pytest"}}
+
+
+def test_the_note_teaches_the_one_call_card():
+    note = CA.TOOLS_NOTE
+    assert "in one call" in note
+    assert ("entity_add class='Decision' name='Which test runner' "
+            "summary='pytest or unittest for the new suite' "
+            "properties={'status': 'open', 'var': {'type': 'option', "
+            "'options': ['pytest', 'unittest']}, 'pick': 'pytest'}") in note
+    assert "no quotes or apostrophes" in note
+    assert "then entity_edit" not in note          # the two-call form is gone
+
+
+def test_the_one_call_card_lands_on_a_real_store():
+    from unittest import mock
+    from membrane import mcp_server as M
+    from membrane.eids import lint_name
+    from membrane.entities import EntityStore
+    from tests.test_jwt_auth import _jwt_env
+    from tests.test_offbox_auth import _proxy
+    assert lint_name(CARD["name"]) is None
+    assert lint_name("Memo's runner")              # an apostrophe is refused
+    import tempfile
+    with tempfile.TemporaryDirectory() as d, \
+            mock.patch("membrane.lanes._pulse_edit", lambda *a: None), \
+            mock.patch("membrane.lanes._entity_post_process", lambda *a: None), \
+            mock.patch("membrane.lanes._active_model_hook", lambda *a: None):
+        env = _jwt_env(MEMBRANE_SEAT_TOKEN_FILE=os.path.join(d, "seat-token"),
+                       MEMBRANE_DATA_DIR=d)
+        env.start()
+        backend, srv = _proxy(offbox=False)
+        try:
+            srv.entity_store = est = EntityStore(path=None, shared=False)
+            out = M.tool_entity_add(dict(CARD), srv.server_address[1])
+        finally:
+            srv.shutdown()
+            backend.shutdown()
+            env.stop()
+    assert "Also set: properties" in out, out
+    [doc] = [dc for dc in est.docs.values() if dc.cls == "Decision"]
+    assert doc.cls == "Decision"
+    p = doc.properties
+    assert (p["status"], p["pick"]) == ("open", "pytest")
+    assert p["var"] == {"type": "option", "options": ["pytest", "unittest"]}
