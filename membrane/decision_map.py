@@ -138,6 +138,23 @@ def _shown(value, var: dict) -> str:
     return f"{s} {unit}" if unit else s
 
 
+def set_chat(est, spec: str, chat: str) -> dict:
+    """Record the chat a card opened (the board's click): only the `chat`
+    property changes, and a card keeps the chat it already has."""
+    from .entities import CLASS_DECISION
+    chat = str(chat or "").strip()
+    if not chat:
+        return {"ok": False, "error": "chat required"}
+    ent = est.resolve(str(spec or ""), exact=True) if est is not None else None
+    if ent is None or ent.cls != CLASS_DECISION:
+        return {"ok": False, "error": f"no Decision card {spec!r}"}
+    p = ent.properties or {}
+    p["chat"] = p.get("chat") or chat
+    ent.properties = p
+    est.upsert(ent)
+    return {"ok": True, "card": _card_of(ent)}
+
+
 def _one_line(s, cap: int) -> str:
     s = " ".join(str(s or "").split())
     return s if len(s) <= cap else s[: cap - 1] + "…"
