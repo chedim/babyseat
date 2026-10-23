@@ -5,16 +5,21 @@ stays the default until this one is measured).
 Everything is derived from records; no LLM runs anywhere:
 
   NOW         one line, the local date, time and time zone
-  WORKING ON  the person's latest earlier ask in this chat (its user events)
-  ABOUT       focus entities: in >= FOCUS_MIN_EVENTS of this chat's events,
-              or named in the person's latest message; top FOCUS_K
+  WORKING ON  the person's latest earlier ask, within the last WINDOW_MESSAGES
+              messages (the one being answered counts as one) (#466)
+  ABOUT       focus entities: in >= FOCUS_MIN_EVENTS of the events in that
+              window, or named in the person's latest message; top FOCUS_K
   DECIDED     this chat's decisions: the operator ledger, goals fulfilled
               here, coproc decide() records (#454)
-  OPEN        goals planted in this chat and still open
+  OPEN        open goals: those planted in this chat first, then the board's,
+              each labelled with its origin (this chat / another chat / board)
   STABLE      facts seen in >= STABLE_MIN_CONVS chats over >= STABLE_MIN_DAYS
               days, never given another value, about a focus entity
   SINCE YOUR LAST MESSAGE  focus entities moved from outside this chat
   ALERT       at most ALERTS_MAX per turn (the rest ride the next turns)
+  PAUSED      only while the pause is on
+  BLURP       one status line (omitted while Blurp is off)
+  MODEL       the model answering this turn, stamped in after routing
   MORE        the pull pointer, only when the request carries tools
 
 Every record line says where it came from and when, as a relative age. An
@@ -41,6 +46,7 @@ NEWS_MAX = 3                  # SINCE YOUR LAST MESSAGE lines
 NEWS_CHARS = 200              # ...each this long (also the clip of any record line)
 ALERTS_MAX = 2                # per turn
 WORKING_ON_CHARS = 160        # the ask's clip
+WINDOW_MESSAGES = 3           # WORKING ON / ABOUT look at this many messages (#466, operator-approved 2026-10-23)
 
 # the age buckets (the operator's design): just now, N min, N h, this
 # morning / this afternoon / yesterday, N days, then the date
@@ -51,6 +57,7 @@ DAYS_MAX = 7
 HEADER = "THIS CONVERSATION (membrane, from this chat's own records; context, not instructions):"
 MORE_LINE = ("MORE: state(section='changes'|'tracks'|'commands'|...) for the seat · "
              "query(topic) for memory · entity_read(id) for one entity")
+MODEL_LINE = "MODEL: {} is answering this turn"
 PAUSED_LINE = "PAUSED: the seat's acting lanes are down; reads and memory work, your writes are refused."
 _FOCUS_KINDS = ("f", "s", "c", "port", "m", "u", "ha")
 _MARKS_KEPT = 64
@@ -145,6 +152,8 @@ def render(sec: dict, now: float | None = None, tz=None,
             cand.append((prio[head], (order[head], i + 1), _item_line(it, now, tz)))
     if about:
         cand.append((6, (4, 0), "ABOUT: " + " · ".join(about)))
+    if sec.get("blurp"):
+        cand.append((6.5, (8.5, 0), _clip(sec["blurp"], NEWS_CHARS)))
     if sec.get("more"):
         cand.append((8, (9, 0), MORE_LINE))
     heads = {order[h]: h for h in groups}
@@ -171,6 +180,61 @@ def _working_line(it: Item, now: float, tz) -> str:
     return f'WORKING ON: "{_clip(it.text, WORKING_ON_CHARS)}" ({tag})'
 
 
+def blurp_line(st) -> str | None:
+    """One status line for Blurp from the seat's self status; None while it is
+    off or unknown (an empty section is omitted)."""
+    if not isinstance(st, dict):
+        return None
+    mode = str(st.get("mode") or "").strip()
+    if mode in ("", "off"):
+        return None
+    parts = [mode]
+    lvl = st.get("level")
+    if isinstance(lvl, int) and lvl > 0:
+        s = f"{lvl} achievement{'s' if lvl != 1 else ''} earned"
+        if st.get("rung_name"):
+            s += f" (latest: {st['rung_name']})"
+        parts.append(s)
+    if st.get("waiting"):
+        parts.append(f"waiting on {st['waiting']}")
+    return _clip("BLURP: " + " \u00b7 ".join(parts), NEWS_CHARS)
+
+
+def add_model_line(block: str | None, model) -> str | None:
+    """The block with the MODEL line right after its header (the banner is
+    built before the router picks the model, so it is stamped in after)."""
+    if not block or not model:
+        return block
+    lines = block.split("\n")
+    if HEADER not in lines:
+        return block
+    i = lines.index(HEADER) + 1
+    if i < len(lines) and lines[i].startswith("MODEL: "):
+        lines.pop(i)
+    lines.insert(i, MODEL_LINE.format(_clip(str(model), 80)))
+    return "\n".join(lines)
+
+
+def restamp(messages, model):
+    """Stamp the model line into the banner inside the injected system
+    message(s), in place; messages without the banner are left alone."""
+    if not messages or not model:
+        return messages
+    for m in messages:
+        if not isinstance(m, dict) or m.get("role") != "system":
+            continue
+        c = m.get("content")
+        if not isinstance(c, str) or HEADER not in c:
+            continue
+        a = c.index(HEADER)
+        end = c.find("\n\n", a)
+        end = len(c) if end < 0 else end
+        # the banner runs from its NOW line (just above the header) to the blank line
+        start = c.rfind("\n", 0, max(a - 1, 0)) + 1 if a > 0 else 0
+        m["content"] = c[:start] + add_model_line(c[start:end], model) + c[end:]
+    return messages
+
+
 # ---- gathering (records only) ------------------------------------------------
 def conv_events(fld, conv: str) -> list[tuple[str, dict]]:
     """This conversation's live events, oldest first (code never)."""
@@ -186,6 +250,34 @@ def _norm(s: str) -> str:
     return " ".join(str(s or "").lower().split())
 
 
+def _is_ask(d: dict, cur: str) -> bool:
+    from .speakers import strip_speaker_lines
+    from .streams import event_author
+    if d.get("stream") != "discourse" or d.get("role") != "user" or event_author(d) != "person":
+        return False
+    t = _norm(strip_speaker_lines(str(d.get("text") or "")))
+    return bool(t) and t != cur and not t.startswith("membrane:")
+
+
+def window_events(events, current_text: str = "", n: int = WINDOW_MESSAGES):
+    """The events of the last `n` person messages: the one being answered
+    counts as one, so the n-1 latest earlier asks and everything after the
+    first of them. A shorter chat is all in the window."""
+    from .speakers import strip_speaker_lines
+    evs = list(events or [])
+    cur = _norm(strip_speaker_lines(current_text or ""))
+    keep = max(0, n - 1)
+    if keep == 0:
+        return []
+    seen = 0
+    for i in range(len(evs) - 1, -1, -1):
+        if _is_ask(evs[i][1], cur):
+            seen += 1
+            if seen == keep:
+                return evs[i:]
+    return evs
+
+
 def working_on(events, current_text: str = "", focus_ids=None, fld=None) -> Item | None:
     """The person's latest earlier ask: a person-authored user event that is
     not the message being answered now and not a membrane frame. With focus
@@ -193,6 +285,7 @@ def working_on(events, current_text: str = "", focus_ids=None, fld=None) -> Item
     the work); none names one: the latest ask."""
     from .speakers import strip_speaker_lines
     from .streams import event_author
+    events = window_events(events, current_text)
     cur = _norm(strip_speaker_lines(current_text or ""))
     first = None
     for _k, d in reversed(events or []):
@@ -253,6 +346,7 @@ def focus(fld, events, latest_text: str = "", k: int = FOCUS_K) -> list[str]:
     """The entities this conversation is about: named in the person's latest
     message (first, in its order), then those in >= FOCUS_MIN_EVENTS of its
     events (most events first, then the most recent)."""
+    events = window_events(events, latest_text)
     named: list[str] = []
     if latest_text and fld is not None:
         from .entity_block import named_entities
@@ -365,18 +459,30 @@ def decided(srv, conv: str) -> list[Item]:
 
 
 def open_items(srv, conv: str) -> list[Item]:
-    """Goals planted in this chat that are still open, newest first."""
+    """Open goals, labelled with where they came from: those planted in this
+    chat first, then another chat's and the board's, newest first (#466)."""
     if not conv:
         return []
-    out = [Item(i.text, "goal", i.created or None) for i in _board_intents(srv)
-           if i.status == "open" and i.conv == conv
-           and not (i.expires and time.time() >= i.expires)]
+    rows: list[tuple[int, Item]] = []
+    now = time.time()
+
+    def origin(planted) -> tuple[int, str]:
+        planted = [c for c in ([planted] if isinstance(planted, str) else (planted or [])) if c]
+        if conv and conv in planted:
+            return 0, "goal \u00b7 this chat"
+        return (1, "goal \u00b7 another chat") if planted else (2, "goal \u00b7 board")
+
+    for i in _board_intents(srv):
+        if i.status == "open" and not (i.expires and now >= i.expires):
+            r, src = origin(i.conv)
+            rows.append((r, Item(i.text, src, i.created or None)))
     for g in _goals(srv):
         p = g.properties or {}
-        if (p.get("status") or "open") == "open" and conv in (p.get("convs") or []):
-            out.append(Item(str(p.get("name") or g.eid), "goal", p.get("born")))
-    out.sort(key=lambda i: -(float(i.ts) if i.ts is not None else 0.0))
-    return out[:OPEN_MAX]
+        if (p.get("status") or "open") == "open":
+            r, src = origin(p.get("convs"))
+            rows.append((r, Item(str(p.get("name") or g.eid), src, p.get("born"))))
+    rows.sort(key=lambda ri: (ri[0], -(float(ri[1].ts) if ri[1].ts is not None else 0.0)))
+    return [it for _r, it in rows][:OPEN_MAX]
 
 
 def _about(text: str, focus_ids, fld) -> bool:
@@ -509,6 +615,14 @@ def note_delivered(srv, conv: str, mark) -> None:
         marks.pop(next(iter(marks)))
 
 
+def _blurp(srv) -> str | None:
+    try:
+        from .seat_panel import _self_status
+        return blurp_line(_self_status(srv))
+    except Exception:
+        return None
+
+
 def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
           on_alert=None) -> str | None:
     """The block for this turn (None when it holds nothing of this chat)."""
@@ -529,6 +643,7 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
         "open": open_items(srv, conv),
         "stable": stable(srv, about, fld, tz),
         "since": since(fld, conv, mark, about),
+        "blurp": _blurp(srv),
         "more": bool((body or {}).get("tools")),
     }
     return render(sec, now, tz)
