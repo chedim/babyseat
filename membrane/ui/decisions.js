@@ -90,6 +90,12 @@ function goalsShown(goals, max) {
   return { shown: list.slice(0, max), more: Math.max(0, list.length - max) };
 }
 
+/** Where the page scrolls on load: the bar's line a little above the middle
+ * of the view (barTop: the bar's offset in the page; never above the top). */
+function barScrollTop(barTop, viewH) {
+  return Math.max(0, barTop - 0.4 * viewH);
+}
+
 /** A card clicked: what the center chat does. switchTo: the card's own chat
  * (another session than the one open); record: the open session, put on a
  * card that has no chat yet; text: the question, pre-filled (never sent). */
@@ -285,7 +291,7 @@ function age(iso, now) {
   return Math.round(s / 86400) + " days ago";
 }
 
-const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
+const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, barScrollTop, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
   blockersFirst, cardEdges, inputSpec, pickText, valueText, askText, age, POLL_MS, PAST_ROWS, GOALS_MAX };
 if (typeof module !== "undefined" && module.exports) module.exports = DecisionLogic;
 if (typeof window !== "undefined") window.DecisionLogic = DecisionLogic;   // home.js builds the chat's message with it
@@ -296,14 +302,20 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
   const NARROW = "(max-width: 760px)";
   // the cockpit is dark (a HUD over the field): its own colours, the page's font
   const STYLE = `
-    :host { position:absolute; inset:58px 0 0 0; display:block; overflow:hidden; color:#dfe8f1;
+    /* ONE DOCUMENT: the cockpit element is the page's one scroll container --
+       the goals, the open pile, the bar's line, the chat and the past scroll
+       together; the field behind stays put (the page's own fixed host) */
+    :host { position:absolute; inset:58px 0 0 0; display:block; overflow-y:auto; overflow-x:hidden; color:#dfe8f1;
             --amber:#ffb040; --cyan:#5fd6ff; --line:rgba(255,176,64,.5); --dim:rgba(255,176,64,.18);
             --panel:rgba(8,13,20,.86); --cockpit-line:rgba(255,176,64,.55); --cockpit-accent:#5fd6ff; --cockpit-amber:#ffb040;
             --ck-backing:rgba(6,10,16,.74);
             background:transparent; }
-    .ck { position:relative; height:100%; display:grid; gap:0 18px; padding:8px 66px 0;
+    .ck { position:relative; min-height:100%; display:grid; gap:0 18px; padding:8px 66px 0;
           grid-template-columns:minmax(0,1fr) minmax(0,55%) minmax(0,1fr);
-          grid-template-rows:minmax(0,1fr) auto minmax(0,1fr);
+          /* the chat spans the bar's row and the past's: the flexible last row takes
+             its height, so the bar's row stays the in-flight cards' height */
+          grid-template-rows:auto auto 1fr;
+          align-items:start;
           grid-template-areas:"fl ct fr" "nl cc nr" "pl cc pr"; }
     .fl { grid-area:fl; } .fr { grid-area:fr; } .nl { grid-area:nl; } .nr { grid-area:nr; }
     .pl { grid-area:pl; } .pr { grid-area:pr; } .ct { grid-area:ct; } .cc { grid-area:cc; }
@@ -321,7 +333,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     svg.graph marker path { stroke:none; } svg.graph #ck-arrow-amber path { fill:var(--amber); } svg.graph #ck-arrow-cyan path { fill:var(--cyan); }
     svg.graph.hl path.e { opacity:.12; } svg.graph.hl path.e.on { opacity:1; stroke-width:2.2; }
     .dc.nb { border-color:var(--cyan); box-shadow:0 0 12px rgba(95,214,255,.35); }
-    .band.future { flex-direction:column-reverse; overflow-y:auto; scrollbar-width:thin; padding-bottom:10px; }
+    .band.future { flex-direction:column-reverse; padding-bottom:10px; align-self:end; }   /* the pile sits on the bar's line */
     .band.now { padding:4px 2px 10px; min-height:64px; }
     .band.past { overflow:hidden; padding-top:10px; }
     .lbl { font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--amber); opacity:.8;
@@ -363,7 +375,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .empty { font-size:12px; opacity:.4; letter-spacing:.04em; }
     .fr .empty, .nr .empty, .pr .empty { text-align:right; }
     /* the center column */
-    .ct { position:relative; z-index:1; display:flex; flex-direction:column; min-height:0; }
+    .ct { position:relative; z-index:1; display:flex; flex-direction:column; min-height:0; align-self:stretch; }
     .goals { flex:none; text-align:center; padding:4px 12px 6px; margin:0 auto; max-width:100%; border-radius:4px;
              background:var(--ck-backing); text-shadow:0 1px 2px #000; }
     .goals ul { list-style:none; margin:4px 0 0; padding:0; display:flex; flex-direction:column; gap:2px; align-items:center; }
@@ -381,10 +393,11 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     /* a phone: one column -- goals, the future, now and the bar, the chat, the past */
     @media ${NARROW} {
       :host { overflow-y:auto; }
-      .ck { display:flex; flex-direction:column; height:auto; min-height:100%; padding:8px 12px 16px; gap:8px; }
+      .ck { display:flex; flex-direction:column; min-height:100%; padding:8px 12px 16px; gap:8px; align-items:stretch; }
+      .band, .band.future, .ct, .cc { align-self:stretch; }
       .fr, .nr, .pr, .nowline, svg.graph { display:none; }   /* a phone: no lines, the links are chips */
       .band.future, .band.past { overflow:visible; }
-      .fl { order:2; } .ct { order:1; } .nl { order:3; } .cc { order:4; height:72vh; height:72dvh; } .pl { order:5; }
+      .fl { order:2; } .ct { order:1; } .nl { order:3; } .cc { order:4; } .pl { order:5; }
       .mark { flex:none; height:84px; }
     }
   `;
@@ -440,11 +453,18 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         this._root.addEventListener("pointerover", over);
         this._root.addEventListener("focusin", over);
         this._root.addEventListener("pointerleave", () => { this._hover(null); this._graphHover(null); });
-        // the lines follow the cards: a resize, a scrolled pile, a card's depth transition
+        // the lines live in the scrolling layer, so a scroll moves them with the cards;
+        // they are recomputed when the layout changes: a resize, the chat or a band
+        // growing (a ResizeObserver), a card's depth transition
         this._redraw = () => { if (!this._rafG) this._rafG = requestAnimationFrame(() => { this._rafG = 0; this._drawGraph(); }); };
         window.addEventListener("resize", this._redraw);
-        this._root.addEventListener("scroll", this._redraw, true);
         this._root.addEventListener("transitionend", this._redraw);
+        if (typeof ResizeObserver !== "undefined") {
+          this._ro = new ResizeObserver(() => this._redraw());
+          this._ro.observe(this._root);
+          for (const el of this._root.querySelectorAll(".band, .cc, .ct")) this._ro.observe(el);
+        }
+        for (const ev of ["wheel", "touchstart", "keydown"]) this.addEventListener(ev, () => { this._touched = true; }, { passive: true });
         this._mq = window.matchMedia(NARROW);
         this._onMq = () => this._paint();
         if (this._mq.addEventListener) this._mq.addEventListener("change", this._onMq);
@@ -454,7 +474,27 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       this._timer = setInterval(() => { if (!document.hidden && !this._editing()) this._load(); }, POLL_MS);
     }
 
-    disconnectedCallback() { clearInterval(this._timer); window.removeEventListener("resize", this._redraw); }
+    disconnectedCallback() {
+      clearInterval(this._timer); window.removeEventListener("resize", this._redraw);
+      if (this._ro) this._ro.disconnect();
+    }
+
+    /** On the first paint with cards, once: the input bar into view, the open
+     * pile above it (scroll up = the future), the chat and the past below. */
+    _showBar() {
+      if (this._barShown || this._barT || !this._board) return;
+      // after the layout settles (two frames: the piles, the goals, the logo); and only
+      // while the person hasn't scrolled yet -- their own scroll wins
+      this._barT = requestAnimationFrame(() => requestAnimationFrame(() => {
+        this._barT = 0;
+        const cc = this._root.querySelector(".cc");
+        if (!cc || !this.clientHeight || this._barShown) return;
+        this._barShown = true;
+        if (this._touched) return;
+        const top = cc.getBoundingClientRect().top - this.getBoundingClientRect().top + this.scrollTop;
+        this.scrollTop = barScrollTop(top, this.clientHeight);
+      }));
+    }
 
     _chat() { return (this._api && this._api.chat) || null; }
     _sid() { const c = this._chat(); return (c && c.sessionId) || ""; }
@@ -545,6 +585,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       this._bandOf = {};
       for (const k of ["future", "now", "past"]) for (const c of b[k]) this._bandOf[c.eid] = k;
       this._redraw();
+      this._showBar();
       if (focusEid) {
         const again = this._root.querySelector(`.dc[data-eid="${CSS.escape(focusEid)}"]`);
         if (again) again.focus({ preventScroll: true });
@@ -563,8 +604,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       const rect = (eid) => {
         const el = this._root.querySelector(`.dc[data-eid="${CSS.escape(eid)}"]`);
         if (!el) return null;
-        const r = el.getBoundingClientRect(), band = el.closest(".band").getBoundingClientRect();
-        if (r.bottom < band.top || r.top > band.bottom) return null;           // scrolled out of its pile
+        const r = el.getBoundingClientRect();
         return { l: r.left - box.left, r: r.right - box.left, t: r.top - box.top, b: r.bottom - box.top,
                  cx: (r.left + r.right) / 2 - box.left, cy: (r.top + r.bottom) / 2 - box.top };
       };
