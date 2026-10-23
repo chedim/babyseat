@@ -128,6 +128,8 @@ BUILT_AT = {
     "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 55, 39)},
     # change itself (#320): the dream and its test
     "change": {"pr": 326, "merged": _utc(2026, 10, 20, 20, 21, 28)},
+    # first reach (#333 part 3c): the nudge skill's test -- the PR's opening time until its merge's is set
+    "nudge": {"pr": 475, "merged": _utc(2026, 10, 23, 4, 34, 9)},
 }
 RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop wrote a line every PACE_S (#343: faster now)
 WALL_WHY = "no built skill to learn: {next} not built yet"
