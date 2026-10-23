@@ -605,15 +605,18 @@ def split_messages(messages) -> tuple[str, str]:
 # own on its trailing environment message: 4 breakpoints with the system's 2,
 # the API's maximum -- measured by capturing the CLI's request). An answer
 # the API refuses for it is sent again as plain text, and the head stays off
-# (_HEAD_REFUSED) until the seat restarts. MEMBRANE_CLAUDE_CACHE_HEAD=0 turns
-# it off.
+# (_HEAD_REFUSED) until the seat restarts. OPT-IN (2026-10-23): on the live
+# seat every head answer failed as "claude-agent: unknown" (the CLI login's
+# path refused the blocks without a reason), so MEMBRANE_CLAUDE_CACHE_HEAD=1
+# turns it on, and ANY failure of a head attempt before its first output is
+# sent again as plain text.
 _HEAD_REFUSED: set = set()
 _INTRO = "The conversation so far, oldest first; answer its last message."
 
 
 def cache_head_on() -> bool:
-    v = os.environ.get("MEMBRANE_CLAUDE_CACHE_HEAD", "1").strip().lower()
-    return v not in ("0", "false", "no", "off") and not _HEAD_REFUSED
+    v = os.environ.get("MEMBRANE_CLAUDE_CACHE_HEAD", "0").strip().lower()
+    return v in ("1", "true", "yes", "on") and not _HEAD_REFUSED
 
 
 def prompt_blocks(messages) -> tuple[str, list | None]:
@@ -635,11 +638,6 @@ def _blocks_prompt(blocks):
         yield {"type": "user", "session_id": "", "parent_tool_use_id": None,
                "message": {"role": "user", "content": blocks}}
     return gen()
-
-
-def _refused_breakpoint(e: BaseException) -> bool:
-    t = str(e).lower()
-    return "cache_control" in t or "cache control" in t
 
 
 # ---- membrane's tools, served to the SDK in-process (#389) ----------------------
@@ -782,11 +780,11 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
                                put_seen, port, resume, env)
             return
         except Exception as e:
-            if [k for k in sent if k != "step"] or not _refused_breakpoint(e):
-                raise
+            if [k for k in sent if k != "step"]:
+                raise                        # words already went out: no silent retry
             _HEAD_REFUSED.add(True)          # the plain prompt from now on (#450)
             _count("head_refused")
-            print(f"[claude-agent] the cache head was refused ({str(e)[:160]}); "
+            print(f"[claude-agent] the cache head failed ({str(e)[:160]}); "
                   f"plain prompts from now on", file=sys.stderr)
     await _consume_run(sdk, system, prompt, model, stream, put, port, resume, env)
 

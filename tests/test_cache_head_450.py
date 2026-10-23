@@ -47,10 +47,17 @@ def texts(blocks):
     return [b["text"] for b in blocks]
 
 
+def _head_on(case):
+    p = mock.patch.dict(os.environ, {"MEMBRANE_CLAUDE_CACHE_HEAD": "1"})
+    p.start()
+    case.addCleanup(p.stop)
+
+
 class TestBlocks(unittest.TestCase):
     def setUp(self):
         CA._HEAD_REFUSED.clear()
         self.addCleanup(CA._HEAD_REFUSED.clear)
+        _head_on(self)
 
     def test_the_blocks_say_what_the_prompt_says(self):
         msgs = convo(3, "and now?", "BANNER one")
@@ -90,7 +97,8 @@ class TestBlocks(unittest.TestCase):
 
 
 class _SDKCase(unittest.TestCase):
-    def sdk_with(self, fail_blocks=False):
+    def sdk_with(self, fail_blocks=False, error="claude-agent: messages: A maximum of 4 blocks "
+                                                 "with cache_control may be provided. Found 5."):
         sdk = T384.fake_sdk()
         sdk.prompts = []
         real = sdk.query
@@ -100,8 +108,7 @@ class _SDKCase(unittest.TestCase):
                 got = [m async for m in prompt]
                 sdk.prompts.append(got)
                 if fail_blocks:
-                    raise RuntimeError("claude-agent: messages: A maximum of 4 blocks "
-                                       "with cache_control may be provided. Found 5.")
+                    raise RuntimeError(error)
             else:
                 sdk.prompts.append(prompt)
             async for m in real(prompt="x", options=options, transport=transport):
@@ -120,6 +127,7 @@ class _SDKCase(unittest.TestCase):
         self.addCleanup(CA._HEAD_REFUSED.clear)
         CA.reset_stats()
         self.addCleanup(CA.reset_stats)
+        _head_on(self)
 
 
 class TestTheCall(_SDKCase):
@@ -203,3 +211,22 @@ class TestWindowSteps(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheHeadIsSafe(_SDKCase):
+    """The live seat, 2026-10-23: every Claude turn failed with "claude-agent:
+    unknown" once the head was on -- the API refused the blocks and the SDK
+    named no reason, so the cache_control match never fired."""
+
+    def test_the_head_is_off_unless_asked_for(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MEMBRANE_CLAUDE_CACHE_HEAD", None)
+            self.assertFalse(CA.cache_head_on())
+            self.assertIsNone(CA.prompt_blocks(convo(3, "x", "B"))[1])
+
+    def test_any_failure_of_the_head_before_output_is_sent_again_as_text(self):
+        sdk = self.sdk_with(fail_blocks=True, error="claude-agent: unknown")
+        out = self.answer(sdk, convo(3, "and now?", "B"))
+        self.assertIn("Hello world", "".join(v for k, v in out if k == "text"))
+        self.assertIsInstance(sdk.prompts[1], str)                  # the retry
+        self.assertEqual(CA.stats()["head_refused"], 1)
