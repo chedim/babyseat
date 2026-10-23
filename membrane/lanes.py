@@ -5738,6 +5738,12 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 print(f"[opencode] router error (plain path): {e}",
                       file=sys.stderr)
         _st.mark("router")
+        if ctx and _injection_mode(srv) == "conversation":
+            try:
+                from . import conv_banner as _CB
+                _CB.restamp(up.get("messages"), up.get("model"))   # #466: the model is known only now
+            except Exception as e:
+                print(f"[conv-banner] model line error: {e}", file=sys.stderr)
         _gate_s = round(time.time() - _t_v1, 2)
         print(f"[proxy] turn staged: gate {_gate_s}s "
               f"(model {str(up.get('model'))[:30]}) -- {_st.summary()}", file=sys.stderr)

@@ -300,7 +300,8 @@ class TestGather(unittest.TestCase):
     def test_working_on_prefers_the_latest_ask_about_the_focus(self):
         # a distractor ('a poem about rain') is not what the chat works on
         _turn(self.f, "sid:a", "make `tools/backup.py` skip big files", ts=NOW - 900)
-        _turn(self.f, "sid:a", "now `tools/backup.py` logs what it skipped", ts=NOW - 800)
+        _turn(self.f, "sid:a", "now `tools/backup.py` logs what it skipped",
+              "`tools/backup.py` now logs every skipped file", ts=NOW - 800)
         _turn(self.f, "sid:a", "unrelated: give me a poem about rain", ts=NOW - 700)
         evs = CB.conv_events(self.f, "sid:a")
         foc = CB.focus(self.f, evs, "what next?")
@@ -358,7 +359,10 @@ class TestGather(unittest.TestCase):
         _goal(self.srv.entity_store, "c", "done here", born=NOW - H, convs=["sid:a"],
               status="fulfilled")
         got = CB.open_items(self.srv, "sid:a")
-        self.assertEqual([(i.text, i.src) for i in got], [("report skipped files", "goal")])
+        # #466: this chat's first, then the other chats' and the board's, each labelled
+        self.assertEqual([(i.text, i.src) for i in got],
+                         [("report skipped files", "goal · this chat"),
+                          ("a goal from elsewhere", "goal · another chat")])
 
     def test_stable_needs_three_chats_two_days_and_no_contradiction(self):
         for i, c in enumerate(("sid:a", "sid:b", "sid:c")):
@@ -434,7 +438,7 @@ class TestBuild(unittest.TestCase):
         self.assertIn('WORKING ON: "and have `tools/backup.py` log what it skipped"', out)
         self.assertIn("ABOUT: f:tools/backup.py", out)
         self.assertIn("- size limit stays 2 GB (person · 13 min ago)", out)
-        self.assertIn("- report skipped files in the digest (goal · 10 min ago)", out)
+        self.assertIn("- report skipped files in the digest (goal · this chat · 10 min ago)", out)
         self.assertNotIn("MORE:", out)                       # no tools on the request
         self.assertLessEqual(len(out), 900)
         # no seat machinery: no tracks, command counts, class proposals, event numbers
@@ -447,7 +451,11 @@ class TestBuild(unittest.TestCase):
         self.assertIn("MORE: state(section=", out)
 
     def test_another_conversation_sees_none_of_it(self):
-        self.assertIsNone(CB.build(self.srv, self.body("hello there"), "sid:zz", now=NOW, tz=UTC))
+        out = CB.build(self.srv, self.body("hello there"), "sid:zz", now=NOW, tz=UTC)
+        for mine in ("WORKING ON", "ABOUT", "DECIDED", "size limit"):
+            self.assertNotIn(mine, out)
+        # #466: the board's open goals ride every chat, labelled with their origin
+        self.assertIn("(goal · another chat ·", out)
         self.assertIsNone(CB.build(self.srv, self.body("hello there"), "", now=NOW, tz=UTC))
 
     def test_since_waits_for_this_chats_first_delivery(self):
@@ -573,7 +581,9 @@ class TestRecordsCarryTheConversation(unittest.TestCase):
         L._intent_cmd(srv, "membrane: intend that the importer writes a daily reject report")
         self.assertEqual([i.text for i in CB.open_items(srv, "sid:a")],
                          ["the importer writes a daily reject report"])
-        self.assertEqual(CB.open_items(srv, "sid:b"), [])
+        # #466: another chat sees it too, labelled with its origin
+        self.assertEqual([(i.text, i.src) for i in CB.open_items(srv, "sid:b")],
+                         [("the importer writes a daily reject report", "goal · another chat")])
         C.set_conversation("sid:b")
         L._intent_cmd(srv, "membrane: fulfill daily reject")
         self.assertEqual(CB.open_items(srv, "sid:a"), [])
