@@ -177,7 +177,8 @@ def _world(seed, n, summary=False, things=6, voids=True):
                     r["medium"], r["clock"] = "toy", rng.choice([1, 2])
             recs.append(r)
         elif x < 0.88:
-            recs.append({"ts": t, "kind": "mirror", "toy": rng.choice(["mirror", "mirror", "glass2"]),
+            recs.append({"ts": t, "kind": "mirror", "look": True,   # #333 3d: rows come only from looks
+                         "toy": rng.choice(["mirror", "mirror", "glass2"]),
                          "glass": rng.uniform(-1, 1), "stranger": rng.uniform(-1, 1),
                          "p_glass": rng.uniform(-1, 1), "b_glass": rng.uniform(-1, 1),
                          "p_stranger": rng.uniform(-1, 1), "b_stranger": rng.uniform(-1, 1)})

@@ -69,8 +69,10 @@ STRANGER self's own move from `lag_s` (MIRROR_LAG) seconds before the glass's
 statistics, nothing to do with what self does now -- each plus seeded
 gaussian jitter (SD `jitter`). Its state keeps the moves it needs (a restart
 keeps them); its log flags the glass's change `by: self` and the stranger's
-`by: world`. It has no getter (self's ordinary looks never read it: it sees
-it by feeding it), no clock, and takes no pokes yet.
+`by: world`. #333 part 3d: it has a getter (the glass and the stranger) --
+self feeds it every cycle (the mirror's physics) and sees it only by looking,
+like any toy; a mirror from before gets the getter at boot (bind). It has no
+clock, and takes no pokes yet.
 
 THE SURFACE: `membrane toybox list|add|remove|reset|migrate|poke` (cli_main),
 the `toybox` object's methods list / add(spec) / remove(name) / reset(name) /
@@ -793,8 +795,7 @@ def _put(est, name: str, kind: str, block: int | None = None, n: int = 0) -> str
         about = KINDS[kind]["about"]
     props = {"name": ename, "summary": f"toybox {kind}: {about}", "silent_birth": True,
              "toybox": {"kind": kind, "name": name, **({"block": block} if block else {})}}
-    if kind != "mirror":                         # #312: self sees its mirror by feeding it, never by a look
-        props["getter_script"] = STUB_GET
+    props["getter_script"] = STUB_GET            # #333 part 3d: the mirror too -- Blurp sees it by looking
     if KINDS[kind]["clock"] and not block:
         props.update(tick_script=STUB_TICK, tick_every=1)
     eid = entity_id(CLASS_COMPONENT, ename)
@@ -1001,6 +1002,23 @@ def bind(srv) -> None:
                               read_only=(meth == "list"))
     except Exception as e:                      # noqa: BLE001
         print(f"[toybox] the toybox object not wired ({e!r})", file=sys.stderr)
+    _mirror_getters(est)
+
+
+def _mirror_getters(est) -> None:
+    """#333 part 3d, once per mirror: a mirror from #312 had no getter (Blurp
+    saw it by feeding it); since part 3d it is looked at like any toy, so a
+    mirror entity without one gets the stub getter at boot."""
+    try:
+        for e in list((est.docs or {}).values()):
+            pp = e.properties or {}
+            if (pp.get("toybox") or {}).get("kind") == "mirror" and not pp.get("getter_script"):
+                pp = dict(pp)
+                pp["getter_script"] = STUB_GET
+                e.properties = pp
+                est.upsert(e, embedder=None)
+    except Exception as ex:                     # noqa: BLE001
+        print(f"[toybox] the mirror's getter not set ({ex!r})", file=sys.stderr)
 
 
 def from_command(rest: str) -> dict:

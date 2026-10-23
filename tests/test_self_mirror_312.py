@@ -1,5 +1,5 @@
 """#312 (part of #161): the mirror skill -- "recognize itself" (rung 9; prerequisites
-feel itself and meet an other).
+feel itself and first reach since #333 part 3d, meet an other before).
 
 Self's body is a point moving in the field. The 🪞 mirror toy has two sides:
 the GLASS shows self's own move from one feed back, with seeded jitter; the
@@ -11,6 +11,9 @@ baseline) -- then feeds its move and reads both. The test passes when its own
 moves predict the glass far beyond the baseline (skill >= BODY_SKILL, the
 line meet's self/other split uses, and a sign-test z >= MIRROR_Z) -- the glass
 reads as body -- and do not predict the stranger -- the stranger reads as other.
+#333 part 3d: the feed is the mirror's physics (every cycle, no line); a row
+is written only at Blurp's look at the mirror (its getter), with its own last
+MIRROR_OWN moves (tests/test_mirror_looks_333.py).
 """
 import json
 import os
@@ -29,6 +32,7 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SH  # noqa: E402
 from membrane import toy_unlocks as TU  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
+from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS  # noqa: E402
 
 DIM = 16
@@ -39,6 +43,7 @@ MIRROR = MEMBRANE_NS + "Component:toy:mirror"
 def _data(monkeypatch, tmp_path):
     monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(TB, "_seat_alive", lambda: False)
+    monkeypatch.setattr(WA, "_GETTER_LRU_S", 0.0)          # #333 part 3d: a look every cycle
     yield tmp_path / "data"
 
 
@@ -58,7 +63,7 @@ class _Drift:
         return []
 
 
-def _seat(rungs=(1, 2, 6), world=None, mirror=True, sub=""):
+def _seat(rungs=(1, 2, 13), world=None, mirror=True, sub=""):
     d = Path(os.environ["MEMBRANE_DATA_DIR"]) / sub          # a sub dir: a seat of its own (no provisioning)
     d.mkdir(parents=True, exist_ok=True)
     srv = types.SimpleNamespace(paused=False, events_pool=None, membrane=None)
@@ -77,9 +82,9 @@ def _seat(rungs=(1, 2, 6), world=None, mirror=True, sub=""):
         SL._append(srv, line)
     rt = SL._rt(srv)
     rt["mode"] = "on"
-    rt["isolate"] = {"mirror"}                      # the mirror's machinery alone
+    rt["isolate"] = {"reach", "mirror"}             # the mirror's machinery alone (#333 part 3d: and the looks)
     if mirror:
-        assert TB.add(srv, "mirror")["ok"]
+        assert TB.add(srv, "mirror", locked_ok=True)["ok"]   # #333: it unlocks with meet until part 3e
     return srv
 
 
@@ -98,7 +103,7 @@ def _run(srv, n, t0=1000.0):
 def test_mirror_is_built_with_its_test():
     a = SL.ACHIEVEMENTS["mirror"]
     assert a["built"] is True and a["rung"] == 9 and a["name"] == "recognize itself"
-    assert set(a["prereqs"]) == {"feel", "meet"} and a["branch"] == "self"
+    assert set(a["prereqs"]) == {"feel", "nudge"} and a["branch"] == "self"   # #333 part 3d
     assert "not built" not in a["why_prereqs"]
     assert 9 in SL.LADDER and SL.RUNG_ID[9] == "mirror" and "mirror" in SL.BUILT
     assert SL.PROGRESS[9] is SL._rung9
@@ -106,10 +111,10 @@ def test_mirror_is_built_with_its_test():
     assert "Amsterdam" in a["child_ability"]                     # an analogy, kept
 
 
-def test_it_opens_once_feel_and_meet_are_earned_and_accepted():
-    srv = _seat(rungs=(1, 2, 6), mirror=False)
+def test_it_opens_once_feel_and_first_reach_are_earned_and_accepted():
+    srv = _seat(rungs=(1, 2, 13), mirror=False)
     assert "mirror" in SL.status(srv)["next"]
-    srv = _seat(rungs=(2, 6), mirror=False, sub="two")            # feel not earned: closed
+    srv = _seat(rungs=(2, 13), mirror=False, sub="two")           # feel not earned: closed
     assert "mirror" not in SL.status(srv)["next"]
 
 
@@ -175,13 +180,13 @@ def test_who_changed_each_side_is_on_the_log():
     assert TB.read("toy:mirror", by="self") == TB._reading(TB.peek("toy:mirror"))   # a look changes nothing
 
 
-def test_the_mirror_takes_no_pokes_and_has_no_getter():
+def test_the_mirror_takes_no_pokes_and_has_a_getter():
     srv = _seat(mirror=True)
     out = TB.poke("toy:mirror", "roll", by="alice")
     assert not out["ok"] and "mirror" in out["error"]
     ent = srv.entity_store.docs[MIRROR]
-    assert not (ent.properties or {}).get("getter_script")        # self's ordinary looks never read it
-    assert MIRROR not in SL._targets(srv)
+    assert (ent.properties or {}).get("getter_script")            # #333 part 3d: Blurp sees it by looking
+    assert MIRROR in SL._targets(srv)
 
 
 def test_a_seat_whose_rung_6_unlocked_before_gets_the_mirror_once():
@@ -224,7 +229,7 @@ def _rows(n, glass, stranger, seed=0):
     s = rng.normal(size=n)
     out = []
     for t in range(n):
-        out.append({"ts": float(t), "kind": "mirror", "n": t, "s": round(float(s[t]), 4),
+        out.append({"ts": float(t), "kind": "mirror", "n": t, "look": True, "s": round(float(s[t]), 4),
                     "glass": glass(s, t, rng), "stranger": stranger(s, t, rng)})
     return out
 
@@ -306,12 +311,12 @@ def test_a_still_self_cannot_recognize_itself():
 
 # ---- 4. the practice, through the loop ---------------------------------------------------------
 
-def test_the_loop_feeds_the_mirror_and_earns_recognize_itself():
+def test_the_loop_looks_at_the_mirror_and_earns_recognize_itself():
     srv = _seat(world=_Drift(0))
     _run(srv, int(round(SL.MIRROR_LAG / SL.PACE_S)) + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS + 120)   # #343: the lag in 10 s cycles
     recs = _record(srv)
     lines = [r for r in recs if r["kind"] == "mirror"]
-    assert lines and all(r["toy"] == "toy:mirror" for r in lines)
+    assert lines and all(r["toy"] == "toy:mirror" and r["look"] for r in lines)   # #333 part 3d: rows at looks
     assert lines[0]["glass"] is None and lines[-1]["stranger"] is not None
     assert any("p_glass" in r and "b_glass" in r for r in lines)
     ach = [r for r in recs if r["kind"] == "achieve" and r["id"] == "mirror"]
@@ -329,7 +334,7 @@ def test_no_mirror_lines_without_the_toy():
 
 
 def test_no_mirror_lines_while_it_is_closed():
-    srv = _seat(rungs=(2, 6), world=_Drift(1), mirror=True)       # feel not earned: the toy, but no skill
+    srv = _seat(rungs=(2, 13), world=_Drift(1), mirror=True)      # feel not earned: the toy, but no skill
     SL._rt(srv)["isolate"] = None
     _run(srv, 30)
     assert not [r for r in _record(srv) if r["kind"] == "mirror"]
@@ -363,7 +368,7 @@ def test_the_dock_shows_both_sides_and_how_self_reads_them():
     from membrane import self_sheet as SS
     t = next(t for t in SS.dock(srv, fresh=True)["toys"] if t["kind"] == "mirror")
     assert set(t["reading"]) == {"glass", "stranger"} and t["reading"]["glass"] is not None
-    assert t["health"] == "ok"                                     # fed, though it has no getter
+    assert t["health"] == "ok"                                     # #333 part 3d: looked at, through its getter
     assert t["seen_as"] == {"glass": None, "stranger": None}       # not enough looks to say yet
 
 

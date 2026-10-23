@@ -370,7 +370,7 @@ def test_the_voided_old_rung_seven_pass_stays_void_and_counts_for_neither_rung()
     done = SL._passed(SL._read(srv))
     assert 7 not in done and 8 not in done
     st = SL.status(srv)
-    assert st["rung"] == 6 and st["next"] == ["turns", "expect", "mirror", "nudge"] and st["rung_name"] == "meet an other"   # #295: siblings (#312: mirror)
+    assert st["rung"] == 6 and st["next"] == ["turns", "expect", "nudge"] and st["rung_name"] == "meet an other"   # #295: siblings (#312: mirror)
     assert next(r for r in st["ladder"] if r["rung"] == 7)["name"] == "time its turn"     # #300
 
 
