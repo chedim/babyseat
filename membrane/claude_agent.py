@@ -711,6 +711,31 @@ def build_mcp_server(sdk, port, answer=None):
                                      tools=tools)
 
 
+# THE TOOLS NOTE (2026-10-23): the rung's built-in tools are off, and with
+# only tool names to go on Claude told the operator it had "no tools to work".
+# Fixed text, after the stable system prompt, so the prompt cache still holds.
+TOOLS_NOTE = (
+    "Your tools: Claude Code's own tools (Read, Edit, Bash...) are off here; "
+    "membrane's tools are your hands. entity_link runs shell commands on the "
+    "seat's machine (commands=['<command line>']): read files (cat, sed -n, "
+    "grep), edit them (python3, sed), run tests, git and gh -- for code work, "
+    "use a git worktree in a temp folder, never the main checkout. "
+    "method_call runs a method on an object (e.g. object='presence', "
+    "method='exec', args={'code': ...} for JS in the person's opted-in page). "
+    "query, entity_read and graph read the field (memory); intend and fulfill "
+    "keep goals; entity_add and entity_edit write entities. To ask the person "
+    "for a decision, make it a card on their decision board, not a list in "
+    "chat: entity_add class='Decision' name=<the question> summary=<one line>, "
+    "then entity_edit properties={'status': 'open', 'var': {'type': "
+    "'int'|'float'|'bool'|'string'|'option', 'options': [...]}, 'pick': <your "
+    "recommendation>, 'blocks': [<eids it blocks>]} -- one variable per card; "
+    "only the person answers.")
+
+
+def _with_tools_note(system: str) -> str:
+    return (system.rstrip() + "\n\n" + TOOLS_NOTE) if system else TOOLS_NOTE
+
+
 def build_options(sdk, system: str, model: str, stream: bool, port=None,
                   resume=None, env=None, answer=None):
     answer = answer if answer is not None else _Answer()
@@ -718,7 +743,7 @@ def build_options(sdk, system: str, model: str, stream: bool, port=None,
     return sdk.ClaudeAgentOptions(
         **extra,
         env=credential_env() if env is None else dict(env),   # the key (#413)
-        system_prompt=system or None,
+        system_prompt=_with_tools_note(system),
         tools=[],                  # Claude Code's built-in tools: off
         allowed_tools=tool_names(),  # only membrane's tools (#389)
         mcp_servers={MCP_NAME: build_mcp_server(sdk, port, answer)},
