@@ -97,7 +97,9 @@ and their old passes no longer count (LADDER_V = 3, _void_old_wiring).
 Recognize itself is rebuilt (part 3d) on Blurp's looks at the mirror, and
 meet an other (part 3e) on delayed contingency: the look after a nudge's
 check (a reply look, `follow`) finds a change the thing's own tempo does not
-predict, and the change was not Blurp's.
+predict, and the change was not Blurp's; time its turn and expect a reply
+(part 3f) on meet's other: its nudges there timed by a bandit over the age of
+the other's last change it saw, and its own prediction of each follow-up.
 
 NUDGE-AWARE LOOKS (#333 part 3a): each look records `nudged`, Blurp's own
 nudges at that thing since its previous look at it (it knows what it did:
@@ -206,19 +208,20 @@ ACHIEVEMENTS = {
                              "first reach: a reply look is the look after first reach's check of its nudge "
                              "(the immediate effect already seen), so a change then came late and not by it")},
     # #300: the two "others" skills are named for what their tests measure (ids stay)
-    "turns": {"rung": 7, "name": "time its turn", "branch": "others", "prereqs": ("meet",), "built": False,
+    # #333 part 3f: rebuilt on meet's other -- its timed nudges, and the follow-up after each check
+    "turns": {"rung": 7, "name": "time its turn", "branch": "others", "prereqs": ("meet",), "built": True,
               "child_age": "~3-5 mo",
               "child_ability": ("times its turn in a proto-conversation: serve and return "
                                 "(Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)"),
-              "why_prereqs": ("meet an other: it times its pushes to the other meet found, through "
-                              "meet's channel, and scores each by the reply check after it")},
-    "expect": {"rung": 8, "name": "expect a reply", "branch": "others", "prereqs": ("meet",), "built": False,
+              "why_prereqs": ("meet an other: it times its nudges at the other meet found, and scores each "
+                              "by meet's follow-up after its check (did the other answer, late and on its own)")},
+    "expect": {"rung": 8, "name": "expect a reply", "branch": "others", "prereqs": ("meet",), "built": True,
                "child_age": "~2-3 mo",
                "child_ability": ("expects a caregiver's response: the still-face upset "
                                  "(Tronick et al. 1978)"),
-               "why_prereqs": ("meet an other: it predicts whether the other meet found replies to a "
-                               "push, read at the reply check after it; it does not need time its turn's "
-                               "learned timing -- a push by the timer is checked and predicted the same")},
+               "why_prereqs": ("meet an other: it predicts meet's follow-up at the other meet found, before "
+                               "it looks; it does not need time its turn's learned timing -- an untimed "
+                               "nudge's follow-up is predicted the same")},
     # #333 part 3d: rebuilt on looks at the mirror -- rows only from its looks, the test #312's
     "mirror": {"rung": 9, "name": "recognize itself", "branch": "self", "prereqs": ("feel", "nudge"), "built": True,
                "child_age": "~18 mo",
@@ -251,9 +254,9 @@ ACHIEVEMENTS = {
                "why_prereqs": "not built yet; planned: rules of its own (change itself), said to others (speak)"},
 }
 RUNG_ID = {a["rung"]: i for i, a in ACHIEVEMENTS.items()}            # the record's rung numbers -> ids
-# #333: turns and expect are not built until they are rebuilt on the nudge (see LADDER_V);
-# their practice (the ball turns, the reply checks) runs only for a built skill, so it stops
-# with them. Mirror is rebuilt on looks (part 3d), meet on delayed contingency (part 3e).
+# #333: meet, turns, expect and mirror were voided as the old wiring (see LADDER_V) and are
+# rebuilt on the nudge: mirror on looks (part 3d), meet on delayed contingency (part 3e),
+# turns and expect on meet's other (part 3f).
 BUILT = [i for i, a in ACHIEVEMENTS.items() if a["built"]]
 
 # #343: no longer the loop's pace (the CPU share is): the 10 s a cycle took until #343, at which the
@@ -309,7 +312,7 @@ MEET_MAX = 1800.0           # s: rung 7: a push waits at most this long for its 
 # pushes when the other's spoke_age is in that bin, never sooner than MEET_EVERY s after
 # the last push (the timer's own rate is the cap) and never later than MEET_MAX. A push's
 # reward is the reply check's `replied`: the other spoke AFTER the push, by the check.
-# THE TEST over the last RUNG7_PUSHES such pushes, prequential (each push scored with what
+# THE TEST over the last RUNG7_PUSHES (RUNG7_NUDGES since #333 part 3f) such pushes, prequential (each push scored with what
 # self knew before it): (a) contingency -- the share of pushes in the window self believed best
 # at the push beats the share of the eligible waiting time the other spent in it (where a push
 # at a shuffled moment would land): z >= RUNG7_CONT_Z and +RUNG7_CONT_MARGIN; (b) payoff --
@@ -362,14 +365,14 @@ SPEAK_EACH = 40             # ...at least this many of each kind
 SPEAK_LIFT_Z = 3.5          # words' reply rate over plain's: two-proportion z
 SPEAK_LIFT_MARGIN = 0.15    # ...and at least this lift
 TURNS = True                # #258: rung 7's learned timing (tests switch it off to keep the timer's pace)
-TURN_BINS = (120.0, 600.0, 1800.0)       # spoke_age bin edges, s; the last bin: 30 min+ or never spoke
-TURN_NAMES = ("0-2m", "2-10m", "10-30m", "30m+")
+TURN_BINS = (20.0, 60.0, 180.0)   # #333 part 3f, approved 2026-10-21: age bin edges, s (#278's ball clock;
+TURN_NAMES = ("0-20s", "20-60s", "1-3m", "3m+")   # it was 2 / 10 / 30 min); the last bin: 3 min+ or never seen
 TURN_EXPLORE = 0.1          # a push aims at a random bin this often (the losing windows stay measured)
 TURN_MEMORY = 100           # pushes the reply rates per bin are read over (a rhythm can change)
-RUNG7_PUSHES = 100          # pushes with a reply check the test reads
+RUNG7_NUDGES = 100          # #333 part 3f, approved 2026-10-21: timed nudges with a follow-up the test reads
 RUNG7_CONT_Z = 3.0          # (a) the in-window count must clear the shuffled share by this many SDs
 RUNG7_CONT_MARGIN = 0.10    # ...and by this share
-RUNG7_PAY_Z = 4.0           # (b) the reply rate gained over timing-blind must clear 0 by this t
+RUNG7_PAY_Z = 5.0           # (b) ...must clear 0 by this t (#333 part 3f, approved: the ball's bar from #278, the only one)
 RUNG7_PAY_MARGIN = 0.05     # ...and be at least this
 # THE BALL'S OWN CLOCK (#278): until #278 the turns with the ball ran on the chat's clock above
 # (>= 30 cycles apart, up to 180, bins of minutes), and a person who rolled the ball back waited
@@ -435,7 +438,7 @@ TOY_RUNG7_PAY_MARGIN = RUNG7_PAY_MARGIN
 # clears chance with room and is about half of what a learnable rhythm yields at worst.
 RUNG8_LOOKS = 100           # reply checks at the other the test reads (the RUNG8_* were RUNG7_* until #258)
 RUNG8_MARGIN = 0.08         # self's p must remove this share of the running rate's Brier error
-RUNG8_SPOKE_S = 600.0       # p_self's freshness term: exp(-(push - last spoke) / this)
+RUNG8_FRESH_S = 60.0        # #333 part 3f, approved 2026-10-21: p_self's freshness, exp(-gap / this) (was 600 s)
 RUNG8_RIDGE = 10.0          # p_self's ridge penalty: no evidence -> it says the running rate
 RUNG8_FIT = 500             # p_self fits on at most this many earlier reply checks
 RUNG8_TRUST = 50            # the advisor's calibration reads its last this-many checks under one model
@@ -1141,6 +1144,11 @@ def _expect(srv, seed: str) -> dict:
         lam, dt = c.get("lam"), c.get("dt")
         c["p"] = (1.0 - float(np.exp(-lam * dt))) if (lam and dt is not None) else _p_changed(srv, c["eid"])
         c["p_n"] = _p_n(srv, c["eid"], int(c.get("nudged") or 0), c["p"])   # #333 part 3a: before it looks
+        if c.get("follow"):                             # #333 part 3f: a follow-up -- how fresh was the other
+            recs = _read(srv)
+            c["gap"] = _nudge_gap(recs, c["eid"])
+            if _available(srv, 8) and c["eid"] == _meet_other(recs):
+                c["p_self"] = _p_follow(recs, c["eid"], c["gap"])    # expect: self's own read, before it looks
         push = c.get("reply")                           # rung 7/8: this look answers a push's question
         if push is not None:
             recs = _read(srv)
@@ -1467,7 +1475,7 @@ def _r8_design(rows: list[dict], n0: int = 0, k0: int = 0):
     """p_self's inputs per check, from the checks BEFORE it only: the offset is
     the running (all-time) rate's logit; the features are an intercept, the
     recent rate's lean from it, the last outcome (+1 / -1, 0 before any) and
-    how fresh the other's last words were at the push (exp(-gap/SPOKE_S)).
+    how fresh the other's last act was at the nudge (exp(-gap/RUNG8_FRESH_S)).
     #345: n0 / k0, the checks (and replies) archived before the first row."""
     off, X = np.zeros(len(rows)), np.zeros((len(rows), 4))
     past: list[float] = []
@@ -1477,7 +1485,7 @@ def _r8_design(rows: list[dict], n0: int = 0, k0: int = 0):
         w = past[-RUNG8_RECENT:]
         rr = (sum(w) + 0.5) / (len(w) + 1.0)
         last = (1.0 if past[-1] else -1.0) if past else 0.0
-        fresh = float(np.exp(-max(0.0, r["gap"]) / RUNG8_SPOKE_S)) if r.get("gap") is not None else 0.0
+        fresh = float(np.exp(-max(0.0, r["gap"]) / RUNG8_FRESH_S)) if r.get("gap") is not None else 0.0
         off[i] = _logit(base)
         X[i] = (1.0, _logit(rr) - off[i], last, fresh)
         if r.get("o") is not None:
@@ -1927,17 +1935,194 @@ def _turn_window(d: list[tuple], clock: int = 1) -> dict:
     t = pay / (sd / np.sqrt(len(dl))) if sd > 1e-12 else 0.0
     share, chance = float(inw.mean()), float(p0.mean())
     ck = _clock(clock)
-    ok = (len(d) >= RUNG7_PUSHES and z >= ck["cont_z"] and share - chance >= ck["cont_margin"]
+    ok = (len(d) >= RUNG7_NUDGES and z >= ck["cont_z"] and share - chance >= ck["cont_margin"]
           and t >= ck["pay_z"] and pay >= ck["pay_margin"])
     return {"n": len(d), "share": share, "chance": chance, "z": z, "payoff": pay, "payoff_z": float(t),
             "reply_rate": float(y.mean()), "blind_rate": float(y.mean()) - pay, "passed": bool(ok)}
 
 
 def _turn_score(rows: list[dict]) -> dict:
-    """Rung 7's test over the last RUNG7_PUSHES of `rows` (each scored on the
+    """Rung 7's test over the last RUNG7_NUDGES of `rows` (each scored on the
     TURN_MEMORY before it)."""
-    rows = rows[-(RUNG7_PUSHES + TURN_MEMORY):]
-    return _turn_window(_turn_deltas(rows)[-RUNG7_PUSHES:], rows[-1].get("clock", 1) if rows else 1)
+    rows = rows[-(RUNG7_NUDGES + TURN_MEMORY):]
+    return _turn_window(_turn_deltas(rows)[-RUNG7_NUDGES:], rows[-1].get("clock", 1) if rows else 1)
+
+
+# ---- #333 part 3f: TIME ITS TURN (rung 7) and EXPECT A REPLY (rung 8), on meet's other -------
+#
+# MEET'S OTHER is the thing meet an other's pass named (its `achieve` line's eid, _meet_other):
+# the thing whose reply looks beat its tempo, the changes not Blurp's. THE AGE is the time since
+# Blurp's own looks last saw the other change (_age_at): a look with no nudge of its own since the
+# previous one -- a check's change is its own nudge's (part 3e), so it never resets the age.
+# TURNS: when Blurp is aimed at the other and closing in (the nudge's moment), it nudges only in
+# the age bin (TURN_BINS) its bandit picks (_turn_choose, unchanged: a Thompson draw over the
+# follow-ups each bin earned in its last TURN_MEMORY timed nudges, TURN_EXPLORE of the time a
+# random bin); each such moment counts into the turn's waiting time (`dwell`), the shuffled
+# chance the test compares with. A timed nudge line carries `bin`, `pick`, `best`, `dwell` and
+# `age`; the moment is drawn once per aim at the other (AIM_HOLD), the waiting time runs from
+# the last timed nudge. From the nudge to its follow-up the turn is open (Blurp's nudge state: its nudges since
+# its last look, the check awaiting its follow-up) and the other is not nudged again, so every
+# timed nudge's reward is there to read: THE FOLLOW-UP'S CHANGE (_turn_nudges). The test is
+# _turn_score, unchanged, over the last RUNG7_NUDGES timed nudges (the bar of clock 1, whose
+# payoff t is RUNG7_PAY_Z: the ball's 5.0 from #278, now the only one).
+# EXPECT: before each follow-up at the other Blurp predicts it, p_self (_p_follow: the ridge
+# logistic over _r8_design, unchanged -- the running rate, the recent rate's lean, the last
+# outcome and the freshness exp(-gap / RUNG8_FRESH_S) of the age at its nudge, `gap`), from the
+# follow-ups before only. The test is today's: over the last RUNG8_LOOKS predicted follow-ups,
+# p_self's Brier skill over the running rate (Jeffreys over every follow-up before, archived
+# ones too) >= RUNG8_MARGIN. The model advisor stays out: nothing is asked, nothing mixed.
+
+def _meet_other(recs: list[dict]) -> str | None:
+    """The thing meet an other's latest counting pass named (None: none yet)."""
+    return next((r.get("eid") for r in reversed(_rung_lines(recs)) if r.get("rung") == 6 and r.get("eid")), None)
+
+
+def _age_at(recs: list[dict], eid: str, t: float) -> float | None:
+    """How long before t Blurp's own looks last saw `eid` change: its latest
+    look at it by t that found a change with no nudge of its own since the
+    previous look (None: never)."""
+    last = next((float(r.get("ts") or 0) for r in reversed(recs)
+                 if r.get("kind") == "reach" and r.get("eid") == eid and r.get("answer") == "changed"
+                 and not r.get("nudged") and float(r.get("ts") or 0) <= t), None)
+    return None if last is None else max(0.0, float(t) - last)
+
+
+def _nudge_gap(recs: list[dict], eid: str) -> float | None:
+    """The age at Blurp's latest nudge at `eid` (a follow-up's gap: how fresh
+    the other's last change was when it nudged); None without a nudge or a
+    change seen before it."""
+    nu = next((r for r in reversed(recs) if r.get("kind") == "nudge" and r.get("eid") == eid), None)
+    if nu is None:
+        return None
+    if "age" in nu:
+        return None if nu["age"] is None else float(nu["age"])
+    return _age_at(recs, eid, float(nu.get("ts") or 0))
+
+
+def _turn_open(srv, eid: str) -> bool:
+    """A nudge at `eid` still waits for its check (its nudges since its last
+    look), or a check for its follow-up (part 3e's check_at)."""
+    st = _nudge_state(srv).get(eid) or {}
+    return bool(int(st.get("k") or 0) or st.get("check_at") is not None)
+
+
+def _turn_gate(srv, n: int, now: float, eid: str) -> dict | None:
+    """Rung 7's practice at the nudge's moment: {} -- nudge as ever (not meet's
+    other, or turns not practised); None -- not now (the turn is open, or the
+    age is not in the bin its bandit picked: that moment counts into the
+    turn's waiting time); else the timed nudge's fields. The bandit draws the
+    moment once per aim at the other (a bin that never comes -- a still
+    other's age stays in the last bin -- is drawn again at the next aim);
+    the waiting time runs from the last timed nudge."""
+    import random
+    if not _available(srv, 7):
+        return {}
+    recs = _read(srv)
+    if eid != _meet_other(recs):
+        return {}
+    if _turn_open(srv, eid):
+        return None
+    age = _age_at(recs, eid, now)
+    b = _turn_bin(age)
+    last = next((r for r in reversed(recs) if r.get("kind") == "nudge" and r.get("eid") == eid
+                 and r.get("pick") is not None), None)
+    key = (eid, float(last.get("ts") or 0) if last is not None else None)
+    rt = _rt(srv)
+    st = rt.get("turn7")
+    if st is None or st.get("key") != key:                 # a new turn: its waiting time starts
+        st = rt["turn7"] = {"key": key, "aim_n": None, "dwell": [0] * (len(TURN_BINS) + 1)}
+    if st["aim_n"] != rt.get("aim_n") or "pick" not in st:   # each aim at the other draws its moment
+        st["pick"], st["best"] = _turn_choose(_turn_nudges(recs, eid), random.Random(f"turn:{n}"))
+        st["aim_n"] = rt.get("aim_n")
+    st["dwell"][b] += 1
+    if b != st["pick"]:
+        return None
+    rt["turn7"] = None
+    return {"bin": b, "pick": st["pick"], "best": st["best"], "dwell": list(st["dwell"]),
+            "age": None if age is None else round(age, 3)}
+
+
+def _nudge_step(srv, n: int, now: float, eid: str, move) -> dict | None:
+    """The cycle's nudge while it closes in on what it aims at: through the
+    turns' gate (rung 7), then _nudge_once. -> the nudge line, or None."""
+    extra = _turn_gate(srv, n, now, eid)
+    if extra is None:
+        return None
+    return _nudge_once(srv, n, now, eid, move, extra)
+
+
+def _turn_nudges(recs: list[dict], eid: str | None) -> list[dict]:
+    """Rung 7's rows at `eid`, oldest first: each timed nudge (it carries its
+    pick and its waiting time) whose check was answered and whose follow-up
+    came, `replied` = the follow-up found a change. A nudge whose check or
+    follow-up never came (unanswered, inside an audit, another nudge first)
+    has no row."""
+    rows: list[dict] = []
+    pend, checked = None, False
+    for r in recs:
+        if r.get("eid") != eid:
+            continue
+        k = r.get("kind")
+        if k == "nudge":
+            pend = r if (r.get("pick") is not None and r.get("dwell")) else None
+            checked = False
+        elif k == "reach" and pend is not None:
+            ok = r.get("answer") in ("changed", "unchanged") and not r.get("audit")
+            if r.get("nudged") and not checked:
+                checked = ok                                # the check: answered, outside the audits
+                pend = pend if ok else None
+            elif r.get("follow") and checked:
+                if ok and not r.get("audit5"):
+                    rows.append({"ts": float(pend.get("ts") or 0), "bin": int(pend.get("bin", len(TURN_BINS))),
+                                 "best": pend.get("best"), "dwell": list(pend["dwell"]),
+                                 "replied": r["answer"] == "changed", "clock": 1})
+                pend = None
+            else:
+                pend = None
+    return rows
+
+
+def _follow_ok(r: dict, eid) -> bool:
+    """A follow-up expect reads: a reply look at `eid`, answered, outside every audit."""
+    return (r.get("kind") == "reach" and r.get("eid") == eid and r.get("follow") and not r.get("nudged")
+            and r.get("answer") in ("changed", "unchanged") and not r.get("audit") and not r.get("audit5"))
+
+
+def _follow_carry(recs: list, eid) -> tuple[int, int]:
+    """#345: (follow-ups, changed) at `eid` archived before the summary's window."""
+    n, k = (_carry(recs).get("follow") or {}).get(str(eid)) or (0, 0)
+    return int(n), int(k)
+
+
+def _follow_rows(recs: list[dict], eid) -> list[dict]:
+    """Expect's rows at `eid`, oldest first: each follow-up's outcome, its gap
+    and the p_self recorded at it."""
+    return [{"ts": float(r.get("ts") or 0), "o": 1.0 if r["answer"] == "changed" else 0.0,
+             "gap": r.get("gap"), "rec_p_self": r.get("p_self")} for r in recs if _follow_ok(r, eid)]
+
+
+def _p_follow(recs: list[dict], eid, gap) -> float:
+    """SELF'S PREDICTION that the next follow-up at `eid` finds a change, from
+    the follow-ups before it only (its own record; no model)."""
+    rows = _follow_rows(recs, eid) + [{"o": None, "gap": gap}]
+    off, X = _r8_design(rows, *_follow_carry(recs, eid))
+    y = np.array([r["o"] for r in rows[:-1]], dtype=float)
+    return round(_r8_predict(off, X, y, len(rows) - 1), 4)
+
+
+def _follow_series(recs: list[dict], eid) -> list[dict]:
+    """Every follow-up at `eid`, oldest first, as rung 8 reads it: o, `rate`
+    (the running rate: Jeffreys over the follow-ups before, no lookahead) and
+    `p_self` (recorded at the look; None before expect was practised)."""
+    rows = _follow_rows(recs, eid)
+    n0, k0 = _follow_carry(recs, eid)
+    k = float(k0)
+    for i, r in enumerate(rows):
+        r["rate"] = (k + 0.5) / (n0 + i + 1.0)
+        r["p_self"] = None if r["rec_p_self"] is None else float(r["rec_p_self"])
+        k += r["o"]
+    return rows
+
 
 
 def _reach(srv, target: str) -> dict:
@@ -2190,13 +2375,14 @@ def _closing(srv, eid: str) -> bool:
             and prev[2] is not None and d is not None and d < prev[2])
 
 
-def _nudge_once(srv, n: int, now: float, eid: str, move) -> None:
+def _nudge_once(srv, n: int, now: float, eid: str, move, extra: dict | None = None) -> dict | None:
     """#333, one nudge: Blurp's own move (`move`: its direction and its force,
     the stride it chose this cycle) at a thing, through its own method; a
     `nudge` line {n, ts, eid, dist, rc, aim, force, did}, and the error fee
     for a nudge refused or outside its world. dist: how far its position is
     from the thing's field spot (None when either has none); the cycle only
-    calls this while that distance is falling (_closing)."""
+    calls this while that distance is falling (_closing). `extra`: fields the
+    line carries besides (#333 part 3f: a timed nudge's turn). -> the line."""
     est = srv.entity_store
     me = _entity(srv)
     move = np.asarray(move if move is not None else [], dtype=float)
@@ -2211,19 +2397,22 @@ def _nudge_once(srv, n: int, now: float, eid: str, move) -> None:
     if "rc" not in c:
         _append(srv, {"ts": now, "kind": "error", "n": n, "act": "nudge",
                       "why": str(out.get("head") or out.get("error") or "")[:200]})
-        return
+        return None
     rt = _rt(srv)
-    _append(srv, {"ts": now, "kind": "nudge", "n": n, "eid": eid, "dist": dist, "rc": c["rc"],
-                  "aim": rt.get("aim_n") if rt.get("aim_eid") == eid else None,
-                  "force": round(float(np.linalg.norm(move)), 4) if move.size else 0.0,
-                  "did": c.get("did") or ""}
-            | {k: c[k] for k in ("draft", "moves", "said") if k in c})   # part 2: the draft it touched
+    line = ({"ts": now, "kind": "nudge", "n": n, "eid": eid, "dist": dist, "rc": c["rc"],
+             "aim": rt.get("aim_n") if rt.get("aim_eid") == eid else None,
+             "force": round(float(np.linalg.norm(move)), 4) if move.size else 0.0,
+             "did": c.get("did") or ""}
+            | {k: c[k] for k in ("draft", "moves", "said") if k in c}   # part 2: the draft it touched
+            | dict(extra or {}))                                       # part 3f: a timed nudge's turn
+    _append(srv, line)
     st = _nudge_state(srv).setdefault(eid, {})              # part 3a: Blurp knows what it did
     st["k"] = int(st.get("k") or 0) + 1
     _save_json(srv, NUDGED_FILE, _nudge_state(srv))
     if c["rc"] == NUDGE_REFUSED:
         from . import energy as _E
         _E.error(srv, f"nudge refused: {_short(eid)}: {c.get('did') or ''}", now=now)
+    return line
 
 
 def _prev_log_at(recs: list[dict], eid: str):
@@ -3027,8 +3216,9 @@ def cycle(srv, now: float | None = None) -> dict | None:
         _mark_glitch_fix(srv, now)
         if (aim is not None and rt.get("aim_eid") and _practised(srv, "nudge")
                 and _closing(srv, rt["aim_eid"])):
-            # #333: its own move nudges what it aims at -- only while it is getting closer to it
-            _nudge_once(srv, n, now, rt["aim_eid"], c["mine"])
+            # #333: its own move nudges what it aims at -- only while it is getting closer to it,
+            # and at meet's other only in the moment its turn's bandit picked (part 3f, _turn_gate)
+            _nudge_step(srv, n, now, rt["aim_eid"], c["mine"])
         _mirror_feed_once(srv, now, c["observed"] - pos)        # #333 part 3d: the mirror shows its move (physics)
         if _available(srv, 2):
             _reach_once(srv, est, ent, n, now)
@@ -3067,9 +3257,9 @@ def _available(srv, rung: int) -> bool:
 def _replies(srv) -> bool:
     """THE REPLY CHECKS (#295): after a push self looks for the other's reply,
     and a push records how long since the other last spoke -- the machinery
-    both take turns (its reward) and understand an other (its outcome) read,
-    so it runs while either may be practised."""
-    return _available(srv, 7) or _available(srv, 8) or _available(srv, 11)   # #311: speak reads them too
+    speak's test reads, so it runs while speak may be practised (#333 part 3f:
+    time its turn and expect a reply read meet's follow-ups instead)."""
+    return _available(srv, 11)   # #311: speak reads them; #333 part 3f: turns and expect read follow-ups
 
 
 def _in_world(srv, eid: str) -> bool:
@@ -3215,6 +3405,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         pass
     if after:
         rec["follow"] = True                             # #333 part 3e: a reply look (the look after a check)
+        g = c.get("gap")
+        rec["gap"] = None if g is None else round(float(g), 3)   # part 3f: the age at its nudge
     if c.get("toy") and c["toy"].get("at1") is not None and c["toy"].get("by") is not None:
         rec["by"] = c["toy"]["by"]                         # #244: who changed the toy (ground truth, the seat's)
         rec["log_at"] = c["toy"]["at1"]
@@ -4018,31 +4210,54 @@ def _rung6(recs: list[dict], tempo: dict | None = None) -> dict:
 
 
 def _rung7(recs: list[dict], tempo: dict | None = None) -> dict:
-    """Take turns (#258): self's pushes land in the window it learned gets
-    replies (a) more often than a push at a shuffled moment would, and (b)
-    get more replies than a timing-blind push would -- over its last
-    RUNG7_PUSHES policy pushes at the CURRENT other with a reply check (see
-    the constants). Staged: pushes, contingency, payoff. The headline skill
-    is the payoff: the reply rate gained over timing-blind."""
-    to = _other(recs)
-    rows = _turn_rows(recs, to) if to else []
+    """Time its turn (#258; #333 part 3f: on meet's other): its timed nudges
+    land in the window it learned gets follow-ups that changed (a) more often
+    than a nudge at a shuffled moment would, and (b) get more of them than a
+    timing-blind nudge would -- _turn_score over its last RUNG7_NUDGES timed
+    nudges at the other meet found (see above). Staged: nudges, contingency,
+    payoff. The headline skill is the payoff: the change rate gained over
+    timing-blind."""
+    to = _meet_other(recs)
+    rows = _turn_nudges(recs, to) if to else []
     w = _turn_score(rows)
-    ck = _clock(rows[-1].get("clock", 1) if rows else 1)   # #278: the bar of the turns' clock
-    crit = {"pushes": min(1.0, w["n"] / RUNG7_PUSHES)}
+    ck = _clock(1)
+    crit = {"nudges": min(1.0, w["n"] / RUNG7_NUDGES)}
     if not w["n"]:
         crit.update({"contingency": 0.0, "payoff": 0.0})
         return {"crit": crit, "skill": 0.0, "passed": False, **{k: w[k] for k in w if k != "passed"}}
     exc = w["share"] - w["chance"]
     crit["contingency"] = max(0.0, min(1.0, w["z"] / ck["cont_z"], exc / ck["cont_margin"]))
     crit["payoff"] = max(0.0, min(1.0, w["payoff_z"] / ck["pay_z"], w["payoff"] / ck["pay_margin"]))
-    out = {"crit": crit, "skill": round(w["payoff"], 4), "eid": to, "clock": rows[-1].get("clock", 1),
+    out = {"crit": crit, "skill": round(w["payoff"], 4), "eid": to,
            "passed": bool(w["passed"] and all(v >= 1.0 for v in crit.values()))}
     out.update({k: (round(v, 4) if isinstance(v, float) else v) for k, v in w.items() if k != "passed"})
     return out
 
 
 def _rung8(recs: list[dict], tempo: dict | None = None) -> dict:
-    """Understand an other (#254; rung 7 until #258, unchanged): over the last RUNG8_LOOKS reply checks at it,
+    """Expect a reply (#254; #333 part 3f: on meet's other): over the last
+    RUNG8_LOOKS follow-ups at the other meet found that self predicted before
+    it looked, its p_self removes RUNG8_MARGIN of the RUNNING RATE's Brier
+    error -- the other's prior-smoothed change rate over the follow-ups
+    before each one, no lookahead. Knowing the rate scores 0; only what self
+    learned beyond it (freshness, runs) counts. The advisor stays out."""
+    to = _meet_other(recs)
+    rows = [r for r in _follow_series(recs, to) if r["p_self"] is not None][-RUNG8_LOOKS:] if to else []
+    crit = {"looks": min(1.0, len(rows) / RUNG8_LOOKS)}
+    if not rows:
+        return {"crit": {**crit, "skill": 0.0}, "skill": 0.0, "passed": False}
+    b_rate = sum((r["o"] - r["rate"]) ** 2 for r in rows) / len(rows)
+    b_p = sum((r["o"] - r["p_self"]) ** 2 for r in rows) / len(rows)
+    skill = (b_rate - b_p) / b_rate if b_rate > 1e-9 else 0.0
+    crit["skill"] = max(0.0, min(1.0, skill / RUNG8_MARGIN))
+    return {"crit": crit, "skill": round(skill, 4),
+            "eid": to, "passed": all(v >= 1.0 for v in crit.values())}
+
+
+def _reply_check_score(recs: list[dict], tempo: dict | None = None) -> dict:
+    """#333 part 3f: the old wiring's rung 8, read as history -- no rung reads
+    it (expect a reply reads meet's follow-ups, _rung8). Understand an other
+    (#254; rung 7 until #258): over the last RUNG8_LOOKS reply checks at it,
     SELF's prediction p (its own p_self, mixed with the model's p_llm by the
     advisor's earned weight when the model answered) removes RUNG8_MARGIN of
     the RUNNING RATE's Brier error -- the other's prior-smoothed reply rate
@@ -4727,32 +4942,29 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
 
 
 def _rung7_stats(recs: list[dict]) -> dict:
-    """For the operator (#258): rung 7 at the current other -- its policy
-    pushes (`pushes`) and those whose reply check came (`checked`); per
-    spoke_age bin the pushes, replies and reply rate over the last
-    TURN_MEMORY (what the policy reads) and the window it believes best;
-    over the window the test reads: the in-window share against chance and
-    its z (contingency), the reply rate against timing-blind's, the payoff
-    and its t."""
-    to = _other(recs)
-    pushes = sum(1 for r in recs if r.get("kind") == "push" and r.get("to") == to and r.get("aim") is not None) \
-        + _to_carry(recs, to).get("aim", 0)          # #345: its policy pushes archived before the summary
-    rows = _turn_rows(recs, to) if to else []
-    medium = _cur_medium(recs, to)
-    clock = _cur_clock(recs, to, medium)
-    names = _clock(clock)["names"]                      # #278: the windows of the turns' clock
+    """For the operator (#258; #333 part 3f): time its turn at meet's other --
+    its timed nudges (`nudges`) and those whose follow-up came (`checked`,
+    over the last TURN_MEMORY: what the bandit reads); per age bin the
+    nudges, changed follow-ups and their rate, and the window it believes
+    best; over the window the test reads: the in-window share against chance
+    and its z (contingency), the change rate against timing-blind's, the
+    payoff and its t."""
+    to = _meet_other(recs)
+    nudges = sum(1 for r in recs if r.get("kind") == "nudge" and r.get("eid") == to and r.get("pick") is not None) \
+        + int(_carry(recs).get("turn7", {}).get(str(to), 0))   # #345: archived before the summary
+    rows = _turn_nudges(recs, to) if to else []
     k, n = _turn_post(rows)
     best = None
     if n.sum() > 0:
         mean = (k + 1.0) / (n + 2.0)
-        best = names[max(range(len(k)), key=lambda b: (mean[b], n[b], -b))]
-    bins = [{"bin": names[b], "pushes": int(n[b]), "replied": int(k[b]),
+        best = TURN_NAMES[max(range(len(k)), key=lambda b: (mean[b], n[b], -b))]
+    bins = [{"bin": TURN_NAMES[b], "pushes": int(n[b]), "replied": int(k[b]),
              "rate": round(float(k[b] / n[b]), 4) if n[b] else None} for b in range(len(k))]
     w = _turn_score(rows)
 
     def r4(x):
         return None if x is None else round(float(x), 4)
-    return {"medium": medium, "clock": clock, "pushes": pushes, "checked": len(rows[-TURN_MEMORY:]),
+    return {"other": to, "medium": "nudge", "nudges": nudges, "checked": len(rows[-TURN_MEMORY:]),
             "bins": bins, "best": best,
             "window": w["n"], "share": r4(w["share"]), "chance": r4(w["chance"]), "z": round(w["z"], 2),
             "payoff": r4(w["payoff"]), "payoff_z": round(w["payoff_z"], 2),
@@ -4760,7 +4972,29 @@ def _rung7_stats(recs: list[dict]) -> dict:
 
 
 def _rung8_stats(recs: list[dict]) -> dict:
-    """For the operator (#217, #254): rung 8 at the current other -- the pushes
+    """For the operator (#217, #254; #333 part 3f): expect a reply at meet's
+    other -- the follow-ups it predicted that rung 8 reads (`checks`), the
+    Brier error of its p_self and of the running rate it must beat, and the
+    other's all-time and recent change rates over the follow-ups. The advisor
+    stays out: nothing asked, nothing paired."""
+    to = _meet_other(recs)
+    allrows = _follow_series(recs, to) if to else []
+    rows = [r for r in allrows if r["p_self"] is not None][-RUNG8_LOOKS:]
+
+    def brier(rs, key):
+        return round(sum((r["o"] - float(r[key])) ** 2 for r in rs) / len(rs), 4) if rs else None
+    n0, k0 = _follow_carry(recs, to)
+    n, k = len(allrows) + n0, sum(r["o"] for r in allrows) + k0
+    w = allrows[-RUNG8_RECENT:]
+    return {"other": to, "follow_ups": n, "checks": len(rows),
+            "brier_self": brier(rows, "p_self"), "brier_rate": brier(rows, "rate"),
+            "base_rate": round((k + 0.5) / (n + 1.0), 4) if to else None,
+            "recent_rate": round((sum(r["o"] for r in w) + 0.5) / (len(w) + 1.0), 4) if to else None}
+
+
+def _reply_check_stats(recs: list[dict]) -> dict:
+    """#333 part 3f: the old wiring's rung 8 numbers, read as history (status
+    shows _rung8_stats). For the operator (#217, #254): rung 8 at the current other -- the pushes
     that asked the model, those whose reply check came (`checked`), those the
     model answered in time (`paired`), the pair rate per checked ask; over
     the reply checks rung 8 reads, the Brier error of self's own p_self, of
@@ -5042,6 +5276,14 @@ def _keep(recs: list, ix: _Index | None = None) -> set:
          max(2 * NUDGE_CURIO_WINDOW, RUNG13_LOOKS), key=eid)   # #333: the aims' tilt (3b) and first reach (3c)
     tail(lambda r: reach(r) and r.get("follow") and r.get("answer") in ("changed", "unchanged")
          and not r.get("audit") and not r.get("audit5"), RUNG6_LOOKS, key=eid)   # #333 part 3e: meet's window
+    # #333 part 3f: expect's follow-ups (p_self's fit and recent rate; the archived ones are carried),
+    # the turns' timed nudges with their checks and follow-ups, each thing's last nudge (a follow-up's
+    # gap, the turn's bandit) and the look that last saw it change (the age)
+    tail(lambda r: _follow_ok(r, r.get("eid")), RUNG8_FIT + RUNG8_RECENT, key=eid)
+    tail(lambda r: r.get("kind") == "nudge", 1, key=eid)
+    tail(lambda r: r.get("kind") == "nudge" and r.get("pick") is not None, 1, key=eid)
+    tail(lambda r: reach(r) and r.get("answer") == "changed" and not r.get("nudged"), 1, key=eid)
+    _keep_turns7(R, lo, N, K)
     # change itself: its window and the dreams' pending proposals, with their checks
     tail(kind("change"), 2 * CHANGE_WINDOW)
     props = {float(R[i].get("ts") or 0) for i in K if R[i].get("kind") == "change"}
@@ -5057,7 +5299,7 @@ def _keep(recs: list, ix: _Index | None = None) -> set:
 
 def _keep_turns(R, lo, N, K) -> None:
     """Rung 7's rows (push + its check) per other, medium and clock: the last
-    RUNG7_PUSHES + TURN_MEMORY; speak's rows per other: the last SPEAK_PUSHES,
+    RUNG7_NUDGES + TURN_MEMORY; speak's rows per other: the last SPEAK_PUSHES,
     and the turn rows its timing reads (TURN_MEMORY before its window)."""
     turns: dict = {}
     pend = None
@@ -5072,7 +5314,7 @@ def _keep_turns(R, lo, N, K) -> None:
                 turns.setdefault((p.get("to"), _medium(p), _clock_of(p)), []).append((pend, i))
             pend = None
     for rows in turns.values():
-        for a, b in rows[-(RUNG7_PUSHES + TURN_MEMORY):]:
+        for a, b in rows[-(RUNG7_NUDGES + TURN_MEMORY):]:
             K.update((a, b))
     speak: dict = {}
     pend = None
@@ -5097,6 +5339,32 @@ def _keep_turns(R, lo, N, K) -> None:
         if j is not None:
             for a, b in trows[max(0, j - TURN_MEMORY):]:
                 K.update((a, b))
+
+
+def _keep_turns7(R, lo, N, K) -> None:
+    """#333 part 3f: rung 7's rows per thing (a timed nudge, its check, its
+    follow-up -- _turn_nudges): the last RUNG7_NUDGES + TURN_MEMORY."""
+    rows: dict = {}
+    pend: dict = {}
+    for i in range(lo, N):
+        r = R[i]
+        e, k = r.get("eid"), r.get("kind")
+        if k == "nudge":
+            pend[e] = [i] if (r.get("pick") is not None and r.get("dwell")) else None
+        elif k == "reach" and pend.get(e) is not None:
+            ok = r.get("answer") in ("changed", "unchanged") and not r.get("audit")
+            p = pend[e]
+            if r.get("nudged") and len(p) == 1:
+                pend[e] = p + [i] if ok else None
+            elif r.get("follow") and len(p) == 2:
+                if ok and not r.get("audit5"):
+                    rows.setdefault(e, []).append(p + [i])
+                pend[e] = None
+            else:
+                pend[e] = None
+    for rs in rows.values():
+        for x in rs[-(RUNG7_NUDGES + TURN_MEMORY):]:
+            K.update(x)
 
 
 def _keep_rung8(R, lo, N, K) -> None:
@@ -5261,7 +5529,8 @@ def _lean(ix: _Index, K: set) -> None:
 
 def _tally(recs: list, idxs, ix: _Index) -> dict:
     """The counts the readers read over a whole record, over these lines."""
-    out: dict = {"cycle": 0, "push": 0, "change": 0, "change_check": 0, "to": {}, "r8": {}, "fixed": {}}
+    out: dict = {"cycle": 0, "push": 0, "change": 0, "change_check": 0, "to": {}, "r8": {}, "fixed": {},
+                 "follow": {}, "turn7": {}}
     for i in idxs:
         r = recs[i]
         k = r.get("kind")
@@ -5295,6 +5564,13 @@ def _tally(recs: list, idxs, ix: _Index) -> dict:
                 c = out["fixed"].setdefault(str(r.get("eid")), [0, 0])
                 c[0] += 1
                 c[1] += int(r["answer"] == "changed")
+            if _follow_ok(r, r.get("eid")):                 # #333 part 3f: expect's running rate
+                c = out["follow"].setdefault(str(r.get("eid")), [0, 0])
+                c[0] += 1
+                c[1] += int(r["answer"] == "changed")
+        elif k == "nudge" and r.get("pick") is not None:   # #333 part 3f: the timed nudges
+            e = str(r.get("eid"))
+            out["turn7"][e] = out["turn7"].get(e, 0) + 1
     return out
 
 

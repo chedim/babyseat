@@ -43,7 +43,6 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SH  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS  # noqa: E402
-from tests._self_cap import OLD_BUILT_AT, start_rebuilt, stop_rebuilt  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 UI = ROOT / "membrane" / "ui"
@@ -56,19 +55,6 @@ FIX191 = dt.datetime(2026, 10, 16, 21, 43, 37, tzinfo=dt.timezone.utc).timestamp
 OP = MEMBRANE_NS + "Component:chat:in:operator"
 ALICE = MEMBRANE_NS + "Component:chat:in:alice"
 
-
-_REBUILT: list = []
-
-
-def setUpModule():
-    """#333: the sheet is tested on the whole tree -- meet, turns, expect and
-    mirror built as their rebuild on the nudge (part 3) will build them, the
-    lived seat's passes of theirs on ladder 3."""
-    _REBUILT[:] = start_rebuilt()
-
-
-def tearDownModule():
-    stop_rebuilt(_REBUILT)
 
 
 def _seat():
@@ -134,14 +120,20 @@ def _sheet(srv, now):
 # 2026-10-16 13:00Z, before rung 1's test merged (13:07Z): where a test reads
 # only the downtime or a bug window, it runs with this (the walls are
 # test_growth_walls_305's)
-BUILT_FROM_BIRTH = {i: {**m, "merged": 0.0} for i, m in {**SH.BUILT_AT, **OLD_BUILT_AT}.items()}   # #333: the whole tree
+BUILT_FROM_BIRTH = {i: {**m, "merged": 0.0} for i, m in SH.BUILT_AT.items()}   # #333: the whole tree
 
 
 def _lived8(srv):
     """#258: the lived seat one rung on -- it passed the new rung 7 (take
     turns) before its pairs, and may grow to 8: rung 8 reads the pairs."""
     _lived(srv)
+    _put(srv, {"ts": T0 + 9.6 * H, "kind": "rung", "rung": 6, "skill": 0.5, "eid": ALICE, "ladder": SL.LADDER_V})
     _put(srv, {"ts": T0 + 9.7 * H, "kind": "rung", "rung": 7, "skill": 0.1, "eid": ALICE, "ladder": SL.LADDER_V})
+    t = T0 + 9.85 * H                         # #333 part 3f: rung 8 reads the follow-ups at meet's other (alice)
+    for i in range(20):
+        _put(srv, {"ts": t + i * 60, "kind": "reach", "eid": ALICE, "p": 0.5, "nudged": 0, "follow": True,
+                   "answer": "changed" if i % 2 else "unchanged",
+                   "p_self": 0.9 if i % 2 == 0 else 0.1})          # self bets wrong every time
     SL._RT.pop(id(srv), None)
     SL.bind(srv)
     srv.efield = types.SimpleNamespace(current=lambda: [1.0, 0.0])
@@ -269,8 +261,8 @@ class TestGrowth(unittest.TestCase):
         self.assertEqual(floors[4], SL.RUNG4_TIMED)
         self.assertEqual(floors[5], SL.RUNG5_LOOKS)
         self.assertEqual(floors[6], SL.RUNG6_LOOKS * (2 + SL.FOLLOW_S / SL.PACE_S))   # #333 3e: nudge, check, follow-up
-        self.assertEqual(floors[7], SL.RUNG7_PUSHES * SL.TOY_MEET_EVERY / SL.PACE_S)  # #258: take turns (#278: with the ball)
-        self.assertEqual(floors[8], SL.RUNG8_LOOKS * SL.TOY_MEET_EVERY / SL.PACE_S)   # understand an other, moved up
+        self.assertEqual(floors[7], SL.RUNG7_NUDGES * (2 + SL.FOLLOW_S / SL.PACE_S))  # #333 3f: timed nudge, check, follow-up
+        self.assertEqual(floors[8], SL.RUNG8_LOOKS * (2 + SL.FOLLOW_S / SL.PACE_S))   # ...a predicted follow-up each
         self.assertEqual(floors[13], 2 * SL.RUNG13_LOOKS)              # #333 part 3c: a nudge, then its check
         self.assertEqual(set(floors), set(SL.PROGRESS))             # every built rung has one
 
@@ -348,11 +340,11 @@ class TestQuest(unittest.TestCase):
         self.assertEqual(q["rung"], 7)
         self.assertEqual(q["name"], "time its turn")                # #300
         c = {x["key"]: x for x in q["criteria"]}
-        self.assertEqual(list(c), ["pushes", "contingency", "payoff"])
-        self.assertEqual(c["pushes"]["text"], f"0/{SL.RUNG7_PUSHES} timed lines with a reply check")
-        self.assertRegex(c["contingency"]["text"], r"^lines in its window – vs chance – \(z 0\.0 → 3\.0, \+0\.10\)$")
-        self.assertRegex(c["payoff"]["text"], r"^replies gained over timing-blind – \(t 0\.0 → 4\.0, \+0\.05\)$")
-        self.assertEqual(q["waiting_on"], "pushes")
+        self.assertEqual(list(c), ["nudges", "contingency", "payoff"])                 # #333 part 3f
+        self.assertEqual(c["nudges"]["text"], f"0/{SL.RUNG7_NUDGES} timed nudges at its other, followed up")
+        self.assertRegex(c["contingency"]["text"], r"^nudges in its window – vs chance – \(z 0\.0 → 3\.0, \+0\.10\)$")
+        self.assertRegex(c["payoff"]["text"], r"^replies gained over timing-blind – \(t 0\.0 → 5\.0, \+0\.05\)$")
+        self.assertEqual(q["waiting_on"], "nudges")
 
     def test_rung_8_staged_with_its_counts_and_skill(self):
         # the old rung 7 test, one rung up (#258)
@@ -364,11 +356,11 @@ class TestQuest(unittest.TestCase):
         self.assertEqual(list(c), ["looks", "skill"])
         # #254: rung 8 (rung 7 until #258) reads 100 reply checks and grades self against the running rate
         self.assertFalse(c["looks"]["met"])
-        self.assertEqual(c["looks"]["text"], f"20/{SL.RUNG8_LOOKS} reply checks")
+        self.assertEqual(c["looks"]["text"], f"20/{SL.RUNG8_LOOKS} follow-ups it predicted")   # #333 part 3f
         self.assertFalse(c["skill"]["met"])
         self.assertRegex(c["skill"]["text"], r"^skill vs running rate −\d\.\d\d → \+0\.08$")
         self.assertEqual(q["waiting_on"], "looks")
-        self.assertIn(f"20/{SL.RUNG8_LOOKS} reply checks · skill vs running rate −", q["summary"])
+        self.assertIn(f"20/{SL.RUNG8_LOOKS} follow-ups it predicted · skill vs running rate −", q["summary"])
 
     def test_asleep_before_birth(self):
         s = _sheet(_seat(), T0)
@@ -428,7 +420,7 @@ class TestToysAndOthers(unittest.TestCase):
         model = o["the seat's model"]
         self.assertEqual(model["kind"], "model")
         self.assertEqual(model["play"]["changes"], 1)
-        self.assertIsNotNone(model["rung8"]["brier_model"])         # #258: rung 8's advisor
+        self.assertNotIn("rung8", model)                            # #333 part 3f: the advisor stays out
 
     def test_the_body_set(self):
         r = self.s["relationships"]

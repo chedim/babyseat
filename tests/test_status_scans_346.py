@@ -31,7 +31,6 @@ sys.path.insert(0, str(ROOT))
 from membrane import self_loop as SL  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
 from membrane.entities import MEMBRANE_NS  # noqa: E402
-from tests._self_cap import rebuilt  # noqa: E402
 
 C = MEMBRANE_NS + "Component:"
 ALICE = C + "chat:in:alice"
@@ -295,10 +294,10 @@ def _pins(tree):
 PINNED_PATH = Path(__file__).with_name("data") / "status_scans_346.json"
 
 
-@pytest.fixture(params=["built", "whole_tree"])
-def tree(request, monkeypatch):
-    if request.param == "whole_tree":
-        rebuilt(monkeypatch)
+@pytest.fixture(params=["built"])
+def tree(request):
+    """#333: the tree as built (the whole tree since part 3f rebuilt the last of meet,
+    turns, expect and mirror; the `rebuilt()` stand-in retired)."""
     return request.param
 
 
@@ -433,10 +432,8 @@ def test_the_advisors_calibration_reads_a_bounded_window_per_check():
 if __name__ == "__main__":                       # regenerate the pins (from the OLD code only)
     import pytest as _pt
     out = {}
-    for t in ("built", "whole_tree"):
+    for t in ("built",):
         mp = _pt.MonkeyPatch()
-        if t == "whole_tree":
-            rebuilt(mp)
         out[t] = _pins(t)
         mp.undo()
     PINNED_PATH.parent.mkdir(exist_ok=True)

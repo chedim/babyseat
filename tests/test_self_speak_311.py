@@ -395,12 +395,3 @@ def test_status_and_the_sheet_show_speak(monkeypatch):
 def _seed_turns(monkeypatch):
     """The toy medium stays on (the seat's default): speak's opening is what moves the turns to chat."""
 
-
-@pytest.fixture(autouse=True)
-def _rebuilt_333(monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the scoring and the readers tested here run on the
-    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
-    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
-    from tests._self_cap import rebuilt
-    rebuilt(monkeypatch)

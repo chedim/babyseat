@@ -134,6 +134,10 @@ BUILT_AT = {
     "nudge": {"pr": 475, "merged": _utc(2026, 10, 23, 4, 43, 2)},
     # recognize itself (#333 part 3d), rebuilt on looks at the mirror -- the PR's opening time until its merge's is set
     "mirror": {"pr": 477, "merged": _utc(2026, 10, 23, 7, 7, 50)},
+    # time its turn and expect a reply (#333 part 3f), rebuilt on meet's other -- the PR's opening time until
+    # its merge's is set
+    "turns": {"pr": 481, "merged": _utc(2026, 10, 23, 9, 0, 44)},
+    "expect": {"pr": 481, "merged": _utc(2026, 10, 23, 9, 0, 44)},
 }
 RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop wrote a line every PACE_S (#343: faster now)
 WALL_WHY = "no built skill to learn: {next} not built yet"
@@ -177,8 +181,9 @@ def fastest_cycles() -> dict:
     (a rung bound by counts can pass faster at today's pace)."""
     r2 = SL.RUNG2_REACHES + SL.AUDIT_REACHES
     return {1: SL.RUNG1_CYCLES, 2: r2, 3: SL.RUNG3_WINDOW - r2, 4: SL.RUNG4_TIMED,
-            5: SL.RUNG5_LOOKS, 6: SL.RUNG6_LOOKS * (2 + _cycles(SL.FOLLOW_S)), 7: SL.RUNG7_PUSHES * _cycles(_turn_every()),
-            8: SL.RUNG8_LOOKS * _cycles(_turn_every()),
+            5: SL.RUNG5_LOOKS, 6: SL.RUNG6_LOOKS * (2 + _cycles(SL.FOLLOW_S)),
+            7: SL.RUNG7_NUDGES * (2 + _cycles(SL.FOLLOW_S)),   # #333 part 3f: a timed nudge, its check, its follow-up
+            8: SL.RUNG8_LOOKS * (2 + _cycles(SL.FOLLOW_S)),    # ...and a predicted follow-up after each check
             9: _cycles(SL.MIRROR_LAG) + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS,   # #312: the stranger's lag, the fit, the looks
             10: SL.CHANGE_WINDOW * _cycles(SL.CHANGE_EVERY),                       # #320: a day of dreams
             11: SL.SPEAK_PUSHES * _cycles(SL.MEET_EVERY),   # #311: speak is in chat
@@ -188,12 +193,6 @@ def fastest_cycles() -> dict:
 def _cycles(s: float) -> int:
     """#343: a gap in seconds as cycles at the old pace (PACE_S)."""
     return int(round(s / SL.PACE_S))
-
-
-def _turn_every() -> float:
-    """Seconds between self's turns from rung 7 on: the ball's clock (#278), the
-    turns' last medium (#333: the turns went with meet and roll)."""
-    return SL.TOY_MEET_EVERY
 
 
 def _dur(s: float) -> str:
@@ -209,8 +208,9 @@ def _needs() -> dict:
             5: f"{SL.RUNG5_LOOKS} looks with noticing on, both audit shifts caught",
             6: (f"{SL.RUNG6_LOOKS} reply looks at one thing ({_dur(SL.FOLLOW_S)} after a nudge's check) that "
                 f"beat its tempo, the changes not its own (at least {SL.RUNG13_AUDIT_MIN})"),   # #333 part 3e
-            7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {_dur(_turn_every())} apart",
-            8: f"{SL.RUNG8_LOOKS} reply checks, one per line",
+            7: (f"{SL.RUNG7_NUDGES} timed nudges at the other meet found, each followed up "
+                f"{_dur(SL.FOLLOW_S)} after its check"),                                   # #333 part 3f
+            8: f"{SL.RUNG8_LOOKS} follow-ups at the other meet found, each predicted before it looks",
             9: f"{SL.MIRROR_LOOKS} looks at the mirror and the stranger, after the stranger's "
                f"{_dur(SL.MIRROR_LAG)} lag and {SL.MIRROR_MIN_FIT} to learn from",
             10: (f"{SL.CHANGE_WINDOW} dreams, {_dur(SL.CHANGE_EVERY)} apart, each replaying its last "
@@ -758,17 +758,15 @@ def _quest(recs: list, st: dict, progs: dict) -> dict:
 def _criteria(aim: int, recs: list, progs: dict) -> list:
     """An achievement's test (by its rung number) as staged criteria, each in words."""
     p = progs[aim]
-    ball = SL._cur_medium(recs, SL._other(recs)) == "toy"      # #264: rung 7 takes turns with the ball
-    ck = SL._clock(int(p.get("clock") or 1)) if aim == 7 else SL._clock(1)   # #278: the bar of the turns' clock
+    ck = SL._clock(1)                                          # #333 part 3f: one bar (the ball's, #278)
     count = {1: {"pushes": (SL.RUNG1_CYCLES, "pushed cycles")},
              2: {"reaches": (SL.RUNG2_REACHES, "answered looks at one thing")},
              3: {"looks": (SL.RUNG3_LOOKS, "steered looks")},
              4: {"timed": (SL.RUNG4_TIMED, "timed looks")},
              5: {"looks": (SL.RUNG5_LOOKS, "looks with noticing on")},
              6: {"looks": (SL.RUNG6_LOOKS, "reply looks at one thing")},
-             7: {"pushes": (SL.RUNG7_PUSHES, "turns with the ball with a reply check (you roll it back)" if ball
-                            else "timed lines with a reply check")},
-             8: {"looks": (SL.RUNG8_LOOKS, "reply checks")},
+             7: {"nudges": (SL.RUNG7_NUDGES, "timed nudges at its other, followed up")},   # #333 part 3f
+             8: {"looks": (SL.RUNG8_LOOKS, "follow-ups it predicted")},
              9: {"looks": (SL.MIRROR_LOOKS, "looks at the mirror and the stranger")},
              10: {"dreams": (SL.CHANGE_WINDOW, "dreams: a setting's neighbour scored on its own record")},
              11: {"pushes": (SL.SPEAK_PUSHES, "timed lines with a reply check")},
@@ -814,7 +812,7 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
             text = f"timed looks find news ({round(100 * frac)}% of the way)"
         elif key == "contingency":
             sh, ch = p.get("share"), p.get("chance")
-            text = (f"{'turns' if ball else 'lines'} in its window {'–' if sh is None else f'{sh:.2f}'} vs chance "
+            text = (f"nudges in its window {'–' if sh is None else f'{sh:.2f}'} vs chance "
                     f"{'–' if ch is None else f'{ch:.2f}'} (z {float(p.get('z') or 0):.1f} → {ck['cont_z']:.1f}, "
                     f"+{ck['cont_margin']:.2f})")
         elif key == "self" and aim == 9:              # #312: the glass, by its own moves
@@ -990,13 +988,7 @@ def _relationships(recs: list, tempo: dict, st: dict) -> dict:
         rs = plays.get(b, [])
         row["play"] = {"changes": changes.get(b, 0), "looks": len(rs), "brier": _r(_brier(rs), 4),
                        "toys": sorted(toys.get(b, set()))}
-    r8 = st.get("rung8") or {}
-    if r8.get("asked") or model_name in rows:
-        row = rows.setdefault(model_name, {"who": model_name, "kind": "model", "current": False,
-                                           "chat": None, "play": None})
-        row["rung8"] = {"asked": r8.get("asked"), "pairs": r8.get("paired"),
-                        "brier_model": r8.get("brier_model"), "brier_self": r8.get("brier_self"),
-                        "weight": r8.get("advisor_weight"), "model": r8.get("advisor_model")}
+    # #333 part 3f: expect a reply's advisor stays out -- the model has no rung 8 numbers to show
     others = sorted(rows.values(), key=lambda x: (not x["current"], x["kind"] == "model",
                                                   -((x.get("chat") or {}).get("looks") or 0), x["who"]))
     return {"others": others,

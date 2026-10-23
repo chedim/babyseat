@@ -24,19 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import test_self_sheet_249 as S  # noqa: E402  (its fixtures: a seat that lived through the bugs)
 from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SH  # noqa: E402
-from _self_cap import start_rebuilt, stop_rebuilt  # noqa: E402
-
-_REBUILT: list = []
-
-
-def setUpModule():
-    """#333: meet, turns, expect and mirror built as their rebuild (part 3) will
-    build them; the passes of rungs 6-9 here are on ladder 3."""
-    _REBUILT[:] = start_rebuilt()
-
-
-def tearDownModule():
-    stop_rebuilt(_REBUILT)
 
 H, T0 = S.H, S.T0
 NOW = T0 + 12 * H

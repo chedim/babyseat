@@ -126,10 +126,12 @@ def test_rung6_no_longer_reads_pushes_to_a_named_other():
 
 
 def test_rung8_reads_only_the_current_others_pairs():   # rung 7 until #258
+    # #333 part 3f: the old wiring's rung 8, as history (the rebuilt one reads meet's follow-ups)
     old = _push(OP_IN, 1) + _looks(OP_IN, SL.RUNG8_LOOKS)
-    assert SL._rung8(old)["passed"] is True
+    assert SL._reply_check_score(old)["passed"] is True
+    assert SL._rung8(old)["passed"] is False
     now = old + _push(ROOM_IN, 1, base=100.0)
-    out = SL._rung8(now)
+    out = SL._reply_check_score(now)
     assert out["crit"]["looks"] == 0.0 and out["passed"] is False
 
 

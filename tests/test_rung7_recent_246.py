@@ -170,9 +170,9 @@ def test_the_recent_rate_uses_the_last_few_checks_with_a_prior(outcomes, rate):
 
 def test_status_exposes_recent_rate():
     srv = _seat()
-    assert "recent_rate" in SL.status(srv)["rung8"]
+    assert "recent_rate" in SL._reply_check_stats(SL._read(srv))
     _history(srv, [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0])
-    r7 = SL.status(srv)["rung8"]
+    r7 = SL._reply_check_stats(SL._read(srv))
     assert r7["recent_rate"] == pytest.approx(0.5 / 7, abs=1e-3)
     assert r7["base_rate"] == pytest.approx(6.5 / 13, abs=1e-3)
 
@@ -194,7 +194,7 @@ def _replay(model):
                          "answer": "changed" if o else "unchanged", "replied": bool(o), "p_llm": p})
         out.append((o, p))
         t += 300
-    return out, SL._rung8(SL._read(srv))
+    return out, SL._reply_check_score(SL._read(srv))
 
 
 def _all_time(prompt):

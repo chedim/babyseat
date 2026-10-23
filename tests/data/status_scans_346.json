@@ -112,8 +112,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -228,13 +228,13 @@
 "id": "turns",
 "name": "time its turn",
 "rung": 7,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "expect",
 "name": "expect a reply",
 "rung": 8,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "mirror",
@@ -286,25 +286,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -313,29 +313,23 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 0,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
 "base_rate": null,
-"brier_mix": null,
-"brier_model": null,
 "brier_rate": null,
 "brier_self": null,
-"checked": 0,
 "checks": 0,
-"pair_rate": null,
-"paired": 0,
+"follow_ups": 0,
+"other": null,
 "recent_rate": null
 },
 "rung_name": "sleep and wake",
@@ -481,8 +475,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -597,13 +591,13 @@
 "id": "turns",
 "name": "time its turn",
 "rung": 7,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "expect",
 "name": "expect a reply",
 "rung": 8,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "mirror",
@@ -655,25 +649,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -682,29 +676,23 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 0,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
 "base_rate": null,
-"brier_mix": null,
-"brier_model": null,
 "brier_rate": null,
 "brier_self": null,
-"checked": 0,
 "checks": 0,
-"pair_rate": null,
-"paired": 0,
+"follow_ups": 0,
+"other": null,
 "recent_rate": null
 },
 "rung_name": "sleep and wake",
@@ -872,8 +860,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -886,12 +874,11 @@
 },
 "8": {
 "crit": {
-"looks": 0.14,
+"looks": 0.0,
 "skill": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
-"skill": -0.5375
+"skill": 0.0
 },
 "9": {
 "crit": {
@@ -1055,7 +1042,7 @@
 "o": 0.0,
 "p": 0.3383,
 "p_llm": 0.531,
-"p_self": 0.3045,
+"p_self": 0.3051,
 "rate": 0.3,
 "rec_cal": [
 -0.8746,
@@ -1074,9 +1061,9 @@
 "gap": 468.7845607579886,
 "model": "m-b",
 "o": 0.0,
-"p": 0.2414,
+"p": 0.24460000000000004,
 "p_llm": 0.933,
-"p_self": 0.2414,
+"p_self": 0.2446,
 "rate": 0.25,
 "rec_cal": null,
 "rec_p": null,
@@ -1112,7 +1099,7 @@
 "o": 1.0,
 "p": 0.2335,
 "p_llm": 0.395,
-"p_self": 0.1699,
+"p_self": 0.1721,
 "rate": 0.1875,
 "rec_cal": [
 -0.8711,
@@ -1167,9 +1154,9 @@
 "gap": null,
 "model": null,
 "o": 1.0,
-"p": 0.22610000000000002,
+"p": 0.22519999999999998,
 "p_llm": 0.673,
-"p_self": 0.2261,
+"p_self": 0.2252,
 "rate": 0.22727272727272727,
 "rec_cal": null,
 "rec_p": null,
@@ -1185,9 +1172,9 @@
 "gap": 2532.8925709724426,
 "model": null,
 "o": 0.0,
-"p": 0.2561,
+"p": 0.2557,
 "p_llm": 0.568,
-"p_self": 0.2561,
+"p_self": 0.2557,
 "rate": 0.2916666666666667,
 "rec_cal": null,
 "rec_p": null,
@@ -1409,9 +1396,9 @@
 "gap": 212.14107394218445,
 "model": null,
 "o": 1.0,
-"p": 0.5725472054435025,
+"p": 0.582094735876638,
 "p_llm": 0.812,
-"p_self": 0.5633,
+"p_self": 0.5729,
 "rate": 0.55,
 "rec_cal": null,
 "rec_p": null,
@@ -1584,13 +1571,13 @@
 "id": "turns",
 "name": "time its turn",
 "rung": 7,
-"state": "unbuilt"
+"state": "passed"
 },
 {
 "id": "expect",
 "name": "expect a reply",
 "rung": 8,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "mirror",
@@ -1652,25 +1639,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -1679,30 +1666,24 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 26,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 26,
-"base_rate": 0.2333,
-"brier_mix": 0.3315,
-"brier_model": 0.2885,
-"brier_rate": 0.2156,
-"brier_self": 0.3116,
-"checked": 21,
-"checks": 14,
-"pair_rate": 0.0952,
-"paired": 2,
-"recent_rate": 0.2143
+"base_rate": null,
+"brier_rate": null,
+"brier_self": null,
+"checks": 0,
+"follow_ups": 0,
+"other": null,
+"recent_rate": null
 },
 "rung_name": "speak",
 "skill": 1.0,
@@ -1893,13 +1874,13 @@
 "id": "turns",
 "name": "time its turn",
 "rung": 7,
-"state": "unbuilt"
+"state": "passed"
 },
 {
 "id": "expect",
 "name": "expect a reply",
 "rung": 8,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "mirror",
@@ -1961,25 +1942,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -1988,30 +1969,24 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 26,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 26,
-"base_rate": 0.2333,
-"brier_mix": 0.3315,
-"brier_model": 0.2885,
-"brier_rate": 0.2156,
-"brier_self": 0.3116,
-"checked": 21,
-"checks": 14,
-"pair_rate": 0.0952,
-"paired": 2,
-"recent_rate": 0.2143
+"base_rate": null,
+"brier_rate": null,
+"brier_self": null,
+"checks": 0,
+"follow_ups": 0,
+"other": null,
+"recent_rate": null
 },
 "rung_name": "speak",
 "skill": 0.0,
@@ -2214,8 +2189,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -2228,12 +2203,11 @@
 },
 "8": {
 "crit": {
-"looks": 0.25,
+"looks": 0.0,
 "skill": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
-"skill": -0.2617
+"skill": 0.0
 },
 "9": {
 "crit": {
@@ -2392,9 +2366,9 @@
 "gap": 292.975765704054,
 "model": null,
 "o": 0.0,
-"p": 0.228,
+"p": 0.2322,
 "p_llm": null,
-"p_self": 0.228,
+"p_self": 0.2322,
 "rate": 0.28125,
 "rec_cal": null,
 "rec_p": null,
@@ -2449,9 +2423,9 @@
 "gap": 292.975765704054,
 "model": "m-a",
 "o": 1.0,
-"p": 0.15989999999999996,
+"p": 0.16439999999999996,
 "p_llm": 0.222,
-"p_self": 0.1599,
+"p_self": 0.1644,
 "rate": 0.23684210526315788,
 "rec_cal": null,
 "rec_p": null,
@@ -2467,9 +2441,9 @@
 "gap": 292.975765704054,
 "model": "m-a",
 "o": 1.0,
-"p": 0.2618,
+"p": 0.26610000000000006,
 "p_llm": 0.032,
-"p_self": 0.2618,
+"p_self": 0.2661,
 "rate": 0.275,
 "rec_cal": null,
 "rec_p": null,
@@ -2506,9 +2480,9 @@
 "gap": null,
 "model": null,
 "o": 0.0,
-"p": 0.2585,
+"p": 0.2586,
 "p_llm": null,
-"p_self": 0.2585,
+"p_self": 0.2586,
 "rate": 0.29545454545454547,
 "rec_cal": null,
 "rec_p": null,
@@ -2524,9 +2498,9 @@
 "gap": null,
 "model": "m-a",
 "o": 0.0,
-"p": 0.23829999999999998,
+"p": 0.23839999999999997,
 "p_llm": 0.286,
-"p_self": 0.2383,
+"p_self": 0.2384,
 "rate": 0.2826086956521739,
 "rec_cal": null,
 "rec_p": null,
@@ -2544,7 +2518,7 @@
 "o": 1.0,
 "p": 0.943,
 "p_llm": 0.743,
-"p_self": 0.2209,
+"p_self": 0.2205,
 "rate": 0.2708333333333333,
 "rec_cal": [
 -0.4665,
@@ -2565,7 +2539,7 @@
 "o": 1.0,
 "p": 0.911,
 "p_llm": 0.797,
-"p_self": 0.3158,
+"p_self": 0.3124,
 "rate": 0.3,
 "rec_cal": [
 -0.689,
@@ -2584,9 +2558,9 @@
 "gap": 507.949947044311,
 "model": "m-a",
 "o": 0.0,
-"p": 0.3806,
+"p": 0.3744,
 "p_llm": 0.409,
-"p_self": 0.3806,
+"p_self": 0.3744,
 "rate": 0.3269230769230769,
 "rec_cal": null,
 "rec_p": null,
@@ -2638,9 +2612,9 @@
 "gap": 60.86327777390642,
 "model": null,
 "o": 0.0,
-"p": 0.3685,
+"p": 0.3583,
 "p_llm": null,
-"p_self": 0.3685,
+"p_self": 0.3583,
 "rate": 0.3275862068965517,
 "rec_cal": null,
 "rec_p": null,
@@ -2674,9 +2648,9 @@
 "gap": 2689.6673650741577,
 "model": null,
 "o": 1.0,
-"p": 0.3601,
+"p": 0.3609,
 "p_llm": null,
-"p_self": 0.3601,
+"p_self": 0.3609,
 "rate": 0.3387096774193548,
 "rec_cal": null,
 "rec_p": null,
@@ -2712,7 +2686,7 @@
 "o": 0.0,
 "p": 0.9174,
 "p_llm": 0.383,
-"p_self": 0.3776,
+"p_self": 0.3675,
 "rate": 0.3484848484848485,
 "rec_cal": [
 -0.2141,
@@ -2752,9 +2726,9 @@
 "gap": 732.4338037967682,
 "model": "m-b",
 "o": 0.0,
-"p": 0.31420000000000003,
+"p": 0.3138,
 "p_llm": 0.916,
-"p_self": 0.3142,
+"p_self": 0.3138,
 "rate": 0.32857142857142857,
 "rec_cal": null,
 "rec_p": null,
@@ -2826,9 +2800,9 @@
 "gap": 96.16355752944946,
 "model": null,
 "o": 0.0,
-"p": 0.3098,
+"p": 0.3015,
 "p_llm": null,
-"p_self": 0.3098,
+"p_self": 0.3015,
 "rate": 0.2777777777777778,
 "rec_cal": null,
 "rec_p": null,
@@ -2844,9 +2818,9 @@
 "gap": null,
 "model": null,
 "o": 0.0,
-"p": 0.2551,
+"p": 0.2555,
 "p_llm": null,
-"p_self": 0.2551,
+"p_self": 0.2555,
 "rate": 0.25,
 "rec_cal": null,
 "rec_p": null,
@@ -2862,9 +2836,9 @@
 "gap": null,
 "model": "m-b",
 "o": 0.0,
-"p": 0.2227,
+"p": 0.22300000000000003,
 "p_llm": 0.912,
-"p_self": 0.2227,
+"p_self": 0.223,
 "rate": 0.22727272727272727,
 "rec_cal": null,
 "rec_p": null,
@@ -2880,9 +2854,9 @@
 "gap": null,
 "model": null,
 "o": 1.0,
-"p": 0.1975,
+"p": 0.1977,
 "p_llm": null,
-"p_self": 0.1975,
+"p_self": 0.1977,
 "rate": 0.20833333333333334,
 "rec_cal": null,
 "rec_p": null,
@@ -2898,9 +2872,9 @@
 "gap": 2303.8528575897217,
 "model": null,
 "o": 0.0,
-"p": 0.2724,
+"p": 0.2725,
 "p_llm": null,
-"p_self": 0.2724,
+"p_self": 0.2725,
 "rate": 0.2692307692307692,
 "rec_cal": null,
 "rec_p": null,
@@ -2934,9 +2908,9 @@
 "gap": 381.48659663615865,
 "model": null,
 "o": 0.0,
-"p": 0.2982,
+"p": 0.2918,
 "p_llm": null,
-"p_self": 0.2982,
+"p_self": 0.2918,
 "rate": 0.3,
 "rec_cal": null,
 "rec_p": null,
@@ -3092,13 +3066,13 @@
 "id": "turns",
 "name": "time its turn",
 "rung": 7,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "expect",
 "name": "expect a reply",
 "rung": 8,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "mirror",
@@ -3158,25 +3132,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -3185,30 +3159,24 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 32,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 26,
-"base_rate": 0.3108,
-"brier_mix": 0.2693,
-"brier_model": 0.3613,
-"brier_rate": 0.2134,
-"brier_self": 0.2983,
-"checked": 20,
-"checks": 25,
-"pair_rate": 0.25,
-"paired": 5,
-"recent_rate": 0.2143
+"base_rate": null,
+"brier_rate": null,
+"brier_self": null,
+"checks": 0,
+"follow_ups": 0,
+"other": null,
+"recent_rate": null
 },
 "rung_name": "speak",
 "skill": 0.0,
@@ -3414,8 +3382,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -3428,12 +3396,11 @@
 },
 "8": {
 "crit": {
-"looks": 0.28,
+"looks": 0.0,
 "skill": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
-"skill": -0.176
+"skill": 0.0
 },
 "9": {
 "crit": {
@@ -3598,9 +3565,9 @@
 "gap": null,
 "model": null,
 "o": 0.0,
-"p": 0.846,
+"p": 0.8461,
 "p_llm": null,
-"p_self": 0.846,
+"p_self": 0.8461,
 "rate": 0.8333333333333334,
 "rec_cal": null,
 "rec_p": null,
@@ -3688,9 +3655,9 @@
 "gap": 780.2250121585495,
 "model": null,
 "o": 0.0,
-"p": 0.7048,
+"p": 0.7034,
 "p_llm": null,
-"p_self": 0.7048,
+"p_self": 0.7034,
 "rate": 0.6875,
 "rec_cal": null,
 "rec_p": null,
@@ -3706,9 +3673,9 @@
 "gap": 850.5987954513195,
 "model": null,
 "o": 0.0,
-"p": 0.6156,
+"p": 0.6151,
 "p_llm": 0.541,
-"p_self": 0.6156,
+"p_self": 0.6151,
 "rate": 0.6111111111111112,
 "rec_cal": null,
 "rec_p": null,
@@ -3778,9 +3745,9 @@
 "gap": 256.08717294134726,
 "model": null,
 "o": 0.0,
-"p": 0.5725,
+"p": 0.5731,
 "p_llm": null,
-"p_self": 0.5725,
+"p_self": 0.5731,
 "rate": 0.5769230769230769,
 "rec_cal": null,
 "rec_p": null,
@@ -3796,9 +3763,9 @@
 "gap": 881.5936053592865,
 "model": "m-b",
 "o": 1.0,
-"p": 0.5097141904922512,
+"p": 0.5114134524646736,
 "p_llm": 0.945,
-"p_self": 0.5009,
+"p_self": 0.5026,
 "rate": 0.5357142857142857,
 "rec_cal": null,
 "rec_p": null,
@@ -3852,7 +3819,7 @@
 "o": 0.0,
 "p": 0.6412,
 "p_llm": 0.239,
-"p_self": 0.4645,
+"p_self": 0.4705,
 "rate": 0.5,
 "rec_cal": [
 0.0005,
@@ -3889,9 +3856,9 @@
 "gap": 780.34380986379,
 "model": null,
 "o": 0.0,
-"p": 0.3666,
+"p": 0.3694,
 "p_llm": null,
-"p_self": 0.3666,
+"p_self": 0.3694,
 "rate": 0.4473684210526316,
 "rec_cal": null,
 "rec_p": null,
@@ -3938,12 +3905,12 @@
 {
 "cal": [
 1.0764,
-0.0571
+0.0566
 ],
 "gap": 152.03274085132747,
 "model": "m-b",
 "o": 1.0,
-"p": 0.38775853041246044,
+"p": 0.38807372313671396,
 "p_llm": 0.171,
 "p_self": 0.4243,
 "rate": 0.4772727272727273,
@@ -3951,7 +3918,7 @@
 "rec_p": null,
 "rec_p_self": 0.4243,
 "ts": 1760039536.4145007,
-"w": 0.0571
+"w": 0.0566
 },
 {
 "cal": [
@@ -3963,7 +3930,7 @@
 "o": 0.0,
 "p": 0.5694,
 "p_llm": 0.16,
-"p_self": 0.5045,
+"p_self": 0.502,
 "rate": 0.5,
 "rec_cal": [
 -0.913,
@@ -4018,9 +3985,9 @@
 "gap": 434.6547316348352,
 "model": null,
 "o": 0.0,
-"p": 0.5378,
+"p": 0.5343,
 "p_llm": null,
-"p_self": 0.5378,
+"p_self": 0.5343,
 "rate": 0.5192307692307693,
 "rec_cal": null,
 "rec_p": null,
@@ -4164,9 +4131,9 @@
 "gap": 630.0127424133151,
 "model": "m-b",
 "o": 1.0,
-"p": 0.23730000000000007,
+"p": 0.24080000000000001,
 "p_llm": 0.811,
-"p_self": 0.2373,
+"p_self": 0.2408,
 "rate": 0.25,
 "rec_cal": null,
 "rec_p": null,
@@ -4221,9 +4188,9 @@
 "gap": 4789.047811746597,
 "model": null,
 "o": 0.0,
-"p": 0.2709,
+"p": 0.2703,
 "p_llm": null,
-"p_self": 0.2709,
+"p_self": 0.2703,
 "rate": 0.2777777777777778,
 "rec_cal": null,
 "rec_p": null,
@@ -4389,13 +4356,13 @@
 "id": "turns",
 "name": "time its turn",
 "rung": 7,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "expect",
 "name": "expect a reply",
 "rung": 8,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "mirror",
@@ -4463,25 +4430,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -4490,30 +4457,24 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 71,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": "m-a",
-"advisor_weight": 0.1135,
-"asked": 63,
-"base_rate": 0.5,
-"brier_mix": 0.3294,
-"brier_model": 0.2702,
-"brier_rate": 0.2801,
-"brier_self": 0.3187,
-"checked": 52,
-"checks": 28,
-"pair_rate": 0.1923,
-"paired": 10,
-"recent_rate": 0.5
+"base_rate": null,
+"brier_rate": null,
+"brier_self": null,
+"checks": 0,
+"follow_ups": 0,
+"other": null,
+"recent_rate": null
 },
 "rung_name": "tell things apart",
 "skill": 1.0,
@@ -4623,7 +4584,9 @@
 },
 "open_ids": [
 "reach",
-"nudge"
+"nudge",
+"turns",
+"expect"
 ],
 "progress": {
 "1": {
@@ -4731,8 +4694,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -4745,12 +4708,11 @@
 },
 "8": {
 "crit": {
-"looks": 0.12,
+"looks": 0.0,
 "skill": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
-"skill": -0.1594
+"skill": 0.0
 },
 "9": {
 "crit": {
@@ -5152,7 +5114,7 @@
 "o": 0.0,
 "p": 0.4588,
 "p_llm": 0.05,
-"p_self": 0.4828,
+"p_self": 0.4825,
 "rate": 0.5,
 "rec_cal": [
 0.1664,
@@ -5171,9 +5133,9 @@
 "gap": 14412.119420289993,
 "model": "m-a",
 "o": 0.0,
-"p": 0.3794,
+"p": 0.3791,
 "p_llm": 0.618,
-"p_self": 0.3794,
+"p_self": 0.3791,
 "rate": 0.4166666666666667,
 "rec_cal": null,
 "rec_p": null,
@@ -5189,9 +5151,9 @@
 "gap": null,
 "model": null,
 "o": 1.0,
-"p": 0.3081,
+"p": 0.3078,
 "p_llm": null,
-"p_self": 0.3081,
+"p_self": 0.3078,
 "rate": 0.35714285714285715,
 "rec_cal": null,
 "rec_p": null,
@@ -5245,7 +5207,7 @@
 "o": 0.0,
 "p": 0.9469,
 "p_llm": 0.015,
-"p_self": 0.3027,
+"p_self": 0.3076,
 "rate": 0.35,
 "rec_cal": [
 0.4533,
@@ -5266,7 +5228,7 @@
 "o": 1.0,
 "p": 0.2651,
 "p_llm": 0.897,
-"p_self": 0.2645,
+"p_self": 0.2679,
 "rate": 0.3181818181818182,
 "rec_cal": [
 -0.1976,
@@ -5280,12 +5242,12 @@
 {
 "cal": [
 -3.3243,
-0.0089
+0.0098
 ],
 "gap": 737.4082664291627,
 "model": "m-b",
 "o": 0.0,
-"p": 0.7278562958711209,
+"p": 0.7283643798126654,
 "p_llm": 0.384,
 "p_self": 0.7228,
 "rate": 0.375,
@@ -5293,7 +5255,7 @@
 "rec_p": null,
 "rec_p_self": 0.7228,
 "ts": 1760036687.2074807,
-"w": 0.0089
+"w": 0.0098
 }
 ],
 "membrane::Component:chat:in:bob": [
@@ -5344,9047 +5306,9 @@
 "gap": 237.6957272720588,
 "model": null,
 "o": 1.0,
-"p": 0.8466,
+"p": 0.8461,
 "p_llm": null,
-"p_self": 0.8466,
-"rate": 0.8333333333333334,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760025222.6146739,
-"w": 0.0
-},
-{
-"cal": [
--1.4435,
-0.0
-],
-"gap": 3098.681381702423,
-"model": "m-b",
-"o": 0.0,
-"p": 0.8878999999999999,
-"p_llm": 0.988,
-"p_self": 0.8879,
-"rate": 0.875,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760030410.2910142,
-"w": 0.0
-},
-{
-"cal": [
-0.8657,
-0.5029
-],
-"gap": 5259.277923107147,
-"model": "m-a",
-"o": 0.0,
-"p": 0.2705,
-"p_llm": 0.514,
-"p_self": 0.7104,
-"rate": 0.7,
-"rec_cal": [
-0.8657,
-0.5029
-],
-"rec_p": 0.2705,
-"rec_p_self": null,
-"ts": 1760030583.7843676,
-"w": 0.5029
-}
-]
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t10": "other",
-"membrane::Component:w:t11": "other",
-"membrane::Component:w:t12": "other",
-"membrane::Component:w:t13": "other",
-"membrane::Component:w:t14": "other",
-"membrane::Component:w:t15": "other",
-"membrane::Component:w:t16": "other",
-"membrane::Component:w:t17": "other",
-"membrane::Component:w:t18": "other",
-"membrane::Component:w:t19": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t20": "other",
-"membrane::Component:w:t21": "other",
-"membrane::Component:w:t22": "other",
-"membrane::Component:w:t23": "other",
-"membrane::Component:w:t24": "unknown",
-"membrane::Component:w:t25": "other",
-"membrane::Component:w:t26": "other",
-"membrane::Component:w:t27": "other",
-"membrane::Component:w:t28": "other",
-"membrane::Component:w:t29": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t30": "other",
-"membrane::Component:w:t31": "other",
-"membrane::Component:w:t32": "other",
-"membrane::Component:w:t33": "other",
-"membrane::Component:w:t34": "other",
-"membrane::Component:w:t35": "other",
-"membrane::Component:w:t36": "other",
-"membrane::Component:w:t37": "other",
-"membrane::Component:w:t38": "other",
-"membrane::Component:w:t39": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other",
-"membrane::Component:w:t6": "other",
-"membrane::Component:w:t7": "other",
-"membrane::Component:w:t8": "other",
-"membrane::Component:w:t9": "other"
-},
-"status": {
-"accepted": [
-"feel",
-"kinds",
-"patience",
-"meet",
-"mirror",
-"change",
-"speak"
-],
-"aim": "reach",
-"allow": [
-"feel",
-"reach",
-"patience",
-"nudge",
-"change"
-],
-"allowed": [
-"feel",
-"reach",
-"patience",
-"nudge",
-"change"
-],
-"awaiting": [],
-"bar": 0.1333,
-"born": true,
-"change": {
-"adopted": 7,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 9,
-"last": {
-"cost_s": null,
-"from": 30,
-"gain": -0.0067296076542686725,
-"reason": null,
-"setting": "lam_looks",
-"to": 45,
-"ts": 1760032525.5027006,
-"verdict": "adopted",
-"z": 0.87794255718737
-},
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 323,
-"earned": [
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760001283.7940807
-},
-{
-"id": "meet",
-"name": "meet an other",
-"ts": 1760009765.3333535
-},
-{
-"id": "speak",
-"name": "speak",
-"ts": 1760013535.857661
-},
-{
-"id": "patience",
-"name": "patience",
-"ts": 1760013747.5487359
-},
-{
-"id": "change",
-"name": "change itself",
-"ts": 1760018379.8188655
-},
-{
-"id": "feel",
-"name": "feel itself",
-"ts": 1760025085.390342
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"ts": 1760026996.8702867
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "passed"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "current"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "passed"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "passed"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "locked"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "passed"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "unbuilt"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "unbuilt"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "passed"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "passed"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "passed"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "current"
-}
-],
-"level": 7,
-"limit": 13,
-"meets": {
-"heard_age": 9971362.092,
-"medium": "chat",
-"other": "membrane::Component:chat:in:alice",
-"push_age": 9963065.008,
-"pushes": 125
-},
-"mode": "on",
-"next": [
-"reach",
-"nudge"
-],
-"off_field": {
-"looks": 200,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760001786.4556034
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"ts": 1760020657.3605363
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760000553.816216
-}
-],
-"rung": 7,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 55,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 55,
-"base_rate": 0.3462,
-"brier_mix": 0.3193,
-"brier_model": 0.0736,
-"brier_rate": 0.2754,
-"brier_self": 0.2471,
-"checked": 45,
-"checks": 12,
-"pair_rate": 0.2,
-"paired": 9,
-"recent_rate": 0.3571
-},
-"rung_name": "tell things apart",
-"skill": -1.1546,
-"skill_measured": true,
-"skill_pass": 0.2,
-"skill_rung": 2,
-"slipping": true,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t10": "other",
-"membrane::Component:w:t11": "other",
-"membrane::Component:w:t12": "other",
-"membrane::Component:w:t13": "other",
-"membrane::Component:w:t14": "other",
-"membrane::Component:w:t15": "other",
-"membrane::Component:w:t16": "other",
-"membrane::Component:w:t17": "other",
-"membrane::Component:w:t18": "other",
-"membrane::Component:w:t19": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t20": "other",
-"membrane::Component:w:t21": "other",
-"membrane::Component:w:t22": "other",
-"membrane::Component:w:t23": "other",
-"membrane::Component:w:t25": "other",
-"membrane::Component:w:t26": "other",
-"membrane::Component:w:t27": "other",
-"membrane::Component:w:t28": "other",
-"membrane::Component:w:t29": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t30": "other",
-"membrane::Component:w:t31": "other",
-"membrane::Component:w:t32": "other",
-"membrane::Component:w:t33": "other",
-"membrane::Component:w:t34": "other",
-"membrane::Component:w:t35": "other",
-"membrane::Component:w:t36": "other",
-"membrane::Component:w:t37": "other",
-"membrane::Component:w:t38": "other",
-"membrane::Component:w:t39": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other",
-"membrane::Component:w:t6": "other",
-"membrane::Component:w:t7": "other",
-"membrane::Component:w:t8": "other",
-"membrane::Component:w:t9": "other"
-},
-"steer": {
-"err": 0.2108,
-"naive": 0.3233,
-"skill": 0.3478
-},
-"toys": [],
-"unlock": {
-"id": "mirror",
-"late": true,
-"rung": 9,
-"toys": [
-{
-"icon": "\u26bd",
-"kind": "ball"
-},
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760026645.753911
-},
-"waiting_on": "reaches",
-"world": {
-"membrane::Component:chat:in:alice": "intermittent",
-"membrane::Component:chat:in:bob": "intermittent",
-"membrane::Component:w:t0": "moving",
-"membrane::Component:w:t1": "intermittent",
-"membrane::Component:w:t10": "moving",
-"membrane::Component:w:t11": "intermittent",
-"membrane::Component:w:t12": "intermittent",
-"membrane::Component:w:t13": "intermittent",
-"membrane::Component:w:t14": "intermittent",
-"membrane::Component:w:t15": "intermittent",
-"membrane::Component:w:t16": "intermittent",
-"membrane::Component:w:t17": "still",
-"membrane::Component:w:t18": "intermittent",
-"membrane::Component:w:t19": "intermittent",
-"membrane::Component:w:t2": "intermittent",
-"membrane::Component:w:t20": "still",
-"membrane::Component:w:t21": "intermittent",
-"membrane::Component:w:t22": "still",
-"membrane::Component:w:t23": "still",
-"membrane::Component:w:t25": "intermittent",
-"membrane::Component:w:t26": "still",
-"membrane::Component:w:t27": "intermittent",
-"membrane::Component:w:t28": "still",
-"membrane::Component:w:t29": "intermittent",
-"membrane::Component:w:t3": "intermittent",
-"membrane::Component:w:t30": "intermittent",
-"membrane::Component:w:t31": "still",
-"membrane::Component:w:t32": "intermittent",
-"membrane::Component:w:t33": "intermittent",
-"membrane::Component:w:t34": "still",
-"membrane::Component:w:t35": "still",
-"membrane::Component:w:t36": "intermittent",
-"membrane::Component:w:t37": "intermittent",
-"membrane::Component:w:t38": "intermittent",
-"membrane::Component:w:t39": "intermittent",
-"membrane::Component:w:t4": "intermittent",
-"membrane::Component:w:t5": "still",
-"membrane::Component:w:t6": "intermittent",
-"membrane::Component:w:t7": "intermittent",
-"membrane::Component:w:t8": "intermittent",
-"membrane::Component:w:t9": "still"
-}
-}
-},
-"random_no_voids": {
-"earn_order": [
-"feel",
-"kinds",
-"shift",
-"meet",
-"turns",
-"expect",
-"mirror",
-"change",
-"speak"
-],
-"latest_unlock": {
-"id": "expect",
-"late": true,
-"rung": 8,
-"toys": [
-{
-"icon": "",
-"kind": "dice"
-},
-{
-"icon": "\ud83e\ude9e",
-"kind": "mirror"
-}
-],
-"ts": 1760019369.0872326
-},
-"open_ids": [
-"reach",
-"patience",
-"nudge"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 1.0,
-"skill": 0.8839444380369497
-},
-"passed": false,
-"skill": 0.442
-},
-"10": {
-"adopted": 3,
-"checked": 0,
-"crit": {
-"dreams": 0.25,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 6,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 1.0,
-"reaches": 1.0,
-"skill": 0.0
-},
-"eid": "membrane::Component:w:t3",
-"passed": false,
-"skill": -0.5857
-},
-"3": {
-"crit": {
-"focus": 1.0,
-"kinds": 0.0,
-"looks": 1.0,
-"skill": 1.0
-},
-"passed": false,
-"skill": 0.3864
-},
-"4": {
-"crit": {
-"calibration": 0.37569334222235573,
-"news": 0.5097613882863341,
-"timed": 1.0
-},
-"passed": false,
-"skill": 0.25
-},
-"5": {
-"crit": {
-"audit": 1.0,
-"looks": 1.0
-},
-"passed": true,
-"skill": 1.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.18,
-"skill": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"passed": false,
-"skill": -0.0436
-},
-"9": {
-"crit": {
-"looks": 0.1,
-"other": 1.0,
-"self": 0.0
-},
-"labels": {
-"glass": "other",
-"stranger": "other"
-},
-"passed": false,
-"skill": -1.623,
-"stranger_skill": 0.4183,
-"stranger_z": 0.63,
-"z": -3.16
-}
-},
-"rung2_stats": {
-"membrane::Component:chat:in:alice": {
-"auditable": true,
-"candidate": false,
-"p": 0.75,
-"reaches": 20,
-"skill": -0.4204
-},
-"membrane::Component:chat:in:bob": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.0548
-},
-"membrane::Component:w:t0": {
-"auditable": false,
-"candidate": false,
-"p": 0.048,
-"reaches": 20,
-"skill": -0.7781
-},
-"membrane::Component:w:t1": {
-"auditable": true,
-"candidate": true,
-"p": 0.932,
-"reaches": 20,
-"skill": 0.3864
-},
-"membrane::Component:w:t2": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.1019
-},
-"membrane::Component:w:t3": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.5857
-},
-"membrane::Component:w:t4": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.5325
-},
-"membrane::Component:w:t5": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -1.0941
-}
-},
-"series": {
-"membrane::Component:chat:in:alice": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": "m-b",
-"o": 0.0,
-"p": 0.8089,
-"p_llm": 0.962,
-"p_self": 0.8089,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.8089,
-"ts": 1760002639.593147,
-"w": 0.0
-},
-{
-"cal": [
--0.4289,
-0.4351
-],
-"gap": 2234.979280233383,
-"model": "m-a",
-"o": 1.0,
-"p": 0.3329,
-"p_llm": 0.619,
-"p_self": 0.2582,
-"rate": 0.25,
-"rec_cal": [
--0.4289,
-0.4351
-],
-"rec_p": 0.3329,
-"rec_p_self": 0.2582,
-"ts": 1760002788.7705598,
-"w": 0.4351
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 2234.979280233383,
-"model": null,
-"o": 1.0,
-"p": 0.9035,
-"p_llm": null,
-"p_self": 0.9035,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.9035,
-"ts": 1760003073.5291235,
-"w": 0.0
-},
-{
-"cal": [
-0.3514,
-0.8437
-],
-"gap": 89.54941743300189,
-"model": "m-b",
-"o": 0.0,
-"p": 0.2174,
-"p_llm": 0.248,
-"p_self": 0.4554,
-"rate": 0.625,
-"rec_cal": [
-0.3514,
-0.8437
-],
-"rec_p": 0.2174,
-"rec_p_self": 0.4554,
-"ts": 1760004383.150824,
-"w": 0.8437
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 89.54941743300189,
-"model": null,
-"o": 0.0,
-"p": 0.5821,
-"p_llm": null,
-"p_self": 0.5821,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.5821,
-"ts": 1760004992.7842038,
-"w": 0.0
-},
-{
-"cal": [
-0.4853,
-0.0
-],
-"gap": 717.2804979994688,
-"model": "m-a",
-"o": 0.0,
-"p": 0.2551,
-"p_llm": 0.243,
-"p_self": 0.2551,
-"rate": 0.4166666666666667,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.2551,
-"ts": 1760006522.4321966,
-"w": 0.0
-},
-{
-"cal": [
-1.0611,
-0.0
-],
-"gap": 303.9736594540283,
-"model": "m-b",
-"o": 1.0,
-"p": 0.37029999999999996,
-"p_llm": 0.737,
-"p_self": 0.3703,
-"rate": 0.35714285714285715,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.3703,
-"ts": 1760007012.5008109,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 303.9736594540283,
-"model": null,
-"o": 0.0,
-"p": 0.0978,
-"p_llm": null,
-"p_self": 0.0978,
-"rate": 0.4375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.0978,
-"ts": 1760007225.594869,
-"w": 0.0
-},
-{
-"cal": [
--0.3255,
-0.1539
-],
-"gap": 2911.9128913879395,
-"model": "m-a",
-"o": 0.0,
-"p": 0.5833589988964918,
-"p_llm": 0.989,
-"p_self": 0.3999,
-"rate": 0.3888888888888889,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760010964.6804707,
-"w": 0.1539
-},
-{
-"cal": [
--0.0441,
-0.5274
-],
-"gap": 1706.5069403648376,
-"model": "m-a",
-"o": 0.0,
-"p": 0.7516,
-"p_llm": 0.9,
-"p_self": 0.3142,
-"rate": 0.35,
-"rec_cal": [
--0.0441,
-0.5274
-],
-"rec_p": 0.7516,
-"rec_p_self": 0.3142,
-"ts": 1760012880.8921366,
-"w": 0.5274
-},
-{
-"cal": [
-1.5113,
-0.0
-],
-"gap": 1706.5069403648376,
-"model": "m-a",
-"o": 1.0,
-"p": 0.2997000000000001,
-"p_llm": 0.558,
-"p_self": 0.2997,
-"rate": 0.3181818181818182,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760014337.395251,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 4000.89767742157,
-"model": null,
-"o": 0.0,
-"p": 0.3441,
-"p_llm": null,
-"p_self": 0.3441,
-"rate": 0.375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760015085.5999024,
-"w": 0.0
-},
-{
-"cal": [
-1.2556,
-0.0
-],
-"gap": 2329.8601393699646,
-"model": "m-a",
-"o": 0.0,
-"p": 0.3529,
-"p_llm": 0.021,
-"p_self": 0.3529,
-"rate": 0.34615384615384615,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.3529,
-"ts": 1760017438.4886665,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 2329.8601393699646,
-"model": null,
-"o": 0.0,
-"p": 0.7586,
-"p_llm": 0.406,
-"p_self": 0.7586,
-"rate": 0.32142857142857145,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.7586,
-"ts": 1760017441.72603,
-"w": 0.0
-},
-{
-"cal": [
-0.406,
-0.0
-],
-"gap": 365.80930506755664,
-"model": "m-a",
-"o": 0.0,
-"p": 0.3126,
-"p_llm": 0.285,
-"p_self": 0.3126,
-"rate": 0.3,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.3126,
-"ts": 1760018296.6458488,
-"w": 0.0
-},
-{
-"cal": [
-0.2166,
-0.0006
-],
-"gap": 316.20475024254847,
-"model": "m-a",
-"o": 1.0,
-"p": 0.7874519952997907,
-"p_llm": 0.095,
-"p_self": 0.7877,
-"rate": 0.28125,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.7877,
-"ts": 1760018748.6094563,
-"w": 0.0006
-},
-{
-"cal": [
--0.3805,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.2823,
-"p_llm": 0.094,
-"p_self": 0.2823,
-"rate": 0.3235294117647059,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760019742.1716828,
-"w": 0.0
-},
-{
-"cal": [
-1.0509,
-0.0
-],
-"gap": 524.1886866546594,
-"model": "m-b",
-"o": 1.0,
-"p": 0.33760000000000007,
-"p_llm": 0.374,
-"p_self": 0.3376,
-"rate": 0.3611111111111111,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760020046.2001328,
-"w": 0.0
-}
-],
-"membrane::Component:chat:in:bob": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 683.3825159124409,
-"model": null,
-"o": 0.0,
-"p": 0.5,
-"p_llm": null,
-"p_self": 0.5,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760003159.5183496,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 668.785197320051,
-"model": null,
-"o": 0.0,
-"p": 0.2401,
-"p_llm": null,
-"p_self": 0.2401,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760003594.9832654,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 1304.1316258907318,
-"model": null,
-"o": 0.0,
-"p": 0.0722,
-"p_llm": null,
-"p_self": 0.0722,
-"rate": 0.16666666666666666,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.0722,
-"ts": 1760006573.3339295,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 1304.1316258907318,
-"model": null,
-"o": 1.0,
-"p": 0.1119,
-"p_llm": null,
-"p_self": 0.1119,
-"rate": 0.125,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760006977.355596,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 3190.953803062439,
-"model": null,
-"o": 1.0,
-"p": 0.2896,
-"p_llm": 0.744,
-"p_self": 0.2896,
-"rate": 0.3,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760010116.0551002,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 3190.953803062439,
-"model": null,
-"o": 1.0,
-"p": 0.4374,
-"p_llm": null,
-"p_self": 0.4374,
-"rate": 0.4166666666666667,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760010342.167769,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 3561.0887744426727,
-"model": "m-a",
-"o": 0.0,
-"p": 0.45869999999999994,
-"p_llm": 0.035,
-"p_self": 0.4587,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.4587,
-"ts": 1760012476.1794336,
-"w": 0.0
-},
-{
-"cal": [
--3.3168,
-0.0
-],
-"gap": 3561.0887744426727,
-"model": "m-a",
-"o": 0.0,
-"p": 0.44670000000000004,
-"p_llm": 0.752,
-"p_self": 0.4467,
-"rate": 0.4375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760012773.9448497,
-"w": 0.0
-},
-{
-"cal": [
-1.0669,
-0.0
-],
-"gap": 225.69438791406083,
-"model": null,
-"o": 1.0,
-"p": 0.6999,
-"p_llm": 0.969,
-"p_self": 0.6999,
-"rate": 0.3888888888888889,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6999,
-"ts": 1760017266.0098047,
-"w": 0.0
-},
-{
-"cal": [
-2.2546,
-0.0
-],
-"gap": 225.69438791406083,
-"model": null,
-"o": 0.0,
-"p": 0.5212,
-"p_llm": 0.226,
-"p_self": 0.5212,
-"rate": 0.45,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.5212,
-"ts": 1760017347.6549387,
-"w": 0.0
-},
-{
-"cal": [
--1.1037,
-0.0036
-],
-"gap": 225.69438791406083,
-"model": "m-a",
-"o": 0.0,
-"p": 0.677791429623391,
-"p_llm": 0.539,
-"p_self": 0.6768,
-"rate": 0.4090909090909091,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6768,
-"ts": 1760017481.5856733,
-"w": 0.0036
-},
-{
-"cal": [
-0.4256,
-0.2617
-],
-"gap": 608.9118058681488,
-"model": "m-a",
-"o": 0.0,
-"p": 0.7042,
-"p_llm": 0.412,
-"p_self": 0.3727,
-"rate": 0.375,
-"rec_cal": [
-0.4256,
-0.2617
-],
-"rec_p": 0.7042,
-"rec_p_self": null,
-"ts": 1760018044.3994133,
-"w": 0.2617
-},
-{
-"cal": [
-0.8454,
-0.0221
-],
-"gap": 608.9118058681488,
-"model": "m-b",
-"o": 0.0,
-"p": 0.8582,
-"p_llm": 0.502,
-"p_self": 0.3759,
-"rate": 0.34615384615384615,
-"rec_cal": [
-0.8454,
-0.0221
-],
-"rec_p": 0.8582,
-"rec_p_self": 0.3759,
-"ts": 1760018194.4923866,
-"w": 0.0221
-}
-]
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"status": {
-"accepted": [
-"feel",
-"kinds",
-"shift",
-"meet",
-"turns",
-"mirror",
-"speak"
-],
-"aim": "patience",
-"allow": [
-"feel",
-"reach",
-"patience",
-"nudge"
-],
-"allowed": [
-"feel",
-"reach",
-"patience",
-"nudge"
-],
-"awaiting": [
-"expect",
-"change"
-],
-"bar": 0.5033,
-"born": true,
-"change": {
-"adopted": 3,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 6,
-"last": {
-"cost_s": null,
-"from": 30,
-"gain": -0.008483057630345221,
-"reason": null,
-"setting": "lam_looks",
-"to": 45,
-"ts": 1760019926.1207457,
-"verdict": "adopted",
-"z": 0.32719550560346544
-},
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 246,
-"earned": [
-{
-"id": "speak",
-"name": "speak",
-"ts": 1760000314.4968572
-},
-{
-"id": "change",
-"name": "change itself",
-"ts": 1760004296.6800172
-},
-{
-"id": "feel",
-"name": "feel itself",
-"ts": 1760004374.3744953
-},
-{
-"id": "meet",
-"name": "meet an other",
-"ts": 1760004386.6373894
-},
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760005297.136693
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760006560.758733
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"ts": 1760007849.0783029
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"ts": 1760008870.2011716
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"ts": 1760011340.772509
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "passed"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "current"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "passed"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "current"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "passed"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "passed"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "unbuilt"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "unbuilt"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "passed"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "passed"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "passed"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "current"
-}
-],
-"level": 9,
-"limit": 13,
-"meets": {
-"heard_age": 9980257.828,
-"medium": "chat",
-"other": "membrane::Component:chat:in:alice",
-"push_age": 9980094.541,
-"pushes": 74
-},
-"mode": "on",
-"next": [
-"reach",
-"patience",
-"nudge"
-],
-"off_field": {
-"looks": 200,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760017352.8297112
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"ts": 1760008104.810349
-}
-],
-"rung": 9,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 27,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 27,
-"base_rate": 0.3947,
-"brier_mix": 0.2932,
-"brier_model": 0.3944,
-"brier_rate": 0.2809,
-"brier_self": 0.272,
-"checked": 23,
-"checks": 18,
-"pair_rate": 0.3043,
-"paired": 7,
-"recent_rate": 0.5
-},
-"rung_name": "tell things apart",
-"skill": 0.25,
-"skill_measured": true,
-"skill_pass": null,
-"skill_rung": 4,
-"slipping": true,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"steer": {
-"err": 0.1948,
-"naive": 0.3401,
-"skill": 0.4273
-},
-"toys": [],
-"unlock": {
-"id": "expect",
-"late": true,
-"rung": 8,
-"toys": [
-{
-"icon": "",
-"kind": "dice"
-},
-{
-"icon": "\ud83e\ude9e",
-"kind": "mirror"
-}
-],
-"ts": 1760019369.0872326
-},
-"waiting_on": "news",
-"world": {
-"membrane::Component:chat:in:alice": "intermittent",
-"membrane::Component:chat:in:bob": "intermittent",
-"membrane::Component:w:t0": "intermittent",
-"membrane::Component:w:t1": "intermittent",
-"membrane::Component:w:t2": "intermittent",
-"membrane::Component:w:t3": "still",
-"membrane::Component:w:t4": "intermittent",
-"membrane::Component:w:t5": "intermittent"
-}
-}
-},
-"summary_only": {
-"earn_order": [],
-"latest_unlock": null,
-"open_ids": [
-"feel",
-"reach"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"10": {
-"adopted": 0,
-"checked": 0,
-"crit": {
-"dreams": 0.0,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 0,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": null,
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 0.0,
-"reaches": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"3": {
-"crit": {
-"focus": 0.0,
-"kinds": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"4": {
-"crit": {
-"calibration": 0.0,
-"news": 0.0,
-"timed": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"5": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"9": {
-"crit": {
-"looks": 0.0,
-"other": 0.0,
-"self": 0.0
-},
-"passed": false,
-"skill": 0.0,
-"z": 0.0
-}
-},
-"rung2_stats": {},
-"series": {
-"membrane::Component:chat:in:alice": [],
-"membrane::Component:chat:in:bob": []
-},
-"split": {},
-"status": {
-"accepted": [],
-"aim": "feel",
-"allow": [
-"feel",
-"reach"
-],
-"allowed": [
-"feel",
-"reach"
-],
-"awaiting": [],
-"bar": 0.0,
-"born": false,
-"change": {
-"adopted": 0,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 0,
-"last": null,
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 12,
-"earned": [],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "current"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "current"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "locked"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "locked"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "locked"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "unbuilt"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "unbuilt"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "locked"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "locked"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "locked"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "locked"
-}
-],
-"level": 0,
-"limit": 2,
-"meets": {
-"heard_age": null,
-"medium": "chat",
-"other": null,
-"push_age": null,
-"pushes": 4
-},
-"mode": "on",
-"next": [
-"feel",
-"reach"
-],
-"off_field": {
-"looks": 0,
-"off": null,
-"things": []
-},
-"old_wiring": [],
-"rung": 0,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 0,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
-"base_rate": null,
-"brier_mix": null,
-"brier_model": null,
-"brier_rate": null,
-"brier_self": null,
-"checked": 0,
-"checks": 0,
-"pair_rate": null,
-"paired": 0,
-"recent_rate": null
-},
-"rung_name": "sleep and wake",
-"skill": 0.0,
-"skill_measured": false,
-"skill_pass": 0.5,
-"skill_rung": 1,
-"slipping": false,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {},
-"steer": null,
-"toys": [],
-"unlock": null,
-"waiting_on": "the world",
-"world": {}
-}
-},
-"summary_then_lines": {
-"earn_order": [
-"shift",
-"turns",
-"mirror",
-"change"
-],
-"latest_unlock": {
-"id": "feel",
-"late": false,
-"rung": 1,
-"toys": [
-{
-"icon": "\ud83e\ude9e",
-"kind": "mirror"
-},
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760002376.5401454
-},
-"open_ids": [
-"feel",
-"reach"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 1.0,
-"skill": 1.0
-},
-"passed": true,
-"skill": 0.5235
-},
-"10": {
-"adopted": 1,
-"checked": 0,
-"crit": {
-"dreams": 0.08333333333333333,
-"honesty": 1.0,
-"judgement": 0.0
-},
-"dreams": 2,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 1.0,
-"reaches": 0.3,
-"skill": 0.0
-},
-"eid": "membrane::Component:w:t1",
-"passed": false,
-"skill": -0.5607
-},
-"3": {
-"crit": {
-"focus": 1.0,
-"kinds": 0.0,
-"looks": 1.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": -0.3782
-},
-"4": {
-"crit": {
-"calibration": 0.698889511418894,
-"news": 0.6896551724137931,
-"timed": 0.9666666666666667
-},
-"passed": false,
-"skill": 0.3448
-},
-"5": {
-"crit": {
-"audit": 1.0,
-"looks": 1.0
-},
-"passed": true,
-"skill": 1.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.16,
-"skill": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"passed": false,
-"skill": -0.0054
-},
-"9": {
-"crit": {
-"looks": 0.02,
-"other": 1.0,
-"self": 0.0
-},
-"labels": {
-"glass": "other",
-"stranger": "other"
-},
-"passed": false,
-"skill": -5.4499,
-"stranger_skill": -0.4363,
-"stranger_z": -1.41,
-"z": -1.41
-}
-},
-"rung2_stats": {
-"membrane::Component:chat:in:alice": {
-"auditable": true,
-"candidate": false,
-"p": 0.75,
-"reaches": 20,
-"skill": -0.3782
-},
-"membrane::Component:chat:in:bob": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 14,
-"skill": -0.356
-},
-"membrane::Component:w:t0": {
-"auditable": false,
-"candidate": false,
-"p": 0.048,
-"reaches": 11,
-"skill": -0.1631
-},
-"membrane::Component:w:t1": {
-"auditable": true,
-"candidate": false,
-"p": 0.932,
-"reaches": 6,
-"skill": -0.5607
-},
-"membrane::Component:w:t2": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 16,
-"skill": -0.3294
-},
-"membrane::Component:w:t3": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 11,
-"skill": -1.9402
-},
-"membrane::Component:w:t4": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 9,
-"skill": -0.0956
-},
-"membrane::Component:w:t5": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 5,
-"skill": -0.8083
-}
-},
-"series": {
-"membrane::Component:chat:in:alice": [
-{
-"cal": [
--0.8051,
-0.7121
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.5579,
-"p_llm": 0.58,
-"p_self": 0.7845,
-"rate": 0.375,
-"rec_cal": [
--0.8051,
-0.7121
-],
-"rec_p": 0.5579,
-"rec_p_self": 0.7845,
-"ts": 1760000042.725883,
-"w": 0.7121
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 622.8510919607784,
-"model": "m-a",
-"o": 0.0,
-"p": 0.44869999999999993,
-"p_llm": 0.229,
-"p_self": 0.4487,
-"rate": 0.4230769230769231,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760000196.198862,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 183.93602694860073,
-"model": null,
-"o": 0.0,
-"p": 0.4026,
-"p_llm": null,
-"p_self": 0.4026,
-"rate": 0.39285714285714285,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760000614.9859993,
-"w": 0.0
-},
-{
-"cal": [
--0.3993,
-0.9435
-],
-"gap": null,
-"model": "m-a",
-"o": 0.0,
-"p": 0.2225,
-"p_llm": 0.439,
-"p_self": 0.3635,
-"rate": 0.36666666666666664,
-"rec_cal": [
--0.3993,
-0.9435
-],
-"rec_p": 0.2225,
-"rec_p_self": null,
-"ts": 1760002076.6436043,
-"w": 0.9435
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 1759.7512333393097,
-"model": null,
-"o": 1.0,
-"p": 0.3277,
-"p_llm": null,
-"p_self": 0.3277,
-"rate": 0.34375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760002619.9941885,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 134.38177262073594,
-"model": null,
-"o": 0.0,
-"p": 0.3506,
-"p_llm": null,
-"p_self": 0.3506,
-"rate": 0.38235294117647056,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.3506,
-"ts": 1760002897.8779087,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 134.38177262073594,
-"model": null,
-"o": 0.0,
-"p": 0.8637,
-"p_llm": null,
-"p_self": 0.8637,
-"rate": 0.3611111111111111,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.8637,
-"ts": 1760003106.0601618,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 429.18992495536804,
-"model": null,
-"o": 0.0,
-"p": 0.336,
-"p_llm": null,
-"p_self": 0.336,
-"rate": 0.34210526315789475,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760003309.3405216,
-"w": 0.0
-},
-{
-"cal": [
-0.3228,
-0.0
-],
-"gap": 429.18992495536804,
-"model": null,
-"o": 0.0,
-"p": 0.08479999999999999,
-"p_llm": 0.355,
-"p_self": 0.0848,
-"rate": 0.325,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.0848,
-"ts": 1760003594.675256,
-"w": 0.0
-},
-{
-"cal": [
-0.8526,
-0.7387
-],
-"gap": null,
-"model": "m-a",
-"o": 0.0,
-"p": 0.2853,
-"p_llm": 0.811,
-"p_self": 0.1424,
-"rate": 0.30952380952380953,
-"rec_cal": [
-0.8526,
-0.7387
-],
-"rec_p": 0.2853,
-"rec_p_self": 0.1424,
-"ts": 1760003829.0053804,
-"w": 0.7387
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 527.1149870515535,
-"model": null,
-"o": 1.0,
-"p": 0.9221,
-"p_llm": null,
-"p_self": 0.9221,
-"rate": 0.29545454545454547,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.9221,
-"ts": 1760004064.3516219,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 527.1149870515535,
-"model": null,
-"o": 0.0,
-"p": 0.859,
-"p_llm": null,
-"p_self": 0.859,
-"rate": 0.32608695652173914,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.859,
-"ts": 1760004225.168652,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 9.732740533802486,
-"model": null,
-"o": 1.0,
-"p": 0.8067,
-"p_llm": null,
-"p_self": 0.8067,
-"rate": 0.3125,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.8067,
-"ts": 1760004677.872877,
-"w": 0.0
-},
-{
-"cal": [
-0.0616,
-0.2515
-],
-"gap": 9.732740533802486,
-"model": null,
-"o": 1.0,
-"p": 0.4903,
-"p_llm": 0.831,
-"p_self": 0.7249,
-"rate": 0.34,
-"rec_cal": [
-0.0616,
-0.2515
-],
-"rec_p": 0.4903,
-"rec_p_self": 0.7249,
-"ts": 1760004743.5836723,
-"w": 0.2515
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 308.4226813316345,
-"model": null,
-"o": 1.0,
-"p": 0.2921,
-"p_llm": null,
-"p_self": 0.2921,
-"rate": 0.36538461538461536,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.2921,
-"ts": 1760005424.3177996,
-"w": 0.0
-},
-{
-"cal": [
--0.3288,
-0.863
-],
-"gap": 189.58125686645508,
-"model": null,
-"o": 0.0,
-"p": 0.5453,
-"p_llm": 0.064,
-"p_self": 0.728,
-"rate": 0.3888888888888889,
-"rec_cal": [
--0.3288,
-0.863
-],
-"rec_p": 0.5453,
-"rec_p_self": 0.728,
-"ts": 1760005733.0434887,
-"w": 0.863
-}
-],
-"membrane::Component:chat:in:bob": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": "m-b",
-"o": 0.0,
-"p": 0.2086,
-"p_llm": 0.239,
-"p_self": 0.2086,
-"rate": 0.21428571428571427,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.2086,
-"ts": 1760000138.5659468,
-"w": 0.0
-},
-{
-"cal": [
-0.4798,
-0.8977
-],
-"gap": null,
-"model": "m-a",
-"o": 1.0,
-"p": 0.6462,
-"p_llm": 0.421,
-"p_self": 0.5778,
-"rate": 0.1875,
-"rec_cal": [
-0.4798,
-0.8977
-],
-"rec_p": 0.6462,
-"rec_p_self": 0.5778,
-"ts": 1760000304.6225493,
-"w": 0.8977
-},
-{
-"cal": [
--0.3187,
-0.0
-],
-"gap": null,
-"model": "m-a",
-"o": 0.0,
-"p": 0.6421,
-"p_llm": 0.158,
-"p_self": 0.6421,
-"rate": 0.2777777777777778,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6421,
-"ts": 1760002906.2686508,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 0.0,
-"p": 0.2738,
-"p_llm": null,
-"p_self": 0.2738,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760003566.9716926,
-"w": 0.0
-},
-{
-"cal": [
-0.7924,
-0.0575
-],
-"gap": null,
-"model": "m-b",
-"o": 0.0,
-"p": 0.7038,
-"p_llm": 0.243,
-"p_self": 0.2854,
-"rate": 0.22727272727272727,
-"rec_cal": [
-0.7924,
-0.0575
-],
-"rec_p": 0.7038,
-"rec_p_self": 0.2854,
-"ts": 1760003731.4817648,
-"w": 0.0575
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.214,
-"p_llm": null,
-"p_self": 0.214,
-"rate": 0.20833333333333334,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760003739.3934214,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 400.96699023246765,
-"model": null,
-"o": 0.0,
-"p": 0.6896,
-"p_llm": null,
-"p_self": 0.6896,
-"rate": 0.2692307692307692,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6896,
-"ts": 1760004347.273398,
-"w": 0.0
-},
-{
-"cal": [
--1.1472,
-0.0
-],
-"gap": 624.5350182212233,
-"model": "m-b",
-"o": 0.0,
-"p": 0.2109,
-"p_llm": 0.978,
-"p_self": 0.2109,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.2109,
-"ts": 1760005020.9117026,
-"w": 0.0
-}
-]
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"status": {
-"accepted": [
-"shift",
-"turns",
-"mirror",
-"change"
-],
-"aim": "feel",
-"allow": [
-"feel",
-"reach"
-],
-"allowed": [
-"feel",
-"reach"
-],
-"awaiting": [],
-"bar": 1.0,
-"born": true,
-"change": {
-"adopted": 1,
-"checks": 1,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 4,
-"last": {
-"cost_s": null,
-"from": 30,
-"gain": 0.007596702007683245,
-"reason": null,
-"setting": "lam_looks",
-"to": 45,
-"ts": 1760004152.080577,
-"verdict": "adopted",
-"z": 4.715768123938162
-},
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 129,
-"earned": [
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760000263.9887133
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760002795.3566933
-},
-{
-"id": "change",
-"name": "change itself",
-"ts": 1760004716.59655
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"ts": 1760005448.1086042
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "current"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "current"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "locked"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "locked"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "passed"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "unbuilt"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "unbuilt"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "passed"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "passed"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "locked"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "locked"
-}
-],
-"level": 4,
-"limit": 2,
-"meets": {
-"heard_age": 9994493.015,
-"medium": "chat",
-"other": "membrane::Component:chat:in:alice",
-"push_age": 9994303.434,
-"pushes": 43
-},
-"mode": "on",
-"next": [
-"feel",
-"reach"
-],
-"off_field": {
-"looks": 140,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760002816.3032508
-}
-],
-"rung": 4,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 16,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": null,
-"advisor_weight": 0.3455,
-"asked": 28,
-"base_rate": 0.375,
-"brier_mix": 0.2481,
-"brier_model": 0.1769,
-"brier_rate": 0.2468,
-"brier_self": 0.2432,
-"checked": 22,
-"checks": 16,
-"pair_rate": 0.3636,
-"paired": 8,
-"recent_rate": 0.6429
-},
-"rung_name": "notice the world changed",
-"skill": 0.5235,
-"skill_measured": true,
-"skill_pass": 0.5,
-"skill_rung": 1,
-"slipping": false,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"steer": {
-"err": 0.243,
-"naive": 0.3129,
-"skill": 0.2235
-},
-"toys": [],
-"unlock": {
-"id": "feel",
-"late": false,
-"rung": 1,
-"toys": [
-{
-"icon": "\ud83e\ude9e",
-"kind": "mirror"
-},
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760002376.5401454
-},
-"waiting_on": "the world",
-"world": {
-"membrane::Component:chat:in:alice": "intermittent",
-"membrane::Component:chat:in:bob": "intermittent",
-"membrane::Component:w:t0": "intermittent",
-"membrane::Component:w:t1": "still",
-"membrane::Component:w:t2": "intermittent",
-"membrane::Component:w:t3": "still",
-"membrane::Component:w:t4": "intermittent"
-}
-}
-},
-"voided_rungs": {
-"earn_order": [
-"feel",
-"reach"
-],
-"latest_unlock": {
-"id": "reach",
-"late": false,
-"rung": 2,
-"toys": [
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760000011.0
-},
-"open_ids": [
-"kinds",
-"shift",
-"nudge"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"10": {
-"adopted": 0,
-"checked": 0,
-"crit": {
-"dreams": 0.0,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 0,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": null,
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 0.0,
-"reaches": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"3": {
-"crit": {
-"focus": 0.0,
-"kinds": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"4": {
-"crit": {
-"calibration": 0.0,
-"news": 0.0,
-"timed": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"5": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"9": {
-"crit": {
-"looks": 0.0,
-"other": 0.0,
-"self": 0.0
-},
-"passed": false,
-"skill": 0.0,
-"z": 0.0
-}
-},
-"rung2_stats": {},
-"series": {
-"membrane::Component:chat:in:alice": [],
-"membrane::Component:chat:in:bob": []
-},
-"split": {},
-"status": {
-"accepted": [
-"feel",
-"reach"
-],
-"aim": "kinds",
-"allow": [
-"feel",
-"reach",
-"kinds",
-"shift",
-"nudge"
-],
-"allowed": [
-"feel",
-"reach",
-"kinds",
-"shift",
-"nudge"
-],
-"awaiting": [],
-"bar": 0.0,
-"born": true,
-"change": {
-"adopted": 0,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 0,
-"last": null,
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 0,
-"earned": [
-{
-"id": "feel",
-"name": "feel itself",
-"ts": 1760000001.0
-},
-{
-"id": "reach",
-"name": "look",
-"ts": 1760000004.0
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "passed"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "passed"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "current"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "locked"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "current"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "unbuilt"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "unbuilt"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "locked"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "locked"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "locked"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "current"
-}
-],
-"level": 2,
-"limit": 13,
-"meets": {
-"heard_age": null,
-"medium": "chat",
-"other": null,
-"push_age": null,
-"pushes": 0
-},
-"mode": "on",
-"next": [
-"kinds",
-"shift",
-"nudge"
-],
-"off_field": {
-"looks": 0,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "meet",
-"name": "meet an other",
-"ts": 1760000005.0
-}
-],
-"rung": 2,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 0,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
-"base_rate": null,
-"brier_mix": null,
-"brier_model": null,
-"brier_rate": null,
-"brier_self": null,
-"checked": 0,
-"checks": 0,
-"pair_rate": null,
-"paired": 0,
-"recent_rate": null
-},
-"rung_name": "look",
-"skill": 0.0,
-"skill_measured": false,
-"skill_pass": 0.2,
-"skill_rung": 3,
-"slipping": true,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {},
-"steer": null,
-"toys": [],
-"unlock": {
-"id": "reach",
-"late": false,
-"rung": 2,
-"toys": [
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760000011.0
-},
-"waiting_on": "looks",
-"world": {}
-},
-"status_off": {
-"accepted": [
-"feel",
-"reach"
-],
-"aim": "reach",
-"allow": 0,
-"allowed": [],
-"awaiting": [],
-"bar": 0.0,
-"born": true,
-"change": {
-"adopted": 0,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 0,
-"last": null,
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 0,
-"earned": [
-{
-"id": "feel",
-"name": "feel itself",
-"ts": 1760000001.0
-},
-{
-"id": "reach",
-"name": "look",
-"ts": 1760000004.0
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "passed"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "passed"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "capped"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "locked"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "capped"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "unbuilt"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "unbuilt"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "locked"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "locked"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "locked"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "capped"
-}
-],
-"level": 2,
-"limit": 0,
-"meets": {
-"heard_age": null,
-"medium": "chat",
-"other": null,
-"push_age": null,
-"pushes": 0
-},
-"mode": "off",
-"next": [
-"kinds",
-"shift",
-"nudge"
-],
-"off_field": {
-"looks": 0,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "meet",
-"name": "meet an other",
-"ts": 1760000005.0
-}
-],
-"rung": 2,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 0,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
-"base_rate": null,
-"brier_mix": null,
-"brier_model": null,
-"brier_rate": null,
-"brier_self": null,
-"checked": 0,
-"checks": 0,
-"pair_rate": null,
-"paired": 0,
-"recent_rate": null
-},
-"rung_name": "look",
-"skill": 0.0,
-"skill_measured": false,
-"skill_pass": 0.2,
-"skill_rung": 2,
-"slipping": true,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {},
-"steer": null,
-"toys": [],
-"unlock": {
-"id": "reach",
-"late": false,
-"rung": 2,
-"toys": [
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760000011.0
-},
-"waiting_on": "reaches",
-"world": {}
-}
-}
-},
-"whole_tree": {
-"birth_only": {
-"earn_order": [],
-"latest_unlock": null,
-"open_ids": [
-"feel",
-"reach"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"10": {
-"adopted": 0,
-"checked": 0,
-"crit": {
-"dreams": 0.0,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 0,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": null,
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 0.0,
-"reaches": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"3": {
-"crit": {
-"focus": 0.0,
-"kinds": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"4": {
-"crit": {
-"calibration": 0.0,
-"news": 0.0,
-"timed": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"5": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"9": {
-"crit": {
-"looks": 0.0,
-"other": 0.0,
-"self": 0.0
-},
-"passed": false,
-"skill": 0.0,
-"z": 0.0
-}
-},
-"rung2_stats": {},
-"series": {
-"membrane::Component:chat:in:alice": [],
-"membrane::Component:chat:in:bob": []
-},
-"split": {},
-"status": {
-"accepted": [],
-"aim": "feel",
-"allow": [
-"feel",
-"reach"
-],
-"allowed": [
-"feel",
-"reach"
-],
-"awaiting": [],
-"bar": 0.0,
-"born": true,
-"change": {
-"adopted": 0,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 0,
-"last": null,
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 0,
-"earned": [],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "current"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "current"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "locked"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "locked"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "locked"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "locked"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "locked"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "locked"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "locked"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "locked"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "locked"
-}
-],
-"level": 0,
-"limit": 2,
-"meets": {
-"heard_age": null,
-"medium": "chat",
-"other": null,
-"push_age": null,
-"pushes": 0
-},
-"mode": "on",
-"next": [
-"feel",
-"reach"
-],
-"off_field": {
-"looks": 0,
-"off": null,
-"things": []
-},
-"old_wiring": [],
-"rung": 0,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 0,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
-"base_rate": null,
-"brier_mix": null,
-"brier_model": null,
-"brier_rate": null,
-"brier_self": null,
-"checked": 0,
-"checks": 0,
-"pair_rate": null,
-"paired": 0,
-"recent_rate": null
-},
-"rung_name": "sleep and wake",
-"skill": 0.0,
-"skill_measured": false,
-"skill_pass": 0.5,
-"skill_rung": 1,
-"slipping": false,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {},
-"steer": null,
-"toys": [],
-"unlock": null,
-"waiting_on": "the world",
-"world": {}
-}
-},
-"empty": {
-"earn_order": [],
-"latest_unlock": null,
-"open_ids": [
-"feel",
-"reach"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"10": {
-"adopted": 0,
-"checked": 0,
-"crit": {
-"dreams": 0.0,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 0,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": null,
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 0.0,
-"reaches": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"3": {
-"crit": {
-"focus": 0.0,
-"kinds": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"4": {
-"crit": {
-"calibration": 0.0,
-"news": 0.0,
-"timed": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"5": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"9": {
-"crit": {
-"looks": 0.0,
-"other": 0.0,
-"self": 0.0
-},
-"passed": false,
-"skill": 0.0,
-"z": 0.0
-}
-},
-"rung2_stats": {},
-"series": {
-"membrane::Component:chat:in:alice": [],
-"membrane::Component:chat:in:bob": []
-},
-"split": {},
-"status": {
-"accepted": [],
-"aim": "feel",
-"allow": [
-"feel",
-"reach"
-],
-"allowed": [
-"feel",
-"reach"
-],
-"awaiting": [],
-"bar": 0.0,
-"born": false,
-"change": {
-"adopted": 0,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 0,
-"last": null,
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 0,
-"earned": [],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "current"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "current"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "locked"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "locked"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "locked"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "locked"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "locked"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "locked"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "locked"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "locked"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "locked"
-}
-],
-"level": 0,
-"limit": 2,
-"meets": {
-"heard_age": null,
-"medium": "chat",
-"other": null,
-"push_age": null,
-"pushes": 0
-},
-"mode": "on",
-"next": [
-"feel",
-"reach"
-],
-"off_field": {
-"looks": 0,
-"off": null,
-"things": []
-},
-"old_wiring": [],
-"rung": 0,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 0,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
-"base_rate": null,
-"brier_mix": null,
-"brier_model": null,
-"brier_rate": null,
-"brier_self": null,
-"checked": 0,
-"checks": 0,
-"pair_rate": null,
-"paired": 0,
-"recent_rate": null
-},
-"rung_name": "sleep and wake",
-"skill": 0.0,
-"skill_measured": false,
-"skill_pass": 0.5,
-"skill_rung": 1,
-"slipping": false,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {},
-"steer": null,
-"toys": [],
-"unlock": null,
-"waiting_on": "the world",
-"world": {}
-}
-},
-"random_a": {
-"earn_order": [
-"feel",
-"reach",
-"kinds",
-"turns",
-"change",
-"speak"
-],
-"latest_unlock": {
-"id": "kinds",
-"late": true,
-"rung": 3,
-"toys": [
-{
-"icon": "\u26bd",
-"kind": "ball"
-},
-{
-"icon": "",
-"kind": "lamp"
-}
-],
-"ts": 1760010492.6417396
-},
-"open_ids": [
-"shift"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 1.0,
-"skill": 1.0
-},
-"passed": true,
-"skill": 0.5041
-},
-"10": {
-"adopted": 2,
-"checked": 0,
-"crit": {
-"dreams": 0.20833333333333334,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 5,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 1.0,
-"reaches": 1.0,
-"skill": 0.0
-},
-"eid": "membrane::Component:w:t5",
-"passed": false,
-"skill": -0.4355
-},
-"3": {
-"crit": {
-"focus": 1.0,
-"kinds": 0.0,
-"looks": 1.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": -0.2737
-},
-"4": {
-"crit": {
-"calibration": 0.6349767438949481,
-"news": 0.5172413793103449,
-"timed": 1.0
-},
-"passed": false,
-"skill": 0.25
-},
-"5": {
-"crit": {
-"audit": 1.0,
-"looks": 1.0
-},
-"passed": true,
-"skill": 1.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.14,
-"skill": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"passed": false,
-"skill": -0.5375
-},
-"9": {
-"crit": {
-"looks": 0.16,
-"other": 1.0,
-"self": 0.1791111111111111
-},
-"labels": {
-"glass": "other",
-"stranger": "other"
-},
-"passed": false,
-"skill": 0.1612,
-"stranger_skill": 0.5383,
-"stranger_z": 0.0,
-"z": 1.0
-}
-},
-"rung2_stats": {
-"membrane::Component:chat:in:alice": {
-"auditable": true,
-"candidate": false,
-"p": 0.75,
-"reaches": 20,
-"skill": -0.2737
-},
-"membrane::Component:chat:in:bob": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 18,
-"skill": -0.9174
-},
-"membrane::Component:w:t0": {
-"auditable": false,
-"candidate": false,
-"p": 0.048,
-"reaches": 17,
-"skill": -0.7808
-},
-"membrane::Component:w:t1": {
-"auditable": true,
-"candidate": false,
-"p": 0.932,
-"reaches": 20,
-"skill": -0.4391
-},
-"membrane::Component:w:t2": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -1.3405
-},
-"membrane::Component:w:t3": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.3939
-},
-"membrane::Component:w:t4": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 19,
-"skill": -0.882
-},
-"membrane::Component:w:t5": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.4355
-}
-},
-"series": {
-"membrane::Component:chat:in:alice": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 174.70678048667065,
-"model": "m-b",
-"o": 0.0,
-"p": 0.7853999999999999,
-"p_llm": 0.449,
-"p_self": 0.7854,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.7854,
-"ts": 1760003871.7301924,
-"w": 0.0
-},
-{
-"cal": [
--0.6786,
-0.325
-],
-"gap": 778.5192709150639,
-"model": null,
-"o": 1.0,
-"p": 0.2425,
-"p_llm": 0.911,
-"p_self": 0.5356,
-"rate": 0.25,
-"rec_cal": [
--0.6786,
-0.325
-],
-"rec_p": 0.2425,
-"rec_p_self": 0.5356,
-"ts": 1760005037.8572497,
-"w": 0.325
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 778.5192709150639,
-"model": null,
-"o": 0.0,
-"p": 0.6296,
-"p_llm": null,
-"p_self": 0.6296,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6296,
-"ts": 1760005279.0640118,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 778.5192709150639,
-"model": null,
-"o": 0.0,
-"p": 0.3234,
-"p_llm": null,
-"p_self": 0.3234,
-"rate": 0.375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.3234,
-"ts": 1760005421.4838808,
-"w": 0.0
-},
-{
-"cal": [
--0.8746,
-0.8713
-],
-"gap": 1257.9882400035858,
-"model": "m-a",
-"o": 0.0,
-"p": 0.3383,
-"p_llm": 0.531,
-"p_self": 0.3045,
-"rate": 0.3,
-"rec_cal": [
--0.8746,
-0.8713
-],
-"rec_p": 0.3383,
-"rec_p_self": null,
-"ts": 1760006540.924752,
-"w": 0.8713
-},
-{
-"cal": [
--0.2047,
-0.0
-],
-"gap": 468.7845607579886,
-"model": "m-b",
-"o": 0.0,
-"p": 0.2414,
-"p_llm": 0.933,
-"p_self": 0.2414,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760006617.5268161,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 1477.5200896263123,
-"model": null,
-"o": 0.0,
-"p": 0.4375,
-"p_llm": null,
-"p_self": 0.4375,
-"rate": 0.21428571428571427,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.4375,
-"ts": 1760006785.7362728,
-"w": 0.0
-},
-{
-"cal": [
--0.8711,
-0.4985
-],
-"gap": 631.3249782650598,
-"model": "m-b",
-"o": 1.0,
-"p": 0.2335,
-"p_llm": 0.395,
-"p_self": 0.1699,
-"rate": 0.1875,
-"rec_cal": [
--0.8711,
-0.4985
-],
-"rec_p": 0.2335,
-"rec_p_self": null,
-"ts": 1760008741.4570515,
-"w": 0.4985
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 187.2484252920939,
-"model": null,
-"o": 0.0,
-"p": 0.5271,
-"p_llm": null,
-"p_self": 0.5271,
-"rate": 0.2777777777777778,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.5271,
-"ts": 1760008883.2485354,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 86.66762804985046,
-"model": null,
-"o": 0.0,
-"p": 0.4078,
-"p_llm": null,
-"p_self": 0.4078,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.4078,
-"ts": 1760009048.3063247,
-"w": 0.0
-},
-{
-"cal": [
-2.3259,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.22610000000000002,
-"p_llm": 0.673,
-"p_self": 0.2261,
-"rate": 0.22727272727272727,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760012864.2012434,
-"w": 0.0
-},
-{
-"cal": [
-1.5238,
-0.0
-],
-"gap": 2532.8925709724426,
-"model": null,
-"o": 0.0,
-"p": 0.2561,
-"p_llm": 0.568,
-"p_self": 0.2561,
-"rate": 0.2916666666666667,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760013221.0027924,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 109.15277910232544,
-"model": null,
-"o": 0.0,
-"p": 0.9397,
-"p_llm": null,
-"p_self": 0.9397,
-"rate": 0.2692307692307692,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.9397,
-"ts": 1760013597.8527784,
-"w": 0.0
-},
-{
-"cal": [
-0.6676,
-0.0
-],
-"gap": 309.77176626946596,
-"model": "m-b",
-"o": 0.0,
-"p": 0.07770000000000002,
-"p_llm": 0.388,
-"p_self": 0.0777,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.0777,
-"ts": 1760014224.8509426,
-"w": 0.0
-}
-],
-"membrane::Component:chat:in:bob": [
-{
-"cal": [
--0.374,
-0.6869
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.9109,
-"p_llm": 0.683,
-"p_self": 0.634,
-"rate": 0.5,
-"rec_cal": [
--0.374,
-0.6869
-],
-"rec_p": 0.9109,
-"rec_p_self": 0.634,
-"ts": 1760002469.429398,
-"w": 0.6869
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": "m-b",
-"o": 1.0,
-"p": 0.759,
-"p_llm": 0.159,
-"p_self": 0.759,
-"rate": 0.75,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760003674.2191746,
-"w": 0.0
-},
-{
-"cal": [
-0.7676,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 0.0,
-"p": 0.599,
-"p_llm": 0.658,
-"p_self": 0.599,
-"rate": 0.8333333333333334,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.599,
-"ts": 1760003726.1850631,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.8419,
-"p_llm": null,
-"p_self": 0.8419,
-"rate": 0.625,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.8419,
-"ts": 1760004275.1095984,
-"w": 0.0
-},
-{
-"cal": [
-0.711,
-0.0109
-],
-"gap": 463.71421440968584,
-"model": null,
-"o": 0.0,
-"p": 0.9293471480815966,
-"p_llm": 0.554,
-"p_self": 0.9297,
-"rate": 0.7,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.9297,
-"ts": 1760004412.0084887,
-"w": 0.0109
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 472.14308264421237,
-"model": null,
-"o": 0.0,
-"p": 0.9025,
-"p_llm": null,
-"p_self": 0.9025,
-"rate": 0.5833333333333334,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.9025,
-"ts": 1760004853.4265952,
-"w": 0.0
-},
-{
-"cal": [
--0.6264,
-0.5346
-],
-"gap": 188.11331415176392,
-"model": "m-b",
-"o": 1.0,
-"p": 0.9366,
-"p_llm": 0.163,
-"p_self": 0.4547,
-"rate": 0.5,
-"rec_cal": [
--0.6264,
-0.5346
-],
-"rec_p": 0.9366,
-"rec_p_self": 0.4547,
-"ts": 1760005438.9670625,
-"w": 0.5346
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.7774,
-"p_llm": null,
-"p_self": 0.7774,
-"rate": 0.5625,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.7774,
-"ts": 1760007410.3328917,
-"w": 0.0
-},
-{
-"cal": [
-0.5463,
-0.0642
-],
-"gap": 212.14107394218445,
-"model": null,
-"o": 0.0,
-"p": 0.5455085777652674,
-"p_llm": 0.765,
-"p_self": 0.5354,
-"rate": 0.6111111111111112,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.5354,
-"ts": 1760009540.09216,
-"w": 0.0642
-},
-{
-"cal": [
-0.7048,
-0.0497
-],
-"gap": 212.14107394218445,
-"model": null,
-"o": 1.0,
-"p": 0.5725472054435025,
-"p_llm": 0.812,
-"p_self": 0.5633,
-"rate": 0.55,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760009835.096195,
-"w": 0.0497
-},
-{
-"cal": [
-0.0469,
-0.2939
-],
-"gap": 604.8679814689762,
-"model": "m-b",
-"o": 1.0,
-"p": 0.4888,
-"p_llm": 0.305,
-"p_self": 0.1931,
-"rate": 0.5909090909090909,
-"rec_cal": [
-0.0469,
-0.2939
-],
-"rec_p": 0.4888,
-"rec_p_self": 0.1931,
-"ts": 1760013686.9383676,
-"w": 0.2939
-}
-]
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"status": {
-"accepted": [
-"reach",
-"turns",
-"change"
-],
-"aim": "shift",
-"allow": [
-"feel",
-"reach",
-"kinds",
-"shift"
-],
-"allowed": [
-"feel",
-"reach",
-"kinds",
-"shift"
-],
-"awaiting": [
-"feel",
-"kinds",
-"speak"
-],
-"bar": 1.0,
-"born": true,
-"change": {
-"adopted": 2,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 5,
-"last": {
-"cost_s": null,
-"from": 30,
-"gain": 0.008810171707568778,
-"reason": null,
-"setting": "lam_looks",
-"to": 45,
-"ts": 1760010131.4227538,
-"verdict": "adopted",
-"z": 3.736474761717167
-},
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 177,
-"earned": [
-{
-"id": "change",
-"name": "change itself",
-"ts": 1760002541.460968
-},
-{
-"id": "reach",
-"name": "look",
-"ts": 1760003655.1437516
-},
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760004587.381385
-},
-{
-"id": "feel",
-"name": "feel itself",
-"ts": 1760006269.4257061
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"ts": 1760007640.4530313
-},
-{
-"id": "speak",
-"name": "speak",
-"ts": 1760008996.6776104
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "passed"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "passed"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "passed"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "capped"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "current"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "passed"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "locked"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "locked"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "passed"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "passed"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "capped"
-}
-],
-"level": 6,
-"limit": 5,
-"meets": {
-"heard_age": 9986362.727,
-"medium": "chat",
-"other": "membrane::Component:chat:in:alice",
-"push_age": 9985726.981,
-"pushes": 61
-},
-"mode": "on",
-"next": [
-"shift"
-],
-"off_field": {
-"looks": 200,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760004219.5977871
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760005449.96898
-}
-],
-"rung": 6,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 26,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 26,
-"base_rate": 0.2333,
-"brier_mix": 0.3315,
-"brier_model": 0.2885,
-"brier_rate": 0.2156,
-"brier_self": 0.3116,
-"checked": 21,
-"checks": 14,
-"pair_rate": 0.0952,
-"paired": 2,
-"recent_rate": 0.2143
-},
-"rung_name": "speak",
-"skill": 1.0,
-"skill_measured": true,
-"skill_pass": 1.0,
-"skill_rung": 5,
-"slipping": true,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"steer": {
-"err": 0.1673,
-"naive": 0.3038,
-"skill": 0.4493
-},
-"toys": [],
-"unlock": {
-"id": "kinds",
-"late": true,
-"rung": 3,
-"toys": [
-{
-"icon": "\u26bd",
-"kind": "ball"
-},
-{
-"icon": "",
-"kind": "lamp"
-}
-],
-"ts": 1760010492.6417396
-},
-"waiting_on": null,
-"world": {
-"membrane::Component:chat:in:alice": "intermittent",
-"membrane::Component:chat:in:bob": "intermittent",
-"membrane::Component:w:t0": "still",
-"membrane::Component:w:t1": "intermittent",
-"membrane::Component:w:t2": "intermittent",
-"membrane::Component:w:t3": "intermittent",
-"membrane::Component:w:t4": "intermittent",
-"membrane::Component:w:t5": "intermittent"
-}
-},
-"status_off": {
-"accepted": [
-"reach",
-"turns",
-"change"
-],
-"aim": "speak",
-"allow": 0,
-"allowed": [],
-"awaiting": [
-"feel",
-"kinds",
-"speak"
-],
-"bar": 0.0,
-"born": true,
-"change": {
-"adopted": 2,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 5,
-"last": {
-"cost_s": null,
-"from": 30,
-"gain": 0.008810171707568778,
-"reason": null,
-"setting": "lam_looks",
-"to": 45,
-"ts": 1760010131.4227538,
-"verdict": "adopted",
-"z": 3.736474761717167
-},
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 177,
-"earned": [
-{
-"id": "change",
-"name": "change itself",
-"ts": 1760002541.460968
-},
-{
-"id": "reach",
-"name": "look",
-"ts": 1760003655.1437516
-},
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760004587.381385
-},
-{
-"id": "feel",
-"name": "feel itself",
-"ts": 1760006269.4257061
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"ts": 1760007640.4530313
-},
-{
-"id": "speak",
-"name": "speak",
-"ts": 1760008996.6776104
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "passed"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "passed"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "passed"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "capped"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "capped"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "passed"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "locked"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "locked"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "passed"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "passed"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "capped"
-}
-],
-"level": 6,
-"limit": 0,
-"meets": {
-"heard_age": 9986362.727,
-"medium": "chat",
-"other": "membrane::Component:chat:in:alice",
-"push_age": 9985726.981,
-"pushes": 61
-},
-"mode": "off",
-"next": [
-"shift"
-],
-"off_field": {
-"looks": 200,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760004219.5977871
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760005449.96898
-}
-],
-"rung": 6,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 26,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 26,
-"base_rate": 0.2333,
-"brier_mix": 0.3315,
-"brier_model": 0.2885,
-"brier_rate": 0.2156,
-"brier_self": 0.3116,
-"checked": 21,
-"checks": 14,
-"pair_rate": 0.0952,
-"paired": 2,
-"recent_rate": 0.2143
-},
-"rung_name": "speak",
-"skill": 0.0,
-"skill_measured": false,
-"skill_pass": 0.15,
-"skill_rung": 11,
-"slipping": true,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"steer": {
-"err": 0.1673,
-"naive": 0.3038,
-"skill": 0.4493
-},
-"toys": [],
-"unlock": {
-"id": "kinds",
-"late": true,
-"rung": 3,
-"toys": [
-{
-"icon": "\u26bd",
-"kind": "ball"
-},
-{
-"icon": "",
-"kind": "lamp"
-}
-],
-"ts": 1760010492.6417396
-},
-"waiting_on": "pushes",
-"world": {
-"membrane::Component:chat:in:alice": "intermittent",
-"membrane::Component:chat:in:bob": "intermittent",
-"membrane::Component:w:t0": "still",
-"membrane::Component:w:t1": "intermittent",
-"membrane::Component:w:t2": "intermittent",
-"membrane::Component:w:t3": "intermittent",
-"membrane::Component:w:t4": "intermittent",
-"membrane::Component:w:t5": "intermittent"
-}
-}
-},
-"random_b": {
-"earn_order": [
-"feel",
-"reach",
-"kinds",
-"patience",
-"shift",
-"change",
-"speak"
-],
-"latest_unlock": {
-"id": "change",
-"late": true,
-"rung": 10,
-"toys": [
-{
-"icon": "\ud83e\ude9e",
-"kind": "mirror"
-},
-{
-"icon": "",
-"kind": "lamp"
-}
-],
-"ts": 1760007196.6911938
-},
-"open_ids": [],
-"progress": {
-"1": {
-"crit": {
-"pushes": 1.0,
-"skill": 1.0
-},
-"passed": true,
-"skill": 0.5631
-},
-"10": {
-"adopted": 3,
-"checked": 0,
-"crit": {
-"dreams": 0.16666666666666666,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 4,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 0.0,
-"reaches": 1.0,
-"skill": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"passed": false,
-"skill": -0.7458
-},
-"3": {
-"crit": {
-"focus": 1.0,
-"kinds": 0.0,
-"looks": 1.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": -0.7458
-},
-"4": {
-"crit": {
-"calibration": 1.0,
-"news": 0.8,
-"timed": 1.0
-},
-"passed": false,
-"skill": 0.4
-},
-"5": {
-"crit": {
-"audit": 1.0,
-"looks": 1.0
-},
-"passed": true,
-"skill": 1.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.25,
-"skill": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"passed": false,
-"skill": -0.2617
-},
-"9": {
-"crit": {
-"looks": 0.12,
-"other": 1.0,
-"self": 0.0
-},
-"labels": {
-"glass": "other",
-"stranger": "other"
-},
-"passed": false,
-"skill": -0.0405,
-"stranger_skill": -0.3341,
-"stranger_z": -1.15,
-"z": 0.0
-}
-},
-"rung2_stats": {
-"membrane::Component:chat:in:alice": {
-"auditable": true,
-"candidate": false,
-"p": 0.75,
-"reaches": 20,
-"skill": -0.7458
-},
-"membrane::Component:chat:in:bob": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.2929
-},
-"membrane::Component:w:t0": {
-"auditable": false,
-"candidate": false,
-"p": 0.048,
-"reaches": 17,
-"skill": -0.3759
-},
-"membrane::Component:w:t1": {
-"auditable": true,
-"candidate": false,
-"p": 0.932,
-"reaches": 19,
-"skill": -0.8657
-},
-"membrane::Component:w:t2": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 18,
-"skill": -0.4662
-},
-"membrane::Component:w:t3": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.2222
-},
-"membrane::Component:w:t4": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.1728
-},
-"membrane::Component:w:t5": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 19,
-"skill": -0.4798
-}
-},
-"series": {
-"membrane::Component:chat:in:alice": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 0.0,
-"p": 0.375,
-"p_llm": null,
-"p_self": 0.375,
-"rate": 0.375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760000809.8046315,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 0.0,
-"p": 0.3399,
-"p_llm": null,
-"p_self": 0.3399,
-"rate": 0.34615384615384615,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760000859.8167248,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 85.62244939804077,
-"model": null,
-"o": 0.0,
-"p": 0.3005,
-"p_llm": null,
-"p_self": 0.3005,
-"rate": 0.32142857142857145,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760001306.3780777,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 74.83050632476807,
-"model": "m-a",
-"o": 0.0,
-"p": 0.08519999999999998,
-"p_llm": 0.778,
-"p_self": 0.0852,
-"rate": 0.3,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.0852,
-"ts": 1760001414.5408154,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 292.975765704054,
-"model": null,
-"o": 0.0,
-"p": 0.228,
-"p_llm": null,
-"p_self": 0.228,
-"rate": 0.28125,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760003890.0974286,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 292.975765704054,
-"model": null,
-"o": 0.0,
-"p": 0.3195,
-"p_llm": null,
-"p_self": 0.3195,
-"rate": 0.2647058823529412,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.3195,
-"ts": 1760003946.6510642,
-"w": 0.0
-},
-{
-"cal": [
-0.2979,
-0.0683
-],
-"gap": 292.975765704054,
-"model": null,
-"o": 0.0,
-"p": 0.1975,
-"p_llm": 0.603,
-"p_self": 0.7454,
-"rate": 0.25,
-"rec_cal": [
-0.2979,
-0.0683
-],
-"rec_p": 0.1975,
-"rec_p_self": 0.7454,
-"ts": 1760003980.4439285,
-"w": 0.0683
-},
-{
-"cal": [
-1.254,
-0.0
-],
-"gap": 292.975765704054,
-"model": "m-a",
-"o": 1.0,
-"p": 0.15989999999999996,
-"p_llm": 0.222,
-"p_self": 0.1599,
-"rate": 0.23684210526315788,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760004006.4090111,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 292.975765704054,
-"model": "m-a",
-"o": 1.0,
-"p": 0.2618,
-"p_llm": 0.032,
-"p_self": 0.2618,
-"rate": 0.275,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760004107.303239,
-"w": 0.0
-},
-{
-"cal": [
-0.0693,
-0.4374
-],
-"gap": 3452.710045814514,
-"model": null,
-"o": 0.0,
-"p": 0.6381,
-"p_llm": 0.328,
-"p_self": 0.1142,
-"rate": 0.30952380952380953,
-"rec_cal": [
-0.0693,
-0.4374
-],
-"rec_p": 0.6381,
-"rec_p_self": 0.1142,
-"ts": 1760004766.1270409,
-"w": 0.4374
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 0.0,
-"p": 0.2585,
-"p_llm": null,
-"p_self": 0.2585,
-"rate": 0.29545454545454547,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760007207.8610451,
-"w": 0.0
-},
-{
-"cal": [
--1.1365,
-0.0
-],
-"gap": null,
-"model": "m-a",
-"o": 0.0,
-"p": 0.23829999999999998,
-"p_llm": 0.286,
-"p_self": 0.2383,
-"rate": 0.2826086956521739,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760007382.3378158,
-"w": 0.0
-},
-{
-"cal": [
--0.4665,
-0.1237
-],
-"gap": 494.41399692972186,
-"model": null,
-"o": 1.0,
-"p": 0.943,
-"p_llm": 0.743,
-"p_self": 0.2209,
-"rate": 0.2708333333333333,
-"rec_cal": [
--0.4665,
-0.1237
-],
-"rec_p": 0.943,
-"rec_p_self": null,
-"ts": 1760007550.219851,
-"w": 0.1237
-},
-{
-"cal": [
--0.689,
-0.2244
-],
-"gap": 494.41399692972186,
-"model": "m-a",
-"o": 1.0,
-"p": 0.911,
-"p_llm": 0.797,
-"p_self": 0.3158,
-"rate": 0.3,
-"rec_cal": [
--0.689,
-0.2244
-],
-"rec_p": 0.911,
-"rec_p_self": null,
-"ts": 1760007887.8806894,
-"w": 0.2244
-},
-{
-"cal": [
--0.5913,
-0.0
-],
-"gap": 507.949947044311,
-"model": "m-a",
-"o": 0.0,
-"p": 0.3806,
-"p_llm": 0.409,
-"p_self": 0.3806,
-"rate": 0.3269230769230769,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760008147.7716577,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 507.949947044311,
-"model": null,
-"o": 0.0,
-"p": 0.8548,
-"p_llm": null,
-"p_self": 0.8548,
-"rate": 0.3148148148148148,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.8548,
-"ts": 1760008266.2446725,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 992.5777430534363,
-"model": null,
-"o": 1.0,
-"p": 0.4534,
-"p_llm": null,
-"p_self": 0.4534,
-"rate": 0.30357142857142855,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.4534,
-"ts": 1760008555.4158545,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 60.86327777390642,
-"model": null,
-"o": 0.0,
-"p": 0.3685,
-"p_llm": null,
-"p_self": 0.3685,
-"rate": 0.3275862068965517,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760008788.5001504,
-"w": 0.0
-},
-{
-"cal": [
--0.5541,
-0.0
-],
-"gap": 60.86327777390642,
-"model": "m-a",
-"o": 1.0,
-"p": 0.2711,
-"p_llm": 0.693,
-"p_self": 0.2711,
-"rate": 0.31666666666666665,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.2711,
-"ts": 1760009442.1845968,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 2689.6673650741577,
-"model": null,
-"o": 1.0,
-"p": 0.3601,
-"p_llm": null,
-"p_self": 0.3601,
-"rate": 0.3387096774193548,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760014148.6554506,
-"w": 0.0
-},
-{
-"cal": [
-0.2541,
-0.1186
-],
-"gap": 2689.6673650741577,
-"model": null,
-"o": 0.0,
-"p": 0.6640978898142206,
-"p_llm": 0.623,
-"p_self": 0.6575,
-"rate": 0.359375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6575,
-"ts": 1760014229.4151428,
-"w": 0.1186
-},
-{
-"cal": [
--0.2141,
-0.297
-],
-"gap": 115.39087867736816,
-"model": null,
-"o": 0.0,
-"p": 0.9174,
-"p_llm": 0.383,
-"p_self": 0.3776,
-"rate": 0.3484848484848485,
-"rec_cal": [
--0.2141,
-0.297
-],
-"rec_p": 0.9174,
-"rec_p_self": null,
-"ts": 1760014593.7188025,
-"w": 0.297
-},
-{
-"cal": [
--0.7942,
-0.9973
-],
-"gap": 115.39087867736816,
-"model": "m-a",
-"o": 0.0,
-"p": 0.6432,
-"p_llm": 0.784,
-"p_self": 0.8122,
-"rate": 0.3382352941176471,
-"rec_cal": [
--0.7942,
-0.9973
-],
-"rec_p": 0.6432,
-"rec_p_self": 0.8122,
-"ts": 1760014629.291631,
-"w": 0.9973
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 732.4338037967682,
-"model": "m-b",
-"o": 0.0,
-"p": 0.31420000000000003,
-"p_llm": 0.916,
-"p_self": 0.3142,
-"rate": 0.32857142857142857,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760015470.0309231,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 732.4338037967682,
-"model": null,
-"o": 0.0,
-"p": 0.5887,
-"p_llm": null,
-"p_self": 0.5887,
-"rate": 0.3194444444444444,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.5887,
-"ts": 1760015528.6290658,
-"w": 0.0
-}
-],
-"membrane::Component:chat:in:bob": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 109.59308974938597,
-"model": null,
-"o": 1.0,
-"p": 0.6331000000000001,
-"p_llm": 0.547,
-"p_self": 0.6331,
-"rate": 0.21428571428571427,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6331,
-"ts": 1760000428.1682258,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 591.5003320274906,
-"model": "m-b",
-"o": 0.0,
-"p": 0.1565,
-"p_llm": 0.754,
-"p_self": 0.1565,
-"rate": 0.3125,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.1565,
-"ts": 1760004201.6610558,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 96.16355752944946,
-"model": null,
-"o": 0.0,
-"p": 0.3098,
-"p_llm": null,
-"p_self": 0.3098,
-"rate": 0.2777777777777778,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760004472.471708,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 0.0,
-"p": 0.2551,
-"p_llm": null,
-"p_self": 0.2551,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760007326.4405363,
-"w": 0.0
-},
-{
-"cal": [
-1.1201,
-0.0
-],
-"gap": null,
-"model": "m-b",
-"o": 0.0,
-"p": 0.2227,
-"p_llm": 0.912,
-"p_self": 0.2227,
-"rate": 0.22727272727272727,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760007580.7048151,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.1975,
-"p_llm": null,
-"p_self": 0.1975,
-"rate": 0.20833333333333334,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760008104.3205285,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 2303.8528575897217,
-"model": null,
-"o": 0.0,
-"p": 0.2724,
-"p_llm": null,
-"p_self": 0.2724,
-"rate": 0.2692307692307692,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760014815.555436,
-"w": 0.0
-},
-{
-"cal": [
-1.7292,
-0.0
-],
-"gap": 381.48659663615865,
-"model": "m-b",
-"o": 1.0,
-"p": 0.4376,
-"p_llm": 0.324,
-"p_self": 0.4376,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.4376,
-"ts": 1760015243.8087745,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 381.48659663615865,
-"model": null,
-"o": 0.0,
-"p": 0.2982,
-"p_llm": null,
-"p_self": 0.2982,
-"rate": 0.3,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760015359.2439349,
-"w": 0.0
-}
-]
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"status": {
-"accepted": [
-"kinds",
-"shift"
-],
-"aim": "speak",
-"allow": [
-"feel",
-"reach",
-"patience"
-],
-"allowed": [
-"feel",
-"reach",
-"patience"
-],
-"awaiting": [
-"feel",
-"reach",
-"patience",
-"change",
-"speak"
-],
-"bar": 0.0,
-"born": false,
-"change": {
-"adopted": 3,
-"checks": 1,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 6,
-"last": {
-"cost_s": null,
-"from": 30,
-"gain": 0.00750179178457353,
-"reason": null,
-"setting": "lam_looks",
-"to": 45,
-"ts": 1760009545.6716757,
-"verdict": "adopted",
-"z": 2.898273801583966
-},
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 228,
-"earned": [
-{
-"id": "feel",
-"name": "feel itself",
-"ts": 1760001066.646258
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"ts": 1760001615.919405
-},
-{
-"id": "reach",
-"name": "look",
-"ts": 1760004317.5235639
-},
-{
-"id": "patience",
-"name": "patience",
-"ts": 1760006883.9113078
-},
-{
-"id": "change",
-"name": "change itself",
-"ts": 1760006902.0283155
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"ts": 1760006972.6990445
-},
-{
-"id": "speak",
-"name": "speak",
-"ts": 1760012297.3576822
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "passed"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "passed"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "passed"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "passed"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "passed"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "locked"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "locked"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "locked"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "passed"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "passed"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "capped"
-}
-],
-"level": 7,
-"limit": 4,
-"meets": {
-"heard_age": 9984143.435,
-"medium": "chat",
-"other": "membrane::Component:chat:in:alice",
-"push_age": 9984154.232,
-"pushes": 65
-},
-"mode": "on",
-"next": [],
-"off_field": {
-"looks": 200,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "meet",
-"name": "meet an other",
-"ts": 1760015307.212033
-},
-{
-"id": "turns",
-"name": "time its turn",
-"ts": 1760007336.0780342
-}
-],
-"rung": 7,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 32,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 26,
-"base_rate": 0.3108,
-"brier_mix": 0.2693,
-"brier_model": 0.3613,
-"brier_rate": 0.2134,
-"brier_self": 0.2983,
-"checked": 20,
-"checks": 25,
-"pair_rate": 0.25,
-"paired": 5,
-"recent_rate": 0.2143
-},
-"rung_name": "speak",
-"skill": 0.0,
-"skill_measured": false,
-"skill_pass": 0.15,
-"skill_rung": 11,
-"slipping": true,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other"
-},
-"steer": {
-"err": 0.1647,
-"naive": 0.3095,
-"skill": 0.4678
-},
-"toys": [],
-"unlock": {
-"id": "change",
-"late": true,
-"rung": 10,
-"toys": [
-{
-"icon": "\ud83e\ude9e",
-"kind": "mirror"
-},
-{
-"icon": "",
-"kind": "lamp"
-}
-],
-"ts": 1760007196.6911938
-},
-"waiting_on": "pushes",
-"world": {
-"membrane::Component:chat:in:alice": "intermittent",
-"membrane::Component:chat:in:bob": "intermittent",
-"membrane::Component:w:t0": "intermittent",
-"membrane::Component:w:t1": "intermittent",
-"membrane::Component:w:t2": "intermittent",
-"membrane::Component:w:t3": "intermittent",
-"membrane::Component:w:t4": "intermittent",
-"membrane::Component:w:t5": "still"
-}
-}
-},
-"random_c": {
-"earn_order": [
-"feel",
-"reach",
-"kinds",
-"patience",
-"mirror",
-"change",
-"speak"
-],
-"latest_unlock": {
-"id": "reach",
-"late": true,
-"rung": 2,
-"toys": [
-{
-"icon": "\ud83e\ude9e",
-"kind": "mirror"
-},
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760054376.8934686
-},
-"open_ids": [
-"shift",
-"nudge"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 1.0,
-"skill": 0.8978888135096317
-},
-"passed": false,
-"skill": 0.4489
-},
-"10": {
-"adopted": 7,
-"checked": 0,
-"crit": {
-"dreams": 0.75,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 18,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 1.0,
-"reaches": 1.0,
-"skill": 0.2905
-},
-"eid": "membrane::Component:w:t6",
-"passed": false,
-"skill": 0.0581
-},
-"3": {
-"crit": {
-"focus": 1.0,
-"kinds": 0.0,
-"looks": 1.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": -0.7223
-},
-"4": {
-"crit": {
-"calibration": 0.6809974639858195,
-"news": 0.6534653465346534,
-"timed": 1.0
-},
-"passed": false,
-"skill": 0.3
-},
-"5": {
-"crit": {
-"audit": 1.0,
-"looks": 1.0
-},
-"passed": true,
-"skill": 1.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.28,
-"skill": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"passed": false,
-"skill": -0.176
-},
-"9": {
-"crit": {
-"looks": 0.3,
-"other": 1.0,
-"self": 0.18544444444444444
-},
-"labels": {
-"glass": "other",
-"stranger": "other"
-},
-"passed": false,
-"skill": 0.1669,
-"stranger_skill": -0.0731,
-"stranger_z": 0.37,
-"z": 1.83
-}
-},
-"rung2_stats": {
-"membrane::Component:chat:in:alice": {
-"auditable": true,
-"candidate": false,
-"p": 0.75,
-"reaches": 20,
-"skill": -0.7441
-},
-"membrane::Component:chat:in:bob": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.8388
-},
-"membrane::Component:w:t0": {
-"auditable": false,
-"candidate": false,
-"p": 0.048,
-"reaches": 20,
-"skill": -0.4754
-},
-"membrane::Component:w:t1": {
-"auditable": true,
-"candidate": false,
-"p": 0.932,
-"reaches": 20,
-"skill": -0.7223
-},
-"membrane::Component:w:t10": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.7902
-},
-"membrane::Component:w:t11": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.6112
-},
-"membrane::Component:w:t2": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.1457
-},
-"membrane::Component:w:t3": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.5609
-},
-"membrane::Component:w:t4": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.3766
-},
-"membrane::Component:w:t5": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.5395
-},
-"membrane::Component:w:t6": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": 0.0581
-},
-"membrane::Component:w:t7": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": 0.0181
-},
-"membrane::Component:w:t8": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 20,
-"skill": -0.2595
-},
-"membrane::Component:w:t9": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 17,
-"skill": -0.3235
-}
-},
-"series": {
-"membrane::Component:chat:in:alice": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 611.3532582342978,
-"model": "m-b",
-"o": 1.0,
-"p": 0.5,
-"p_llm": 0.599,
-"p_self": 0.5,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760000221.110945,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 611.3532582342978,
-"model": null,
-"o": 1.0,
-"p": 0.4224,
-"p_llm": null,
-"p_self": 0.4224,
-"rate": 0.75,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.4224,
-"ts": 1760000334.229066,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 0.0,
-"p": 0.846,
-"p_llm": null,
-"p_self": 0.846,
-"rate": 0.8333333333333334,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760003328.8603363,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 3399.360243320465,
-"model": null,
-"o": 0.0,
-"p": 0.8307,
-"p_llm": null,
-"p_self": 0.8307,
-"rate": 0.625,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.8307,
-"ts": 1760003672.8228831,
-"w": 0.0
-},
-{
-"cal": [
-0.4013,
-0.0
-],
-"gap": 6708.581657171249,
-"model": "m-b",
-"o": 1.0,
-"p": 0.819,
-"p_llm": 0.496,
-"p_self": 0.819,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.819,
-"ts": 1760006942.162938,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 8785.818650484085,
-"model": "m-a",
-"o": 1.0,
-"p": 0.708,
-"p_llm": 0.077,
-"p_self": 0.708,
-"rate": 0.5833333333333334,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.708,
-"ts": 1760009415.8970926,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 9838.26966881752,
-"model": null,
-"o": 1.0,
-"p": 0.2733,
-"p_llm": 0.361,
-"p_self": 0.2733,
-"rate": 0.6428571428571429,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.2733,
-"ts": 1760010114.2191682,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 780.2250121585495,
-"model": null,
-"o": 0.0,
-"p": 0.7048,
-"p_llm": null,
-"p_self": 0.7048,
-"rate": 0.6875,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760013127.3537297,
-"w": 0.0
-},
-{
-"cal": [
--0.571,
-0.0
-],
-"gap": 850.5987954513195,
-"model": null,
-"o": 0.0,
-"p": 0.6156,
-"p_llm": 0.541,
-"p_self": 0.6156,
-"rate": 0.6111111111111112,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760015874.614911,
-"w": 0.0
-},
-{
-"cal": [
--0.2033,
-0.0
-],
-"gap": 850.5987954513195,
-"model": null,
-"o": 1.0,
-"p": 0.8121,
-"p_llm": 0.809,
-"p_self": 0.8121,
-"rate": 0.55,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.8121,
-"ts": 1760015997.62978,
-"w": 0.0
-},
-{
-"cal": [
-0.3456,
-0.0
-],
-"gap": 850.5987954513195,
-"model": null,
-"o": 1.0,
-"p": 0.074,
-"p_llm": 0.881,
-"p_self": 0.074,
-"rate": 0.5909090909090909,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.074,
-"ts": 1760016056.0618274,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 668.9430859088898,
-"model": null,
-"o": 0.0,
-"p": 0.1918,
-"p_llm": null,
-"p_self": 0.1918,
-"rate": 0.625,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.1918,
-"ts": 1760016947.9019206,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 256.08717294134726,
-"model": null,
-"o": 0.0,
-"p": 0.5725,
-"p_llm": null,
-"p_self": 0.5725,
-"rate": 0.5769230769230769,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760021770.3344536,
-"w": 0.0
-},
-{
-"cal": [
-0.1926,
-0.0133
-],
-"gap": 881.5936053592865,
-"model": "m-b",
-"o": 1.0,
-"p": 0.5097141904922512,
-"p_llm": 0.945,
-"p_self": 0.5009,
-"rate": 0.5357142857142857,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760023300.795469,
-"w": 0.0133
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 881.5936053592865,
-"model": null,
-"o": 0.0,
-"p": 0.81,
-"p_llm": null,
-"p_self": 0.81,
-"rate": 0.5666666666666667,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.81,
-"ts": 1760023317.6048124,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 0.0,
-"p": 0.0574,
-"p_llm": null,
-"p_self": 0.0574,
-"rate": 0.53125,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.0574,
-"ts": 1760024008.5966482,
-"w": 0.0
-},
-{
-"cal": [
-0.0005,
-0.3
-],
-"gap": 177.37136397179714,
-"model": "m-a",
-"o": 0.0,
-"p": 0.6412,
-"p_llm": 0.239,
-"p_self": 0.4645,
-"rate": 0.5,
-"rec_cal": [
-0.0005,
-0.3
-],
-"rec_p": 0.6412,
-"rec_p_self": null,
-"ts": 1760024673.6561065,
-"w": 0.3
-},
-{
-"cal": [
--1.821,
-0.0
-],
-"gap": 177.37136397179714,
-"model": "m-a",
-"o": 0.0,
-"p": 0.1653,
-"p_llm": 0.601,
-"p_self": 0.1653,
-"rate": 0.4722222222222222,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.1653,
-"ts": 1760024794.3053124,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 780.34380986379,
-"model": null,
-"o": 0.0,
-"p": 0.3666,
-"p_llm": null,
-"p_self": 0.3666,
-"rate": 0.4473684210526316,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760031425.3611755,
-"w": 0.0
-},
-{
-"cal": [
--1.0775,
-0.0
-],
-"gap": 152.03274085132747,
-"model": "m-a",
-"o": 1.0,
-"p": 0.3469,
-"p_llm": 0.214,
-"p_self": 0.3469,
-"rate": 0.425,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.3469,
-"ts": 1760037222.0753014,
-"w": 0.0
-},
-{
-"cal": [
--1.1333,
-0.0
-],
-"gap": 152.03274085132747,
-"model": "m-a",
-"o": 1.0,
-"p": 0.5227,
-"p_llm": 0.889,
-"p_self": 0.5227,
-"rate": 0.4523809523809524,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.5227,
-"ts": 1760037240.3613436,
-"w": 0.0
-},
-{
-"cal": [
-1.0764,
-0.0571
-],
-"gap": 152.03274085132747,
-"model": "m-b",
-"o": 1.0,
-"p": 0.38775853041246044,
-"p_llm": 0.171,
-"p_self": 0.4243,
-"rate": 0.4772727272727273,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.4243,
-"ts": 1760039536.4145007,
-"w": 0.0571
-},
-{
-"cal": [
--0.913,
-0.8329
-],
-"gap": 152.03274085132747,
-"model": "m-a",
-"o": 0.0,
-"p": 0.5694,
-"p_llm": 0.16,
-"p_self": 0.5045,
-"rate": 0.5,
-"rec_cal": [
--0.913,
-0.8329
-],
-"rec_p": 0.5694,
-"rec_p_self": null,
-"ts": 1760040106.9008107,
-"w": 0.8329
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 152.03274085132747,
-"model": null,
-"o": 1.0,
-"p": 0.7418,
-"p_llm": null,
-"p_self": 0.7418,
-"rate": 0.4791666666666667,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.7418,
-"ts": 1760040430.250514,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 553.3661736315992,
-"model": null,
-"o": 1.0,
-"p": 0.6928,
-"p_llm": null,
-"p_self": 0.6928,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6928,
-"ts": 1760042198.8256552,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 434.6547316348352,
-"model": null,
-"o": 0.0,
-"p": 0.5378,
-"p_llm": null,
-"p_self": 0.5378,
-"rate": 0.5192307692307693,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760044402.8895862,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 626.0669841766357,
-"model": null,
-"o": 1.0,
-"p": 0.177,
-"p_llm": null,
-"p_self": 0.177,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.177,
-"ts": 1760047882.6166465,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 574.2599066927725,
-"model": null,
-"o": 0.0,
-"p": 0.7082,
-"p_llm": null,
-"p_self": 0.7082,
-"rate": 0.5178571428571429,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.7082,
-"ts": 1760050146.832051,
-"w": 0.0
-}
-],
-"membrane::Component:chat:in:bob": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 123.69180256999833,
-"model": "m-a",
-"o": 0.0,
-"p": 0.5,
-"p_llm": 0.813,
-"p_self": 0.5,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760009398.9202185,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 808.4711107540744,
-"model": null,
-"o": 0.0,
-"p": 0.5925,
-"p_llm": 0.455,
-"p_self": 0.5925,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.5925,
-"ts": 1760009961.2293074,
-"w": 0.0
-},
-{
-"cal": [
--0.1805,
-0.0
-],
-"gap": 386.98880615444244,
-"model": null,
-"o": 0.0,
-"p": 0.41529999999999995,
-"p_llm": 0.237,
-"p_self": 0.4153,
-"rate": 0.16666666666666666,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.4153,
-"ts": 1760015580.2605176,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 95.21173906608398,
-"model": null,
-"o": 0.0,
-"p": 0.408,
-"p_llm": null,
-"p_self": 0.408,
-"rate": 0.125,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.408,
-"ts": 1760016311.659053,
-"w": 0.0
-},
-{
-"cal": [
--0.6748,
-0.0
-],
-"gap": 1541.350811958313,
-"model": null,
-"o": 1.0,
-"p": 0.39890000000000003,
-"p_llm": 0.327,
-"p_self": 0.3989,
-"rate": 0.1,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.3989,
-"ts": 1760031012.6372674,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 630.0127424133151,
-"model": "m-b",
-"o": 1.0,
-"p": 0.23730000000000007,
-"p_llm": 0.811,
-"p_self": 0.2373,
-"rate": 0.25,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760037254.783975,
-"w": 0.0
-},
-{
-"cal": [
-1.4696,
-0.0
-],
-"gap": 630.0127424133151,
-"model": "m-a",
-"o": 0.0,
-"p": 0.8936,
-"p_llm": 0.099,
-"p_self": 0.8936,
-"rate": 0.35714285714285715,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.8936,
-"ts": 1760037276.9309268,
-"w": 0.0
-},
-{
-"cal": [
--0.0298,
-0.3118
-],
-"gap": 773.3771003056747,
-"model": null,
-"o": 0.0,
-"p": 0.902,
-"p_llm": 0.453,
-"p_self": 0.1018,
-"rate": 0.3125,
-"rec_cal": [
--0.0298,
-0.3118
-],
-"rec_p": 0.902,
-"rec_p_self": 0.1018,
-"ts": 1760039404.5344071,
-"w": 0.3118
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 4789.047811746597,
-"model": null,
-"o": 0.0,
-"p": 0.2709,
-"p_llm": null,
-"p_self": 0.2709,
-"rate": 0.2777777777777778,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760044226.0159533,
-"w": 0.0
-}
-]
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t10": "other",
-"membrane::Component:w:t11": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other",
-"membrane::Component:w:t6": "other",
-"membrane::Component:w:t7": "other",
-"membrane::Component:w:t8": "other",
-"membrane::Component:w:t9": "other"
-},
-"status": {
-"accepted": [
-"feel",
-"reach",
-"mirror",
-"change",
-"speak"
-],
-"aim": "shift",
-"allow": [
-"feel",
-"reach",
-"kinds",
-"shift",
-"nudge"
-],
-"allowed": [
-"feel",
-"reach",
-"kinds",
-"shift",
-"nudge"
-],
-"awaiting": [
-"kinds",
-"patience"
-],
-"bar": 1.0,
-"born": true,
-"change": {
-"adopted": 7,
-"checks": 0,
-"defaults": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-},
-"dreams": 18,
-"last": {
-"cost_s": null,
-"from": 30,
-"gain": -0.001626820016956767,
-"reason": null,
-"setting": "lam_looks",
-"to": 45,
-"ts": 1760054971.6394563,
-"verdict": "rejected",
-"z": 3.21835683320936
-},
-"settings": {
-"lam_looks": 30,
-"lam_prior_looks": 3.0
-}
-},
-"curiosity": [],
-"cycles": 456,
-"earned": [
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760000325.262236
-},
-{
-"id": "feel",
-"name": "feel itself",
-"ts": 1760001109.0409694
-},
-{
-"id": "reach",
-"name": "look",
-"ts": 1760010612.3762524
-},
-{
-"id": "speak",
-"name": "speak",
-"ts": 1760021077.202254
-},
-{
-"id": "patience",
-"name": "patience",
-"ts": 1760039486.4609938
-},
-{
-"id": "change",
-"name": "change itself",
-"ts": 1760042306.5700195
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"ts": 1760052509.5906453
-}
-],
-"held": false,
-"ladder": [
-{
-"id": null,
-"name": "sleep and wake",
-"rung": 0,
-"state": "passed"
-},
-{
-"id": "feel",
-"name": "feel itself",
-"rung": 1,
-"state": "passed"
-},
-{
-"id": "reach",
-"name": "look",
-"rung": 2,
-"state": "passed"
-},
-{
-"id": "kinds",
-"name": "tell things apart",
-"rung": 3,
-"state": "passed"
-},
-{
-"id": "patience",
-"name": "patience",
-"rung": 4,
-"state": "passed"
-},
-{
-"id": "shift",
-"name": "notice the world changed",
-"rung": 5,
-"state": "current"
-},
-{
-"id": "meet",
-"name": "meet an other",
-"rung": 6,
-"state": "locked"
-},
-{
-"id": "turns",
-"name": "time its turn",
-"rung": 7,
-"state": "locked"
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"rung": 8,
-"state": "locked"
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"rung": 9,
-"state": "passed"
-},
-{
-"id": "change",
-"name": "change itself",
-"rung": 10,
-"state": "passed"
-},
-{
-"id": "speak",
-"name": "speak",
-"rung": 11,
-"state": "passed"
-},
-{
-"id": "nudge",
-"name": "first reach",
-"rung": 13,
-"state": "current"
-}
-],
-"level": 7,
-"limit": 13,
-"meets": {
-"heard_age": 9949389.315,
-"medium": "chat",
-"other": "membrane::Component:chat:in:alice",
-"push_age": 9945005.798,
-"pushes": 161
-},
-"mode": "on",
-"next": [
-"shift",
-"nudge"
-],
-"off_field": {
-"looks": 200,
-"off": null,
-"things": []
-},
-"old_wiring": [
-{
-"id": "meet",
-"name": "meet an other",
-"ts": 1760018595.629679
-},
-{
-"id": "expect",
-"name": "expect a reply",
-"ts": 1760020615.7359664
-},
-{
-"id": "mirror",
-"name": "recognize itself",
-"ts": 1760036490.2169363
-}
-],
-"rung": 7,
-"rung7": {
-"best": null,
-"bins": [
-{
-"bin": "0-2m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "2-10m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "10-30m",
-"pushes": 0,
-"rate": null,
-"replied": 0
-},
-{
-"bin": "30m+",
-"pushes": 0,
-"rate": null,
-"replied": 0
-}
-],
-"blind_rate": null,
-"chance": null,
-"checked": 0,
-"clock": 1,
-"medium": "chat",
-"payoff": null,
-"payoff_z": 0.0,
-"pushes": 71,
-"reply_rate": null,
-"share": null,
-"window": 0,
-"z": 0.0
-},
-"rung8": {
-"advisor_model": "m-a",
-"advisor_weight": 0.1135,
-"asked": 63,
-"base_rate": 0.5,
-"brier_mix": 0.3294,
-"brier_model": 0.2702,
-"brier_rate": 0.2801,
-"brier_self": 0.3187,
-"checked": 52,
-"checks": 28,
-"pair_rate": 0.1923,
-"paired": 10,
-"recent_rate": 0.5
-},
-"rung_name": "tell things apart",
-"skill": 1.0,
-"skill_measured": true,
-"skill_pass": 1.0,
-"skill_rung": 5,
-"slipping": true,
-"speak": {
-"false": 0,
-"last_words": null,
-"lift": 0.0,
-"mute": 0,
-"n_plain": 0,
-"n_words": 0,
-"plain": 0,
-"rate_plain": null,
-"rate_words": null,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"window": 0,
-"words": 0,
-"z": 0.0
-},
-"split": {
-"membrane::Component:chat:in:alice": "other",
-"membrane::Component:chat:in:bob": "other",
-"membrane::Component:w:t0": "other",
-"membrane::Component:w:t1": "other",
-"membrane::Component:w:t10": "other",
-"membrane::Component:w:t11": "other",
-"membrane::Component:w:t2": "other",
-"membrane::Component:w:t3": "other",
-"membrane::Component:w:t4": "other",
-"membrane::Component:w:t5": "other",
-"membrane::Component:w:t6": "other",
-"membrane::Component:w:t7": "other",
-"membrane::Component:w:t8": "other",
-"membrane::Component:w:t9": "other"
-},
-"steer": {
-"err": 0.2118,
-"naive": 0.2881,
-"skill": 0.265
-},
-"toys": [],
-"unlock": {
-"id": "reach",
-"late": true,
-"rung": 2,
-"toys": [
-{
-"icon": "\ud83e\ude9e",
-"kind": "mirror"
-},
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760054376.8934686
-},
-"waiting_on": null,
-"world": {
-"membrane::Component:chat:in:alice": "intermittent",
-"membrane::Component:chat:in:bob": "intermittent",
-"membrane::Component:w:t0": "intermittent",
-"membrane::Component:w:t1": "intermittent",
-"membrane::Component:w:t10": "intermittent",
-"membrane::Component:w:t11": "intermittent",
-"membrane::Component:w:t2": "intermittent",
-"membrane::Component:w:t3": "intermittent",
-"membrane::Component:w:t4": "intermittent",
-"membrane::Component:w:t5": "intermittent",
-"membrane::Component:w:t6": "intermittent",
-"membrane::Component:w:t7": "intermittent",
-"membrane::Component:w:t8": "intermittent",
-"membrane::Component:w:t9": "intermittent"
-}
-}
-},
-"random_many_things": {
-"earn_order": [
-"feel",
-"kinds",
-"patience",
-"meet",
-"mirror",
-"change",
-"speak"
-],
-"latest_unlock": {
-"id": "mirror",
-"late": true,
-"rung": 9,
-"toys": [
-{
-"icon": "\u26bd",
-"kind": "ball"
-},
-{
-"icon": "",
-"kind": "dice"
-}
-],
-"ts": 1760026645.753911
-},
-"open_ids": [
-"reach",
-"nudge",
-"turns",
-"expect"
-],
-"progress": {
-"1": {
-"crit": {
-"pushes": 1.0,
-"skill": 0.7457244103256435
-},
-"passed": false,
-"skill": 0.3729
-},
-"10": {
-"adopted": 7,
-"checked": 0,
-"crit": {
-"dreams": 0.375,
-"honesty": 0.0,
-"judgement": 0.0
-},
-"dreams": 9,
-"gain_after": null,
-"held": 0,
-"misses": 0,
-"passed": false,
-"skill": 0.0,
-"z_after": 0.0
-},
-"11": {
-"crit": {
-"lift": 0.0,
-"pushes": 0.0,
-"timing": 0.0,
-"truth": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"false": 0,
-"n": 0,
-"n_plain": 0,
-"n_words": 0,
-"passed": false,
-"rate_plain": null,
-"rate_words": null,
-"skill": 0.0,
-"timing_chance": null,
-"timing_share": null,
-"timing_z": 0.0,
-"z": 0.0
-},
-"13": {
-"crit": {
-"audit": 0.0,
-"looks": 0.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"2": {
-"crit": {
-"audit": 1.0,
-"reaches": 0.4,
-"skill": 0.0
-},
-"eid": "membrane::Component:w:t1",
-"passed": false,
-"skill": -1.1546
-},
-"3": {
-"crit": {
-"focus": 1.0,
-"kinds": 0.0,
-"looks": 1.0,
-"skill": 0.0
-},
-"passed": false,
-"skill": -1.1546
-},
-"4": {
-"crit": {
-"calibration": 0.597662439699868,
-"news": 0.4153248195446974,
-"timed": 1.0
-},
-"passed": false,
-"skill": 0.2
-},
-"5": {
-"crit": {
-"audit": 1.0,
-"looks": 1.0
-},
-"passed": true,
-"skill": 1.0
-},
-"6": {
-"crit": {
-"audit": 0.0,
-"lift": 0.0,
-"looks": 0.0
-},
-"passed": false,
-"skill": 0.0
-},
-"7": {
-"blind_rate": null,
-"chance": null,
-"crit": {
-"contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
-},
-"n": 0,
-"passed": false,
-"payoff": null,
-"payoff_z": 0.0,
-"reply_rate": null,
-"share": null,
-"skill": 0.0,
-"z": 0.0
-},
-"8": {
-"crit": {
-"looks": 0.12,
-"skill": 0.0
-},
-"eid": "membrane::Component:chat:in:alice",
-"passed": false,
-"skill": -0.1594
-},
-"9": {
-"crit": {
-"looks": 0.33,
-"other": 1.0,
-"self": 0.0
-},
-"labels": {
-"glass": "other",
-"stranger": "other"
-},
-"passed": false,
-"skill": -0.0384,
-"stranger_skill": 0.3854,
-"stranger_z": 0.87,
-"z": -0.17
-}
-},
-"rung2_stats": {
-"membrane::Component:chat:in:alice": {
-"auditable": true,
-"candidate": false,
-"p": 0.75,
-"reaches": 18,
-"skill": -1.2208
-},
-"membrane::Component:chat:in:bob": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 11,
-"skill": -0.9151
-},
-"membrane::Component:w:t0": {
-"auditable": false,
-"candidate": false,
-"p": 0.048,
-"reaches": 12,
-"skill": -0.5244
-},
-"membrane::Component:w:t1": {
-"auditable": true,
-"candidate": false,
-"p": 0.932,
-"reaches": 8,
-"skill": -1.1546
-},
-"membrane::Component:w:t10": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 11,
-"skill": 0.2765
-},
-"membrane::Component:w:t11": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 8,
-"skill": -0.8622
-},
-"membrane::Component:w:t12": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 18,
-"skill": -0.9564
-},
-"membrane::Component:w:t13": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 7,
-"skill": -0.0323
-},
-"membrane::Component:w:t14": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 10,
-"skill": 0.2154
-},
-"membrane::Component:w:t15": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 7,
-"skill": 0.0061
-},
-"membrane::Component:w:t16": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 16,
-"skill": -0.1102
-},
-"membrane::Component:w:t17": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 8,
-"skill": -1.1016
-},
-"membrane::Component:w:t18": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 10,
-"skill": -0.0299
-},
-"membrane::Component:w:t19": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 12,
-"skill": 0.3132
-},
-"membrane::Component:w:t2": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 6,
-"skill": 0.0273
-},
-"membrane::Component:w:t20": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 16,
-"skill": -0.082
-},
-"membrane::Component:w:t21": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 9,
-"skill": 0.0437
-},
-"membrane::Component:w:t22": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 9,
-"skill": -2.2594
-},
-"membrane::Component:w:t23": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 7,
-"skill": -0.8803
-},
-"membrane::Component:w:t24": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 4,
-"skill": 0.3673
-},
-"membrane::Component:w:t25": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 15,
-"skill": -0.5619
-},
-"membrane::Component:w:t26": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 12,
-"skill": -0.3204
-},
-"membrane::Component:w:t27": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 12,
-"skill": 0.0852
-},
-"membrane::Component:w:t28": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 9,
-"skill": -3.1782
-},
-"membrane::Component:w:t29": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 13,
-"skill": -0.6211
-},
-"membrane::Component:w:t3": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 5,
-"skill": 0.3507
-},
-"membrane::Component:w:t30": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 6,
-"skill": -1.3246
-},
-"membrane::Component:w:t31": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 12,
-"skill": -2.657
-},
-"membrane::Component:w:t32": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 6,
-"skill": 0.1048
-},
-"membrane::Component:w:t33": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 7,
-"skill": -0.4292
-},
-"membrane::Component:w:t34": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 12,
-"skill": -0.9165
-},
-"membrane::Component:w:t35": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 7,
-"skill": -1.2956
-},
-"membrane::Component:w:t36": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 14,
-"skill": -0.5262
-},
-"membrane::Component:w:t37": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 14,
-"skill": -1.3135
-},
-"membrane::Component:w:t38": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 13,
-"skill": -0.1558
-},
-"membrane::Component:w:t39": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 7,
-"skill": -0.9993
-},
-"membrane::Component:w:t4": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 17,
-"skill": 0.323
-},
-"membrane::Component:w:t5": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 5,
-"skill": -0.6857
-},
-"membrane::Component:w:t6": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 5,
-"skill": -0.6276
-},
-"membrane::Component:w:t7": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 9,
-"skill": -0.4829
-},
-"membrane::Component:w:t8": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 6,
-"skill": -0.4747
-},
-"membrane::Component:w:t9": {
-"auditable": false,
-"candidate": false,
-"p": 0.5,
-"reaches": 9,
-"skill": -0.9237
-}
-},
-"series": {
-"membrane::Component:chat:in:alice": [
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.5,
-"p_llm": 0.933,
-"p_self": 0.5,
-"rate": 0.5,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760000579.951175,
-"w": 0.0
-},
-{
-"cal": [
--0.1647,
-0.8634
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.631,
-"p_llm": 0.823,
-"p_self": 0.759,
-"rate": 0.75,
-"rec_cal": [
--0.1647,
-0.8634
-],
-"rec_p": 0.631,
-"rec_p_self": null,
-"ts": 1760002020.240962,
-"w": 0.8634
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 625.0581216193343,
-"model": null,
-"o": 0.0,
-"p": 0.385,
-"p_llm": null,
-"p_self": 0.385,
-"rate": 0.8333333333333334,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.385,
-"ts": 1760009297.8357637,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 450.4685604793968,
-"model": null,
-"o": 0.0,
-"p": 0.5613,
-"p_llm": null,
-"p_self": 0.5613,
-"rate": 0.625,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.5613,
-"ts": 1760014333.3156533,
-"w": 0.0
-},
-{
-"cal": [
-0.1664,
-0.4638
-],
-"gap": 5069.920705080032,
-"model": "m-b",
-"o": 0.0,
-"p": 0.4588,
-"p_llm": 0.05,
-"p_self": 0.4828,
-"rate": 0.5,
-"rec_cal": [
-0.1664,
-0.4638
-],
-"rec_p": 0.4588,
-"rec_p_self": null,
-"ts": 1760016070.8500419,
-"w": 0.4638
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 14412.119420289993,
-"model": "m-a",
-"o": 0.0,
-"p": 0.3794,
-"p_llm": 0.618,
-"p_self": 0.3794,
-"rate": 0.4166666666666667,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760023972.4629436,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": null,
-"model": null,
-"o": 1.0,
-"p": 0.3081,
-"p_llm": null,
-"p_self": 0.3081,
-"rate": 0.35714285714285715,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760024601.3690126,
-"w": 0.0
-},
-{
-"cal": [
-0.4811,
-0.0
-],
-"gap": 2871.055621623993,
-"model": "m-a",
-"o": 0.0,
-"p": 0.4227000000000001,
-"p_llm": 0.284,
-"p_self": 0.4227,
-"rate": 0.4375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": null,
-"ts": 1760028244.8441465,
-"w": 0.0
-},
-{
-"cal": [
--2.9444,
-0.0
-],
-"gap": 362.4545488164693,
-"model": "m-b",
-"o": 0.0,
-"p": 0.06359999999999999,
-"p_llm": 0.055,
-"p_self": 0.0636,
-"rate": 0.3888888888888889,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.0636,
-"ts": 1760028637.9082365,
-"w": 0.0
-},
-{
-"cal": [
-0.4533,
-0.5565
-],
-"gap": 628.2897421568182,
-"model": "m-b",
-"o": 0.0,
-"p": 0.9469,
-"p_llm": 0.015,
-"p_self": 0.3027,
-"rate": 0.35,
-"rec_cal": [
-0.4533,
-0.5565
-],
-"rec_p": 0.9469,
-"rec_p_self": null,
-"ts": 1760030804.2250893,
-"w": 0.5565
-},
-{
-"cal": [
--0.1976,
-0.9545
-],
-"gap": 799.1762196025934,
-"model": "m-a",
-"o": 1.0,
-"p": 0.2651,
-"p_llm": 0.897,
-"p_self": 0.2645,
-"rate": 0.3181818181818182,
-"rec_cal": [
--0.1976,
-0.9545
-],
-"rec_p": 0.2651,
-"rec_p_self": null,
-"ts": 1760031185.4004717,
-"w": 0.9545
-},
-{
-"cal": [
--3.3243,
-0.0089
-],
-"gap": 737.4082664291627,
-"model": "m-b",
-"o": 0.0,
-"p": 0.7278562958711209,
-"p_llm": 0.384,
-"p_self": 0.7228,
-"rate": 0.375,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.7228,
-"ts": 1760036687.2074807,
-"w": 0.0089
-}
-],
-"membrane::Component:chat:in:bob": [
-{
-"cal": [
--0.7373,
-0.6539
-],
-"gap": null,
-"model": "m-b",
-"o": 1.0,
-"p": 0.3507,
-"p_llm": 0.191,
-"p_self": 0.5,
-"rate": 0.5,
-"rec_cal": [
--0.7373,
-0.6539
-],
-"rec_p": 0.3507,
-"rec_p_self": null,
-"ts": 1760001448.0848794,
-"w": 0.6539
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 784.0110626746172,
-"model": "m-a",
-"o": 1.0,
-"p": 0.6885,
-"p_llm": 0.902,
-"p_self": 0.6885,
-"rate": 0.75,
-"rec_cal": null,
-"rec_p": null,
-"rec_p_self": 0.6885,
-"ts": 1760023787.6390314,
-"w": 0.0
-},
-{
-"cal": [
-0.0,
-0.0
-],
-"gap": 237.6957272720588,
-"model": null,
-"o": 1.0,
-"p": 0.8466,
-"p_llm": null,
-"p_self": 0.8466,
+"p_self": 0.8461,
 "rate": 0.8333333333333334,
 "rec_cal": null,
 "rec_p": null,
@@ -14696,25 +5620,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -14723,30 +5647,24 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 55,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 55,
-"base_rate": 0.3462,
-"brier_mix": 0.3193,
-"brier_model": 0.0736,
-"brier_rate": 0.2754,
-"brier_self": 0.2471,
-"checked": 45,
-"checks": 12,
-"pair_rate": 0.2,
-"paired": 9,
-"recent_rate": 0.3571
+"base_rate": null,
+"brier_rate": null,
+"brier_self": null,
+"checks": 0,
+"follow_ups": 0,
+"other": null,
+"recent_rate": null
 },
 "rung_name": "tell things apart",
 "skill": -1.1546,
@@ -15021,8 +5939,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -15035,12 +5953,11 @@
 },
 "8": {
 "crit": {
-"looks": 0.18,
+"looks": 0.0,
 "skill": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
-"skill": -0.0436
+"skill": 0.0
 },
 "9": {
 "crit": {
@@ -15277,9 +6194,9 @@
 "gap": 2911.9128913879395,
 "model": "m-a",
 "o": 0.0,
-"p": 0.5833589988964918,
+"p": 0.5821425252212711,
 "p_llm": 0.989,
-"p_self": 0.3999,
+"p_self": 0.3987,
 "rate": 0.3888888888888889,
 "rec_cal": null,
 "rec_p": null,
@@ -15316,9 +6233,9 @@
 "gap": 1706.5069403648376,
 "model": "m-a",
 "o": 1.0,
-"p": 0.2997000000000001,
+"p": 0.2996,
 "p_llm": 0.558,
-"p_self": 0.2997,
+"p_self": 0.2996,
 "rate": 0.3181818181818182,
 "rec_cal": null,
 "rec_p": null,
@@ -15334,9 +6251,9 @@
 "gap": 4000.89767742157,
 "model": null,
 "o": 0.0,
-"p": 0.3441,
+"p": 0.3431,
 "p_llm": null,
-"p_self": 0.3441,
+"p_self": 0.3431,
 "rate": 0.375,
 "rec_cal": null,
 "rec_p": null,
@@ -15401,12 +6318,12 @@
 {
 "cal": [
 0.2166,
-0.0006
+0.0009
 ],
 "gap": 316.20475024254847,
 "model": "m-a",
 "o": 1.0,
-"p": 0.7874519952997907,
+"p": 0.787327913656435,
 "p_llm": 0.095,
 "p_self": 0.7877,
 "rate": 0.28125,
@@ -15414,7 +6331,7 @@
 "rec_p": null,
 "rec_p_self": 0.7877,
 "ts": 1760018748.6094563,
-"w": 0.0006
+"w": 0.0009
 },
 {
 "cal": [
@@ -15424,9 +6341,9 @@
 "gap": null,
 "model": null,
 "o": 1.0,
-"p": 0.2823,
+"p": 0.2817,
 "p_llm": 0.094,
-"p_self": 0.2823,
+"p_self": 0.2817,
 "rate": 0.3235294117647059,
 "rec_cal": null,
 "rec_p": null,
@@ -15442,9 +6359,9 @@
 "gap": 524.1886866546594,
 "model": "m-b",
 "o": 1.0,
-"p": 0.33760000000000007,
+"p": 0.3425,
 "p_llm": 0.374,
-"p_self": 0.3376,
+"p_self": 0.3425,
 "rate": 0.3611111111111111,
 "rec_cal": null,
 "rec_p": null,
@@ -15480,9 +6397,9 @@
 "gap": 668.785197320051,
 "model": null,
 "o": 0.0,
-"p": 0.2401,
+"p": 0.241,
 "p_llm": null,
-"p_self": 0.2401,
+"p_self": 0.241,
 "rate": 0.25,
 "rec_cal": null,
 "rec_p": null,
@@ -15516,9 +6433,9 @@
 "gap": 1304.1316258907318,
 "model": null,
 "o": 1.0,
-"p": 0.1119,
+"p": 0.1121,
 "p_llm": null,
-"p_self": 0.1119,
+"p_self": 0.1121,
 "rate": 0.125,
 "rec_cal": null,
 "rec_p": null,
@@ -15588,9 +6505,9 @@
 "gap": 3561.0887744426727,
 "model": "m-a",
 "o": 0.0,
-"p": 0.44670000000000004,
+"p": 0.4466,
 "p_llm": 0.752,
-"p_self": 0.4467,
+"p_self": 0.4466,
 "rate": 0.4375,
 "rec_cal": null,
 "rec_p": null,
@@ -15662,7 +6579,7 @@
 "o": 0.0,
 "p": 0.7042,
 "p_llm": 0.412,
-"p_self": 0.3727,
+"p_self": 0.3749,
 "rate": 0.375,
 "rec_cal": [
 0.4256,
@@ -15930,25 +6847,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -15957,30 +6874,24 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 27,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": "m-b",
-"advisor_weight": 0.0,
-"asked": 27,
-"base_rate": 0.3947,
-"brier_mix": 0.2932,
-"brier_model": 0.3944,
-"brier_rate": 0.2809,
-"brier_self": 0.272,
-"checked": 23,
-"checks": 18,
-"pair_rate": 0.3043,
-"paired": 7,
-"recent_rate": 0.5
+"base_rate": null,
+"brier_rate": null,
+"brier_self": null,
+"checks": 0,
+"follow_ups": 0,
+"other": null,
+"recent_rate": null
 },
 "rung_name": "tell things apart",
 "skill": 0.25,
@@ -16162,8 +7073,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -16336,25 +7247,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -16363,29 +7274,23 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 0,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
 "base_rate": null,
-"brier_mix": null,
-"brier_model": null,
 "brier_rate": null,
 "brier_self": null,
-"checked": 0,
 "checks": 0,
-"pair_rate": null,
-"paired": 0,
+"follow_ups": 0,
+"other": null,
 "recent_rate": null
 },
 "rung_name": "sleep and wake",
@@ -16552,8 +7457,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -16566,12 +7471,11 @@
 },
 "8": {
 "crit": {
-"looks": 0.16,
+"looks": 0.0,
 "skill": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
-"skill": -0.0054
+"skill": 0.0
 },
 "9": {
 "crit": {
@@ -16697,9 +7601,9 @@
 "gap": 183.93602694860073,
 "model": null,
 "o": 0.0,
-"p": 0.4026,
+"p": 0.4051,
 "p_llm": null,
-"p_self": 0.4026,
+"p_self": 0.4051,
 "rate": 0.39285714285714285,
 "rec_cal": null,
 "rec_p": null,
@@ -16717,7 +7621,7 @@
 "o": 0.0,
 "p": 0.2225,
 "p_llm": 0.439,
-"p_self": 0.3635,
+"p_self": 0.3631,
 "rate": 0.36666666666666664,
 "rec_cal": [
 -0.3993,
@@ -16736,9 +7640,9 @@
 "gap": 1759.7512333393097,
 "model": null,
 "o": 1.0,
-"p": 0.3277,
+"p": 0.3279,
 "p_llm": null,
-"p_self": 0.3277,
+"p_self": 0.3279,
 "rate": 0.34375,
 "rec_cal": null,
 "rec_p": null,
@@ -16790,9 +7694,9 @@
 "gap": 429.18992495536804,
 "model": null,
 "o": 0.0,
-"p": 0.336,
+"p": 0.3451,
 "p_llm": null,
-"p_self": 0.336,
+"p_self": 0.3451,
 "rate": 0.34210526315789475,
 "rec_cal": null,
 "rec_p": null,
@@ -17296,25 +8200,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -17323,30 +8227,24 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 16,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": null,
-"advisor_weight": 0.3455,
-"asked": 28,
-"base_rate": 0.375,
-"brier_mix": 0.2481,
-"brier_model": 0.1769,
-"brier_rate": 0.2468,
-"brier_self": 0.2432,
-"checked": 22,
-"checks": 16,
-"pair_rate": 0.3636,
-"paired": 8,
-"recent_rate": 0.6429
+"base_rate": null,
+"brier_rate": null,
+"brier_self": null,
+"checks": 0,
+"follow_ups": 0,
+"other": null,
+"recent_rate": null
 },
 "rung_name": "notice the world changed",
 "skill": 0.5235,
@@ -17542,8 +8440,8 @@
 "chance": null,
 "crit": {
 "contingency": 0.0,
-"payoff": 0.0,
-"pushes": 0.0
+"nudges": 0.0,
+"payoff": 0.0
 },
 "n": 0,
 "passed": false,
@@ -17743,25 +8641,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -17770,29 +8668,23 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 0,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
 "base_rate": null,
-"brier_mix": null,
-"brier_model": null,
 "brier_rate": null,
 "brier_self": null,
-"checked": 0,
 "checks": 0,
-"pair_rate": null,
-"paired": 0,
+"follow_ups": 0,
+"other": null,
 "recent_rate": null
 },
 "rung_name": "look",
@@ -17988,25 +8880,25 @@
 "best": null,
 "bins": [
 {
-"bin": "0-2m",
+"bin": "0-20s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "2-10m",
+"bin": "20-60s",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "10-30m",
+"bin": "1-3m",
 "pushes": 0,
 "rate": null,
 "replied": 0
 },
 {
-"bin": "30m+",
+"bin": "3m+",
 "pushes": 0,
 "rate": null,
 "replied": 0
@@ -18015,29 +8907,23 @@
 "blind_rate": null,
 "chance": null,
 "checked": 0,
-"clock": 1,
-"medium": "chat",
+"medium": "nudge",
+"nudges": 0,
+"other": null,
 "payoff": null,
 "payoff_z": 0.0,
-"pushes": 0,
 "reply_rate": null,
 "share": null,
 "window": 0,
 "z": 0.0
 },
 "rung8": {
-"advisor_model": null,
-"advisor_weight": 0.0,
-"asked": 0,
 "base_rate": null,
-"brier_mix": null,
-"brier_model": null,
 "brier_rate": null,
 "brier_self": null,
-"checked": 0,
 "checks": 0,
-"pair_rate": null,
-"paired": 0,
+"follow_ups": 0,
+"other": null,
 "recent_rate": null
 },
 "rung_name": "look",

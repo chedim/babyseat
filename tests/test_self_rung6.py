@@ -193,12 +193,3 @@ def test_meet_ages_are_absent_before_any_exchange():
     assert m["pushes"] == 0 and m["other"] is None
     assert m["push_age"] is None and m["heard_age"] is None
 
-
-@pytest.fixture(autouse=True)
-def _rebuilt_333(monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the scoring and the readers tested here run on the
-    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
-    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
-    from tests._self_cap import rebuilt
-    rebuilt(monkeypatch)

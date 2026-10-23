@@ -283,7 +283,7 @@ def drive_toy(kind, pusher, hours, seed):
 def windows(rows):
     """The test at every push: (ts, window stats) for each full window."""
     d = SL._turn_deltas(rows)
-    n = SL.RUNG7_PUSHES
+    n = SL.RUNG7_NUDGES
     clock = rows[0].get("clock", 1) if rows else 1                 # #278: the bar of the rows' clock
     return [(rows[j - 1]["ts"], SL._turn_window(d[j - n:j], clock)) for j in range(n, len(d) + 1)]
 
@@ -341,7 +341,7 @@ def table(driver, cases, seeds, hours, jobs=1, play=False):
 
 
 def main(seeds=100, hours=168.0):
-    print(f"window {SL.RUNG7_PUSHES} pushes; contingency z >= {SL.RUNG7_CONT_Z} and +{SL.RUNG7_CONT_MARGIN}; "
+    print(f"window {SL.RUNG7_NUDGES} pushes; contingency z >= {SL.RUNG7_CONT_Z} and +{SL.RUNG7_CONT_MARGIN}; "
           f"payoff t >= {SL.RUNG7_PAY_Z} and +{SL.RUNG7_PAY_MARGIN}; explore {SL.TURN_EXPLORE}, "
           f"wait {SL.MEET_EVERY:g}..{SL.MEET_MAX:g} s; {seeds} seeds x {hours:.0f} h")
     print(HEAD)
@@ -358,7 +358,7 @@ TOY_CASES = (("rhythm", "policy"), ("rhythm", "timer"), ("rhythm", "random"), ("
 
 def main_toy(seeds=100, hours=168.0, jobs=1):
     ck = SL._clock(SL.TOY_CLOCK)
-    print(f"#278, the toy medium on the ball's own clock: window {SL.RUNG7_PUSHES} turns; contingency z >= "
+    print(f"#278, the toy medium on the ball's own clock: window {SL.RUNG7_NUDGES} turns; contingency z >= "
           f"{ck['cont_z']} and +{ck['cont_margin']}; payoff t >= {ck['pay_z']} and +{ck['pay_margin']}; "
           f"bins {SL.TOY_TURN_BINS} s, wait {SL.TOY_MEET_EVERY:g}..{SL.TOY_MEET_MAX:g} s, check {SL.TOY_CHECK_S} s; "
           f"{seeds} seeds x {hours:.0f} h")

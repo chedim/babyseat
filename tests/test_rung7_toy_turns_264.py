@@ -454,15 +454,12 @@ def _mixed_record(chat=150, toy=30):
 
 def test_the_window_starts_fresh_with_the_ball():
     recs = _mixed_record()
-    out = SL._rung7(recs)
-    assert out["eid"] == BALL and out["n"] == 30
-    assert out["crit"]["pushes"] == pytest.approx(30 / SL.RUNG7_PUSHES)
+    rows = SL._turn_rows(recs, BALL)                 # the old turns, read as history (#333 part 3f: no test reads them)
+    assert len(rows) == 30
     first_toy = next(r["ts"] for r in recs if r.get("medium") == "toy")
-    assert all(r["ts"] >= first_toy for r in SL._turn_rows(recs, BALL))
-    r8 = SL._rung8(recs)
-    assert r8["eid"] == BALL and r8["crit"]["looks"] == pytest.approx(30 / SL.RUNG8_LOOKS)
-    st = SL._rung7_stats(recs)
-    assert st["medium"] == "toy" and st["checked"] == 30
+    assert all(r["ts"] >= first_toy for r in rows)
+    assert len(SL._rung8_rows(recs, BALL)) == 30
+    assert SL._rung7(recs)["crit"]["nudges"] == 0.0 and SL._rung8(recs)["crit"]["looks"] == 0.0
 
 
 def test_rows_of_another_medium_never_pair_even_at_one_target():
@@ -597,12 +594,3 @@ class TestDocs(unittest.TestCase):
         self.assertIn("`ball`", doc)
         self.assertIn("natural rhythm", doc)
 
-
-@pytest.fixture(autouse=True)
-def _rebuilt_333(monkeypatch):
-    """#333: meet, turns, expect and mirror are not built until they are rebuilt
-    on the nudge (part 3); the scoring and the readers tested here run on the
-    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
-    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
-    from tests._self_cap import rebuilt
-    rebuilt(monkeypatch)

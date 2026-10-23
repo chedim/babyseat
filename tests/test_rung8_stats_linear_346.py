@@ -1,4 +1,5 @@
-"""#346: _rung8_stats (the panel's rung 8 numbers, read by status() -- which
+"""#346: _rung8_stats (#333 part 3f: _reply_check_stats, the old wiring's rung 8
+numbers read as history; status shows the rebuilt rung 8's) (the panel's rung 8 numbers, read by status() -- which
 the cycle's _show calls every cycle) found each ask's reply check by scanning
 the record from its start: time quadratic in the record's length (on a 16 MB
 record, over a second a cycle). It now finds them in one pass. Its numbers
@@ -25,6 +26,21 @@ ALICE = C + "chat:in:alice"
 BOB = C + "chat:in:bob"
 LAMP = C + "w:lamp"
 T0 = 1_760_000_000.0
+_PATCH: list = []
+
+
+def setUpModule():
+    """The pins were made at the old wiring's freshness scale (600 s; #333 part
+    3f moved p_self's to RUNG8_FRESH_S 60 s for the follow-ups)."""
+    from unittest import mock
+    _PATCH[:] = [mock.patch.object(SL, "RUNG8_FRESH_S", 600.0)]
+    for p in _PATCH:
+        p.start()
+
+
+def tearDownModule():
+    for p in _PATCH:
+        p.stop()
 
 
 def _old_rung8_stats(recs):
@@ -414,17 +430,17 @@ class TestRung8StatsUnchanged(unittest.TestCase):
         self.assertEqual(set(PINNED), set(cases))
         for name, recs in cases.items():
             with self.subTest(name):
-                self.assertEqual(SL._rung8_stats(recs), PINNED[name])
+                self.assertEqual(SL._reply_check_stats(recs), PINNED[name])
 
     def test_empty_record(self):
-        self.assertEqual(SL._rung8_stats([]), _EMPTY)
+        self.assertEqual(SL._reply_check_stats([]), _EMPTY)
 
     def test_same_as_the_old_scan_on_random_records(self):
         for seed in range(60):
             recs = _life(1000 + seed, random.Random(seed).randrange(0, 500), summary=seed % 3 == 0,
                          jitter=seed % 2 == 0)
             with self.subTest(seed=seed):
-                self.assertEqual(SL._rung8_stats(recs), _old_rung8_stats(recs))
+                self.assertEqual(SL._reply_check_stats(recs), _old_rung8_stats(recs))
 
 
 class _Counted(dict):
@@ -443,7 +459,7 @@ class TestRung8StatsScalesLinearly(unittest.TestCase):
     def _reads(self, n):
         recs = [_Counted(r) for r in _life(5, n, jitter=False)]
         _Counted.gets = 0
-        SL._rung8_stats(recs)
+        SL._reply_check_stats(recs)
         return _Counted.gets
 
     def test_four_times_the_record_costs_about_four_times(self):

@@ -529,7 +529,7 @@ function selfView(st) {
   // land there against chance, and the replies its timing gains
   const f2 = (x) => (x == null ? "–" : Number(x).toFixed(2));
   const r7 = s.rung7 || {};
-  const r7s = r7.checked ? " · rung 7: " + r7.checked + " timed lines checked"
+  const r7s = r7.checked ? " · rung 7: " + r7.checked + (r7.medium === "nudge" ? " timed nudges followed up" : " timed lines checked")
     + (r7.best ? ", best window " + r7.best : "")
     + (r7.share != null ? ", in it " + f2(r7.share) + " vs chance " + f2(r7.chance) : "")
     + (r7.payoff != null ? ", replies " + skillSigned(r7.payoff) + " over timing-blind" : "") : "";
@@ -538,7 +538,10 @@ function selfView(st) {
   // (lower is better; self must beat the rate), with the model's alone and
   // the weight self gives it
   const r8 = s.rung8 || {};
-  const r8s = (r8.asked || r8.brier_self != null) ? " · rung 8: " + (r8.paired || 0) + " of " + (r8.checked || 0) + " asked pushes paired"
+  // #333 part 3f: the rebuilt rung 8 -- its predicted follow-ups at meet's other, no advisor
+  const r8s = r8.checks != null && r8.asked == null ? (r8.checks ? " · rung 8: " + r8.checks + " follow-ups predicted"
+    + ", Brier " + SELF_NAME + " " + f2(r8.brier_self) + " vs rate " + f2(r8.brier_rate) : "")
+    : (r8.asked || r8.brier_self != null) ? " · rung 8: " + (r8.paired || 0) + " of " + (r8.checked || 0) + " asked pushes paired"
     + (r8.brier_mix != null ? ", Brier " + SELF_NAME + " " + f2(r8.brier_mix) + " vs rate " + f2(r8.brier_rate) : "")
     + (r8.brier_model != null ? ", model alone " + f2(r8.brier_model) + " (weight " + f2(r8.advisor_weight) + ")" : "")
     + (r8.base_rate != null ? ", base rate " + f2(r8.base_rate) : "") : "";
@@ -797,15 +800,21 @@ function selfCardHtml(st) {
   }).join("") + "</ol>");
   const r7 = s.rung7 || {};
   const ball = r7.medium === "toy";                    // #264: the turns are with the ball
+  const nud = r7.medium === "nudge";                   // #333 part 3f: timed nudges at meet's other
   out.push("<h4>rung 7: taking turns" + (ball ? " with the ball" : "") + "</h4>" + (r7.checked
-    ? "<p><b>" + r7.checked + "</b> " + (ball ? "turns with the ball" : "timed lines") + " with a reply check" +
-      (r7.best ? " · best window <b>" + escText(r7.best) + "</b> after they " + (ball ? "played" : "spoke") : "") +
+    ? "<p><b>" + r7.checked + "</b> " + (nud ? "timed nudges with a follow-up" : (ball ? "turns with the ball" : "timed lines") + " with a reply check") +
+      (r7.best ? " · best window <b>" + escText(r7.best) + "</b> after they " + (ball ? "played" : nud ? "changed" : "spoke") : "") +
       "<br>" + (r7.bins || []).map((b) => escText(b.bin) + " " + (b.rate == null ? "–" : f2s(b.rate)) + ' <span class="muted">(' + b.replied + "/" + b.pushes + ")</span>").join(" · ") +
-      (r7.share != null ? "<br>" + (ball ? "turns" : "lines") + " in its window <b>" + f2s(r7.share) + "</b> vs chance " + f2s(r7.chance) + " (z " + Number(r7.z || 0).toFixed(1) + ")" +
+      (r7.share != null ? "<br>" + (ball ? "turns" : nud ? "nudges" : "lines") + " in its window <b>" + f2s(r7.share) + "</b> vs chance " + f2s(r7.chance) + " (z " + Number(r7.z || 0).toFixed(1) + ")" +
         "<br>replied <b>" + f2s(r7.reply_rate) + "</b> vs timing-blind " + f2s(r7.blind_rate) + " (t " + Number(r7.payoff_z || 0).toFixed(1) + ")" : "") + "</p>"
     : '<p class="muted">' + (ball ? "no turns with the ball checked yet" : "no timed lines checked yet") + "</p>"));
   const r8 = s.rung8 || {};
-  out.push("<h4>rung 8: the other</h4>" + (r8.asked || r8.brier_self != null
+  out.push("<h4>rung 8: the other</h4>" + (r8.checks != null && r8.asked == null   // #333 part 3f: no advisor
+    ? (r8.checks ? "<p><b>" + r8.checks + "</b> follow-ups " + escText(SELF_NAME) + " predicted<br>Brier " + escText(SELF_NAME) +
+        " <b>" + f2s(r8.brier_self) + "</b> vs running rate <b>" + f2s(r8.brier_rate) + "</b> (lower is better)" +
+        (r8.base_rate != null ? "<br>base rate " + f2s(r8.base_rate) : "") + "</p>"
+      : '<p class="muted">no follow-ups predicted yet</p>')
+    : r8.asked || r8.brier_self != null
     ? "<p><b>" + (r8.paired || 0) + " of " + (r8.checked || 0) + "</b> asked pushes paired (" + (r8.asked || 0) + " asked)" +
       (r8.brier_mix != null ? "<br>Brier " + escText(SELF_NAME) + " <b>" + f2s(r8.brier_mix) + "</b> vs running rate <b>" + f2s(r8.brier_rate) + "</b> (lower is better)" +
         " · " + escText(SELF_NAME) + " alone " + f2s(r8.brier_self) : "") +

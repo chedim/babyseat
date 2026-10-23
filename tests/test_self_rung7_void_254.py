@@ -33,13 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import test_self_rung7_self_predicts_254 as P  # noqa: E402  (its synthetic others)
 import test_self_sheet_249 as S  # noqa: E402  (a seat that lived through the bugs)
 from membrane import self_loop as SL  # noqa: E402
-from _self_cap import cap, rebuilt  # noqa: E402
+from _self_cap import cap  # noqa: E402
 
-
-@pytest.fixture(autouse=True)
-def _whole_tree(monkeypatch):
-    """#333: meet, turns, expect and mirror built as their rebuild (part 3) will build them."""
-    rebuilt(monkeypatch)
 
 OLD7 = 100.0                 # the old scorer's rung 7 pass
 FIX = 200.0                  # the fixed rung 7's first cycle
@@ -89,9 +84,12 @@ def test_the_new_scorer_can_pass_later():
     srv = _seat_with_old_pass()
     SL._mark_rung7_restart(srv, FIX)
     SL._append(srv, {"ts": FIX + 1, "kind": "rung", "rung": 7, "skill": 0.2, "ladder": SL.LADDER_V})
+    SL._append(srv, {"ts": FIX + 2, "kind": "achieve", "id": "meet", "rung": 6, "skill": 0.5,
+                     "ladder": SL.LADDER_V, "eid": P.RESP})   # #333 part 3e: meet's pass names its other
     cap(srv, 8)
-    for r in P._recs(P._sessions(3)):                          # an other self can learn, after the fix
-        SL._append(srv, {**r, "ts": r["ts"] + FIX})
+    from tests.test_turns_expect_rebuilt_333 import _expects
+    for r in _expects(P.RESP, 160, lambda g: 0.95 if g < 40 else 0.05, t0=FIX + 10):
+        SL._append(srv, r)                                     # #333 part 3f: an other self can expect
     SL._open_rungs(srv)
     new8 = [r for r in _lines(srv, "achieve") if r["rung"] == 8 and r["ts"] > FIX]   # #295: an achieve line
     assert len(new8) == 1 and new8[0]["id"] == "expect"
