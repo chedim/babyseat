@@ -135,7 +135,7 @@ RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "look", 3: "tell things 
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "time its turn", 8: "expect a reply", 9: "recognize itself", 10: "change itself",
               11: "speak", 13: "first reach"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)}   # the rungs with a test (#311: speak; #312: mirror; #320: change; #333: 6-9 being rebuilt on the nudge -- ACHIEVEMENTS' `built` says which run)
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13)}   # the rungs with a test (#311: speak; #312: mirror; #320: change; #333: 6-9 being rebuilt on the nudge -- ACHIEVEMENTS' `built` says which run; 13: first reach)
 # THE LADDER FLIP (#258): rung 7 was "understand an other" until the turn-taking rung went in
 # below it. A `rung` line above 6 counts only when it carries "ladder": LADDER_FLIP or later --
 # a pass recorded before the flip was the old numbering's (the record is never rewritten).
@@ -229,9 +229,10 @@ ACHIEVEMENTS = {
                               "stage is that skill's contingency) with an other it can predict (expect a reply: "
                               "its outcome is the reply check after each push)")},
     # #333: the nudge skill -- Blurp's one act on things. Practised once feel itself is
-    # accepted (it nudges the thing it aims at while closing in on it); its test comes with the rebuilt
-    # rungs, so it is not built yet. Rung 13 is its test's number (12 was taken by invent).
-    "nudge": {"rung": 13, "name": "first reach", "branch": "world", "prereqs": ("feel",), "built": False,
+    # accepted (it nudges the thing it aims at while closing in on it); its test (part 3c, _rung13):
+    # its nudged looks at one thing beat that thing's tempo. Rung 13 is its test's number (12 was
+    # taken by invent).
+    "nudge": {"rung": 13, "name": "first reach", "branch": "world", "prereqs": ("feel",), "built": True,
               "child_age": "~2-3 mo",
               "child_ability": "learns its kicks move a mobile (Rovee-Collier, contingency learning)",
               "why_prereqs": ("feel itself: a nudge is its own move into a thing (the direction and the "
@@ -508,6 +509,10 @@ CURIO_MIN = 0.005           # progress under this anywhere is no frontier: the b
 CURIO_TRIM = 0.25           # #259: a window's error is its interquartile mean -- a rare outlier is no progress
 AIM_EXPLORE = 0.1           # #333 part 3b, approved 2026-10-21: this share of aims is uniform among every thing with a spot
 NUDGE_CURIO_WINDOW = 10     # #333 part 3b, approved 2026-10-21: nudge checks per window of the aims' tilt
+RUNG13_LOOKS = 30           # #333 part 3c, approved 2026-10-21: nudged looks at one thing first reach reads
+RUNG13_SKILL = 0.2          # #333 part 3c, approved 2026-10-21: Brier skill of p_n over the tempo p (rung 2's bar)
+RUNG13_AUDIT_SHARE = 0.9    # #333 part 3c, approved 2026-10-21: share of its found changes whose `by` includes self
+RUNG13_AUDIT_MIN = 5        # #333 part 3c, approved 2026-10-21: ...over at least this many changes carrying `by`
 CURIO_GAP_S = 2 * WAIT_EVERY            # #259: a record gap this long is a restart/stall; a look spanning one is no error
 ATTENTION = True            # #266: among the due, weigh a look by what it can teach (tests switch it off for the base)
 INFO_FLOOR = 0.1            # #266: a near-certain look still weighs this much: a mastered thing is re-checked now and then
@@ -4102,6 +4107,68 @@ def _rung11(recs: list[dict], tempo: dict | None = None) -> dict:
             "timing_share": r4(tw["share"]), "timing_chance": r4(tw["chance"]), "timing_z": round(tw["z"], 2)}
 
 
+# ---- #333 part 3c: FIRST REACH (rung 13), the nudge skill's test -----------------------------
+#
+# Does its nudge change what it next sees, beyond the thing's tempo? Over the last RUNG13_LOOKS
+# nudged looks (k >= 1: answered, outside every audit -- the checks _check_errors reads) at one
+# thing: (1) at least RUNG13_LOOKS of them; (2) the Brier skill of p_n over the tempo
+# prediction p on those same looks, 1 - B(p_n)/B(p), at least RUNG13_SKILL; (3) THE AUDIT
+# (ground truth, the toy log's changers, never fed to Blurp): among those looks that found a
+# change and carry `by`, at least RUNG13_AUDIT_SHARE include `self`, over at least
+# RUNG13_AUDIT_MIN such looks -- the change was its nudge, not the person. The best thing
+# counts, as in rung 2. A thing on its own tempo (body, fast, slow, drift) can't pass: its tempo
+# already predicts it, so p_n adds nothing; a tower block passes when a nudge reliably moves it.
+
+def _self_by(by) -> bool:
+    """A look's `by` (the toy log's changers: a list, or one name) includes self."""
+    return "self" in (by if isinstance(by, (list, tuple, set)) else [by])
+
+
+def _rung13_stats(recs: list[dict]) -> dict:
+    """eid -> its first-reach numbers over its last RUNG13_LOOKS checks."""
+    by: dict[str, list] = {}
+    for r in recs:
+        if (r.get("kind") == "reach" and r.get("nudged") and r.get("answer") in ("changed", "unchanged")
+                and not r.get("audit") and not r.get("audit5")
+                and r.get("p_n") is not None and r.get("p") is not None):
+            by.setdefault(r["eid"], []).append(r)
+    out = {}
+    for eid, rs in by.items():
+        mine = rs[-RUNG13_LOOKS:]
+        a = [1.0 if r["answer"] == "changed" else 0.0 for r in mine]
+        b_n = sum((x - float(r["p_n"])) ** 2 for x, r in zip(a, mine))
+        b_p = sum((x - float(r["p"])) ** 2 for x, r in zip(a, mine))
+        skill = (1.0 - b_n / b_p) if b_p > 1e-9 else 0.0
+        seen = [r for r in mine if r["answer"] == "changed" and r.get("by") is not None]
+        own = sum(1 for r in seen if _self_by(r["by"]))
+        out[eid] = {"looks": len(mine), "skill": round(skill, 4), "audited": len(seen),
+                    "own": round(own / len(seen), 4) if seen else 0.0}
+    return out
+
+
+def _rung13(recs: list[dict], tempo: dict | None = None) -> dict:
+    """First reach: the best thing's nudged looks beat its tempo, and the
+    changes they found were its own (see above)."""
+    stats = _rung13_stats(recs)
+    if not stats:
+        return {"crit": {"looks": 0.0, "skill": 0.0, "audit": 0.0}, "skill": 0.0, "passed": False}
+
+    def crit_of(s):
+        audit = (min(1.0, s["audited"] / RUNG13_AUDIT_MIN)
+                 * (1.0 if s["own"] >= RUNG13_AUDIT_SHARE else s["own"] / RUNG13_AUDIT_SHARE))
+        return {"looks": min(1.0, s["looks"] / RUNG13_LOOKS),
+                "skill": max(0.0, min(1.0, s["skill"] / RUNG13_SKILL)),
+                "audit": round(audit, 4)}
+
+    def rank(eid):
+        c = crit_of(stats[eid])
+        return (all(v >= 1.0 for v in c.values()), _staged(c)[0], stats[eid]["skill"], stats[eid]["looks"])
+    best = max(sorted(stats), key=rank)
+    s, crit = stats[best], crit_of(stats[best])
+    return {"crit": crit, "skill": s["skill"], "eid": best, "looks": s["looks"],
+            "audited": s["audited"], "own": s["own"], "passed": all(v >= 1.0 for v in crit.values())}
+
+
 def _speak_stats(recs: list[dict]) -> dict:
     """For the operator (#311): speak at the current other -- its pushes by
     kind (all time), its last words, and the test's window: counts, reply
@@ -4122,11 +4189,12 @@ def _speak_stats(recs: list[dict]) -> dict:
 
 
 PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7,
-            8: _rung8, 9: _rung9, 10: _rung10, 11: _rung11}   # rung -> its test over the record
+            8: _rung8, 9: _rung9, 10: _rung10, 11: _rung11, 13: _rung13}   # rung -> its test over the record
 # #249: the line each rung's headline skill has to reach (the number status()['skill'] reads);
 # rung 4's news share has a moving bar (its fixed-pace base + 0.15), so it has none here
 SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6: 1.0,
-              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN, 9: BODY_SKILL, 10: CHANGE_MARGIN, 11: SPEAK_LIFT_MARGIN}
+              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN, 9: BODY_SKILL, 10: CHANGE_MARGIN, 11: SPEAK_LIFT_MARGIN,
+              13: RUNG13_SKILL}
 
 
 def _ladder_ok(r: dict, n) -> bool:
@@ -4785,7 +4853,7 @@ def _keep(recs: list, ix: _Index | None = None) -> set:
     _keep_curiosity(R, lo, N, K)
     tail(lambda r: reach(r) and r.get("nudged") and r.get("answer") in ("changed", "unchanged")
          and not r.get("audit") and not r.get("audit5") and r.get("p_n") is not None,
-         2 * NUDGE_CURIO_WINDOW, key=eid)               # #333 part 3b: the aims' tilt (_check_errors)
+         max(2 * NUDGE_CURIO_WINDOW, RUNG13_LOOKS), key=eid)   # #333: the aims' tilt (3b) and first reach (3c)
     # change itself: its window and the dreams' pending proposals, with their checks
     tail(kind("change"), 2 * CHANGE_WINDOW)
     props = {float(R[i].get("ts") or 0) for i in K if R[i].get("kind") == "change"}

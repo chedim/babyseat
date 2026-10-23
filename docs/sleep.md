@@ -140,6 +140,7 @@ and 40 that `_steer_stats` and rung 4 already used).
 | rung 10 (change itself) | the last 2 × `CHANGE_WINDOW` proposals and their checks, the first proposal and every adoption (the honesty chain), the last `CHANGE_LOOKS` rate-read looks and the `CHANGE_LOOKS` after each proposal not yet checked, each with the looks its rate fit reads (up to the longest window on the grid, 120) |
 | the live rate fit | each thing's last 120 fittable looks since its last shift, and before it (its own and the seat's) |
 | curiosity | each thing's last 2 × `CURIO_WINDOW` ordinary looks that span no gap, and the look before them |
+| the aims' tilt, rung 13 (first reach) | each thing's last max(2 × `NUDGE_CURIO_WINDOW`, `RUNG13_LOOKS`) nudge checks (answered nudged looks outside audits, with `by`) |
 | rung 11 (speak) | per other, the last `SPEAK_PUSHES` pushes with words or plain, the looks their words cite, and the turns its timing reads (`TURN_MEMORY` before its window) |
 | passes, accepts, unlocks | every `birth`, `rung`, `achieve`, `rung_void`, `accept`, `accept_migrated`, `unlock`, `unlock_built`, `rung7_restart`, `fix` and `audit` line (a few each) |
 | the pairings | each kept push's next push or check, and its first look; each kept check's push; each kept timed look's or check's last shift; the sleep line that dropped a kept turn |

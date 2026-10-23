@@ -53,6 +53,15 @@
 "timing_z": 0.0,
 "z": 0.0
 },
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
+},
 "2": {
 "crit": {
 "audit": 0.0,
@@ -250,7 +259,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "locked"
 }
 ],
 "level": 0,
@@ -413,6 +422,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -611,7 +629,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "locked"
 }
 ],
 "level": 0,
@@ -795,6 +813,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -1590,7 +1617,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "capped"
 }
 ],
 "level": 6,
@@ -1899,7 +1926,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "capped"
 }
 ],
 "level": 6,
@@ -2129,6 +2156,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -3090,7 +3126,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "capped"
 }
 ],
 "level": 7,
@@ -3273,7 +3309,8 @@
 "ts": 1760054376.8934686
 },
 "open_ids": [
-"shift"
+"shift",
+"nudge"
 ],
 "progress": {
 "1": {
@@ -3320,6 +3357,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -4221,13 +4267,15 @@
 "feel",
 "reach",
 "kinds",
-"shift"
+"shift",
+"nudge"
 ],
 "allowed": [
 "feel",
 "reach",
 "kinds",
-"shift"
+"shift",
+"nudge"
 ],
 "awaiting": [
 "kinds",
@@ -4376,11 +4424,11 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "current"
 }
 ],
 "level": 7,
-"limit": 5,
+"limit": 13,
 "meets": {
 "heard_age": 9949389.315,
 "medium": "chat",
@@ -4390,7 +4438,8 @@
 },
 "mode": "on",
 "next": [
-"shift"
+"shift",
+"nudge"
 ],
 "off_field": {
 "looks": 200,
@@ -4578,7 +4627,8 @@
 "ts": 1760026645.753911
 },
 "open_ids": [
-"reach"
+"reach",
+"nudge"
 ],
 "progress": {
 "1": {
@@ -4625,6 +4675,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -5401,13 +5460,15 @@
 "feel",
 "reach",
 "patience",
-"change"
+"change",
+"nudge"
 ],
 "allowed": [
 "feel",
 "reach",
 "patience",
-"change"
+"change",
+"nudge"
 ],
 "awaiting": [],
 "bar": 0.1333,
@@ -5553,11 +5614,11 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "current"
 }
 ],
 "level": 7,
-"limit": 10,
+"limit": 13,
 "meets": {
 "heard_age": 9971362.092,
 "medium": "chat",
@@ -5567,7 +5628,8 @@
 },
 "mode": "on",
 "next": [
-"reach"
+"reach",
+"nudge"
 ],
 "off_field": {
 "looks": 200,
@@ -5812,7 +5874,8 @@
 },
 "open_ids": [
 "reach",
-"patience"
+"patience",
+"nudge"
 ],
 "progress": {
 "1": {
@@ -5859,6 +5922,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -6611,12 +6683,14 @@
 "allow": [
 "feel",
 "reach",
-"patience"
+"patience",
+"nudge"
 ],
 "allowed": [
 "feel",
 "reach",
-"patience"
+"patience",
+"nudge"
 ],
 "awaiting": [
 "expect",
@@ -6775,11 +6849,11 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "current"
 }
 ],
 "level": 9,
-"limit": 4,
+"limit": 13,
 "meets": {
 "heard_age": 9980257.828,
 "medium": "chat",
@@ -6790,7 +6864,8 @@
 "mode": "on",
 "next": [
 "reach",
-"patience"
+"patience",
+"nudge"
 ],
 "off_field": {
 "looks": 200,
@@ -6986,6 +7061,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -7184,7 +7268,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "locked"
 }
 ],
 "level": 0,
@@ -7367,6 +7451,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -8130,7 +8223,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "locked"
 }
 ],
 "level": 4,
@@ -8302,7 +8395,8 @@
 },
 "open_ids": [
 "kinds",
-"shift"
+"shift",
+"nudge"
 ],
 "progress": {
 "1": {
@@ -8349,6 +8443,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -8448,13 +8551,15 @@
 "feel",
 "reach",
 "kinds",
-"shift"
+"shift",
+"nudge"
 ],
 "allowed": [
 "feel",
 "reach",
 "kinds",
-"shift"
+"shift",
+"nudge"
 ],
 "awaiting": [],
 "bar": 0.0,
@@ -8565,11 +8670,11 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "current"
 }
 ],
 "level": 2,
-"limit": 5,
+"limit": 13,
 "meets": {
 "heard_age": null,
 "medium": "chat",
@@ -8580,7 +8685,8 @@
 "mode": "on",
 "next": [
 "kinds",
-"shift"
+"shift",
+"nudge"
 ],
 "off_field": {
 "looks": 0,
@@ -8809,7 +8915,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "capped"
 }
 ],
 "level": 2,
@@ -8824,7 +8930,8 @@
 "mode": "off",
 "next": [
 "kinds",
-"shift"
+"shift",
+"nudge"
 ],
 "off_field": {
 "looks": 0,
@@ -8992,6 +9099,15 @@
 "timing_z": 0.0,
 "z": 0.0
 },
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
+},
 "2": {
 "crit": {
 "audit": 0.0,
@@ -9189,7 +9305,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "locked"
 }
 ],
 "level": 0,
@@ -9352,6 +9468,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -9550,7 +9675,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "locked"
 }
 ],
 "level": 0,
@@ -9735,6 +9860,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -10532,7 +10666,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "capped"
 }
 ],
 "level": 6,
@@ -10842,7 +10976,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "capped"
 }
 ],
 "level": 6,
@@ -11073,6 +11207,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -12034,7 +12177,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "capped"
 }
 ],
 "level": 7,
@@ -12218,7 +12361,8 @@
 },
 "open_ids": [
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "progress": {
 "1": {
@@ -12265,6 +12409,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -13167,14 +13320,16 @@
 "reach",
 "kinds",
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "allowed": [
 "feel",
 "reach",
 "kinds",
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "awaiting": [
 "kinds",
@@ -13323,11 +13478,11 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "current"
 }
 ],
 "level": 7,
-"limit": 6,
+"limit": 13,
 "meets": {
 "heard_age": 9949389.315,
 "medium": "chat",
@@ -13338,7 +13493,8 @@
 "mode": "on",
 "next": [
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "off_field": {
 "looks": 200,
@@ -13528,7 +13684,8 @@
 "open_ids": [
 "reach",
 "turns",
-"expect"
+"expect",
+"nudge"
 ],
 "progress": {
 "1": {
@@ -13575,6 +13732,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -14354,7 +14520,8 @@
 "turns",
 "expect",
 "mirror",
-"change"
+"change",
+"nudge"
 ],
 "allowed": [
 "feel",
@@ -14363,7 +14530,8 @@
 "turns",
 "expect",
 "mirror",
-"change"
+"change",
+"nudge"
 ],
 "awaiting": [],
 "bar": 0.1333,
@@ -14509,11 +14677,11 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "current"
 }
 ],
 "level": 7,
-"limit": 10,
+"limit": 13,
 "meets": {
 "heard_age": 9971362.092,
 "medium": "chat",
@@ -14525,7 +14693,8 @@
 "next": [
 "reach",
 "turns",
-"expect"
+"expect",
+"nudge"
 ],
 "off_field": {
 "looks": 200,
@@ -14770,7 +14939,8 @@
 },
 "open_ids": [
 "reach",
-"patience"
+"patience",
+"nudge"
 ],
 "progress": {
 "1": {
@@ -14817,6 +14987,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -15572,7 +15751,8 @@
 "patience",
 "turns",
 "expect",
-"mirror"
+"mirror",
+"nudge"
 ],
 "allowed": [
 "feel",
@@ -15580,7 +15760,8 @@
 "patience",
 "turns",
 "expect",
-"mirror"
+"mirror",
+"nudge"
 ],
 "awaiting": [
 "expect",
@@ -15739,11 +15920,11 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "current"
 }
 ],
 "level": 9,
-"limit": 9,
+"limit": 13,
 "meets": {
 "heard_age": 9980257.828,
 "medium": "chat",
@@ -15754,7 +15935,8 @@
 "mode": "on",
 "next": [
 "reach",
-"patience"
+"patience",
+"nudge"
 ],
 "off_field": {
 "looks": 200,
@@ -15950,6 +16132,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -16148,7 +16339,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "locked"
 }
 ],
 "level": 0,
@@ -16331,6 +16522,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -17094,7 +17294,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "locked"
 }
 ],
 "level": 4,
@@ -17267,7 +17467,8 @@
 "open_ids": [
 "kinds",
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "progress": {
 "1": {
@@ -17314,6 +17515,15 @@
 "timing_share": null,
 "timing_z": 0.0,
 "z": 0.0
+},
+"13": {
+"crit": {
+"audit": 0.0,
+"looks": 0.0,
+"skill": 0.0
+},
+"passed": false,
+"skill": 0.0
 },
 "2": {
 "crit": {
@@ -17414,14 +17624,16 @@
 "reach",
 "kinds",
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "allowed": [
 "feel",
 "reach",
 "kinds",
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "awaiting": [],
 "bar": 0.0,
@@ -17532,11 +17744,11 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "current"
 }
 ],
 "level": 2,
-"limit": 6,
+"limit": 13,
 "meets": {
 "heard_age": null,
 "medium": "chat",
@@ -17548,7 +17760,8 @@
 "next": [
 "kinds",
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "off_field": {
 "looks": 0,
@@ -17777,7 +17990,7 @@
 "id": "nudge",
 "name": "first reach",
 "rung": 13,
-"state": "unbuilt"
+"state": "capped"
 }
 ],
 "level": 2,
@@ -17793,7 +18006,8 @@
 "next": [
 "kinds",
 "shift",
-"meet"
+"meet",
+"nudge"
 ],
 "off_field": {
 "looks": 0,

@@ -128,6 +128,8 @@ BUILT_AT = {
     "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 55, 39)},
     # change itself (#320): the dream and its test
     "change": {"pr": 326, "merged": _utc(2026, 10, 20, 20, 21, 28)},
+    # first reach (#333 part 3c): the nudge skill's test -- the PR's opening time until its merge's is set
+    "nudge": {"pr": 475, "merged": _utc(2026, 10, 23, 4, 34, 9)},
 }
 RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop wrote a line every PACE_S (#343: faster now)
 WALL_WHY = "no built skill to learn: {next} not built yet"
@@ -175,7 +177,8 @@ def fastest_cycles() -> dict:
             8: SL.RUNG8_LOOKS * _cycles(_turn_every()),
             9: _cycles(SL.MIRROR_LAG) + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS,   # #312: the stranger's lag, the fit, the looks
             10: SL.CHANGE_WINDOW * _cycles(SL.CHANGE_EVERY),                       # #320: a day of dreams
-            11: SL.SPEAK_PUSHES * _cycles(SL.MEET_EVERY)}   # #311: speak is in chat
+            11: SL.SPEAK_PUSHES * _cycles(SL.MEET_EVERY),   # #311: speak is in chat
+            13: 2 * SL.RUNG13_LOOKS}                         # #333 part 3c: a nudge, then the look that checks it
 
 
 def _cycles(s: float) -> int:
@@ -208,7 +211,9 @@ def _needs() -> dict:
             10: (f"{SL.CHANGE_WINDOW} dreams, {_dur(SL.CHANGE_EVERY)} apart, each replaying its last "
                  f"{SL.CHANGE_LOOKS} timed looks; a change it adopted, checked on the {SL.CHANGE_LOOKS} looks after it"),
             11: (f"{SL.SPEAK_PUSHES} timed lines with a reply check, at least {SL.SPEAK_EACH} with words "
-                 f"and {SL.SPEAK_EACH} plain")}
+                 f"and {SL.SPEAK_EACH} plain"),
+            13: (f"{SL.RUNG13_LOOKS} nudged looks at one thing that beat its tempo, the changes they found "
+                 f"its own (at least {SL.RUNG13_AUDIT_MIN})")}
 
 
 def iso(t) -> str | None:
@@ -761,9 +766,11 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
              8: {"looks": (SL.RUNG8_LOOKS, "reply checks")},
              9: {"looks": (SL.MIRROR_LOOKS, "looks at the mirror and the stranger")},
              10: {"dreams": (SL.CHANGE_WINDOW, "dreams: a setting's neighbour scored on its own record")},
-             11: {"pushes": (SL.SPEAK_PUSHES, "timed lines with a reply check")}}.get(aim, {})
+             11: {"pushes": (SL.SPEAK_PUSHES, "timed lines with a reply check")},
+             13: {"looks": (SL.RUNG13_LOOKS, "nudged looks at one thing")}}.get(aim, {})
     skill = {1: (SL.RUNG1_SKILL, "feel skill"), 2: (SL.RUNG2_SKILL, "reach skill"),
-             3: (SL.RUNG2_SKILL, "reach skill on a moving thing"), 8: (SL.RUNG8_MARGIN, "skill vs running rate")}
+             3: (SL.RUNG2_SKILL, "reach skill on a moving thing"), 8: (SL.RUNG8_MARGIN, "skill vs running rate"),
+             13: (SL.RUNG13_SKILL, "nudge-aware skill over its tempo")}
     flags = {"audit": "both audit shifts caught" if aim == 5 else "blind audit passed",
              "kinds": "kinds agree across halves", "split": "the other reads as other"}
     crits = []
@@ -822,6 +829,10 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
             text = ("every change cleared its own bar, one step from the value it had, never back and forth"
                     if p["crit"].get("honesty", 0) >= 1.0 else
                     "a change that did not clear its own bar, skipped a step or went back and forth")
+        elif key == "audit" and aim == 13:           # #333 part 3c: the changes it found were its own
+            n = int(p.get("audited") or 0)
+            text = (f"its own changes: {round(float(p.get('own') or 0) * n)}/{n} found changes carry self "
+                    f"(≥ {SL.RUNG13_AUDIT_SHARE:.0%}, at least {SL.RUNG13_AUDIT_MIN})")
         elif key == "payoff":
             pay = p.get("payoff")
             text = (f"replies gained over timing-blind {'–' if pay is None else _sg(float(pay))} "
