@@ -191,3 +191,22 @@ def test_the_stop_button_wears_the_cockpit_hud_like_send():
     assert "border-radius:999px" in rule and "background:transparent" in rule
     assert "border:1px solid var(--cockpit-accent" in rule and "color:var(--cockpit-accent" in rule
     assert "min-height:48px" in rule
+
+
+def test_the_field_is_the_cockpits_full_page_background():
+    # round 2: the 3D field fills the page behind the whole cockpit and takes no input
+    home = (UI / "home.js").read_text()
+    dec = (UI / "decisions.js").read_text()
+    # the field's host stays where the page put it (full page), not slotted into a small box
+    assert "this._host3d.slot" not in home
+    assert 'slot name="field"' not in dec and ".fieldbox" not in dec
+    # unclickable: its drag / hover / select never fire under the cockpit
+    rule = _cockpit_rule(home, ".view-decisions .field")
+    assert "pointer-events:none" in rule
+    # the cockpit itself is see-through; its panels carry the backing that keeps text legible
+    host = _cockpit_rule(dec, ":host")
+    assert "background:transparent" in host
+    assert "--panel:rgba(" in host
+    assert "background:var(--ck-backing" in _cockpit_rule((UI / "panel.js").read_text(), ":host([cockpit]) .scroller")
+    # no small-field point cap any more: the page's own adaptive budget
+    assert "COCKPIT_FIELD_BUDGET" not in home

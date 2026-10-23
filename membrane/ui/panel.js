@@ -2179,7 +2179,7 @@ const STYLE = `
     background:transparent; border:1px solid var(--cockpit-accent, #5fd6ff); }
   :host([cockpit]) .bar { order:-1; min-height:0; border:0; padding:0 4px 4px; font-size:12px; background:transparent; }
   :host([cockpit]) .bar .title { font-weight:500; opacity:.7; }
-  :host([cockpit]) .scroller { background:transparent;
+  :host([cockpit]) .scroller { background:var(--ck-backing, rgba(6,10,16,.74));
     border-top:1px solid color-mix(in srgb, var(--ck-line) 45%, transparent); }
   :host([cockpit]) .msgs { display:flex; flex-direction:column-reverse; max-width:none; padding:6px 8px 16px; }
   :host([cockpit]) .jump { display:none !important; }

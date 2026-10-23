@@ -4,8 +4,9 @@
  * past below, and the center input bar's line is NOW. The page is symmetric
  * about its vertical center line.
  *
- *   center: the goals we steer toward (GET /membrane/goals), a small field
- *           with the babyseat over it, the input bar (the real chat element,
+ *   behind:  the page's 3D field, the full-page background (no input).
+ *   center: the goals we steer toward (GET /membrane/goals), the babyseat,
+ *           the input bar (the real chat element,
  *           <ai-terminal-panel cockpit>: composer on top) and the chat below
  *           it, newest message first.
  *   sides:  FUTURE cards (open) pile up above the bar's line, the first to
@@ -210,8 +211,9 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
   const STYLE = `
     :host { position:absolute; inset:58px 0 0 0; display:block; overflow:hidden; color:#dfe8f1;
             --amber:#ffb040; --cyan:#5fd6ff; --line:rgba(255,176,64,.5); --dim:rgba(255,176,64,.18);
-            --panel:rgba(8,13,20,.84); --cockpit-line:rgba(255,176,64,.55); --cockpit-accent:#5fd6ff;
-            background:radial-gradient(ellipse at 50% 46%, #0d1a28 0%, #060a10 62%, #04060a 100%); }
+            --panel:rgba(8,13,20,.86); --cockpit-line:rgba(255,176,64,.55); --cockpit-accent:#5fd6ff;
+            --ck-backing:rgba(6,10,16,.74);
+            background:transparent; }
     .ck { position:relative; height:100%; display:grid; gap:0 18px; padding:8px 66px 0;
           grid-template-columns:minmax(0,1fr) minmax(0,55%) minmax(0,1fr);
           grid-template-rows:minmax(0,1fr) auto minmax(0,1fr);
@@ -226,7 +228,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .band.future { flex-direction:column-reverse; overflow-y:auto; scrollbar-width:thin; padding-bottom:10px; }
     .band.now { padding:4px 2px 10px; min-height:64px; }
     .band.past { overflow:hidden; padding-top:10px; }
-    .lbl { font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--amber); opacity:.7; }
+    .lbl { font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--amber); opacity:.8;
+           text-shadow:0 1px 2px #000, 0 0 6px #000; }
     .fr .lbl, .nr .lbl, .pr .lbl { text-align:right; }
     .gone { font-size:11px; opacity:.45; text-align:center; letter-spacing:.08em; }
     /* a card: a chamfered HUD panel */
@@ -265,15 +268,14 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .fr .empty, .nr .empty, .pr .empty { text-align:right; }
     /* the center column */
     .ct { display:flex; flex-direction:column; min-height:0; }
-    .goals { flex:none; text-align:center; padding:2px 0 4px; }
+    .goals { flex:none; text-align:center; padding:4px 12px 6px; margin:0 auto; max-width:100%; border-radius:4px;
+             background:var(--ck-backing); text-shadow:0 1px 2px #000; }
     .goals ul { list-style:none; margin:4px 0 0; padding:0; display:flex; flex-direction:column; gap:2px; align-items:center; }
     .goals li { font-size:13px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:.8; }
     .goals li.on { opacity:1; color:#eaf6ff; } .goals li.on::before { content:"◆ "; color:var(--cyan); }
     .goals li:not(.on)::before { content:"◇ "; color:var(--amber); opacity:.7; }
     .goals .more, .goals .none { font-size:11px; opacity:.45; }
-    .fieldbox { position:relative; flex:1; min-height:110px; margin:0 auto; width:min(100%, 520px);
-                -webkit-mask-image:radial-gradient(ellipse at center, #000 52%, transparent 74%);
-                mask-image:radial-gradient(ellipse at center, #000 52%, transparent 74%); }
+    .mark { position:relative; flex:1; min-height:80px; pointer-events:none; }
     .logo { position:absolute; left:50%; top:50%; width:56px; height:56px; transform:translate(-50%,-50%);
             pointer-events:none; filter:drop-shadow(0 0 10px rgba(95,214,255,.45)); opacity:.95; }
     .cc { position:relative; min-height:0; display:flex; flex-direction:column; }
@@ -287,7 +289,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       .fr, .nr, .pr, .nowline { display:none; }
       .band.future, .band.past { overflow:visible; }
       .fl { order:2; } .ct { order:1; } .nl { order:3; } .cc { order:4; height:72vh; height:72dvh; } .pl { order:5; }
-      .fieldbox { flex:none; height:130px; }
+      .mark { flex:none; height:84px; }
     }
   `;
 
@@ -312,7 +314,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
           <div class="nowline" aria-hidden="true"></div>
           <section class="band future fl" aria-label="to decide, left"></section>
           <div class="ct"><div class="goals" aria-label="goals"></div>
-            <div class="fieldbox"><slot name="field"></slot><img class="logo" alt="" hidden></div></div>
+            <div class="mark"><img class="logo" alt="" hidden></div></div>
           <section class="band future fr" aria-label="to decide, right"></section>
           <section class="band now nl" aria-label="in flight, left"></section>
           <div class="cc"><slot name="chat"></slot></div>
