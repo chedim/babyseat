@@ -114,3 +114,36 @@ def test_the_one_call_card_lands_on_a_real_store():
     p = doc.properties
     assert (p["status"], p["pick"]) == ("open", "pytest")
     assert p["var"] == {"type": "option", "options": ["pytest", "unittest"]}
+
+
+# ---- the name map (2026-10-23): the doctrine names the seat's tool FAMILIES
+# (exec(action='link'), goal(action='plant')...), the rung has only the MCP
+# tools; the note maps one onto the other, checked against both registries so
+# it can't go stale.
+
+def _name_map():
+    import re
+    note = CA.TOOLS_NOTE
+    start = note.index("The doctrine names the seat's tool families")
+    seg = note[start:note.index("\n", start) if "\n" in note[start:] else None]
+    out = []
+    for fam, acts, names in re.findall(r"(\w+)(?:\(action=([^)]*)\))? -> ([\w/]+)", seg):
+        names = names.split("/")
+        acts = [a.strip("'") for a in acts.split("/")] if acts else [None] * len(names)
+        assert len(acts) == len(names), (fam, acts, names)
+        out += [(fam, a, n) for a, n in zip(acts, names)]
+    return out
+
+
+def test_the_note_maps_the_doctrine_families_to_the_tools():
+    from membrane import mcp_server as M
+    from membrane import toolset as T
+    tools = {t["name"] for t in M.TOOLS}
+    pairs = _name_map()
+    fams = {f for f, _, _ in pairs}
+    assert {"exec", "entity", "goal", "memory", "find", "track", "peer"} <= fams, fams
+    for fam, act, name in pairs:
+        assert name in tools, name
+        assert fam in T.FAMILIES, fam
+        legs = T.FAMILIES[fam]["actions"]
+        assert (legs[act] == name) if act else (name in legs.values()), (fam, act, name)
