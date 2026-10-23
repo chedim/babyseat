@@ -1334,6 +1334,7 @@ const HSTYLE = `
    * chat and a small field live inside it (moved there, the same elements) */
   .view-decisions .chat, .view-decisions .sbox, .view-decisions .me, .view-decisions .chatbtn,
   .view-decisions .card, .view-decisions .tip, .view-decisions .brainline { display:none; }
+  .view-decisions .msg { display:none !important; }   /* the 3D view's camera hints mean nothing here */
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card { position:absolute; z-index:3; left:12px; bottom:12px; max-width:min(420px, calc(100% - 24px));

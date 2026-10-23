@@ -2179,6 +2179,9 @@ const STYLE = `
     border-top:1px solid color-mix(in srgb, var(--ck-line) 45%, transparent); }
   :host([cockpit]) .msgs { display:flex; flex-direction:column-reverse; max-width:none; padding:6px 8px 16px; }
   :host([cockpit]) .jump { display:none !important; }
+  /* latest on top inside a reply too: its parts (words, tool calls) newest first, the who-line its header */
+  :host([cockpit]) .msg.ai { display:flex; flex-direction:column-reverse; }
+  :host([cockpit]) .msg.ai > .who { order:99; }
   :host([cockpit]) .msg.found { outline:1px solid var(--cockpit-accent, #5fd6ff); outline-offset:4px; border-radius:8px;
     background:color-mix(in srgb, var(--cockpit-accent, #5fd6ff) 10%, transparent); }
 `;
