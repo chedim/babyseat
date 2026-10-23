@@ -155,7 +155,7 @@ what each answer's first step sends, in chars per answer (`system_chars`,
 system prompt differed from the answer before: each one rewrites the cached
 system prompt.
 
-**The stable cached head (#450), opt-in.** With `MEMBRANE_CLAUDE_CACHE_HEAD=1`, the conversation goes to the SDK as content
+**The stable cached head (#450), on with an API key.** When the rung runs on an Anthropic API key, the conversation goes to the SDK as content
 blocks, one per earlier message, with a cache breakpoint on the last of them.
 The per-turn blocks (the banner) and the latest message follow it. The next
 answer starts with the same blocks, so the prompt cache reads the head the
@@ -165,11 +165,13 @@ row is a multiple of 4, so the window holds 9-12 earlier messages instead of
 exactly 12, and its start (the head's first block) stays put for a few
 answers. The bundled CLI keeps our `cache_control` and adds its own on its
 trailing environment message. With the system prompt's 2 that is 4, the API's
-maximum, checked by capturing the CLI's requests. It is off by default: on the
-live seat (the CLI login) every head answer failed as `claude-agent: unknown`.
+maximum, checked by capturing the CLI's requests. It is on by default on an API
+key and off on the CLI login (the development opt-in below): on the live seat
+(the CLI login) every head answer failed as `claude-agent: unknown`.
 If a head answer fails for any reason before its first word, it is sent again as
 one plain text prompt, and the head stays off until the seat restarts
-(`head_refused` in the diag). Switches: `MEMBRANE_CLAUDE_CACHE_HEAD=1` turns the head on,
+(`head_refused` in the diag). Switches: `MEMBRANE_CLAUDE_CACHE_HEAD=1` forces the head on (the login
+included), `MEMBRANE_CLAUDE_CACHE_HEAD=0` forces it off (an API key included),
 `MEMBRANE_HISTORY_ANCHOR=1` restores the plain last-12 window, and
 `MEMBRANE_HISTORY_MAX` sets the window's size (default 12).
 

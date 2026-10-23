@@ -605,18 +605,25 @@ def split_messages(messages) -> tuple[str, str]:
 # own on its trailing environment message: 4 breakpoints with the system's 2,
 # the API's maximum -- measured by capturing the CLI's request). An answer
 # the API refuses for it is sent again as plain text, and the head stays off
-# (_HEAD_REFUSED) until the seat restarts. OPT-IN (2026-10-23): on the live
-# seat every head answer failed as "claude-agent: unknown" (the CLI login's
-# path refused the blocks without a reason), so MEMBRANE_CLAUDE_CACHE_HEAD=1
-# turns it on, and ANY failure of a head attempt before its first output is
-# sent again as plain text.
+# (_HEAD_REFUSED) until the seat restarts. ON BY DEFAULT ON AN API KEY, OFF
+# ON THE CLI LOGIN (operator, 2026-10-23): on the live seat (the login) every
+# head answer failed as "claude-agent: unknown" -- the login's path refused
+# the blocks without a reason. MEMBRANE_CLAUDE_CACHE_HEAD=1/0 forces it either
+# way, and ANY failure of a head attempt before its first output is sent
+# again as plain text.
 _HEAD_REFUSED: set = set()
 _INTRO = "The conversation so far, oldest first; answer its last message."
 
 
 def cache_head_on() -> bool:
-    v = os.environ.get("MEMBRANE_CLAUDE_CACHE_HEAD", "0").strip().lower()
-    return v in ("1", "true", "yes", "on") and not _HEAD_REFUSED
+    if _HEAD_REFUSED:
+        return False
+    v = os.environ.get("MEMBRANE_CLAUDE_CACHE_HEAD", "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return auth_mode() == MODE_KEY
 
 
 def prompt_blocks(messages) -> tuple[str, list | None]:

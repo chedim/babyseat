@@ -218,11 +218,43 @@ class TestTheHeadIsSafe(_SDKCase):
     unknown" once the head was on -- the API refused the blocks and the SDK
     named no reason, so the cache_control match never fired."""
 
-    def test_the_head_is_off_unless_asked_for(self):
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("MEMBRANE_CLAUDE_CACHE_HEAD", None)
-            self.assertFalse(CA.cache_head_on())
-            self.assertIsNone(CA.prompt_blocks(convo(3, "x", "B"))[1])
+    def _mode(self, mode, env=None):
+        """auth_mode pinned to `mode`; MEMBRANE_CLAUDE_CACHE_HEAD unset, or
+        set to `env`."""
+        p = mock.patch.object(CA, "auth_mode", return_value=mode)
+        p.start()
+        self.addCleanup(p.stop)
+        e = mock.patch.dict(os.environ, {}, clear=False)
+        e.start()
+        self.addCleanup(e.stop)
+        os.environ.pop("MEMBRANE_CLAUDE_CACHE_HEAD", None)
+        if env is not None:
+            os.environ["MEMBRANE_CLAUDE_CACHE_HEAD"] = env
+
+    def test_the_head_is_off_by_default_on_the_cli_login(self):
+        self._mode(CA.MODE_LOGIN)
+        self.assertFalse(CA.cache_head_on())
+        self.assertIsNone(CA.prompt_blocks(convo(3, "x", "B"))[1])
+
+    def test_the_head_is_on_by_default_on_an_api_key(self):
+        # operator, 2026-10-23: the failures were the login's path only
+        self._mode(CA.MODE_KEY)
+        self.assertTrue(CA.cache_head_on())
+        self.assertIsNotNone(CA.prompt_blocks(convo(3, "x", "B"))[1])
+
+    def test_env_0_forces_the_head_off_on_an_api_key(self):
+        self._mode(CA.MODE_KEY, "0")
+        self.assertFalse(CA.cache_head_on())
+
+    def test_env_1_forces_the_head_on_on_the_cli_login(self):
+        self._mode(CA.MODE_LOGIN, "1")
+        self.assertTrue(CA.cache_head_on())
+
+    def test_a_refused_head_stays_off_even_on_an_api_key(self):
+        self._mode(CA.MODE_KEY)
+        CA._HEAD_REFUSED.add("x")
+        self.addCleanup(CA._HEAD_REFUSED.discard, "x")
+        self.assertFalse(CA.cache_head_on())
 
     def test_any_failure_of_the_head_before_output_is_sent_again_as_text(self):
         sdk = self.sdk_with(fail_blocks=True, error="claude-agent: unknown")
