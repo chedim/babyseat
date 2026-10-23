@@ -260,7 +260,9 @@ def test_the_chat_things_first_look_places_it_so_it_can_be_aimed_at():
     """#333 part 3a (spec change): the chat thing has a getter, so it is placed
     like any looked-at thing -- by its first look (part 2 placed chat:out by hand)."""
     rec = [{"ts": T0, "kind": "birth", "by": "operator"},
-           {"ts": T0 + 1, "kind": "achieve", "id": "feel", "rung": 1, "skill": 0.9}]
+           {"ts": T0 + 1, "kind": "achieve", "id": "feel", "rung": 1, "skill": 0.9},
+           {"ts": T0 + 2, "kind": "unlock", "rung": 3, "id": "kinds", "toys": ["tower"],
+            "added": ["toy:tower"]}]                      # #333 3e: an old tower, removed since -- none here
     srv, r = _chat_seat(record=rec)
     SL.set_mode(srv, "on")
     SL._rt(srv)["isolate"] = {"feel", "nudge"}

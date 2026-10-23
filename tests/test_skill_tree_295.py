@@ -37,8 +37,9 @@ from tests._self_cap import rebuilt  # noqa: E402
 OTHER = MEMBRANE_NS + "Component:chat:in:someone"
 BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect", "mirror", "change",
          "speak"]   # #311, #312, #320 -- the tree the mechanics below walk (_whole_tree)
-LATER = ["nudge", "mirror", "change", "speak", "invent"]    # #333: first reach, the nudge skill (3d: before its child, mirror)
-ORDER = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect"] + LATER   # the tree's order
+LATER = ["mirror", "change", "speak", "invent"]
+ORDER = ["feel", "reach", "kinds", "patience", "shift", "nudge", "meet", "turns", "expect"] + LATER   # the tree's order
+# #333: first reach, the nudge skill, before its children (3e: meet; 3d: mirror)
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +100,7 @@ def test_the_tree_has_stable_ids_branches_and_real_edges():
     A = SL.ACHIEVEMENTS
     assert list(A) == ORDER
     assert [a for a in A if A[a]["built"]] == [a for a in ORDER if a in BUILT + ["nudge"]
-                                               and a not in ("meet", "turns", "expect")]   # #333 (3d: mirror)
+                                               and a not in ("turns", "expect")]   # #333 (3d: mirror; 3e: meet)
     assert A["nudge"]["prereqs"] == ("feel",) and A["nudge"]["built"]    # #333 part 3c: first reach, its test built
     br = {a: A[a]["branch"] for a in A}
     assert br["feel"] == "self"
@@ -112,7 +113,7 @@ def test_the_tree_has_stable_ids_branches_and_real_edges():
     assert pre["kinds"] == {"reach"}
     assert pre["patience"] == {"kinds"}
     assert pre["shift"] == {"reach"}                               # its noticing reads the tempo, not patience's rates
-    assert pre["meet"] == {"reach"}                                # the split is reach's own skill
+    assert pre["meet"] == {"reach", "nudge"}                       # #333 part 3e: the look after first reach's check
     assert pre["turns"] == {"meet"} and pre["expect"] == {"meet"}  # siblings: either can come first
     assert pre["change"] == {"mirror", "patience"}                 # #320: its dream replays patience's timed looks
     for a in A:
@@ -123,6 +124,7 @@ def test_the_tree_has_stable_ids_branches_and_real_edges():
     # the rung numbers the record has always used map onto the ids
     assert [SL.RUNG_ID[n] for n in range(1, 9)] == ["feel", "reach", "kinds", "patience", "shift", "meet",
                                                      "turns", "expect"]
+    assert SL.RUNG_ID[13] == "nudge"
     assert A["expect"]["name"] == "expect a reply" and A["turns"]["name"] == "time its turn"   # #300
 
 
@@ -166,7 +168,7 @@ def test_expect_is_earned_while_turns_stays_open():
     st = SL.status(srv)
     assert st["level"] == 7
     assert st["rung_name"] == "expect a reply"                     # #300
-    assert st["next"] == ["turns", "nudge"]                        # #333: first reach with feel (3d: mirror with feel + first reach)
+    assert st["next"] == ["nudge", "turns"]                        # #333: first reach with feel (3d: mirror with feel + first reach; 3e: tree order)
     assert [e["id"] for e in st["earned"]][-1] == "expect"
     tree = {t["id"]: t for t in SS.compute(srv)["tree"]}
     assert tree["expect"]["state"] == "earned" and tree["turns"]["state"] == "open"
@@ -178,7 +180,8 @@ def test_a_root_needs_nothing_and_a_child_waits_for_its_parent():
     assert SL._available(srv, 2)                                   # reach: a root, practised from birth
     assert not SL._available(srv, 3)                               # kinds waits for reach
     srv = _seat(rungs=(2,), limit="all")
-    assert SL._available(srv, 3) and SL._available(srv, 5) and SL._available(srv, 6)
+    assert SL._available(srv, 3) and SL._available(srv, 5)
+    assert not SL._available(srv, 6)                               # #333 part 3e: meet waits for first reach too
     assert not SL._available(srv, 4)                               # patience waits for kinds
 
 
@@ -203,9 +206,9 @@ def _accepts(srv):
 def test_the_limit_accepts_an_achievement_and_its_closure():
     srv = _seat(rungs=(1, 2, 6), lines=[{"ts": 9.5, "kind": "accept_migrated", "ids": []}])
     assert SL.status(srv)["awaiting"] == ["feel", "reach", "meet"]
-    assert SL.set_limit(srv, "expect")                             # its closure: reach, meet, expect
-    assert _accepts(srv) == ["reach", "meet"]                      # the earned ones in it, in tree order
-    assert SL.set_limit(srv, "all") and _accepts(srv) == ["reach", "meet", "feel"]
+    assert SL.set_limit(srv, "expect")                             # its closure: reach, feel, nudge, meet, expect
+    assert _accepts(srv) == ["feel", "reach", "meet"]              # the earned ones in it, in tree order
+    assert SL.set_limit(srv, "all") and _accepts(srv) == ["feel", "reach", "meet"]   # #333 3e: nothing left
     assert not SL.set_limit(srv, "nonsense") and not SL.set_limit(srv, "invent")   # unbuilt: nothing to accept
     assert SL.set_limit(srv, 5) and SL.set_limit(srv, 8)           # nothing left to accept: no new lines
     assert len(_accepts(srv)) == 3
@@ -224,7 +227,8 @@ def test_a_saved_limit_is_ignored_and_the_mode_kept():
 def test_a_test_under_an_unaccepted_parent_does_not_earn():
     srv = _seat(rungs=(1, 2, 3, 4, 5), lines=[{"ts": 9.5, "kind": "accept_migrated",
                                                "ids": ["feel", "reach", "kinds", "patience", "shift"]},
-                                              {"ts": 9.6, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0}]
+                                              {"ts": 9.6, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0,
+                                               "ladder": SL.LADDER_V}]
                 + _expect_passes_turns_not())
     SL._open_rungs(srv)
     assert not [r for r in SL._read(srv) if r.get("kind") == "achieve" and r.get("id") != "meet"]
@@ -249,7 +253,8 @@ def test_the_sheet_and_the_dock_carry_the_tree_and_the_level():
     by = {r["id"]: r for r in rows}
     assert by["kinds"]["state"] == "earned" and by["kinds"]["earned_at"].startswith("1970")
     assert by["kinds"]["skill"] == 0.9 and by["kinds"]["bar"] == 1.0
-    assert by["patience"]["state"] == "open" and by["shift"]["state"] == "open" and by["meet"]["state"] == "open"
+    assert by["patience"]["state"] == "open" and by["shift"]["state"] == "open" and by["nudge"]["state"] == "open"
+    assert by["meet"]["state"] == "locked" and by["meet"]["waiting_on"] == "first reach"   # #333 part 3e
     assert by["turns"]["state"] == "locked" and by["turns"]["skill"] is None
     assert "meet an other" in by["turns"]["waiting_on"]
     assert by["patience"]["why_prereqs"]
@@ -261,17 +266,17 @@ def test_the_card_counts_achievements():
     srv = _seat(rungs=(1, 2, 3, 4, 5, 6), limit="all", lines=_expect_passes_turns_not())
     SL._open_rungs(srv)
     c = SS.card(srv)
-    assert c["level"] == 7 and c["rung_name"] == "expect a reply" and c["next"] == ["turns", "nudge"]   # #300, #333
+    assert c["level"] == 7 and c["rung_name"] == "expect a reply" and c["next"] == ["nudge", "turns"]   # #300, #333
 
 
 # ---- 6. the toys unlock by achievement -------------------------------------------------------
 
 def test_toys_unlock_by_achievement():
-    assert TU.UNLOCK_IDS["ball"] == "meet" and TU.UNLOCK_IDS["tower"] == "kinds"
-    assert TU.UNLOCK_IDS["mirror"] == "meet"                       # #312: with its last prerequisite
+    assert TU.UNLOCK_IDS["ball"] == "nudge" and TU.UNLOCK_IDS["tower"] == "feel"   # #333 part 3e: #337's order
+    assert TU.UNLOCK_IDS["mirror"] == "nudge"                      # #312: with its last prerequisite
     srv = _seat(rungs=(2,))
     why = TU.refusal(srv, "ball")
-    assert why and "meet an other" in why
+    assert why and "first reach" in why
 
 
 # ---- 7. home's celebration: once per newly earned achievement ----------------------------------

@@ -142,7 +142,7 @@ class TestEverySayingReadsIt(unittest.TestCase):
             SL._append(srv, {"ts": T0, "kind": "birth"})
             SN.set_name("Zed")
             msg = TU.refusal(srv, "tower")
-            self.assertIn("unlocks when Zed earns 'tell things apart'", msg)   # #295: the achievement
+            self.assertIn("unlocks when Zed earns 'feel itself'", msg)   # #295: the achievement (#333 3e: the tower's)
             self.assertIn("Zed topples", msg)
 
     def test_the_seat_card_tells_the_model(self):

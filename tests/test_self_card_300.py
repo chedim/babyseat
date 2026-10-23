@@ -176,7 +176,7 @@ class TestSkillsOnTheCard(unittest.TestCase):
     def test_several_side_by_side(self):
         srv = _tree_seat(rungs=(2,), limit="all")
         s = SH.sheet(srv, fresh=True)
-        self.assertEqual([k["id"] for k in s["skills"]], ["feel", "kinds", "shift", "meet"])
+        self.assertEqual([k["id"] for k in s["skills"]], ["feel", "kinds", "shift"])   # #333 3e: meet needs first reach
 
     def test_an_earned_skill_whose_test_fails_now_is_a_slipping_line(self):
         s = _sheet(_lived(_seat()), T0 + 12 * H)
@@ -200,7 +200,7 @@ class TestNoRungs(unittest.TestCase):
         c = SH.card(_lived(_seat()))
         self.assertEqual(c["level"], 6)
         self.assertEqual(c["rung_name"], "meet an other")              # the latest earned skill
-        self.assertEqual(c["next"], ["turns", "expect", "nudge"])   # #333: first reach (3d: recognize itself opens with it)
+        self.assertEqual(c["next"], ["nudge", "turns", "expect"])   # #333: first reach (3d: recognize itself opens with it; 3e: tree order)
 
 
 # ---- 4. the renames ----------------------------------------------------------------------

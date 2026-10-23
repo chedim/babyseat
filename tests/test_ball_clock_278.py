@@ -95,11 +95,12 @@ def _seat(limit=7):
     SL.bind(srv)
     TB.bind(srv)
     cap(srv, 1)
-    for r in (1, 2, 3, 4, 5, 6):
+    for r in (1, 2, 3, 4, 5, 6, 13):
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
     cap(srv, limit)
-    TU.sync(srv)                                  # the ball, unlocked at rung 6 (#267)
+    SL._append(srv, {"ts": 2.0, "kind": "accept", "id": "nudge", "by": "test"})
+    TU.sync(srv)                                  # the ball, unlocked with first reach (#333 part 3e; rung 6, #267)
     return srv
 
 

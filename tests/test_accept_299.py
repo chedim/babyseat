@@ -113,7 +113,7 @@ def test_the_live_record_migrates_once_and_everything_earned_is_accepted():
     st = SL.status(srv)
     assert st["level"] == 7
     assert st["accepted"] == LIVE7 and st["awaiting"] == []
-    assert st["next"] == ["turns", "nudge"]                # turns open, as it already was (#333: first reach; 3d: the mirror waits for it)
+    assert st["next"] == ["nudge", "turns"]                # turns open, as it already was (#333: first reach; 3d: the mirror waits for it; 3e: tree order, nudge before meet)
     assert SL._available(srv, 7) and SL._available(srv, 8)
     # a restart: the migration is never written twice
     SL._RT.pop(id(srv), None)
@@ -160,8 +160,9 @@ def test_a_pass_is_earned_and_counted_but_opens_nothing_until_accepted(monkeypat
     assert out["ok"] and not out.get("already")
     st = SL.status(srv)
     assert st["accepted"] == ["reach"] and st["awaiting"] == []
-    assert SL._available(srv, 3) and SL._available(srv, 5) and SL._available(srv, 6)
-    assert {"kinds", "shift", "meet"} <= set(st["next"])
+    assert SL._available(srv, 3) and SL._available(srv, 5)
+    assert not SL._available(srv, 6)                       # #333 part 3e: meet waits for first reach too
+    assert {"kinds", "shift"} <= set(st["next"]) and "meet" not in st["next"]   # #333 part 3e
     tree = {t["id"]: t for t in SS.compute(srv)["tree"]}
     assert tree["reach"]["accepted"] is True and tree["kinds"]["state"] == "open"
 
@@ -169,15 +170,17 @@ def test_a_pass_is_earned_and_counted_but_opens_nothing_until_accepted(monkeypat
 def test_a_child_whose_parent_is_unaccepted_does_not_earn(monkeypatch):
     srv, d = _boot(_live_record()[:-1])                     # rungs 1-6, all migrated as accepted
     SL._append(srv, {"ts": 150.0, "kind": "rung_void", "rung": 6, "voids_ts": 16.0, "why": "test"})
+    SL._append(srv, {"ts": 151.0, "kind": "achieve", "id": "nudge", "rung": 13, "skill": 0.5})   # #333 part 3e:
+    SL._append(srv, {"ts": 152.0, "kind": "accept", "id": "nudge", "by": "operator"})          # meet's other parent
     _pass(monkeypatch, 6, 7, 8)
     SL._open_rungs(srv)                                     # meet is earned again -- after the migration
-    assert [r["id"] for r in _kinds(srv, "achieve")] == ["meet"]
+    assert [r["id"] for r in _kinds(srv, "achieve")] == ["nudge", "meet"]
     assert SL.status(srv)["awaiting"] == ["meet"]
     assert not SL._available(srv, 7) and not SL._available(srv, 8)
     assert not SL._replies(srv)                             # no reply checks (#333: the ball rolls went)
     SL.accept(srv, "meet", by="operator")
     SL._open_rungs(srv)
-    assert {r["id"] for r in _kinds(srv, "achieve")} == {"meet", "turns", "expect"}
+    assert {r["id"] for r in _kinds(srv, "achieve")} == {"nudge", "meet", "turns", "expect"}
 
 
 def test_asleep_nothing_is_open_and_acceptance_still_records():
@@ -284,11 +287,11 @@ def test_a_toy_unlocks_only_once_its_achievement_is_accepted(monkeypatch):
     srv, d = _boot([{"ts": 1.0, "kind": "birth", "by": "operator"},
                     {"ts": 2.0, "kind": "rung", "rung": 2, "skill": 0.9}])   # reach, migrated
     SL._append(srv, {"ts": 300.0, "kind": "achieve", "id": "kinds", "rung": 3, "skill": 0.4})
-    why = TU.refusal(srv, "tower")
+    why = TU.refusal(srv, "fast")                           # #333 part 3e: fast unlocks with tell things apart
     assert why and "accept" in why
     assert not [r for r in TU.sync(srv) if r.get("kind") == "unlock" and r.get("rung") == 3]
     SL.accept(srv, "kinds")
-    assert TU.refusal(srv, "tower") is None
+    assert TU.refusal(srv, "fast") is None
     assert [r for r in _kinds(srv, "unlock") if r.get("rung") == 3]      # accept syncs at once
 
 

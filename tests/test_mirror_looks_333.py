@@ -175,7 +175,7 @@ def test_a_seat_that_never_looks_at_the_mirror_never_passes():
 
 
 def test_a_seat_that_looks_passes_on_the_glass_and_reads_the_stranger_as_other():
-    srv = _seat()
+    srv = _seat(sub="looks")                    # #333 part 3e: no provisioning (first reach unlocks the ball, ...)
     _run(srv, ENOUGH)
     recs = _record(srv)
     p = SL._rung9(recs)

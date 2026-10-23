@@ -57,6 +57,8 @@ def _young(srv, upto=6):
                  (5, B0 + 1.0 * H), (6, R6)):
         if n <= upto:
             S._put(srv, {"ts": t, "kind": "rung", "rung": n, "skill": 1.0, "eid": S.ALICE, "ladder": SL.LADDER_V})
+    if upto >= 6:                                  # #333 part 3e: meet needs first reach too (no wall before it)
+        S._put(srv, {"ts": B0 + 0.15 * H, "kind": "rung", "rung": 13, "skill": 1.0, "ladder": SL.LADDER_V})
     SL._RT.pop(id(srv), None)
     SL.bind(srv)
     return srv

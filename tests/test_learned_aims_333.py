@@ -210,6 +210,7 @@ def test_in_the_cycle_aims_land_mostly_on_things_it_can_look_at(monkeypatch):
         SL.cycle(srv, now=T0 + 100 + 11 * k)
     rt_lines = [json.loads(ln) for ln in SL.record_path(srv).read_text().splitlines() if ln.strip()]
     aims = {c["aim_n"]: c["aim_eid"] for c in rt_lines if c.get("kind") == "cycle" and c.get("aim_eid")}
+    look = set(SL._targets(srv))                          # #333 part 3e: feel's tower joined its world
     assert len(aims) > 150
     on = sum(1 for e in aims.values() if e in look) / len(aims)
     assert on > 0.8                                          # ~0.9 + 0.1 x 2/14; random was 2/14

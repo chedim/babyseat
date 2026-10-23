@@ -268,7 +268,7 @@ class TestGrowth(unittest.TestCase):
         self.assertEqual(floors[3], SL.RUNG3_WINDOW - SL.RUNG2_REACHES - SL.AUDIT_REACHES)
         self.assertEqual(floors[4], SL.RUNG4_TIMED)
         self.assertEqual(floors[5], SL.RUNG5_LOOKS)
-        self.assertEqual(floors[6], SL.RUNG6_PUSHES * SL.MEET_EVERY / SL.PACE_S)     # #343: s, as cycles at 10 s
+        self.assertEqual(floors[6], SL.RUNG6_LOOKS * (2 + SL.FOLLOW_S / SL.PACE_S))   # #333 3e: nudge, check, follow-up
         self.assertEqual(floors[7], SL.RUNG7_PUSHES * SL.TOY_MEET_EVERY / SL.PACE_S)  # #258: take turns (#278: with the ball)
         self.assertEqual(floors[8], SL.RUNG8_LOOKS * SL.TOY_MEET_EVERY / SL.PACE_S)   # understand an other, moved up
         self.assertEqual(floors[13], 2 * SL.RUNG13_LOOKS)              # #333 part 3c: a nudge, then its check
@@ -446,7 +446,7 @@ class TestHeaderAndCache(unittest.TestCase):
         self.assertEqual(h["name"], "Blurp")
         self.assertEqual(h["level"], 6)
         self.assertEqual(h["rung_name"], "meet an other")
-        self.assertEqual(h["next"], ["turns", "expect", "nudge"])    # #295: the open achievements (#333: first reach; 3d: the mirror after it)
+        self.assertEqual(h["next"], ["nudge", "turns", "expect"])    # #295: the open achievements (#333: first reach; 3d: the mirror after it; 3e: tree order)
         self.assertAlmostEqual(h["age_h"], 12.0, places=2)
         self.assertEqual(h["born"], "2026-10-16T13:00:00+00:00")
         self.assertEqual(h["lines_sent"], 20)

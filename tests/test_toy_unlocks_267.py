@@ -13,6 +13,13 @@ On a pass that unlocks something the record gets one line {"kind": "unlock",
 (once: a kind the seat already has is left alone). No toy ever disappears:
 a toy whose kind is still locked stays (grandfathered); adding a locked kind
 is refused. An unlock never feeds a rung's test.
+
+#333 part 3e: the order is #337's, by skill (UNLOCKS: kind -> achievement
+id): tower with feel itself (1), slow with look (2), fast with tell things
+apart (3), burst with patience (4), die and drift with notice the world
+changed (5), the ball and then the mirror with first reach (13), blocks with
+recognize itself (9). Birth unlocks nothing; body and rattle are dropped
+from the order (never locked, never provisioned; a seat keeps its own).
 """
 import json
 import os
@@ -87,12 +94,15 @@ def _kinds():
 # ---- the table --------------------------------------------------------------------
 
 def test_the_table():
-    assert TU.UNLOCKS == {"body": 0, "fast": 0, "slow": 0, "tower": 3, "burst": 4, "die": 5, "drift": 5,
-                          "ball": 6, "mirror": 6, "blocks": 9, "rattle": 10}   # #312: mirror with meet
+    assert TU.UNLOCKS == {"tower": "feel", "slow": "reach", "fast": "kinds", "burst": "patience",
+                          "die": "shift", "drift": "shift", "ball": "nudge", "mirror": "nudge",
+                          "blocks": "mirror"}                     # #333 part 3e: #337's order, by skill
+    assert TU.RUNGS == {"tower": 1, "slow": 2, "fast": 3, "burst": 4, "die": 5, "drift": 5,
+                        "ball": 13, "mirror": 13, "blocks": 9}
 
 
 def test_every_built_kind_has_an_unlock_rung():
-    assert set(TB.KINDS) <= set(TU.UNLOCKS)
+    assert set(TB.KINDS) <= set(TU.UNLOCKS) | set(TU.DROPPED)    # #333 part 3e: body is out of the order
 
 
 def test_the_placeholders_have_a_name_an_icon_a_rung_and_a_lesson():
@@ -104,15 +114,16 @@ def test_the_placeholders_have_a_name_an_icon_a_rung_and_a_lesson():
 
 
 def test_every_kind_in_the_table_has_an_icon_and_a_lesson():
-    for k in TU.UNLOCKS:
+    for k in list(TU.UNLOCKS) + list(TU.DROPPED):
         assert TU.ICONS.get(k) and TU.TEACHES.get(k), k
 
 
 def test_unlocked_by_the_passed_rungs():
-    assert TU.unlocked({0}) == ["body", "fast", "slow"]
-    assert TU.unlocked({0, 1, 2, 3}) == ["body", "fast", "slow", "tower"]
-    assert TU.unlocked({0, 1, 2, 3, 4, 5}) == ["body", "fast", "slow", "tower", "burst", "die", "drift"]
-    assert "mirror" in TU.unlocked(set(range(9))) and "blocks" not in TU.unlocked(set(range(9)))
+    assert TU.unlocked({0}) == []                                  # #333 part 3e: birth unlocks nothing
+    assert TU.unlocked({0, 1}) == ["tower"]
+    assert TU.unlocked({0, 1, 2, 3}) == ["tower", "slow", "fast"]
+    assert TU.unlocked({0, 1, 2, 3, 4, 5}) == ["tower", "slow", "fast", "burst", "die", "drift"]
+    assert TU.unlocked({13}) == ["ball", "mirror"] and TU.unlocked({9}) == ["blocks"]
     assert TU.unlocked(5) == TU.unlocked({0, 1, 2, 3, 4, 5})     # a level: every rung up to it
 
 
@@ -121,9 +132,9 @@ def test_unlocked_is_void_aware():
     _born(srv)
     _pass(srv, 1, 2, 3, ts=2000.0)
     SL._append(srv, {"ts": 2100.0, "kind": "rung_void", "rung": 3, "voids_ts": 2000.0})
-    assert "tower" not in TU.unlocked(TU.passed(srv))
+    assert "fast" not in TU.unlocked(TU.passed(srv))
     _pass(srv, 3, ts=2200.0)                                     # a later pass counts
-    assert "tower" in TU.unlocked(TU.passed(srv))
+    assert "fast" in TU.unlocked(TU.passed(srv))
 
 
 def test_unlocked_honours_the_ladder_flip():
@@ -138,27 +149,28 @@ def test_unlocked_honours_the_ladder_flip():
 
 # ---- the unlock line and provisioning ---------------------------------------------------
 
-def test_birth_kinds_are_unlocked_from_the_start_without_a_line_or_a_toy():
-    """Birth is not a pass: body, fast and slow are simply unlocked (the
-    operator adds them, as before) -- no unlock line, nothing switched on."""
+def test_birth_unlocks_nothing_and_the_dropped_body_is_never_locked():
+    """Birth is not a pass, and since #333 part 3e it unlocks nothing (body,
+    fast and slow came with it until then): no unlock line, nothing switched
+    on. Body is out of the order: never locked, the operator may add it."""
     srv = _seat()
     _born(srv)
     TU.sync(srv, now=1001.0)
     assert _unlocks(srv) == []
     assert _kinds() == []
-    assert TU.unlocked(TU.passed(srv)) == ["body", "fast", "slow"]
+    assert TU.unlocked(TU.passed(srv)) == []
     assert TB.add(srv, "body")["ok"]
 
 
 def test_the_unlock_line_is_written_once_and_provisioning_is_idempotent():
     srv = _seat()
     _born(srv)
-    _pass(srv, 1, 2, 3, ts=2000.0)
+    _pass(srv, 1, ts=2000.0)
     TU.sync(srv, now=2001.0)
     TU.sync(srv, now=2002.0)
     TU.sync(srv, now=2003.0)
     rows = _unlocks(srv)
-    assert [r["rung"] for r in rows] == [3]
+    assert [r["rung"] for r in rows] == [1]
     assert rows[0]["toys"] == ["tower"] and rows[0]["kind"] == "unlock" and rows[0]["added"] == ["toy:tower"]
     assert _kinds() == ["tower"]
     assert [t["name"] for t in TB.list_toys()].count("toy:tower") == 1
@@ -196,10 +208,10 @@ def test_a_placeholder_unlock_is_announced_but_provisions_nothing():
 def test_ball_is_tolerated_when_its_kind_is_not_built():
     srv = _seat()
     _born(srv)
-    _pass(srv, 1, 2, 3, 4, 5, 6)
+    _pass(srv, 1, 2, 3, 4, 5, 13)
     TU.sync(srv, now=2001.0)                                     # no error, whatever the kit holds
-    row = next(r for r in _unlocks(srv) if r["rung"] == 6)
-    assert row["toys"] == ["ball", "mirror"]                      # #312: the mirror with meet
+    row = next(r for r in _unlocks(srv) if r["rung"] == 13)
+    assert row["toys"] == ["ball", "mirror"]                      # #333 part 3e: both with first reach
     assert ("ball" in _kinds()) == ("ball" in TB.KINDS)
 
 
@@ -219,9 +231,9 @@ def test_a_late_unlock_is_marked_so_the_page_does_not_celebrate_it():
 def test_no_provisioning_into_another_data_dirs_toybox(tmp_path):
     srv = _seat(tmp_path / "elsewhere")                          # its record is not the toybox's data dir
     _born(srv)
-    _pass(srv, 1, 2, 3)
+    _pass(srv, 1)
     TU.sync(srv, now=2001.0)
-    assert [r["rung"] for r in _unlocks(srv)] == [3]             # the line, yes
+    assert [r["rung"] for r in _unlocks(srv)] == [1]             # the line, yes
     assert TB.list_toys() == []                                  # ...the toys, no
 
 
@@ -257,8 +269,9 @@ def test_adding_a_locked_kind_is_refused_with_a_clear_message():
     _born(srv)
     out = TB.add(srv, "tower")
     assert not out["ok"]
-    assert "locked" in out["error"] and "'tell things apart'" in out["error"]   # #295: the achievement (rung 3's test)
-    assert TB.add(srv, "fast", name="toy:f2")["ok"]               # an unlocked kind: fine
+    assert "locked" in out["error"] and "'feel itself'" in out["error"]   # #333 part 3e: the tower's achievement
+    _pass(srv, 1)
+    assert TB.add(srv, "tower", name="toy:t2")["ok"]              # an unlocked kind: fine
 
 
 def test_a_locked_placeholder_is_refused_and_an_unlocked_one_is_not_built_yet():
@@ -284,10 +297,10 @@ def test_the_cli_refuses_a_locked_kind(capsys):
     _born(srv)
     SL._RT.pop(id(srv), None)
     assert TB.cli_main(["add", "tower"]) == 2
-    assert "'tell things apart'" in capsys.readouterr().err   # #295: the achievement that unlocks it
+    assert "'feel itself'" in capsys.readouterr().err         # #333 part 3e: the achievement that unlocks it
     assert TB.cli_main(["add", "mirror"]) == 2
     assert "locked" in capsys.readouterr().err
-    assert TB.cli_main(["add", "slow"]) == 0
+    assert TB.cli_main(["add", "body"]) == 0                     # dropped from the order: never locked
 
 
 def test_the_cli_adds_an_unlocked_kind_after_its_rung():
@@ -360,7 +373,7 @@ def test_the_sheet_has_a_toys_section_with_locked_and_unlocked():
     assert set(rows) == set(TU.UNLOCKS)
     assert rows["tower"]["state"] == "unlocked" and rows["tower"]["have"] is True
     assert rows["tower"]["at"]                                    # when it unlocked
-    assert rows["mirror"]["state"] == "locked" and rows["mirror"]["rung"] == 6 and rows["mirror"]["icon"] == "🪞"   # #312
+    assert rows["mirror"]["state"] == "locked" and rows["mirror"]["rung"] == 13 and rows["mirror"]["icon"] == "🪞"   # #333 3e
     assert rows["mirror"]["teaches"]
 
 
@@ -370,8 +383,8 @@ def test_the_achievements_carry_the_toys_each_pass_unlocked():
     _pass(srv, 1, 2, 3)
     TU.sync(srv, now=2001.0)
     a = {x["rung"]: x for x in SH.compute(srv)["achievements"]}
-    assert a[3]["toys"] == ["tower"]
-    assert a[1].get("toys") in (None, [])
+    assert a[1]["toys"] == ["tower"]                               # #333 part 3e: the tower with feel
+    assert a[3]["toys"] == ["fast"]
 
 
 def test_status_carries_the_latest_unlock():
@@ -380,20 +393,20 @@ def test_status_carries_the_latest_unlock():
     _pass(srv, 1, 2, 3, ts=2000.0)
     TU.sync(srv, now=2001.0)
     u = SL.status(srv)["unlock"]
-    assert u["rung"] == 3 and u["toys"] == [{"kind": "tower", "icon": TU.ICONS["tower"]}]
+    assert u["rung"] == 3 and u["toys"] == [{"kind": "fast", "icon": TU.ICONS["fast"]}]   # the newest line
 
 
 def test_the_dock_lists_the_next_locked_toys_capped():
     srv = _seat()
+    assert TB.add(srv, "fast")["ok"]                              # before birth: kept (#333 3e: fast is locked after)
     _born(srv)
-    assert TB.add(srv, "fast")["ok"]
     d = SH.dock(srv, fresh=True)
     assert [t["name"] for t in d["toys"]] == ["toy:fast"]
     lk = d["locked"]
     assert len(lk) == TU.NEXT_LOCKED == 2
-    assert [x["kind"] for x in lk] == ["tower", "burst"]
+    assert [x["kind"] for x in lk] == ["tower", "slow"]          # fast: the seat has one (kept)
     assert lk[0] == {"name": "locked:tower", "kind": "tower", "locked": True, "icon": TU.ICONS["tower"],
-                     "unlock_rung": 3, "unlock_id": "kinds", "rung_name": SL.RUNG_NAMES[3], "teaches": TU.TEACHES["tower"]}
+                     "unlock_rung": 1, "unlock_id": "feel", "rung_name": "feel itself", "teaches": TU.TEACHES["tower"]}
 
 
 def test_a_kept_toy_is_not_shown_again_as_locked():
@@ -402,7 +415,7 @@ def test_a_kept_toy_is_not_shown_again_as_locked():
     _born(srv)
     TU.sync(srv, now=1001.0)
     d = SH.dock(srv, fresh=True)
-    assert [x["kind"] for x in d["locked"]] == ["burst", "die"]
+    assert [x["kind"] for x in d["locked"]] == ["slow", "fast"]
 
 
 def test_an_unborn_seat_has_nothing_locked():

@@ -131,9 +131,10 @@ OLD = [{"ts": T0, "kind": "birth", "by": "operator"},
 
 def test_the_ladder_version_is_3_and_the_rebuilt_rungs_are_not_built_yet():
     assert SL.LADDER_V == 3
-    for i in ("meet", "turns", "expect"):
+    for i in ("turns", "expect"):
         assert SL.ACHIEVEMENTS[i]["built"] is False, i
     assert SL.ACHIEVEMENTS["mirror"]["built"] is True             # part 3d: rebuilt on looks
+    assert SL.ACHIEVEMENTS["meet"]["built"] is True               # part 3e: rebuilt on delayed contingency
     assert SL.ACHIEVEMENTS["reach"]["name"] == "look"           # rung 2's pass, kept as the look
     assert SL.ACHIEVEMENTS["reach"]["built"] is True
     nd = SL.ACHIEVEMENTS["nudge"]
@@ -335,7 +336,9 @@ def test_once_feel_is_accepted_it_nudges_the_thing_it_aims_at_while_closing_in(m
     assert len(cyc) == 80
     assert 0 < len(ns) < len(cyc)                                # at most one a cycle: only while closing in
     assert len({r["n"] for r in ns}) == len(ns)
-    assert {field_id(r["eid"]) for r in ns} == mine              # both things, never the outside one
+    got = {field_id(r["eid"]) for r in ns}
+    assert mine <= got and field_id(outside) not in got          # both things, never the outside one
+    assert got <= mine | {f for f in got if ":toy:tower" in f}   # #333 part 3e: feel's tower joined its world
     by_n = {c["n"]: c for c in cyc}
     for r in ns:
         c = by_n[r["n"]]
