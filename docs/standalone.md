@@ -134,9 +134,10 @@ sphere it was the distance to it).
 The babyseat menu (top left) opens the page's views: *Chat only*, *Graph only*,
 **Decisions** (`/?view=decisions`) and *Everything*. Decisions is the project
 decision map as a cockpit: the time axis runs top to bottom and the chat's
-input bar is *now*. The center column holds the open goals the seat steers
-toward, a small field with the babyseat over it, the input bar, and the chat
-below the bar, newest message first. On both sides, open questions pile up
+input bar is *now*. The page's 3D field fills the background behind it all
+and takes no clicks there. The center column holds the open goals the seat
+steers toward, the babyseat, the input bar, and the chat below the bar,
+newest message first. On both sides, open questions pile up
 above the bar's line (the first to decide nearest it), the cards in flight sit
 on the line, and decided cards fall below it (the newest nearest; the oldest
 are pushed out of view). New cards alternate left and right.

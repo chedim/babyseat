@@ -61,7 +61,6 @@ function standaloneMenu(current) {
   return rows.map((r) => Object.assign(r, { current: r.v === current }));
 }
 const VIEW = typeof window !== "undefined" ? knownView(window.MEMBRANE_VIEW) : "";
-const COCKPIT_FIELD_BUDGET = 1500;   // #470: the cockpit's small field draws at most this many points
 
 /** The orbit angles that put the camera on the ray from the field's centre
  * through p (beyond it), so it looks at the centre THROUGH p -- the
@@ -1330,11 +1329,13 @@ const HSTYLE = `
   .view-chat .chat { left:12px; width:auto; }
   .view-chat .sbox, .view-chat .me, .view-chat .chatbtn,
   .view-chat .card, .view-chat .tip, .view-chat .field { display:none; }
-  /* #470: the decision cockpit's view -- the cockpit under the top bar; the
-   * chat and a small field live inside it (moved there, the same elements) */
+  /* #470: the decision cockpit's view -- the cockpit under the top bar, the
+   * chat inside it (moved there, the same element); the field stays the
+   * full-page background behind it all, and takes no input there */
   .view-decisions .chat, .view-decisions .sbox, .view-decisions .me, .view-decisions .chatbtn,
   .view-decisions .card, .view-decisions .tip, .view-decisions .brainline { display:none; }
-  .view-decisions .msg { display:none !important; }   /* the 3D view's camera hints mean nothing here */
+  .view-decisions .msg { display:none !important; }
+  .view-decisions .field { pointer-events:none; background:radial-gradient(ellipse at 50% 46%, #0d1a28 0%, #060a10 62%, #04060a 100%); }   /* the 3D view's camera hints mean nothing here */
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card { position:absolute; z-index:3; left:12px; bottom:12px; max-width:min(420px, calc(100% - 24px));
@@ -3158,8 +3159,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const el = this._cockpit = document.createElement("membrane-decisions");
       this._chat.setAttribute("cockpit", "");
       this._chat.slot = "chat";
-      this._host3d.slot = "field";
-      el.append(this._host3d, this._chat);
+      el.append(this._chat);                      // the field stays behind, the page's background
       root.appendChild(el);
     }
 
@@ -3216,7 +3216,6 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         };
         const v = this._v3 = new window.MembraneField3D(this._host3d, api);
         if (window.matchMedia("(max-width: 760px)").matches) { v.maxBudget = 3000; v._applyBudget(3000); }
-        if (VIEW === "decisions") { v.maxBudget = COCKPIT_FIELD_BUDGET; v._applyBudget(COCKPIT_FIELD_BUDGET); }   // #470: the small field
         v.selfEyes = this._mode === "eyes"; v.selfFollow = this._mode === "self" || this._mode === "eyes"; v.selfName = SELF_NAME;
         await v.start();
         if (!this._started) { v.stop(); return; }

@@ -4,12 +4,14 @@
 
 ```
    open questions ▲              GOALS                 ▲ open questions
-   (the first to decide      small field + 🪑
+   (the first to decide           🪑
     nearest the bar)
   ──── in flight ─────  [ the input bar (now) ]  ───── in flight ─────
    decided ▼              the chat, newest first           ▼ decided
    (the newest nearest)   older messages below
 ```
+
+The whole cockpit floats over the page's 3D field, its full-page background.
 
 A question starts above the bar. When the operator answers it, the work starts on the bar's line. When the work lands, the card falls below the line into the past, still linked to what led to it.
 
@@ -54,7 +56,7 @@ Agents can't decide through any write path. `entity_add` takes no properties (th
 ## Build order
 
 1. **The entity convention and the answer route** (this page, `membrane/decision_map.py`).
-2. **The cockpit view** (`membrane/ui/decisions.js`, the standalone menu's 🗂 Decisions, `/?view=decisions`). It replaced the first board, a three-column kanban. The center column holds the goals (`GET /membrane/goals`), a small field (`field3d.js`, the same one the page boots, drawing at most 1500 points) with the babyseat over it, and the real chat element in its `cockpit` mode (`<ai-terminal-panel cockpit>`: the composer on top as the input bar, about 55% of the page wide, and the messages below it, newest first). On both sides, mirrored, open cards pile up above the bar's line with the first to decide nearest it (a card that blocks another comes before it). Cards in flight sit on the line, and decided cards fall below it, the newest nearest. Each band's cards alternate left and right. Five past rows stay in view, and each new decision pushes the oldest out. With CSS perspective, future cards farther up are smaller and tilted back, while past cards farther down shrink, tilt the other way and fade. `prefers-reduced-motion` turns off the transitions. On a phone (≤ 760 px) it's one column: goals, open, in flight, the bar and chat, then the past.
+2. **The cockpit view** (`membrane/ui/decisions.js`, the standalone menu's 🗂 Decisions, `/?view=decisions`). It replaced the first board, a three-column kanban. The page's 3D field (`field3d.js`, the same boot and adaptive point budget as the full page) is the cockpit's full-page background. It sits behind every panel with `pointer-events: none`, so its drag, hover and select never fire there, and the cards, goals and chat keep dark backings so their text stays readable over it. The center column holds the goals (`GET /membrane/goals`), the babyseat logo, and the real chat element in its `cockpit` mode (`<ai-terminal-panel cockpit>`: the composer on top as the input bar, about 55% of the page wide, and the messages below it, newest first). On both sides, mirrored, open cards pile up above the bar's line with the first to decide nearest it (a card that blocks another comes before it). Cards in flight sit on the line, and decided cards fall below it, the newest nearest. Each band's cards alternate left and right. Five past rows stay in view, and each new decision pushes the oldest out. With CSS perspective, future cards farther up are smaller and tilted back, while past cards farther down shrink, tilt the other way and fade. `prefers-reduced-motion` turns off the transitions. On a phone (≤ 760 px) it's one column: goals, open, in flight, the bar and chat, then the past.
    - An open card's one input is pre-filled with the pick, and ✓ answers it.
    - Clicking a card loads a message about the decision into the center bar, pre-filled and never sent. If the card has its own `chat` and it isn't the one open, the center chat switches to it first. Otherwise the open session is recorded on the card with `POST /membrane/decision/chat`.
    - ✓ pressed while the card's chat is open sends that chat's newest message id as `message`.
