@@ -4259,6 +4259,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_out(_COP.state(self.server)); return
         if path == "/membrane/entity/read":
             self._entity_read(); return
+        if path == "/membrane/decisions":             # #470: the project decision map
+            from . import decision_map as _DM
+            self._json_out(_DM.board(getattr(self.server, "entity_store", None))); return
         if path in STRANGER_PATHS:
             self._stranger(path); return
         if path == "/membrane/gate-stages":           # the gate's stage clock, the last rounds
@@ -4354,6 +4357,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._entity_track_list(); return
         if path == "/membrane/entity/add":
             self._entity_add(); return
+        if path == "/membrane/decision/answer":
+            self._decision_answer(); return
         if path == "/membrane/peer/post":
             self._peer_post(); return
         if path == "/membrane/peer/read":
@@ -6876,6 +6881,26 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         _entity_post_process(srv, res)
+        self._json_out(res)
+
+    def _decision_answer(self) -> None:
+        """POST /membrane/decision/answer {card, value, conv}: the operator
+        answers a decision card (#470). Owner only: agents ask, never decide."""
+        if self._paused_write_refused():
+            return
+        from . import seatauth as _SA
+        if not _SA.owner(self):
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
+        from . import decision_map as _DM
+        srv = self.server
+        body = self._json_body()
+        res = _DM.answer(getattr(srv, "entity_store", None),
+                         getattr(srv, "user_ledger", None),
+                         str(body.get("card") or ""), body.get("value"),
+                         conv=str(body.get("conv") or ""))
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
 
     def _filetool(self) -> None:

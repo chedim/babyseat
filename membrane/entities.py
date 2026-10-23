@@ -2579,6 +2579,11 @@ class EntityStore(MultiParentOps, TimelineOps):
                     props_refused[kk] = ("engine-owned (only script_every_n / "
                                          "script_cooldown_s are settable)")
                     continue
+                from .decision_map import refusal as _dm_refusal
+                _why = _dm_refusal(ent.cls, kk, v)    # #470: agents ask, never decide
+                if _why:
+                    props_refused[kk] = _why
+                    continue
                 if kk in ("parents", "parent"):
                     # ISA goes through set_parents (names resolved, cycles
                     # refused) -- a raw write was silently inert (2026-10-10)
