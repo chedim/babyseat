@@ -1,18 +1,25 @@
 """TOYS UNLOCK AS SELF GROWS (#267, part of #161): the operator's rewards.
 
-#295, THE SKILL TREE: a kind unlocks when self EARNS an achievement (UNLOCK_IDS:
-the achievement whose test is the rung in UNLOCKS -- tower: tell things apart,
-burst: patience, die and drift: notice the world changed, ball and mirror:
-meet an other, ...). Achievements are earned out of order, so the
-toys are too; the record's unlock line carries the achievement's `id` beside
-its `rung` (the test's number, as before).
+#295, THE SKILL TREE: a kind unlocks when self EARNS an achievement.
+Achievements are earned out of order, so the toys are too; the record's
+unlock line carries the achievement's `id` beside its `rung` (the test's
+number, as before).
 
-Each toybox kind has an unlock rung (UNLOCKS). Body, fast and slow come with
-birth; the rest unlock when self passes a rung, and each unlock is also the
-next lesson (the mirror, unlocked at rung 8, is the apparatus of rung 9:
-recognize itself). "Passes rung N" is the ladder's own rule,
-self_loop._passed: a voided pass doesn't count (#254), and a pass above rung
-6 counts only with "ladder": 2 (#258).
+#333 part 3e, THE ORDER (#337's, mapped to skills; approved 2026-10-21):
+UNLOCKS names each kind's achievement by id -- tower with feel itself (its
+nudges start there; first reach is learned on it), slow with look, fast with
+tell things apart, burst with patience, die and drift with notice the world
+changed (five self-moving toys over four skills: one gives two), the ball and
+then the mirror with first reach (meet's and recognize itself's apparatus,
+with each skill's last prerequisite, #312's rule), blocks (a placeholder)
+with recognize itself, as before. Birth unlocks nothing. 🫧 body and 🔊 rattle
+are DROPPED from the order (DROPPED: Blurp has itself; its voice is its chat):
+never unlocked, never provisioned, never locked -- a seat that has one keeps
+it. Old unlock lines stay valid: a kind named on any unlock line is never
+unlocked again, and no toy is ever taken away. Each unlock is also the next
+lesson. "Passes" is the ladder's own rule, self_loop._passed: a voided pass
+doesn't count (#254), and a pass of a rebuilt rung counts only with
+"ladder": 3 (#333).
 
 THE RECORD. On a pass that unlocks something sync() appends one line to
 self's record, once per rung:
@@ -40,10 +47,11 @@ the first time it is built, with one `unlock_built` line -- the same
 "never brought back" rule.
 
 THE MIRROR (#312) is rung 9's apparatus (recognize itself, whose
-prerequisites are feel itself and meet an other): it unlocks with meet an
-other, the skill's last prerequisite (feel is a root), so it is there when
-the skill opens. It was a placeholder at rung 8 (expect a reply) until it was
-built; a seat whose rung 8 line already named it gets it once, as built late.
+prerequisites are feel itself and first reach since #333 part 3d): it unlocks
+with first reach, after the ball (#333 part 3e; with meet an other until
+then), so it is there when the skill opens. It was a placeholder at rung 8
+(expect a reply) until it was built; a seat whose rung 8 line already named
+it gets it once, as built late.
 
 A KIND ADDED TO A RUNG ALREADY UNLOCKED (#312: the mirror beside the ball) gets
 an unlock line of its own, once: a kind named on any unlock line is never
@@ -73,8 +81,10 @@ from . import self_loop as _SL
 from . import self_writer as _W   # #440: the one writer for self/
 from .self_sheet import NAME as _NAME
 
-UNLOCKS = {"body": 0, "fast": 0, "slow": 0, "tower": 3, "burst": 4, "die": 5, "drift": 5,
-           "ball": 6, "mirror": 6, "blocks": 9, "rattle": 10}
+UNLOCKS = {"tower": "feel", "slow": "reach", "fast": "kinds", "burst": "patience",   # #333 part 3e:
+           "die": "shift", "drift": "shift", "ball": "nudge", "mirror": "nudge",      # kind -> its achievement,
+           "blocks": "mirror"}                                                        # in the order they unlock
+DROPPED = ("body", "rattle")   # #333 part 3e (#337): out of the order -- a seat that has one keeps it
 ICONS = {"body": "🫧", "fast": "⚡", "slow": "🐢", "tower": "🗼", "burst": "✦", "die": "🎲", "drift": "〰️",
          "ball": "⚽", "mirror": "🪞", "blocks": "🧱", "rattle": "🔊"}
 TEACHES = {                 # read by people (the dock, the sheet): self goes by its name (#277)
@@ -90,7 +100,8 @@ TEACHES = {                 # read by people (the dock, the sheet): self goes by
     "blocks": f"pieces {_NAME} can put together and take apart: changing itself (rung 10)",
     "rattle": f"makes a sound when {_NAME} shakes it: its first voice (rung 11, speak)",
 }
-UNLOCK_IDS = {k: _SL.RUNG_ID.get(n) for k, n in UNLOCKS.items()}   # #295: kind -> the achievement (None: birth)
+UNLOCK_IDS = dict(UNLOCKS)     # #295: kind -> the achievement (UNLOCKS itself since #333 part 3e)
+RUNGS = {k: _SL.ACHIEVEMENTS[i]["rung"] for k, i in UNLOCKS.items()}   # kind -> its achievement's test number
 PLACEHOLDERS = ("blocks", "rattle")   # locked kinds with no mechanics yet (#312: the mirror is built)
 NEXT_LOCKED = 2             # the dock shows this many locked toys (the next ones), so it stays tidy on a phone
 LATE_S = 300.0              # an unlock written this long after its pass is a catch-up, not news
@@ -98,7 +109,7 @@ LOCKED_PREFIX = "locked:"   # the dock's name for a locked toy (never a toybox n
 
 
 def achievement_of(kind: str) -> str | None:
-    """#295: the achievement whose pass unlocks a kind (None: birth)."""
+    """#295: the achievement whose pass unlocks a kind (None: none -- dropped)."""
     return UNLOCK_IDS.get(str(kind or "").strip().lower())
 
 
@@ -108,19 +119,19 @@ def _ach_name(n: int) -> str:
 
 
 def rung_of(kind: str) -> int:
-    """The rung whose pass unlocks a kind (a kind not in the table: birth)."""
-    return int(UNLOCKS.get(str(kind or "").strip().lower(), 0))
+    """The test number of the achievement that unlocks a kind (0: a kind
+    outside the order -- dropped, or not a kind)."""
+    return int(RUNGS.get(str(kind or "").strip().lower(), 0))
 
 
 def unlocked(passed) -> list[str]:
-    """The kinds unlocked by the passed rungs (a set, as self_loop._passed
-    gives it; an int is a level: every rung up to it), by rung then table
-    order."""
+    """The kinds unlocked by the passed rungs (a set of test numbers, as
+    self_loop._passed gives it; an int is every rung up to it), in the
+    table's order."""
     if isinstance(passed, int):
         passed = set(range(passed + 1))
     got = {0} | set(passed or ())
-    return [k for k in sorted(UNLOCKS, key=lambda k: (UNLOCKS[k], list(UNLOCKS).index(k)))
-            if UNLOCKS[k] in got]
+    return [k for k in UNLOCKS if RUNGS[k] in got]
 
 
 def _recs(srv) -> list[dict]:
@@ -165,6 +176,9 @@ def refusal(srv, kind: str) -> str | None:
     kind = str(kind or "").strip().lower()
     recs = _recs(srv)
     n = rung_of(kind)
+    if kind in DROPPED and kind in PLACEHOLDERS:
+        return (f"{kind} {ICONS.get(kind, '')} is out of the toys' order (#337): {_NAME}'s voice is its "
+                f"chat now").replace("  ", " ")
     if born(recs) and kind in UNLOCKS and n not in _opened(recs):
         from . import self_name as _SN                 # #283: said with this seat's name
         if n in SL._passed(recs):                      # #299: earned, waiting for the operator's accept
@@ -302,14 +316,14 @@ def _sync_new(srv, recs, now):
     from . import self_loop as SL
     named = {k for r in recs if r.get("kind") == "unlock" for k in r.get("toys") or []}
     passed_ = _opened(recs)                     # #299: earned and accepted
-    if all(k in named for k in unlocked(passed_) if UNLOCKS[k] > 0):
+    if all(k in named for k in unlocked(passed_)):
         return []
     at = {r["rung"]: float(r.get("ts") or 0) for r in SL._rung_lines(recs)}
     for n, t in _accept_ts(recs).items():       # ...news from the later of the pass and the accept
         at[n] = max(at.get(n, t), t)
     out = []
     for n in sorted(passed_):
-        toys = [k for k in unlocked({n}) if UNLOCKS[k] == n and k not in named]   # #312: once per kind
+        toys = [k for k in unlocked({n}) if k not in named]   # #312: once per kind
         if n == 0 or not toys:                   # birth is no pass: its kinds are simply open
             continue
         line = {"ts": now, "kind": "unlock", "rung": n, "id": _SL.RUNG_ID.get(n), "toys": toys}
@@ -341,16 +355,16 @@ def locked_rows(recs: list[dict], have=(), cap: int = NEXT_LOCKED) -> list[dict]
     if not born(recs):
         return []
     open_ = set(unlocked(_opened(recs))) | set(have or ())
-    rows = [k for k in sorted(UNLOCKS, key=lambda k: (UNLOCKS[k], list(UNLOCKS).index(k))) if k not in open_]
+    rows = [k for k in UNLOCKS if k not in open_]
     return [{"name": LOCKED_PREFIX + k, "kind": k, "locked": True, "icon": ICONS.get(k, ""),
-             "unlock_rung": UNLOCKS[k], "unlock_id": UNLOCK_IDS[k], "rung_name": _ach_name(UNLOCKS[k]),
+             "unlock_rung": RUNGS[k], "unlock_id": UNLOCK_IDS[k], "rung_name": _ach_name(RUNGS[k]),
              "teaches": TEACHES.get(k, "")} for k in rows[:max(0, int(cap))]]
 
 
 def grandfathered(recs: list[dict], kind: str) -> bool:
     """A toy kept from before its kind unlocked (no toy ever disappears)."""
     from . import self_loop as SL
-    return born(recs) and kind in UNLOCKS and UNLOCKS[kind] not in _opened(recs)
+    return born(recs) and kind in UNLOCKS and RUNGS[kind] not in _opened(recs)
 
 
 def table(recs: list[dict], have: set) -> list[dict]:
@@ -366,13 +380,18 @@ def table(recs: list[dict], have: set) -> list[dict]:
             for k in r.get("toys") or []:
                 when.setdefault(k, r.get("ts"))
     out = []
-    for k in sorted(UNLOCKS, key=lambda k: (UNLOCKS[k], list(UNLOCKS).index(k))):
+    for k in UNLOCKS:
         built = k in TB.KINDS
         state = ("unlocked" if k in open_ else "grandfathered" if k in have else "locked")
-        out.append({"kind": k, "icon": ICONS.get(k, ""), "rung": UNLOCKS[k], "unlock_id": UNLOCK_IDS[k],
-                    "rung_name": _ach_name(UNLOCKS[k]), "teaches": TEACHES.get(k, ""),
+        out.append({"kind": k, "icon": ICONS.get(k, ""), "rung": RUNGS[k], "unlock_id": UNLOCK_IDS[k],
+                    "rung_name": _ach_name(RUNGS[k]), "teaches": TEACHES.get(k, ""),
                     "state": state, "built": built, "have": k in have,
                     "at": when.get(k)})
+    for k in DROPPED:                           # #333 part 3e: out of the order -- shown only where kept
+        if k in have:
+            out.append({"kind": k, "icon": ICONS.get(k, ""), "rung": None, "unlock_id": None,
+                        "rung_name": "", "teaches": TEACHES.get(k, ""), "state": "kept",
+                        "built": k in TB.KINDS, "have": True, "at": when.get(k)})
     return out
 
 

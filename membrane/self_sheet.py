@@ -124,6 +124,8 @@ BUILT_AT = {
     "shift": {"pr": 180, "merged": _utc(2026, 10, 16, 16, 29, 14)},
     # #333: meet (PR #187), time its turn and expect a reply (#281) and recognize itself (#314) were the
     # developer's wiring: not built until they are rebuilt on the nudge, so they are listed again then
+    # meet an other (#333 part 3e), rebuilt on delayed contingency -- the PR's opening time until its merge's is set
+    "meet": {"pr": 479, "merged": _utc(2026, 10, 23, 7, 54, 22)},
     # speak (#311): its turns carry words from its record
     "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 55, 39)},
     # change itself (#320): the dream and its test
@@ -175,7 +177,7 @@ def fastest_cycles() -> dict:
     (a rung bound by counts can pass faster at today's pace)."""
     r2 = SL.RUNG2_REACHES + SL.AUDIT_REACHES
     return {1: SL.RUNG1_CYCLES, 2: r2, 3: SL.RUNG3_WINDOW - r2, 4: SL.RUNG4_TIMED,
-            5: SL.RUNG5_LOOKS, 6: SL.RUNG6_PUSHES * _cycles(SL.MEET_EVERY), 7: SL.RUNG7_PUSHES * _cycles(_turn_every()),
+            5: SL.RUNG5_LOOKS, 6: SL.RUNG6_LOOKS * (2 + _cycles(SL.FOLLOW_S)), 7: SL.RUNG7_PUSHES * _cycles(_turn_every()),
             8: SL.RUNG8_LOOKS * _cycles(_turn_every()),
             9: _cycles(SL.MIRROR_LAG) + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS,   # #312: the stranger's lag, the fit, the looks
             10: SL.CHANGE_WINDOW * _cycles(SL.CHANGE_EVERY),                       # #320: a day of dreams
@@ -205,7 +207,8 @@ def _needs() -> dict:
             3: f"{SL.RUNG3_WINDOW} looks so its kinds can agree across halves",
             4: f"{SL.RUNG4_TIMED} timed looks",
             5: f"{SL.RUNG5_LOOKS} looks with noticing on, both audit shifts caught",
-            6: f"{SL.RUNG6_PUSHES} lines sent, {_dur(SL.MEET_EVERY)} apart",
+            6: (f"{SL.RUNG6_LOOKS} reply looks at one thing ({_dur(SL.FOLLOW_S)} after a nudge's check) that "
+                f"beat its tempo, the changes not its own (at least {SL.RUNG13_AUDIT_MIN})"),   # #333 part 3e
             7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {_dur(_turn_every())} apart",
             8: f"{SL.RUNG8_LOOKS} reply checks, one per line",
             9: f"{SL.MIRROR_LOOKS} looks at the mirror and the stranger, after the stranger's "
@@ -762,7 +765,7 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
              3: {"looks": (SL.RUNG3_LOOKS, "steered looks")},
              4: {"timed": (SL.RUNG4_TIMED, "timed looks")},
              5: {"looks": (SL.RUNG5_LOOKS, "looks with noticing on")},
-             6: {"pushes": (SL.RUNG6_PUSHES, "lines sent"), "heard": (SL.RUNG6_HEARD, "answered looks at the other")},
+             6: {"looks": (SL.RUNG6_LOOKS, "reply looks at one thing")},
              7: {"pushes": (SL.RUNG7_PUSHES, "turns with the ball with a reply check (you roll it back)" if ball
                             else "timed lines with a reply check")},
              8: {"looks": (SL.RUNG8_LOOKS, "reply checks")},
@@ -789,7 +792,7 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
             fl = int(p.get("false") or 0)
             text = ("every utterance true of its record" if not fl
                     else f"{fl} utterance{'s' if fl != 1 else ''} not true of its record")
-        elif key == "lift":
+        elif key == "lift" and aim != 6:
             rw, rp = p.get("rate_words"), p.get("rate_plain")
             text = (f"replies to words {'–' if rw is None else f'{rw:.2f}'} vs plain {'–' if rp is None else f'{rp:.2f}'} "
                     f"(z {float(p.get('z') or 0):.1f} → {SL.SPEAK_LIFT_Z:.1f}, {_sg(SL.SPEAK_LIFT_MARGIN)})")
@@ -831,6 +834,13 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
             text = ("every change cleared its own bar, one step from the value it had, never back and forth"
                     if p["crit"].get("honesty", 0) >= 1.0 else
                     "a change that did not clear its own bar, skipped a step or went back and forth")
+        elif key == "lift" and aim == 6:             # #333 part 3e: the replies beat its own tempo
+            text = (f"reply lift over its tempo {_sg(float(p.get('margin') or 0))} "
+                    f"(z {float(p.get('z') or 0):.1f} → {SL.RUNG6_Z:.1f}, {_sg(SL.RUNG6_MARGIN)})")
+        elif key == "audit" and aim == 6:            # ...and the changes were not its own
+            n = int(p.get("audited") or 0)
+            text = (f"not its own: {round(float(p.get('other') or 0) * n)}/{n} found changes carry no self "
+                    f"(≥ {SL.RUNG13_AUDIT_SHARE:.0%}, at least {SL.RUNG13_AUDIT_MIN})")
         elif key == "audit" and aim == 13:           # #333 part 3c: the changes it found were its own
             n = int(p.get("audited") or 0)
             text = (f"its own changes: {round(float(p.get('own') or 0) * n)}/{n} found changes carry self "
@@ -997,7 +1007,7 @@ def _relationships(recs: list, tempo: dict, st: dict) -> dict:
 SKILL_STEP_S = 1800.0        # the skill's trend line: one point per half hour of the record
 SKILL_POINTS = 9             # ...over the last four hours
 SKILL_LABEL = {1: "feel skill", 2: "reach skill", 3: "reach skill on a moving thing", 4: "news share of timed looks",
-               5: "shifts noticed", 6: "the other read as other", 7: "replies gained by its timing",
+               5: "shifts noticed", 6: "reply lift over its tempo", 7: "replies gained by its timing",
                8: "skill vs running rate", 9: "its own moves predict the mirror",
                10: "its changes' gain, out of sample", 11: "replies gained by its words"}
 

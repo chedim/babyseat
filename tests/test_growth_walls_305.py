@@ -225,9 +225,10 @@ class TestTheTable(unittest.TestCase):
     def test_the_old_wiring_is_not_built(self):
         # #333: meet, time its turn (PR #281), expect a reply (#281) and recognize itself (#314) were the
         # developer's wiring -- not built until they are rebuilt on the nudge
-        for i in ("meet", "turns", "expect"):
+        for i in ("turns", "expect"):
             self.assertNotIn(i, SH.BUILT_AT, i)
         self.assertNotEqual(SH.BUILT_AT["mirror"]["pr"], 314)   # part 3d: rebuilt on looks, not #314's
+        self.assertNotEqual(SH.BUILT_AT["meet"]["pr"], 187)     # part 3e: rebuilt on delayed contingency
 
 
 def _js(expr):

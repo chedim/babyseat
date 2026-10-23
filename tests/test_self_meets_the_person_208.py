@@ -116,15 +116,13 @@ def _push(to, n, base=0.0):
     return [{"ts": base + i, "kind": "push", "n": i, "eid": "chat:out:x", "to": to} for i in range(n)]
 
 
-def test_rung6_reads_only_the_current_others_answers():
+def test_rung6_no_longer_reads_pushes_to_a_named_other():
+    """#333 part 3e: meet is rebuilt on Blurp's reply looks; the old wiring's
+    pushes to the person and answered looks at them pass nothing."""
     tempo = {OP_IN: {"changed": 10, "answered": 20}}
     old = _push(OP_IN, SL.RUNG6_PUSHES) + _looks(OP_IN, SL.RUNG6_HEARD)
-    assert SL._rung6(old, tempo)["passed"] is True          # it passed against the old other
-    now = old + _push(ROOM_IN, 1, base=100.0)               # the person changed
-    out = SL._rung6(now, tempo)
-    assert out["eid"] == ROOM_IN
-    assert out["crit"]["pushes"] == 1 / SL.RUNG6_PUSHES     # pushes to the old slot don't count
-    assert out["crit"]["heard"] == 0.0 and out["passed"] is False
+    out = SL._rung6(old, tempo)
+    assert out["passed"] is False and out["crit"]["looks"] == 0.0
 
 
 def test_rung8_reads_only_the_current_others_pairs():   # rung 7 until #258

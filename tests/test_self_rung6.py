@@ -134,13 +134,16 @@ def test_it_classes_the_imperfect_answerer_as_other(monkeypatch):
 
 def test_a_perfect_echo_is_a_body_not_an_other():
     # a responder self predicts near-perfectly (zero gap, its own echo) is a
-    # BODY -- rung 6 must not open against it
+    # BODY (the split, kept for the page); #333 part 3e: rung 6 no longer reads
+    # it -- an echo of its own look changes `by: self`, so meet's audit fails
     recs = ([{"kind": "reach", "eid": "echo", "answer": "changed", "p": 0.99, "steer": True}] * 20
             + [{"kind": "reach", "eid": "still", "answer": "unchanged", "p": 0.01, "steer": True}] * 20)
     tempo = {"echo": {"changed": 20, "answered": 20}, "still": {"changed": 0, "answered": 20}}
     assert SL._split(recs, tempo)["echo"] == "body"
-    out = SL._rung6(_push_recs("echo") + recs, tempo)
-    assert out["crit"]["split"] == 0.0 and out["passed"] is False
+    follows = [{"kind": "reach", "eid": "echo", "answer": "changed", "p": 0.1, "follow": True, "nudged": 0,
+                "by": ["self"]}] * 20
+    out = SL._rung6(_push_recs("echo") + recs + follows, tempo)
+    assert out["crit"]["audit"] == 0.0 and out["passed"] is False
 
 
 def test_an_imperfect_answerer_is_an_other():

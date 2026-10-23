@@ -181,7 +181,7 @@ def test_list_and_the_dock_read_whose_side():
 
 # ---- 2. one shared ball, provisioned once --------------------------------------------
 
-def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7, ball=True):
+def _seat(passed=(1, 2, 3, 4, 5, 6, 13), limit=7, ball=True):
     d = Path(os.environ["MEMBRANE_DATA_DIR"])
     d.mkdir(parents=True, exist_ok=True)
     srv = types.SimpleNamespace(paused=False, events_pool=None, membrane=None, efield=_Field())
@@ -202,8 +202,10 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7, ball=True):
         SL._append(srv, line)
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
     cap(srv, limit)
+    if 13 in passed:                       # #333 part 3e: the ball unlocks with first reach
+        SL._append(srv, {"ts": 2.0, "kind": "accept", "id": "nudge", "by": "test"})
     if ball:
-        TU.sync(srv)                       # the unlocks of the rungs passed (#267): the ball at rung 6
+        TU.sync(srv)                       # the unlocks of the rungs passed (#267): the ball with first reach
     return srv
 
 
@@ -231,16 +233,16 @@ def _ball_names():
     return [r["name"] for r in TB.list_toys() if r["kind"] == "ball"]
 
 
-def test_the_rung_six_unlock_switches_on_exactly_one_ball_once():
+def test_the_first_reach_unlock_switches_on_exactly_one_ball_once():
     srv = _seat(passed=(1, 2, 3, 4, 5), limit=6, ball=False)
     TU.sync(srv)
-    assert _ball_names() == []                                      # locked before rung 6
-    _rung(srv, 6)
+    assert _ball_names() == []                                      # locked before first reach
+    _rung(srv, 13)
     TU.sync(srv)
     assert _ball_names() == []                                      # #299: earned, not accepted yet: still locked
-    SL.accept(srv, "meet")                                          # the operator's accept syncs the unlock
+    SL.accept(srv, "nudge")                                         # the operator's accept syncs the unlock
     TU.sync(srv)
-    line = next(r for r in SL._read(srv) if r.get("kind") == "unlock" and r.get("rung") == 6)
+    line = next(r for r in SL._read(srv) if r.get("kind") == "unlock" and r.get("rung") == 13)   # #333 part 3e
     assert line["toys"] == ["ball", "mirror"] and line["added"] == [TB.BALL, "toy:mirror"]   # #312: the mirror too
     assert _ball_names() == [TB.BALL] and len(_balls(srv)) == 1
     TU.sync(srv)

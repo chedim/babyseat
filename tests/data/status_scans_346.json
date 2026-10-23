@@ -100,11 +100,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -223,7 +222,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -470,11 +469,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -593,7 +591,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -862,13 +860,12 @@
 },
 "6": {
 "crit": {
-"heard": 0.3,
-"pushes": 0.4,
-"split": 1.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
-"skill": 1.0
+"skill": 0.0
 },
 "7": {
 "blind_rate": null,
@@ -1581,7 +1578,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -1890,7 +1887,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -2205,11 +2202,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.1,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:bob",
 "passed": false,
 "skill": 0.0
 },
@@ -3090,7 +3086,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -3406,11 +3402,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.1,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
 "skill": 0.0
 },
@@ -4388,7 +4383,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -4724,11 +4719,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.1,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:bob",
 "passed": false,
 "skill": 0.0
 },
@@ -5578,7 +5572,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "passed"
 },
 {
 "id": "turns",
@@ -5971,11 +5965,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.1,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
 "skill": 0.0
 },
@@ -6813,7 +6806,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "passed"
 },
 {
 "id": "turns",
@@ -7109,11 +7102,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -7232,7 +7224,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -7500,11 +7492,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -8187,7 +8178,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -8491,11 +8482,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -8634,7 +8624,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -8879,7 +8869,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "unbuilt"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -9146,11 +9136,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -9516,11 +9505,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -9812,8 +9800,7 @@
 "ts": 1760010492.6417396
 },
 "open_ids": [
-"shift",
-"meet"
+"shift"
 ],
 "progress": {
 "1": {
@@ -9909,13 +9896,12 @@
 },
 "6": {
 "crit": {
-"heard": 0.3,
-"pushes": 0.4,
-"split": 1.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
-"skill": 1.0
+"skill": 0.0
 },
 "7": {
 "blind_rate": null,
@@ -10513,15 +10499,13 @@
 "feel",
 "reach",
 "kinds",
-"shift",
-"meet"
+"shift"
 ],
 "allowed": [
 "feel",
 "reach",
 "kinds",
-"shift",
-"meet"
+"shift"
 ],
 "awaiting": [
 "feel",
@@ -10630,7 +10614,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "current"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -10670,7 +10654,7 @@
 }
 ],
 "level": 6,
-"limit": 6,
+"limit": 5,
 "meets": {
 "heard_age": 9986362.727,
 "medium": "chat",
@@ -10680,8 +10664,7 @@
 },
 "mode": "on",
 "next": [
-"shift",
-"meet"
+"shift"
 ],
 "off_field": {
 "looks": 200,
@@ -10940,7 +10923,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "capped"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -10990,8 +10973,7 @@
 },
 "mode": "off",
 "next": [
-"shift",
-"meet"
+"shift"
 ],
 "off_field": {
 "looks": 200,
@@ -11256,11 +11238,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.1,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:bob",
 "passed": false,
 "skill": 0.0
 },
@@ -12141,7 +12122,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "capped"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -12361,7 +12342,6 @@
 },
 "open_ids": [
 "shift",
-"meet",
 "nudge"
 ],
 "progress": {
@@ -12458,11 +12438,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.1,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
 "skill": 0.0
 },
@@ -13320,7 +13299,6 @@
 "reach",
 "kinds",
 "shift",
-"meet",
 "nudge"
 ],
 "allowed": [
@@ -13328,7 +13306,6 @@
 "reach",
 "kinds",
 "shift",
-"meet",
 "nudge"
 ],
 "awaiting": [
@@ -13442,7 +13419,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "current"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -13493,7 +13470,6 @@
 "mode": "on",
 "next": [
 "shift",
-"meet",
 "nudge"
 ],
 "off_field": {
@@ -13683,9 +13659,9 @@
 },
 "open_ids": [
 "reach",
+"nudge",
 "turns",
-"expect",
-"nudge"
+"expect"
 ],
 "progress": {
 "1": {
@@ -13781,11 +13757,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.1,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:bob",
 "passed": false,
 "skill": 0.0
 },
@@ -14517,18 +14492,18 @@
 "feel",
 "reach",
 "patience",
+"nudge",
 "turns",
 "expect",
-"nudge",
 "change"
 ],
 "allowed": [
 "feel",
 "reach",
 "patience",
+"nudge",
 "turns",
 "expect",
-"nudge",
 "change"
 ],
 "awaiting": [],
@@ -14690,9 +14665,9 @@
 "mode": "on",
 "next": [
 "reach",
+"nudge",
 "turns",
-"expect",
-"nudge"
+"expect"
 ],
 "off_field": {
 "looks": 200,
@@ -15034,11 +15009,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.1,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": "membrane::Component:chat:in:alice",
 "passed": false,
 "skill": 0.0
 },
@@ -15747,17 +15721,17 @@
 "feel",
 "reach",
 "patience",
+"nudge",
 "turns",
-"expect",
-"nudge"
+"expect"
 ],
 "allowed": [
 "feel",
 "reach",
 "patience",
+"nudge",
 "turns",
-"expect",
-"nudge"
+"expect"
 ],
 "awaiting": [
 "expect",
@@ -16176,11 +16150,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -16567,11 +16540,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -17463,7 +17435,6 @@
 "open_ids": [
 "kinds",
 "shift",
-"meet",
 "nudge"
 ],
 "progress": {
@@ -17559,11 +17530,10 @@
 },
 "6": {
 "crit": {
-"heard": 0.0,
-"pushes": 0.0,
-"split": 0.0
+"audit": 0.0,
+"lift": 0.0,
+"looks": 0.0
 },
-"eid": null,
 "passed": false,
 "skill": 0.0
 },
@@ -17620,7 +17590,6 @@
 "reach",
 "kinds",
 "shift",
-"meet",
 "nudge"
 ],
 "allowed": [
@@ -17628,7 +17597,6 @@
 "reach",
 "kinds",
 "shift",
-"meet",
 "nudge"
 ],
 "awaiting": [],
@@ -17704,7 +17672,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "current"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -17756,7 +17724,6 @@
 "next": [
 "kinds",
 "shift",
-"meet",
 "nudge"
 ],
 "off_field": {
@@ -17950,7 +17917,7 @@
 "id": "meet",
 "name": "meet an other",
 "rung": 6,
-"state": "capped"
+"state": "locked"
 },
 {
 "id": "turns",
@@ -18002,7 +17969,6 @@
 "next": [
 "kinds",
 "shift",
-"meet",
 "nudge"
 ],
 "off_field": {

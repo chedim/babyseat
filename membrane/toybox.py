@@ -57,7 +57,8 @@ words. Its state is whose side it is on (`self` / `other`), its last mover
 (a nudge since #333, roll_self before, `by: self`); a person rolls
 it back (poke); the model may roll it too (`by: model`), which is never the
 other's turn. It has no clock, and a look never moves it. Exactly one shared
-ball (BALL) is provisioned once, by toy_unlocks when rung 6 passes (#267). The
+ball (BALL) is provisioned once, by toy_unlocks when first reach is accepted
+(#333 part 3e: meet's apparatus; when rung 6 passed, #267, until then). The
 other's last act -- a person's poke on ANY toy -- is kept in one small file
 (last_person_poke): what rung 7's timing reads.
 

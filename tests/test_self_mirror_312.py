@@ -120,12 +120,13 @@ def test_it_opens_once_feel_and_first_reach_are_earned_and_accepted():
 
 # ---- 2. the toy -----------------------------------------------------------------------------
 
-def test_the_mirror_is_a_built_in_kind_unlocked_with_meet():
+def test_the_mirror_is_a_built_in_kind_unlocked_with_first_reach():
     assert "mirror" in TB.KINDS and TB.KINDS["mirror"]["clock"] is False
     assert "mirror" not in TU.PLACEHOLDERS
     assert TB.MIRROR_LAG == SL.MIRROR_LAG and TB.KINDS["mirror"]["params"]["lag_s"] == TB.MIRROR_LAG   # #343: s
     assert TB.MIRROR_LAG % SL.AIM_HOLD                            # never in step with its aims (they'd leak timing)
-    assert TU.UNLOCKS["mirror"] == 6 and TU.UNLOCK_IDS["mirror"] == "meet"   # its last prerequisite
+    assert TU.UNLOCKS["mirror"] == "nudge" and TU.RUNGS["mirror"] == 13   # #333 part 3e: its last prerequisite
+    assert list(TU.UNLOCKS).index("ball") < list(TU.UNLOCKS).index("mirror")   # ...listed after the ball
 
 
 def test_the_glass_shows_the_move_one_feed_back_and_the_stranger_one_from_long_ago():
@@ -189,12 +190,12 @@ def test_the_mirror_takes_no_pokes_and_has_a_getter():
     assert MIRROR in SL._targets(srv)
 
 
-def test_a_seat_whose_rung_6_unlocked_before_gets_the_mirror_once():
-    srv = _seat(rungs=(1, 2, 6), mirror=False)
+def test_a_seat_whose_rung_6_unlocked_the_ball_before_gets_the_mirror_once_with_first_reach():
+    srv = _seat(rungs=(1, 2, 13), mirror=False)
     SL._append(srv, {"ts": 5.0, "kind": "unlock", "rung": 6, "toys": ["ball"]})   # before the mirror was built
     TU.sync(srv, now=100.0)
     new = [r for r in _record(srv) if r["kind"] == "unlock" and "mirror" in r["toys"]]
-    assert len(new) == 1 and new[0]["rung"] == 6 and new[0]["toys"] == ["mirror"]
+    assert len(new) == 1 and new[0]["rung"] == 13 and new[0]["toys"] == ["mirror"]   # #333 part 3e: the ball was named
     assert "mirror" in {t["kind"] for t in TB.list_toys()}
     TB.remove(srv, "toy:mirror")
     TU.sync(srv, now=200.0)                                        # removed stays removed
@@ -202,13 +203,14 @@ def test_a_seat_whose_rung_6_unlocked_before_gets_the_mirror_once():
 
 
 def test_a_seat_whose_rung_8_line_named_the_mirror_gets_it_built_late():
-    srv = _seat(rungs=(1, 2, 6, 7, 8), mirror=False)
+    srv = _seat(rungs=(1, 2, 6, 7, 8, 13), mirror=False)    # #333 part 3e: the mirror opens with first reach
     SL._append(srv, {"ts": 5.0, "kind": "unlock", "rung": 6, "toys": ["ball"]})
     SL._append(srv, {"ts": 6.0, "kind": "unlock", "rung": 8, "id": "expect", "toys": ["mirror"]})
     TU.sync(srv, now=100.0)
     recs = _record(srv)
     assert [r for r in recs if r["kind"] == "unlock_built" and r["toys"] == ["mirror"]]
-    assert not [r for r in recs if r["kind"] == "unlock" and r["ts"] == 100.0]   # no second unlock
+    assert not [r for r in recs if r["kind"] == "unlock" and r["ts"] == 100.0
+                and {"ball", "mirror"} & set(r["toys"])]                          # no second unlock
     assert "mirror" in {t["kind"] for t in TB.list_toys()}
 
 
@@ -312,7 +314,7 @@ def test_a_still_self_cannot_recognize_itself():
 # ---- 4. the practice, through the loop ---------------------------------------------------------
 
 def test_the_loop_looks_at_the_mirror_and_earns_recognize_itself():
-    srv = _seat(world=_Drift(0))
+    srv = _seat(world=_Drift(0), sub="loop")    # #333 part 3e: no provisioning (first reach unlocks the ball, ...)
     _run(srv, int(round(SL.MIRROR_LAG / SL.PACE_S)) + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS + 120)   # #343: the lag in 10 s cycles
     recs = _record(srv)
     lines = [r for r in recs if r["kind"] == "mirror"]
@@ -413,3 +415,4 @@ def _rebuilt_333(monkeypatch):
     -- meet's push, the ball's turns, the asks at a push -- are gone)."""
     from tests._self_cap import rebuilt
     rebuilt(monkeypatch)
+
