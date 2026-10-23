@@ -3350,6 +3350,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if psrv is None:
                     return self._json_err(503, "no seat")
                 self._json_out(_SP.pause_state(psrv))
+            elif path == "/membrane/decisions":
+                # #470: the decision board's read (the page calls the serve port)
+                from . import decision_map as _DM
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                self._json_out(_DM.board(getattr(psrv, "entity_store", None)))
             elif path == "/membrane/options":
                 # #344: the seat-wide options (options.py) -- the ⚙ window's read
                 from . import options as _OPT
@@ -3597,6 +3602,23 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                                  relay_speaker=getattr(self, "_ui_speaker", "") if getattr(self, "_ui_relay", False) else None,
                                  body=b)
                 return self._json_out(_SP.set_pause(psrv, b["paused"], by=_by))
+            if path in ("/membrane/decision/answer", "/membrane/decision/chat"):
+                # #470: the board's writes, behind the owner's door above like
+                # every write: an answer (decision_map.answer) or a card's chat
+                from . import decision_map as _DM
+                b = self._read_body()
+                if not isinstance(b, dict):
+                    return self._json_out({"error": "a JSON object body is required"}, code=400)
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                est = getattr(psrv, "entity_store", None)
+                if path.endswith("/answer"):
+                    res = _DM.answer(est, getattr(psrv, "user_ledger", None), str(b.get("card") or ""),
+                                     b.get("value"), conv=str(b.get("conv") or ""))
+                else:
+                    res = _DM.set_chat(est, str(b.get("card") or ""), str(b.get("chat") or ""))
+                if not res.get("ok"):
+                    return self._json_out({"error": res.get("error")}, code=409 if res.get("conflict") else 400)
+                return self._json_out(res)
             if path == "/membrane/options":
                 # #344: the ⚙ window's write -- the writable options only,
                 # validated (a 400 with the reason; nothing written), then

@@ -36,7 +36,9 @@ entity_edit  spec=<eid>  properties={"status": "open", "var": {"type": "int", "u
 
 On a `Decision`, `entity_edit` refuses `value`, `set_by`, `set_at` and any `status` other than `open` or `in_flight`. Only the operator answers:
 
+- Both ports serve the board: the proxy (`:11500`) and the serve port (`:4096`, which the page reaches as `/ui/serve/...`).
 - `GET /membrane/decisions` returns `{cards: [...], edges: [{from, to, rel}]}`.
+- `POST /membrane/decision/chat {card, chat}` (serve port, owner only) records the chat a card opened. Only `chat` changes, and a card keeps one it already has.
 - `POST /membrane/decision/answer {card, value, conv}` (seat owner only) validates the value against the card's `var`. It then marks the card `decided` and appends `decided: <title> = <value>` to the operator ledger (`<field>.ledger.jsonl`), so the decision is recalled verbatim, as law. The ledger line is one line, and the title and value are each clipped to 160 characters. The ledger is written first, so a failed write leaves the card open. Answers run one at a time, so a card is decided once. A decided card refuses another answer (409), and `entity_edit` can't reopen it. Changing a past decision will create a timeline (step 3). A `Decision` with no status yet (made before the map) can be given one and become a card.
 
 `GET /membrane/decisions` is a read, open to the same callers as the seat's other reads (localhost, the LAN in standalone, a token in JWT mode). Only answering needs the owner.
@@ -46,5 +48,5 @@ Agents can't decide through any write path. `entity_add` takes no properties (th
 ## Build order
 
 1. **The entity convention and the answer route** (this page, `membrane/decision_map.py`).
-2. **The board view** (`membrane/ui/decisions.js`, the standalone menu's 🗂 Decisions, `/?view=decisions`): three columns, decided · in flight · open. In the open column, a card that blocks another sits above it. Lines show the edges between cards, and chips show work outside the board (`carried_by: PR #468`). An open card's one input is pre-filled with the pick, and ✓ answers it. Clicking the card itself opens its chat: the card's `chat` session, or a new one titled `Decision: <title>`, recorded on the card with `entity_edit`. The chat opens with a message about the decision pre-filled, never sent. The board re-reads the seat every 5 s while it's shown.
+2. **The board view** (`membrane/ui/decisions.js`, the standalone menu's 🗂 Decisions, `/?view=decisions`): three columns, decided · in flight · open. In the open column, a card that blocks another sits above it. Lines show the edges between cards, and chips show work outside the board (`carried_by: PR #468`). An open card's one input is pre-filled with the pick, and ✓ answers it. Clicking the card itself opens its chat: the card's `chat` session, or a new one titled `Decision: <title>`, recorded on the card with `POST /membrane/decision/chat`. The chat opens with a message about the decision pre-filled, never sent. The board re-reads the seat every 5 s while it's shown.
 3. **The field view and timelines:** decision edges drawn on the field. Changing a past decision creates a new `Timeline` branch (`TimelineOps` in `membrane/entities.py`).

@@ -3166,7 +3166,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           if (!sid) {
             const s = await post("/session", { title: "Decision: " + String(card.title).slice(0, 60) });
             sid = (s && s.id) || "";
-            if (sid) { try { await post("/membrane/entity/edit", { spec: card.eid, properties: { chat: sid } }); } catch (e) { /* the chat still opens */ } }
+            if (sid) { try { await post("/membrane/decision/chat", { card: card.eid, chat: sid }); } catch (e) { /* the chat still opens */ } }
           }
           if (sid) lsSet("membrane.chat.sid", sid);       // the chat panel reopens this session
           location.href = "/?view=chat&ask=" + encodeURIComponent(window.DecisionLogic ? window.DecisionLogic.askText(card) : card.title);
