@@ -135,9 +135,10 @@ The babyseat menu (top left) opens the page's views: *Chat only*, *Graph only*,
 **Decisions** (`/?view=decisions`) and *Everything*. Decisions is the project
 decision map as a cockpit: the time axis runs top to bottom and the chat's
 input bar is *now*. The page's 3D field fills the background behind it all
-and takes no clicks there. The center column holds the open goals the seat
-steers toward, the babyseat, the input bar, and the chat below the bar,
-newest message first. On both sides, open questions pile up
+and takes no clicks there. The center column holds the babyseat, the open
+goals the seat steers toward (stacked right on the input bar and growing
+upward, newest on top, the active ones marked ◆), the input bar, and the
+chat below the bar, newest message first. On both sides, open questions pile up
 above the bar's line (the first to decide nearest it), the cards in flight sit
 on the line, and decided cards fall below it (the newest nearest; the oldest
 are pushed out of view). New cards alternate left and right.
@@ -147,7 +148,7 @@ An open card asks for one value, pre-filled with the agent's pick; ✓ decides i
 about the decision into the center bar, pre-filled and never sent, so the talk
 happens in the center chat. Hovering a decided card scrolls the chat to the
 message where it was decided, when that chat is open; clicking it opens its
-chat. On a phone the cockpit is one column: goals, open questions, in flight,
+chat. On a phone the cockpit is one column: open questions, in flight, the goals,
 the bar and the chat, then the past. See [decision-map.md](decision-map.md).
 
 ## The options window (⚙)
