@@ -212,7 +212,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
             --amber:#ffb040; --cyan:#5fd6ff; --line:rgba(255,176,64,.5); --dim:rgba(255,176,64,.18);
             --panel:rgba(8,13,20,.84); --cockpit-line:rgba(255,176,64,.55); --cockpit-accent:#5fd6ff;
             background:radial-gradient(ellipse at 50% 46%, #0d1a28 0%, #060a10 62%, #04060a 100%); }
-    .ck { position:relative; height:100%; display:grid; gap:0 18px; padding:8px 44px 0;
+    .ck { position:relative; height:100%; display:grid; gap:0 18px; padding:8px 66px 0;
           grid-template-columns:minmax(0,1fr) minmax(0,55%) minmax(0,1fr);
           grid-template-rows:minmax(0,1fr) auto minmax(0,1fr);
           grid-template-areas:"fl ct fr" "nl cc nr" "pl cc pr"; }

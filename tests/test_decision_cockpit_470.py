@@ -160,3 +160,19 @@ def test_the_chamfered_corners_draw_their_edge():
     src = (UI / "decisions.js").read_text()
     assert ".dc::before" in src and ".dc::after" in src
     assert "border-color:var(--edge)" in src
+
+
+def test_a_reply_runs_newest_part_first_in_the_cockpit():
+    """The cockpit reads past at the bottom, latest on top -- also inside one
+    reply: its tool calls and words were still oldest-first (operator,
+    2026-10-23). The reply's who-line stays its header."""
+    src = (UI / "panel.js").read_text()
+    assert ":host([cockpit]) .msg.ai { display:flex; flex-direction:column-reverse;" in src
+    assert ":host([cockpit]) .msg.ai > .who { order:99; }" in src
+
+
+def test_the_side_lanes_clear_blurps_tab_and_toys():
+    """Blurp's tab and its toy dock float at the left edge: the lanes' side
+    margin is 1.5x the first cut's 44px (operator, 2026-10-23)."""
+    src = (UI / "decisions.js").read_text()
+    assert "padding:8px 66px 0;" in src
