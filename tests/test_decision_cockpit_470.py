@@ -81,11 +81,37 @@ def test_each_new_decision_pushes_the_oldest_out_of_view():
     assert _js('D.pushOut([], 3)') == {"shown": [], "gone": 0}
 
 
+def goal(eid, born, active=False):
+    return {"eid": eid, "title": eid, "active": active, "born": born}
+
+
 @NODE
-def test_the_goals_show_the_active_first_and_count_the_rest():
-    goals = [{"eid": "g:a", "active": False}, {"eid": "g:b", "active": True}, {"eid": "g:c", "active": False}]
-    out = _js('D.goalsShown(%s, 2)' % json.dumps(goals))
-    assert [g["eid"] for g in out["shown"]] == ["g:b", "g:a"] and out["more"] == 1
+def test_the_goals_stack_on_the_bar_oldest_nearest_newest_on_top():
+    # round 2: the goals sit right above the input bar and grow upward like the
+    # open cards' pile -- index 0 is nearest the bar (the oldest), the newest on top
+    goals = [goal("g:new", 300), goal("g:old", 100), goal("g:mid", 200, active=True)]
+    out = _js("D.goalStack(%s, 5)" % json.dumps(goals))
+    assert [g["eid"] for g in out["stack"]] == ["g:old", "g:mid", "g:new"] and out["more"] == 0
+    assert [g["eid"] for g in out["stack"] if g["active"]] == ["g:mid"]       # still marked
+
+
+@NODE
+def test_a_full_goal_stack_keeps_the_active_and_the_newest_and_counts_the_rest():
+    goals = [goal("g:1", 100, active=True), goal("g:2", 200), goal("g:3", 300), goal("g:4", 400), goal("g:5", 500)]
+    out = _js("D.goalStack(%s, 3)" % json.dumps(goals))
+    # the active one stays however old; the rest of the room goes to the newest; still oldest nearest the bar
+    assert [g["eid"] for g in out["stack"]] == ["g:1", "g:4", "g:5"] and out["more"] == 2
+    # a goal with no birth time counts as the oldest
+    out = _js("D.goalStack(%s, 5)" % json.dumps([goal("g:x", None), goal("g:y", 10)]))
+    assert [g["eid"] for g in out["stack"]] == ["g:x", "g:y"]
+
+
+def test_the_goals_sit_directly_above_the_bar():
+    src = (UI / "decisions.js").read_text()
+    rule = _cockpit_rule(src, ".goals ul")
+    assert "flex-direction:column-reverse" in rule                     # the stack grows upward from the bar
+    ct = src[src.index('<div class="ct">'):src.index('</div></div>', src.index('<div class="ct">'))]
+    assert ct.index('class="mark"') < ct.index('class="goals"')        # the babyseat above, the goals last: on the bar
 
 
 @NODE

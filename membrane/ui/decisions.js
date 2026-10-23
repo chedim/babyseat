@@ -5,7 +5,8 @@
  * about its vertical center line.
  *
  *   behind:  the page's 3D field, the full-page background (no input).
- *   center: the goals we steer toward (GET /membrane/goals), the babyseat,
+ *   center: the babyseat, the goals we steer toward (GET /membrane/goals)
+ *           stacked on the bar and growing upward (newest on top),
  *           the input bar (the real chat element,
  *           <ai-terminal-panel cockpit>: composer on top) and the chat below
  *           it, newest message first.
@@ -84,10 +85,21 @@ function pushOut(past, rows) {
   return { shown: list.slice(0, keep), gone: Math.max(0, list.length - keep) };
 }
 
-/** The goals listed: the seat's active set first, `max` in all, the rest counted. */
-function goalsShown(goals, max) {
-  const list = (goals || []).slice().sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
-  return { shown: list.slice(0, max), more: Math.max(0, list.length - max) };
+/** The goals' stack on the input bar (it grows upward, as the open cards'
+ * pile does): index 0 nearest the bar is the oldest, the newest on top. With
+ * more than `max` goals the active ones stay (however old) and the rest of
+ * the room goes to the newest; `more` counts the ones left out. A goal with
+ * no birth time counts as the oldest. */
+function goalStack(goals, max) {
+  const born = (g) => (typeof g.born === "number" && isFinite(g.born) ? g.born : -Infinity);
+  const age = (a, b) => born(a) - born(b) || String(a.title || a.eid).localeCompare(String(b.title || b.eid));
+  const list = (goals || []).slice();
+  const room = Math.max(0, Number(max) || 0);
+  const active = list.filter((g) => g.active).sort(age).slice(-room);
+  const free = room - active.length;
+  const newest = free > 0 ? list.filter((g) => !g.active).sort(age).slice(-free) : [];
+  const stack = active.concat(newest).sort(age);
+  return { stack, more: list.length - stack.length };
 }
 
 /** A card clicked: what the center chat does. switchTo: the card's own chat
@@ -198,7 +210,7 @@ function age(iso, now) {
   return Math.round(s / 86400) + " days ago";
 }
 
-const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, goalsShown, loadCard, answerLink, pastLink,
+const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, goalStack, loadCard, answerLink, pastLink,
   blockersFirst, cardEdges, inputSpec, pickText, valueText, askText, age, POLL_MS, PAST_ROWS, GOALS_MAX };
 if (typeof module !== "undefined" && module.exports) module.exports = DecisionLogic;
 if (typeof window !== "undefined") window.DecisionLogic = DecisionLogic;   // home.js builds the chat's message with it
@@ -270,7 +282,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .ct { display:flex; flex-direction:column; min-height:0; }
     .goals { flex:none; text-align:center; padding:4px 12px 6px; margin:0 auto; max-width:100%; border-radius:4px;
              background:var(--ck-backing); text-shadow:0 1px 2px #000; }
-    .goals ul { list-style:none; margin:4px 0 0; padding:0; display:flex; flex-direction:column; gap:2px; align-items:center; }
+    /* the goals sit on the input bar and grow upward: the oldest nearest the bar, the newest on top */
+    .goals ul { list-style:none; margin:4px 0 0; padding:0; display:flex; flex-direction:column-reverse; gap:2px; align-items:center; }
     .goals li { font-size:13px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:.8; }
     .goals li.on { opacity:1; color:#eaf6ff; } .goals li.on::before { content:"◆ "; color:var(--cyan); }
     .goals li:not(.on)::before { content:"◇ "; color:var(--amber); opacity:.7; }
@@ -282,13 +295,13 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .cc ::slotted(ai-terminal-panel) { flex:1; min-height:0; height:auto; }
     .msg { position:absolute; left:0; right:0; bottom:4px; text-align:center; font-size:12px; opacity:.6; pointer-events:none; }
     @media (prefers-reduced-motion: reduce) { .dc { transition:none; } }
-    /* a phone: one column -- goals, the future, now and the bar, the chat, the past */
+    /* a phone: one column -- the future, now, the goals on the bar, the chat, the past */
     @media ${NARROW} {
       :host { overflow-y:auto; }
       .ck { display:flex; flex-direction:column; height:auto; min-height:100%; padding:8px 12px 16px; gap:8px; }
       .fr, .nr, .pr, .nowline { display:none; }
       .band.future, .band.past { overflow:visible; }
-      .fl { order:2; } .ct { order:1; } .nl { order:3; } .cc { order:4; height:72vh; height:72dvh; } .pl { order:5; }
+      .fl { order:1; } .nl { order:2; } .ct { order:3; } .cc { order:4; height:72vh; height:72dvh; } .pl { order:5; }
       .mark { flex:none; height:84px; }
     }
   `;
@@ -313,8 +326,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         this.shadowRoot.innerHTML = `<style>${STYLE}</style><div class="ck">
           <div class="nowline" aria-hidden="true"></div>
           <section class="band future fl" aria-label="to decide, left"></section>
-          <div class="ct"><div class="goals" aria-label="goals"></div>
-            <div class="mark"><img class="logo" alt="" hidden></div></div>
+          <div class="ct"><div class="mark"><img class="logo" alt="" hidden></div>
+            <div class="goals" aria-label="goals"></div></div>
           <section class="band future fr" aria-label="to decide, right"></section>
           <section class="band now nl" aria-label="in flight, left"></section>
           <div class="cc"><slot name="chat"></slot></div>
@@ -440,10 +453,10 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     _paintGoals() {
       const box = this._root.querySelector(".goals");
       const goals = (this._goals && this._goals.goals) || [];
-      const g = goalsShown(goals, GOALS_MAX);
-      box.innerHTML = `<div class="lbl">goals</div>` + (g.shown.length
-        ? `<ul>${g.shown.map((x) => `<li class="${x.active ? "on" : ""}" title="${esc(x.summary || x.title)}${x.active ? " (steering now)" : ""}">${esc(x.title)}</li>`).join("")}</ul>` +
-          (g.more ? `<div class="more">+${g.more} more open</div>` : "")
+      const g = goalStack(goals, GOALS_MAX);
+      // the label and the count head the stack (its far end), as "to decide" heads the open pile
+      box.innerHTML = `<div class="lbl">goals ▲${g.more ? ` <span class="more">· +${g.more} more open</span>` : ""}</div>` + (g.stack.length
+        ? `<ul>${g.stack.map((x) => `<li class="${x.active ? "on" : ""}" title="${esc(x.summary || x.title)}${x.active ? " (steering now)" : ""}">${esc(x.title)}</li>`).join("")}</ul>`
         : `<div class="none">${this._goals ? "no open goals" : "goals unavailable"}</div>`);
     }
 
