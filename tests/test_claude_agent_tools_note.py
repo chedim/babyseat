@@ -4,7 +4,10 @@ hands -- entity_link runs shell commands (read, edit, test, git, gh) and
 method_call runs an object's method. A fixed note now rides the system
 prompt (fixed text, so the prompt cache still holds). It also says to ask the
 person for a decision as a Decision card on their board, not a list in chat
-(Memo kept asking in chat)."""
+(Memo kept asking in chat). And it says how to work, as Claude Code does:
+carry the task through within the turn, end only when done, when the
+person's decision is needed, or when blocked (11 of Memo's 15 turns ended on
+a permission question or a "next I'll..." with nothing after it)."""
 import os
 import sys
 from pathlib import Path
@@ -26,6 +29,21 @@ def test_the_note_names_the_hands():
     for word in ("entity_link", "shell", "method_call", "worktree", "query",
                  "Decision", "'status': 'open'", "pick"):
         assert word in CA.TOOLS_NOTE, word
+
+
+def test_the_note_says_how_to_work():
+    note = CA.TOOLS_NOTE
+    for phrase in ("carry it out to the end in this turn",
+                   "Don't ask permission",
+                   "\"next I'll...\"",
+                   "End your turn only when",
+                   "the task is done",
+                   "you need the person's decision",
+                   "you are blocked",
+                   "Say which",
+                   "same message as your next tool call",
+                   "\"Open decisions\""):
+        assert phrase in note, phrase
 
 
 def test_the_system_prompt_carries_the_note_after_the_doctrine():

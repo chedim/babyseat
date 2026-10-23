@@ -95,7 +95,7 @@ opencode) as an in-process SDK MCP server named `membrane`:
   bullet-salvage that turns written calls into real ones stays off for
   Claude rounds, so nothing runs twice.
 
-The system prompt ends with a fixed **tools note** (`TOOLS_NOTE`): Claude Code's own tools are off, and membrane's tools are its hands. `entity_link` runs shell commands (read, edit, test, `git`, `gh`, in a git worktree for code work), and `method_call` runs an object's method. It also says to ask the person for a decision as a `Decision` card on their board (one variable and a pick), not a list in chat. Without it, Claude told the operator it had no tools. Its text never changes, so the prompt cache still holds.
+The system prompt ends with a fixed **tools note** (`TOOLS_NOTE`): Claude Code's own tools are off, and membrane's tools are its hands. `entity_link` runs shell commands (read, edit, test, `git`, `gh`, in a git worktree for code work), and `method_call` runs an object's method. It also says to ask the person for a decision as a `Decision` card on their board (one variable and a pick), not a list in chat. And it says how to work, as Claude Code does: carry a task through to the end within the turn, without asking permission for its steps or ending on "next I'll..."; end the turn only when done, when the person's decision is needed (a Decision card, then stop), or when blocked, and say which; status updates ride the next tool call's message; no "Open decisions" footers. Without it, Claude told the operator it had no tools, and ended most turns on a permission question or an announced next step. Its text never changes, so the prompt cache still holds.
 
 The tools Claude gets:
 

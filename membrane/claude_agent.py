@@ -729,7 +729,15 @@ TOOLS_NOTE = (
     "then entity_edit properties={'status': 'open', 'var': {'type': "
     "'int'|'float'|'bool'|'string'|'option', 'options': [...]}, 'pick': <your "
     "recommendation>, 'blocks': [<eids it blocks>]} -- one variable per card; "
-    "only the person answers.")
+    "only the person answers.\n\n"
+    "How you work: when the person gives you a task, carry it out to the end "
+    "in this turn. Don't ask permission for steps that are part of the task, "
+    "and don't end a reply with \"next I'll...\" -- do it. End your turn only "
+    "when the task is done, when you need the person's decision (make it a "
+    "Decision card, then stop), or when you are blocked. Say which. A status "
+    "update goes in the same message as your next tool call, never as a "
+    "reply on its own. No \"Open decisions\" footers: questions for the "
+    "person are Decision cards.")
 
 
 def _with_tools_note(system: str) -> str:
