@@ -140,7 +140,9 @@ steers toward, the babyseat, the input bar, and the chat below the bar,
 newest message first. On both sides, open questions pile up
 above the bar's line (the first to decide nearest it), the cards in flight sit
 on the line, and decided cards fall below it (the newest nearest; the oldest
-are pushed out of view). New cards alternate left and right.
+are pushed out of view). The cards form a dependency graph: lines run from past
+decisions to the work they led to, and from the open questions to the work
+they block. Linked cards share a side, and hovering a card lights its links.
 
 An open card asks for one value, pre-filled with the agent's pick; ✓ decides it
 (from another machine, the seat token first). Clicking a card loads a message
