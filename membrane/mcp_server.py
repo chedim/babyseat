@@ -707,6 +707,42 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "method_call",
+        "description": (
+            "CLIFFHANGER CALL: run a method on an object -- an entity or a "
+            "class. Dispatch walks the object, then its ISA classes, then the "
+            "globals (help('cliffhanger')). Use this, not entity_link, for "
+            "`<object>.<method>`: e.g. object='presence', method='exec', "
+            "args={'code': 'return document.title'} runs JS in the person's "
+            "opted-in page; object='presence', method='restart' restarts the "
+            "seat. The receipt (rc, outcome, head) lands on the object."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object": {"type": "string", "description": "The target entity (eid or name)."},
+                "method": {"type": "string", "description": "The method's name, e.g. exec."},
+                "args": {"type": "object", "description": "The method's {{param}} values."},
+            },
+            "required": ["object", "method"],
+        },
+    },
+    {
+        "name": "method_inspect",
+        "description": (
+            "CLIFFHANGER INSPECT: which method a call on an object would run "
+            "(its owner, the resolution order, its params and template) without "
+            "running it. Read-only."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object": {"type": "string", "description": "The target entity (eid or name)."},
+                "method": {"type": "string", "description": "The method's name."},
+                "args": {"type": "object", "description": "Optional {{param}} values to bind."},
+            },
+            "required": ["object", "method"],
+        },
+    },
+    {
         "name": "entity_unlink",
         "description": (
             "THE EXEC UNLINK: supersede the executor's 'executes' edges to "

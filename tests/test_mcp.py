@@ -169,6 +169,8 @@ class TestMcpProtocol(unittest.TestCase):
                                  "graph",
                                  "entity_inherit",
                                  "entity_link",
+                                 # Cliffhanger's call and inspect: a method on an object
+                                 "method_call", "method_inspect",
                                  "entity_unlink",
                                  "entity_read"])
         for t in resp["result"]["tools"]:
