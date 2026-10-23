@@ -4,10 +4,12 @@ filled the replay window it held no user message, and the backend
 answered with nothing (done_reason 'load') every round. The last user
 message always rides first."""
 
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -36,7 +38,8 @@ class TestAnchor(unittest.TestCase):
         rows = [("user", "keep an eye on the battery")] + \
                [("assistant", f"reply {i}") for i in range(SV.HISTORY_MAX_MESSAGES + 5)]
         r, sid = self._runner(rows)
-        h = r._prior_history(sid, "", anchor=True)
+        with mock.patch.dict(os.environ, {"MEMBRANE_HISTORY_ANCHOR": "1"}):   # the plain last-12 (#450)
+            h = r._prior_history(sid, "", anchor=True)
         self.assertEqual(len(h), SV.HISTORY_MAX_MESSAGES)
         self.assertEqual(h[0], {"role": "user", "content": "keep an eye on the battery"})
         self.assertEqual(h[-1]["content"], f"reply {SV.HISTORY_MAX_MESSAGES + 4}")

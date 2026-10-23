@@ -148,7 +148,8 @@ class TestResume(_SDKCase):
         self.assertEqual(self.sdk.calls[1]["prompt"], CA.CONTINUE_PROMPT)
         self.assertEqual(self.sdk.tool_runs, ["learn"])        # nothing ran twice
         self.assertEqual(CA.stats(), {"checkin_denials": 0, "ceiling_hits": 2,
-                                      "continues": 1})   # #425 counters
+                                      "continues": 1,    # #425 counters
+                                      "head_refused": 0})   # #450
 
 
 # ---- the transcript and the person's Continue -------------------------------
