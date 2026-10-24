@@ -2939,9 +2939,10 @@ def loopback_ladder(port: int, runner=None, cell=None):
 def mcp_executor(port: int):
     """The default executor: the MCP tool impls themselves -- the same
     relay surface the TUI uses (all guards stay in the proxy). Unknown
-    tools are a clean error, never a crash."""
+    tools are a clean error, never a crash. The local models' entity_link
+    keeps its short head (mcp_server.LOCAL_TOOL_IMPLS)."""
     def exec_tool(name: str, args: dict, call_id: str = "") -> str:
-        impl = _mcp.TOOL_IMPLS.get(name)
+        impl = _mcp.LOCAL_TOOL_IMPLS.get(name)
         if impl is None:
             raise ValueError(f"unknown membrane tool: {name}")
         return impl(args or {}, port)

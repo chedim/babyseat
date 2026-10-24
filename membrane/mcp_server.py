@@ -48,6 +48,48 @@ HTTP_TIMEOUT_S = 120.0   # the relay headroom: a live turn's tool call may
                          # The handlers' own caps (subprocess 20s/600s)
                          # bound the real work.
 
+# THE SHELL'S REPLY (operator report 2026-10-24, "Output is clipped"):
+# entity_link answers like Claude Code's Bash tool -- a command's FULL output
+# (stdout+stderr as run) up to LINK_OUTPUT_CAP chars; past it the head (2/3)
+# and the tail (1/3) around a cut marker, the total size and how to read the
+# rest. The cap is cut where the command runs (night.run_command_entity), so
+# the route's JSON never carries more; the command entity keeps only its short
+# run_head/run_tail residue. APPROVED by the operator 2026-10-24 (Claude
+# Code's default inline cap).
+LINK_OUTPUT_CAP = 30000
+# the local models' toolset path (server.mcp_executor) keeps the 600-char head
+# it always had: their context is small (a pre-existing value, unchanged)
+LOCAL_LINK_HEAD = 600
+
+
+def cut_middle(text: str, cap: int = LINK_OUTPUT_CAP) -> str:
+    """`text` whole when it fits in `cap`; else its first 2/3 and last 1/3
+    of `cap` around a '… N chars cut …' marker."""
+    text = str(text or "")
+    if len(text) <= cap:
+        return text
+    h = cap * 2 // 3
+    t = cap - h
+    return f"{text[:h]}\n… {len(text) - h - t} chars cut …\n{text[-t:]}"
+
+
+def _link_output(r: dict) -> str:
+    """One run's output block for the tool reply: the (already cut) output,
+    and past the cap its total size and how to read the rest."""
+    out = r.get("output")
+    if out is None:                       # an older seat / a composition exit
+        out = r.get("head") or ""
+    out = str(out)
+    n = int(r.get("output_len") or len(out))
+    if n <= LINK_OUTPUT_CAP:
+        return f"output ({n} chars):\n{out}" if out else "output: (none)"
+    h = LINK_OUTPUT_CAP * 2 // 3
+    return (f"output ({n} chars, cut to the first {h} and the last "
+            f"{LINK_OUTPUT_CAP - h}; the full output is not kept -- read the "
+            f"rest by re-running narrower: sed -n 'A,Bp' / head -c / tail -c / "
+            f"grep):\n{out}")
+
+
 # the parts of WHERE WE ARE state(section=...) pulls (#429); the same names
 # as lanes.PULL_SECTIONS (this module stays a thin HTTP client: no import)
 _PULL_SECTIONS = ("tracks", "commands", "interfaces", "classes", "loops",
@@ -1462,8 +1504,10 @@ def _link_commands(args: dict) -> list:
     return command_specs(raw)
 
 
-def tool_entity_link(args: dict, port: int) -> str:
-    """The executor's link hand: link + inline run, post-run state back."""
+def tool_entity_link(args: dict, port: int, head_cap: int | None = None) -> str:
+    """The executor's link hand: link + inline run, post-run state back.
+    Each run's full output rides the reply up to LINK_OUTPUT_CAP;
+    `head_cap` (the local models' path) keeps the short head instead."""
     body = {"commands": _link_commands(args),
             "executor": str(args.get("executor") or "")}
     if isinstance(args.get("args"), dict):
@@ -1487,13 +1531,27 @@ def tool_entity_link(args: dict, port: int) -> str:
                        f"name it yourself with '<label> :: <command>']")
             else:
                 tag = f" [re-ran '{sig}', run #{r.get('run_n')}]"
-        if r.get("ok"):
+        if head_cap is not None:
+            if r.get("ok"):
+                lines.append(f"- {eid}{tag}: rc={r.get('rc')} {r.get('outcome')} "
+                             f"({r.get('ms', 0)}ms) "
+                             f"head: {str(r.get('head'))[:head_cap]}")
+            else:
+                lines.append(_failed_line(eid, r))
+        elif r.get("ok"):
             lines.append(f"- {eid}{tag}: rc={r.get('rc')} {r.get('outcome')} "
-                         f"({r.get('ms', 0)}ms) "
-                         f"head: {str(r.get('head'))[:600]}")
+                         f"({r.get('ms', 0)}ms) {_link_output(r)}")
         else:
-            lines.append(_failed_line(eid, r))
+            # a failing run (a red test run, a missing file) is where the
+            # output matters most: the reason line, then the output itself
+            fl = _failed_line(eid, r)
+            lines.append(fl + (f"\n{_link_output(r)}" if r.get("output") else ""))
     return "\n".join(lines)
+
+
+def tool_entity_link_local(args: dict, port: int) -> str:
+    """entity_link for the local models (server.mcp_executor): the short head."""
+    return tool_entity_link(args, port, head_cap=LOCAL_LINK_HEAD)
 
 
 def _failed_line(eid: str, r: dict) -> str:
@@ -1751,6 +1809,9 @@ TOOL_IMPLS = {
     "entity_unlink": tool_entity_unlink,
     "entity_read": tool_entity_read,
 }
+# the local models' toolset path (server.mcp_executor): the same tools, with
+# entity_link's short head (their context is small)
+LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "entity_link": tool_entity_link_local}
 
 
 # ---- the JSON-RPC loop ---------------------------------------------------------
