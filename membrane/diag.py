@@ -375,11 +375,11 @@ def route(handler, path: str) -> bool:
         if not isinstance(body, dict):
             body = {}
     if path == "/membrane/diag/claude-agent":
-        # the claude-agent rung's check-ins and ceiling (#425): denials,
-        # ceiling hits and the person's continues
+        # the claude-agent rung's ceiling (#425): ceiling hits and the
+        # person's continues
         from . import claude_agent as _CA
         # and the prompt cache's ledger (#426): uncached / read / write / output
-        _send(handler, 200, {**_CA.stats(), "checkin_tool_calls": _CA.CHECKIN_TOOL_CALLS,
+        _send(handler, 200, {**_CA.stats(),
                              "max_tool_calls": _CA.MAX_TOOL_CALLS_PER_ANSWER,
                              "max_turns": _CA.MAX_TURNS,
                              "usage": _CA.usage_stats()})

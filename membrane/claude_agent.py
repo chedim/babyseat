@@ -14,22 +14,21 @@ unexecuted, so Claude gets membrane's MCP tool surface (mcp_server.TOOLS,
 run by mcp_server.TOOL_IMPLS, write tools included) as an in-process SDK
 MCP server, and allowed_tools is exactly that mcp__membrane__* set. The
 tools relay to this seat's proxy like the stdio MCP server's do, so every
-proxy-side guard applies. Check-ins pace the loop (below). The turn's own
+proxy-side guard applies. The turn's own
 tool definitions (the caller's surface) are not passed on; the reply never
 carries tool_calls for the caller to run. Each tool Claude ran rides the
 reply as a TOOL_KEY chunk (streamed) or TOOLS_KEY list (buffered), so the
 transcript shows it and the proxy captures it.
 
-CHECK-INS INSTEAD OF A TURN CAP (issue #425, the operator's 2026-10-21,
-values approved; it replaced #389's fixed 4-turn batches): one answer is ONE
-continuous SDK run. A PreToolUse hook (_Answer.hook) counts Claude's tool
-calls since its last words to the person: at most CHECKIN_TOOL_CALLS in a
-row; any assistant text resets the count; the next call is denied with
-CHECKIN_MESSAGE, which Claude gets as that tool's result (the person never
-sees it as an error), so Claude says where it is and goes on. A hard
-ceiling, MAX_TOOL_CALLS_PER_ANSWER, stops the run: the call past it is
-denied and the hook stops the loop. MAX_TURNS is only the SDK's backstop,
-sized never to bind before the ceiling.
+ONE CONTINUOUS RUN AND A CEILING (issue #425, which replaced #389's fixed
+4-turn batches): one answer is ONE continuous SDK run. A PreToolUse hook
+(_Answer.hook) counts Claude's tool calls; a hard ceiling,
+MAX_TOOL_CALLS_PER_ANSWER, stops the run: the call past it is denied and the
+hook stops the loop. No call is ever refused for silence: #425's check-in
+denial (7 calls in a row without words) went on 2026-10-23, the operator:
+"let's do it as Claude. If the model loops, that's not our problem but the
+model's." MAX_TURNS is only the SDK's backstop, sized never to bind before
+the ceiling.
 
 THE CEILING AND CONTINUE (#389's machinery): an answer that stops at the
 ceiling (or the backstop) is neither an error nor a silent cut. The reply
@@ -38,7 +37,7 @@ and the chat offers Continue. Continue is a person's action only (never
 automatic, never on a background lane): it resumes the SAME SDK session
 (the SDK's `resume`, RESUME_KEY on the turn) with the same tools and options
 and a fresh ceiling, and each capped answer continues at most once.
-STATS counts check-in denials, ceiling hits and continues (RAM,
+STATS counts ceiling hits and continues (RAM,
 /membrane/diag/claude-agent).
 
 LEARNED LIKE ANY MODEL (issue #389, the operator's 2026-10-21): Claude's
@@ -108,24 +107,14 @@ CLI_HINT = ("reinstall the SDK (it bundles the `claude` CLI) or install "
 LOGIN_HINT = ("run `claude` once to log in, then "
               "`membrane auth claude-agent --login`")
 STATUS_TIMEOUT_S = 20
-CHECKIN_TOOL_CALLS = 7              # tool calls in a row without words to the
-                                    # person (#425; approved 2026-10-21)
 MAX_TOOL_CALLS_PER_ANSWER = 2048    # the hard ceiling per answer; Continue
                                     # gives a fresh one (#425; 50 -> 2048 approved
                                     # 2026-10-23, #467)
-MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: every
-                                    # allowed call may take a turn and be
-                                    # denied once first, so it never binds
-                                    # before the ceiling (#425)
-CHECKIN_MESSAGE = ("Check in: write one line telling the person where you "
-                   "are, in the same message as your next tool call (words "
-                   "first, then the call), not as a separate text-only "
-                   "reply; then continue.")
+MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: sized
+                                    # never to bind before the ceiling (#425)
 CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
                    f"person can press Continue.")
-SEEN_WAIT_S = 2.0                   # the hook waits this long for the reader to
-                                    # see the call's message (its words first)
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
@@ -146,7 +135,7 @@ class ContinueRefused(ValueError):
 
 
 _stats_lock = threading.Lock()
-STATS = {"checkin_denials": 0, "ceiling_hits": 0, "continues": 0,
+STATS = {"ceiling_hits": 0, "continues": 0,
          "head_refused": 0}                # diagnostics (RAM)
 
 
@@ -265,39 +254,17 @@ def usage_stats() -> dict:
 
 
 class _Answer:
-    """One answer's check-ins (#425): the PreToolUse hook's state. The
-    reader (_consume) notes Claude's words and each tool_use it sees; the
-    hook, run by the SDK before each call, waits until the reader has seen
-    that call's message -- so words in the same message count first --
-    then allows, denies (a check-in) or stops (the ceiling)."""
+    """One answer's tool calls (#425): the PreToolUse hook's state. The hook,
+    run by the SDK before each call, allows it, or stops the run at the
+    ceiling. It never refuses a call for silence (2026-10-23)."""
 
     def __init__(self):
         self.calls = 0                  # allowed calls in this answer
-        self.streak = 0                 # allowed calls since Claude's last words
         self.denied: set = set()        # tool_use ids the hook refused
         self.ceiling = False
-        self._seen: dict = {}           # tool_use id -> asyncio.Event
-
-    def _event(self, tid: str):
-        ev = self._seen.get(tid)
-        if ev is None:
-            ev = self._seen[tid] = asyncio.Event()
-        return ev
-
-    def note_text(self, text) -> None:
-        if str(text or "").strip():
-            self.streak = 0
-
-    def note_use(self, tid: str) -> None:
-        self._event(str(tid)).set()
 
     async def hook(self, hook_input, tool_use_id=None, context=None):
         tid = str((hook_input or {}).get("tool_use_id") or tool_use_id or "")
-        try:
-            await asyncio.wait_for(self._event(tid).wait(), SEEN_WAIT_S)
-        except asyncio.TimeoutError:
-            pass                        # counted on what the reader has seen
-        self._seen.pop(tid, None)
         if self.calls >= MAX_TOOL_CALLS_PER_ANSWER:
             self.ceiling = True
             self.denied.add(tid)
@@ -305,14 +272,7 @@ class _Answer:
                     "hookSpecificOutput": {"hookEventName": "PreToolUse",
                                            "permissionDecision": "deny",
                                            "permissionDecisionReason": CEILING_MESSAGE}}
-        if self.streak >= CHECKIN_TOOL_CALLS:
-            self.denied.add(tid)
-            _count("checkin_denials")
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                           "permissionDecision": "deny",
-                                           "permissionDecisionReason": CHECKIN_MESSAGE}}
         self.calls += 1
-        self.streak += 1
         return {}
 
 
@@ -673,12 +633,11 @@ def _coproc_hidden() -> frozenset:
 
 def _footer(answer) -> str:
     """The live count within this answer (#467): calls left before the
-    ceiling, and calls until the next check-in. No answer, no footer."""
+    ceiling. No answer, no footer."""
     if answer is None:
         return ""
     left = max(MAX_TOOL_CALLS_PER_ANSWER - answer.calls, 0)
-    nxt = max(CHECKIN_TOOL_CALLS - answer.streak, 0)
-    return f"\n\n\u00b7 {left} calls left \u00b7 check-in in {nxt}"
+    return f"\n\n\u00b7 {left} calls left"
 
 
 def _tool_handler(name: str, port, answer=None):
@@ -777,7 +736,7 @@ def build_options(sdk, system: str, model: str, stream: bool, port=None,
         mcp_servers={MCP_NAME: build_mcp_server(sdk, port, answer)},
         strict_mcp_config=True,    # no user MCP config, no claude.ai connectors (#455)
         setting_sources=[],        # no settings files, no CLAUDE.md
-        max_turns=MAX_TURNS,       # a backstop: the check-in hook paces (#425)
+        max_turns=MAX_TURNS,       # a backstop: the hook's ceiling stops first (#425)
         hooks={"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[answer.hook])]},
         model=sdk_model(model) or None,
         include_partial_messages=bool(stream),
@@ -799,7 +758,7 @@ def _usage(u) -> dict:
                 "cache_write_tokens": int(u.get("cache_creation_input_tokens") or 0)}}
 
 
-_FOOTER_RE = re.compile(r"\n\n\u00b7 \d+ calls left \u00b7 check-in in \d+$")
+_FOOTER_RE = re.compile(r"\n\n\u00b7 \d+ calls left( \u00b7 check-in in \d+)?$")   # the old form too
 
 
 def _result_text(content) -> str:
@@ -873,7 +832,6 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                 d = ev.get("delta") or {}
                 if d.get("type") == "text_delta" and d.get("text"):
                     partial = True
-                    answer.note_text(d["text"])          # words: a check-in
                     put(("text", d["text"]))
                 elif d.get("type") == "thinking_delta" and d.get("thinking"):
                     put(("reasoning", d["thinking"]))
@@ -886,11 +844,9 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                 if bk == "ToolUseBlock":
                     pending[str(getattr(b, "id", ""))] = (
                         _bare(getattr(b, "name", "")), getattr(b, "input", None) or {})
-                    answer.note_use(str(getattr(b, "id", "")))
                 elif partial:
                     continue                  # the words already came as deltas
                 elif bk == "TextBlock" and getattr(b, "text", ""):
-                    answer.note_text(b.text)
                     put(("text", b.text))
                 elif bk == "ThinkingBlock" and getattr(b, "thinking", ""):
                     put(("reasoning", b.thinking))

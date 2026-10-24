@@ -1,6 +1,6 @@
 """Issue #467 (operator, 2026-10-23): ceiling 2048; a calls-left footer on
-every membrane tool result; a check-in rides WITH the next tool call; the
-stored reply keeps its parts in the order they happened."""
+every membrane tool result; the stored reply keeps its parts in the order
+they happened. (Its check-in distance went with the check-ins, 2026-10-23.)"""
 import asyncio
 import json
 import os
@@ -87,23 +87,23 @@ class TestCeilingAndFooter(unittest.TestCase):
     def test_the_reader_strips_the_footer_from_the_stored_output(self):
         # #469 review: the footer is for Claude only; the stored tool part
         # output must not carry it (chat, field recall, replayed history).
-        foot = "\n\n\u00b7 47 calls left \u00b7 check-in in 5"
+        foot = "\n\n\u00b7 47 calls left"
         self.assertEqual(CA._result_text("the result" + foot), "the result")
+        old = "\n\n\u00b7 47 calls left \u00b7 check-in in 5"     # the footer before 2026-10-23
+        self.assertEqual(CA._result_text("the result" + old), "the result")
         self.assertEqual(CA._result_text([{"text": "a"}, {"text": "b" + foot}]), "a\nb")
         self.assertEqual(CA._result_text("keeps \u00b7 3 calls left mid-text"),
                          "keeps \u00b7 3 calls left mid-text")
 
-    def test_a_result_carries_the_calls_left_and_the_checkin_distance(self):
+    def test_a_result_carries_the_calls_left_only(self):
         from membrane import mcp_server as M
         a = CA._Answer()
-        a.calls, a.streak = 3, 3
+        a.calls = 3
         with mock.patch.dict(M.TOOL_IMPLS, {"query": lambda args, port: "the result"}):
             res = asyncio.run(CA._tool_handler("query", 9, a)({}))
         text = res["content"][0]["text"]
-        self.assertTrue(text.startswith("the result"))
-        self.assertTrue(text.rstrip().endswith(
-            f"· {CA.MAX_TOOL_CALLS_PER_ANSWER - 3} calls left "
-            f"· check-in in {CA.CHECKIN_TOOL_CALLS - 3}"), text)
+        self.assertEqual(text, f"the result\n\n· {CA.MAX_TOOL_CALLS_PER_ANSWER - 3} calls left")
+        self.assertNotIn("check-in", text)
 
     def test_an_error_result_has_the_footer_too(self):
         from membrane import mcp_server as M
@@ -111,7 +111,7 @@ class TestCeilingAndFooter(unittest.TestCase):
         def boom(args, port):
             raise RuntimeError("nope")
         a = CA._Answer()
-        a.calls, a.streak = 1, 1
+        a.calls = 1
         with mock.patch.dict(M.TOOL_IMPLS, {"query": boom}):
             res = asyncio.run(CA._tool_handler("query", 9, a)({}))
         self.assertTrue(res["is_error"])
@@ -124,16 +124,11 @@ class TestCeilingAndFooter(unittest.TestCase):
         self.assertEqual(res["content"][0]["text"], "plain")
 
 
-class TestCheckinRidesWithTheNextCall(unittest.TestCase):
-    def test_the_denial_says_write_it_with_the_next_call(self):
-        m = CA.CHECKIN_MESSAGE.lower()
-        self.assertIn("same message", m)
-        self.assertIn("tool call", m)
-        self.assertIn("not as a separate", m)
-
-    def test_the_docs_say_so(self):
+class TestNoCheckinsInTheDocs(unittest.TestCase):
+    def test_the_docs_say_no_call_is_refused_for_silence(self):
         doc = (Path(__file__).resolve().parent.parent / "docs" / "claude-agent.md").read_text()
-        self.assertIn("same message as its next tool call", doc)
+        self.assertIn("No tool call is ever refused for silence", doc)
+        self.assertNotIn("check-in in", doc)
 
 
 if __name__ == "__main__":

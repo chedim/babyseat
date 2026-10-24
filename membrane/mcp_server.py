@@ -363,6 +363,15 @@ TOOLS: list[dict] = [
                                            "was decided / what fails."},
                 "links": {"type": "array",
                           "description": "Field cell indexes to link."},
+                "properties": {"type": "object",
+                               "description": "the entity's property "
+                                              "patch, set in the same "
+                                              "call (e.g. a Decision "
+                                              "card: {'status': 'open', "
+                                              "'var': {'type': 'option', "
+                                              "'options': [...]}, "
+                                              "'pick': ..., 'blocks': "
+                                              "[<eids>]})."},
             },
             "required": ["name"],
         },
