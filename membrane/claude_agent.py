@@ -115,9 +115,13 @@ MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: sized
 CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
                    f"person can press Continue.")
+TOOL_ALIVE_S = 15.0                 # a running tool's keep-alive period: a tool in
+                                    # flight is activity, not silence (the serve
+                                    # turn's idle guard, TURN_IDLE_S = 300 s)
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
+ALIVE_KEY = "membrane_alive"        # a streamed chunk: a tool is still running
 TOOLS_KEY = "membrane_tools"        # a buffered response: every tool Claude ran
 CAPPED_KEY = "membrane_capped"      # reply: the answer stopped at the ceiling (#425)
 CAP_MARK = "claudeCapped"           # transcript row: {session, turns, continued}
@@ -262,6 +266,11 @@ class _Answer:
         self.calls = 0                  # allowed calls in this answer
         self.denied: set = set()        # tool_use ids the hook refused
         self.ceiling = False
+        self.put = None                 # the reply's queue: a running tool's keep-alives
+
+    def alive(self, name: str) -> None:
+        if self.put is not None:
+            self.put(("alive", name))
 
     async def hook(self, hook_input, tool_use_id=None, context=None):
         tid = str((hook_input or {}).get("tool_use_id") or tool_use_id or "")
@@ -652,7 +661,18 @@ def _tool_handler(name: str, port, answer=None):
         try:
             if port is None:
                 raise _mcp.ProxyError(503, "the seat's proxy port is unknown")
-            text = await asyncio.to_thread(impl, dict(args or {}), int(port))
+            # A TOOL IN FLIGHT IS ACTIVITY, NOT SILENCE (as Claude Code, which
+            # never kills its own long tool runs): a keep-alive at the call's
+            # start and every TOOL_ALIVE_S until its result, so the serve
+            # turn's idle guard counts only true silence
+            job = asyncio.ensure_future(asyncio.to_thread(impl, dict(args or {}), int(port)))
+            while True:
+                if answer is not None:
+                    answer.alive(name)
+                done, _ = await asyncio.wait({job}, timeout=TOOL_ALIVE_S)
+                if done:
+                    break
+            text = job.result()
             return {"content": [{"type": "text",
                                  "text": str(text) + _footer(answer)}]}
         except _mcp.ProxyError as e:
@@ -811,6 +831,7 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
 async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                        resume=None, env=None):
     answer = _Answer()                   # a fresh ceiling, Continue too (#425)
+    answer.put = put                     # a running tool's keep-alives
     opts = build_options(sdk, system, model, stream, port, resume, env, answer)
     partial = False
     capped = False
@@ -925,8 +946,8 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
 # ---- the reply as an OpenAI response ---------------------------------------------
 
 def _chunk(model: str, delta: dict, finish=None, usage=None, tool=None,
-           capped=None) -> bytes:
-    side = tool is not None or capped is not None
+           capped=None, alive=None) -> bytes:
+    side = tool is not None or capped is not None or alive is not None
     obj = {"id": "chatcmpl-claude-agent", "object": "chat.completion.chunk",
            "created": int(time.time()), "model": model, RESP_KEY: PROVIDER,
            "choices": ([] if side else
@@ -935,6 +956,8 @@ def _chunk(model: str, delta: dict, finish=None, usage=None, tool=None,
         obj[TOOL_KEY] = tool
     if capped is not None:
         obj[CAPPED_KEY] = capped
+    if alive is not None:
+        obj[ALIVE_KEY] = alive
     if usage is not None:
         obj["usage"] = usage
     return b"data: " + json.dumps(obj).encode() + b"\n"
@@ -994,6 +1017,12 @@ class SSEReply:
                 if kind == "tool":
                     self.tools.append(val)
                     yield _chunk(self.model, {}, tool=val)
+                    yield b"\n"
+                    continue
+                if kind == "alive":
+                    # a tool still running: an event for the serve turn's
+                    # idle guard, nothing for the transcript
+                    yield _chunk(self.model, {}, alive=val)
                     yield b"\n"
                     continue
                 d = {"content": val} if kind == "text" else {"reasoning": val}

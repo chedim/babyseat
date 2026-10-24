@@ -230,10 +230,16 @@ it as Claude. If the model loops, that's not our problem but the model's"):
   Claude turns that were still working. A claude-agent turn has no wall
   clock and no lifetime cap: every event its stream publishes (a token, a
   tool call and its result, a usage step) resets an idle clock, and the
-  turn is aborted only after `TURN_IDLE_S = 300` s with no event at all.
-  The abort says `no event for 300.0s -- aborted by the turn watchdog's
-  idle guard`. A single tool call that runs longer than that without output
-  counts as silence too. The ceiling and the idle guard are the only stops;
+  turn is aborted only after `TURN_IDLE_S = 300` s (approved 2026-10-23)
+  with no event at all. The abort says `no event for 300.0s -- aborted by
+  the turn watchdog's idle guard`.
+- **A tool in flight is activity, not silence**, as in Claude Code, which
+  never kills its own long tool runs. While a membrane tool runs, its
+  in-process MCP handler streams a keep-alive chunk (`membrane_alive`) at
+  the call's start and every `TOOL_ALIVE_S = 15` s until the result, so a
+  long silent test run is never cut. Only true silence (no tool running
+  and no token or event) counts toward `TURN_IDLE_S`. The keep-alive is
+  not shown in the chat. The ceiling and the idle guard are the only stops;
   nothing continues by itself.
 
 ## The ceiling and Continue

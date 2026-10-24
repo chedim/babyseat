@@ -55,7 +55,7 @@ def _run(model, stream):
 
 
 def test_the_idle_window_is_300s():
-    assert MS.TurnRunner.TURN_IDLE_S == 300.0       # flagged for the operator's approval
+    assert MS.TurnRunner.TURN_IDLE_S == 300.0       # approved by the operator, 2026-10-23
 
 
 def test_a_claude_turn_that_keeps_working_is_not_aborted():
@@ -72,3 +72,110 @@ def test_another_model_keeps_the_wall_clock():
     errs = _run("m", _talky)
     assert len(errs) == 1, errs
     assert "outlived" in errs[0], errs
+
+
+# ---- a tool in flight is activity, not silence (as Claude Code: it never kills
+# its own long tool runs). While a membrane tool runs, the in-process MCP
+# handler streams a keep-alive chunk (ALIVE_KEY) at the call's start and every
+# TOOL_ALIVE_S; the serve side reads it as an event like any other. The real
+# chain end to end: a stand-in SDK -> SSEReply over HTTP -> loopback_ladder ->
+# the turn runner's watchdog.
+
+import asyncio  # noqa: E402
+import http.server  # noqa: E402
+import json  # noqa: E402
+import threading  # noqa: E402
+from unittest import mock  # noqa: E402
+
+from membrane import mcp_server as MCP  # noqa: E402
+from tests.test_claude_agent_384 import key_fixture  # noqa: E402
+from tests.test_claude_agent_tools_389 import UserMessage, fake_sdk  # noqa: E402
+
+
+def _sdk(after_result_s=0.0):
+    mod = fake_sdk(call=("query", {"topic": "x"}))
+    orig = mod.query
+
+    async def query(*, prompt, options=None, transport=None):
+        async for m in orig(prompt=prompt, options=options, transport=transport):
+            yield m
+            if isinstance(m, UserMessage) and after_result_s:
+                await asyncio.sleep(after_result_s)       # silence after the result
+    mod.query = query
+    return mod
+
+
+def _seat(sdk):
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            for line in CA.SSEReply(body["messages"], "claude-agent:sonnet", sdk, port=9):
+                self.wfile.write(line)
+                self.wfile.flush()
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def _run_tool(tool_s, after_result_s=0.0):
+    sdk = _sdk(after_result_s)
+
+    def slow(args, port):
+        time.sleep(tool_s)                    # a silent tool: no output until it ends
+        return "the result"
+    patches = [mock.patch.dict(sys.modules, {"claude_agent_sdk": sdk}),
+               mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude"),
+               mock.patch.object(CA, "TOOL_ALIVE_S", 0.05),
+               mock.patch.dict(MCP.TOOL_IMPLS, {"query": slow}),
+               key_fixture()]
+    for p in patches:
+        p.start()
+    srv = _seat(sdk)
+    try:
+        r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(),
+                          MS.loopback_ladder(srv.server_address[1]),
+                          lambda *a: "ok", system="", model="claude-agent:sonnet", tools=[])
+        r.TURN_MAX_S = WINDOW
+        r.TURN_IDLE_S = WINDOW
+        errs = []
+        r._stream_error_part = lambda sid, msg: errs.append(msg)
+        sid = r.sessions.create(title="t")["id"]
+        r.run(sid, "go")
+        return errs
+    finally:
+        srv.shutdown()
+        for p in reversed(patches):
+            p.stop()
+
+
+def test_a_long_silent_tool_call_is_not_silence():
+    assert _run_tool(tool_s=4 * WINDOW) == []
+
+
+def test_after_the_result_silence_still_aborts():
+    errs = _run_tool(tool_s=0.0, after_result_s=4 * WINDOW)
+    assert len(errs) == 1 and "no event" in errs[0], errs
+
+
+def test_the_handler_streams_keep_alives_while_the_tool_runs():
+    a = CA._Answer()
+    got = []
+    a.put = got.append
+
+    def slow(args, port):
+        time.sleep(0.35)
+        return "r"
+    with mock.patch.object(CA, "TOOL_ALIVE_S", 0.1), \
+            mock.patch.dict(MCP.TOOL_IMPLS, {"query": slow}):
+        res = asyncio.run(CA._tool_handler("query", 9, a)({}))
+    assert res["content"][0]["text"].startswith("r")
+    assert got and all(k == "alive" for k, _ in got), got
+    assert len(got) >= 3, got                 # at the start, then every TOOL_ALIVE_S
