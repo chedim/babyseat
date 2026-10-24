@@ -40,7 +40,10 @@ judge, the router's boot interview, `/delegate` — tally per lane and model
 into `.membrane/bg-usage.json` (persisted across restarts), and
 `membrane stats` prints them as a `background model calls` section with
 their share of all tokens (`--bg PATH` to point elsewhere). Tallying began
-with #200, so a seat's file starts empty and its `since` says from when.
+with #200, so a seat's file starts empty and its `since` says from when. The file also
+keeps the calls in 10-minute slots for about a day, which membrane home's 📊
+stats window reads for today and the last hour
+([standalone.md](standalone.md#the-stats-window-)).
 
 ## How it saves tokens
 

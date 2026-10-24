@@ -181,6 +181,27 @@ machine they need the [seat token](auth.md#the-seat-token). Home Assistant's
 relay doesn't forward `/membrane/options` yet, so the window works in
 standalone mode.
 
+## The stats window (📊)
+
+The 📊 beside the ⚙ opens the seat's tokens, read-only. The window reads
+`GET /membrane/stats` (the serve port; `membrane/tokenomics.py`) when it opens
+and again every 10 s while it is open; × or Escape closes it.
+
+| Section | |
+|---|---|
+| Today | calls, input and output tokens since local midnight, and in the last hour, so a runaway loop stands out |
+| By mind, today | Chat (a person's turns), Goal worker (the watch and goal loops), Idle thinker (the thinker and its claim judges), Other background (`/delegate`, the router's interview, untagged calls); the last-hour column marks the busiest |
+| By model, today | the same split by model id (`qwen3:8b`, `claude-agent:sonnet`, ...) |
+| Claude rung, since the seat started | answers and API steps, and per answer, first step and later steps: cache read, cache write, uncached input, output and the effective input, `0.1 × read + 1.25 × write + uncached` (from the ledger `/membrane/diag/claude-agent` reads; in RAM, so a restart zeroes it) |
+
+Input is the whole prompt, on the same ruler as `membrane stats`. The foreground
+comes from the serve messages' tokens: each chat is read backward from its
+newest message and the read stops at the first one older than midnight, so a
+refresh never scans the whole history. The background comes from
+`bg-usage.json`, which now also keeps its calls in 10-minute slots for about a
+day. The last hour is therefore up to 10 minutes longer for background calls, and
+background calls made before this version are not in today's numbers.
+
 ## The pause (⏸ / ▶)
 
 The ⏸ beside 💬 in membrane home's top bar is the seat's pause (#348). Like a
