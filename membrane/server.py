@@ -1536,6 +1536,7 @@ class TurnRunner:
         finally:
             self._turn_sockets.pop(sid, None)
             self._turn_activity.pop(sid, None)
+            (getattr(self, "_idle_turns", None) or set()).discard(sid)
             self._current_turn_sid = None
             stop.set()
             self._turn_stops.pop(sid, None)
@@ -1697,6 +1698,16 @@ class TurnRunner:
     # honest error part + marks the turn dead) -- one dead backend
     # socket can't hold the guard + queue the room for 5 minutes.
     TURN_MAX_S = 300.0       # a cold 14B load + the transcript prefill's honest scale (the watchdog's 120s fired ON a normal qwen cold turn — the honest budget is the ladder's own 300)
+    # THE IDLE GUARD (a claude-agent turn works like Claude Code, the
+    # operator 2026-10-23: "if the model loops, that's not our problem but
+    # the model's"): the whole SDK run is ONE round, so the round's touch
+    # never moved the clock and the watchdog cut turns still working (284 s
+    # Claude turns, 10-22). A claude-agent turn has no wall clock and no
+    # lifetime cap: every event its stream publishes touches the activity
+    # clock, and it aborts only after TURN_IDLE_S with no event at all. A
+    # tool in flight is activity: its handler streams keep-alives
+    # (claude_agent.TOOL_ALIVE_S) until the result.
+    TURN_IDLE_S = 300.0      # approved 2026-10-23 (the operator)
 
     def _turn_watchdog(self, sid: str, t0: float) -> None:
         """The turn's timer thread: past TURN_MAX_S marks the abort
@@ -1720,11 +1731,13 @@ class TurnRunner:
             now = time.time()
             last = max(last,
                        getattr(self, "_turn_activity", {}).get(sid, 0) or 0)
-            if now - last >= self.TURN_MAX_S:
+            idle = sid in (getattr(self, "_idle_turns", None) or set())
+            limit = self.TURN_IDLE_S if idle else self.TURN_MAX_S
+            if now - last >= limit:
                 break                          # A REAL hang: 300s of silence
-            if now >= cap:
+            if now >= cap and not idle:
                 break                          # the forever-turn's absolute cap
-            if self._stop_wait(sid, 1.0):
+            if self._stop_wait(sid, min(1.0, max(limit / 10.0, 0.01))):
                 return
         if sid not in self._busy:
             return                      # the turn ended (the normal way)
@@ -1740,8 +1753,10 @@ class TurnRunner:
         # THE EVIDENCE: the error part + the stack dump (the corpse's
         # own name)
         import faulthandler
-        print(f"[serve] turn {sid} STILL RUNNING after {self.TURN_MAX_S}s "
-              "-- the turn watchdog aborts (the graveyard covenant)",
+        print(f"[serve] turn {sid} STILL RUNNING "
+              + (f"with no event for {self.TURN_IDLE_S}s " if idle
+                 else f"after {self.TURN_MAX_S}s ")
+              + "-- the turn watchdog aborts (the graveyard covenant)",
               file=sys.stderr)
         # THE EVIDENCE'S OWN FILE (the GIL-free lane): the dump writes
         # to the log file -- the stderr's file handle competes with
@@ -1756,6 +1771,11 @@ class TurnRunner:
             print(f"[serve] the dump: {dp}", file=sys.stderr)
         except Exception as e:
             faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        if idle:
+            self._stream_error_part(sid, f"no event for {self.TURN_IDLE_S}s "
+                                       "-- aborted by the turn watchdog's "
+                                       "idle guard (a hang, not your message)")
+            return
         self._stream_error_part(sid, "the turn outlived "
                                    f"{self.TURN_MAX_S}s -- aborted by "
                                    "the turn watchdog (a backend "
@@ -2098,6 +2118,17 @@ class TurnRunner:
                 turn_model, _turn_auth = self._turn_model(sid, text)
             except Exception:
                 turn_model, _turn_auth = self.model, None
+            # a claude-agent turn runs on the idle guard, not the wall clock
+            try:
+                from . import claude_agent as _CA
+                if not hasattr(self, "_idle_turns"):
+                    self._idle_turns = set()
+                if _CA.is_claude_rung(getattr(self, "srv", None), turn_model):
+                    self._idle_turns.add(sid)
+                else:
+                    self._idle_turns.discard(sid)
+            except Exception:
+                pass
             # MEMBRANE PREDICTS THIS MOVE (predict.py): every round Argus takes
             # is guessed before the model runs -- a virtual action, never run
             try:
@@ -2158,6 +2189,8 @@ class TurnRunner:
                     e[1] = time.time()
 
             def _on_event(kind, val, _live=live, _pend=_pend):
+                if sid in (getattr(self, "_idle_turns", None) or ()):
+                    self._turn_activity[sid] = time.time()   # the idle guard's touch
                 if kind == "tick":
                     return sid in self._aborting
                 if kind == "ext":

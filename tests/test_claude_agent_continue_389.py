@@ -147,7 +147,7 @@ class TestResume(_SDKCase):
         self.assertEqual(set(second["mcp_servers"]), {"membrane"})
         self.assertEqual(self.sdk.calls[1]["prompt"], CA.CONTINUE_PROMPT)
         self.assertEqual(self.sdk.tool_runs, ["learn"])        # nothing ran twice
-        self.assertEqual(CA.stats(), {"checkin_denials": 0, "ceiling_hits": 2,
+        self.assertEqual(CA.stats(), {"ceiling_hits": 2,
                                       "continues": 1,    # #425 counters
                                       "head_refused": 0})   # #450
 

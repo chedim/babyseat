@@ -261,6 +261,16 @@ class TestMcpTools(unittest.TestCase):
         self.assertIn("tick_script", json.dumps(
             edit_tool["inputSchema"]))
 
+    def test_entity_add_schema_names_properties(self):
+        # the add applies `properties` itself (tool_entity_add's follow-up
+        # edit), so its schema says so: a Decision card is one call
+        add = next(t for t in M.TOOLS if t["name"] == "entity_add")
+        prop = add["inputSchema"]["properties"].get("properties")
+        self.assertIsNotNone(prop)
+        self.assertEqual(prop["type"], "object")
+        for word in ("Decision", "status", "var", "pick", "blocks"):
+            self.assertIn(word, prop["description"])
+
     def test_state_summary(self):
         text = _call("state", {})
         self.assertIn("12 live entities", text)

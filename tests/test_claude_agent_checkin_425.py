@@ -1,18 +1,15 @@
-"""CHECK-INS INSTEAD OF A TURN CAP (issue #425, the operator's 2026-10-21;
-values approved): the claude-agent rung runs ONE continuous SDK run per
-answer, and a PreToolUse hook keeps Claude talking to the person.
+"""ONE CONTINUOUS RUN AND A CEILING (issue #425; the check-ins went
+2026-10-23, the operator: "let's do it as Claude"): the claude-agent rung
+runs ONE continuous SDK run per answer, and its PreToolUse hook only counts.
 
-- CHECKIN_TOOL_CALLS = 7: at most 7 tool calls in a row without assistant
-  text; any text resets the count; the 8th consecutive call is DENIED with
-  CHECKIN_MESSAGE -- the denial reaches Claude (the tool result it sees),
-  never the person as an error -- and Claude speaks and goes on;
+- no check-ins: no tool call is ever refused for silence, however many come
+  in a row without words to the person (the 7-call check-in denial is gone);
 - MAX_TOOL_CALLS_PER_ANSWER = 2048: the hard ceiling; at it the run stops the
   way the old cap did (the reply's cap mark, the row's claudeCapped, the
   person's Continue), and Continue resumes the same session with a fresh 50;
 - max_turns is only a backstop that never binds before the ceiling;
 - nothing runs twice, nothing continues by itself;
-- /membrane/diag/claude-agent counts checkin_denials, ceiling_hits,
-  continues.
+- /membrane/diag/claude-agent counts ceiling_hits and continues.
 
 The SDK is a stand-in that calls the hooks it was handed, as the real CLI
 does (PreToolUse after the assistant message that carries the tool_use).
@@ -145,8 +142,9 @@ class _Case(unittest.TestCase):
 
 class TestOptions(_Case):
     def test_the_approved_values(self):
-        self.assertEqual(CA.CHECKIN_TOOL_CALLS, 7)
         self.assertEqual(CA.MAX_TOOL_CALLS_PER_ANSWER, 2048)
+        self.assertFalse(hasattr(CA, "CHECKIN_TOOL_CALLS"))
+        self.assertFalse(hasattr(CA, "CHECKIN_MESSAGE"))
 
     def test_max_turns_never_binds_before_the_ceiling(self):
         self._items()
@@ -163,56 +161,27 @@ class TestOptions(_Case):
         self.assertIsNone(hooks["PreToolUse"][0].matcher)     # every tool
 
 
-# ---- check-ins ------------------------------------------------------------------
+# ---- no check-ins -----------------------------------------------------------
 
-class TestTextResetsTheCount(_Case):
-    plans = [[("tools", 7), ("text", "seven done"), ("tools", 7), ("text", "done")]]
-
-    def test_seven_then_text_then_seven_runs_everything(self):
-        self._items()
-        self.assertEqual(len(self.sdk.tool_runs), 14)
-        self.assertEqual(self.sdk.seen_by_model, [])
-        self.assertEqual(CA.stats()["checkin_denials"], 0)
-
-
-class TestEighthDenied(_Case):
-    plans = [[("tools", 8), ("text", "done")]]
-
-    def test_the_eighth_call_is_denied_with_the_message(self):
-        got = self._items()
-        self.assertEqual(self.sdk.seen_by_model, [CA.CHECKIN_MESSAGE])
-        self.assertIn("in the same message as your next tool call", CA.CHECKIN_MESSAGE)
-        # Claude spoke, then the call ran: all 8, each once
-        self.assertEqual(self.sdk.tool_runs, [f"l{n}" for n in range(1, 9)])
-        self.assertIn(STATUS, "".join(v for k, v in got if k == "text"))
-        self.assertEqual(CA.stats()["checkin_denials"], 1)
-        self.assertEqual(len(self.sdk.calls), 1)               # one continuous run
-
-    def test_the_denial_is_the_models_not_an_error_for_the_person(self):
-        got = self._items()
-        tools = [v for k, v in got if k == "tool"]
-        self.assertEqual(len(tools), 8)                         # the 8 that ran
-        self.assertFalse([t for t in tools if t["is_error"]])
-        self.assertNotIn(CA.CHECKIN_MESSAGE, json.dumps(got))
-        self.assertFalse([v for k, v in got if k == "capped"])
-
-
-class TestOneMessageManyCalls(_Case):
+class TestNoCheckins(_Case):
     plans = [[("tools", 9), ("text", "done")]]
 
-    def test_calls_in_one_message_count_one_by_one(self):
-        self._items()
-        self.assertEqual(self.sdk.seen_by_model, [CA.CHECKIN_MESSAGE] * 2)
-        self.assertEqual(len(self.sdk.tool_runs), 9)
+    def test_silent_calls_in_a_row_all_run(self):
+        got = self._items()
+        self.assertEqual(self.sdk.seen_by_model, [])           # nothing denied
+        self.assertEqual(self.sdk.tool_runs, [f"l{n}" for n in range(1, 10)])
+        self.assertNotIn(STATUS, "".join(v for k, v in got if k == "text"))
+        self.assertNotIn("checkin_denials", CA.stats())
+        self.assertEqual(len(self.sdk.calls), 1)               # one continuous run
 
 
-class TestStreamedTextResets(_Case):
-    plans = [[("tools", 7), ("text", "status"), ("tools", 7), ("text", "done")]]
+class TestManySilentMessages(_Case):
+    plans = [[("tools", 1)] * 30 + [("tools", 20), ("text", "done")]]
 
-    def test_streamed_words_reset_the_count(self):
+    def test_fifty_silent_calls_run_unrefused(self):
         self._items(stream=True)
         self.assertEqual(self.sdk.seen_by_model, [])
-        self.assertEqual(len(self.sdk.tool_runs), 14)
+        self.assertEqual(len(self.sdk.tool_runs), 50)
 
 
 # ---- the ceiling ---------------------------------------------------------------
@@ -230,7 +199,6 @@ class TestCeiling(_Case):
         self.assertEqual([v for k, v in got if k == "capped"],
                          [{"session": "sess-1", "calls": CA.MAX_TOOL_CALLS_PER_ANSWER}])
         self.assertEqual(CA.stats()["ceiling_hits"], 1)
-        self.assertEqual(CA.stats()["checkin_denials"], 0)
         self.assertEqual(len(self.sdk.calls), 1)               # no auto-continue
         tools = [v for k, v in got if k == "tool"]
         self.assertEqual(len(tools), CA.MAX_TOOL_CALLS_PER_ANSWER)
@@ -289,10 +257,10 @@ class TestTranscript(_Case):
         self.assertFalse([p for p in tparts if p["state"]["status"] == "error"])
 
 
-class TestTranscriptDenial(_Case):
+class TestTranscriptSilentCalls(_Case):
     plans = [[("tools", 8), ("text", "done")]]
 
-    def test_a_denied_call_is_no_error_part(self):
+    def test_silent_calls_are_plain_tool_parts(self):
         def ladder(body):
             return json.loads(CA.open_reply(dict(body, stream=False), port=9).read())
         r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(), ladder,
@@ -305,7 +273,7 @@ class TestTranscriptDenial(_Case):
         self.assertEqual(len(tparts), 8)
         self.assertFalse([p for p in tparts if p["state"]["status"] == "error"])
         self.assertNotIn(CA.CAP_MARK, asst["info"])
-        self.assertIn(STATUS, json.dumps(asst["parts"]))
+        self.assertNotIn(STATUS, json.dumps(asst["parts"]))
 
 
 # ---- diagnostics ---------------------------------------------------------------
@@ -323,10 +291,10 @@ class TestDiag(_Case):
                 mock.patch("membrane.seatauth.is_loopback", lambda hh: True):
             self.assertTrue(D.route(h, "/membrane/diag/claude-agent"))
         o = sent["obj"]
-        self.assertEqual(o["checkin_denials"], 1)
+        self.assertNotIn("checkin_denials", o)
+        self.assertNotIn("checkin_tool_calls", o)
         self.assertEqual(o["ceiling_hits"], 0)
         self.assertEqual(o["continues"], 0)
-        self.assertEqual(o["checkin_tool_calls"], CA.CHECKIN_TOOL_CALLS)
         self.assertEqual(o["max_tool_calls"], CA.MAX_TOOL_CALLS_PER_ANSWER)
 
 
