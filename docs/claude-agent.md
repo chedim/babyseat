@@ -113,7 +113,7 @@ opencode) as an in-process SDK MCP server named `membrane`:
   bullet-salvage that turns written calls into real ones stays off for
   Claude rounds, so nothing runs twice.
 
-The system prompt ends with a fixed **tools note** (`TOOLS_NOTE`): Claude Code's own tools are off, and membrane's tools are its hands. `entity_link` runs shell commands (read, edit, test, `git`, `gh`, in a git worktree for code work), and `method_call` runs an object's method. It also says to ask the person for a decision as a `Decision` card on their board (one variable and a pick), not a list in chat, made in one `entity_add` call (it applies `properties` itself), with a concrete option-card example and the rule that a name holds no quotes or apostrophes (the name lint refuses them). It maps the doctrine's tool families onto the rung's MCP tools (`exec(action='link')` -> `entity_link`, `goal(action='plant')` -> `intend`, and so on); a test checks every pair against `toolset.FAMILIES` and `mcp_server.TOOLS`, so the map can't go stale. And it says how to work, as Claude Code does: carry a task through to the end within the turn, without asking permission for its steps or ending on "next I'll..."; end the turn only when done, when the person's decision is needed (a Decision card, then stop), or when blocked, and say which; status updates ride the next tool call's message; no "Open decisions" footers. Without it, Claude told the operator it had no tools, and ended most turns on a permission question or an announced next step. Its text never changes, so the prompt cache still holds.
+The system prompt ends with a fixed **tools note** (`TOOLS_NOTE`): Claude Code's own tools are off, and membrane's tools are its hands. `entity_link` runs shell commands (read, edit, test, `git`, `gh`, in a git worktree for code work), and `method_call` runs an object's method. It also says to ask the person for a decision as a `Decision` card on their board (one variable and a pick), not a list in chat, made in one `entity_add` call (it applies `properties` itself), with a concrete option-card example and the rule that a name holds no quotes or apostrophes (the name lint refuses them). It maps the doctrine's tool families onto the rung's MCP tools (`exec(action='link')` -> `entity_link`, `goal(action='plant')` -> `intend`, and so on); a test checks every pair against `toolset.FAMILIES` and `mcp_server.TOOLS`, so the map can't go stale. And it says how to work, as Claude Code does: carry a task through to the end within the turn, without asking permission for its steps or ending on "next I'll..."; end the turn only when done, when the person's decision is needed (a Decision card, then stop), or when blocked, and say which; status updates ride the next tool call's message; no "Open decisions" footers. And since a turn ends after 5 minutes of silence and a running tool call is silent, a command that may run longer than about 4 minutes is started detached (`nohup … > log 2>&1 &` through `entity_link`) or as an entity script, and checked afterwards. Without it, Claude told the operator it had no tools, and ended most turns on a permission question or an announced next step. Its text never changes, so the prompt cache still holds.
 
 The tools Claude gets:
 
@@ -233,14 +233,14 @@ it as Claude. If the model loops, that's not our problem but the model's"):
   turn is aborted only after `TURN_IDLE_S = 300` s (approved 2026-10-23)
   with no event at all. The abort says `no event for 300.0s -- aborted by
   the turn watchdog's idle guard`.
-- **A tool in flight is activity, not silence**, as in Claude Code, which
-  never kills its own long tool runs. While a membrane tool runs, its
-  in-process MCP handler streams a keep-alive chunk (`membrane_alive`) at
-  the call's start and every `TOOL_ALIVE_S = 15` s until the result, so a
-  long silent test run is never cut. Only true silence (no tool running
-  and no token or event) counts toward `TURN_IDLE_S`. The keep-alive is
-  not shown in the chat. The ceiling and the idle guard are the only stops;
-  nothing continues by itself.
+- **A silent tool call is silence.** No keep-alive is streamed while a
+  membrane tool runs (the operator, 2026-10-24, took out #502's), so a
+  tool call that returns nothing for `TURN_IDLE_S` ends the turn like any
+  other silence. The tools note tells Claude so: a command that may run
+  longer than about 4 minutes must be started detached (e.g. `nohup … >
+  log 2>&1 &` through `entity_link`) or as an entity script, and its
+  result checked afterwards. The ceiling and the idle guard are the only
+  stops; nothing continues by itself.
 
 ## The ceiling and Continue
 
