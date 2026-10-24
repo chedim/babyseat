@@ -892,6 +892,117 @@ class OptionsWindow {
   }
 }
 
+// THE STATS WINDOW (📊, beside the ⚙): the seat's tokenomics, read-only -- one
+// read, GET /membrane/stats on the serve port (membrane/tokenomics.py), on open
+// and every STATS_EVERY_MS while open. Today and the last hour by mind and by
+// model (a runaway loop stands out in the last hour), and the Claude rung's
+// cache split since the seat started. StatsWindow takes its elements and the
+// calls, so node drives it with stubs (tests/test_stats_window.py).
+const STATS_PATH = "/membrane/stats";
+const STATS_EVERY_MS = 10000;
+const STATS_MINDS = [["chat", "Chat"], ["loops", "Goal worker"], ["cortex", "Idle thinker"], ["other", "Other background"]];
+
+/** A token count, short: 999, 1.2k, 123k, 2.5M. */
+function tokShort(n) {
+  const v = Math.max(0, Number(n) || 0);
+  const s = (x, u) => (x < 10 ? String(Math.round(x * 10) / 10) : String(Math.round(x))) + u;
+  if (v < 1000) return String(Math.round(v));
+  if (v < 1e6) return s(v / 1e3, "k");
+  return s(v / 1e6, "M");
+}
+
+/** One split (minds or models) as a table: calls, in, out today, and the last
+ * hour's in+out -- the busiest of the last hour marked hot (when there are two
+ * or more rows to tell apart). */
+function statsTable(head, names, today, hour) {
+  const t = today || {}, h = hour || {};
+  const lastH = (k) => { const r = h[k]; return r ? (r.input || 0) + (r.output || 0) : 0; };
+  let hot = null, top = 0;
+  for (const [k] of names) if (lastH(k) > top) { top = lastH(k); hot = k; }
+  const shown = names.filter(([k]) => t[k] || h[k]);
+  if (shown.length < 2) hot = null;
+  const rows = shown.map(([k, label]) => {
+    const r = t[k] || { calls: 0, input: 0, output: 0 };
+    return `<tr><th scope="row">${zooEsc(label)}</th><td>${zooEsc(r.calls || 0)}</td><td>${tokShort(r.input)}</td>` +
+      `<td>${tokShort(r.output)}</td><td${k === hot ? ' class="hot"' : ""}>${tokShort(lastH(k))}</td></tr>`;
+  });
+  if (!rows.length) return '<p class="ohint">nothing yet today</p>';
+  return `<table class="stbl"><thead><tr><th scope="col">${zooEsc(head)}</th><th scope="col">calls</th>` +
+    '<th scope="col">in</th><th scope="col">out</th><th scope="col" title="in + out in the last hour">last h</th></tr></thead>' +
+    `<tbody>${rows.join("")}</tbody></table>`;
+}
+
+/** The window's rows from GET /membrane/stats. */
+function statsRows(s) {
+  s = s || {};
+  const today = s.today || {}, hour = s.hour || {};
+  const line = (w) => { const t = w.total || {}; return `${zooEsc(t.calls || 0)} calls · in ${tokShort(t.input)} · out ${tokShort(t.output)}`; };
+  const td = today.models || {}, hd = hour.models || {};
+  const io = (r) => ((r || {}).input || 0) + ((r || {}).output || 0);
+  const models = Array.from(new Set(Object.keys(td).concat(Object.keys(hd))))
+    .sort((a, b) => io(td[b]) - io(td[a])).map((m) => [m, m]);
+  let html = '<h3 class="osec">Today</h3>' +
+    `<div class="orow"><span class="olab">since midnight</span><span class="oval">${line(today)}</span></div>` +
+    `<div class="orow"><span class="olab">last hour</span><span class="oval">${line(hour)}</span>` +
+    '<p class="ohint">every model call the seat made: your chats and its background work</p></div>' +
+    '<h3 class="osec">By mind, today</h3>' + statsTable("mind", STATS_MINDS, today.minds, hour.minds) +
+    '<h3 class="osec">By model, today</h3>' + statsTable("model", models, today.models, hour.models);
+  const c = s.claude || {};
+  html += '<h3 class="osec">Claude rung, since the seat started</h3>';
+  if (!c.answers) return html + '<p class="ohint">no Claude answers since the seat started</p>';
+  const row = (label, r) => { r = r || {};
+    return `<tr><th scope="row">${zooEsc(label)}</th><td>${tokShort(r.cache_read)}</td><td>${tokShort(r.cache_write)}</td>` +
+      `<td>${tokShort(r.input)}</td><td>${tokShort(r.output)}</td><td>${tokShort(r.effective)}</td></tr>`; };
+  return html + `<div class="orow"><span class="olab">${zooEsc(c.answers)} answers · ${zooEsc(c.steps || 0)} steps</span></div>` +
+    '<table class="stbl"><thead><tr><th scope="col"></th><th scope="col">read</th><th scope="col">write</th>' +
+    '<th scope="col">uncached</th><th scope="col">out</th><th scope="col">effective</th></tr></thead><tbody>' +
+    row("per answer", c.per_answer) + row("first step", c.first_step) + row("later steps", c.later_step) + row("all", c.total) +
+    '</tbody></table><p class="ohint">effective input = 0.1 × read + 1.25 × write + uncached: what the input bills as, in uncached tokens. ' +
+    "An answer's first step writes the fresh prompt to the cache; its later steps mostly read it.</p>";
+}
+
+class StatsWindow {
+  /** els: btn (the 📊), panel, body, msg; get(path) -> the JSON;
+   * every(fn, ms) / stop(id): the refresh timer (setInterval by default). */
+  constructor({ btn, panel, body, msg, get, every, stop }) {
+    Object.assign(this, { btn, panel, body, msg, get });
+    this.every = every || ((fn, ms) => setInterval(fn, ms));
+    this.stop = stop || ((id) => clearInterval(id));
+    this.state = null; this._t = null;
+  }
+
+  get open() { return !!this.panel && !this.panel.hidden; }
+
+  /** Open (read now, then every STATS_EVERY_MS) or close; null = the other way round. */
+  async toggle(on) {
+    on = on == null ? !this.open : !!on;
+    this.panel.hidden = !on;
+    this.btn.classList.toggle("on", on);
+    this.btn.setAttribute("aria-expanded", on ? "true" : "false");
+    if (this._t != null) { this.stop(this._t); this._t = null; }
+    if (!on) return;
+    this._t = this.every(() => this.load(), STATS_EVERY_MS);
+    await this.load();
+  }
+
+  /** Escape closes it and gives the 📊 the focus back. */
+  key(e) {
+    if (!e || e.key !== "Escape" || !this.open) return;
+    if (e.stopPropagation) e.stopPropagation();
+    this.toggle(false);
+    if (this.btn.focus) this.btn.focus();
+  }
+
+  async load() {
+    if (!this.state) this.msg.textContent = "reading…";
+    try {
+      this.state = await this.get(STATS_PATH);
+      this.body.innerHTML = statsRows(this.state);
+      this.msg.textContent = "";
+    } catch (e) { this.msg.textContent = "the seat did not answer (" + (e && e.message || e) + ")"; }
+  }
+}
+
 // THE RUNG CELEBRATION (#289, the operator: "a rung is a milestone the
 // operator waits hours for; it should be unmissable"): a pass gets ~3 s over
 // the field (the amoeba bounces and glows, a burst in its colours, a caption;
@@ -1331,6 +1442,7 @@ const HomeLogic = { knownView, standaloneMenu, pauseView, PauseButton, PAUSE_PAT
   achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody,
   ballAlert, ballAlertText, ballNotifyBody, ballChimeNotes, titleFlash,
   optSharePct, optShareFromPct, optionsRows, backgroundRows, OptionsWindow,
+  tokShort, statsTable, statsRows, StatsWindow,
   blurpPose, blurpEyes, blurpLookAngle, blurpBlink, blurpZs, blurpRuns, drawBlurp, BlurpBodies };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
@@ -1498,7 +1610,7 @@ const HSTYLE = `
               background:color-mix(in srgb, var(--card-background-color,#111) 95%, transparent); font-size:13px; }
   .optpanel[hidden] { display:none; }
   .optpanel .ohead { display:flex; align-items:center; gap:8px; padding:2px 2px 6px; font-weight:600; }
-  .optpanel .ox { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
+  .optpanel .ox, .optpanel .stx { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
   .optpanel .orow { display:grid; grid-template-columns:1fr auto; gap:2px 8px; align-items:center; padding:8px 2px;
                     border-top:1px solid color-mix(in srgb, var(--divider-color,#888) 30%, transparent); }
   .optpanel .olab { font-weight:600; min-width:0; overflow-wrap:anywhere; }
@@ -1509,9 +1621,19 @@ const HSTYLE = `
   .optpanel .osel { min-width:0; max-width:190px; font:inherit; padding:2px 4px; border-radius:6px; }
   .optpanel .osub { font-weight:400; opacity:.85; margin-top:4px; }
   .optpanel .osel:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
-  .optpanel .omsg { margin:4px 2px 0; font-size:12px; opacity:.85; }
-  .optpanel .omsg:empty { display:none; }
-  .optpanel .ox:focus-visible, .optpanel .oshare:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
+  .optpanel .omsg, .optpanel .stmsg { margin:4px 2px 0; font-size:12px; opacity:.85; }
+  .optpanel .omsg:empty, .optpanel .stmsg:empty { display:none; }
+  /* the 📊 stats window: the options window's frame, with tables */
+  .statpanel { width:min(420px, calc(100% - 32px)); }
+  .statpanel .stbl { width:100%; border-collapse:collapse; margin:4px 0 2px; font-size:12px; font-variant-numeric:tabular-nums; }
+  .statpanel .stbl th, .statpanel .stbl td { padding:3px 4px; text-align:right; white-space:nowrap; }
+  .statpanel .stbl th[scope="row"], .statpanel .stbl thead th:first-child { text-align:left; font-weight:600;
+                                       max-width:150px; overflow:hidden; text-overflow:ellipsis; }
+  .statpanel .stbl thead th { font-weight:400; opacity:.7; }
+  .statpanel .stbl tbody tr { border-top:1px solid color-mix(in srgb, var(--divider-color,#888) 30%, transparent); }
+  .statpanel .stbl td.hot { font-weight:700; color:var(--warning-color,#e8a33d); }
+  .statpanel .ohint { margin:2px 2px 6px; }
+  .optpanel .stx:focus-visible, .optpanel .ox:focus-visible, .optpanel .oshare:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
   .zoopanel .zhead { display:flex; align-items:center; gap:8px; padding:2px 2px 6px; font-weight:600; }
   .zoopanel .zx { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
   .zoopanel .zcard { display:flex; flex-direction:column; gap:2px; width:100%; text-align:left; margin:0 0 6px; padding:8px 10px;
@@ -2001,6 +2123,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       clearInterval(this._follow);
       clearInterval(this._pauseT); clearInterval(this._selfT); clearInterval(this._selfPanelT);
       clearInterval(this._brainT); clearInterval(this._dockT);
+      if (this._stats) this._stats.toggle(false);                 // the 📊 window's refresh
       clearTimeout(this._cycT); this._titleStop();                // #331
       if (this._bodies) this._bodies.pause(true);                      // #358: no frames while off the page
       if (this._brainVis) { document.removeEventListener("visibilitychange", this._brainVis); this._brainVis = null; }
@@ -2900,6 +3023,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="pausebtn" title="the seat's pause -- reading its state…" aria-label="the seat's pause" aria-pressed="false">▶</button>
           <span class="selfstat" title="where ${nm} is now: its rung, the bar toward the next, what it waits on"></span>
           <button class="rungbell" aria-label="${nm}'s rungs and ball: the chime and notifications" aria-pressed="true">🔔</button>
+          <button class="statbtn" title="Stats: the seat's tokens -- today, the last hour, the Claude rung" aria-label="stats" aria-haspopup="dialog" aria-expanded="false" aria-controls="statpanel">📊</button>
           <button class="optbtn" title="Options: the seat's long-term settings" aria-label="options" aria-haspopup="dialog" aria-expanded="false" aria-controls="optpanel">⚙</button>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
@@ -2915,6 +3039,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <div class="ohead"><span>⚙ options</span><button class="ox" aria-label="close the options" title="Close">×</button></div>
           <div class="obody"></div>
           <p class="omsg" role="status" aria-live="polite"></p>
+        </aside>
+        <aside class="optpanel statpanel glass" id="statpanel" role="dialog" aria-label="stats: the seat's tokens" hidden>
+          <div class="ohead"><span>📊 stats</span><button class="stx" aria-label="close the stats" title="Close">×</button></div>
+          <div class="stbody"></div>
+          <p class="stmsg" role="status" aria-live="polite"></p>
         </aside>
         <button class="babybtn" aria-label="${nm}: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
                 title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now"><canvas class="bbody" width="72" height="72" aria-hidden="true"></canvas></button>
@@ -3105,7 +3234,15 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           if (!r.ok) throw new Error((d && d.error) || (r.status === 401 ? "the seat token is needed to change options" : String(r.status)));
           return d;
         } });
-      this._optBtn.addEventListener("click", () => this._opt.toggle());
+      this._optBtn.addEventListener("click", () => { if (this._stats) this._stats.toggle(false); this._opt.toggle(); });
+      // the 📊 stats window: the seat's tokens, read on open and every 10 s while open
+      this._statBtn = $(".statbtn");
+      this._stats = new StatsWindow({ btn: this._statBtn, panel: $(".statpanel"), body: $(".stbody"), msg: $(".stmsg"),
+        get: (p) => this._get(p) });
+      this._statBtn.addEventListener("click", () => { if (!this._stats.open) this._opt.toggle(false); this._stats.toggle(); });
+      $(".stx").addEventListener("click", () => { this._stats.toggle(false); this._statBtn.focus(); });
+      this._stats.panel.addEventListener("keydown", (e) => this._stats.key(e));
+      this._statBtn.addEventListener("keydown", (e) => this._stats.key(e));
       $(".ox").addEventListener("click", () => { this._opt.toggle(false); this._optBtn.focus(); });
       this._opt.panel.addEventListener("keydown", (e) => this._opt.key(e));
       this._optBtn.addEventListener("keydown", (e) => this._opt.key(e));   // Escape right after the click, focus still on ⚙
