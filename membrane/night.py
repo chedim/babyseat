@@ -2104,6 +2104,7 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
             "tail": r.get("tail"), "state": _parsed(r.get("head"))}
         res.update({"ok": r.get("status") == "ok", "rc": r.get("rc"), "outcome": r.get("outcome"),
                     "head": r.get("head"), "tail": r.get("tail"),
+                    "output": r.get("output"), "output_len": r.get("output_len"),
                     "status": "blocked" if r.get("status") == "blocked" else None,
                     "error": r.get("error")})
         memo[eid] = res
@@ -3058,6 +3059,8 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
     return {"ok": status == "ok", "status": status, "object": obj.eid, "method": mp.get("name") or method,
             "via": via or "global", "mro": mro, "fed": fed, "rc": rc, "outcome": run.get("outcome"),
             "head": run.get("head"), "tail": run.get("tail"), "error": run.get("error"),
+            # the caller's copy (cut to mcp_server.LINK_OUTPUT_CAP), never stored
+            "output": run.get("output"), "output_len": run.get("output_len"),
             "read_only": read_only, "params": command_params(template),
             "steps": {k: {kk: vv for kk, vv in v.items() if kk != "tail"} for k, v in ctx["steps"].items()}}
 
