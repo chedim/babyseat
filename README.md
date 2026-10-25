@@ -596,7 +596,7 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 
 A working lab, used every day to build itself: this repo's own field holds
 about 14,000 entities, and its background mind digests, dreams and talks
-about its own work. Version **0.7.2**; API and flag surfaces may still
+about its own work. Version **0.7.2.1**; API and flag surfaces may still
 move. Licensing: **PolyForm Noncommercial 1.0.0** (see [LICENSE](LICENSE)) —
 free to use, modify and share for any noncommercial purpose (personal, hobby,
 research, education, charities and public institutions); commercial use needs

@@ -34,7 +34,7 @@ class TestTheVersionIsOneVersion(unittest.TestCase):
         self.assertEqual(m.group(1), _pyproject_version())
 
     def test_the_newest_changelog_entry_is_it(self):
-        m = re.search(r"(?m)^## v?([0-9]+\.[0-9]+\.[0-9]+)", (ROOT / "CHANGELOG.md").read_text())
+        m = re.search(r"(?m)^## v?([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)", (ROOT / "CHANGELOG.md").read_text())
         self.assertIsNotNone(m)
         self.assertEqual(m.group(1), _pyproject_version())
 
@@ -42,9 +42,10 @@ class TestTheVersionIsOneVersion(unittest.TestCase):
         # #417: CITATION.cff is what GitHub's "Cite this repository" and Zenodo
         # read. On a release branch it names exactly the package's version; on
         # main it may name the newest patch release of the same line (main is
-        # bumped only at the next minor), never an older one.
+        # bumped only at the next minor), never an older one. A hotfix may add a
+        # fourth part (0.7.2.1).
         cff = (ROOT / "CITATION.cff").read_text()
-        m = re.search(r'(?m)^version: "?([0-9]+\.[0-9]+\.[0-9]+)"?\s*$', cff)
+        m = re.search(r'(?m)^version: "?([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)"?\s*$', cff)
         self.assertIsNotNone(m)
         cite = tuple(int(x) for x in m.group(1).split("."))
         pkg = tuple(int(x) for x in _pyproject_version().split("."))
