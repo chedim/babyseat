@@ -63,7 +63,7 @@ ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane
                  "membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result",
                  "membrane/toybox/poke", "membrane/seat/pause",
                  # #470: the decision cockpit's writes, the out-of-tokens Resume, the ⚙ window
-                 "membrane/decision/answer", "membrane/decision/chat",
+                 "membrane/decision/answer", "membrane/decision/chat", "membrane/decision/drop",
                  "membrane/quota/resume", "membrane/options")
 # #244: the 👶 panel's play buttons -- the poke is tagged with the HA user, stamped here;
 # #299: the seat's switches too (an admin's accept of self's achievement names them on its record)
@@ -75,7 +75,7 @@ VOICE_PATHS = ("membrane/voice", "membrane/voice/state", "membrane/jsexec/regist
 # #470: the seat's other owner-only writes the pages make (every seat write is
 # behind the owner's door, seatauth.py, and the relay holds the seat token)
 ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control", "membrane/seat/pause",
-                     "membrane/decision/answer", "membrane/decision/chat",
+                     "membrane/decision/answer", "membrane/decision/chat", "membrane/decision/drop",
                      "membrane/quota/resume", "membrane/options")
 # the field dashboard + the drawer: the seat's read surfaces the serve
 # relays (membrane/server.py SEAT_READ_PATHS) -- GET only, exact paths

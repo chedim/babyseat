@@ -4,7 +4,12 @@
 A card is a Decision entity (the existing class, converged on: no parallel
 store) with a ``status`` that moves right to left:
 
-  open (a question, the future) -> in_flight (the work, now) -> decided (the past)
+  open (a question) -> decided (answered) -> in_flight (the work) -> closed (receipt)
+
+A card tagged work_needed=False closes on the answer; one needing work stays
+decided until a watcher loop moves it to in_flight, and it closes only once a
+receipt is on it. The operator may also drop an open card. (An untagged answer
+stays decided, as before.)
 
 A Decision with no status is a legacy one, already decided. A card asks for
 ONE variable (``var``: int, float, bool, string or an option from a list) and
@@ -28,8 +33,11 @@ import time
 STATUS_OPEN = "open"
 STATUS_IN_FLIGHT = "in_flight"
 STATUS_DECIDED = "decided"
-STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_DECIDED)
-AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT)    # what entity_edit may set
+STATUS_CLOSED = "closed"
+STATUS_DROPPED = "dropped"
+STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_DECIDED, STATUS_CLOSED, STATUS_DROPPED)
+AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_CLOSED)    # what entity_edit may set
+LOCKED = (STATUS_CLOSED, STATUS_DROPPED)
 ANSWER_OWNED = ("value", "set_by", "set_at")        # only answer() writes these
 EDGE_KEYS = ("blocks", "led_to", "carried_by")
 VAR_TYPES = ("int", "float", "bool", "string", "option")
@@ -49,10 +57,23 @@ def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
         return None
     if key in ANSWER_OWNED:
         return "answer-owned (only the operator answers a Decision card)"
-    # an answered card is locked; a legacy Decision (no status yet) may become a card
-    if key == "status" and (props or {}).get("status") == STATUS_DECIDED:
+    cur = (props or {}).get("status")
+    if key == "status" and cur in LOCKED:
+        return f"the card is {cur}; changing a past decision comes with timelines (#470 step 3)"
+    if key == "status" and cur == STATUS_DECIDED and value not in (STATUS_IN_FLIGHT, STATUS_CLOSED):
         return ("the card is decided; changing a past decision comes with "
                 "timelines (#470 step 3)")
+    if key == "status" and value == STATUS_OPEN and (props or {}).get("value") is not None:
+        return ("the card is answered; changing a past decision comes with "
+                "timelines (#470 step 3)")
+    if key == "status" and value == STATUS_IN_FLIGHT and cur == STATUS_DECIDED \
+            and (props or {}).get("work_needed") is not True:
+        return "the card was decided as needing no work; it cannot go in flight"
+    if key == "status" and value == STATUS_CLOSED:
+        if cur not in (STATUS_DECIDED, STATUS_IN_FLIGHT):
+            return "only a decided or in-flight card closes"
+        if not str((props or {}).get("receipt") or "").strip():
+            return "a card closes with a receipt: set its receipt property first"
     if key == "status" and value not in AGENT_STATUSES:
         return (f"a card's status is set to one of {', '.join(AGENT_STATUSES)} "
                 f"here; only the operator's answer makes it decided")
@@ -111,7 +132,8 @@ def _card_of(ent) -> dict:
             "var": p.get("var") if isinstance(p.get("var"), dict) else None,
             "pick": p.get("pick"), "value": p.get("value"),
             "set_by": p.get("set_by"), "set_at": p.get("set_at"),
-            "chat": p.get("chat"), "message": p.get("message")}
+            "chat": p.get("chat"), "message": p.get("message"),
+            "work_needed": p.get("work_needed"), "receipt": p.get("receipt")}
 
 
 def board(est) -> dict:
@@ -161,17 +183,17 @@ def _one_line(s, cap: int) -> str:
     return s if len(s) <= cap else s[: cap - 1] + "…"
 
 
-def answer(est, ledger, spec: str, value, conv: str = "", message: str = "") -> dict:
+def answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None) -> dict:
     """The operator answers a card: validate the value against its var, append
     the decision to the ledger, then mark the card decided. Nothing changes on
     a refusal or a failed ledger write; one answer at a time. ``message`` (the
     cockpit's ✓ while the card's chat is open) is the id of that chat's newest
     message: where the card was decided. It is kept only with its ``conv``."""
     with _ANSWER_LOCK:
-        return _answer(est, ledger, spec, value, conv, message)
+        return _answer(est, ledger, spec, value, conv, message, work)
 
 
-def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "") -> dict:
+def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None) -> dict:
     from .entities import CLASS_DECISION
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
@@ -179,7 +201,10 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "") ->
     if ent is None or ent.cls != CLASS_DECISION:
         return {"ok": False, "error": f"no Decision card {spec!r}"}
     p = ent.properties or {}
-    if _status(p) == STATUS_DECIDED:
+    # an in_flight card is answered work (open -> decided -> in_flight), past like a
+    # decided one; only a legacy in_flight card that was never answered takes one
+    if _status(p) not in (STATUS_OPEN, STATUS_IN_FLIGHT) or \
+            (_status(p) == STATUS_IN_FLIGHT and p.get("value") is not None):
         return {"ok": False, "conflict": True,
                 "error": "this card is already decided (changing a past "
                          "decision comes with timelines, #470 step 3)"}
@@ -192,7 +217,11 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "") ->
     shown = _one_line(_shown(v, var), LEDGER_TITLE_MAX)
     if ledger is not None and not ledger.append(f"decided: {title} = {shown}", conv=conv):
         return {"ok": False, "error": "the ledger could not be written; the card stays open"}
-    p.update({"value": v, "status": STATUS_DECIDED, "set_by": "operator",
+    work = p.get("work_needed") if work is None else work     # the answer may override the tag
+    if work is not None:
+        p["work_needed"] = bool(work)
+    p.update({"value": v, "status": STATUS_CLOSED if work is False else STATUS_DECIDED,
+              "set_by": "operator",
               "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     if conv:
         p["chat"] = p.get("chat") or conv     # a card keeps the chat it already has
@@ -204,8 +233,34 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "") ->
     pool = getattr(est, "_events_pool", None)   # the watcher loops' events pool (the proxy wires it)
     if pool is not None:                        # the answer wakes a loop pass, like a fired watch
         pool.put({"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
-                  "blocks": p.get("blocks") or [], "ts": time.time()})
+                  "blocks": p.get("blocks") or [], "work_needed": work is True,
+                  "ts": time.time()})
     return {"ok": True, "card": _card_of(ent)}
+
+
+def drop(est, spec: str) -> dict:
+    """The operator drops an open card without answering it. Owner-only at the
+    route; entity_edit refuses status dropped, so an agent never drops."""
+    from .entities import CLASS_DECISION
+    with _ANSWER_LOCK:
+        if est is None:
+            return {"ok": False, "error": "entity layer unavailable"}
+        ent = est.resolve(str(spec or ""), exact=True)
+        if ent is None or ent.cls != CLASS_DECISION:
+            return {"ok": False, "error": f"no Decision card {spec!r}"}
+        p = ent.properties or {}
+        if _status(p) != STATUS_OPEN:
+            return {"ok": False, "conflict": True, "error": "only an open card can be dropped"}
+        p.update({"status": STATUS_DROPPED, "set_by": "operator",
+                  "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        ent.properties = p
+        est.upsert(ent)
+        pool = getattr(est, "_events_pool", None)
+        if pool is not None:
+            pool.put({"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
+                      "value": "dropped", "blocks": p.get("blocks") or [],
+                      "work_needed": False, "ts": time.time()})
+        return {"ok": True, "card": _card_of(ent)}
 
 
 def goals(est, active=()) -> dict:

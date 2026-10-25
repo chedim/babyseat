@@ -40,10 +40,13 @@ const GOALS_MAX = 4;                // goals listed above the field; the rest ar
 /** The cards by band, each nearest the bar first. future: a card that blocks
  * another comes before it (the first thing to decide nearest the bar), then
  * by title; now: by title; past: the newest decision first. */
+/** A card in the work band: in flight, or decided and waiting for its work. */
+function inNow(c) { return c.status === "in_flight" || (c.status === "decided" && c.work_needed === true); }
+
 function bands(board) {
   const cards = (board && board.cards) || [];
   const out = { future: [], now: [], past: [] };
-  for (const c of cards) (c.status === "open" ? out.future : c.status === "in_flight" ? out.now : out.past).push(c);
+  for (const c of cards) (c.status === "open" ? out.future : inNow(c) ? out.now : out.past).push(c);
   out.now.sort((a, b) => String(a.title).localeCompare(String(b.title)));
   out.past.sort((a, b) => String(b.set_at || "").localeCompare(String(a.set_at || "")) ||
     String(a.title).localeCompare(String(b.title)));
@@ -348,7 +351,7 @@ function age(iso, now) {
   return Math.round(s / 86400) + " days ago";
 }
 
-const DecisionLogic = { STACK_FLOW_ROWS, STACK_STRIP, STACK_SHOWN, stackPad, stackSlot, bands, place, sideLists, depthStyle, pushOut, windowRange, itemOffset, stubLine, barScrollTop, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
+const DecisionLogic = { inNow, STACK_FLOW_ROWS, STACK_STRIP, STACK_SHOWN, stackPad, stackSlot, bands, place, sideLists, depthStyle, pushOut, windowRange, itemOffset, stubLine, barScrollTop, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
   blockersFirst, cardEdges, inputSpec, pickText, valueText, askText, age, POLL_MS, PAST_ROWS, GOALS_MAX };
 if (typeof module !== "undefined" && module.exports) module.exports = DecisionLogic;
 if (typeof window !== "undefined") window.DecisionLogic = DecisionLogic;   // home.js builds the chat's message with it
@@ -609,7 +612,12 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         } else {
           body = `<div class="m">no variable set: talk it over in the chat</div>`;
         }
-      } else if (c.status === "decided") {
+      } else if (c.status === "dropped") {
+        body = `<div class="m">dropped${c.set_at ? " · " + esc(age(c.set_at)) : ""}</div>`;
+      } else if (c.status === "decided" && c.work_needed === true) {
+        const v = valueText(c);
+        body = `<div class="m">${v ? `<span class="val">${esc(v)}</span> · ` : ""}decided · waiting for work</div>`;
+      } else if (c.status === "decided" || c.status === "closed") {
         const v = valueText(c);
         body = `<div class="m">${v ? `<span class="val">${esc(v)}</span> · ` : ""}${esc(c.set_by || "decided")}` +
           `${c.set_at ? " · " + esc(age(c.set_at)) : ""}</div>`;
@@ -625,7 +633,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       const what = band === "past" ? "show where it was decided" : "talk it over in the chat";
       return `<article class="dc" tabindex="0" role="button" style="${tf}" data-eid="${esc(c.eid)}" aria-label="${esc(c.title)}: ${what}">` +
         `<div class="t">${esc(c.title)}</div>${c.description && band !== "now" ? `<div class="d">${esc(c.description)}</div>` : ""}` +
-        `${body}${ch ? `<div class="chips">${ch}</div>` : ""}${err}</article>`;
+        `${body}${c.status === "open" ? `<button type="button" class="drop" aria-label="drop ${esc(c.title)}" title="Drop this card without answering">Drop</button>` : ""}` +
+        `${ch ? `<div class="chips">${ch}</div>` : ""}${err}</article>`;
     }
 
     _paint() {
@@ -820,6 +829,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     }
 
     _click(e) {
+      const dr = e.target.closest && e.target.closest("button.drop");
+      if (dr) { e.stopPropagation(); this._drop(dr.closest(".dc")); return; }
       if (e.target.closest("form.ans")) return;         // the value is edited in place
       const c = e.target.closest(".dc");
       if (c) this._activate(c);
@@ -828,7 +839,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     _activate(el) {
       const card = this._byEid(el.dataset.eid);
       if (!card) return;
-      if (card.status === "decided") this._openPast(card, el); else this._loadIntoBar(card);
+      if (card.status === "open" || inNow(card)) this._loadIntoBar(card); else this._openPast(card, el);
     }
 
     /** An open / in-flight card: its question into the center bar, its chat recorded. */
@@ -872,6 +883,19 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       // the session paints on the next frames
       for (let i = 0; i < 20 && !chat.scrollToMessage(l.message); i++) await new Promise((r) => setTimeout(r, 100));
       if (el) el.classList.add("lit");
+    }
+
+    async _drop(el) {
+      const eid = el && el.dataset.eid;
+      if (!eid) return;
+      try {
+        await this._api.post("/membrane/decision/drop", { card: eid });
+        delete this._errs[eid];
+        await this._load();
+      } catch (err) {
+        this._errs[eid] = String(err && err.message || err);
+        this._paint();
+      }
     }
 
     async _answer(form) {
