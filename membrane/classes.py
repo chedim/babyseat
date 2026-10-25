@@ -4,8 +4,8 @@ to do generalizations, why is it not doing that?").
 The live seat held 2081 entities and not one ISA link: inheritance existed
 and nobody built a hierarchy. This proposes the classes the field already
 shows -- siblings sharing a name stem ('ha:light.port_strip',
-'ha:light.aft_cabin' -> 'ha:light'; 'argus:organs:vessel' ... ->
-'argus:organs') -- and the seat accepts one with ONE call: inherit with a
+'ha:light.aft_cabin' -> 'ha:light'; 'seat:organs:vessel' ... ->
+'seat:organs') -- and the seat accepts one with ONE call: inherit with a
 pattern links every member and mints the class when it is missing. The
 engine proposes; the seat decides (its hierarchy, its call).
 """

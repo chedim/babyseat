@@ -27,7 +27,7 @@ from pathlib import Path
 
 import aiohttp
 
-from .const import SEAT_DIR
+from .const import DEFAULT_NAME, SEAT_DIR
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,12 +93,12 @@ def child_args(data: Path, backend: str, model: str, embed: str, listen: int, se
 
 
 def read_name(data: Path) -> tuple[str, list]:
-    """The seat's agreed name (naming.py writes it to settings.json); Bob until then."""
+    """The seat's agreed name (naming.py writes it to settings.json); the default until then."""
     try:
         d = json.loads((data / "settings.json").read_text())
-        return str(d.get("name") or "") or "Bob", list(d.get("aliases") or [])
+        return str(d.get("name") or "") or DEFAULT_NAME, list(d.get("aliases") or [])
     except (OSError, ValueError):
-        return "Bob", []
+        return DEFAULT_NAME, []
 
 
 class SeatSupervisor:

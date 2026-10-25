@@ -262,7 +262,7 @@ def test_the_platform_is_registered():
 
 # ---- the zoo fan-out ------------------------------------------------------------------
 
-def _seat_app(token, card=None, sheet=None, recent=None, slow=0.0):
+def _seat_app(token, card=None, sheet=None, recent=None, slow=0.0, conf=None):
     import base64
     from aiohttp import web
 
@@ -286,7 +286,14 @@ def _seat_app(token, card=None, sheet=None, recent=None, slow=0.0):
 
     async def h_recent(request):
         return web.json_response({"lines": recent or []})
+    async def h_conf(request):
+        if not ok(request):
+            return web.Response(status=401)
+        if conf is None:
+            return web.Response(status=404, text="no such path")
+        return web.json_response(conf)
     app = web.Application()
+    app.router.add_get("/ui/conf", h_conf)
     app.router.add_get("/membrane/self/card", h_card)
     app.router.add_get("/membrane/self/sheet", h_sheet)
     app.router.add_get("/membrane/self/recent", h_recent)
@@ -332,6 +339,34 @@ def test_the_fan_out_reads_every_seat_and_survives_an_offline_one(cc):
     assert by["off"]["online"] is False and "card" not in by["off"] and by["off"]["error"]
     assert by["slow"]["online"] is False and by["slow"]["error"] == "timeout"
     assert by["off"]["host"] == "127.0.0.1"
+
+
+def test_a_connected_seat_is_called_by_its_own_name(cc):
+    # issue #6: HA connected to a named seat said "Bob": the name comes from the
+    # seat itself (its /ui/conf); until it answers, or when it serves none
+    # (a plain serve), the seat's own default
+    import aiohttp
+    from aiohttp import test_utils
+
+    async def go():
+        named = test_utils.TestServer(_seat_app("tn", conf={"name": "Memo", "aliases": ["memmo"]}))
+        plain = test_utils.TestServer(_seat_app("tp"))
+        for s in (named, plain):
+            await s.start_server()
+        out = []
+        async with aiohttp.ClientSession() as sess:
+            for srv, tok in ((named, "tn"), (plain, "tp")):
+                comp = {}
+                cc.zoo.apply(comp, {"id": "x", "name": "", "host": "127.0.0.1", "serve_port": srv.port, "token": tok})
+                before = (comp["name"], comp["aliases"])
+                await cc.zoo.fetch_name(sess, comp)
+                out.append((before, (comp["name"], comp["aliases"])))
+        for s in (named, plain):
+            await s.close()
+        return out
+    (b1, a1), (b2, a2) = _run(go())
+    assert b1 == b2 == a2 == (cc.const.DEFAULT_NAME, [])
+    assert a1 == ("Memo", ["memmo"])
 
 
 def test_the_zoo_views(cc):

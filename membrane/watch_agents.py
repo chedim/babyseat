@@ -1059,7 +1059,7 @@ _UNIT_S = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
 def blocked_condition(detail: str, now: float | None = None) -> dict:
-    """A BLOCKED verdict's wake condition (Argus's ask, 2026-10-08):
+    """A BLOCKED verdict's wake condition (the seat's ask, 2026-10-08):
     'retry after 2h' -> a timer; 'on <entity-id>' -> wake when it moves;
     neither -> {} (waits for the operator)."""
     now = time.time() if now is None else now
@@ -1135,7 +1135,7 @@ def _park_kind(props: dict) -> str:
 def dormant_line(srv, now: float | None = None,
                  min_age_s: float | None = None) -> str:
     """One line: the open goals that are asleep and why (backoff, parked),
-    without waking any (Argus's ask: show the dormant set at a boot)."""
+    without waking any (the seat's ask: show the dormant set at a boot)."""
     est = getattr(srv, "entity_store", None)
     if est is None:
         return ""

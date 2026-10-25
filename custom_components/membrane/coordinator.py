@@ -12,6 +12,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import (DataUpdateCoordinator,
                                                       UpdateFailed)
 
+from . import zoo
 from .metrics import metrics_from
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,6 +38,8 @@ class FieldCoordinator(DataUpdateCoordinator):
             return await r.json(content_type=None)
 
     async def _async_update_data(self) -> dict:
+        if self._comp.get("serve_url") and self._comp.get("serve_ready"):
+            await zoo.fetch_name(async_get_clientsession(self.hass), self._comp)   # a seat elsewhere: its own name
         try:
             state = await self._get("/membrane/state")
             try:

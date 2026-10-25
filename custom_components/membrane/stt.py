@@ -21,6 +21,7 @@ from aiohttp import web
 
 from homeassistant.components.http import HomeAssistantView
 
+from .const import DEFAULT_NAME
 from .relay import component_of
 
 _LOGGER = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ class SttView(HomeAssistantView):
             return web.json_response({"error": "too long (8 minutes at most)"}, status=413)
         if not looks_like_wav(data):
             return web.json_response({"error": "expected a WAV recording"}, status=400)
-        body, ctype = multipart(data, ", ".join([comp.get("name") or "Bob"] + list(comp.get("aliases") or [])) + ", Home Assistant.")
+        body, ctype = multipart(data, ", ".join([comp.get("name") or DEFAULT_NAME] + list(comp.get("aliases") or [])) + ", Home Assistant.")
         try:
             async with aiohttp.ClientSession() as sess:
                 async with sess.post(url, data=body, headers={"Content-Type": ctype},

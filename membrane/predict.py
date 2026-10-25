@@ -1,4 +1,4 @@
-"""MEMBRANE PREDICTS ARGUS (2026-10-10, the operator: "can the goal of
+"""MEMBRANE PREDICTS THE SEAT (2026-10-10, the operator: "can the goal of
 membrane's speech generator be predicting the model's answers? maybe even
 actions? and then compare what it said/did to what the model said/did ...
 in that mode the LLM would not get to see membrane's mumblings ... should
@@ -6,13 +6,13 @@ membrane's actions be virtual?").
 
 EVERY MOVE (2026-10-11, the operator: "it should predict after each LLM
 action/message, not just between full moves ... treat every generated
-message/tool call as a separate move"): before each of Argus's model rounds
+message/tool call as a separate move"): before each of the seat's model rounds
 (the chat's and the watch loops'), membrane writes down what that round will
 DO -- its tools (family.action, or '(reply)' for a plain answer) and the
 entities it touches, top 3 each. The round's response scores the guess at
 once, and the predictor learns from the miss:
 
-  tools     the nearest past moves (by what Argus just saw: the message,
+  tools     the nearest past moves (by what the seat just saw: the message,
             or the tool results he is reading) vote with their tools; what
             usually follows his previous action backs them up
   entities  candidates from three sources -- the entities the message
@@ -21,7 +21,7 @@ once, and the predictor learns from the miss:
             often it has been right (its hits / its proposals)
 
 THE COVENANTS: a guess is never executed (membrane has no hands: these
-are virtual actions, a ledger line and a score); it never enters Argus's
+are virtual actions, a ledger line and a score); it never enters the seat's
 context, the session's messages or the field. The chat's text guess is
 the voice's own line (voice.py), graded by closeness as before.
 Kill switch: MEMBRANE_PREDICT=0."""
@@ -239,7 +239,7 @@ class Predictor:
     # ---- the score -------------------------------------------------------------
     def score(self, guess: dict, qv, lane: str, tools: list[str], ents: list[str], meta=None,
               prev: str = START) -> dict:
-        """The guess against what Argus did; then the predictor learns."""
+        """The guess against what the seat did; then the predictor learns."""
         actual_t = tools or [NONE]
         gt = [t[0] for t in guess.get("tools") or []]
         ge = [e[0] for e in guess.get("ents") or []]
@@ -366,7 +366,7 @@ def _label(g: dict) -> tuple[str, str]:
 
 
 def publish(runner, sid: str, item: dict) -> None:
-    """A phantom: membrane's guess of one of Argus's moves, for the chat to
+    """A phantom: membrane's guess of one of the seat's moves, for the chat to
     draw greyed beside the real one (and kept for a reload)."""
     log = runner.__dict__.setdefault("_predict_log", {}).setdefault(sid, {})
     log[item["id"]] = {**log.get(item["id"], {}), **item}
@@ -400,7 +400,7 @@ def calls_of(tool_calls) -> tuple[list[str], list[str]]:
 
 
 def context_of(history, first_text: str = "") -> str:
-    """What Argus is looking at before this round: the message (first round)
+    """What the seat is looking at before this round: the message (first round)
     or the tool results since his last move."""
     tail = []
     for m in reversed(history or []):
@@ -457,7 +457,7 @@ def step_start(runner, sid: str, text: str, lane: str, step: int = 1, mid: str =
 
 
 def moves_of(tool_calls, content: str = "") -> list[dict]:
-    """A round's response as Argus's MOVES, in order (2026-10-11, the operator:
+    """A round's response as the seat's MOVES, in order (2026-10-11, the operator:
     "predict/learn inside the LLM's step, every text message and every tool
     call"): the text he writes (a lead-in or the answer), then each tool call."""
     out = []

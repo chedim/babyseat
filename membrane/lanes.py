@@ -3963,7 +3963,7 @@ def _active_model_hook(srv, est, spec, res) -> None:
                 res["voice_out"] = out
                 est.upsert(ent, embedder=None)
         elif ent is not None and (ent.properties or {}).get("voice_io") == "in":
-            lis = VIO.on_listen(srv, ent)           # Argus opens / closes the mic for an answer
+            lis = VIO.on_listen(srv, ent)           # the seat opens / closes the mic for an answer
             if lis is not None:
                 res["voice_in"] = lis
                 est.upsert(ent, embedder=None)
@@ -4272,7 +4272,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             from .fieldpulse import of as _pulse_of
             _fp = _pulse_of(self.server)
             self._json_out(_fp.minds() if _fp is not None else {"loops": {}, "thinker": [], "dreamer": []}); return
-        if path == "/membrane/predict":               # membrane predicting Argus: hit rates per lane
+        if path == "/membrane/predict":               # membrane predicting the seat: hit rates per lane
             from . import predict as _predict
             _p = _predict.of(self.server)
             self._json_out(_p.report() if _p is not None else {"off": True}); return

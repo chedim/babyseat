@@ -1,7 +1,7 @@
 """MEMBRANE'S OWN VOICE (2026-10-09, the operator: "add membrane's own speech
 as a third chat participant that me and the LLM teach").
 
-The field is the conceptualizer; the LLM is Argus's formulator (the
+The field is the conceptualizer; the LLM is the seat's formulator (the
 language cortex). This is membrane's OWN formulator, grown the way a
 child's is: by hearing words spoken while a concept state is active.
 
@@ -830,16 +830,16 @@ class Voice:
             pass
 
     def of_session(self, sid: str) -> list[dict]:
-        """The session's voice lines (its guesses of Argus's moves are not lines)."""
+        """The session's voice lines (its guesses of the seat's moves are not lines)."""
         return sorted((r for r in self.lines.values() if r.get("sid") == sid
                        and not str(r.get("mode") or "").startswith("predict")),
                       key=lambda r: r.get("time", 0))
 
 
 def say_guess(srv, sid: str, qv, context: str = ""):
-    """THE SPEECH GENERATOR PREDICTS ARGUS'S NEXT MESSAGE (2026-10-11): what it
+    """THE SPEECH GENERATOR PREDICTS THE SEAT'S NEXT MESSAGE (2026-10-11): what it
     expects him to write, aimed at what he is looking at and leaned along its
-    last miss. A ledger line, never a chat message, never shown to Argus."""
+    last miss. A ledger line, never a chat message, never shown to the seat."""
     v = of(srv)
     if v is None or not v._booted or qv is None:
         return None
@@ -1090,7 +1090,7 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
                     except Exception:
                         pass
             lid = (getattr(runner, "_voice_last", {}) or {}).pop(sid, None)
-            # the guess of Argus's actions (predict.py), scored and shown on its line
+            # the guess of the seat's actions (predict.py), scored and shown on its line
             try:
                 from . import predict as _predict
                 pr = _predict.end(runner, sid, parts or [])
@@ -1101,7 +1101,7 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
             # LEARNING FROM ITS MISSES (2026-10-10, the operator: "does it learn from
             # its misses or not yet?"): its line was a guess of the reply -- the
             # reply's opening is what it should have said, and the gap between the
-            # two leans its next aim (Argus's own words as the answer key)
+            # two leans its next aim (the seat's own words as the answer key)
             if lid and reply:
                 said = (v.lines.get(lid) or {}).get("text", "")
                 actual = " ".join(pool_sentences(strip_meant(reply))[:2]) or clean(reply)[:300]

@@ -1,7 +1,7 @@
-"""RESTARTS, TOLD TO ARGUS (2026-10-11, the operator: "announce HA and seat
-restarts to Argus going forward ... thru its ollama proxy endpoint").
+"""RESTARTS, TOLD TO THE SEAT (2026-10-11, the operator: "announce HA and seat
+restarts to the seat going forward ... thru its ollama proxy endpoint").
 
-A restart used to be silent: the loops resumed, a watch re-fired, and Argus
+A restart used to be silent: the loops resumed, a watch re-fired, and the seat
 read the gap as the world going quiet. Now each one reaches him as a short
 signed brief through the seat's own /v1 proxy -- the same door the
 engineer's briefs use, so it passes through the field like any message.
@@ -159,7 +159,7 @@ def _send(srv, kind: str, text: str) -> None:
         ok = post(srv, text)
         try:
             from . import seat_panel as SP
-            SP.note(srv, "told-argus", what=kind, ok=ok)
+            SP.note(srv, "told-seat", what=kind, ok=ok)
         except Exception:
             pass
     threading.Thread(target=go, daemon=True, name=f"notice-{kind}").start()
@@ -290,8 +290,8 @@ def check_ask_file(srv) -> None:
     threading.Thread(target=go, daemon=True, name="restart-ask").start()
 
 
-# ---- Argus restarts the seat himself ------------------------------------------
-# (2026-10-11, the operator: "or better yet -- have Argus do those restarts
+# ---- The seat restarts itself --------------------------------------------------
+# (2026-10-11, the operator: "or better yet -- have the seat do those restarts
 # instead of you? ... if he's 1 minute late to restart then you should
 # consult me"). A deploy only STAGES: seat-install writes PENDING_FILE and
 # leaves the serve running. The seat turns it into the entity
@@ -494,12 +494,12 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
     why = " ".join(str(why or "").split())[:200] or "no reason given"
     try:
         with open(os.path.join(_dir(srv), REASON_FILE), "w") as f:
-            f.write(f"Argus restarted it ({why})" + (f"; it loads the staged {files}" if files else ""))
+            f.write(f"the seat restarted it ({why})" + (f"; it loads the staged {files}" if files else ""))
     except Exception:
         pass
     try:
         from . import seat_panel as SP
-        SP.note(srv, "restart", by="argus", why=why)
+        SP.note(srv, "restart", by="seat", why=why)
     except Exception:
         pass
 

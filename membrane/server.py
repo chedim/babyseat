@@ -2261,7 +2261,7 @@ class TurnRunner:
                     self._idle_turns.discard(sid)
             except Exception:
                 pass
-            # MEMBRANE PREDICTS THIS MOVE (predict.py): every round Argus takes
+            # MEMBRANE PREDICTS THIS MOVE (predict.py): every round the seat takes
             # is guessed before the model runs -- a virtual action, never run
             try:
                 from . import predict as _predict
@@ -3557,7 +3557,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     if segs[1] in ("todo", "children"):
                         return self._json_out([])
                     if segs[1] == "predict":
-                        # membrane's phantoms: its guesses of Argus's moves (predict.py)
+                        # membrane's phantoms: its guesses of the seat's moves (predict.py)
                         from . import predict as _predict
                         return self._json_out(_predict.phantoms(runner, sid) if runner else [])
                     if segs[1] == "voice":
@@ -4266,7 +4266,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     _psrv = getattr(runner, "srv", None) if runner is not None else None
                     if _who and _psrv is not None:
                         _VIO.heard(_psrv, _who, _said, sid)
-                        # the 🎙 carries the state Argus answers by (a fact, not an instruction):
+                        # the 🎙 carries the state the seat answers by (a fact, not an instruction):
                         # which voice:out is theirs and whether it is on
                         text = _VIO.stamp(_psrv, _who, text)
                 except Exception:

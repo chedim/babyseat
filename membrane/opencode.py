@@ -659,7 +659,7 @@ def main() -> None:
         os.environ["MEMBRANE_STANDALONE"] = "1"
     # THE NAME CEREMONY (naming.py): a new seat asks its operator for its name --
     # standalone, and a seat Home Assistant runs (its supervisor sets the env);
-    # never a seat that has one already in its doctrine (the boat's Argus)
+    # never a seat that has one already in its doctrine (the boat's seat)
     naming_on = args.standalone or os.environ.get("MEMBRANE_NAME_CEREMONY") == "1"
     passthrough = args.passthrough
     if args.new_session:
@@ -1775,7 +1775,7 @@ def main() -> None:
                                    serve=bool(getattr(args, "serve", False)))
             if naming_on:                  # THE NAME CEREMONY (naming.py): its own name, in its own prompt
                 from . import naming as _NM
-                text = _NM.personalize(text, _NM.current()) + _NM.card_line() + _NM.feedback_line()
+                text += _NM.card_line() + _NM.feedback_line()
             from . import ha_bridge as _HB                 # Home Assistant around this seat: its
             if _HB.hass_available():                       # child env, or a token HA pushed
                 text += _HB.card_line()                    # into ~/.config/membrane/hass.env
@@ -2020,7 +2020,7 @@ def main() -> None:
                     paint_dormant(srv)
                 except Exception as e:
                     print(f"[seat] dormant inventory skipped ({e})", file=sys.stderr)
-                from . import restarts as _RS     # restarts: told to Argus; a staged one is his to do
+                from . import restarts as _RS     # restarts: told to the seat; a staged one is his to do
                 _RS.bind(srv)
                 _RS.on_boot(srv)
                 _serve_hub.on_lost = lambda: _SP.note(srv, "stream-cut")

@@ -16,7 +16,7 @@ The scripts and the entity store run anyway; this keeps the rest whole:
   the minds     loop events and llm calls wait (no model to answer them)
   the strikes   a script's failure doesn't count while offline (the HA
                 readers would come home disabled)
-  the return    a brief to Argus through /v1: when, how long, what the
+  the return    a brief to the seat through /v1: when, how long, what the
                 field took in, what waited for him
 
 membrane::net carries the state (online/offline, since, which embedder).
