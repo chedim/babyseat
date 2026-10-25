@@ -292,8 +292,13 @@ async def _owners_of(request) -> tuple[dict, object]:
         from homeassistant.helpers.storage import Store
         store = Store(request.app[KEY_HASS], OWNERS_STORE_VERSION,
                       OWNERS_STORE_KEY)
-        comp["owners"] = (await store.async_load() or {}).get("owners", {})
-        comp["owners_store"] = store
+        loaded = (await store.async_load() or {}).get("owners", {})
+        # #470: the page's first requests race here; the first load wins, so
+        # every request shares ONE map (a chat POSTed into a map the next
+        # request no longer read: its own DELETE answered 404)
+        if "owners" not in comp:
+            comp["owners"] = loaded
+            comp["owners_store"] = store
     return comp["owners"], comp["owners_store"]
 
 

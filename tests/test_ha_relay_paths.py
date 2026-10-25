@@ -46,6 +46,24 @@ UI_OWNER_WRITES = (
 )
 
 
+class FakeStore:
+    """HA's Store, as far as the relay uses it: one disk per key, a load that
+    yields to the loop (HA's reads the file in an executor) and a save that
+    lands at once (HA's lands after the delay)."""
+    disk = {}
+
+    def __init__(self, hass, version, key):
+        self.key = key
+
+    async def async_load(self):
+        import asyncio
+        await asyncio.sleep(0.01)
+        return FakeStore.disk.get(self.key)
+
+    def async_delay_save(self, data_func, delay=0):
+        FakeStore.disk[self.key] = data_func()
+
+
 def _stubs():
     def mod(name, pkg=False, **attrs):
         m = types.ModuleType(name)
@@ -65,6 +83,7 @@ def _stubs():
         "homeassistant.components.http": mod("homeassistant.components.http", HomeAssistantView=HomeAssistantView),
         "homeassistant.helpers": mod("homeassistant.helpers", True),
         "homeassistant.helpers.http": mod("homeassistant.helpers.http", KEY_HASS="hass"),
+        "homeassistant.helpers.storage": mod("homeassistant.helpers.storage", Store=FakeStore),
     }
 
 
@@ -261,6 +280,63 @@ def test_a_chat_round_trip_through_the_relay_to_a_real_seat(relay):
             st, out = await call("DELETE", "session/" + sid)
             assert (st, out) == (200, True)
             assert sid not in comp["owners"] and sid not in sessions.sessions
+        finally:
+            if comp.get("http_session") is not None:
+                await comp["http_session"].close()
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(go())
+    finally:
+        loop.close()
+        httpd.shutdown()
+
+
+def test_the_owners_load_once_when_the_first_requests_race(relay):
+    # the live trace (#470): right after HA starts, the page's first requests
+    # (the chat list, the status, the live stream) all find no owners map and
+    # each loaded its own; the chat POSTed into one of them (and saved it to
+    # .storage), while the next request read another -- so the 🗑 DELETE of
+    # the caller's own fresh chat answered 404 though the store had its owner
+    import asyncio
+    import json
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from aiohttp.test_utils import make_mocked_request
+
+    from membrane import server as NS
+
+    FakeStore.disk.clear()
+    sessions = NS.SessionStore(None)
+    handler = NS.make_handler(hub=NS.SSEHub(), sessions=sessions, messages=NS.MessageStore(),
+                              config={}, runner=None)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    comp = {"serve_url": f"http://127.0.0.1:{httpd.server_address[1]}", "serve_ready": True}
+    hass = types.SimpleNamespace(data={"membrane": comp})
+
+    async def call(method, rest, body=b""):
+        req = make_mocked_request(method, "/api/membrane/serve/" + rest,
+                                  match_info={"path": rest}, app={"hass": hass})
+        req["hass_user"] = types.SimpleNamespace(id="u1", name="Tester", is_admin=True)
+
+        async def _read():
+            return body
+        req.read = _read
+        resp = await getattr(relay.ServeProxyView(), method.lower())(req, path=rest)
+        return resp.status, json.loads(resp.body or b"null")
+
+    async def go():
+        try:
+            (st, s), _, _ = await asyncio.gather(call("POST", "session", b'{"title": "relay test"}'),
+                                                 call("GET", "session"), call("GET", "session/status"))
+            assert st == 200
+            sid = s["id"]
+            assert FakeStore.disk["membrane.sessions"]["owners"] == {sid: "u1"}
+            st, out = await call("DELETE", "session/" + sid)
+            assert (st, out) == (200, True)
+            assert sid not in sessions.sessions
         finally:
             if comp.get("http_session") is not None:
                 await comp["http_session"].close()
