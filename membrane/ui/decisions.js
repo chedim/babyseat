@@ -58,10 +58,10 @@ function place(list, narrow) {
     : { card, side: i % 2 ? "right" : "left", row: Math.floor(i / 2) });
 }
 
-// THE OPEN PILE STACKS: the first rows of each side stay in flow; newer (farther)
+// THE OPEN PILE STACKS: the oldest card of each side is the stack front; newer (farther)
 // cards hide behind older ones, each showing a strip of its top edge, so the pile
 // never pushes the bar off the page. These numbers are flagged for the operator.
-const STACK_FLOW_ROWS = 2;           // rows per side kept fully in flow before the stack starts
+const STACK_FLOW_ROWS = 0;           // rows per side kept out of the stack (0: the oldest card is the stack front)
 const STACK_STRIP = 26;              // px of a stacked card that shows above the one in front
 const STACK_SHOWN = 6;               // strips drawn; deeper cards hide under the last one
 

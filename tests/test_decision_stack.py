@@ -18,9 +18,9 @@ def _js(expr):
 
 
 @NODE
-def test_the_first_rows_stay_in_flow_the_rest_stack_behind():
+def test_every_open_card_is_in_the_stack_the_oldest_in_front():
     flow = _js("D.STACK_FLOW_ROWS")
-    assert flow >= 1
+    assert flow == 0  # the oldest card of each side is the stack front, none left outside it
     for r in range(flow):
         assert _js("D.stackSlot(%d)" % r) == {"stacked": False, "shift": 0, "z": 0}
     s1, s2 = _js("D.stackSlot(%d)" % flow), _js("D.stackSlot(%d)" % (flow + 1))
