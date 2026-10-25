@@ -498,17 +498,19 @@ reply on meet's other (part 3f, above). Rung 2's pass is kept as **look**;
 - **Its memory starts at birth** (the first switch-on). Everything the seat did
   before is the field it grows in, not "its" past.
 
-## Waking it
+## Switching it on
 
-### Sleep and wake
+### On and off
 
-Self is **off by default**. The 💤 / 🌱 toggle in the 👶 panel's header on
-membrane home (and in the chat's side menu) wakes it and puts it back to sleep:
+Self is **off by default**. The ⏻ on/off switch in the 👶 panel's header on
+membrane home (and in the chat's side menu) switches it on and off (#460: it
+reads `⏻ on` / `⏻ off`, never asleep; real sleep is automatic, see the
+Sleep block, and has no button):
 
 | state | what happens |
 |---|---|
-| 💤 asleep | nothing runs, **nothing is erased** (record, model, tempo stay) |
-| 🌱 awake | self cycles, practises every open skill and earns what its tests pass |
+| ⏻ off | nothing runs, energy is frozen, **nothing is erased** (record, model, tempo stay) |
+| ⏻ on | self cycles, practises every open skill and earns what its tests pass |
 
 The same switch over HTTP is `{"self": "on" | "off" | "watch"}`. **`watch`
 currently runs exactly like `on`**; it exists for the nanny the design
@@ -774,7 +776,7 @@ Lv 6 · meet an other  [██████░░░░] 64%
 - **held** greys it ("switch it off and on to clear");
 - **accept?** (#299): nothing open is running and an earned achievement
   waits for your accept, so the bar is hatched and the caption says so;
-- **asleep** shows only `🌱 asleep`;
+- **off** shows only `⏻ off`;
 - **a new rung** gets a short level-up moment: the level turns gold, the bar
   glows once, and the caption reads `⬆ level up` for a few seconds. With
   *reduce motion* on, the gold and the caption stay and nothing pulses.
@@ -833,8 +835,8 @@ what the seat reports:
 
 - **asleep** (the seat's card, `GET /membrane/self/card`: `awake` false --
   switched off or asleep from tiredness, #345): the eyes close and z's drift
-  up beside it. Before the card loads (or from a seat without it) the 💤
-  toggle's state decides.
+  up beside it. Before the card loads (or from a seat without it) the ⏻
+  switch's state decides.
 - **energy** (the same card, 0..1): the glow scales from 30 % of the film's at
   0 to the full glow at 1; a card without energy keeps the full glow.
 - **the look:** while self has a fresh look on the 3D field (the same 8 s
@@ -842,7 +844,7 @@ what the seat reports:
   the screen from the amoeba; with none they look straight ahead.
 
 The page re-reads the card every 15 s while the tab is visible (and at once
-after the 💤 toggle). One animation loop draws every body, and only while
+after the ⏻ switch). One animation loop draws every body, and only while
 one is on the screen and the browser tab is visible: a hidden panel, a closed
 zoo or a background tab costs nothing. With *reduce motion* set, each body is
 a still frame (no wobble, blink or drifting z's), redrawn when what it shows
@@ -1042,8 +1044,8 @@ curl -s http://127.0.0.1:4096/membrane/self/card   # #283, the zoo's card per se
 #  "last_activity": "2026-10-19T12:00:00+00:00", "generated": 1792...}
 ```
 
-**It is read-only for self**, but for your two switches: the 💤 / 🌱 sleep
-toggle in its header and the Skill tree's Accept (#299). Everything it shows is `status()`, the toybox
+**It is read-only for self**, but for your two switches: the ⏻ on/off
+switch in its header and the Skill tree's Accept (#299). Everything it shows is `status()`, the toybox
 and self's own record: nothing is claimed about self that the record doesn't
 measure. On a seat too old to serve the sheet, the panel shows the old report
 card instead.
@@ -1179,9 +1181,9 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `split` | rung 6's split: `body` (it predicts it near-perfectly) or `other` (it can't) |
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered), `medium` (#264: `toy` once the turns are with the ball: `other` is then the ball, `heard_age` the other's last poke on any toy) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
-| `rung7` | #258; #333 part 3f: time its turn at meet's other: `other` (its eid), `medium` (`nudge`), `nudges` (its timed nudges), `checked` (those whose follow-up came, over the last 100), `bins` (per age bin `0-20s` / `20-60s` / `1-3m` / `3m+`: `pushes` (timed nudges), `replied` (follow-ups that found a change), `rate`), `best` (the window it believes best); over the window the test reads (`window`, up to 100): `share` (nudges in the believed-best window) vs `chance` (the share of the waiting time spent there) and `z`; `reply_rate` vs `blind_rate` (what a timing-blind nudge would have got), `payoff` (the difference) and `payoff_z`. The 🌱 toggle's tooltip shows it as `rung 7: 24 timed nudges followed up, best window 20-60s, in it 0.42 vs chance 0.17, replies +0.12 over timing-blind` |
+| `rung7` | #258; #333 part 3f: time its turn at meet's other: `other` (its eid), `medium` (`nudge`), `nudges` (its timed nudges), `checked` (those whose follow-up came, over the last 100), `bins` (per age bin `0-20s` / `20-60s` / `1-3m` / `3m+`: `pushes` (timed nudges), `replied` (follow-ups that found a change), `rate`), `best` (the window it believes best); over the window the test reads (`window`, up to 100): `share` (nudges in the believed-best window) vs `chance` (the share of the waiting time spent there) and `z`; `reply_rate` vs `blind_rate` (what a timing-blind nudge would have got), `payoff` (the difference) and `payoff_z`. The ⏻ switch's tooltip shows it as `rung 7: 24 timed nudges followed up, best window 20-60s, in it 0.42 vs chance 0.17, replies +0.12 over timing-blind` |
 | `speak` | #311, speak at the current other: `words`, `plain`, `mute` (its pushes of each kind, all time), `last_words`; over the window the test reads (`window`, up to 100): `n_words`, `n_plain`, `rate_words` vs `rate_plain` (reply rates at the check), `lift` and its `z`, `false` (utterances not true of its record), and its timing: `timing_share` (lines in its believed-best window) vs `timing_chance` and `timing_z` |
-| `rung8` | #333 part 3f: expect a reply at meet's other: `other`, `follow_ups` (every follow-up at it, archived ones too), `checks` (the predicted follow-ups the test reads, up to 100), `brier_self` (its `p_self`), `brier_rate` (the running rate it must beat by 8%), `base_rate` (the all-time change rate of the follow-ups) and `recent_rate` (over the last 6). No advisor fields: the advisor stays out (the old wiring's numbers: `_reply_check_stats`). The 🌱 toggle's tooltip shows it as `rung 8: 40 follow-ups predicted, Brier Blurp 0.21 vs rate 0.25` |
+| `rung8` | #333 part 3f: expect a reply at meet's other: `other`, `follow_ups` (every follow-up at it, archived ones too), `checks` (the predicted follow-ups the test reads, up to 100), `brier_self` (its `p_self`), `brier_rate` (the running rate it must beat by 8%), `base_rate` (the all-time change rate of the follow-ups) and `recent_rate` (over the last 6). No advisor fields: the advisor stays out (the old wiring's numbers: `_reply_check_stats`). The ⏻ switch's tooltip shows it as `rung 8: 40 follow-ups predicted, Brier Blurp 0.21 vs rate 0.25` |
 | `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter`; a built-in toy also carries `toy` (its toybox name) and, for a tower block, `block` (#244: the play buttons' target) |
 | `unlock` | #267: the newest unlock line, `{rung, ts, late, toys: [{kind, icon}]}` (or `null`); the exp bar's level-up caption names its toy when its rung is the one just reached |
 | `off_field` | #244: of self's last 200 looks, `looks` (how many), `off` (how many landed on a thing with no live field point; `null` when the seat has no field) and `things` (those things, most looked-at first). The home view draws those looks as ghosts |
@@ -1347,7 +1349,7 @@ are earned and accepted (#299), self is awake, and its test passes on the record
 
 | rung | what self does there | what it needs from its world | passes when (the stages, in order) | how you help |
 |---|---|---|---|---|
-| **0 · sleep and wake** | nothing; the switch | — | always passed | wake it (💤 -> 🌱) |
+| **0 · sleep and wake** | nothing; the switch | — | always passed | switch it on (⏻) |
 | **1 · feel itself** | moves its own position while the field's **current** (the live conversation's context: every lately-active session pulling at once, fading over ~3 min) pushes it; learns the push | a conversation: no talk, no current, no cycles | **pushes**: 20 cycles where the world pushed it; **skill**: over those 20, `1 − gap/naive ≥ 0.5` | talk to the seat. A topic turn reopens the gap, and that's fine |
 | *steer* (after 1) | holds an aim for 300 s (#343: was 30 cycles) and leans into the current by the push it learned | — | not a rung; shown as `steer.skill` | — |
 | **2 · look** ("first reach" until #333) | each cycle reads one thing that has a getter, predicting first whether it will have changed since it last looked | **entities with getters** whose readings are true and live; at least one must change on ≥ 60% of looks to be auditable | **reaches**: 20 answered reaches of one thing; **skill**: Brier skill ≥ 0.2 there, against the seat-wide change rate; **audit**: membrane secretly pauses that thing's getter for 3 more looks (cap 10 min) and **no change** is marked | give it getters that read something real and moving (a sensor, a counter that ticks, `field:vitals`) |
@@ -1925,7 +1927,7 @@ not loosened to fit this record. An other whose replies follow a rhythm (in
 a session they answer, away they don't) is passable without any model.
 
 **Rung 8's model is overconfident, or its asks don't pair (#217; rung 7
-then).** Read `rung8` in the panel (or the 🌱 toggle's tooltip). On the live seat (2026-10-18) 7
+then).** Read `rung8` in the panel (or the ⏻ switch's tooltip). On the live seat (2026-10-18) 7
 pushes asked and only 4 paired, and the model said 0.85–0.99 "will have
 spoken" to reply checks that went 3 of 7: its Brier error was worse than
 habit's ~0.2 guesses. Two causes, both fixed:

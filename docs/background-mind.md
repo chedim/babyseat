@@ -214,7 +214,7 @@ section covers what is built (`membrane/self_loop.py`); the operator's guide
 to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 
 - **Rung 0, sleep and wake, and acceptance (#299).** A per-seat switch, **off
-  by default**, set only by the operator: the 💤 / 🌱 toggle (the 👶 panel's
+  by default**, set only by the operator: the ⏻ on/off switch (the 👶 panel's
   header on membrane home, and the chat's side menu) → `POST
   /membrane/seat/control {"self": "on" | "off" | "watch"}` (`seat_panel.control`).
   Earning is automatic (a pass is an `achieve` line), but an earned
@@ -476,7 +476,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   can't pass. No model is needed to pass. `status()['rung8']` shows the
   operator `asked` / `checked` / `paired`, `pair_rate`, the Brier errors of
   self alone, of the mix, of the running rate and of the model alone, and
-  the advisor's weight and model id (the 🌱 toggle's tooltip too). It is scoped to the
+  the advisor's weight and model id (the ⏻ switch's tooltip too). It is scoped to the
   other only (the current one: checks at a previous person don't count);
   every other thing keeps habit's prediction.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
@@ -535,7 +535,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 MEMBRANE_EFIELD=shadow | off   # events-only capture / the field off
 MEMBRANE_LANE_GATE=0           # the flat tool surface (no operator/listener split)
 MEMBRANE_NERVE_PAUSE=0         # pause becomes a no-op
-(the self loop)                # off by default; the operator's 💤/🌱 switch and accepts (#299)
+(the self loop)                # off by default; the operator's ⏻ on/off switch and accepts (#299)
 ```
 
 ## The goal loops' rhythm (2026-10-08)

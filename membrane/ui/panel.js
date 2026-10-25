@@ -555,16 +555,18 @@ function setSelfName(n) {
   return SELF_NAME;
 }
 
-/** #161 / #299: self's sleep and wake -- a plain on/off toggle (the 🌱
+/** #161 / #299 / #460: self's on/off switch -- a plain toggle (the 🌱
  *  growth-limit chooser it was gave way to acceptance: an earned achievement
  *  opens what it leads to once the operator accepts it) -- and its rung +
- *  exp bar. `on`: awake; `icon` / `label` / `title`: the toggle's face. */
+ *  exp bar. `on`: on; `icon` / `label` / `title`: the toggle's face. #460: it
+ *  reads on / off, never asleep / awake -- real sleep (energy) is automatic
+ *  and has its own display (sheetEnergy, sheetSleep). */
 function selfView(st) {
   const s = (st && st.self) || { mode: "off" };
   const loaded = !!(st && st.self && Array.isArray(st.self.ladder));   // the seat's real state, not the placeholder
   const wait = Array.isArray(s.awaiting) && s.awaiting.length ? " · awaiting your accept: " + s.awaiting.join(", ") : "";
-  if (s.mode === "off") return { loaded, on: false, icon: "💤", label: SELF_NAME + " asleep", status: "🌱 asleep", exp: selfExp(st),
-                                 title: SELF_NAME + " (#161) is asleep: nothing runs, nothing is erased -- tap to wake it" + wait };
+  if (s.mode === "off") return { loaded, on: false, icon: "⏻", label: SELF_NAME + ": off", status: "⏻ off", exp: selfExp(st),
+                                 title: SELF_NAME + ": off -- nothing runs, energy is frozen, nothing is erased -- tap to switch on" + wait };
   const pct = Math.round(100 * (s.bar || 0));
   const rung = "rung " + (s.rung || 0) + (s.rung_name ? " (" + s.rung_name + ")" : "");
   const why = s.held ? " · HELD (3 failed cycles; switch it off and on to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
@@ -594,15 +596,15 @@ function selfView(st) {
     + (r8.brier_mix != null ? ", Brier " + SELF_NAME + " " + f2(r8.brier_mix) + " vs rate " + f2(r8.brier_rate) : "")
     + (r8.brier_model != null ? ", model alone " + f2(r8.brier_model) + " (weight " + f2(r8.advisor_weight) + ")" : "")
     + (r8.base_rate != null ? ", base rate " + f2(r8.base_rate) : "") : "";
-  return { loaded, on: true, icon: "🌱", label: SELF_NAME + " awake", status, exp: selfExp(st),
-           title: SELF_NAME + " (#161): " + s.mode + " · tap to put it to sleep · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
+  return { loaded, on: true, icon: "⏻", label: SELF_NAME + ": on", status, exp: selfExp(st),
+           title: SELF_NAME + ": on · tap to switch off · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
                   + wait + " · " + (s.cycles || 0) + " cycles" + r7s + r8s };
 }
 
 // ---- #230: SELF IN THE UI -- the exp bar, the activity lines, the report card.
 // Everything here only reads status() and self's record: nothing is claimed
 // about self that the record doesn't measure, and nothing here changes it
-// (the 🌱 sleep toggle and the operator's accept, #299, are the only switches).
+// (the ⏻ on/off switch and the operator's accept, #299, are the only switches).
 const SELF_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "look", 3: "tell things apart", 4: "patience",
   5: "notice the world changed", 6: "meet an other", 7: "time its turn", 8: "expect a reply",
   9: "recognize itself", 10: "change itself", 11: "speak" };
@@ -639,12 +641,12 @@ function selfExp(st) {
   else if (s.slipping) state = "slipping";
   else if (s.waiting_on === "your accept") state = "capped";             // #299: an earned one waits for the operator
   else if (s.next == null) state = "top";
-  const caption = state === "asleep" ? "asleep: nothing runs, nothing is erased"
+  const caption = state === "asleep" ? "off: nothing runs, energy is frozen, nothing is erased"   // #460: the switch, not sleep
     : state === "held" ? "held: 3 failed cycles in a row (switch it off and on to clear)"
     : state === "capped" ? "earned, awaiting your accept: accept it to open what it leads to"
     : (state === "slipping" ? "slipping: rung " + n + "'s test fails now" + (s.waiting_on ? " · " : "") : "")
       + (s.waiting_on ? "waiting on: " + s.waiting_on : "");
-  const label = state === "asleep" ? "asleep" : state === "held" ? "held" : state === "capped" ? "accept?" : pct + "%";
+  const label = state === "asleep" ? "off" : state === "held" ? "held" : state === "capped" ? "accept?" : pct + "%";
   // #249 (the operator: "I don't see the skill level anywhere"): the skill
   // the bar's test reads, against the line it has to beat
   const sk = s.mode !== "off" && s.skill != null && isFinite(Number(s.skill))
@@ -654,7 +656,7 @@ function selfExp(st) {
   const u = s.unlock;
   const newToy = u && u.rung === n && n > 0 && !u.late && Array.isArray(u.toys) && u.toys.length
     ? unlockText({ toys: u.toys.map((t) => (t && t.kind) || t) }) : "";
-  return { state, rung: n, level: state === "asleep" ? "🌱 asleep" : level, goal, pct, fill, label, caption: cap, skill: sk, newToy,
+  return { state, rung: n, level: state === "asleep" ? "⏻ off" : level, goal, pct, fill, label, caption: cap, skill: sk, newToy,
            title: SELF_NAME + " (#161): " + level + " · " + label + " " + goal + (cap ? " · " + cap : "") };
 }
 
@@ -1112,7 +1114,7 @@ function sheetQuest(s) {
   const slip = (Array.isArray(s.slipping) ? s.slipping : []).map((x) => '<p class="note warn">⚠ ' + escText(x.text || x.name || "") + "</p>").join("") +
     (q.voided || []).map((v) => '<p class="note warn">' + escText(v) + "</p>").join("");
   if (!ks.length) {
-    const why = s.header && s.header.mode === "off" ? escText(SELF_NAME) + " is asleep (💤 wakes it)" : "nothing open to practise right now";
+    const why = s.header && s.header.mode === "off" ? escText(SELF_NAME) + " is off (⏻ switches it on)" : "nothing open to practise right now";
     return '<p class="muted">learning nothing new: ' + why + "</p>" + slip;
   }
   return '<div class="learn">' + ks.map((k) => {
@@ -1304,7 +1306,7 @@ function selfSheetHtml(s, open, nowS) {
     (h.cycles ? "<span>" + h.cycles + " cycles</span><span>" + (h.looks || 0) + " looks</span><span>" + (h.lines_sent || 0) + " lines sent</span>" : "") +
     sheetEnergy(s.energy) +
     "</div></div>" + sheetSleep(s.energy)];
-  if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: tap 💤 to wake it.</p>');
+  if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: tap ⏻ to switch it on.</p>');
   const body = { attributes: sheetAttrs, quest: sheetQuest, growth: sheetGrowth,
                  time: sheetTime, inventory: sheetInventory, toys: sheetToys, relationships: sheetRelationships };
   const nLearn = Array.isArray(s.skills) ? s.skills.length : 0, nSlip = Array.isArray(s.slipping) ? s.slipping.length : 0;
@@ -2370,7 +2372,7 @@ function definePanel() {
             <select class="modelpick" title="Model (what membrane sees on Ollama)"><option value="">model…</option></select>
             <span class="pill state">…</span>
             <button class="btn icon voicebtn" title="membrane's own voice (show / hide)">🗣</button>
-            <button class="btn icon selfsleep" aria-pressed="false" title="${escAttr(SELF_NAME)} (#161): asleep or awake -- tap to switch">💤</button>
+            <button class="btn icon selfsleep" aria-pressed="false" title="${escAttr(SELF_NAME)}: on or off -- tap to switch">⏻</button>
             <span class="selfstat" title="where ${escAttr(SELF_NAME)} is now: its rung, the bar toward the next, what it waits on"></span>
             <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
             <button class="btn icon jsbtn" title="allow JS scripting in this window -- the page runs it with your HA login -- off by default">🧩</button>
@@ -2403,7 +2405,7 @@ function definePanel() {
         const ctl = document.createElement("div");
         ctl.className = "ctl";
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"],
-                                    ["selfsleep", SELF_NAME + " asleep"], ["selfstat", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["selfsleep", SELF_NAME + ": off"], ["selfstat", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -2461,7 +2463,7 @@ function definePanel() {
       this._vlogBtn.addEventListener("click", () => this._toggleVoiceLog().catch(() => {}));
       this._pauseBtn = $(".pausebtn");
       this._pauseBtn.addEventListener("click", () => this._togglePause().catch(() => {}));
-      this._selfSleep = $(".selfsleep");                           // #299: sleep / wake (the 🌱 chooser is gone)
+      this._selfSleep = $(".selfsleep");                           // #299 / #460: the on/off switch (the 🌱 chooser is gone)
       this._selfStat = $(".selfstat");
       this._selfSleep.addEventListener("click", () => this._setSelfMode(!selfView(this._seat).on).catch(() => {}));
       this._thinkBtn = $(".thinkbtn");
@@ -3721,10 +3723,10 @@ function definePanel() {
       else this._err(this._apiErr("pause failed (HA admins only)", r));
     }
 
-    /** The 🌱 sleep toggle's face (home.js's 👶 panel paints its own from here). */
+    /** The ⏻ on/off switch's face (home.js's 👶 panel paints its own from here). */
     _selfView() { return selfView(this._seat); }
 
-    /** #299: sleep or wake -- the seat's mode, on or off (never before its state loads). */
+    /** #299: switch on or off -- the seat's mode, on or off (never before its state loads). */
     async _setSelfMode(on) {
       const v = selfView(this._seat);
       if (!v.loaded || !!on === v.on) return { ok: false, skipped: true };   // nothing before the state loads, nothing for no change
@@ -3734,7 +3736,7 @@ function definePanel() {
       if (r.ok && r.data && r.data.state) {
         this._seat = r.data.state;
         const got = selfView(this._seat);                          // the seat's answer, not what was clicked
-        out = { ok: true, on: got.on, text: got.on ? "✓ " + SELF_NAME + " is awake" : "✓ " + SELF_NAME + " is asleep (nothing erased)" };
+        out = { ok: true, on: got.on, text: got.on ? "✓ " + SELF_NAME + " is on" : "✓ " + SELF_NAME + " is off (nothing erased)" };
       } else {
         out = { ok: false, text: this._apiErr("switching " + SELF_NAME + " failed (HA admins only)", r) };
         this._err(out.text);
@@ -3774,14 +3776,15 @@ function definePanel() {
       if (lbl) lbl.textContent = v.label;
       this._pauseBtn.title = v.title;
       this._pauseBtn.style.opacity = v.paused ? "1" : ".6";
-      if (this._selfSleep) {                                       // #299: the sleep toggle
+      if (this._selfSleep) {                                       // #299 / #460: the on/off switch
         const v = selfView(this._seat);
         const sico = this._selfSleep.querySelector(".ico"), slbl = this._selfSleep.querySelector(".lbl");
         if (sico) sico.textContent = v.icon; else this._selfSleep.textContent = v.icon;
         if (slbl) slbl.textContent = v.label;
         this._selfSleep.title = v.title;
         this._selfSleep.setAttribute("aria-pressed", v.on ? "true" : "false");
-        this._selfSleep.setAttribute("aria-label", v.label + " -- tap to " + (v.on ? "put it to sleep" : "wake it"));
+        this._selfSleep.setAttribute("aria-label", v.label + " -- tap to " + (v.on ? "switch it off" : "switch it on"));
+        this._selfSleep.style.opacity = v.on ? "1" : ".6";        // #460: one ⏻ icon, dimmed when off
         this._selfSleep.disabled = !v.loaded;
       }
       if (this._selfStat && !this._selfFlash) paintExp(this._selfStat, selfExp(this._seat));   // #230: the exp bar
