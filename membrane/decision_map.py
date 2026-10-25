@@ -63,6 +63,9 @@ def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
     if key == "status" and cur == STATUS_DECIDED and value not in (STATUS_IN_FLIGHT, STATUS_CLOSED):
         return ("the card is decided; changing a past decision comes with "
                 "timelines (#470 step 3)")
+    if key == "status" and value == STATUS_OPEN and (props or {}).get("value") is not None:
+        return ("the card is answered; changing a past decision comes with "
+                "timelines (#470 step 3)")
     if key == "status" and value == STATUS_IN_FLIGHT and cur == STATUS_DECIDED \
             and (props or {}).get("work_needed") is not True:
         return "the card was decided as needing no work; it cannot go in flight"
@@ -198,7 +201,10 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
     if ent is None or ent.cls != CLASS_DECISION:
         return {"ok": False, "error": f"no Decision card {spec!r}"}
     p = ent.properties or {}
-    if _status(p) not in (STATUS_OPEN, STATUS_IN_FLIGHT):
+    # an in_flight card is answered work (open -> decided -> in_flight), past like a
+    # decided one; only a legacy in_flight card that was never answered takes one
+    if _status(p) not in (STATUS_OPEN, STATUS_IN_FLIGHT) or \
+            (_status(p) == STATUS_IN_FLIGHT and p.get("value") is not None):
         return {"ok": False, "conflict": True,
                 "error": "this card is already decided (changing a past "
                          "decision comes with timelines, #470 step 3)"}

@@ -137,3 +137,41 @@ class TestLifecycle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnsweredCardsStayAnswered(unittest.TestCase):
+    """An answered card in flight is past, not open: it can't be answered
+    again, and no agent can put it back to open (that's #470 step 3's
+    timelines). A legacy in_flight card (the old open -> in_flight -> decided
+    order, never answered) still takes its first answer."""
+
+    def _in_flight(self):
+        est, led = _store()
+        eid = _card(est, "deploy", work_needed=True)
+        self.assertTrue(DM.answer(est, led, eid, True)["ok"])
+        self.assertTrue(est.edit(eid, properties={"status": "in_flight"})["ok"])
+        return est, led, eid
+
+    def test_an_in_flight_answered_card_takes_no_second_answer(self):
+        est, led, eid = self._in_flight()
+        n = len(led.entries()) if hasattr(led, "entries") else None
+        res = DM.answer(est, led, eid, False)
+        self.assertFalse(res["ok"])
+        self.assertTrue(res.get("conflict"))
+        p = est.resolve(eid, exact=True).properties
+        self.assertIs(p["value"], True)
+        self.assertEqual(p["status"], "in_flight")
+        if n is not None:
+            self.assertEqual(len(led.entries()), n)
+
+    def test_no_agent_puts_an_answered_card_back_to_open(self):
+        est, led, eid = self._in_flight()
+        self.assertFalse(est.edit(eid, properties={"status": "open"}).get("ok") and
+                         _status(est, eid) == "open")
+        self.assertEqual(_status(est, eid), "in_flight")
+
+    def test_a_legacy_unanswered_in_flight_card_still_takes_its_answer(self):
+        est, led = _store()
+        eid = _card(est, "legacy")
+        self.assertTrue(est.edit(eid, properties={"status": "in_flight"})["ok"])
+        self.assertTrue(DM.answer(est, led, eid, True)["ok"])
