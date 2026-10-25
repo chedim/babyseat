@@ -18,6 +18,9 @@ either HTTP server (:4096 serve, :11500 proxy):
   stacks and the per-thread totals. One profile at a time. It replaces
   `sudo py-spy`.
 
+- THE REQUESTS RING (diag_requests): GET /membrane/diag/requests shows the
+  last outbound model requests as sent, with their sizes per section.
+
 Neither instrument takes any of the seat's locks: the ring and the profile
 result sit behind this module's own lock, held only to copy or append.
 """
@@ -48,7 +51,8 @@ PROFILE_MAX_DEPTH = 200       # frames kept per stack (the root side is cut beyo
 PROFILER_THREAD = "membrane-profiler"
 
 DIAG_PATHS = ("/membrane/diag/timing", "/membrane/diag/profile",
-              "/membrane/diag/claude-agent", "/membrane/diag/deliver")
+              "/membrane/diag/claude-agent", "/membrane/diag/deliver",
+              "/membrane/diag/requests")
 
 # THE BUSY TIMEOUT (#431, option C of #429): a turn whose delivery outlives
 # the rung's budget fails visibly with this error -- never a bare resend
@@ -383,6 +387,11 @@ def route(handler, path: str) -> bool:
                              "max_tool_calls": _CA.MAX_TOOL_CALLS_PER_ANSWER,
                              "max_turns": _CA.MAX_TURNS,
                              "usage": _CA.usage_stats()})
+        return True
+    if path == "/membrane/diag/requests":
+        # what the seat last sent to each model: the RAM ring (diag_requests)
+        from . import diag_requests as _DR
+        _send(handler, 200, _DR.view(model=q.get("model") or None, n=q.get("n")))
         return True
     if path == "/membrane/diag/deliver":
         # the busy timeouts (#431): deliveries that outlived the rung's budget

@@ -279,12 +279,30 @@ would take the module with it). Both stay installed; to drop the old name later:
 
 The seat measures itself, without root (`membrane/diag.py`). Both ports answer
 `/membrane/diag/timing`, `/membrane/diag/profile`,
-`/membrane/diag/claude-agent` and `/membrane/diag/deliver`, from localhost only
+`/membrane/diag/claude-agent`, `/membrane/diag/deliver` and
+`/membrane/diag/requests`, from localhost only
 (a call from anywhere else gets 403). `claude-agent` counts the claude-agent
 rung's turn-cap hits and Continues, and sums its prompt-cache split (uncached
 input, cache reads, cache writes, output) ([claude-agent.md](claude-agent.md)).
 `deliver` counts `busy_timeouts`: turns whose model didn't answer inside the
 rung's budget (`rung_budget_s`, 90 s).
+
+**What the seat sent to each model.** `requests` lists the last 5 requests
+the seat sent to a model, newest first: `ts`, `model`, `lane` (`chat`, `loop`,
+`thinker`, `delegate`, or another background lane's name), the upstream `path`
+and the `body` as sent (messages with their roles and content, tools, options
+such as `num_ctx` and `temperature`). `sizes` gives chars and an estimated
+token count (4 chars a token) per message and per section: `system`, `tools`,
+`history`, `injected` (the blocks the seat added this turn), `latest_user`,
+and the `total`. A claude-agent rung's entry has `path` `claude-agent-sdk` and
+shows the system prompt, the prompt or its cache blocks and the tool names it
+gave the SDK; its sections are `system`, `tools`, `prompt`,
+`prompt_cached_head` and `prompt_tail`. `?model=<name>` keeps one model's
+requests and `?n=` fewer of them. The list lives in memory only, and
+Authorization and API-key headers, the seat token and provider keys are
+replaced with `[redacted]`.
+
+    curl -s localhost:11500/membrane/diag/requests?n=1 | python3 -m json.tool
 
 **A busy seat fails the turn visibly.** When the model doesn't answer inside
 that budget (a loaded seat, a model swap), the turn gets an error saying the

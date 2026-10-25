@@ -797,6 +797,8 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
     else:
         blocks = prompt_blocks(messages)[1]
         _note_prompt(system, prompt, blocks)
+    from . import diag_requests as _DR
+    _DR.record_claude(model, _with_tools_note(system), prompt, blocks, tool_names(), resume)
     if blocks:
         sent: list = []
 
@@ -945,8 +947,11 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
     sdk = sdk or check_available(auth)
     env = credential_env(mode=auth)         # no key -> Unavailable, no call
     q: queue.Queue = queue.Queue()
+    from . import diag_requests as _DR
+    _dr = _DR.current()                     # the caller's lane, for the SDK thread
 
     def run():
+        _DR.context(**_dr)
         try:
             asyncio.run(_consume(sdk, messages, model, stream, q.put, port, resume,
                                  env))
