@@ -47,6 +47,7 @@ from . import streams as _streams
 from . import efield as _efield_mod
 from . import capture as _CAPMOD          # #429: the conversation key
 from . import diag as _DIAG                 # #346: the timing ring + the profiler
+from . import diag_requests as _DR         # what the seat last sent to each model
 from .entities import (EntityStore, QuantumEntity, MEMBRANE_NS,
                        CLASS_COMPONENT, CLASS_TOOL)
 
@@ -5896,6 +5897,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             _qp = _QUOTA.paused(model_name)
             if _qp is not None:
                 raise _QUOTA.QuotaPaused.of(_qp)
+            _DR.context(lane=_DR.lane_of(srv, up), injected=ctx)   # diag/requests
             u2 = dict(up)
             u2["model"] = model_name
             # THE THINK DIAL (the seat's say in why the backend reasons):
@@ -5926,6 +5928,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             else:
                 url = srv.backend + "/v1/chat/completions"
                 headers = {"Content-Type": "application/json"}
+            _DR.record(model_name, url, u2, headers=headers)
             rq = urllib.request.Request(
                 url, data=json.dumps(u2).encode(), method="POST",
                 headers=headers)
@@ -6683,6 +6686,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                      "content": "You are a delegated subtask worker. "
                                 "Answer the task directly, tersely."},
                     {"role": "user", "content": task[:8000]}]
+        _DR.record(model, srv.backend + "/v1/chat/completions",
+                   {"model": model, "messages": messages, "stream": False}, lane="delegate")
         rq = urllib.request.Request(
             srv.backend + "/v1/chat/completions",
             data=json.dumps({"model": model, "messages": messages,

@@ -218,6 +218,8 @@ def _ollama_chat(backend: str, model: str, messages: list,
             "messages": messages}
     if think is not None:
         body["think"] = bool(think)
+    from . import diag_requests as _DR
+    _DR.record(model, backend + "/api/chat", body, lane=lane)
     try:
         req = urllib.request.Request(backend + "/api/chat",
                                      data=json.dumps(body).encode(),
@@ -246,6 +248,8 @@ def _openai_chat(url: str, headers: dict, model: str, messages: list,
             "messages": messages}
     if think is not None:
         body["think"] = bool(think)
+    from . import diag_requests as _DR
+    _DR.record(model, url, body, lane=lane, headers=headers)
     try:
         req = urllib.request.Request(
             url, data=json.dumps(body).encode(), method="POST",
@@ -279,6 +283,8 @@ def _claude_cortex_chat(srv, model: str, messages: list, lane: str) -> str:
         port = getattr(srv, "listen_port", None)
         if port is None:
             port = (getattr(srv, "server_address", None) or (None, None))[1]
+        from . import diag_requests as _DR
+        _DR.context(lane=lane)                 # the SDK call records under this lane
         rep = _CA.open_reply(body, port=port)
         resp = json.loads(rep.read() or b"{}")
         if getattr(rep, "failed", False) is True:
