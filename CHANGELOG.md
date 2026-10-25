@@ -6,6 +6,7 @@ Home Assistant fixes: a patch on 0.7.2 for running the seat under Home Assistant
 - **Deleting a chat through Home Assistant no longer 404s on a fresh HA start** (#470, #527). The page's first requests raced the load of the chat owners map, so a chat made in one request was unknown to its own delete; the map now loads once and every request shares it.
 - **Home Assistant calls a connected seat by its own name** (#6, #526), instead of a hard-coded "Bob" or "Argus".
 - **A remote seat gets a Home Assistant address it can reach** (#529, #530). A seat on HA's host keeps the local URL, a seat on HA's LAN gets HA's LAN address, a seat outside it gets HA's public one, and none gets a loopback URL. If HA has no such address, it warns and sends the seat no token. If your HA sits behind a reverse proxy bound to loopback, set the integration's "Home Assistant's address as the seat sees it" option (`ha_base_url`).
+- **You can roll the ball back again** (#535, #536): a person may roll it whichever side it is on; it sat stuck on Blurp's side since #333 removed Blurp's turn-taking roll.
 
 ## v0.7.2 (2026-10-25) — the seat
 
