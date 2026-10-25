@@ -745,7 +745,7 @@ TOOLS: list[dict] = [
                 "executor": {"type": "string",
                              "description": "The executor entity (default "
                                             "'tool:executor')."},
-                "commands": {"type": "array",
+                "commands": {"type": ["string", "array"],
                              "items": {"type": "string"},
                              "description": "Command entity specs -- or "
                                             "raw command lines (created "
@@ -880,7 +880,7 @@ TOOLS: list[dict] = [
                 "executor": {"type": "string",
                              "description": "The executor entity (default "
                                             "'tool:executor')."},
-                "commands": {"type": "array",
+                "commands": {"type": ["string", "array"],
                              "items": {"type": "string"},
                              "description": "Command entity specs to unlink."},
             },
