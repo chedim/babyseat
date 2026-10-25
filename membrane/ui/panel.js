@@ -1706,7 +1706,7 @@ function toyGlyph(t) {
   if (k === "ball") {                                  // #264: whose side it is on (self's left, yours right)
     const yours = r.side === "other";
     return { html: '<span class="ball side-' + (yours ? "other" : "self") + '"><i></i></span>',
-             label: nm + ", the ball: " + (yours ? "on your side, roll it back" : "with " + SELF_NAME + ", its turn next") };
+             label: nm + ", the ball: " + (yours ? "on your side, roll it back" : "with " + SELF_NAME + ", roll it whenever you like") };
   }
   if (k === "die") {
     const n = Number(v);
@@ -1799,7 +1799,10 @@ function toyPopoverHtml(t, res) {
     acts = bl.map((up, i) => ({ action: up ? "knock" : "rebuild", arg: i + 1, label: (up ? "knock " : "rebuild ") + (i + 1),
                                 title: up ? "knock block " + (i + 1) + " (and the ones above it) down" : "stand block " + (i + 1) + " back up" }));
   } else if (t.kind === "ball" && !(t.reading && t.reading.side === "other")) {
-    acts = [];                                         // #264: self has it -- its turn comes next
+    // #535: self has it, and a person may roll it anyway (since #333 self rolls only when its nudge aims at it)
+    out.push('<p class="muted">' + escText(SELF_NAME) + " has the ball: roll it whenever you like</p>");
+    acts = toyActions({ toy: t.name, kind: t.kind }).map((a) => Object.assign({}, a, { label: "roll it",
+      title: "roll the ball to " + SELF_NAME + " while it has it, tagged as yours" }));
   } else {
     acts = toyActions({ toy: t.name, kind: t.kind });
   }
@@ -1810,7 +1813,7 @@ function toyPopoverHtml(t, res) {
   } else {
     out.push('<p class="muted">' + (t.kind === "body" ? escText(SELF_NAME) + " only: nobody else can change it"
       : t.kind === "mirror" ? "it shows " + escText(SELF_NAME) + " its own moves, and a stranger's beside them: it takes no pokes"
-      : t.kind === "ball" ? escText(SELF_NAME) + " has the ball: it rolls it to you on its turn" : "no actions: its own clock is the point") + "</p>");
+      : "no actions: its own clock is the point") + "</p>");
   }
   out.push('<p class="pres' + (res && !res.ok ? " bad" : "") + '" aria-live="polite">' + escText(res ? res.text : "") + "</p>");
   return out.join("");
