@@ -46,6 +46,7 @@ from . import mcp_server as _mcp
 from . import jwtauth as _JWT
 from . import seatauth as _SA
 from . import diag as _BUSY                 # #431: the seat-busy error's shape
+from . import quota as _QUOTA               # the out-of-tokens pause, per model
 
 
 class SeatBusy(RuntimeError):
@@ -56,6 +57,9 @@ class SeatBusy(RuntimeError):
 
 # the failed row's mark: the chat renders it with a Retry (#431)
 BUSY_MARK = "seatBusy"
+# OUT OF TOKENS (quota.py): the row a turn left when its model ran out; the
+# person's message waits (TurnRunner.held) and the row never replays as history
+QUOTA_MARK = "quotaHeld"
 # A ROUND THAT ENDED EARLY (#449): the streamed round's marker, and the
 # error its row carries (a cut reply is never stored as a finished one)
 CUT_KEY = "membrane_cut"
@@ -1082,6 +1086,12 @@ class TurnRunner:
         self._queue_lock = threading.Lock()
         self._drain_results: dict[str, dict] = {}
         self._drain_threads: list[threading.Thread] = []
+        # OUT OF TOKENS (quota.py): a person's messages held while their
+        # model is paused, per session, in order; released by the reset,
+        # the probe time or Resume now
+        self._held: dict[str, list[dict]] = {}
+        self._held_lock = threading.Lock()
+        _QUOTA.subscribe(self._on_quota)
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -1103,6 +1113,11 @@ class TurnRunner:
         cut the NEXT turn's tools short whenever it came)."""
         self._aborting = getattr(self, "_aborting", None) or set()
         self._turn_activity = getattr(self, "_turn_activity", {}) or {}
+        if self._drop_held(sid):
+            # Stop on a message waiting for its model's tokens: it is let go
+            self.hub.publish({"type": "membrane.quota", "why": "stopped", "sessionID": sid})
+            if sid not in (getattr(self, "_busy", None) or {}):
+                return
         self._aborting.add(sid)
         (getattr(self, "_preempted", None) or set()).discard(sid)   # Stop is a stop, even after a preempt
         if sid in (getattr(self, "_busy", None) or {}):
@@ -1214,6 +1229,8 @@ class TurnRunner:
                 continue          # answered in the speaker lane (speaker.py), not here
             if info.get("voiceInterim"):
                 continue          # a streamed partial (Phase 2): its final transcript replays
+            if info.get(QUOTA_MARK):
+                continue          # the out-of-tokens note (quota.py): not a reply
             text = "\n".join(
                 str(p.get("text") or "") for p in row.get("parts") or []
                 if isinstance(p, dict) and p.get("type") == "text").strip()
@@ -1459,6 +1476,11 @@ class TurnRunner:
         user_info["_announced"] = True      # the inner's announce skips
         if (self.sessions.get(sid) or {}).get("blurp"):
             return self.blurp_message(sid, text, user_info)   # #337: no turn in Blurp's private chat
+        # OUT OF TOKENS (quota.py): the turn's model is paused -- a person's
+        # message waits for it; a loop's turn is not run (its event waits)
+        _qh = self._quota_hold(sid, text, user_info, user_parts)
+        if _qh is not None:
+            return _qh
         guard = self._guard(sid)
         got = guard.acquire(blocking=False)
         if not got and _drained:
@@ -1532,6 +1554,11 @@ class TurnRunner:
         try:
             out = self._run_inner(sid, text, user_info, user_parts)
             ended = True
+            # the model ran out during the turn: a person's message waits
+            # (held before the drain below runs the next queued one)
+            _q = out.get("quota") if isinstance(out, dict) else None
+            if _q and _lane_of((self._agents or {}).get(sid)) != "listener":
+                self._hold(sid, text, user_info, user_parts, _q)
             return out
         finally:
             self._turn_sockets.pop(sid, None)
@@ -1553,6 +1580,110 @@ class TurnRunner:
             # THE DRAIN: the next queued turn runs NOW (own thread --
             # this thread is the synchronous lane returning a result).
             self._start_next(sid)
+
+    # -- out of tokens (quota.py) ---------------------------------------------
+
+    def _quota_hold(self, sid: str, text: str, user_info, user_parts):
+        """The turn's model is paused: a person's message is HELD (None:
+        not paused, run it). A loop's turn answers {quota} unrun -- the
+        drainer puts its event back (watch_agents)."""
+        try:
+            self._agents[sid] = self._turn_agent(sid, user_info)
+            model = self._turn_model(sid, text)[0]
+        except Exception:
+            return None
+        ent = _QUOTA.paused(model)
+        if ent is None:
+            return None
+        if _lane_of(self._agents.get(sid)) == "listener":
+            return {"info": dict(user_info or {}), "parts": [], "quota": ent}
+        return self._hold(sid, text, user_info, user_parts, ent)
+
+    def _hold(self, sid: str, text: str, user_info, user_parts, ent: dict) -> dict:
+        model = str(ent.get("model") or "")
+        mid = str((user_info or {}).get("id") or "")
+        with self._held_lock:
+            q = self._held.setdefault(sid, [])
+            if not any(h["mid"] == mid and mid for h in q):
+                q.append({"sid": sid, "mid": mid, "text": text, "model": model,
+                          "user_info": user_info, "user_parts": user_parts,
+                          "ts": time.time()})
+            else:
+                for h in q:
+                    if h["mid"] == mid:
+                        h["model"] = model
+        print(f"[serve] {sid}: {model} is out of tokens -- the message waits "
+              f"(resumes {_QUOTA.hhmm(ent.get('resumes_at'))})", file=sys.stderr)
+        self.hub.publish({"type": "membrane.quota", "why": "held", "model": model,
+                          "sessionID": sid})
+        self.hub.publish({"type": "session.status", "status": {"type": "idle"},
+                          "sessionID": sid})
+        return {"status": "held", "sessionID": sid, "model": model,
+                "resumes_at": ent.get("resumes_at"), "info": dict(user_info or {}),
+                "parts": []}
+
+    def held(self, model: str | None = None) -> list[dict]:
+        """The held messages (oldest first), for one model or all:
+        {sessionID, messageID, model, text, title, ts}."""
+        with self._held_lock:
+            rows = [h for q in self._held.values() for h in q
+                    if model is None or h["model"] == model]
+        rows.sort(key=lambda h: h["ts"])
+        out = []
+        for h in rows:
+            title = ""
+            try:
+                title = str((self.sessions.get(h["sid"]) or {}).get("title") or "")
+            except Exception:
+                pass
+            out.append({"sessionID": h["sid"], "messageID": h["mid"], "model": h["model"],
+                        "text": str(h["text"] or "")[:200], "title": title, "ts": h["ts"]})
+        return out
+
+    def _drop_held(self, sid: str) -> bool:
+        with self._held_lock:
+            return bool(self._held.pop(sid, None))
+
+    def release_held(self, model: str, one: bool = False) -> int:
+        """Send what waited on `model`: every held message (each session's
+        in order, on its own thread), or only the oldest (`one`: the probe
+        -- its answer, or its failure, decides for the rest)."""
+        with self._held_lock:
+            mine = sorted((h for q in self._held.values() for h in q if h["model"] == model),
+                          key=lambda h: h["ts"])
+            if one:
+                mine = mine[:1]
+            for h in mine:
+                self._held[h["sid"]].remove(h)
+                if not self._held[h["sid"]]:
+                    self._held.pop(h["sid"], None)
+        by_sid: dict = {}
+        for h in mine:
+            by_sid.setdefault(h["sid"], []).append(h)
+
+        def _go(items):
+            for h in items:
+                try:
+                    self.run(h["sid"], h["text"], user_info=h["user_info"],
+                             user_parts=h["user_parts"], _drained=True)
+                except Exception as e:
+                    print(f"[serve] a held message failed to run: {e}", file=sys.stderr)
+        for items in by_sid.values():
+            threading.Thread(target=_go, args=(items,), daemon=True,
+                             name="quota-release").start()
+        return len(mine)
+
+    def _on_quota(self, model: str, why: str) -> None:
+        """quota.py's news: the page re-reads; a model free again sends what
+        waited on it (a probe sends the oldest only)."""
+        try:
+            self.hub.publish({"type": "membrane.quota", "why": why, "model": model})
+        except Exception:
+            pass
+        if why in ("reset", "resumed", "cleared"):
+            self.release_held(model)
+        elif why == "probe":
+            self.release_held(model, one=True)
 
     # -- the per-session queue -----------------------------------------------
 
@@ -2059,6 +2190,7 @@ class TurnRunner:
 
         err_done = False
         rounds = 0
+        _quota_hit = None                  # the model ran out mid-turn (quota.py)
         # THE REPEATED REFUSAL (issue #274): qwen3:14b sent the same nameless
         # call seven rounds running, each refused the same way, and the person
         # waited ten minutes for nothing. A call refused before in this turn is
@@ -2367,9 +2499,9 @@ class TurnRunner:
                     try:
                         resp = _stream(body, _on_event)
                         _settle()
-                    except SeatBusy:
+                    except (SeatBusy, _QUOTA.QuotaPaused):
                         _settle()
-                        raise                        # the busy seat: no second (buffered) call (#431)
+                        raise                        # busy (#431) or out of tokens: no second (buffered) call
                     except Exception as _se:
                         _settle()
                         if live["text"] is not None or live["reasoning"] is not None \
@@ -2388,6 +2520,20 @@ class TurnRunner:
                     raise RuntimeError(
                         f"call_ladder returned {type(resp).__name__}, "
                         f"not a response object")
+            except _QUOTA.QuotaPaused as e:
+                # OUT OF TOKENS (quota.py): the model is paused -- the row
+                # says so, the person's message waits for it (run() holds it)
+                now = int(time.time() * 1000)
+                _tokens_fill(a_info, {"usage": getattr(e, "membrane_usage", None)})
+                mkpart({"type": "text",
+                        "text": f"⏸ {e} -- your message waits for it",
+                        "time": {"start": now, "end": now}})
+                _quota_hit = {"model": e.model or turn_model, "resumes_at": e.until,
+                              "reason": e.reason}
+                a_info[QUOTA_MARK] = {"model": e.model or turn_model, "until": e.until}
+                a_info["error"] = {"name": "QuotaPaused", "data": {"message": str(e)[:300]}}
+                _thinking(self, sid, "end")
+                break
             except SeatBusy as e:
                 # THE BUSY SEAT (#431): the turn failed visibly, marked so
                 # the chat offers the person's Retry; nothing retries it
@@ -2842,6 +2988,8 @@ class TurnRunner:
                                  daemon=True, name="predict-end").start()
         except Exception:
             pass
+        if _quota_hit:
+            return {"info": a_info, "parts": parts, "quota": _quota_hit}
         return {"info": a_info, "parts": parts}
 
 
@@ -2888,11 +3036,15 @@ def loopback_ladder(port: int, runner=None, cell=None):
                 return _json.loads(resp.read())
         except urllib.error.HTTPError as he:
             try:
-                busy = _busy_error(_json.loads(he.read() or b"{}"))
+                _eb = _json.loads(he.read() or b"{}")
             except ValueError:
-                busy = None
+                _eb = None
+            busy = _busy_error(_eb)
             if busy:
                 raise SeatBusy(busy) from None
+            _qp = _QUOTA.from_error_obj(_eb)
+            if _qp is not None:
+                raise _qp from None              # out of tokens (quota.py)
             raise
 
     def stream(body: dict, on_event) -> dict:
@@ -2961,6 +3113,9 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     continue
                 if _busy_error(d):
                     raise SeatBusy(_busy_error(d))   # never a truncation: no re-ask (#431)
+                _qp = _QUOTA.from_error_obj(d)
+                if _qp is not None:
+                    raise _qp                        # out of tokens (quota.py): no re-ask
                 if isinstance(d.get("membrane"), dict) and not d.get("choices"):
                     ext = d["membrane"]
                     on_event("ext", ext)
@@ -3567,6 +3722,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # the 📊 window: the seat's tokenomics, read-only (tokenomics.py)
                 from . import tokenomics as _TK
                 self._json_out(_TK.read(messages))
+            elif path == "/membrane/quota":
+                # OUT OF TOKENS (quota.py): the paused models and what waits on
+                # them -- the chat's popup and membrane home's ⚠ read it
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                self._json_out(_QUOTA.status(psrv, runner))
             elif path == "/membrane/self/recent":
                 # #230: self's record, newest first and capped -- the 👶
                 # panel's activity feed (read-only; the gate above ran first)
@@ -3827,6 +3987,19 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if not res.get("ok"):
                     return self._json_out({"error": res.get("error")}, code=409 if res.get("conflict") else 400)
                 return self._json_out(res)
+            if path == "/membrane/quota/resume":
+                # OUT OF TOKENS: a person's Resume now -- the model's pause is
+                # cleared (more tokens, another account) and what waited goes;
+                # if it fails again the pause comes back with the new reset
+                b = self._read_body()
+                model = str((b or {}).get("model") or "").strip() if isinstance(b, dict) else ""
+                if not model:
+                    return self._json_out({"error": "model required"}, code=400)
+                resumed = _QUOTA.resume(model)
+                if not resumed and runner is not None and hasattr(runner, "release_held"):
+                    resumed = runner.release_held(model) > 0   # nothing paused, something waited
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                return self._json_out(dict(_QUOTA.status(psrv, runner), resumed=bool(resumed)))
             if path == "/membrane/options":
                 # #344: the ⚙ window's write -- the writable options only,
                 # validated (a 400 with the reason; nothing written), then

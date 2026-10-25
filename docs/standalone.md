@@ -192,6 +192,7 @@ and again every 10 s while it is open; × or Escape closes it.
 | Today | calls, input and output tokens since local midnight, and in the last hour, so a runaway loop stands out |
 | By mind, today | Chat (a person's turns), Goal worker (the watch and goal loops), Idle thinker (the thinker and its claim judges), Other background (`/delegate`, the router's interview, untagged calls); the last-hour column marks the busiest |
 | By model, today | the same split by model id (`qwen3:8b`, `claude-agent:sonnet`, ...) |
+| ⚠ Out of tokens | shown only while a model is paused for its quota: each paused model and when it resumes (see below) |
 | Claude rung, since the seat started | answers and API steps, and per answer, first step and later steps: cache read, cache write, uncached input, output and the effective input, `0.1 × read + 1.25 × write + uncached` (from the ledger `/membrane/diag/claude-agent` reads; in RAM, so a restart zeroes it) |
 
 Input is the whole prompt, on the same ruler as `membrane stats`. The foreground
@@ -218,6 +219,46 @@ cold start runs, and the button shows ⏸ again. Pressing it from another machin
 [seat token](auth.md#the-seat-token); through Home Assistant, an admin.
 What exactly stops: [background-mind.md](background-mind.md#the-pause-the-operators-stable-point-2026-10-06).
 The button drove auto-chat before #348; auto-chat is gone.
+
+## Out of tokens (⚠)
+
+When a cloud model says its quota is spent (the Claude rung's "You've hit your
+session limit · resets 10:50pm (America/New_York)", a usage-limit error, an
+Ollama cloud or provider 429 / 402), only that model pauses
+(`membrane/quota.py`). Every other model keeps working until it hits its own
+limit. A paused model's calls are not sent at all.
+
+The pause lasts until the reset time the error gives. The time is read with its
+timezone from the Claude CLI's rate-limit event, else from the error's words
+("resets 10pm", "resets Oct 27, 10am (Europe/London)", "resets in 2h 30m"), else
+from a `Retry-After` header. When the error gives no time, the model is paused
+for 10 minutes and then the next real call is the probe. If it answers, the
+pause ends. If it fails again, the model is paused for 10 more minutes. No test
+call is ever sent.
+
+- **Your chat waits.** A message to a paused model is held, not failed: it
+  stays in the chat, and a popup in the middle of the page says
+  "`<model>` is out of tokens · it resumes at HH:MM (in X h Y m)". When the
+  model resumes, the message is sent. **Resume now** clears the pause (you may
+  have more tokens, or have switched accounts) and sends it at once. If it
+  fails again, the popup comes back with the new time. Stop lets the held
+  message go. The normal chat and the 🗂 cockpit both show the popup.
+- **The background minds park.** The Goal worker's loop events wait in their
+  queue and goals stay open (never failed); the pulse wakes no goal on the
+  paused model. The Idle thinker thinks nothing. Both pick up when the model
+  resumes.
+- **⚠ beside the ⏸/▶.** While any model is paused, a ⚠ sits next to the pause
+  button. Hovering over it (or tapping it) shows each paused mind (Chat when a
+  message is held, Goal worker, Idle thinker), its model, when it resumes, the
+  goals parked on it, and Resume now. The ⚠ goes away when every model has
+  resumed.
+
+The state is kept in RAM and in `<data dir>/quota.json`, so a restart keeps a
+pause. Nothing polls the clock: each pause has one timer, set for its reset or
+probe time. Resume now or a successful answer cancels the timer, a new failure
+replaces it, and a restart sets the timers again from `quota.json`. On the serve port (the page calls `/ui/serve/...`):
+`GET /membrane/quota` returns each paused model and what waits on it, and
+`POST /membrane/quota/resume {"model": ...}` is Resume now.
 
 ## Updates
 

@@ -618,6 +618,8 @@ class _LoopDrainer:
         wake ledger (wakes.py: outcome learning's training set)."""
         _WAKE.info = None
         feats = shadow = None
+        if not is_operator_event(ev) and self._quota_park(ev):
+            return "held"               # out of tokens: the event waits, unlogged
         if not is_operator_event(ev):
             try:                               # what the wake arrived with, BEFORE its turn stamps the entity
                 from . import wakes as _WK
@@ -644,6 +646,30 @@ class _LoopDrainer:
             except Exception:
                 pass
         return out
+
+    def _quota_park(self, ev: dict, model: str | None = None) -> bool:
+        """OUT OF TOKENS (quota.py): the Goal worker's model is paused (or
+        `model`, the one a turn just ran out on) -- the event goes back to
+        the pool and its goal stays open, named on the paused model's list
+        (membrane home's ⚠). False: the model is free, run it."""
+        try:
+            from . import quota as _Q
+            if model is None:
+                ent = _Q.mind_paused(self.srv, "loops")
+                if ent is None:
+                    return False
+                model = ent["model"]
+            pool = getattr(self.srv, "events_pool", None)
+            if pool is not None:
+                pool.put(ev)
+            eid = str(ev.get("entity") or "")
+            est = getattr(self.srv, "entity_store", None)
+            doc = (getattr(est, "docs", None) or {}).get(eid) if eid else None
+            if doc is not None:
+                _Q.park(model, eid, str((doc.properties or {}).get("name") or eid))
+            return True
+        except Exception:
+            return False
 
     def _handle(self, ev: dict) -> str:
         """One event -> at most one loop turn. Returns 'skip', 'requeue'
@@ -751,6 +777,11 @@ class _LoopDrainer:
         finally:
             if _called:
                 _LLM._ctx.depth = _prev_depth
+        if isinstance(out.get("quota"), dict):
+            # the model ran out during the turn (quota.py): no verdict, the
+            # goal stays open, the event waits for the model
+            self._quota_park(ev, str(out["quota"].get("model") or ""))
+            return "held"
         text = str(out.get("text") or out.get("verdict_text") or "")
         if _called:
             try:
@@ -1191,6 +1222,12 @@ def rewake_open_goals(srv, now: float | None = None,
     try:
         from .lanes import nerve_paused
         if nerve_paused(srv):
+            return 0
+    except Exception:
+        pass
+    try:                                # out of tokens (quota.py): the goals sleep on
+        from . import quota as _Q
+        if _Q.mind_paused(srv, "loops") is not None:
             return 0
     except Exception:
         pass

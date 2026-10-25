@@ -550,7 +550,7 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 
 | Doc | What's in it |
 |---|---|
-| [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, the ⚙ options window, the 📊 stats window, the ⏸ / ▶ pause, updates, diagnosing a slow seat (request timing, the built-in profiler) |
+| [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, the ⚙ options window, the 📊 stats window, the ⏸ / ▶ pause, the out-of-tokens pause per model (⚠), updates, diagnosing a slow seat (request timing, the built-in profiler) |
 | [docs/claude-agent.md](docs/claude-agent.md) | **The claude-agent rung**: Claude through the Agent SDK on your Anthropic API key; enabling it, opt-in routing, membrane's tools in Claude's loop (built-ins off, no check-ins, a 2048-call ceiling per answer with a person's Continue, an idle guard instead of the wall clock), learned like any model with a `madeBy` provenance mark |
 | [docs/docker.md](docs/docker.md) | **babyseat in Docker**: the public image `chedim/babyseat`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
 | [docs/auth.md](docs/auth.md) | **JWT mode (optional, off by default).** Turning it on, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |

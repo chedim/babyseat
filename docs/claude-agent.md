@@ -314,6 +314,21 @@ Claude's turn is learned like any other model's turn:
   the seat's own (OpenCode provider `membrane`), so the seat's turns do
   not come back to it.
 
+## Out of tokens
+
+When Claude reports that the quota is spent (an `AssistantMessage` with
+`error` `rate_limit` or `billing_error`, or a failed result whose words say so),
+that rung alone pauses (`membrane/quota.py`). The pause lasts until the reset
+time: the CLI's rejected rate-limit event (`resets_at`), else the
+"resets 10:50pm (America/New_York)" line, else a probe 10 minutes later (the
+next real call). A paused rung is not called: `open_reply` refuses it before
+the SDK starts, and the proxy answers `429` with error type `quota_paused` (or
+that error as an SSE event once the stream has begun). The serve turn holds the
+person's message, and the page shows "out of tokens · it resumes at HH:MM" with
+Resume now. The other rungs and models keep answering. See
+[standalone.md](standalone.md#out-of-tokens-) for the chat, the background minds
+and the ⚠.
+
 ## Billing
 
 The rung's usage is billed to the Anthropic API key, like any API call on

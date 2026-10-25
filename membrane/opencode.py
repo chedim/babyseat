@@ -1537,6 +1537,9 @@ def main() -> None:
                         trail.append(f"{p.get('tool')} {st.get('status', '')}: "
                                      f"{' '.join(res.split())[:60]}")
                     # the WHOLE text: the verdict is its last line
+                    if isinstance((out or {}).get("quota"), dict):
+                        # out of tokens (quota.py): no verdict, the event waits
+                        return {"text": "", "quota": out["quota"]}
                     return {"text": txt[-4000:], "verdict_text": txt[:200],
                             "trail": trail[-6:],
                             # the turn's model (#254: self trusts an advisor per model)
@@ -1962,6 +1965,16 @@ def main() -> None:
             if getattr(srv, "_field_pulse", None) is not None:
                 srv._field_pulse.start()
             runner.srv = srv               # /agent reads the live minds
+            # OUT OF TOKENS (quota.py): a pause kept across the restart is
+            # read back and its timer re-armed: what waits goes at its reset / probe time
+            try:
+                from . import quota as _QUOTA
+                for _qp in _QUOTA.snapshot():
+                    print(f"[seat] {_qp['model']} is out of tokens until "
+                          f"{_QUOTA.hhmm(_qp['resumes_at'])} ({_qp['kind']})", file=sys.stderr)
+                _QUOTA.arm_all()
+            except Exception as e:
+                print(f"[seat] the out-of-tokens timers were not re-armed ({e})", file=sys.stderr)
             runner._audit_mem = srv.membrane   # the lane-refusal audits
             _ladder_cell["runner"] = runner   # the runner's late binding
 
