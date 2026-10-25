@@ -11,8 +11,8 @@ identifiers:
     value: "10.5281/zenodo.23550667"
     description: "Concept DOI: all versions, resolves to the newest"
   - type: doi
-    value: "10.5281/zenodo.23550668"
-    description: "Version DOI of 0.7.1"
+    value: "10.5281/zenodo.23644272"
+    description: "Version DOI of 0.7.2"
 repository-code: "https://github.com/chedim/babyseat"
 license: PolyForm-Noncommercial-1.0.0
 abstract: >-
