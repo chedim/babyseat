@@ -2289,7 +2289,10 @@ class TurnRunner:
             if self.tools is not None:
                 tools = _openai_tools(self.tools)
             else:
-                tools = _openai_tools_for((self._agents or {}).get(sid))
+                # IN THE WIRE SHAPE (2026-10-25: the lane's rows went out in
+                # the MCP shape -- {name, inputSchema} -- Ollama read no name
+                # in them, and a qwen3 loop's every call came back nameless)
+                tools = _openai_tools(_openai_tools_for((self._agents or {}).get(sid)))
             lane = _lane_of((self._agents or {}).get(sid))
             if tools and not _text_only:
                 body["tools"] = tools
