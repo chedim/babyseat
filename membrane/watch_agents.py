@@ -1581,6 +1581,15 @@ def _score(kind: str, **kw) -> None:
         pass
 
 
+def is_watched(props: dict) -> bool:
+    """A wake needs a watch on the entity: the existing spec (`watch`,
+    `watch_ops`, `watch_fields`). A getter's reading on an entity nobody
+    watches is stored and shown, but wakes no loop (#549: 38 of 40 loop
+    wakes in 24 h were ticking counters on unwatched entities)."""
+    p = props or {}
+    return bool(p.get("watch") or p.get("watch_ops") or p.get("watch_fields"))
+
+
 def reading_changed(before: dict, state: dict) -> bool:
     for k, v in (state or {}).items():
         if _CLOCK_KEY.search(str(k)):
@@ -1688,7 +1697,7 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model",
         # SECOND loop on the eye; a counter (beats) changes on every read, so
         # the eye ran a pass per read. The reader's own answer is no news.
         pool = getattr(srv, "events_pool", None) if notify else None
-        if pool is not None and changed:
+        if pool is not None and changed and is_watched(ent.properties):
             pool.put({"kind": "getter-applied", "entity": ent.eid,
                       "state": dict(list(state.items())[:8]),
                       "ts": now})
