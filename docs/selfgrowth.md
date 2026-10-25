@@ -614,6 +614,7 @@ Everything is in `<data dir>/self/` (`.membrane/self/` in a seat's directory):
 | `record.jsonl` | append-only while awake, from birth: every cycle, reach, push, wait, shift, audit, error, each achievement earned and each accept (#299). At sleep (#345) its raw lines move to `archive/` and it keeps one summary line: the windows its tests read ([sleep.md](sleep.md)) | kept: earned stays earned, accepted stays accepted |
 | `archive/` | every raw record line, unchanged, in `record-<UTC date>.jsonl` files, and `manifest.jsonl` (the order they were written in) | kept: never edited, never read on the cycle path |
 | `model.json` | rung 1's learned model of the current that pushes it | kept |
+| `parts.json` | its two parts (#333 part 3g): T, the things part, and N, the news part; its position is `unit(T + N)` | kept: if missing, or if they no longer add up to where it stands, T = its position and N = 0 |
 | `tempo.json` | per thing it reads: how often it had changed when self looked | kept |
 | `nudged.json` | per thing (#333 part 3a): its own nudges since its last look at it, and its changed share per nudge bin (`p_n`'s counts) | kept |
 | `world.json` | Blurp's world (#337): the field ids it may look at or act on, each with when and why it joined | kept: it only grows |
@@ -682,8 +683,21 @@ nor fails a rung. Before rung 1 is passed the status says it waits on "the
 world", since feeling a push needs one. Playing counts as speaking: a person's
 poke on a toy pulls the current toward that toy under their own key
 (`toy:<person>`), one event's worth, exactly as a chat line does
-(`efield.pull_current`); self's rolls, the world's changes and the model's
+(`efield.pull_things`); self's rolls, the world's changes and the model's
 pokes never pull it.
+
+**Its position is T + N (#333 part 3g).** The field keeps two pulls with one
+decay (`CURRENT_TAU_S`): the *things current*, pulled by each message's
+non-negative fit (#335) and by a person's poke (`POKE_PULL` = 1, like one
+message), and the *news current*, pulled by the residual. Blurp keeps two parts:
+T (what it is thinking about) follows the things current at `PUSH_GAIN` and takes
+its own stride; N (what pulls at it that nothing known explains) follows the news
+current at `PUSH_GAIN`, and fades when the news stops. Its position is
+`unit(T + N)`, so a large N weakens contact (the closing-in rule and the nudge read
+the whole position). With no current at all nothing moves but the stride. The
+cycle line carries `norm_t`, `norm_n` (their lengths) and `near` (the
+`NEAR_LOG` = 3 nearest things in its world, `[eid, cosine]`; never one outside
+it). The model of the current still predicts the composed push.
 
 ### Blurp's world and its private chat (#337)
 

@@ -556,6 +556,9 @@ def poke(name: str, action: str, arg=None, by: str = "", now: float | None = Non
     return out
 
 
+POKE_PULL = 1.0     # #333 part 3g (approved with the part): a poke pulls the things current like one message
+
+
 def _pull_field(name: str, block: int | None, by: str) -> None:
     """PLAYING COUNTS AS SPEAKING (#282): a person's poke pulls the field's
     current toward the toy they played with (its spot; a tower's block's own),
@@ -564,7 +567,7 @@ def _pull_field(name: str, block: int | None, by: str) -> None:
     world's changes and the model's pokes never come here. Never raises."""
     srv = _SEAT.get("srv")
     fld = getattr(srv, "efield", None) if srv is not None else None
-    if fld is None or not hasattr(fld, "pull_current"):
+    if fld is None or not hasattr(fld, "pull_things"):
         return
     try:
         from .eids import field_id
@@ -576,7 +579,7 @@ def _pull_field(name: str, block: int | None, by: str) -> None:
             st = fld.get(field_id(eid))
         if st is None or st.state is None:
             return
-        fld.pull_current(f"toy:{by}", st.state)
+        fld.pull_things(f"toy:{by}", st.state, weight=POKE_PULL)   # #333 part 3g: the things current
     except Exception as e:                      # noqa: BLE001
         print(f"[toybox] {name}: the poke did not pull the field ({e!r})", file=sys.stderr)
 

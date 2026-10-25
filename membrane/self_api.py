@@ -201,6 +201,8 @@ def context(srv, spots=(), reach: bool = False, only: str | None = None, own: bo
         doc["self"] = {"eid": SL._eid(),
                        "position": _vec(ent.position) if ent is not None and ent.position is not None else None}
         doc["current"] = _vec(SL._current(srv))
+        ct, cn = SL._current_parts(srv)                  # #333 part 3g: the things current and the news current
+        doc["current_t"], doc["current_n"] = _vec(ct), _vec(cn)
         doc["paused"] = bool(getattr(srv, "paused", False))
         doc["nerve_paused"] = bool(SL._paused(srv))
         try:
@@ -229,6 +231,12 @@ def _position(srv, e: dict) -> dict:
         return {"ok": False, "error": "no entity store"}
     pos = e.get("position")
     ent.position = None if pos is None else [float(x) for x in pos]
+    near = None
+    if pos is not None and e.get("near"):
+        try:
+            near = SL._near(srv, pos, int(e["near"]))      # #333 part 3g: the world things nearest it
+        except Exception:                                  # noqa: BLE001
+            near = None
     if "pull" in e:
         pp = ent.properties or {}
         sd = dict(pp.get("script_data") or {})
@@ -237,7 +245,7 @@ def _position(srv, e: dict) -> dict:
         pp["script_data"] = sd
         ent.properties = pp
     est.upsert(ent, embedder=None)
-    return {"ok": True}
+    return {"ok": True} | ({"near": near} if near is not None else {})
 
 
 def _nudge(srv, e: dict) -> dict:
