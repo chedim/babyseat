@@ -42,7 +42,7 @@ def test_the_child_listens_on_loopback_only(sup, tmp_path):
 
 
 def test_name(sup, tmp_path):
-    assert sup.read_name(tmp_path) == ("Bob", [])
+    assert sup.read_name(tmp_path) == (sup.DEFAULT_NAME, [])
     (tmp_path / "settings.json").write_text(json.dumps({"name": "Juniper", "aliases": ["juni"]}))
     assert sup.read_name(tmp_path) == ("Juniper", ["juni"])
 

@@ -232,7 +232,7 @@ HELP = {
         "which implementation answered (via), the resolution order and the exact command that ran. "
         "Mark reads read_only=true. GUARDS: define(..., guard=\"result = {'ok': state['self'].get('reachable') "
         "== 'yes'}\") runs first; false = blocked, nothing runs. COMPOSITES: define(..., steps=[{'name': "
-        "'soc', 'call': 'read', 'object': 'argus:battery'}, {'name': 'lights', 'call': 'turn_off', 'object': "
+        "'soc', 'call': 'read', 'object': 'seat:battery'}, {'name': 'lights', 'call': 'turn_off', 'object': "
         "'self'}]) -- steps run in order, stop on failure (partial if earlier ones ran), nest at most 3 "
         "deep; {{steps.soc.state.soc}} reads a step's captured result (JSON output becomes .state), "
         "{{entities.<spec>.<field>}} reads an entity now. Every node is an entity you can read. "

@@ -385,7 +385,7 @@ def run(runner, routed) -> dict:
 def release_listen(srv) -> None:
     """A listen held during the turn opens after the reply was said: a
     deferred follow-up (`listen_pending`, voice_io.on_listen) and an ear the
-    auto-pause held (`listen_hold`) both reopen now that Argus is done."""
+    auto-pause held (`listen_hold`) both reopen now that the seat is done."""
     try:
         from . import voice_io as VIO
         est = getattr(srv, "entity_store", None)

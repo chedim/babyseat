@@ -64,10 +64,10 @@ def features(srv, ev: dict, now: float) -> dict:
         f["cls"] = getattr(doc, "cls", None)
         f["last_verdicts"] = [str(x.get("verdict") or "") for x in (pp.get("watch_decisions") or [])][-3:]
         f["consequences"] = len(pp.get("consequences") or [])
-        # script health (Argus's review: a broken getter is a wake's context too)
+        # script health (the seat's review: a broken getter is a wake's context too)
         f["script"] = {"failures": int(pp.get("script_failures") or 0),
                        "disabled": bool(pp.get("script_disabled"))}
-    # WHAT THE OTHER GATES WOULD SAY (Argus's review: replay one policy against
+    # WHAT THE OTHER GATES WOULD SAY (the seat's review: replay one policy against
     # three when they merge): the alert budget's state as the wake arrived
     g = getattr(srv, "_alert_gate", None)
     if g is not None:

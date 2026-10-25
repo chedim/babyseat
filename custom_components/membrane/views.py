@@ -17,7 +17,7 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers.http import KEY_HASS
 
-from .const import DOMAIN, SEAT_DIR
+from .const import DEFAULT_NAME, DOMAIN, SEAT_DIR
 
 HERE = Path(__file__).resolve().parent / "www"          # the integration's own (entry.js)
 REWRITE = ((b'"/ui/www/', b'"/api/membrane/www/'), (b'"/ui/serve', b'"/api/membrane/serve'),
@@ -87,7 +87,7 @@ class AssetView(HomeAssistantView):
 
 def _name(hass) -> dict:
     comp = hass.data.get(DOMAIN) or {}
-    return {"name": comp.get("name") or "Bob", "aliases": list(comp.get("aliases") or []),
+    return {"name": comp.get("name") or DEFAULT_NAME, "aliases": list(comp.get("aliases") or []),
             "stt": "server" if comp.get("stt_url") else "browser"}
 
 

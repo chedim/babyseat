@@ -3,7 +3,7 @@ goal is to build the field to substitute the LLM for mundane things,
 lowering the LLM's participation ... without sacrificing quality. Feel free
 to reward it ... make the score a field entity, not the banner").
 
-membrane::score is an entity like any other: Argus reads it when he wants
+membrane::score is an entity like any other: the seat reads it when he wants
 to know how he is doing; nothing injects it into a turn. It counts, in
 hourly buckets kept on the entity (they survive a restart):
 

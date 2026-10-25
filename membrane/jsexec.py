@@ -5,7 +5,7 @@ seats; for running shell/python there could be a different agent").
 
 The seat's presence entity implements remote_executor: its `exec(code,
 timeout)` method's command is `js::{{code}}`, and a `js::` command never
-reaches a shell -- it goes to a browser tab that opted in ("let Argus act as
+reaches a shell -- it goes to a browser tab that opted in ("let the seat act as
 you here", per tab, off by default). The tab runs it IN ITS WINDOW (the
 operator's choice: "why a sandbox? why not let it access the window?") --
 the page, the HA connection, the chat panel in reach, i.e. as that person;

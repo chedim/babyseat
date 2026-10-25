@@ -28,7 +28,7 @@ import base64
 import re
 from urllib.parse import urlsplit
 
-from .const import CONF_MODE, CONF_SERVE_PASS, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_SERVE_USER, DOMAIN, MODE_INSIDE
+from .const import CONF_MODE, CONF_SERVE_PASS, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_NAME, DEFAULT_SERVE_USER, DOMAIN, MODE_INSIDE
 
 SEATS = "seats"
 ACTIVE = "active"
@@ -191,7 +191,7 @@ def apply(comp: dict, seat: dict) -> None:
             if k in slot:
                 comp[k] = slot[k]
     elif not seat.get("inside"):
-        comp["name"], comp["aliases"] = "Bob", []    # a detached seat's wake name, as before #283
+        comp["name"], comp["aliases"] = DEFAULT_NAME, []   # a seat elsewhere: until it says its own (fetch_name)
     comp["stt_url"] = str(seat.get("stt_url") or comp.get("stt_default") or "")
     comp["active_seat"] = seat.get("id")
     comp["seat_name"] = display_name(seat)
@@ -267,6 +267,24 @@ async def fetch_card(sess, conn: dict) -> dict:
     except Exception:                                # noqa: BLE001 (the last activity is optional)
         rec = None
     return card_of(sheet, (rec or {}).get("lines") if isinstance(rec, dict) else None)
+
+
+async def fetch_name(sess, comp: dict, timeout_s: float = CARD_TIMEOUT_S) -> None:
+    """A seat elsewhere is called by its own name (issue #6): what its /ui/conf
+    says (a standalone seat's page config, a plain serve's name + aliases);
+    a seat that doesn't answer keeps the default apply() gave it. The inside
+    seat's comes from its child."""
+    seat = find(comp.get(SEATS) or [], comp.get("active_seat"))
+    if not comp.get("serve_url") or (seat or {}).get("inside"):
+        return
+    url = comp["serve_url"]
+    try:
+        st, conf = await asyncio.wait_for(_get(sess, comp, "/ui/conf"), timeout_s)
+    except Exception:                                # noqa: BLE001 (the name is optional)
+        return
+    name = str((conf or {}).get("name") or "").strip() if st == 200 and isinstance(conf, dict) else ""
+    if name and comp.get("serve_url") == url:        # still the seat that answered
+        comp["name"], comp["aliases"] = name, [str(a) for a in conf.get("aliases") or []]
 
 
 async def _row(sess, comp, seat, active, timeout_s) -> dict:

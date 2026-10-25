@@ -18,7 +18,7 @@ uptime and a beat count, nothing else). The seat's presence entity
             watch, #161; self_loop.py), accepting an achievement self
             earned (#299: {"accept": id}, which opens what it leads to;
             the record says who, caller()) and self's name on this seat
-            (#283; self_name.py). Argus READS all of it; an
+            (#283; self_name.py). The seat READS all of it; an
             edit of these properties by a lane is not a control (the
             refresh writes the truth back) -- the stable point stays the
             operator's call, and he can never lift his own limits.

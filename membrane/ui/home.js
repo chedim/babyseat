@@ -11,9 +11,9 @@
 
 // THE SEAT'S NAME (standalone mode, 2026-10-12): the standalone page sets
 // window.MEMBRANE_NAME (+ MEMBRANE_ALIASES, what speech hears for it) from
-// /ui/conf before this loads; HA's page is Argus
-const SEAT = (typeof window !== "undefined" && window.MEMBRANE_NAME) || "Argus";
-const SEAT_CUSTOM = SEAT !== "Argus";
+// /ui/conf before this loads; until one is handed over it is the seat's
+// default name (naming.DEFAULT)
+const SEAT = (typeof window !== "undefined" && window.MEMBRANE_NAME) || "Bob";
 const SEAT_SAYS = [SEAT].concat((typeof window !== "undefined" && window.MEMBRANE_ALIASES) || [])
   .map((a) => String(a || "").trim().toLowerCase()).filter(Boolean);
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -30,7 +30,7 @@ const LS_IMMERSIVE = "membrane.home.immersive";
 const LS_FOLLOW = "membrane.home.follow";
 const LS_TREESEL = "membrane.home.treesel";   // #394: the Skill tree's clicked skill
 // what the camera follows (the operator, 2026-10-10: "the seat (the most
-// interesting entity) or thinker/chat, whoever's active, to show what Argus
+// interesting entity) or thinker/chat, whoever's active, to show what the seat
 // is thinking/doing, or even just where stuff is changing")
 const FOLLOW_MODES = ["activity", "seat", "you", "self", "eyes"];
 const SEAT_IDS = ["seat:self", "seat"];
@@ -356,7 +356,7 @@ const LS_TTS = "membrane.home.tts";
  *  behind the chat"): speech keeps up with the chat instead of reading out a
  *  backlog. A sentence that waited CATCHUP_STALE_MS is skipped when something
  *  newer of the same speaker waits behind it; membrane's lines older than
- *  CATCHUP_BABBLE_MS go; at most CATCHUP_KEEP of Argus's sentences wait. */
+ *  CATCHUP_BABBLE_MS go; at most CATCHUP_KEEP of the seat's sentences wait. */
 const CATCHUP_STALE_MS = 15000, CATCHUP_BABBLE_MS = 20000, CATCHUP_KEEP = 6;
 const CATCHUP_FAST_AT = 3, CATCHUP_RATE = 1.2;
 function catchUp(queue, now) {
@@ -364,9 +364,9 @@ function catchUp(queue, now) {
   const newer = (i) => q.slice(i + 1).some((y) => y.kind === q[i].kind);
   let out = q.filter((x, i) => !(now - x.ts > (x.kind === "membrane" ? CATCHUP_BABBLE_MS : CATCHUP_STALE_MS) &&
                                  (x.kind === "membrane" || newer(i))));
-  const argus = out.filter((x) => x.kind !== "membrane");
-  if (argus.length > CATCHUP_KEEP) {
-    const drop = new Set(argus.slice(0, argus.length - CATCHUP_KEEP));
+  const seatSaid = out.filter((x) => x.kind !== "membrane");
+  if (seatSaid.length > CATCHUP_KEEP) {
+    const drop = new Set(seatSaid.slice(0, seatSaid.length - CATCHUP_KEEP));
     out = out.filter((x) => !drop.has(x));
   }
   return out;
@@ -474,22 +474,22 @@ function tiltOrbit(base, lr, fb, gain = TILT_GAIN) {
 }
 
 // ---- THE HOTWORD (2026-10-10, the operator: "can you add hotword detection?
-// 'Hey, Argus'"): the browser measures loudness locally; only a burst of
+// 'Hey <name>'"): the browser measures loudness locally; only a burst of
 // speech goes to the LAN's whisper (the PTT path), and only a transcript that
 // starts with the hotword reaches the chat. Opt-in (👂), paused while the page
-// is hidden, while you hold PTT and while Argus speaks; capped.
+// is hidden, while you hold PTT and while the seat speaks; capped.
 const LS_HOTWORD = "membrane.home.hotword";
 // ends of speech waited out longer (2026-10-10, the operator: "it cuts off mid-sentence")
 const HOT_MIN_S = 0.4, HOT_MAX_S = 12, HOT_END_MS = 900, HOT_PER_MIN = 16, HOT_FOLLOW_MS = 8000;
 // THE FOLLOW-UP WINDOW, OFF (2026-10-12, the operator: "just turn it off"): a bare
-// "Hey Argus" used to open 8 s of listening for whatever came next -- ambient
+// "Hey <name>" used to open 8 s of listening for whatever came next -- ambient
 // speech went out as messages; now a bare wake word only chimes. Say it in one breath.
 const FOLLOW_ON = false;
 const HOT_EARLY_S = 1.3;          // the first stretch is checked while you are still talking
 const HOT_ACKS = ["Yes?", "Uh-huh?", "Mm-hm?", "I'm listening."];
-// Latin and Cyrillic (runglish, 2026-10-10: "Аргус, включи свет"); JS's \b
+// Latin and Cyrillic (runglish, 2026-10-10: "<name>, включи свет"); JS's \b
 // knows no Cyrillic, so the name ends at a space, a mark or the end
-const HOT_NAMES = SEAT_CUSTOM ? SEAT_SAYS.map(reEsc).join("|") : "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus|are guess|our guess|gus|аргус|аргос|аргуш";
+const HOT_NAMES = SEAT_SAYS.map(reEsc).join("|");
 const HOT_GREETS = "hey|hi|hay|ok|okay|hello|yo|эй|хей|привет|окей|ок";
 const HOT_RE = new RegExp("^(?:(?:" + HOT_GREETS + ")[\\s,.!-]+)?(?:" + HOT_NAMES + ")(?=$|[\\s,.!?-])[\\s,.!?-]*([\\s\\S]*)$", "iu");
 
@@ -502,7 +502,7 @@ function speakable(text) {
   return out;
 }
 
-/** 'Hey Argus, turn on the lights' -> {hit: true, rest: 'turn on the lights'}. */
+/** 'Hey <name>, turn on the lights' -> {hit: true, rest: 'turn on the lights'}. */
 function hotword(text) {
   const t = String(text || "").trim().replace(/^[\s\p{P}\p{S}]+/u, "");   // marks only: Cyrillic letters stay
   const m = HOT_RE.exec(t);
@@ -519,27 +519,23 @@ const VOSK_JS = "/ui/www/vosk.js";
 const VOSK_MODEL = "/ui/www/vosk-model-en.tar.gz";
 const VOSK_CACHE = "membrane-voice-v1";
 const LS_STT = "membrane.home.stt";          // "device" (default) | "lan"
-// 'argus' is not in the small model's words: these sound like it
 // a greeting is required: a bare name in the grammar matched "turn on" (the
 // recognizer squeezes every sound into its few phrases -- the browser test
 // caught it, 2026-10-10)
-const WAKE_NAMES = SEAT_CUSTOM ? SEAT_SAYS : ["are gus", "our gus", "are guess", "our guess", "angus", "august", "gus"];
+const WAKE_NAMES = SEAT_SAYS;
 const WAKE_GREETS = ["hey", "hay", "hi", "okay", "ok"];
 const WAKE_GRAMMAR = WAKE_GREETS.flatMap((g) => WAKE_NAMES.map((n) => g + " " + n)).concat(["[unk]"]);
 const WAKE_RE = new RegExp("\\b(" + WAKE_GREETS.join("|") + ") (" + WAKE_NAMES.join("|") + ")\\b");
 // a safety net for very long messages, cut silently (the operator didn't want
 // "the rest is in the chat"; answers are short now and he can be interrupted)
 const SPEAK_MAX_SENTENCES = 12, SPEAK_MAX_CHARS = 1500;
-// ADDRESSED (2026-10-10, the operator: "every time someone addresses Argus, not
+// ADDRESSED (2026-10-10, the operator: "every time someone addresses the seat, not
 // just a wake phrase"): a free on-device recognizer hears every sentence; one
 // that names him anywhere goes, as audio, to whisper and becomes a message
 const LS_EARMODE = "membrane.home.earmode";          // "wake" (default) | "addressed"
-const NAME_ANY_RE = SEAT_CUSTOM ? new RegExp("\\b(" + HOT_NAMES + ")\\b", "i")
-  : /\b(argus|argos|are gus|our gus|are guess|our guess|angus|august)\b/i;
+const NAME_ANY_RE = new RegExp("\\b(" + HOT_NAMES + ")\\b", "i");
 // whisper hears the name's tail ("gus, turn on..."): what is cut off the front
-const STRIP_RE = SEAT_CUSTOM
-  ? new RegExp("^\\s*(?:(?:hey|hi|okay|ok)[\\s,]+)?(?:" + HOT_NAMES + ")(?=$|[\\s,.!?-])[\\s,.!?-]*", "i")
-  : /^\s*(?:(?:hey|hi|okay|ok)[\s,]+)?(?:are gus|our gus|argus|argos|angus|august|gus|us)(?=$|[\s,.!?-])[\s,.!?-]*/i;
+const STRIP_RE = new RegExp("^\\s*(?:(?:hey|hi|okay|ok)[\\s,]+)?(?:" + HOT_NAMES + ")(?=$|[\\s,.!?-])[\\s,.!?-]*", "i");
 const ADDR_MAX_S = 15;
 const DICTATE_END_MS = 1100, DICTATE_WAIT_MS = 3000, LOCK_END_MS = 1600;
 
@@ -3786,7 +3782,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         load(); window.speechSynthesis.addEventListener && window.speechSynthesis.addEventListener("voiceschanged", load);
       }
       // WHAT STOPS HIM (the operator: "only a tap that sends a message or starts
-      // the microphone, or 'Hey Argus'"): sending (below), 🎙/🔒 (_recStart),
+      // the microphone, or 'Hey <name>'"): sending (below), 🎙/🔒 (_recStart),
       // his name (_localWake) -- nothing else
       this._chat.addEventListener("ai-sent", () => { if (this._speaking || (this._speechQ || []).length) { this._hushTts(); this._orb(null); this._orbText(""); } });
       this._earBtn = root.querySelector(".ear");
@@ -3816,7 +3812,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           if (!this._speaking && !(this._speechQ || []).length) this._orb(null);
         }, 1500);
       });
-      // SPEECH AS IT COMES: Argus's words the moment each part closes (🔊 on, or
+      // SPEECH AS IT COMES: the seat's words the moment each part closes (🔊 on, or
       // a turn you started by voice), membrane's own lines in its own voice (🔊 on)
       // the reply finished (a busy chat may not go idle for a long while:
       // don't wait for it) -- the voice turn is over; the wave rests once speech is done
@@ -3825,9 +3821,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         setTimeout(() => { if (!this._speaking && !(this._speechQ || []).length) this._speechDone(); }, 400);
       });
       // VOICE OUT (2026-10-11, the operator: "it should not voice the chat since we
-      // have voice:out"): Argus speaks through his voice:out line (ai-say);
+      // have voice:out"): the seat speaks through his voice:out line (ai-say);
       // the chat's text is never read aloud, nor membrane's lines.
-      // ARGUS OPENS THE MIC (2026-10-12, the operator: "let argus turn listening on and
+      // THE SEAT OPENS THE MIC (2026-10-12, the operator: "let the seat turn listening on and
       // off instead of that follow-up mode"): voice:in's `listen` -> listen that long once
       // he has finished speaking (never his own voice); 0 closes. Needs the ear (👂) on.
       this._chat.addEventListener("ai-listen", (e) => {
@@ -3851,8 +3847,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._chat.addEventListener("ai-say", (e) => {
         const d = e.detail || {};
-        speechLog("argus", this._ttsOn ? "say (voice:out)" : "skip: 🔊 off", d.text);
-        if (this._ttsOn && d.text) this._enqueueSpeech("argus", d.text);
+        speechLog("seat", this._ttsOn ? "say (voice:out)" : "skip: 🔊 off", d.text);
+        if (this._ttsOn && d.text) this._enqueueSpeech("seat", d.text);
       });
       // ONLY voice:out is spoken (2026-10-11, the operator: "why does it voice
       // membrane's babbles instead of whatever is sent thru voice:out?"): the
@@ -4288,7 +4284,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         h.any = recognizer(h.model, h.rate, null, (t) => { if (NAME_ANY_RE.test(t)) h.aHit = true; });
         h.any.onResult = (t) => this._addressed(h, t);
       }
-      h.followWait = 0;                                   // an Argus-opened window is one-shot
+      h.followWait = 0;                                   // a seat-opened window is one-shot
       h.state = "wake";
     }
 
@@ -4326,7 +4322,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     /** Transcribe what follows (on the device): the same breath after the
-     * name, or -- after a bare "Hey Argus" -- the next sentence. */
+     * name, or -- after a bare "Hey <name>" -- the next sentence. */
     _dictate(h, follow) {
       h.state = "dictate"; h.follow = follow; h.spoke = !follow; h.silent = 0; h.dStart = performance.now();
       // the words after the name go to whisper (in the browser or on the brain
@@ -4376,7 +4372,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _hotLocalFrame(h, buf) {
       const f32 = buf.getChannelData(0);
-      // Argus speaking does NOT stop the ear: his name cuts him off (Siri-like barge-in)
+      // The seat speaking does NOT stop the ear: his name cuts him off (Siri-like barge-in)
       const busy = h.paused || h.muteUntil > performance.now() || this._rec || this._recBusy;
       let ss = 0; for (let i = 0; i < f32.length; i++) ss += f32[i] * f32[i];
       const rms = Math.sqrt(ss / f32.length), thr = Math.max(0.012, h.floor * 3.5);
@@ -4483,7 +4479,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     /** The utterance ended: decide what it was. */
     async _hotDone(h, u) {
-      if (u.follow) {                                       // the sentence after a bare "Hey Argus"
+      if (u.follow) {                                       // the sentence after a bare "Hey <name>"
         h.follow = 0;
         const t = await this._hotStt(h, u.chunks, false);
         if (t && this._hot === h) this._hotSend(t); else this._vsay("didn't catch that");
@@ -4523,7 +4519,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._vsay("👂 yes?", 3000);
     }
 
-    /** A bare "Hey Argus": a short spoken ack in Argus's voice (fetched once). */
+    /** A bare "Hey <name>": a short spoken ack in the seat's voice (fetched once). */
     /** The wake word heard: a chime, not a spoken "uh-huh" (2026-10-11, the
      *  operator: the "uh-huhs" and "yesses" cut into him listening to me). */
     async _hotAck(h) {
@@ -4586,10 +4582,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     /** The speech queue (2026-10-10: membrane's long babble queued AHEAD of
-     * Argus and the cap dropped his words): Argus first -- his segment cuts a
+     * the seat and the cap dropped his words): the seat first -- his segment cuts a
      * membrane line that's playing and jumps every queued one; membrane says
-     * at most two sentences, only when Argus has nothing waiting, and a line
-     * older than 30 s is dropped. Argus's own segments are never dropped. */
+     * at most two sentences, only when the seat has nothing waiting, and a line
+     * older than 30 s is dropped. The seat's own segments are never dropped. */
     _enqueueSpeech(kind, text) {
       const q = this._speechQ = this._speechQ || [];
       const item = { kind, text, ts: Date.now() };
@@ -4626,8 +4622,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
             this._speakingWho = "membrane";
             await this._speak(speechChunks(item.text).slice(0, 2).join(" "), "membrane", true);
           } else {
-            this._speakingWho = "argus";
-            await this._speak(item.text, "argus", true);
+            this._speakingWho = "seat";
+            await this._speak(item.text, "seat", true);
           }
           this._speakingWho = null;
         }
@@ -4648,7 +4644,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     /** One utterance in the device's own voice; resolves when it ends. */
-    _say1(text, who = "argus") {
+    _say1(text, who = "seat") {
       return new Promise((res) => {
         try {
           // Chrome's engine stalls on long stretches: keep it awake, and clear a stuck queue first
@@ -4671,7 +4667,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
     }
 
-    async _speak(text, who = "argus", queued = false) {
+    async _speak(text, who = "seat", queued = false) {
       if (!queued) this._hushTts();
       if (this._voice && window.speechSynthesis) {          // ON THE DEVICE: nothing sent anywhere
         const gen = this._ttsGen;
@@ -4679,7 +4675,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._orb("speaking");
         const cut = this._cutGen;
         for (const chunk of speakable(text)) {
-          if (gen !== this._ttsGen || cut !== this._cutGen) break;   // hushed, or cut for Argus
+          if (gen !== this._ttsGen || cut !== this._cutGen) break;   // hushed, or cut for the seat
           this._orbText(chunk);
           await this._say1(chunk, who);
         }

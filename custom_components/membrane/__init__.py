@@ -25,7 +25,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT
 from homeassistant.core import CoreState, HomeAssistant
 
 from . import zoo
-from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, DEFAULT_LOOPS, DOMAIN,
+from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, DEFAULT_LOOPS, DEFAULT_NAME, DOMAIN,
                     MODE_INSIDE, OPT_HA_ACCESS, OPT_HA_BASE_URL, OPT_LANDING, OPT_LOOPS, OPT_STT_URL)
 
 _LOGGER = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(entry, options=opts)
     comp["stt_default"] = str(opts.get(OPT_STT_URL) or "")
     comp["stt_url"] = comp["stt_default"]
-    comp.setdefault("name", "Bob")
+    comp.setdefault("name", DEFAULT_NAME)
     # THE ZOO (#283): the seats, the active one; every reader of comp["serve_*"]
     # follows the active seat (zoo.apply), a switch moves them live (zoo.switch)
     comp["entry"] = entry

@@ -98,7 +98,7 @@ class TestArgusRestarts(unittest.TestCase):
                 time.sleep(0.01)
         self.assertEqual(out["rc"], 0)
         kill.assert_called_once()
-        self.assertIn("Argus restarted it (nothing of mine in flight); it loads the staged score.py",
+        self.assertIn("the seat restarted it (nothing of mine in flight); it loads the staged score.py",
                       Path(srv.data_dir, RS.REASON_FILE).read_text())
 
     def test_any_boot_loads_the_staged_code(self):
