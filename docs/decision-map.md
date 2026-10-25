@@ -49,6 +49,10 @@ On a `Decision`, `entity_edit` refuses `value`, `set_by`, `set_at` and any `stat
 - `POST /membrane/decision/chat {card, chat}` (serve port, owner only) records the chat a card opened. Only `chat` changes, and a card keeps one it already has.
 - `POST /membrane/decision/answer {card, value, conv, message}` (seat owner only) validates the value against the card's `var`. It then marks the card `decided` (keeping `message` when it comes with its `conv` and that is the card's chat) and appends `decided: <title> = <value>` to the operator ledger (`<field>.ledger.jsonl`), so the decision is recalled verbatim, as law. The ledger line is one line, and the title and value are each clipped to 160 characters. The ledger is written first, so a failed write leaves the card open. Answers run one at a time, so a card is decided once. A decided card refuses another answer (409), and `entity_edit` can't reopen it. Changing a past decision will create a timeline (step 3). A `Decision` with no status yet (made before the map) can be given one and become a card.
 
+### An answer wakes the watcher loops
+
+A successful answer puts one `decision` event into the watcher loops' events pool (`est._events_pool`, the pool a fired watch lands in): `{kind: "decision", entity: <card eid>, title, value, blocks}`. The loops' drainer admits a pass on the card like any watch event, and its task line reads `decided: <title> = <value> (card '<eid>')` with what the card blocks. A refused answer enqueues nothing.
+
 `GET /membrane/decisions` is a read, open to the same callers as the seat's other reads (localhost, the LAN in standalone, a token in JWT mode). Only answering needs the owner.
 
 Agents can't decide through any write path. `entity_add` takes no properties (the MCP tool sends extra properties through `entity_edit`, which refuses), and a script's `patch` admits only `position`, `script_data` and `links`. An older `Decision` that already carries a `value` keeps it, but `entity_edit` can no longer change it.

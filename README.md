@@ -212,7 +212,7 @@ tracks, commands, interfaces, classes, loops, timelines, frame, digest, or
 changes since the last message), `learn` to keep a lesson (with the same guards as any turn),
 `forget` to clean up its mistakes, and the entity tools
 (`entity_add/edit/remove/link/inherit`, `entity_query`, `entity_tracks`,
-`entities_related`, …). Commands compose in **Cliffhanger**, membrane's command
+`entities_related`, …) and Cliffhanger's method tools (`method_define/call/each/inspect`). Commands compose in **Cliffhanger**, membrane's command
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
 where it came from.

@@ -38,12 +38,50 @@ def test_the_note_says_how_to_work():
                    "\"next I'll...\"",
                    "End your turn only when",
                    "the task is done",
-                   "you need the person's decision",
                    "you are blocked",
                    "Say which",
                    "same message as your next tool call",
                    "\"Open decisions\""):
         assert phrase in note, phrase
+
+
+# ---- programming the field (2026-10-25): Memo "just runs commands instead
+# of programming the field" -- the note sold entity_link as a raw shell. It
+# now says the doctrine's way: reuse what you have, name or define what is
+# worth repeating, keep world things current with getter/tick scripts; raw
+# one-off commands are for exploring and for code work in a worktree.
+
+def test_the_note_teaches_programming_the_field():
+    note = CA.TOOLS_NOTE
+    for phrase in ("programming the field", "method_define", "method_call",
+                   "method_each", "method_inspect", "entity_query",
+                   "'<label> :: <command>'", "getter_script", "tick_script",
+                   "tick_every", "doctrine", "worktree", "one-off"):
+        assert phrase in note, phrase
+    # reuse comes BEFORE a raw command
+    assert note.index("entity_query") < note.index("one-off")
+    # the raw-shell sales pitch is gone
+    assert "read files (cat, sed -n" not in note
+
+
+def test_the_note_keeps_detach_and_the_decision_card():
+    note = CA.TOOLS_NOTE
+    assert "nohup <command> > <log> 2>&1 &" in note
+    assert "longer than about 4 minutes" in note
+    assert "entity_add class='Decision'" in note
+    # a card no longer ends the turn (2026-10-25, the operator)
+    assert "After making a card" not in note
+    assert "End your turn only when the task is done or when you are blocked." in note
+
+
+def test_the_note_stays_tight():
+    assert len(CA.TOOLS_NOTE) <= 3200, len(CA.TOOLS_NOTE)
+
+
+def test_the_name_map_carries_define_and_each():
+    pairs = {(f, a): n for f, a, n in _name_map()}
+    assert pairs[("exec", "define")] == "method_define"
+    assert pairs[("exec", "each")] == "method_each"
 
 
 def test_the_system_prompt_carries_the_note_after_the_doctrine():

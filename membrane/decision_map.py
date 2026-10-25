@@ -201,6 +201,10 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "") ->
             p["message"] = message
     ent.properties = p
     est.upsert(ent)
+    pool = getattr(est, "_events_pool", None)   # the watcher loops' events pool (the proxy wires it)
+    if pool is not None:                        # the answer wakes a loop pass, like a fired watch
+        pool.put({"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
+                  "blocks": p.get("blocks") or [], "ts": time.time()})
     return {"ok": True, "card": _card_of(ent)}
 
 
