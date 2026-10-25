@@ -1549,6 +1549,11 @@ def tool_entity_link(args: dict, port: int, head_cap: int | None = None) -> str:
     return "\n".join(lines)
 
 
+def tool_method_call_local(args: dict, port: int) -> str:
+    """method_call for the local models (server.mcp_executor): the short head."""
+    return tool_method_call(args, port, head_cap=LOCAL_LINK_HEAD)
+
+
 def tool_entity_link_local(args: dict, port: int) -> str:
     """entity_link for the local models (server.mcp_executor): the short head."""
     return tool_entity_link(args, port, head_cap=LOCAL_LINK_HEAD)
@@ -1603,7 +1608,14 @@ def tool_method_define(args: dict, port: int) -> str:
             f"inherits from) its owner: exec(action='call', object=..., method=...)")
 
 
-def tool_method_call(args: dict, port: int) -> str:
+def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
+    """A method call; the run's full output rides the reply up to
+    LINK_OUTPUT_CAP, as entity_link's does; `head_cap` (the local models'
+    path) keeps the short head instead."""
+    def shown(out: dict) -> str:
+        if head_cap is not None:
+            return f"head: {str(out.get('head') or '')[:head_cap]}"
+        return _link_output(out)
     a = args.get("args")
     if isinstance(a, str):
         try:
@@ -1619,7 +1631,7 @@ def tool_method_call(args: dict, port: int) -> str:
                     + (f" [resolution order: {' > '.join(out['mro'])}]" if out.get("mro") else ""))
         return (f"[{out.get('status')}] {out['method']} on {out['object']} (via {out['via']}): "
                 f"rc={out.get('rc')} {out.get('outcome')}\nran: {str(out.get('fed') or '')[:300]}\n"
-                f"head: {str(out.get('head') or '')[:600]}")
+                f"{shown(out)}")
     a = dict(a) if isinstance(a, dict) else {}
     # THE PARAM BAG (issue #5 residual): the models put the wake's
     # about/at/prompt (and the browser executor's code) at the TOP of the
@@ -1638,7 +1650,7 @@ def tool_method_call(args: dict, port: int) -> str:
                 + (f" [resolution order: {' > '.join(out['mro'])}]" if out.get("mro") else ""))
     return (f"[{out.get('status')}] {out['method']} on {out['object']} (via {out['via']}; order "
             f"{' > '.join(out.get('mro') or [])}): rc={out.get('rc')} {out.get('outcome')}\n"
-            f"ran: {str(out.get('fed') or '')[:300]}\nhead: {str(out.get('head') or '')[:600]}")
+            f"ran: {str(out.get('fed') or '')[:300]}\n{shown(out)}")
 
 
 def tool_method_inspect(args: dict, port: int) -> str:
@@ -1810,8 +1822,9 @@ TOOL_IMPLS = {
     "entity_read": tool_entity_read,
 }
 # the local models' toolset path (server.mcp_executor): the same tools, with
-# entity_link's short head (their context is small)
-LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "entity_link": tool_entity_link_local}
+# entity_link's and method_call's short head (their context is small)
+LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "entity_link": tool_entity_link_local,
+                    "method_call": tool_method_call_local}
 
 
 # ---- the JSON-RPC loop ---------------------------------------------------------
