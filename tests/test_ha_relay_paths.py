@@ -145,3 +145,129 @@ def test_owner_writes_are_admin_only(relay):
 def test_cockpit_reads_are_get_only(relay):
     for p in ("membrane/decisions", "membrane/goals", "membrane/stats", "membrane/quota", "membrane/map/search"):
         assert relay.read_only_path(p), p
+
+
+# ---- methods matter, not only paths: the relay view end to end ---------------------
+# A fake seat records what reaches it; the view runs on a mocked HA request.
+
+def _relay_call(relay, method, rest, uid="u1", is_admin=False, owners=None, body=b""):
+    import asyncio
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer, make_mocked_request
+
+    seen = []
+
+    async def seat(request):
+        seen.append((request.method, request.path))
+        return web.json_response(True)
+
+    async def go():
+        app = web.Application()
+        app.router.add_route("*", "/{tail:.*}", seat)
+        async with TestServer(app) as srv:
+            comp = {"serve_url": str(srv.make_url("")), "serve_ready": True,
+                    "owners": dict(owners or {}),
+                    "owners_store": types.SimpleNamespace(async_delay_save=lambda *a, **k: None)}
+            hass = types.SimpleNamespace(data={"membrane": comp})
+            req = make_mocked_request(method, "/api/membrane/serve/" + rest,
+                                      match_info={"path": rest}, app={"hass": hass},
+                                      payload=None)
+            req["hass_user"] = types.SimpleNamespace(id=uid, name="Tester", is_admin=is_admin)
+            if body:
+                async def _read():
+                    return body
+                req.read = _read
+            view = relay.ServeProxyView()
+            resp = await getattr(view, method.lower())(req, path=rest)
+            if comp.get("http_session") is not None:
+                await comp["http_session"].close()
+            return resp.status, seen, comp
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(go())
+    finally:
+        loop.close()
+
+
+def test_the_chat_delete_reaches_the_seat(relay):
+    # the panel's 🗑 "Delete chat": DELETE serve/session/<id> of the caller's own chat
+    status, seen, comp = _relay_call(relay, "DELETE", "session/ses_1", owners={"ses_1": "u1"})
+    assert status == 200, status
+    assert seen == [("DELETE", "/session/ses_1")], seen
+    assert "ses_1" not in comp["owners"]
+
+
+def test_someone_elses_chat_delete_is_a_404(relay):
+    status, seen, _ = _relay_call(relay, "DELETE", "session/ses_1", owners={"ses_1": "u2"})
+    assert (status, seen) == (404, [])
+
+
+def test_an_owner_write_needs_an_admin(relay):
+    status, seen, _ = _relay_call(relay, "POST", "membrane/decision/answer", body=b'{"card": "x"}')
+    assert (status, seen) == (403, [])
+    status, seen, _ = _relay_call(relay, "POST", "membrane/decision/answer", is_admin=True, body=b'{"card": "x"}')
+    assert status == 200 and seen == [("POST", "/membrane/decision/answer")]
+
+
+def test_a_cockpit_read_is_get_only(relay):
+    status, seen, _ = _relay_call(relay, "GET", "membrane/decisions")
+    assert status == 200 and seen == [("GET", "/membrane/decisions")]
+    status, seen, _ = _relay_call(relay, "POST", "membrane/decisions", body=b"{}")
+    assert (status, seen) == (405, [])
+
+
+def test_a_chat_round_trip_through_the_relay_to_a_real_seat(relay):
+    # the panel's chat lifecycle against membrane/server.py's own handler:
+    # 🆕 POST session, the list, ✎ PATCH title, 🗑 DELETE -- every method relayed
+    import asyncio
+    import json
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from aiohttp.test_utils import make_mocked_request
+
+    from membrane import server as NS
+
+    sessions = NS.SessionStore(None)
+    handler = NS.make_handler(hub=NS.SSEHub(), sessions=sessions, messages=NS.MessageStore(),
+                              config={}, runner=None)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    comp = {"serve_url": f"http://127.0.0.1:{httpd.server_address[1]}", "serve_ready": True,
+            "owners": {}, "owners_store": types.SimpleNamespace(async_delay_save=lambda *a, **k: None)}
+
+    async def call(method, rest, body=b""):
+        hass = types.SimpleNamespace(data={"membrane": comp})
+        req = make_mocked_request(method, "/api/membrane/serve/" + rest,
+                                  match_info={"path": rest}, app={"hass": hass})
+        req["hass_user"] = types.SimpleNamespace(id="u1", name="Tester", is_admin=False)
+
+        async def _read():
+            return body
+        req.read = _read
+        resp = await getattr(relay.ServeProxyView(), method.lower())(req, path=rest)
+        return resp.status, json.loads(resp.body or b"null")
+
+    async def go():
+        try:
+            st, s = await call("POST", "session", b"{}")
+            assert st == 200 and s["id"] in comp["owners"]
+            sid = s["id"]
+            st, rows = await call("GET", "session")
+            assert st == 200 and [r["id"] for r in rows] == [sid]
+            st, s = await call("PATCH", "session/" + sid, b'{"title": "renamed"}')
+            assert st == 200 and s["title"] == "renamed"
+            st, out = await call("DELETE", "session/" + sid)
+            assert (st, out) == (200, True)
+            assert sid not in comp["owners"] and sid not in sessions.sessions
+        finally:
+            if comp.get("http_session") is not None:
+                await comp["http_session"].close()
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(go())
+    finally:
+        loop.close()
+        httpd.shutdown()
