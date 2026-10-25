@@ -3972,7 +3972,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                                  relay_speaker=getattr(self, "_ui_speaker", "") if getattr(self, "_ui_relay", False) else None,
                                  body=b)
                 return self._json_out(_SP.set_pause(psrv, b["paused"], by=_by))
-            if path in ("/membrane/decision/answer", "/membrane/decision/chat"):
+            if path in ("/membrane/decision/answer", "/membrane/decision/chat", "/membrane/decision/drop"):
                 # #470: the board's writes, behind the owner's door above like
                 # every write: an answer (decision_map.answer) or a card's chat
                 from . import decision_map as _DM
@@ -3984,7 +3984,10 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if path.endswith("/answer"):
                     res = _DM.answer(est, getattr(psrv, "user_ledger", None), str(b.get("card") or ""),
                                      b.get("value"), conv=str(b.get("conv") or ""),
-                                     message=str(b.get("message") or ""))
+                                     message=str(b.get("message") or ""),
+                                     work=b.get("work") if isinstance(b.get("work"), bool) else None)
+                elif path.endswith("/drop"):
+                    res = _DM.drop(est, str(b.get("card") or ""))
                 else:
                     res = _DM.set_chat(est, str(b.get("card") or ""), str(b.get("chat") or ""))
                 if not res.get("ok"):

@@ -483,6 +483,9 @@ def loop_task_text(ev: dict) -> str:
     elif kind == "decision":
         # decision_map.answer: the operator answered this Decision card
         head = f"decided: {ev.get('title') or ent} = {ev.get('value', '?')} (card '{ent}')"
+        if ev.get("work_needed"):
+            head += (" -- it needs work: set its status to in_flight, do the work, then set its "
+                     "receipt and status closed")
         detail = f"It blocks: {', '.join(map(str, ev['blocks']))}" if ev.get("blocks") else ""
     elif kind == "getter-applied":
         # WHAT CHANGED (2026-10-11 sweep: the loop was woken with an empty task)

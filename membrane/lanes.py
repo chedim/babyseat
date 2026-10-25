@@ -4361,6 +4361,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._entity_add(); return
         if path == "/membrane/decision/answer":
             self._decision_answer(); return
+        if path == "/membrane/decision/drop":
+            self._decision_drop(); return
         if path == "/membrane/peer/post":
             self._peer_post(); return
         if path == "/membrane/peer/read":
@@ -6965,7 +6967,24 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                          getattr(srv, "user_ledger", None),
                          str(body.get("card") or ""), body.get("value"),
                          conv=str(body.get("conv") or ""),
-                         message=str(body.get("message") or ""))
+                         message=str(body.get("message") or ""),
+                         work=body.get("work") if isinstance(body.get("work"), bool) else None)
+        if not res.get("ok"):
+            self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
+        self._json_out(res)
+
+    def _decision_drop(self) -> None:
+        """POST /membrane/decision/drop {card}: the operator drops an open card.
+        Owner only: agents never drop."""
+        if self._paused_write_refused():
+            return
+        from . import seatauth as _SA
+        if not _SA.owner(self):
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
+        from . import decision_map as _DM
+        body = self._json_body()
+        res = _DM.drop(getattr(self.server, "entity_store", None), str(body.get("card") or ""))
         if not res.get("ok"):
             self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
         self._json_out(res)
