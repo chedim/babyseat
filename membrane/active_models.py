@@ -98,11 +98,22 @@ def current_runtime(srv, role: str) -> str:
 
 
 def known_models(srv) -> list[str] | None:
+    """What this seat serves: Ollama's chat-capable models, plus the Claude
+    rungs its router registered (Ollama never lists those, so a loop set to
+    claude-agent:sonnet was refused as 'not served here')."""
+    out: list[str] = []
     try:
         from .lanes import _chat_capable_models
-        return list(_chat_capable_models(getattr(srv, "backend", "")) or []) or None
+        out = list(_chat_capable_models(getattr(srv, "backend", "")) or [])
     except Exception:
-        return None
+        pass
+    try:
+        from . import claude_agent as _CA
+        recs = getattr(getattr(srv, "router", None), "records", None) or {}
+        out += [n for n, r in recs.items() if getattr(r, "backend", "") == _CA.PROVIDER and n not in out]
+    except Exception:
+        pass
+    return out or None
 
 
 def on_change(srv, ent, known=None) -> dict | None:
