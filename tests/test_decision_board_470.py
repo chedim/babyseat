@@ -92,21 +92,35 @@ def test_the_chat_opens_with_the_decision_prefilled():
 # ---- the view in membrane home (home.js, HomeLogic) ---------------------------------
 
 @NODE
-def test_decisions_is_a_view_of_the_standalone_page():
+def test_decisions_is_a_view_of_the_page():
     assert _js('H.knownView("decisions")', "home.js", "H") == "decisions"
     assert _js('H.knownView("chat")', "home.js", "H") == "chat"
     assert _js('H.knownView("graph")', "home.js", "H") == "graph"
-    assert _js('H.knownView("bogus")', "home.js", "H") == ""
+    assert _js('H.knownView("all")', "home.js", "H") == ""      # Everything is asked for by name
 
 
 @NODE
-def test_the_standalone_menu_lists_the_decisions_view():
-    rows = _js('H.standaloneMenu("")', "home.js", "H")
-    assert [r["v"] for r in rows] == ["chat", "graph", "decisions"]
-    assert rows[2]["title"] == "Decisions"
-    here = _js('H.standaloneMenu("decisions")', "home.js", "H")
-    assert [r["v"] for r in here] == ["chat", "graph", "decisions", ""]      # and back to everything
-    assert [r["v"] for r in here if r["current"]] == ["decisions"]
+def test_the_cockpit_is_the_default_view():
+    # standalone and Home Assistant alike: no ?view=, an empty one or an unknown one is the cockpit
+    for raw in (None, "", "bogus"):
+        assert _js('H.knownView(%s)' % json.dumps(raw), "home.js", "H") == "decisions", raw
+
+
+@NODE
+def test_the_standalone_menu_lists_every_view():
+    rows = _js('H.standaloneMenu("decisions")', "home.js", "H")
+    assert [r["v"] for r in rows] == ["chat", "graph", "decisions", "all"]
+    assert rows[2]["title"] == "Decisions" and rows[3]["title"] == "Everything"
+    assert [r["v"] for r in rows if r["current"]] == ["decisions"]
+    every = _js('H.standaloneMenu("")', "home.js", "H")                 # Everything is the "" view
+    assert [r["v"] for r in every if r["current"]] == ["all"]
+
+
+def test_hass_and_standalone_read_the_same_view():
+    src = (UI / "home.js").read_text()
+    line = next(l for l in src.splitlines() if l.startswith("  ? knownView("))
+    assert "window.MEMBRANE_VIEW" in line                                  # standalone: index.html sets it
+    assert 'new URLSearchParams(location.search).get("view")' in line      # HA has no index.html: the URL
 
 
 def test_the_page_loads_the_board_only_in_its_view():
