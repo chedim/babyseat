@@ -32,3 +32,24 @@ keywords:
   - child machine
 version: "0.7.2"
 date-released: "2026-10-25"
+references:
+  - type: article
+    title: "Evaluating Very Long-Term Conversational Memory of LLM Agents"
+    authors:
+      - family-names: Maharana
+        given-names: Adyasha
+      - family-names: Lee
+        given-names: Dong-Ho
+      - family-names: Tulyakov
+        given-names: Sergey
+      - family-names: Bansal
+        given-names: Mohit
+      - family-names: Barbieri
+        given-names: Francesco
+      - family-names: Fang
+        given-names: Yuwei
+    year: 2024
+    identifiers:
+      - type: other
+        value: "arXiv:2402.17753"
+    url: "https://arxiv.org/abs/2402.17753"

@@ -515,6 +515,32 @@ conservative.
 lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 (mature entities 0.206 → 0.634); see the v0.5.0 notes and `experiments/`.
 
+**Public benchmark: LoCoMo, retrieval mode (2026-10-25).** On LoCoMo
+(Maharana et al. 2024: 10 long multi-session conversations, 5,882 turns),
+we score only whether `/membrane/ask` returns a question's annotated
+evidence turn in its top k. There is no answer generation and no LLM judge,
+so these numbers are **not comparable** to published answer-accuracy scores.
+Each conversation goes into its own fresh field through the capture path (no
+chat model), one turn per `doc` event, in session order with the session date;
+embedder mxbai-embed-large. The baseline is plain cosine over the same
+embeddings.
+
+| category (n) | hit@8 | hit@20 | hit@50 | cosine baseline hit@8 |
+|---|---|---|---|---|
+| multi-hop (282) | 50.0% | 65.6% | 77.0% | 63.8% |
+| temporal* (321) | 60.8% | 68.2% | 76.3% | 71.3% |
+| open-domain* (92) | 37.0% | 50.0% | 65.2% | 46.7% |
+| single-hop* (841) | 57.6% | 67.7% | 77.4% | 65.8% |
+| **all answerable (1,536)** | **55.6%** | **66.3%** | **76.4%** | **65.4%** |
+| adversarial (446, no answer in the conversation) | 52.7% | 63.9% | 75.8% | 57.2% |
+
+What it shows: membrane's recall ranks **below plain cosine** today: when a
+question names a person, the entity lane fills about 45% of the top 8 with
+that person's newest lines. And turns captured as a person's chat lines are
+never returned as recall answers (0%), though the injected context holds the
+evidence for 48% of questions. Both are open work. \*LoCoMo's code confirms
+multi-hop and adversarial; the other three names follow the common mapping.
+
 - **Token economics, live seat (2026-10-12):** 5,736 live entities over
   4,949 streamed events; the standing per-turn header ~3 KB (entity tracks,
   one line each) instead of state dumps; per-turn injection is the state
@@ -609,3 +635,15 @@ If you use babyseat in research, please cite it. The citation metadata is in
 every release is archived on Zenodo under the concept DOI
 [10.5281/zenodo.23550667](https://doi.org/10.5281/zenodo.23550667), which
 always resolves to the newest version.
+
+The LoCoMo results above use the LoCoMo dataset (downloaded at run time, never
+committed: it states no license). Cite it as:
+
+```bibtex
+@article{maharana2024evaluating,
+  title={Evaluating very long-term conversational memory of llm agents},
+  author={Maharana, Adyasha and Lee, Dong-Ho and Tulyakov, Sergey and Bansal, Mohit and Barbieri, Francesco and Fang, Yuwei},
+  journal={arXiv preprint arXiv:2402.17753},
+  year={2024}
+}
+```
