@@ -980,6 +980,11 @@ def run_command_entity(fld, est, mem, command: str,
     # down to 0 and the tool:run record would add nothing -- floor at 1
     ms = max(1, int((time.time() - t0) * 1000))
     head, tail = text[:ST.RESULT_HEAD], text[-ST.RESULT_TAIL:]
+    # THE CALLER'S COPY (the clipped-shell report, 2026-10-24): the reply
+    # carries the output cut to the tool's inline cap; it is never stored
+    # (the doc keeps run_head/run_tail, the field the event's head/tail)
+    from .mcp_server import LINK_OUTPUT_CAP, cut_middle
+    output, output_len = cut_middle(text, LINK_OUTPUT_CAP), len(text)
     oc = "timeout" if err else ST.outcome(canon_e, head, tail, rc=rc)
     ok = rc == 0 and not err
     # THE RECEIPT'S REASON (issue #51): the why leaves the engine -- the
@@ -990,6 +995,7 @@ def run_command_entity(fld, est, mem, command: str,
         # no entity store mounted: exec, report, degrade (never wedge)
         return {"ok": ok, "eid": canon_e, "key": key, "rc": rc,
                 "outcome": oc, "head": head, "tail": tail, "ms": ms,
+                "output": output, "output_len": output_len,
                 "error": err, "doc": None, "created": False}
     doc = (est.docs or {}).get(key)
     created = doc is None
@@ -1046,6 +1052,7 @@ def run_command_entity(fld, est, mem, command: str,
                      "command": cmd[:200]})
     return {"ok": ok, "eid": canon_e, "key": key, "rc": rc, "outcome": oc,
             "head": head, "tail": tail, "ms": ms, "error": err,
+            "output": output, "output_len": output_len,
             "doc": doc, "created": created}
 
 
@@ -2139,7 +2146,8 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
                 doc.properties = dp
                 est.upsert(doc, embedder=None)
         res.update({k: out.get(k) for k in ("ok", "rc", "outcome", "head",
-                                            "tail", "ms", "error")})
+                                            "tail", "ms", "error",
+                                            "output", "output_len")})
         res["fed"] = fed if fed != cmd else None
         if ctx is not None:
             ctx.setdefault("steps", {})[_step_name(doc)] = {
@@ -4578,6 +4586,9 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                                          getattr(srv, "membrane", None),
                                          cmd)
             run_out.pop("doc", None)
+            # the getter's result rides events: the short residue only
+            run_out.pop("output", None)
+            run_out.pop("output_len", None)
             out["run_result"] = run_out
             changed += 1
             # THE ENTITY KEEPS ITS OWN RUN'S RESIDUE (the asking
