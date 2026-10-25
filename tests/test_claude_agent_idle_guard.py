@@ -74,12 +74,12 @@ def test_another_model_keeps_the_wall_clock():
     assert "outlived" in errs[0], errs
 
 
-# ---- a tool in flight is activity, not silence (as Claude Code: it never kills
-# its own long tool runs). While a membrane tool runs, the in-process MCP
-# handler streams a keep-alive chunk (ALIVE_KEY) at the call's start and every
-# TOOL_ALIVE_S; the serve side reads it as an event like any other. The real
-# chain end to end: a stand-in SDK -> SSEReply over HTTP -> loopback_ladder ->
-# the turn runner's watchdog.
+# ---- a silent tool call is silence (the operator, 2026-10-24: the rung does
+# not need #502's tool keep-alive). No keep-alive is streamed while a membrane
+# tool runs, so a tool that prints nothing for TURN_IDLE_S ends the turn; the
+# tools note tells Claude to start long commands detached and check them
+# afterwards. The real chain end to end: a stand-in SDK -> SSEReply over HTTP
+# -> loopback_ladder -> the turn runner's watchdog.
 
 import asyncio  # noqa: E402
 import http.server  # noqa: E402
@@ -133,7 +133,6 @@ def _run_tool(tool_s, after_result_s=0.0):
         return "the result"
     patches = [mock.patch.dict(sys.modules, {"claude_agent_sdk": sdk}),
                mock.patch.object(CA, "find_cli", lambda: "/usr/bin/claude"),
-               mock.patch.object(CA, "TOOL_ALIVE_S", 0.05),
                mock.patch.dict(MCP.TOOL_IMPLS, {"query": slow}),
                key_fixture()]
     for p in patches:
@@ -156,8 +155,9 @@ def _run_tool(tool_s, after_result_s=0.0):
             p.stop()
 
 
-def test_a_long_silent_tool_call_is_not_silence():
-    assert _run_tool(tool_s=4 * WINDOW) == []
+def test_a_long_silent_tool_call_is_silence():
+    errs = _run_tool(tool_s=4 * WINDOW)
+    assert len(errs) == 1 and "no event" in errs[0], errs
 
 
 def test_after_the_result_silence_still_aborts():
@@ -165,17 +165,24 @@ def test_after_the_result_silence_still_aborts():
     assert len(errs) == 1 and "no event" in errs[0], errs
 
 
-def test_the_handler_streams_keep_alives_while_the_tool_runs():
+def test_no_keep_alive_is_emitted_while_a_tool_runs():
+    assert not hasattr(CA, "TOOL_ALIVE_S")
+    assert not hasattr(CA, "ALIVE_KEY")
     a = CA._Answer()
     got = []
-    a.put = got.append
+    a.put = got.append                        # anything the handler might queue
 
     def slow(args, port):
         time.sleep(0.35)
         return "r"
-    with mock.patch.object(CA, "TOOL_ALIVE_S", 0.1), \
-            mock.patch.dict(MCP.TOOL_IMPLS, {"query": slow}):
+    with mock.patch.dict(MCP.TOOL_IMPLS, {"query": slow}):
         res = asyncio.run(CA._tool_handler("query", 9, a)({}))
     assert res["content"][0]["text"].startswith("r")
-    assert got and all(k == "alive" for k, _ in got), got
-    assert len(got) >= 3, got                 # at the start, then every TOOL_ALIVE_S
+    assert got == [], got
+
+
+def test_the_tools_note_says_to_detach_long_commands():
+    note = CA.TOOLS_NOTE
+    for word in ("4 minutes", "detached", "nohup", "entity_link",
+                 "entity script", "5 minutes"):
+        assert word in note, word

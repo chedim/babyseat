@@ -1705,8 +1705,8 @@ class TurnRunner:
     # Claude turns, 10-22). A claude-agent turn has no wall clock and no
     # lifetime cap: every event its stream publishes touches the activity
     # clock, and it aborts only after TURN_IDLE_S with no event at all. A
-    # tool in flight is activity: its handler streams keep-alives
-    # (claude_agent.TOOL_ALIVE_S) until the result.
+    # silent tool call is silence (no keep-alive, the operator 2026-10-24):
+    # the tools note tells Claude to detach long commands.
     TURN_IDLE_S = 300.0      # approved 2026-10-23 (the operator)
 
     def _turn_watchdog(self, sid: str, t0: float) -> None:
