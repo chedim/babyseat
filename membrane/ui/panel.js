@@ -285,14 +285,14 @@ function applyEvent(st, ev) {
       st.status = { type: "idle" };
       return true;
     case "membrane.say": {
-      // Argus speaking (voice:out): the voice log keeps it; the page says it
+      // The seat speaking (voice:out): the voice log keeps it; the page says it
       const ln = props.line || {};
       if (!ln.text) return false;
-      st.said = (st.said || []).concat([Object.assign({ who: "argus" }, ln)]).slice(-80);
+      st.said = (st.said || []).concat([Object.assign({ who: "seat" }, ln)]).slice(-80);
       return true;
     }
     case "membrane.predict": {
-      // membrane's guess of one of Argus's moves: a phantom in its place
+      // membrane's guess of one of the seat's moves: a phantom in its place
       const it = props.item || {};
       if (!it.mid || typeof it.n !== "number") return false;
       st.phantoms = st.phantoms || {};
@@ -362,7 +362,7 @@ function loadVoice(st, lines) {
   st.all = true;
 }
 
-/** Membrane's guesses of Argus's moves (GET /session/{sid}/predict), by message and place. */
+/** Membrane's guesses of the seat's moves (GET /session/{sid}/predict), by message and place. */
 function loadPhantoms(st, items) {
   st.phantoms = {};
   for (const it of items || []) {
@@ -371,7 +371,7 @@ function loadPhantoms(st, items) {
   }
 }
 
-/** Is this part one of Argus's moves (a text message or a tool call he made)? */
+/** Is this part one of the seat's moves (a text message or a tool call he made)? */
 function isMove(p) {
   if (!p || typeof p !== "object") return false;
   if (p.type === "text") return !!(p.text && !p.synthetic);
@@ -510,7 +510,7 @@ function connLabel(live, everLive, since, now, polling) {
 }
 
 /** The voice log: what was said aloud, oldest first -- the person's spoken
- *  messages (voiceIn rows), Argus's voice:out lines, membrane's own lines. */
+ *  messages (voiceIn rows), the seat's voice:out lines, membrane's own lines. */
 function voiceLogItems(rows, said, voiceLines) {
   const out = [];
   for (const r of rows || []) {
@@ -524,7 +524,7 @@ function voiceLogItems(rows, said, voiceLines) {
     const key = Math.round((x.ts || 0)) + ":" + x.text;
     if (!x.text || seen.has(key)) continue;
     seen.add(key);
-    out.push({ ts: (x.ts || 0) * 1000, who: "argus", label: "🔊 " + SEAT, text: x.text });
+    out.push({ ts: (x.ts || 0) * 1000, who: "seat", label: "🔊 " + SEAT, text: x.text });
   }
   for (const v of voiceLines || []) {
     if (v && v.text) out.push({ ts: v.time || 0, who: "membrane", label: "membrane", text: v.text });
@@ -1706,7 +1706,7 @@ function toyGlyph(t) {
   if (k === "ball") {                                  // #264: whose side it is on (self's left, yours right)
     const yours = r.side === "other";
     return { html: '<span class="ball side-' + (yours ? "other" : "self") + '"><i></i></span>',
-             label: nm + ", the ball: " + (yours ? "on your side, roll it back" : "with " + SELF_NAME + ", its turn next") };
+             label: nm + ", the ball: " + (yours ? "on your side, roll it back" : "with " + SELF_NAME + ", roll it whenever you like") };
   }
   if (k === "die") {
     const n = Number(v);
@@ -1799,7 +1799,10 @@ function toyPopoverHtml(t, res) {
     acts = bl.map((up, i) => ({ action: up ? "knock" : "rebuild", arg: i + 1, label: (up ? "knock " : "rebuild ") + (i + 1),
                                 title: up ? "knock block " + (i + 1) + " (and the ones above it) down" : "stand block " + (i + 1) + " back up" }));
   } else if (t.kind === "ball" && !(t.reading && t.reading.side === "other")) {
-    acts = [];                                         // #264: self has it -- its turn comes next
+    // #535: self has it, and a person may roll it anyway (since #333 self rolls only when its nudge aims at it)
+    out.push('<p class="muted">' + escText(SELF_NAME) + " has the ball: roll it whenever you like</p>");
+    acts = toyActions({ toy: t.name, kind: t.kind }).map((a) => Object.assign({}, a, { label: "roll it",
+      title: "roll the ball to " + SELF_NAME + " while it has it, tagged as yours" }));
   } else {
     acts = toyActions({ toy: t.name, kind: t.kind });
   }
@@ -1810,13 +1813,13 @@ function toyPopoverHtml(t, res) {
   } else {
     out.push('<p class="muted">' + (t.kind === "body" ? escText(SELF_NAME) + " only: nobody else can change it"
       : t.kind === "mirror" ? "it shows " + escText(SELF_NAME) + " its own moves, and a stranger's beside them: it takes no pokes"
-      : t.kind === "ball" ? escText(SELF_NAME) + " has the ball: it rolls it to you on its turn" : "no actions: its own clock is the point") + "</p>");
+      : "no actions: its own clock is the point") + "</p>");
   }
   out.push('<p class="pres' + (res && !res.ok ? " bad" : "") + '" aria-live="polite">' + escText(res ? res.text : "") + "</p>");
   return out.join("");
 }
 
-/** Membrane's guess of what Argus would DO this turn (predict.py: virtual,
+/** Membrane's guess of what the seat would DO this turn (predict.py: virtual,
  *  never run), scored against what he did: ✓ top guess, ~ in the top 3. */
 function guessHtml(line) {
   const g = line && line.guess;
@@ -1964,7 +1967,7 @@ function replyToSpeak(rows) {
     if (!r || !r.info) continue;
     if (r.info.role === "user") {
       // only a PERSON's row ends the search: membrane's own voice lines and
-      // auto-chat frames land as user rows DURING Argus's turn (the reply
+      // auto-chat frames land as user rows DURING the seat's turn (the reply
       // was never spoken, 2026-10-10)
       const said = (r.parts || []).map((p) => p.text || "").join("\n");
       if (SPEAKER_RE.test(said)) return null;
@@ -2158,7 +2161,7 @@ const STYLE = `
   .vguess { font-size:11px; opacity:.6; margin-top:3px; }
   .vlog { max-height:40%; overflow:auto; border-bottom:1px solid var(--divider-color, #444); padding:6px 10px; font-size:13px; }
   .vlog .vlhead { font-weight:600; opacity:.7; margin-bottom:4px; } .vlog .vli { margin:3px 0; }
-  .vlog .vlwho { opacity:.6; font-size:11px; } .vlog .vli.argus .vlwho { color:var(--primary-color, #4af); }
+  .vlog .vlwho { opacity:.6; font-size:11px; } .vlog .vli.seat .vlwho { color:var(--primary-color, #4af); }
   .phantom { opacity:.45; font-style:italic; border:1px dashed var(--divider-color, #888); border-radius:10px;
              padding:4px 9px; margin:4px 0; font-size:13px; white-space:pre-wrap; }
   .phantom.ptool { font-style:normal; font-family:var(--code-font-family, monospace); font-size:12px; }
@@ -3044,11 +3047,11 @@ function definePanel() {
       // text messages as they appear"): a text part's finished sentences are
       // said while the rest is still coming; the remainder when it closes.
       // A part whose message isn't known yet (streaming sends parts first) is
-      // Argus's unless it carries a person's speaker line.
+      // The seat's unless it carries a person's speaker line.
       this._spokenParts = this._spokenParts || new Set();
       // its own buffer (2026-10-11): it shared the name this._live with the
       // stream's live flag -- `true[partId] = ...` threw in strict mode while
-      // the stream was up, so every one of Argus's parts died unannounced
+      // the stream was up, so every one of the seat's parts died unannounced
       // and only membrane's lines (another path) were spoken
       this._speechParts = this._speechParts || {};
       const emit = (kind, id, text) => {
@@ -3059,7 +3062,7 @@ function definePanel() {
         this.dispatchEvent(new CustomEvent("ai-speak", { detail: { kind, id, text: t }, bubbles: true, composed: true }));
       };
       const roleOf = (mid) => { const r = this._chat.byId && this._chat.byId[mid]; return r && r.info && r.info.role; };
-      const isArgus = (mid, text) => {
+      const isSeat = (mid, text) => {
         const role = roleOf(mid);
         if (role) return role === "assistant";
         return !SPEAKER_RE.test(String(text || "")) && !/^\s*\[membrane voice\]/i.test(text || "");
@@ -3067,7 +3070,7 @@ function definePanel() {
       const flush = (st, partId, upto) => {                // say whole sentences up to `upto` (exclusive)
         const chunk = st.buf.slice(st.said, upto);
         if ((chunk.match(/```/g) || []).length % 2) return; // inside a code block: wait for its end
-        if (chunk.trim()) emit("argus", partId + ":" + st.said, chunk);
+        if (chunk.trim()) emit("seat", partId + ":" + st.said, chunk);
         st.said = upto;
       };
       if (ev.type === "message.part.updated") {
@@ -3084,16 +3087,16 @@ function definePanel() {
           }
           return;
         }
-        if (!isArgus(part.messageID, part.text)) return;
+        if (!isSeat(part.messageID, part.text)) return;
         const full = String(part.text || "");
         st.buf = full.length >= st.buf.length ? full : st.buf;
-        if (st.said < st.buf.length) { const rest = st.buf.slice(st.said); if (rest.trim()) emit("argus", part.id + ":" + st.said, rest); }
+        if (st.said < st.buf.length) { const rest = st.buf.slice(st.said); if (rest.trim()) emit("seat", part.id + ":" + st.said, rest); }
       } else if (ev.type === "message.part.delta") {
         if (p.field && p.field !== "text") return;
         const st = this._speechParts[p.partID] || (this._speechParts[p.partID] = { buf: "", said: 0, mid: p.messageID });
         if (st.type && st.type !== "text") return;         // reasoning streams the same way: never said
         st.buf += String(p.delta || "");
-        if (!isArgus(st.mid || p.messageID, st.buf)) return;
+        if (!isSeat(st.mid || p.messageID, st.buf)) return;
         const re = /[.!?…](?=\s|$)|\n/g;
         let m, upto = -1;
         re.lastIndex = st.said;
@@ -3144,7 +3147,7 @@ function definePanel() {
       if (ev.type === "membrane.name") this._applySeatName(p.name);   // issue #6: the name was adopted
       if (ev.type === "membrane.jsexec") this._jsRun(p.job).catch(() => {});
       if (ev.type === "membrane.listen" && sid === (this._chat && this._chat.sid)) {
-        // Argus opens (or closes) the mic for an answer (voice_io.on_listen);
+        // The seat opens (or closes) the mic for an answer (voice_io.on_listen);
         // pause = the ear holds while he speaks, resume comes as seconds again
         this.dispatchEvent(new CustomEvent("ai-listen", { detail: { seconds: Number(p.seconds) || 0, pause: !!p.pause }, bubbles: true, composed: true }));
       }
@@ -3166,7 +3169,7 @@ function definePanel() {
         this.dispatchEvent(new CustomEvent("ai-idle", { bubbles: true, composed: true }));
       }
       // SPEECH AS IT COMES (2026-10-10, the operator: "why does it voice
-      // messages MUCH after they appear?"): each of Argus's text parts the
+      // messages MUCH after they appear?"): each of the seat's text parts the
       // moment it closes, and each of membrane's own lines, once
       if (this._chat && sid === this._chat.sid && this._repliesArmed) this._announceSpeech(ev, p);
       // a finished reply, announced once (membrane home speaks it)
@@ -3240,7 +3243,7 @@ function definePanel() {
     _busy() { return !!(this._chat && this._chat.status && this._chat.status.type === "busy"); }
 
     /** VOICE IN (voice_io.py): a spoken phrase starts the turn like a message but
-     *  lives in the voice log, not the chat (🎙 tells Argus it was spoken).
+     *  lives in the voice log, not the chat (🎙 tells the seat it was spoken).
      *  CHUNKED STT (Phase 2): opts.stream + opts.final stream the person's speech
      *  -- interim (final:false) coalesces; final (final:true) starts the turn. */
     async sendVoice(text, opts = {}) {
@@ -3634,7 +3637,7 @@ function definePanel() {
         (out ? '<div class="lbl">output</div><pre>' + escText(out) + "</pre>" + more : "") + "</div></details>";
     }
 
-    /** THE SEAT'S JS (jsexec.py): opt in per tab; Argus's code then runs in this
+    /** THE SEAT'S JS (jsexec.py): opt in per tab; the seat's code then runs in this
      *  window, as you -- the switch is the consent. */
     async _toggleJs() {
       this._jsOn = !this._jsOn;
@@ -3708,7 +3711,7 @@ function definePanel() {
     _paintVoiceLog() {
       if (!this._vlogEl || !this._chat) return;
       const seat = this._vlogSeat || {};
-      const items = voiceLogItems(this._chat.rows, (this._chat.said || []).concat(((seat.out || {}).log || []).map((x) => Object.assign({ who: "argus" }, x))),
+      const items = voiceLogItems(this._chat.rows, (this._chat.said || []).concat(((seat.out || {}).log || []).map((x) => Object.assign({ who: "seat" }, x))),
                                   Object.values(this._chat.voice || {}));
       this._vlogEl.innerHTML = '<div class="vlhead">voice log' + (seat.in ? ' · mic ' + escText(seat.in.mode || "off") + ' · 🔊 ' + (seat.out && seat.out.on ? "on" : "off") : "") +
         "</div>" + (items.length ? items.map((x) => '<div class="vli ' + x.who + '"><span class="vlwho">' + escText(x.label) + "</span> " + escText(x.text) + "</div>").join("")

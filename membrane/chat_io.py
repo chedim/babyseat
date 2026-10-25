@@ -4,7 +4,7 @@ same should be for voice").
 
 One entity per person, in the seat's own store:
 
-  chat:<person>  Component, chat_io "chat". Argus WRITES to the person by
+  chat:<person>  Component, chat_io "chat". The seat WRITES to the person by
                  setting its `say` property (an ordinary entity edit, no new
                  tool): the line lands in their latest chat as an assistant
                  message, only while `on` (default on). `said` keeps what was
@@ -287,7 +287,7 @@ def heard(srv, person: str, text: str, sid: str = "") -> None:
 def ensure(srv, spec: str) -> str | None:
     """The edit route's first step: an edit of a person's chat -- chat:<p> or
     the old chat:out:<p> -- makes their chat thing when it does not exist yet
-    (Argus can write to anyone the seat knows) -> its exact eid, which the
+    (the seat can write to anyone the seat knows) -> its exact eid, which the
     route edits (None: not a chat). The old spelling keeps resolving to it: a
     chat:out:<p> that never existed is made as a pointer (merged_into)."""
     s = str(spec or "").strip()

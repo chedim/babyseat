@@ -146,9 +146,19 @@ class TestUiServe(unittest.TestCase):
 
     def test_off_unless_standalone(self):
         with mock.patch.dict(os.environ, {"MEMBRANE_STANDALONE": ""}):
-            self.assertEqual(self._req("/ui/conf", raw=True)[0], 404)            # a plain serve: no UI route
-            self.assertEqual(self._req("/ui/conf", raw=True, auth=True)[0], 404)
+            self.assertEqual(self._req("/", raw=True)[0], 404)                   # a plain serve: no UI
+            self.assertEqual(self._req("/ui/www/home.js", raw=True)[0], 404)
             self.assertEqual(self._req("/ui/serve/session", raw=True, auth=True)[0], 404)
+
+    def test_a_plain_serve_says_only_its_name(self):
+        # issue #6: Home Assistant connected to a plain serve called it Bob --
+        # /ui/conf answers there too, the name and its aliases only (what
+        # zoo.fetch_name reads), never the page's config
+        with mock.patch.dict(os.environ, {"MEMBRANE_STANDALONE": ""}):
+            self.assertEqual(self._req("/ui/conf"), (200, {"name": "Bob", "aliases": []}, mock.ANY))
+            S.save({"name": "Memo", "aliases": ["memmo"]})
+            code, c, _ = self._req("/ui/conf", auth=True)
+            self.assertEqual((code, c), (200, {"name": "Memo", "aliases": ["memmo"]}))
 
     def test_lan_addresses(self):
         def h(ip, **hdr):

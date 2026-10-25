@@ -43,7 +43,7 @@ class TestNaming(unittest.TestCase):
     def test_rules(self):
         v = {"juniper", "nova", "standalone", "argus", "wren"}
         self.assertIsNone(N.check("Juniper", v))
-        self.assertIn("taken", N.check("Argus", v))
+        self.assertIn("taken", N.check("Claude", v))
         self.assertIn("syllables", N.check("Wren", v))
         self.assertIn("recognizer", N.check("Kestrel", v))
         self.assertIn("one plain word", N.check("Mary Jane", v))
@@ -73,10 +73,6 @@ class TestNaming(unittest.TestCase):
         self.assertFalse(N.on_edit(None, ent)["adopted"])
         self.assertIn("recognizer", ent.properties["status"])
         self.assertEqual(N.current(), "Bob")
-
-    def test_personalize(self):
-        self.assertEqual(N.personalize("let Argus act as you", "Membrane"), "let Membrane act as you")
-        self.assertEqual(N.personalize("let Argus act", "Argus"), "let Argus act")
 
 
 if __name__ == "__main__":

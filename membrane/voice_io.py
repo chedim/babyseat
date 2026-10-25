@@ -1,6 +1,6 @@
 """VOICE IN, VOICE OUT (2026-10-11, the operator: "a per-seat voice
 output/input entity that is enabled/disabled when the ui buttons are flipped
-and let Argus use those parallel with the chat ... the voice should not be
+and let the seat use those parallel with the chat ... the voice should not be
 appearing/duplicating as a message in the text chat ... and it should not
 voice the chat since we have voice:out ... a separate voice log I could open,
 hidden by default").
@@ -12,7 +12,7 @@ Two entities per person, in the seat's own store:
                       the person said (their words still start a turn, as a
                       message marked voiceIn: hidden from the chat, shown in
                       the voice log)
-  voice:out:<person>  on / device -- flipped by 🔊; Argus SPEAKS by setting
+  voice:out:<person>  on / device -- flipped by 🔊; the seat SPEAKS by setting
                       its `say` property (an ordinary entity edit, no new
                       tool): the page says it aloud, the chat keeps the text
                       it wrote. `said` keeps what was spoken.
@@ -175,7 +175,7 @@ def on_edit(srv, ent, stream: bool = False) -> dict | None:
     try:
         if r is not None and sid:
             r.hub.publish({"type": "membrane.say", "sessionID": sid, "person": person,
-                           "line": {"text": text, "ts": now, "who": "argus"}})
+                           "line": {"text": text, "ts": now, "who": "seat"}})
     except Exception:
         pass
     _hold_ear(srv, person)                     # the ear never hears his own voice
@@ -199,12 +199,12 @@ LOCK_S = 8.0                     # THE SHORTER LOCK (Phase 3): a follow-up answe
 
 
 def on_listen(srv, ent) -> dict | None:
-    """ARGUS OPENS THE MIC (2026-10-12, the operator: "let argus turn listening on
+    """THE SEAT OPENS THE MIC (2026-10-12, the operator: "let the seat turn listening on
     and off instead of that follow-up mode -- they can control it if they need a
     response"). An edit of voice:in's `listen` tells the person's page what to do:
     seconds (0 closes, at most LISTEN_MAX_S -- a follow-up set mid-turn gets the
     shorter LOCK_S), or "pause"/"resume" (Phase 3's turn-taking: hold the ear
-    while Argus speaks, reopen it after)."""
+    while the seat speaks, reopen it after)."""
     pp = (getattr(ent, "properties", None) or {})
     if pp.get("voice_io") != "in" or "listen" not in pp:
         return None
@@ -240,7 +240,7 @@ def on_listen(srv, ent) -> dict | None:
 
 def _listen_toggle(srv, ent, pp: dict, word: str) -> dict:
     """The "listen" control's pause/resume (Phase 3): the ear holds its remaining
-    window while Argus speaks, and reopens it after -- the page needn't guess."""
+    window while the seat speaks, and reopens it after -- the page needn't guess."""
     if word == "pause":
         held = float(pp.get("listening_for_s") or 0)
         pp["listen_hold"] = held if held > 0 else pp.get("listen_hold") or 0
@@ -281,7 +281,7 @@ def _publish_listen(srv, pp: dict, secs: float, pause: bool = False) -> None:
 
 
 def _hold_ear(srv, person: str) -> None:
-    """AUTO-PAUSE TURN-TAKING (Phase 3): while Argus speaks, the person's ear
+    """AUTO-PAUSE TURN-TAKING (Phase 3): while the seat speaks, the person's ear
     holds its remaining window -- it never hears his own voice. The speaker
     turn's release_listen reopens it."""
     vin = entity(srv, "in", person, create=False)

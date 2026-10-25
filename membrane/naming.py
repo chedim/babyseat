@@ -26,7 +26,7 @@ from . import settings as S
 
 DEFAULT = "Bob"                 # the operator: "call new membranes Bobs until the user chooses to rename them"
 ENT = "name"
-TAKEN = {"argus", "standalone", "assistant", "ai", "bot", "seat", "agatha", "claude"}
+TAKEN = {"standalone", "assistant", "ai", "bot", "seat", "agatha", "claude"}
 VOSK_ARCHIVE = "vosk-model-en.tar.gz"
 _SYL = re.compile(r"[aeiouy]+")
 _VOCAB: dict = {}
@@ -223,7 +223,3 @@ def feedback_line() -> str:
             f"{ISSUES}/new?title=<url-encoded title>&body=<url-encoded body> -- and say why it "
             "matters. You never post it yourself; they decide.\n")
 
-
-def personalize(text: str, name: str) -> str:
-    """The doctrine as this seat reads it: the boat's seat name out, its own in."""
-    return re.sub(r"\bArgus\b", name, text) if name and name != "Argus" else text

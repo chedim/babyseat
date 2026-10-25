@@ -14,7 +14,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import (
     AddConfigEntryEntitiesCallback)
 
-from .const import DOMAIN
+from .const import DEFAULT_NAME, DOMAIN
 
 REQUEST_TIMEOUT_S = 600.0          # the turn loop may run minutes
 SESSION_TITLE_PREFIX = "hass-"
@@ -59,7 +59,7 @@ class MembraneServeEntity(conversation.ConversationEntity):
         self._entry = entry
         comp = hass.data[DOMAIN]
         self._comp = comp
-        self._attr_name = comp.get("name") or "Bob"   # the seat's own name (a rename shows after a reload)
+        self._attr_name = comp.get("name") or DEFAULT_NAME   # the seat's own name (a rename shows after a reload)
         from .sensor import device_info
         self._attr_device_info = device_info(entry)
         self._attr_unique_id = entry.entry_id

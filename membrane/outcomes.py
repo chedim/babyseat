@@ -1,8 +1,8 @@
 """OUTCOME LEARNING -- THE SHADOW GATE (2026-10-11, phase 2; the operator:
-"i dont wanna wait 3 days"; the design run by Argus, his review adopted).
+"i dont wanna wait 3 days"; the design run by the seat, his review adopted).
 
 For every gateable watch-loop wake the field guesses, as it arrives,
-whether Argus will IGNORE it -- then his real verdict lands and the guess
+whether the seat will IGNORE it -- then his real verdict lands and the guess
 is scored. SHADOW ONLY: nothing is skipped, and the guess never reaches
 him (BLIND VERDICTS -- his review: a clone that sees its teacher's answer
 learns to clone itself). It lives in the wake ledger and on

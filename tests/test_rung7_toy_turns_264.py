@@ -101,9 +101,10 @@ def test_self_rolls_it_to_the_other_and_a_person_rolls_it_back():
     assert st["counts"]["self"] == 1 and st["counts"]["alice"] == 1
 
 
-def test_a_person_cannot_roll_it_when_self_has_it():
+def test_the_model_cannot_roll_it_when_self_has_it():
+    # #535: a person may (test_ball_deadlock_535); the model's roll would change nothing
     TB.create("ball", "toy:ball", now=100.0)
-    out = TB.poke("toy:ball", "roll", by="alice", now=120.0)
+    out = TB.poke("toy:ball", "roll", by="model", now=120.0)
     assert not out["ok"] and "self's side" in out["error"]
     assert TB.state("toy:ball")["log"] == []
 
@@ -547,13 +548,13 @@ class TestDockBall(unittest.TestCase):
         self.assertIn("with Blurp", g["label"])
         self.assertIn("side-self", g["html"])
 
-    def test_the_popover_offers_roll_it_back_only_on_your_side(self):
+    def test_the_popover_offers_roll_it_back_on_your_side_and_roll_it_with_blurp(self):
         h = _js("L.toyPopoverHtml(%s, null)" % json.dumps(_ball("other")))
         self.assertIn('data-poke-action="roll"', h)
         self.assertIn("roll it back", h)
         self.assertIn('data-poke-toy="toy:ball"', h)
         h = _js("L.toyPopoverHtml(%s, null)" % json.dumps(_ball("self")))
-        self.assertNotIn("data-poke-action", h)
+        self.assertIn('data-poke-action="roll"', h)                       # #535: from either side
         self.assertIn("Blurp has the ball", h)
 
     def test_the_dock_html_draws_it_first_as_given(self):

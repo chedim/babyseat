@@ -2152,7 +2152,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                 or str((q.properties or {}).get("name", "")).lower() == low]
         if len(hits) > 1:
             # THE DELIBERATE ONE WINS (2026-10-10: a night-minted twin
-            # 'models:mqtt:bridge' shadowed Argus's 'Component:mqtt:bridge'):
+            # 'models:mqtt:bridge' shadowed the seat's 'Component:mqtt:bridge'):
             # an entity someone made beats one the night materialized from text
             def _made(q):
                 pp = q.properties or {}

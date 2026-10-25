@@ -306,7 +306,7 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
     if materialize > 0 and not only_keys:
         hot = []
         # THE NAME CHECK (2026-10-10, the operator: "does the night overwrite
-        # the mqtt entity, erasing what Argus made?"): Argus's
+        # the mqtt entity, erasing what the seat made?"): the seat's
         # 'Component:mqtt:bridge' got a night twin 'models:mqtt:bridge' (the
         # key check only knew its own key form) and the twin won every lookup
         # -- a name someone already gave an entity is never minted again
@@ -933,7 +933,7 @@ def run_command_entity(fld, est, mem, command: str,
             _r = _TB.from_command(cmd[len("toybox::"):].strip())
             rc, text = _r["rc"], _r["text"]
         elif cmd.startswith("seat::restart"):
-            # ARGUS RESTARTS THE SEAT (restarts.py): never a shell
+            # THE SEAT RESTARTS ITSELF (restarts.py): never a shell
             from . import restarts as _RS
             from .jsexec import _unquote
             _r = _RS.do_restart(_RS._seat_srv(), _unquote(cmd[len("seat::restart"):].strip()))
@@ -2296,9 +2296,9 @@ def command_specs(commands) -> list:
     return out
 
 
-# a label may be colon-segmented like the seat's own names ('argus:battery.soc
+# a label may be colon-segmented like the seat's own names ('seat:battery.soc
 # :: <command>'): without it the whole line went to the shell and died
-# 'argus:battery.soc: command not found' (2026-10-11 -- Argus took it for
+# 'seat:battery.soc: command not found' (2026-10-11 -- the seat took it for
 # "ANY colon gets mangled" and routed around it with a '~'-for-':' runner)
 _LABEL_RE = re.compile(r"^\s*(?:shell:|c:)?([A-Za-z][\w.-]{0,40}(?::[\w.-]{1,40}){0,3})\s*::\s*(\S.*)$", re.DOTALL)
 
@@ -2600,7 +2600,7 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
 # object's properties merged over its classes'; other {{params}} are the
 # call's args (shell-quoted). The receipt lands ON the object.
 CALLS_RING = 12
-COMPOSITE_DEPTH = 3            # Argus: "composite depth <= 3" -- feed-forward, not Turing-complete
+COMPOSITE_DEPTH = 3            # the seat: "composite depth <= 3" -- feed-forward, not Turing-complete
 
 
 def method_define(srv, est, fld, mem, on: str, method: str, command: str,
@@ -2824,7 +2824,7 @@ def contract_note(est, obj) -> str:
     return f"implements {names}; missing: {sig}"
 
 
-# THE OUTCOMES (Argus's review, 2026-10-10: "partial must not silently count
+# THE OUTCOMES (the seat's review, 2026-10-10: "partial must not silently count
 # as success"): ok | blocked (refused before running: a missing method, a
 # missing or empty value) | error (ran, failed) | timeout | partial (a
 # composite that got part-way -- step 2)
@@ -2927,7 +2927,7 @@ def _prepare_call(est, obj_spec: str, method: str, args=None, _depth: int = 0) -
     if sid.startswith("ha:") and not str(full.get("self.entity_id") or "").strip():
         full["self.entity_id"] = bare                     # an HA entity's id is its name
     full.update(dict(args or {}))
-    # NO SILENT EMPTIES (Argus: "silent empties cause real-world effects"): every
+    # NO SILENT EMPTIES (the seat: "silent empties cause real-world effects"): every
     # placeholder must have a non-empty value before anything runs
     template = str((m.properties or {}).get("command") or "")
     missing = [p for p in dict.fromkeys(_PARAM.findall(template))
@@ -3065,7 +3065,7 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
             "steps": {k: {kk: vv for kk, vv in v.items() if kk != "tail"} for k, v in ctx["steps"].items()}}
 
 
-# ---- FAN-OUT (Argus's review: "a named fan-out verb, not cardinality smuggled
+# ---- FAN-OUT (the seat's review: "a named fan-out verb, not cardinality smuggled
 # into ordinary calls"; "dry_run is the guard I'd use most -- show me who's
 # about to be hit"): one method over every member of a class (or a pattern),
 # capped, one summary receipt; each member's own call still lands on it

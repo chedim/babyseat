@@ -1102,7 +1102,8 @@ open (#249). This is where you play with self.
 
 - **The ball comes first** (#264): a small court split by a line, the ball on
   self's half (left) or on yours (right, ringed). When it is on your side,
-  it's your turn: open it and **roll it back**; it glows while it waits for
+  it's your turn: open it and **roll it back** (#535: you may roll it while
+  self has it too, whenever you like); it glows while it waits for
   you, and self's roll raises a toast with its own Roll it back button (#331).
   See [Playing ball](#playing-ball-rung-7).
 - **Each icon shows its toy:** a tower as a small stack (fallen blocks
@@ -1116,8 +1117,8 @@ open (#249). This is where you play with self.
   red no getter.
 - **Hover it, or tap it on a phone,** for a popover: its looks, its error
   earlier → later, the changes by self / world / people, the last change (by
-  whom, how long ago), and the play actions: roll the ball back (only while it
-  is on your side; while self has it, the popover says so), knock or rebuild
+  whom, how long ago), and the play actions: roll the ball back (#535: from
+  either side; while self has it, the popover says so and offers **roll it**), knock or rebuild
   per tower block, roll a die, nudge a drift or burst toy (body has none). The result
   shows in the popover (`✓ knock toy:tower block 3 → {"standing": false} (by
   alice)`). Esc closes it.
@@ -1499,7 +1500,7 @@ measure the bug.
 | `die` | memoryless: probability `p` per second, on its own clock, never on a read | `p` (1/60), `faces` (6) | rungs 3–5 |
 | `body` | only when **self** looks at it | none | the body/other test case (rung 6) |
 | `tower` | only when **self** nudges a block (#333; its look until then): a standing block topples with every block above it, and a fallen block is lifted back | `n` (5) | self's first act on the world |
-| `ball` | when **self** nudges it to you (#333: refused while it is on your side) or **you** roll it back (yours); its reading is whose side it is on, `{"side": "self"}` / `{"side": "other"}`; no clock, and a look never moves it | none | rung 7's turns (#264): serve and return |
+| `ball` | when **self** nudges it to you (#333: refused while it is on your side) or **you** roll it to self (yours; #535: whichever side it is on); its reading is whose side it is on, `{"side": "self"}` / `{"side": "other"}`; no clock, and a look never moves it | none | rung 7's turns (#264): serve and return |
 | `mirror` | when **self** feeds it its move, each cycle: the glass shows the move from `delay` feeds back (`by: self` on its log), the stranger self's own move from `lag_s` seconds before the glass's (`by: world`; #343: was `lag` feeds), each plus seeded gaussian jitter of SD `jitter`; its reading is `{"glass": ..., "stranger": ...}`; a getter since #333 part 3d (self sees it by looking), no clock, no pokes | `delay` (1), `lag_s` (1870), `jitter` (0.1) | rung 9 (#312): recognizing itself |
 
 Every kind also takes `seed`. A tower is one entity for the whole (its reading
@@ -1644,13 +1645,15 @@ who made it.
 | `die` | `roll` | a fresh face (never the same one) |
 | `drift` | `nudge [up\|down]` | one step (a coin picks the way when none is given); it bounces off a wall |
 | `burst` | `nudge` | a fresh value |
-| `ball` | `roll` | rolls it back to self (your turn). Only while it is on your side |
+| `ball` | `roll` | rolls it back to self (your turn). From either side (#535): while self has it, your roll still counts as yours |
 | `body` | none | self's alone: the control. A poke is refused |
 
 `fast` and `slow` take no pokes either: their clock is the point. A poke that
 would change nothing (knocking a fallen block, rebuilding a standing one,
-rolling a ball self already has) is refused, so every logged poke is a real
-change. Self's own roll is the one `by: self` on the ball; a poke that names
+the model rolling a ball self already has) is refused, so every logged poke
+is a real change -- except a person's roll of the ball, never refused (#535:
+since #333 self rolls only when its nudge aims at the ball, so waiting for its
+turn left the ball stuck on self's side); it is the other's act either way. Self's own roll is the one `by: self` on the ball; a poke that names
 itself `self` is written `person:self`. The model may roll the ball too
 (`by: model`), but that is never the other's turn. A tower block can be named
 directly: `toy:tower:b3 knock` is `toy:tower knock 3`.
@@ -1694,7 +1697,8 @@ your side is refused and costs Blurp energy. Rolling it back works as below.
 - **Where:** the ball is the first icon in the 🧸 toy dock under the 👶 tab.
   The ball sits on self's half of its little court (left) or on yours
   (right, ringed). On your side it's your turn: hover it (tap on a phone)
-  and press **roll it back**. From a terminal:
+  and press **roll it back**. While self has it you may roll it anyway
+  (**roll it**, #535): nothing waits for self's turn. From a terminal:
   `membrane toybox poke toy:ball roll` (tagged `operator`, or `--as <name>`).
 - **You can't miss it** (#331). When self rolls you the ball, membrane home
   says so: a toast at the top, `⚽ Blurp rolled you the ball`, with a big
