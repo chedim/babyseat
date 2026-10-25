@@ -181,6 +181,34 @@ def apply_think_dial(payload: dict, think: bool | None) -> dict:
     return u2
 
 
+def _quota_note(model: str, e) -> None:
+    """OUT OF TOKENS (quota.py): a 429 / 402 (or a quota error's words)
+    pauses this model; its reset from the body or Retry-After."""
+    try:
+        from . import quota as _Q
+        code = getattr(e, "code", None)
+        text = str(e)
+        try:
+            if hasattr(e, "read"):
+                text += " " + (e.read() or b"").decode("utf-8", "replace")[:600]
+        except Exception:
+            pass
+        hdrs = getattr(e, "headers", None)
+        ra = hdrs.get("Retry-After") if hdrs is not None else None
+        if code in (402, 429) or (code is None and _Q.is_quota_error(text)):
+            _Q.note_error(model, text, code=code, retry_after=ra)
+    except Exception:
+        pass
+
+
+def _quota_ok(model: str) -> None:
+    try:
+        from . import quota as _Q
+        _Q.ok(model)
+    except Exception:
+        pass
+
+
 def _ollama_chat(backend: str, model: str, messages: list,
                  temperature: float = 0.2, timeout: int = 120,
                  think: bool | None = None, lane: str = "background") -> str:
@@ -197,8 +225,10 @@ def _ollama_chat(backend: str, model: str, messages: list,
         with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.loads(r.read())
     except Exception as e:
+        _quota_note(model, e)
         print(f"[bg] llm call failed ({e})", file=sys.stderr)
         return ""
+    _quota_ok(model)
     from . import bgusage
     bgusage.from_ollama(lane, model, resp)
     msg = resp.get("message") if isinstance(resp, dict) else None
@@ -223,8 +253,10 @@ def _openai_chat(url: str, headers: dict, model: str, messages: list,
         with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.loads(r.read())
     except Exception as e:
+        _quota_note(model, e)
         print(f"[bg] llm call failed ({e})", file=sys.stderr)
         return ""
+    _quota_ok(model)
     from . import bgusage
     bgusage.from_openai(lane, model, resp)
     ch = resp.get("choices") if isinstance(resp, dict) else None
@@ -249,6 +281,8 @@ def _claude_cortex_chat(srv, model: str, messages: list, lane: str) -> str:
             port = (getattr(srv, "server_address", None) or (None, None))[1]
         rep = _CA.open_reply(body, port=port)
         resp = json.loads(rep.read() or b"{}")
+        if getattr(rep, "failed", False) is True:
+            return ""                       # the error line is not a thought
     except Exception as e:
         print(f"[bg] {model}: claude-agent call failed ({_CA.scrub(e)})", file=sys.stderr)
         return ""
@@ -280,6 +314,10 @@ def _model_chat(srv):
              lane: str = "background") -> str:
         rec = router.records.get(model) if router is not None else None
         think = getattr(srv, "think", None)
+        from . import quota as _Q
+        if _Q.paused(model) is not None:
+            # out of tokens (quota.py): nothing is sent; the mind thinks nothing
+            return ""
         from . import claude_agent as _CA
         if _CA.is_claude_rung(router, model):
             from . import minds_models as _MM

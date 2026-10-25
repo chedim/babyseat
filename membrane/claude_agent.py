@@ -81,6 +81,8 @@ import threading
 import time
 from pathlib import Path
 
+from . import quota as _Q
+
 PROVIDER = "claude-agent"
 RUNG_PREFIX = PROVIDER + ":"
 DEFAULT_MODELS = ("sonnet", "opus", "haiku")   # the CLI's own model aliases
@@ -128,6 +130,8 @@ CONTINUE_TEXT = "Continue"          # the person's row a Continue adds
 CONTINUE_PROMPT = ("Continue the task from where you stopped at the turn "
                    "limit.")
 MAX_TURNS_SUBTYPE = "error_max_turns"   # the SDK's result subtype at the cap
+QUOTA_ERRORS = ("rate_limit", "billing_error")   # an AssistantMessage error that
+                                    # means out of tokens: the rung pauses (quota.py)
 
 
 class ContinueRefused(ValueError):
@@ -804,6 +808,8 @@ async def _consume(sdk, messages, model, stream, put, port=None, resume=None,
                                put_seen, port, resume, env)
             return
         except Exception as e:
+            if isinstance(e, _Q.QuotaPaused):
+                raise                        # out of tokens: no second try (quota.py)
             if [k for k in sent if k != "step"]:
                 raise                        # words already went out: no silent retry
             _HEAD_REFUSED.add(True)          # the plain prompt from now on (#450)
@@ -823,6 +829,7 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
     session = str(resume or "")
     steps_seen: set = set()              # #450: one API response, counted once
     started: set = set()                 # tool_use ids whose start went out
+    rejected_until = None                # the CLI's rejected rate-limit event's reset
 
     def start(tid, name, args):
         # THE CALL'S START (2026-10-24): said as soon as the SDK reports the
@@ -832,6 +839,12 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
         put(("tool_start", {"id": tid, "name": _bare(name), "input": args}))
     async for m in sdk.query(prompt=prompt, options=opts):
         kind = type(m).__name__
+        if kind == "RateLimitEvent":
+            # OUT OF TOKENS (quota.py): the CLI says when the window resets
+            info = getattr(m, "rate_limit_info", None)
+            if getattr(info, "status", "") == "rejected" and getattr(info, "resets_at", None):
+                rejected_until = float(info.resets_at)
+            continue
         if kind == "AssistantMessage" and isinstance(getattr(m, "usage", None), dict):
             mid = getattr(m, "message_id", None) or id(m)
             if mid not in steps_seen:
@@ -855,7 +868,12 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
         elif kind == "AssistantMessage":
             err = getattr(m, "error", None)
             if err:
-                raise RuntimeError(f"claude-agent: {err}")
+                words = " ".join(str(getattr(b, "text", "") or "")
+                                 for b in getattr(m, "content", None) or []).strip()
+                why = f"claude-agent: {err}" + (f": {words}" if words else "")
+                if err in QUOTA_ERRORS or _Q.is_quota_error(words):
+                    raise _quota_paused(model, why, rejected_until)
+                raise RuntimeError(why)
             for b in getattr(m, "content", None) or []:
                 bk = type(b).__name__
                 if bk == "ToolUseBlock":
@@ -892,11 +910,25 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
             if getattr(m, "is_error", False):
                 why = getattr(m, "result", None) or getattr(m, "errors", None) \
                     or getattr(m, "subtype", "error")
+                if rejected_until or _Q.is_quota_error(why):
+                    raise _quota_paused(model, f"claude-agent: {why}", rejected_until)
                 raise RuntimeError(f"claude-agent: {why}")
+            _Q.ok(model)                     # it answered: a probing pause is over
             put(("usage", _usage(getattr(m, "usage", None))))
     if capped or answer.ceiling:
         _count("ceiling_hits")
         put(("capped", {"session": session, "calls": MAX_TOOL_CALLS_PER_ANSWER}))
+
+
+def _quota_paused(model: str, why: str, until=None):
+    """OUT OF TOKENS (quota.py): only this rung pauses, until the reset the
+    CLI's event gave, else the one its words name, else the probe."""
+    if until is None:
+        until = _Q.parse_reset(why)
+    ent = _Q.note(model, scrub(why), until=until)
+    print(f"[claude-agent] {model} is out of tokens until "
+          f"{_Q.hhmm(ent['resumes_at'])} ({ent['kind']}): {scrub(why)[:160]}", file=sys.stderr)
+    return _Q.QuotaPaused.of(ent)
 
 
 _END = object()
@@ -1033,6 +1065,9 @@ class SSEReply:
                     first = False
                 yield _chunk(self.model, d)
                 yield b"\n"
+        except _Q.QuotaPaused:
+            self.failed = True
+            raise                            # the proxy answers it (quota.py)
         except Exception as e:
             print(f"[claude-agent] {scrub(e)}", file=sys.stderr)
             self.failed = True
@@ -1083,6 +1118,9 @@ class JSONReply:
                     self.tools.append(dict(val, at=len("".join(text))))
                 elif kind == "usage":
                     usage = val
+        except _Q.QuotaPaused:
+            self.failed = True
+            raise                            # the proxy / the caller answers it (quota.py)
         except Exception as e:
             print(f"[claude-agent] {scrub(e)}", file=sys.stderr)
             self.failed = True
@@ -1109,9 +1147,12 @@ def open_reply(body: dict, port=None):
     membrane's, relaying to `port`) -> a streaming or buffered reply.
     RESUME_KEY (a person's Continue, set by the turn runner) resumes that
     SDK session with a fresh ceiling."""
+    model = str(body.get("model") or "")
+    held = _Q.paused(model)
+    if held:
+        raise _Q.QuotaPaused.of(held)      # out of tokens: nothing is sent (quota.py)
     auth = body.get(AUTH_KEY) if body.get(AUTH_KEY) in (MODE_KEY, MODE_LOGIN) else None
     sdk = check_available(auth)
-    model = str(body.get("model") or "")
     msgs = body.get("messages") or []
     resume = str(body.get(RESUME_KEY) or "") or None
     if resume:

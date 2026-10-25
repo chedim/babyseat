@@ -159,7 +159,10 @@ def read(store, now: float | None = None) -> dict:
     msgs = getattr(store, "msgs", None) or {}
     with getattr(store, "_lock", None) or _nolock():
         fg = foreground(msgs, midnight, now - 3600)
-    return _assemble(fg, bg, _CA.usage_stats(), now, midnight)
+    out = _assemble(fg, bg, _CA.usage_stats(), now, midnight)
+    from . import quota as _Q
+    out["paused"] = _Q.snapshot(now)     # the models out of tokens (quota.py)
+    return out
 
 
 def _nolock():

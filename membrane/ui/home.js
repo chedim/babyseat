@@ -941,7 +941,10 @@ function statsRows(s) {
   const io = (r) => ((r || {}).input || 0) + ((r || {}).output || 0);
   const models = Array.from(new Set(Object.keys(td).concat(Object.keys(hd))))
     .sort((a, b) => io(td[b]) - io(td[a])).map((m) => [m, m]);
-  let html = '<h3 class="osec">Today</h3>' +
+  // out of tokens (quota.py): the paused models first, one line each
+  const paused = (s.paused || []).map((p) => `<div class="orow"><span class="olab">${zooEsc(p.model)}</span>` +
+    `<span class="oval">resumes at ${zooEsc(quotaWhen(p.resumes_at, Date.now()).at)}</span></div>`).join("");
+  let html = (paused ? '<h3 class="osec">⚠ Out of tokens</h3>' + paused : "") + '<h3 class="osec">Today</h3>' +
     `<div class="orow"><span class="olab">since midnight</span><span class="oval">${line(today)}</span></div>` +
     `<div class="orow"><span class="olab">last hour</span><span class="oval">${line(hour)}</span>` +
     '<p class="ohint">every model call the seat made: your chats and its background work</p></div>' +
@@ -1266,6 +1269,82 @@ class PauseButton {
   }
 }
 
+// OUT OF TOKENS (membrane/quota.py): a ⚠ beside the ▶/⏸ while any model is
+// paused because its quota is spent. Its hover (or a tap) names each paused
+// mind -- Chat (a held message), the Goal worker, the Idle thinker -- its
+// model, when it resumes, the goals parked on it, and Resume now (a post of
+// {model} to /membrane/quota/resume: the pause is cleared and what waited goes;
+// a new failure pauses it again with the new time). Gone when all resume.
+// One read, GET /membrane/quota, every PAUSE_POLL_MS and on the chat's
+// ai-quota event. QuotaBadge takes its elements and the calls, so node
+// drives it with stubs (tests/test_quota_ui.py).
+const QUOTA_PATH = "/membrane/quota";
+
+/** A resume time (epoch s) against now (ms): {at: "HH:MM", in: "2 h 5 m"} (panel.js's quotaClock). */
+function quotaWhen(ts, nowMs) {
+  const t = Number(ts) || 0, d = new Date(t * 1000), p2 = (n) => String(n).padStart(2, "0");
+  const at = t ? p2(d.getHours()) + ":" + p2(d.getMinutes()) : "?";
+  const left = t * 1000 - (Number(nowMs) || 0);
+  if (!t || left <= 0) return { at, in: "any moment" };
+  const mins = Math.ceil(left / 60000), h = Math.floor(mins / 60), m = mins % 60;
+  return { at, in: h ? (m ? h + " h " + m + " m" : h + " h") : m + " m" };
+}
+
+/** The ⚠'s face and hover from GET /membrane/quota: {shown, label, html}. */
+function quotaBadgeView(st, nowMs) {
+  const ps = (st && st.paused) || [];
+  if (!ps.length) return { shown: false, label: "", html: "" };
+  const label = ps.length === 1 ? ps[0].model + " is out of tokens" : ps.length + " models are out of tokens";
+  const rows = ps.map((p) => {
+    const w = quotaWhen(p.resumes_at, nowMs);
+    const minds = (p.minds || []).length ? p.minds : ["nothing waits on it"];
+    const goals = (p.goals || []).map((g) => zooEsc(g.name || g.eid));
+    return '<div class="qrow">' + minds.map((m) => '<div class="qmind"><b>' + zooEsc(m) + "</b> · " +
+      zooEsc(p.model) + " · resumes at " + zooEsc(w.at) + ' <span class="qin">(in ' + zooEsc(w.in) + ")</span></div>").join("") +
+      (goals.length ? '<div class="qgoals">parked: ' + goals.join(", ") + "</div>" : "") +
+      ((p.chats || []).length ? '<div class="qgoals">' + zooEsc(p.chats.length) + " chat message" + (p.chats.length > 1 ? "s wait" : " waits") + "</div>" : "") +
+      '<button class="qres" data-qresume="' + zooEsc(p.model) + '">Resume now</button></div>';
+  });
+  return { shown: true, label, html: '<div class="qtitle">⚠ out of tokens</div>' + rows.join("") + '<p class="qmsg" aria-live="polite"></p>' };
+}
+
+class QuotaBadge {
+  /** wrap: the ⚠'s box (hidden while nothing is paused); btn: the ⚠; pop: its
+   *  hover; get(path) / post(path, body) -> the JSON; now() -> ms. */
+  constructor({ wrap, btn, pop, get, post, now }) {
+    Object.assign(this, { wrap, btn, pop, get, post });
+    this.now = now || (() => Date.now());
+    this.state = null;
+  }
+
+  paint() {
+    const v = quotaBadgeView(this.state, this.now());
+    this.wrap.hidden = !v.shown;
+    if (!v.shown) { this.pop.innerHTML = ""; return; }
+    this.btn.title = v.label;
+    this.btn.setAttribute("aria-label", v.label + ": what waits");
+    this.pop.innerHTML = v.html;
+  }
+
+  async load() {
+    try { this.state = await this.get(QUOTA_PATH); } catch (e) { return this.state; }
+    this.paint();
+    return this.state;
+  }
+
+  /** Resume now on one model; the answer is the new state. */
+  async resume(model) {
+    try {
+      this.state = await this.post(QUOTA_PATH + "/resume", { model });
+      this.paint();
+    } catch (e) {
+      const m = this.pop.querySelector && this.pop.querySelector(".qmsg");
+      if (m) m.textContent = "not resumed: " + (e && e.message || e);
+    }
+    return this.state;
+  }
+}
+
 // BLURP'S BODY (#358, the operator liked the film's Blurp): where the page drew
 // self as a 👶 -- the tab at the left edge, the panel's header -- and on each
 // zoo card, a small canvas draws the film's body: a soft gold ellipse with a
@@ -1434,7 +1513,7 @@ class BlurpBodies {
   }
 }
 
-const HomeLogic = { knownView, standaloneMenu, pauseView, PauseButton, PAUSE_PATH, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
+const HomeLogic = { knownView, standaloneMenu, pauseView, PauseButton, PAUSE_PATH, quotaWhen, quotaBadgeView, QuotaBadge, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
@@ -1531,6 +1610,23 @@ const HSTYLE = `
   @keyframes recpulse { 50% { box-shadow:0 0 0 8px color-mix(in srgb, var(--error-color,#c0392b) 30%, transparent); } }
   .card { bottom:76px !important; }
   .top .tilt[hidden] { display:none; }
+  /* OUT OF TOKENS: the ⚠ beside the pause and its hover */
+  .top .qwarn { position:relative; display:inline-flex; }
+  .top .qwarn[hidden] { display:none; }
+  .top .qbtn { color:var(--warning-color,#e0a030); font-size:16px; padding:4px 9px; }
+  .top .qpop { display:none; position:absolute; top:calc(100% + 8px); left:50%; transform:translateX(-50%); z-index:8;
+               width:max-content; max-width:min(360px, calc(100vw - 24px)); border-radius:14px; padding:10px 12px;
+               background:color-mix(in srgb, var(--card-background-color,#111) 96%, transparent); font-size:13px;
+               white-space:normal; box-shadow:0 8px 28px rgba(0,0,0,.4); }
+  .top .qwarn::after { content:""; position:absolute; left:0; right:0; top:100%; height:10px; }  /* the hover's bridge */
+  .top .qwarn:hover .qpop, .top .qwarn:focus-within .qpop, .top .qwarn.open .qpop { display:block; }
+  .top .qpop .qtitle { font-weight:600; margin-bottom:6px; color:var(--warning-color,#e0a030); }
+  .top .qpop .qrow { padding:6px 0; border-top:1px solid color-mix(in srgb, var(--divider-color,#888) 35%, transparent); }
+  .top .qpop .qmind { line-height:1.45; overflow-wrap:anywhere; }
+  .top .qpop .qin, .top .qpop .qgoals { opacity:.75; font-size:12px; }
+  .top .qpop .qres { margin-top:6px; padding:4px 12px; background:color-mix(in srgb, var(--primary-color,#3477d6) 30%, transparent); }
+  .top .qpop .qmsg { margin:4px 0 0; font-size:12px; opacity:.75; }
+  .top .qpop .qmsg:empty { display:none; }
   .top .selfstat { font-size:12px; opacity:.85; white-space:nowrap; padding-right:6px; }
   .view-chat .selfstat { display:none; }
   /* THE WAVE (2026-10-10, the operator: "a wavy animation like Siri, but
@@ -3021,6 +3117,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · ${nm} (the 🌱 loop, framed to what it is doing) · 👁 ${nm}'s eyes (looking out from it)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="pausebtn" title="the seat's pause -- reading its state…" aria-label="the seat's pause" aria-pressed="false">▶</button>
+          <span class="qwarn" hidden><button class="qbtn" aria-haspopup="true">⚠</button><span class="qpop glass" role="tooltip"></span></span>
           <span class="selfstat" title="where ${nm} is now: its rung, the bar toward the next, what it waits on"></span>
           <button class="rungbell" aria-label="${nm}'s rungs and ball: the chime and notifications" aria-pressed="true">🔔</button>
           <button class="statbtn" title="Stats: the seat's tokens -- today, the last hour, the Claude rung" aria-label="stats" aria-haspopup="dialog" aria-expanded="false" aria-controls="statpanel">📊</button>
@@ -3168,7 +3265,27 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         } });
       this._pause.btn.addEventListener("click", () => this._pause.click());
       this._pause.load();
-      this._pauseT = setInterval(() => { if (document.visibilityState !== "hidden") this._pause.load(); }, PAUSE_POLL_MS);
+      // OUT OF TOKENS (quota.py): the ⚠ beside the pause, its hover names what waits
+      this._quotaBadge = new QuotaBadge({ wrap: $(".qwarn"), btn: $(".qbtn"), pop: $(".qpop"),
+        get: (p) => this._get(p),
+        post: async (p, b) => {
+          const r = await this._hass.fetchWithAuth(HSERVE + p, { method: "POST",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+          let d = null; try { d = await r.json(); } catch (e) { /* no body */ }
+          if (!r.ok) throw new Error((d && d.error) || (r.status === 401 ? "the seat token is needed" : String(r.status)));
+          return d;
+        } });
+      this._quotaBadge.btn.addEventListener("click", () => this._quotaBadge.wrap.classList.toggle("open"));
+      this._quotaBadge.pop.addEventListener("click", (ev) => {
+        const b = ev.target.closest("[data-qresume]");
+        if (b) { b.disabled = true; this._quotaBadge.resume(b.dataset.qresume); }
+      });
+      this._quotaBadge.load();
+      this._pauseT = setInterval(() => {
+        if (document.visibilityState === "hidden") return;
+        this._pause.load();
+        this._quotaBadge.load();
+      }, PAUSE_POLL_MS);
       // #161 / #299: where self is (the exp bar); the 🌱 growth-limit chooser that
       // sat here gave way to acceptance -- sleep / wake is the 👶 panel's toggle
       this._selfStat = $(".selfstat");
@@ -3683,6 +3800,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       document.addEventListener("visibilitychange", this._onVis);
       if (lsGet(LS_HOTWORD, "0") === "1") setTimeout(() => this._hotStart(), 800);
       // the chat went idle: the spoken turn is over, the orb rests once the queue is done
+      // the chat read the out-of-tokens state (a pause, a hold, a resume): the ⚠ follows
+      this._chat.addEventListener("ai-quota", (e) => {
+        if (this._quotaBadge && e.detail) { this._quotaBadge.state = e.detail; this._quotaBadge.paint(); }
+      });
       this._chat.addEventListener("ai-idle", () => {
         setTimeout(() => {
           if (this._busyChat()) return;

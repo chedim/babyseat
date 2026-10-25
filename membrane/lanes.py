@@ -41,6 +41,7 @@ from .intent import IntentBoard, MAX_INTENTS
 from .seat import Seat
 from . import entity_block as _eb
 from . import efgate as _efg
+from . import quota as _QUOTA       # the out-of-tokens pause, per model
 from . import entities as _ents
 from . import streams as _streams
 from . import efield as _efield_mod
@@ -5776,13 +5777,40 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         """A delivery raised. A TIMEOUT (the rung's budget ran out: a loaded
         seat, a model swap) fails the turn VISIBLY (#431, option C of #429):
         the bare request is never resent without memory. Any other failure
-        keeps the transparent forward."""
+        keeps the transparent forward. A model OUT OF TOKENS (quota.py) is
+        answered as such: never forwarded to the backend it is paused on."""
+        if isinstance(e, _QUOTA.QuotaPaused):
+            self._serve_quota(e, mid_stream=bool(getattr(self, "_v1_stream_open", False)))
+            return
         if _is_timeout(e):
             self._serve_busy(str(up.get("model") or "membrane"),
                              mid_stream=bool(getattr(self, "_v1_stream_open", False)),
                              err=e)
             return
         self._forward_raw(raw)
+
+    def _serve_quota(self, e, mid_stream: bool) -> None:
+        """OUT OF TOKENS (quota.py): HTTP 429 type quota_paused before any
+        byte, or that error as an SSE event + [DONE] once the stream has
+        begun. The serve turn holds the person's message on it."""
+        body = _QUOTA.error_obj(e)
+        print(f"[proxy] {e.model} is out of tokens: the call was not sent "
+              f"(resumes {_QUOTA.hhmm(e.until)})", file=sys.stderr)
+        try:
+            if mid_stream:
+                self.wfile.write(_sse_line(body))
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+                return
+            out = json.dumps(body).encode()
+            self.send_response(429, "out of tokens")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            self.wfile.flush()
+        except OSError as we:
+            print(f"[proxy] out of tokens: the client is gone ({we})", file=sys.stderr)
 
     def _serve_busy(self, model: str, mid_stream: bool, err=None) -> None:
         """The busy answer (#431): HTTP 503 type seat_busy before any byte,
@@ -5864,6 +5892,10 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             cooling down so later turns skip it. When nothing answers the
             request fails and opencode surfaces the field-only state
             honestly."""
+            # OUT OF TOKENS (quota.py): a paused model's call is not sent
+            _qp = _QUOTA.paused(model_name)
+            if _qp is not None:
+                raise _QUOTA.QuotaPaused.of(_qp)
             u2 = dict(up)
             u2["model"] = model_name
             # THE THINK DIAL (the seat's say in why the backend reasons):
@@ -5902,7 +5934,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             # guard must free -- the queue's room cannot wait behind
             # a single socket for 300s); the ladder descends.
             try:
-                return urllib.request.urlopen(rq, timeout=RUNG_BUDGET_S)
+                _resp = urllib.request.urlopen(rq, timeout=RUNG_BUDGET_S)
+                _QUOTA.ok(model_name)          # it answered: a probing pause is over
+                return _resp
             except urllib.error.HTTPError as he:
                 # rung-down codes: bad/absent model (400/404), auth or
                 # payment (401/402/403), rate limit / quota (429), 5xx.
@@ -5925,6 +5959,18 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 if router is not None:
                     router.note_outage(model_name, why)
                 route["rung_down"] = {"model": model_name, "why": why}
+                if he.code in (402, 429):
+                    # OUT OF TOKENS (quota.py): only this model pauses, until
+                    # the reset its answer names, else Retry-After, else the probe
+                    try:
+                        _txt = (he.read() or b"").decode("utf-8", "replace")[:600]
+                    except Exception:
+                        _txt = ""
+                    _ent = _QUOTA.note_error(
+                        model_name, f"HTTP {he.code}: {_txt or he.reason}", code=he.code,
+                        retry_after=(he.headers or {}).get("Retry-After") if he.headers else None)
+                    if _ent is not None:
+                        raise _QUOTA.QuotaPaused.of(_ent) from None
                 raise
             except Exception as first_err:
                 router = getattr(srv, "router", None)
@@ -5969,6 +6015,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             try:
                 backend_r = _open_backend(up.get("model", "membrane"))
             except Exception as e:
+                if isinstance(e, _QUOTA.QuotaPaused):
+                    self._serve_quota(e, mid_stream=True)
+                    return
                 if route.get("ladder_exhausted"):
                     self._serve_field_only(up.get("model", "membrane"), vec,
                                            route, mid_stream=True, err=e)
@@ -6105,6 +6154,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                         _socks.get(_turn_sid) is backend_r:
                     _socks.pop(_turn_sid, None)
             except Exception as e:
+                if isinstance(e, _QUOTA.QuotaPaused):
+                    self._serve_quota(e, mid_stream=False)
+                    return
                 if isinstance(e, RuntimeError) and \
                         "empty answer" in str(e):
                     self._serve_field_only(

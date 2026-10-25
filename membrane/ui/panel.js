@@ -404,6 +404,55 @@ function busyHtml(info) {
     '<button class="more" data-cretry="' + escAttr(info.id || "") + '">Retry</button></div>';
 }
 
+/** OUT OF TOKENS (membrane/quota.py): a message held because its model's
+ *  quota is spent shows a centered popup over the chat -- "<model> is out of
+ *  tokens · it resumes at HH:MM (in X h Y m)" -- with Resume now (the person
+ *  may have more tokens, or another account): POST /membrane/quota/resume
+ *  clears the model's pause and sends the held message; a new failure brings
+ *  the popup back with the new time. The seat says what waits on GET
+ *  /membrane/quota (re-read on every membrane.quota event). */
+const QUOTA_PATH = "/membrane/quota";
+const QUOTA_REPAINT_MS = 30000;      // the countdown's repaint while shown
+
+/** A resume time (epoch s) against now (ms): {at: "HH:MM" local, in: "2 h 5 m"}. */
+function quotaClock(ts, nowMs) {
+  const t = Number(ts) || 0;
+  const d = new Date(t * 1000);
+  const p2 = (n) => String(n).padStart(2, "0");
+  const at = t ? p2(d.getHours()) + ":" + p2(d.getMinutes()) : "?";
+  const left = t * 1000 - (Number(nowMs) || 0);
+  if (!t || left <= 0) return { at, in: "any moment" };
+  const mins = Math.ceil(left / 60000), h = Math.floor(mins / 60), m = mins % 60;
+  return { at, in: h ? (m ? h + " h " + m + " m" : h + " h") : m + " m" };
+}
+
+/** "<model> is out of tokens · it resumes at HH:MM (in X h Y m)". */
+function quotaLine(model, ts, nowMs) {
+  const c = quotaClock(ts, nowMs);
+  return String(model || "the model") + " is out of tokens · it resumes at " + c.at + " (in " + c.in + ")";
+}
+
+/** The paused model holding a message of chat `sid` (GET /membrane/quota), or null. */
+function quotaForChat(st, sid) {
+  if (!st || !sid) return null;
+  for (const p of st.paused || []) {
+    if ((p.chats || []).some((c) => c && c.sessionID === sid)) return p;
+  }
+  return null;
+}
+
+/** The popup's card for one paused model. */
+function quotaPopupHtml(p, nowMs) {
+  p = p || {};
+  const held = (p.chats || []).length;
+  return '<div class="qcard" role="alertdialog" aria-live="assertive" aria-label="out of tokens">' +
+    '<div class="qhead">⏸ ' + escText(quotaLine(p.model, p.resumes_at, nowMs)) + "</div>" +
+    '<p class="qsub">' + (held > 1 ? escText(held) + " messages wait" : "Your message waits") +
+    (p.kind === "probe" ? "; the next try is a real call, at that time." : " and goes when it resumes.") + "</p>" +
+    '<button class="btn primary" data-qresume="' + escAttr(p.model || "") + '">Resume now</button>' +
+    '<p class="qnote" aria-live="polite"></p></div>';
+}
+
 /** The message a Retry re-sends: the person's text of the user row before the
  *  failed answer `mid` (its speaker line off; the send adds it again). */
 function retryText(rows, mid) {
@@ -2003,7 +2052,7 @@ function offlineNotice(data, zoo) {
     : { text: name + " is offline", switchTo: null };
 }
 
-const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, shownModel, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { quotaClock, quotaLine, quotaForChat, quotaPopupHtml, QUOTA_PATH, offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, shownModel, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, sheetSleep, sleepBars, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -2070,6 +2119,17 @@ const STYLE = `
   .mind b { font-weight:600; }
   .err { color:var(--error-color,#f66); font:13px monospace; white-space:pre-wrap; padding:0 12px; }
   .ccap { font:13px sans-serif; opacity:.85; padding:4px 12px; }
+  /* OUT OF TOKENS: the held message's popup, centered on the page */
+  .qpop { position:fixed; inset:0; z-index:40; display:flex; align-items:center; justify-content:center;
+          padding:16px; pointer-events:none; }
+  .qpop[hidden] { display:none; }
+  .qpop .qcard { pointer-events:auto; width:min(420px, 100%); text-align:center; border-radius:16px;
+                 padding:18px 20px 14px; background:var(--card-background-color,#161a22); color:var(--primary-text-color,#e8e8e8);
+                 border:1px solid color-mix(in srgb, var(--warning-color,#e0a030) 55%, transparent);
+                 box-shadow:0 12px 40px rgba(0,0,0,.45); }
+  .qpop .qhead { font-weight:600; font-size:15px; line-height:1.4; overflow-wrap:anywhere; }
+  .qpop .qsub { margin:8px 0 14px; font-size:13px; opacity:.8; }
+  .qpop .qnote { margin:8px 0 0; min-height:1em; font-size:12px; opacity:.75; }
   .err .zswitch { font:inherit; margin-left:6px; padding:2px 10px; border-radius:999px; cursor:pointer;
                   border:1px solid currentColor; background:transparent; color:var(--primary-text-color,#ddd); }
   .err:not(:empty) { padding:8px 12px; }
@@ -2276,6 +2336,7 @@ function definePanel() {
 
     disconnectedCallback() {
       this._booted = false;
+      clearInterval(this._qTick);
       this._closeStream();
       this._stopPoll();
       this._stopReconcile();
@@ -2321,6 +2382,7 @@ function definePanel() {
           <div class="vlog" hidden></div>
           <div class="err"></div>
           <div class="scroller"><div class="msgs"></div><button class="jump">↓ latest</button></div>
+          <div class="qpop" hidden></div>
           <div class="mindbar"></div>
           <div class="composer">
             <div class="newver" hidden><button class="btn">new version · click to reload</button></div>
@@ -2443,6 +2505,49 @@ function definePanel() {
         this._toggleSide(false);
       });
       this._tick = setInterval(() => this._paintStatus(), 1000);
+      // OUT OF TOKENS: the held message's popup (quotaPopupHtml), its countdown
+      this._qpop = this.shadowRoot.querySelector(".qpop");
+      this._qpop.addEventListener("click", (ev) => {
+        const b = ev.target.closest("[data-qresume]");
+        if (b) this._quotaResume(b.dataset.qresume, b).catch(() => {});
+      });
+      this._qTick = setInterval(() => { if (this._quota && (this._quota.paused || []).length) this._loadQuota().catch(() => {}); }, QUOTA_REPAINT_MS);
+    }
+
+    async _loadQuota() {
+      try {
+        const r = await this._api(SERVE + QUOTA_PATH);
+        if (!r.ok || !r.data || typeof r.data !== "object") return;
+        this._quota = r.data;
+      } catch (e) { return; }
+      this._paintQuota();
+      this.dispatchEvent(new CustomEvent("ai-quota", { detail: this._quota, bubbles: true, composed: true }));
+    }
+
+    _paintQuota() {
+      if (!this._qpop) return;
+      const p = quotaForChat(this._quota, this._chat && this._chat.sid);
+      if (!p) { this._qpop.hidden = true; this._qpop.innerHTML = ""; this._qModel = ""; return; }
+      const note = this._qpop.querySelector(".qnote");
+      const keep = p.model === this._qModel && note ? note.textContent : "";
+      this._qpop.innerHTML = quotaPopupHtml(p, Date.now());
+      if (keep) this._qpop.querySelector(".qnote").textContent = keep;
+      this._qModel = p.model;
+      this._qpop.hidden = false;
+    }
+
+    async _quotaResume(model, btn) {
+      if (btn) btn.disabled = true;
+      const note = this._qpop && this._qpop.querySelector(".qnote");
+      if (note) note.textContent = "sending…";
+      const r = await this._api(SERVE + QUOTA_PATH + "/resume", { method: "POST", body: JSON.stringify({ model }) });
+      if (!r.ok) {
+        if (btn) btn.disabled = false;
+        if (note) note.textContent = this._apiErr("not resumed", r);
+        return;
+      }
+      this._quota = r.data;
+      this._paintQuota();
     }
 
     _toggleSide(open) {
@@ -2747,6 +2852,8 @@ function definePanel() {
       this._rowEls = null;
       this._stick = true;
       this._paintSessions();
+      this._paintQuota();
+      this._loadQuota().catch(() => {});
       await this._resync();
       this._toBottom();
     }
@@ -3015,6 +3122,10 @@ function definePanel() {
         this._sesTimer = setTimeout(() => this._listSessions().catch(() => {}), 400);
       }
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
+      if (ev.type === "membrane.quota") {                         // out of tokens: a pause or a hold moved
+        clearTimeout(this._qTimer);
+        this._qTimer = setTimeout(() => this._loadQuota().catch(() => {}), 150);
+      }
       if (ev.type === "self.cycle" && this._seat) {               // #161: the bar moves with each cycle
         const s = Object.assign({}, this._seat.self || {});
         const moved = ("rung" in p && p.rung !== s.rung) || ("limit" in p && p.limit !== s.limit)
