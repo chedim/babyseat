@@ -271,8 +271,9 @@ async def fetch_card(sess, conn: dict) -> dict:
 
 async def fetch_name(sess, comp: dict, timeout_s: float = CARD_TIMEOUT_S) -> None:
     """A seat elsewhere is called by its own name (issue #6): what its /ui/conf
-    says; a seat that serves none (a plain serve) or doesn't answer keeps
-    the default apply() gave it. The inside seat's comes from its child."""
+    says (a standalone seat's page config, a plain serve's name + aliases);
+    a seat that doesn't answer keeps the default apply() gave it. The inside
+    seat's comes from its child."""
     seat = find(comp.get(SEATS) or [], comp.get("active_seat"))
     if not comp.get("serve_url") or (seat or {}).get("inside"):
         return

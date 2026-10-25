@@ -344,7 +344,7 @@ def test_the_fan_out_reads_every_seat_and_survives_an_offline_one(cc):
 def test_a_connected_seat_is_called_by_its_own_name(cc):
     # issue #6: HA connected to a named seat said "Bob": the name comes from the
     # seat itself (its /ui/conf); until it answers, or when it serves none
-    # (a plain serve), the seat's own default
+    # (an older seat), the seat's own default
     import aiohttp
     from aiohttp import test_utils
 

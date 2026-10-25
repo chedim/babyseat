@@ -6,7 +6,7 @@ serves the web UI built for HA -- the chat, membrane home, the 3D field, voice
     /                 the page (ui/index.html: the name prompt, then membrane home)
     /ui/www/<file>    the UI's files (ui/ in the package; the big models from
                       <data dir>/assets/, or the HA integration's www/ in a checkout)
-    /ui/conf          the page's config (the seat's name, voice)
+    /ui/conf          the page's config (the seat's name, voice); a plain serve: name + aliases only
     /ui/stt           speech to text: the settings' whisper-server, or 501 (the
                       page then listens in the browser)
     /ui/serve/<rest>  the seat's own routes (/session, /event, /membrane/...),
@@ -401,6 +401,13 @@ def intercept(handler) -> bool:
     handler._ui_trusted = False            # keep-alive: one handler, many requests
     handler._ui_relay = False
     if not enabled():
+        # A PLAIN SERVE'S NAME (issue #6): no UI, but /ui/conf still says the
+        # seat's name and aliases -- only those (Home Assistant's zoo.fetch_name
+        # reads them), never the page's config
+        if handler.command == "GET" and handler.path.partition("?")[0] == "/ui/conf":
+            from . import naming as NM
+            _json(handler, {"name": NM.current(), "aliases": list(S.load().get("aliases") or [])})
+            return True
         return False
     path, _, qs = handler.path.partition("?")
     jwt = _JWT.enabled()
