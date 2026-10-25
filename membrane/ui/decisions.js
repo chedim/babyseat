@@ -58,6 +58,25 @@ function place(list, narrow) {
     : { card, side: i % 2 ? "right" : "left", row: Math.floor(i / 2) });
 }
 
+// THE OPEN PILE STACKS: the first rows of each side stay in flow; newer (farther)
+// cards hide behind older ones, each showing a strip of its top edge, so the pile
+// never pushes the bar off the page. These numbers are flagged for the operator.
+const STACK_FLOW_ROWS = 2;           // rows per side kept fully in flow before the stack starts
+const STACK_STRIP = 26;              // px of a stacked card that shows above the one in front
+const STACK_SHOWN = 6;               // strips drawn; deeper cards hide under the last one
+
+/** The room a full stack reserves above its cards (px). */
+function stackPad() { return (STACK_SHOWN - 1) * STACK_STRIP; }
+
+/** Where a future card sits by its row from the bar: in flow, or stacked --
+ * shift: px up from the stack's base; z: its depth (older in front). */
+function stackSlot(row) {
+  const r = Math.max(0, Number(row) || 0);
+  if (r < STACK_FLOW_ROWS) return { stacked: false, shift: 0, z: 0 };
+  const k = r - STACK_FLOW_ROWS + 1;
+  return { stacked: true, shift: (Math.min(k, STACK_SHOWN) - 1) * STACK_STRIP, z: Math.max(1, 30 - k) };
+}
+
 /** The band split into its two side lists, each nearest the bar first. */
 function sideLists(list, narrow) {
   const out = { left: [], right: [] };
@@ -329,7 +348,7 @@ function age(iso, now) {
   return Math.round(s / 86400) + " days ago";
 }
 
-const DecisionLogic = { bands, place, sideLists, depthStyle, pushOut, windowRange, itemOffset, stubLine, barScrollTop, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
+const DecisionLogic = { STACK_FLOW_ROWS, STACK_STRIP, STACK_SHOWN, stackPad, stackSlot, bands, place, sideLists, depthStyle, pushOut, windowRange, itemOffset, stubLine, barScrollTop, goalsShown, graphLayout, graphNeighbors, edgeStyle, adjacency, loadCard, answerLink, pastLink,
   blockersFirst, cardEdges, inputSpec, pickText, valueText, askText, age, POLL_MS, PAST_ROWS, GOALS_MAX };
 if (typeof module !== "undefined" && module.exports) module.exports = DecisionLogic;
 if (typeof window !== "undefined") window.DecisionLogic = DecisionLogic;   // home.js builds the chat's message with it
@@ -376,6 +395,12 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .dc.nb { border-color:var(--cyan); box-shadow:0 0 12px rgba(95,214,255,.35); }
     .band.future { flex-direction:column-reverse; padding-bottom:10px; align-self:end; }   /* the pile sits on the bar's line */
     .band.now { padding:4px 2px 10px; min-height:64px; }
+    /* the stack: every newer card in ONE grid cell, top-aligned and lifted by its own
+       shift, so each shows a strip above the older card in front of it; hover (or
+       focus) pops it over all the others */
+    .stack { display:grid; flex:none; }
+    .stack > .dc { grid-area:1 / 1; align-self:start; transform-origin:50% 0; }
+    .stack .dc:hover, .stack .dc:focus-visible, .stack .dc:focus-within { z-index:60 !important; opacity:1 !important; }
     .band.past { overflow:hidden; padding-top:10px; }
     .lbl { font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--amber); opacity:.8;
            text-shadow:0 1px 2px #000, 0 0 6px #000; }
@@ -594,7 +619,9 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       const ch = (chips[c.eid] || []).map((x) => `<span class="chip">${esc(x.rel.replace("_", " "))}: ${esc(titles[x.to] || x.to)}</span>`).join("");
       const err = this._errs[c.eid] ? `<div class="err" role="alert">${esc(this._errs[c.eid])}</div>` : "";
       const d = depthStyle(row, band);
-      const tf = `transform:rotateX(${d.tilt}deg) scale(${d.scale});opacity:${d.opacity}`;
+      const sl = band === "future" && !this._narrow ? stackSlot(row) : { stacked: false };
+      const tf = sl.stacked ? `transform:translateY(-${sl.shift}px);z-index:${sl.z};opacity:.94`
+        : `transform:rotateX(${d.tilt}deg) scale(${d.scale});opacity:${d.opacity}`;
       const what = band === "past" ? "show where it was decided" : "talk it over in the chat";
       return `<article class="dc" tabindex="0" role="button" style="${tf}" data-eid="${esc(c.eid)}" aria-label="${esc(c.title)}: ${what}">` +
         `<div class="t">${esc(c.title)}</div>${c.description && band !== "now" ? `<div class="d">${esc(c.description)}</div>` : ""}` +
@@ -629,7 +656,14 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
           const cards = lists[band][side];
           // rows count from the bar: the card's index in its side list (a phone's
           // one column ages two cards a row, as the two sides do)
-          let html = cards.map((c, i) => this._card(c, band, narrow ? Math.floor(i / 2) : i, chips, titles)).join("");
+          this._narrow = narrow;
+          const cardsHtml = cards.map((c, i) => this._card(c, band, narrow ? Math.floor(i / 2) : i, chips, titles));
+          let html;
+          if (band === "future" && !narrow && cards.length > STACK_FLOW_ROWS) {
+            const nShown = Math.min(cards.length - STACK_FLOW_ROWS, STACK_SHOWN);
+            html = cardsHtml.slice(0, STACK_FLOW_ROWS).join("") +
+              `<div class="stack" style="padding-top:${(nShown - 1) * STACK_STRIP}px">${cardsHtml.slice(STACK_FLOW_ROWS).join("")}</div>`;
+          } else html = cardsHtml.join("");
           const lbl = `<div class="lbl">${label[band]}${side === "left" || narrow ? ` · ${band === "past" ? b.past.length : b[band].length}` : ""}</div>`;
           if (!cards.length && side === "left") html = `<div class="empty">${empty[band]}</div>`;
           // the future pile grows upward (column-reverse): its label is last in the DOM, on top
