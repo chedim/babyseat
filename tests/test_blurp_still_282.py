@@ -220,8 +220,9 @@ def test_a_persons_poke_pulls_the_current_toward_the_toy():
     assert cur is not None
     spot = fld.get(field_id(BALL)).state
     assert float(np.asarray(cur) @ (np.asarray(spot) / np.linalg.norm(spot))) > 0.99
-    assert "toy:alice" in fld._now                          # under the person's own key
-    assert fld._now_w["toy:alice"] == pytest.approx(1.0)   # one event's activity, as a chat line gives
+    assert "toy:alice" in fld._thing_ctx                    # under the person's own key (#333 part 3g: the things current)
+    assert fld._thing_w["toy:alice"] == pytest.approx(1.0)  # one event's activity, as a chat line gives
+    assert "toy:alice" not in fld._now                      # a poke is no news
 
 
 def test_the_pull_fades_like_a_chat_lines():
@@ -229,7 +230,7 @@ def test_the_pull_fades_like_a_chat_lines():
     fld = srv.efield
     TB.roll_self(TB.BALL)
     TB.poke(TB.BALL, "roll", by="alice")
-    t = fld._now_ts["toy:alice"]
+    t = fld._thing_ts["toy:alice"]
     assert fld.current(now=t + 0.1 * CURRENT_TAU_S) is not None
     assert fld.current(now=t + 10 * CURRENT_TAU_S) is None     # gone, as a quiet stream is
 

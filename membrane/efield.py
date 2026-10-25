@@ -497,6 +497,11 @@ class EntityField:
         self._now: dict[str, np.ndarray] = {}      # session -> context (RAM only)
         self._now_w: dict[str, float] = {}         # session -> its pull on the current (activity, fading)
         self._now_ts: dict[str, float] = {}        # session -> when it last spoke (wall clock)
+        # #333 part 3g: the THINGS current beside the news one (_now* above is the residual's, the news):
+        # pulled by each event's fit and by a person's poke; one decay (CURRENT_TAU_S) for both
+        self._thing_ctx: dict[str, np.ndarray] = {}
+        self._thing_w: dict[str, float] = {}
+        self._thing_ts: dict[str, float] = {}
         self._ostats = self.b.get("origin_stats", self._okey) or self._fresh_ostats()
 
     @property
@@ -1359,7 +1364,9 @@ class EntityField:
             resid = x_msg
         sess = ev.get("session") or ""
         if np.linalg.norm(resid) > CTX_MIN_RESID:
-            self.pull_current(sess, resid)
+            self.pull_current(sess, resid)            # the news: what nothing known explains
+        if A and float(np.linalg.norm(xh)) > 1e-9:
+            self.pull_things(sess, xh)                # #333 part 3g: the things: what the message's subjects explain
         for eid, sidx, surf in ev.get("mentions") or []:
             if sidx in skip or sidx >= len(sids):
                 continue
@@ -1578,6 +1585,7 @@ class EntityField:
         self._ostats.update(fw)
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
         self._now_w, self._now_ts = {}, {}
+        self._thing_ctx, self._thing_w, self._thing_ts = {}, {}, {}
         self._wgen += 1
         self._ep_index = None
         self._idiom_cache = None
@@ -1912,6 +1920,7 @@ class EntityField:
         self._ostats.update({k: v for k, v in keep.items() if v is not None})
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
         self._now_w, self._now_ts = {}, {}
+        self._thing_ctx, self._thing_w, self._thing_ts = {}, {}, {}
         self._wgen += 1
         self._ep_index = None
         self._idiom_cache = None
@@ -2388,37 +2397,64 @@ class EntityField:
     def now(self, session: str = "") -> np.ndarray | None:
         return self._now.get(session)
 
-    def pull_current(self, session: str, vec) -> None:
+    def pull_current(self, session: str, vec, weight: float = 1.0, now: float | None = None) -> None:
         """One event of `session`'s activity, toward `vec`: its context moves
-        halfway there, and its pull on the current gains one (#161) -- which
-        fades with CURRENT_TAU_S, so busier streams pull harder. A chat
-        event's residual comes here (_apply), and so does a person's poke on
-        a toy, toward the toy's spot (#282: playing counts as speaking)."""
+        halfway there, and its pull on the NEWS current gains `weight` (#161) --
+        which fades with CURRENT_TAU_S, so busier streams pull harder. A chat
+        event's residual comes here (_apply). The things current (a fit, a
+        person's poke) is pull_things (#333 part 3g)."""
+        self._pull(self._now, self._now_w, self._now_ts, session, vec, weight, now)
+
+    def pull_things(self, session: str, vec, weight: float = 1.0, now: float | None = None) -> None:
+        """#333 part 3g: the same pull on the THINGS current -- an event's fit
+        (the part its mentioned things explain), or a person's poke on a toy
+        toward the toy's spot (#282: playing counts as speaking). One decay
+        (CURRENT_TAU_S) for both currents."""
+        self._pull(self._thing_ctx, self._thing_w, self._thing_ts, session, vec, weight, now)
+
+    @staticmethod
+    def _pull(ctx, ws, tss, session, vec, weight, now) -> None:
         v = unit(np.asarray(vec, dtype=float))
-        now = self._now.get(session)
-        self._now[session] = v if now is None else unit(0.5 * now + 0.5 * v)
-        t = time.time()
-        w = self._now_w.get(session, 0.0)
+        old = ctx.get(session)
+        ctx[session] = v if old is None else unit(0.5 * old + 0.5 * v)
+        t = time.time() if now is None else float(now)
+        w = ws.get(session, 0.0)
         if w:
-            w *= float(np.exp(-(t - self._now_ts.get(session, t)) / CURRENT_TAU_S))
-        self._now_w[session], self._now_ts[session] = w + 1.0, t
+            w *= float(np.exp(-(t - tss.get(session, t)) / CURRENT_TAU_S))
+        ws[session], tss[session] = w + float(weight), t
+
+    @staticmethod
+    def _sum(ctx, ws, tss, t):
+        acc = None
+        for sess, c in list(ctx.items()):
+            w = ws.get(sess, 0.0) * float(np.exp(-(t - tss.get(sess, t)) / CURRENT_TAU_S))
+            if w < CURRENT_MIN_PULL:
+                continue
+            acc = w * c if acc is None else acc + w * c
+        return acc
+
+    def current_parts(self, now: float | None = None):
+        """#333 part 3g: the two currents, each a unit vector or None (nobody
+        pulled lately): (things, news). Blurp's T follows the first, its N the
+        second."""
+        t = time.time() if now is None else now
+        th = self._sum(self._thing_ctx, self._thing_w, self._thing_ts, t)
+        nw = self._sum(self._now, self._now_w, self._now_ts, t)
+        return (None if th is None else unit(th)), (None if nw is None else unit(nw))
 
     def current(self, now: float | None = None) -> np.ndarray | None:
         """THE FIELD'S CURRENT (#161): every session that spoke lately pulls at
         once, toward its own context, by its activity fading with
         CURRENT_TAU_S -- the push the world gives whatever moves on the field.
-        Their SUM, not whoever wrote last: a lone write (a getter reading, a
-        tick) nudges it and can't flip it (the live seat's 2026-10-16 flips).
-        RAM only, like the contexts it is read from; None before anyone spoke."""
+        Their SUM (both currents, #333 part 3g: the things and the news), not
+        whoever wrote last: a lone write (a getter reading, a tick) nudges it
+        and can't flip it (the live seat's 2026-10-16 flips). RAM only, like
+        the contexts it is read from; None before anyone spoke."""
         t = time.time() if now is None else now
-        acc, any_ = None, False
-        for sess, ctx in list(self._now.items()):
-            w = self._now_w.get(sess, 0.0) * float(np.exp(-(t - self._now_ts.get(sess, t)) / CURRENT_TAU_S))
-            if w < CURRENT_MIN_PULL:
-                continue
-            acc = w * ctx if acc is None else acc + w * ctx
-            any_ = True
-        return unit(acc) if any_ else None
+        th = self._sum(self._thing_ctx, self._thing_w, self._thing_ts, t)
+        nw = self._sum(self._now, self._now_w, self._now_ts, t)
+        acc = [a for a in (th, nw) if a is not None]
+        return unit(np.sum(acc, axis=0)) if acc else None
 
     # ---- sharing: disjoint writers, merged reads ------------------------------------
     DIVERGE_COS = 0.0          # displacements from the seed pointing apart

@@ -268,7 +268,8 @@ STEP = 0.1                  # how far self pushes itself per try (its babble)
 AIM_HOLD = 300.0            # s self holds an aim before choosing the next (steer, after rung 1; #343: was 30 cycles)
 AIM_REACH = 0.3             # how far from where it is an aim lies
 STEP_MAX = 0.3              # its longest stride when it steers (leaning into a 0.2 pull needs more than 0.1)
-PUSH_GAIN = 0.2             # how hard the current pulls it toward itself
+PUSH_GAIN = 0.2             # how hard the current pulls it toward itself (#333 part 3g: each part, T and N, toward its own current)
+NEAR_LOG = 3                # #333 part 3g, approved 2026-10-21 (logging only): the world things the cycle line names as nearest
 LEARN = 0.2                 # how fast expect's model of the current follows what it observes
 CALM = 1e-6                 # a push under this is no push (a quiet world)
 RUNG1_CYCLES = 20           # pushed cycles in the window the test reads
@@ -640,6 +641,7 @@ def load_state(srv) -> None:
     rt["mode"] = _load_mode(srv)
     rt["model"] = _load_model(srv)
     rt["tempo"] = _load_json(srv, "tempo.json") or {}
+    rt["parts"] = _load_parts(srv)           # #333 part 3g: T and N (none saved: T = its position, N = 0)
     rt["nudged"] = _load_json(srv, NUDGED_FILE) or {}   # #333 part 3a: nudges since each thing's last look
     rt["settings"] = _load_settings(srv)    # #320: what change itself adopted
 
@@ -1123,6 +1125,70 @@ def _current(srv):
     return None if c is None else _unit(c)
 
 
+def _current_parts(srv):
+    """#333 part 3g: the field's two currents -- (things, news), each a unit
+    vector or None. A field with one current only (an older one) gives it as
+    the things current, which is where the position followed it before."""
+    fld = getattr(srv, "efield", None)
+    try:
+        if hasattr(fld, "current_parts"):
+            t, n = fld.current_parts()
+        else:
+            t, n = (fld.current() if fld is not None else None), None
+    except Exception:
+        t = n = None
+    return (None if t is None else _unit(t)), (None if n is None else _unit(n))
+
+
+def _load_parts(srv):
+    """T and N as the last cycle saved them (parts.json), or None."""
+    d = _load_json(srv, PARTS_FILE)
+    try:
+        t, n = np.asarray(d["t"], dtype=float), np.asarray(d["n"], dtype=float)
+    except Exception:
+        return None
+    return {"t": t, "n": n} if t.ndim == 1 and t.shape == n.shape and len(t) else None
+
+
+def _parts(srv, pos) -> tuple:
+    """#333 part 3g: Blurp's two parts, (T, N), with position = unit(T + N). The
+    saved split when it still adds up to where Blurp stands (a restart keeps
+    it); else T = the position and N = 0 (a new Blurp, a moved one)."""
+    pos = np.asarray(pos, dtype=float)
+    p = _rt(srv).get("parts")
+    if p is not None and len(p["t"]) == len(pos) and len(p["n"]) == len(pos):
+        if np.allclose(_unit(p["t"] + p["n"]), _unit(pos)):
+            return p["t"].copy(), p["n"].copy()
+    return pos.copy(), np.zeros_like(pos)
+
+
+def _move_parts(c: dict, mine) -> tuple:
+    """#333 part 3g: one cycle's move of the two parts -> (T', N'). T takes its own
+    stride and follows the things current; N follows the news current only (a
+    news current gone fades it); a still world (no current at all) moves
+    nothing but the stride."""
+    t, n = c["t"], c["n"]
+    ct, cn = c.get("cur_t"), c.get("cur_n")
+    t1 = t + mine + (PUSH_GAIN * (ct - t) if ct is not None else 0.0)
+    n1 = n if c.get("still") else n + PUSH_GAIN * ((cn if cn is not None else 0.0) - n)
+    return t1, n1
+
+
+def _near(srv, pos, k: int | None = None) -> list:
+    """#333 part 3g, seat-side: the world things nearest a position, [[eid, cos]],
+    nearest first. Only things in Blurp's world (the reach: never merged, never
+    itself, never outside)."""
+    k = NEAR_LOG if k is None else int(k)
+    u = _unit(np.asarray(pos, dtype=float))
+    out = []
+    for eid, dim in _API._reach(srv).items():
+        v = _spot(srv, eid)
+        if v is not None and len(v) == len(u):
+            out.append((eid, round(float(u @ v), 4)))
+    out.sort(key=lambda r: (-r[1], r[0]))
+    return [[e, c] for e, c in out[:k]]
+
+
 def _p_changed(srv, eid: str) -> float:
     """The tempo, at the pace I look, with ONE BIT OF MEMORY: the world bursts,
     so what I will see depends on what I saw last. Predict P(changed | last
@@ -1205,8 +1271,8 @@ def _try(srv, seed: str) -> dict:
     c = _ctx.cycle
     ent = _entity(srv)
     mine = c["mine"] if c.get("mine") is not None else STEP * _seed_dir(seed, len(c["pos"]))
-    world = PUSH_GAIN * (c["current"] - c["pos"])
-    ent.position = [float(x) for x in _unit(c["pos"] + mine + world)]
+    c["t1"], c["n1"] = _move_parts(c, mine)       # #333 part 3g: position = unit(T + N)
+    ent.position = [float(x) for x in _unit(c["t1"] + c["n1"])]
     return {"rc": 0, "text": "moved"}
 
 
@@ -2164,6 +2230,7 @@ NUDGE_MOVED, NUDGE_NOTHING, NUDGE_REFUSED = 0, 1, 2
 # look's interval starts), the rate fits and the look curiosity, as audits are.
 NUDGE_K_BINS = (1, 2)   # approved 2026-10-21: k = 1 and k >= 2 -- two toggles of a tower block undo each other
 NUDGED_FILE = "nudged.json"
+PARTS_FILE = "parts.json"      # #333 part 3g: T and N, kept across a restart
 
 
 def _k_bin(k) -> int | None:
@@ -3146,6 +3213,13 @@ def cycle(srv, now: float | None = None) -> dict | None:
         cur = pos                                                 # the world is still: no push
     elif pos is None or len(pos) != len(cur):
         pos = _unit(cur + _seed_dir("birthplace", len(cur)))      # born near the current, not on it
+    if still:
+        cur_t = cur_n = None
+    elif "current_t" in seat or "current_n" in seat:                # #333 part 3g: the two currents
+        cur_t, cur_n = (None if seat.get(k) is None else _unit(seat[k]) for k in ("current_t", "current_n"))
+    else:
+        cur_t, cur_n = cur, None                                  # an older seat: one current, the things'
+    part_t, part_n = _parts(srv, pos)
     rt["last"] = now
     n = cycle_count(srv) + 1                                      # O(1): the running count (#343)
     seed = f"{n}"
@@ -3172,7 +3246,8 @@ def cycle(srv, now: float | None = None) -> dict | None:
             rt["aim_n"], rt["aim_at"] = n, now                # #343: held AIM_HOLD s from here
         aim = rt["aim"]
     from .night import method_call
-    _ctx.cycle = {"srv": srv, "pos": pos, "current": cur, "aim": aim, "still": still}
+    _ctx.cycle = {"srv": srv, "pos": pos, "current": cur, "aim": aim, "still": still,
+                  "t": part_t, "n": part_n, "cur_t": cur_t, "cur_n": cur_n}
     try:
         outs = []
         for m in ("expect", "try", "notice"):
@@ -3203,14 +3278,21 @@ def cycle(srv, now: float | None = None) -> dict | None:
     elif aim is not None:
         # where it landed against its aim, and where the same stride would have
         # landed without leaning into the current (the world's push is the same)
-        world = PUSH_GAIN * (cur - pos)
-        naive_land = _unit(pos + c["naive_mine"] + world)
+        nt, nn = _move_parts(c, c["naive_mine"])                    # #333 part 3g: the same stride, unsteered
+        naive_land = _unit(nt + nn)
         rec.update({"aim_n": rt["aim_n"], "aim_err": float(np.linalg.norm(c["observed"] - aim)),
                     "aim_naive": float(np.linalg.norm(naive_land - aim))})
     if aim is not None and rt.get("aim_eid"):
         rec["aim_eid"] = rt["aim_eid"]       # #333: the thing it aims at (and nudges)
-    _API.effects(srv, [{"kind": "position", "position": [float(x) for x in ent.position]}   # #440: its move, in the seat
-                       | ({"pull": c["pull"]} if "pull" in c else {})])
+    res = _API.effects(srv, [{"kind": "position", "position": [float(x) for x in ent.position],   # #440: its move, in the seat
+                              "near": NEAR_LOG}                                       # #333 part 3g: and what stands nearest
+                             | ({"pull": c["pull"]} if "pull" in c else {})])
+    t1, n1 = c["t1"], c["n1"]                                    # #333 part 3g: kept, logged and saved
+    rt["parts"] = {"t": t1, "n": n1}
+    _save_json(srv, PARTS_FILE, {"t": [float(x) for x in t1], "n": [float(x) for x in n1]})
+    near = res[0].get("near") if res and isinstance(res[0], dict) else None
+    rec.update({"norm_t": round(float(np.linalg.norm(t1)), 4), "norm_n": round(float(np.linalg.norm(n1)), 4),   # `n` is the cycle number
+                "near": near if isinstance(near, list) else []})
     try:
         _mark_rung7_restart(srv, now)
         _mark_glitch_fix(srv, now)

@@ -87,6 +87,7 @@ def _field(emb=None):
     """A real EntityField on a memory backend; its current() is self's world."""
     fld = EntityField(MemBackend(), emb if emb is not None else _Emb(), "play@test")
     fld.current = lambda now=None: np.array(_unit(1), dtype=float)
+    fld.current_parts = lambda now=None: (np.array(_unit(1), dtype=float), None)   # #333 part 3g: a things current
     return fld
 
 

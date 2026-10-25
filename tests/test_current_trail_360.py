@@ -145,6 +145,7 @@ def _field(pulled=True):
     f.flush()
     if not pulled:
         f._now.clear(); f._now_w.clear(); f._now_ts.clear()
+        f._thing_ctx.clear(); f._thing_w.clear(); f._thing_ts.clear()   # #333 part 3g: the things current too
     return f
 
 
