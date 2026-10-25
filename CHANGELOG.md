@@ -1,6 +1,6 @@
 ## v0.7.2.1 (2026-10-25)
 
-Home Assistant fixes: a patch on 0.7.2 for running the seat under Home Assistant.
+A patch on 0.7.2: fixes for running the seat under Home Assistant, and the ball can be rolled again.
 
 - **The decision cockpit works under Home Assistant** (#470, #527). The cockpit's reads and writes (decisions, goals, stats, the options window, quota resume) 404'd through HA's relay; the relay now forwards them, reads as GET only and writes for admins only.
 - **Deleting a chat through Home Assistant no longer 404s on a fresh HA start** (#470, #527). The page's first requests raced the load of the chat owners map, so a chat made in one request was unknown to its own delete; the map now loads once and every request shares it.
