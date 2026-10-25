@@ -480,6 +480,10 @@ def loop_task_text(ev: dict) -> str:
         head = f"your job #{ev.get('job', '?')} finished ({ev.get('what', '?')}, {ev.get('secs', '?')} s)" + \
                (f" -- about '{ent}'" if ent else "")
         detail = f"Its result:\n{str(ev.get('result') or '')[:1500]}"
+    elif kind == "decision":
+        # decision_map.answered: the operator answered a card this loop asked
+        head = str(ev.get("text") or f"a decision card was answered: '{ent}'")
+        detail = ""
     elif kind == "getter-applied":
         # WHAT CHANGED (2026-10-11 sweep: the loop was woken with an empty task)
         head = f"a reading changed on '{ent}' (its getter ran)"

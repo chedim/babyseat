@@ -204,6 +204,23 @@ def deliver(runner, sid: str, n: int, what: str, result: str, secs: float, depth
     text = f"[membrane] job #{n} finished ({what}, {secs} s):\n{result}"
     if depth >= MAX_DEPTH:
         return "dropped: depth"
+    return deliver_event(runner, sid, text, kind="job-done", entity=entity, tool="job",
+                         key=f"job{n}", call_id=f"job-{n}", title=f"job #{n} finished · {what} ({secs} s)",
+                         card_input={"job": n, "what": what, "seconds": secs}, output=result,
+                         loop_extra={"job": n, "what": what, "result": result, "secs": secs,
+                                     "job_depth": depth + 1, "event_id": f"job-{n}"},
+                         turn_extra={"jobDepth": depth + 1})
+
+
+def deliver_event(runner, sid: str, text: str, kind: str, entity: str = "", tool: str = "",
+                  key: str = "", title: str = "", card_input: dict | None = None,
+                  output: str = "", call_id: str = "", loop_extra: dict | None = None,
+                  turn_extra: dict | None = None) -> str:
+    """AN EVENT BACK TO ITS SESSION (a finished job; an answered Decision card,
+    decision_map.answered): a loop session gets a pass on its own entity (an
+    events-pool event of `kind`, the way a fired watch arrives); a chat gets a
+    tool box in its transcript and a continuation turn carrying `text`.
+    Returns 'loop', 'chat', or why nothing was delivered."""
     srv = getattr(runner, "srv", None)
     if _is_loop(runner, sid):
         pool = getattr(srv, "events_pool", None)
@@ -214,25 +231,30 @@ def deliver(runner, sid: str, n: int, what: str, result: str, secs: float, depth
         # entity ('watch: <eid>'); the job's subject rides only as `what`
         agent = str((getattr(runner, "_agents", None) or {}).get(sid) or "")
         own = agent.split(": ", 1)[1].strip() if ": " in agent else ""
-        entity = own or entity
-        pool.put({"kind": "job-done", "entity": entity, "job": n, "what": what, "result": result,
-                  "secs": secs, "job_depth": depth + 1, "event_id": f"job-{n}", "ts": time.time()})
+        pool.put({"kind": kind, "entity": own or entity, "text": text,
+                  **(loop_extra or {}), "ts": time.time()})
         return "loop"
+    sessions = getattr(runner, "sessions", None)
+    row = sessions.get(sid) if sessions is not None else None
+    if kind != "job-done" and not row:
+        return "no session"              # a job always has its chat; an old card may not
     # THE RESULT IS A TOOL BOX, NOT A BUBBLE (2026-10-12, the operator: "NOT AS GIANT
     # BLUE BUBBLES ... put them back into tool call boxes"): a card row of its own,
     # one tool part (job #N, its output); the continuation turn takes the text
     # invisibly, as auto-chat's continuations do
     now = int(time.time() * 1000)
-    agent = str(((getattr(runner, "sessions", None) and runner.sessions.get(sid)) or {}).get("agent") or "build")
-    card = {"id": f"msg_job{n}_{now}", "sessionID": sid, "role": "assistant", "parentID": "",
+    tool = tool or kind
+    key = key or f"{tool}{now}"
+    agent = str((row or {}).get("agent") or "build")
+    card = {"id": f"msg_{key}_{now}", "sessionID": sid, "role": "assistant", "parentID": "",
             "modelID": "membrane", "providerID": "membrane", "mode": "build", "agent": agent,
             "path": {"cwd": "", "root": ""}, "cost": 0.0,
             "tokens": {"total": 0, "input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
             "time": {"created": now, "completed": now}, "finish": "stop", "jobCard": True}
-    part = {"id": f"prt_job{n}_{now}", "sessionID": sid, "messageID": card["id"], "type": "tool",
-            "callID": f"job-{n}", "tool": "job",
-            "state": {"status": "completed", "input": {"job": n, "what": what, "seconds": secs},
-                      "output": result, "title": f"job #{n} finished · {what} ({secs} s)",
+    part = {"id": f"prt_{key}_{now}", "sessionID": sid, "messageID": card["id"], "type": "tool",
+            "callID": call_id or key, "tool": tool,
+            "state": {"status": "completed", "input": dict(card_input or {}),
+                      "output": output or text, "title": title or text[:120],
                       "time": {"start": now, "end": now}}}
     try:
         runner.messages.append(sid, card, [part])
@@ -240,9 +262,9 @@ def deliver(runner, sid: str, n: int, what: str, result: str, secs: float, depth
         runner.hub.publish({"type": "message.part.updated", "part": dict(part), "time": now, "sessionID": sid})
     except Exception:
         pass
-    info = {"id": f"msg_jobturn{n}_{now}", "sessionID": sid, "role": "user", "agent": agent,
-            "continueTurn": True, "jobTurn": True, "jobDepth": depth + 1, "jobText": text,
-            "time": {"created": now}}
+    info = {"id": f"msg_{key.replace(tool, tool + 'turn', 1)}_{now}", "sessionID": sid, "role": "user", "agent": agent,
+            "continueTurn": True, "jobTurn": True, "jobDepth": 1, "jobText": text,
+            "time": {"created": now}, **(turn_extra or {})}
     threading.Thread(target=lambda: runner.run(sid, "", user_info=info, user_parts=[]),
-                     daemon=True, name=f"job-{n}-turn").start()
+                     daemon=True, name=f"{key}-turn").start()
     return "chat"

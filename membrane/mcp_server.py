@@ -758,6 +758,51 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "method_define",
+        "description": (
+            "CLIFFHANGER DEFINE: give a class or object a METHOD once, then "
+            "call it on any object of that kind (method_call, or method_each "
+            "over every member). command is a shell template: {{name}} binds "
+            "a call's args, {{self.<prop>}} the object's own properties "
+            "(e.g. on='light', method='dim', command='curl ... "
+            "{{self.entity_id}} {{level}}'). Or steps: a composite of calls "
+            "and commands run in order. guard: a python check run first "
+            "(result = {'ok': bool, 'why': str}; false blocks the call). "
+            "A missing owner is created as a class; re-defining updates the "
+            "method. Owner only (a method's command is code)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "on": {"type": "string",
+                       "description": "The owner: the class or object the method "
+                                      "belongs to (eid or name)."},
+                "method": {"type": "string",
+                           "description": "The method's name; with abstract, its "
+                                          "signature, e.g. 'dim(level)'."},
+                "command": {"type": "string",
+                            "description": "The command template ({{arg}}, "
+                                           "{{self.prop}})."},
+                "read_only": {"type": "boolean",
+                              "description": "The method only reads (a sensor)."},
+                "guard": {"type": "string",
+                          "description": "Optional python check run before the "
+                                         "command; state has self, args, steps."},
+                "steps": {"type": "array",
+                          "items": {"type": "object"},
+                          "description": "A composite instead of a command: "
+                                         "[{name, call, object?, args?} | "
+                                         "{name, each, call, args?, max?} | "
+                                         "{name, command}], run in order, a "
+                                         "failure halts."},
+                "abstract": {"type": "boolean",
+                             "description": "An interface's required method: a "
+                                            "signature, no command; each member "
+                                            "must implement it."},
+            },
+            "required": ["on", "method"],
+        },
+    },
+    {
         "name": "method_call",
         "description": (
             "CLIFFHANGER CALL: run a method on an object -- an entity or a "
@@ -775,6 +820,35 @@ TOOLS: list[dict] = [
                 "args": {"type": "object", "description": "The method's {{param}} values."},
             },
             "required": ["object", "method"],
+        },
+    },
+    {
+        "name": "method_each",
+        "description": (
+            "CLIFFHANGER EACH: call one method on every member of a class "
+            "(over='light') or a name pattern (over='ha:light.*'). dry_run "
+            "lists who it would reach without running. Stops at the first "
+            "failure unless on_fail='continue'. Owner only."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "over": {"type": "string",
+                         "description": "The class (its members) or a '*' "
+                                        "name pattern."},
+                "method": {"type": "string", "description": "The method's name."},
+                "args": {"type": "object",
+                         "description": "The method's {{param}} values, the same "
+                                        "for every member."},
+                "max": {"type": "integer",
+                        "description": "Cap on members reached (default 20, "
+                                       "at most 150)."},
+                "dry_run": {"type": "boolean",
+                            "description": "List the members only; run nothing."},
+                "on_fail": {"type": "string", "enum": ["abort", "continue"],
+                            "description": "abort (default) stops at the first "
+                                           "failure; continue runs the rest."},
+            },
+            "required": ["over", "method"],
         },
     },
     {

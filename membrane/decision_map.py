@@ -224,3 +224,132 @@ def goals(est, active=()) -> dict:
         return (act.index(g["eid"]) if g["active"] else len(act), -born, g["title"])
     out.sort(key=rank)
     return {"goals": out}
+
+
+# ---- AN ANSWER COMES BACK (2026-10-25) -------------------------------------
+# A card is answered the way a watch fires: the asker hears it without
+# spending a watch. The field already knows who asked -- the entity_add call
+# that made the card is a captured observation event, and it carries its
+# conversation (#429: 'sid:<serve session>'). Nothing is stamped on the card.
+
+ADD_TOOLS = ("entity_add",)           # the MCP name (Claude's, after its mcp__<server>__ prefix)
+ADD_FAMILY = ("entity", "add")        # the local models' family call: entity(action='add')
+
+
+def _norm(s) -> str:
+    return " ".join(str(s or "").lower().split())
+
+
+def _made_it(ev: dict, name: str, eid: str) -> bool:
+    tool = str(ev.get("tool") or "").rsplit("__", 1)[-1]
+    a = ev.get("args") if isinstance(ev.get("args"), dict) else {}
+    if tool not in ADD_TOOLS and not (tool == ADD_FAMILY[0] and
+                                      str(a.get("action") or "") == ADD_FAMILY[1]):
+        return False
+    if eid and eid in str(ev.get("result_head") or ""):
+        return True
+    return bool(name) and _norm(a.get("name")) == name
+
+
+def birth_conversation(fld, ent) -> str:
+    """The conversation `ent` was born in, from the field's own records: the
+    earliest captured add call that made it (by its name, or its eid in the
+    call's result) and the `conv` that call's event carries. '' when the
+    field holds none (an old card, a card a script made, capture off)."""
+    b = getattr(fld, "b", None)
+    if b is None or ent is None:
+        return ""
+    name = _norm((ent.properties or {}).get("name"))
+    best = None
+    try:
+        rows = b.scan("events", {"origin": getattr(fld, "origin", ""), "stream": "observation"})
+        for _k, ev in rows:
+            if ev.get("conv") and _made_it(ev, name, ent.eid):
+                if best is None or (ev.get("seq") or 0) < (best.get("seq") or 0):
+                    best = ev
+    except Exception:
+        return ""
+    return str((best or {}).get("conv") or "")
+
+
+def _deliver(runner, conv: str, text: str, eid: str, what: str) -> str:
+    if not conv.startswith("sid:") or runner is None:
+        return ""                     # a client's own chat (opencode, Claude Code): no seat session
+    from . import jobs as _jobs
+    return _jobs.deliver_event(runner, conv[4:], text, kind="decision", entity=eid,
+                               tool="decision", key=f"decision{int(time.time() * 1000) % 10**9}",
+                               title=what, card_input={"card": eid})
+
+
+def _blockers_of(est, target: str) -> list:
+    from .entities import CLASS_DECISION
+    out = []
+    for d in list((getattr(est, "docs", None) or {}).values()):
+        if d.cls != CLASS_DECISION or (d.properties or {}).get("merged_into"):
+            continue
+        for t in _eids(est, (d.properties or {}).get("blocks")):
+            if t == target:
+                out.append(d)
+    return out
+
+
+def _eids(est, v) -> list:
+    out = []
+    for x in (v if isinstance(v, list) else [v] if v else []):
+        e = est.resolve(str(x), exact=True)
+        out.append(e.eid if e is not None else str(x))
+    return out
+
+
+def answered(srv, eid: str, runner=None) -> dict:
+    """After an answer: the decision goes back to the conversation the card
+    was born in (jobs.deliver_event: a continuation in a chat, a pass on its
+    own entity for a loop), and each entity the card `blocks` is pulsed once
+    every card blocking it is decided -- a Goal wakes its loop (the board's
+    rewake), anything else hears it in its own birth conversation."""
+    from .entities import CLASS_GOAL
+    est = getattr(srv, "entity_store", None)
+    fld = getattr(srv, "efield", None)
+    runner = runner if runner is not None else getattr(srv, "_loop_runner", None)
+    out = {"delivered": "", "pulsed": []}
+    ent = (getattr(est, "docs", None) or {}).get(eid) if est is not None else None
+    if ent is None:
+        return out
+    p = ent.properties or {}
+    var = p.get("var") if isinstance(p.get("var"), dict) else {}
+    title = _one_line(p.get("name") or eid, LEDGER_TITLE_MAX)
+    shown = _one_line(_shown(p.get("value"), var), LEDGER_TITLE_MAX)
+    out["conv"] = conv = birth_conversation(fld, ent)
+    out["delivered"] = _deliver(runner, conv, f"[membrane] decided: {title} = {shown} "
+                                f"(your card {eid}) -- continue", eid, f"decided · {title} = {shown}")
+    for t in _eids(est, p.get("blocks")):
+        target = est.docs.get(t)
+        if target is None:
+            continue
+        holders = _blockers_of(est, t)
+        if any(_status(h.properties or {}) != STATUS_DECIDED for h in holders):
+            continue
+        tp = target.properties or {}
+        if target.cls == CLASS_GOAL:
+            if tp.get("status", "open") != "open":
+                continue
+            from . import watch_agents as _WA
+            _WA._wake(est, getattr(srv, "events_pool", None), target, tp)
+        else:
+            names = ", ".join(_one_line((h.properties or {}).get("name") or h.eid, 60) for h in holders)
+            tname = _one_line(tp.get("name") or t, LEDGER_TITLE_MAX)
+            _deliver(runner, birth_conversation(fld, target),
+                     f"[membrane] unblocked: {tname} ({t}) -- every card blocking it is decided "
+                     f"({names}) -- continue", t, f"unblocked · {tname}")
+        out["pulsed"].append(t)
+    return out
+
+
+def answered_async(srv, eid: str, runner=None) -> None:
+    """The routes' follow-up, off the request thread (the field scan is a walk)."""
+    def go():
+        try:
+            answered(srv, eid, runner=runner)
+        except Exception:
+            pass
+    threading.Thread(target=go, daemon=True, name="decision-answered").start()

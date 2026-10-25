@@ -59,6 +59,17 @@ class TestTheBoardOnTheServePort(_Env):
         code, out = self._go("POST", "/membrane/decision/answer", {"card": "no such", "value": 1})
         self.assertEqual(code, 400)
 
+    def test_an_answer_on_the_serve_port_runs_the_follow_up(self):
+        # 2026-10-25: the answer goes back to the chat that asked (decision_map.answered)
+        from unittest import mock
+        from membrane import decision_map as DM
+        seen = []
+        with mock.patch.object(DM, "answered_async",
+                               lambda srv, eid, runner=None: seen.append((eid, runner))):
+            code, out = self._go("POST", "/membrane/decision/answer", {"card": self.card, "value": 1800})
+        self.assertEqual(code, 200, out)
+        self.assertEqual(seen, [(self.card, self.r)])
+
     def test_the_chat_a_card_opened_is_recorded(self):
         code, out = self._go("POST", "/membrane/decision/chat", {"card": self.card, "chat": "ses_abc"})
         self.assertEqual(code, 200, out)
