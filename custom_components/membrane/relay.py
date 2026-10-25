@@ -61,7 +61,10 @@ ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
 # its unscoped twin)
 ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane/seat", "membrane/seat/control",
                  "membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result",
-                 "membrane/toybox/poke", "membrane/seat/pause")
+                 "membrane/toybox/poke", "membrane/seat/pause",
+                 # #470: the decision cockpit's writes, the out-of-tokens Resume, the ⚙ window
+                 "membrane/decision/answer", "membrane/decision/chat",
+                 "membrane/quota/resume", "membrane/options")
 # #244: the 👶 panel's play buttons -- the poke is tagged with the HA user, stamped here;
 # #299: the seat's switches too (an admin's accept of self's achievement names them on its record)
 PERSON_PATHS = ("membrane/toybox/poke", "membrane/seat/control", "membrane/seat/pause")
@@ -69,7 +72,11 @@ PERSON_PATHS = ("membrane/toybox/poke", "membrane/seat/control", "membrane/seat/
 VOICE_PATHS = ("membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result")
 # the minds' models: everyone reads, only an HA ADMIN switches them -- the seat's
 # pause too (#348: membrane home's ▶ / ⏸)
-ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control", "membrane/seat/pause")
+# #470: the seat's other owner-only writes the pages make (every seat write is
+# behind the owner's door, seatauth.py, and the relay holds the seat token)
+ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control", "membrane/seat/pause",
+                     "membrane/decision/answer", "membrane/decision/chat",
+                     "membrane/quota/resume", "membrane/options")
 # the field dashboard + the drawer: the seat's read surfaces the serve
 # relays (membrane/server.py SEAT_READ_PATHS) -- GET only, exact paths
 READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
@@ -81,7 +88,12 @@ READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/self/recent",              # #230: self's record, the 👶 panel's feed
                    "membrane/self/sheet",               # #249: self's character sheet
                    "membrane/self/card",                # #283: the zoo's card: name, Lv, rung, awake
-                   "membrane/toybox/state")             # #249: the toy dock's live toys
+                   "membrane/toybox/state",             # #249: the toy dock's live toys
+                   "membrane/map/search",               # the 3D view's catalog search
+                   "membrane/decisions",                # #470: the decision cockpit's board
+                   "membrane/goals",                    # #470: the cockpit's goals
+                   "membrane/stats",                    # the 📊 window's tokenomics
+                   "membrane/quota")                    # out of tokens: the paused models
 # the minds' inner text (the thinker's log, the dreamer's goals): admins only
 ADMIN_READ_EXACT = ("membrane/minds",)
 EVENT_HELLO = "server.connected"
@@ -403,7 +415,8 @@ class ServeProxyView(HomeAssistantView):
             return web.Response(status=405, text="field reads are GET only")
         if rest in ADMIN_WRITE_EXACT and method != "GET" and not getattr(user, "is_admin", False):
             return web.Response(status=403, text="only an admin pauses the seat" if rest == "membrane/seat/pause"
-                                else "only an admin switches the minds' models")
+                                else "only an admin switches the minds' models" if rest in ("membrane/models", "membrane/seat/control")
+                                else "only an admin changes this on the seat")
         if rest in ADMIN_READ_EXACT and not getattr(user, "is_admin", False):
             return web.Response(status=403, text="only an admin reads the minds")
         if rest == "event":
