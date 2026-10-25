@@ -42,8 +42,13 @@ What the integration still does for such a seat:
     POSTs it to the seat; the seat files it in `~/.config/membrane/hass.env`
     (0600) and reads it on its next turn — so an HA restart reaches the seat
     without a seat restart. Set **HA's address as the seat sees it** in the
-    options when the seat is on another machine (Home Assistant's own
-    `internal_url` answer otherwise; empty = that default).
+    options to name it outright; empty = Home Assistant's own answer, picked
+    by where the seat's URL points: a seat on HA's host keeps the local URL, a
+    seat on HA's LAN gets HA's internal address (`internal_url`, else its LAN
+    IP — not when HA binds only 127.0.0.1 behind a proxy), a seat outside the
+    LAN gets HA's external address. A seat elsewhere never gets a loopback
+    URL: with no usable address the token is not sent and HA's log warns,
+    naming this option.
   - **State push** is the mirror of the inside mode: entities the seat marks
     `ha_entity` are pushed to it (in batches) on every change, watches fire
     without polling.
@@ -144,7 +149,7 @@ chosen, not inherited.
 |---|---|
 | Chat model / Embedding model | from the same Ollama server's list (keep the embedder once the field has grown) — inside mode only |
 | Let the seat use Home Assistant | the hidden user + the state push (above); connect mode also gets the delivered token (`hass.env`) |
-| HA's address as the seat sees it | connect mode: what URL the seat reaches Home Assistant at (empty: HA's own `internal_url`) |
+| HA's address as the seat sees it | connect mode: what URL the seat reaches Home Assistant at (empty: HA's own answer for where the seat is — local, LAN or external; never loopback to a seat elsewhere) |
 | Open on membrane home | the landing page + the folded sidebar |
 | Speech server URL | a whisper-server; empty = the browser transcribes |
 | Watch loops (1–3) | the seat's background loops; fewer is lighter, more is livelier (inside mode only) |

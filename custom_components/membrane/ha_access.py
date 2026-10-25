@@ -22,8 +22,11 @@ and it lands in the seat's ~/.config/membrane/hass.env).
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import socket
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -86,6 +89,82 @@ def routable_url(hass: HomeAssistant) -> str:
     return local_url(hass)
 
 
+def _ip(host: str):
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+def _seat_place(host: str) -> str:
+    """Where the seat is, from its serve_url host: "local" (loopback -- HA's
+    own host), "public" (globally routable) or "lan" (private, link-local,
+    CGNAT, or a name that does not resolve here). A name is resolved; any
+    loopback answer makes it local."""
+    ip = _ip(host)
+    ips = [ip] if ip else []
+    if ip is None and host:
+        try:
+            ips = [_ip(a[4][0].split("%")[0]) for a in socket.getaddrinfo(host, None)]
+        except (OSError, UnicodeError):
+            ips = []
+        ips = [i for i in ips if i is not None]
+    if any(i.is_loopback for i in ips):
+        return "local"
+    if ips and all(i.is_global for i in ips):
+        return "public"
+    return "lan"
+
+
+def _get_url(hass: HomeAssistant, **kw) -> str | None:
+    """HA's own answer (homeassistant.helpers.network.get_url), None when it has none."""
+    try:
+        from homeassistant.helpers.network import NoURLAvailableError, get_url
+    except ImportError:
+        return None
+    try:
+        return get_url(hass, **kw).rstrip("/")
+    except NoURLAvailableError:
+        return None
+
+
+def _bound_to_loopback(hass: HomeAssistant) -> bool:
+    ip = _ip(str(getattr(getattr(hass.config, "api", None), "host", None) or ""))
+    return bool(ip and ip.is_loopback)
+
+
+async def seat_ha_url(hass: HomeAssistant, comp: dict) -> str | None:
+    """The URL the detached seat is handed for HA (#529): the ha_base_url
+    option first; a seat on HA's host keeps routable_url (down to the local
+    door); a seat on HA's LAN gets HA's internal address (then its external);
+    a seat outside the LAN gets HA's external address. Never a loopback
+    address to a seat elsewhere: None, with a warning naming the option."""
+    if comp.get("ha_base_url"):
+        return str(comp["ha_base_url"])
+    seat = comp.get("serve_url") or ""
+    host = urlsplit(seat).hostname or ""
+    place = await asyncio.get_running_loop().run_in_executor(None, _seat_place, host)
+    if place == "local":
+        return routable_url(hass)
+    if place == "public":
+        url = _get_url(hass, allow_internal=False, allow_external=True, prefer_external=True)
+    else:
+        # HA bound to loopback (a reverse proxy in front): HA's source-IP
+        # fallback pairs the LAN IP with HA's own port -- no address; only a
+        # configured internal_url speaks for the LAN then
+        internal = not _bound_to_loopback(hass) or bool(getattr(hass.config, "internal_url", None))
+        url = _get_url(hass, allow_internal=internal, allow_external=True, prefer_external=False)
+    ip = _ip(urlsplit(url or "").hostname or "")
+    if url and not (ip and ip.is_loopback) and (urlsplit(url).hostname or "") != "localhost":
+        return url
+    _LOGGER.warning(
+        "membrane: Home Assistant has no address the seat at %s can reach (it is not on this host and "
+        "Home Assistant has no %s URL); set the integration's option \"HA's address as the seat sees it\" "
+        "(ha_base_url) -- the seat gets no Home Assistant token until then",
+        seat, "external" if place == "public" else "internal or external")
+    return None
+
+
 def _auth(comp: dict) -> aiohttp.BasicAuth:
     return aiohttp.BasicAuth(comp.get("serve_user") or "opencode", comp.get("serve_pass") or "")
 
@@ -103,7 +182,10 @@ async def push_token(hass: HomeAssistant, entry, comp: dict) -> bool:
     url = comp.get("serve_url") or ""
     if not (url and comp.get("serve_ready")):
         return False
-    body = {"url": str(comp.get("ha_base_url") or "") or routable_url(hass), "token": token}
+    ha_url = await seat_ha_url(hass, comp)
+    if not ha_url:
+        return False
+    body = {"url": ha_url, "token": token}
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post(url + "/membrane/ha/token", json=body, auth=_auth(comp),
