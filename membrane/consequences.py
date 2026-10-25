@@ -1,4 +1,4 @@
-"""CONSEQUENCES (2026-10-11, Argus on what an AGI would need: "I see tool
+"""CONSEQUENCES (2026-10-11, the seat on what an AGI would need: "I see tool
 outputs, not outcomes ... long-horizon feedback is what turns a chain of
 responses into judgment").
 

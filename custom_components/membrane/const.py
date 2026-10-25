@@ -21,6 +21,7 @@ OPT_HA_BASE_URL = "ha_base_url" # connect mode: HA's address as THE SEAT sees it
 
 DEFAULT_BACKEND = "http://localhost:11434"
 DEFAULT_SERVE_USER = "opencode"
+DEFAULT_NAME = "Bob"            # until the seat says its own: naming.DEFAULT, the seat's default
 DEFAULT_LOOPS = 1               # an HA box is smaller than the boat's brain phone
 
 PROXY_TIMEOUT_S = 1800.0        # a model turn may run minutes

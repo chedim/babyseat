@@ -14,7 +14,7 @@ such a task should be treated almost like an event").
            background and its outcome comes back later
 
 A FINISHED JOB IS AN EVENT: back to the chat session that started it as a
-continuation turn ("[membrane] job #N finished ..." -- visible, Argus answers;
+continuation turn ("[membrane] job #N finished ..." -- visible, the seat answers;
 mid-turn it joins the next round like a queued message); a loop's job wakes a
 loop pass on the loop's own entity (kind 'job-done'). Depth: a job started inside a
 job-woken turn of depth >= MAX_DEPTH wakes nothing (no read -> reply -> read

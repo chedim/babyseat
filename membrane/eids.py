@@ -155,7 +155,7 @@ def _backtick_commands(sentence: str) -> list[str]:
     return out
 
 
-# ---- THE NURSERY GHOSTS (2026-10-11, Argus's lesson: "chopped turns can land
+# ---- THE NURSERY GHOSTS (2026-10-11, the seat's lesson: "chopped turns can land
 # mangled-fragment entities (m:m:...-style) that the graph layer reads but
 # query and remove can never reach -- poking at them replicates them") -----
 # The model-tag regex took ANY word:word token: 'a:b', a MAC's 'ba:c4:f5',

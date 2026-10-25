@@ -4,12 +4,12 @@ enforced synthetic llm calls with a more natural 'call-llm' entity?").
 membrane::llm is an actuator like any other: its method `call(about,
 prompt)` wakes a model turn -- a loop with the listener's hands -- on the
 entity `about`, with that prompt as its task. Whoever decides the model is
-needed calls it: Argus (exec(action='call', object='llm', method='call',
+needed calls it: the seat (exec(action='call', object='llm', method='call',
 args={about, prompt})), a script (membrane.call_llm(prompt) -- one per
 fire, like speak), and, step by step, the seat's own triggers (a watch's
 reaction, auto-chat, the nudges) instead of composing prompts in code.
 
-ARGUS'S FOUR EDGES (his review of this design, 2026-10-11):
+THE SEAT'S FOUR EDGES (his review of this design, 2026-10-11):
   reentrancy  a call made inside a called turn carries its depth; past
               MAX_DEPTH the engine refuses (not etiquette)
   echo/cost   the same (about, prompt) within ECHO_S is not asked again --
@@ -42,7 +42,7 @@ GLOBAL_PER_HOUR = 120
 PROMPT_MAX = 4000
 RING = 20
 
-# SELF-SCHEDULED WAKES (2026-10-11, Argus: "I have no way to hold a goal and
+# SELF-SCHEDULED WAKES (2026-10-11, the seat: "I have no way to hold a goal and
 # wake myself to pursue it"): wake(about, at, prompt) -- at that time the
 # prompt becomes a model turn on `about`, through request() (caps, depth,
 # the switch, pause and offline all apply). Kept on this entity (`wakes`):
@@ -188,7 +188,7 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
               "event_id": f"llm-{int(now * 1000)}", "depth": depth + 1, "echo": key,
               "origin": "field-call" if field_call else "call", "readonly": field_call, **(extra or {})})
     _remember(srv, ent, now, caller, about_eid, prompt)
-    try:                                   # THE CALL LEAVES A TRACE IN THE FIELD (Argus: "calls and
+    try:                                   # THE CALL LEAVES A TRACE IN THE FIELD (the seat: "calls and
         fld = getattr(srv, "efield", None)  # refusals leave no trace in the field at all")
         if fld is not None:
             from . import streams as _ST
