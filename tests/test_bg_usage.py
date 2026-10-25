@@ -193,3 +193,18 @@ def test_stats_says_when_nothing_was_recorded(tmp_path, monkeypatch, capsys):
     from membrane.stats import main
     assert main(["--store", str(store)]) == 0
     assert "background model calls: not recorded" in capsys.readouterr().out
+
+
+def test_loop_turn_tokens_reach_watch_lane(monkeypatch, tmp_path):
+    """#550: a watch loop turn carried its tokens on the message info and
+    dropped them; they land in the watch lane now."""
+    monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path))
+    out = {"info": {"modelID": "m1", "tokens": {"input": 120, "output": 30, "reasoning": 5}}}
+    bgusage.from_turn("watch", out)
+    row = bgusage.load(bgusage.path())["lanes"]["watch"]["m1"]
+    assert (row["calls"], row["input"], row["output"], row["reasoning"]) == (1, 120, 30, 5)
+
+
+def test_from_turn_never_raises():
+    bgusage.from_turn("watch", None)
+    bgusage.from_turn("watch", {"info": None})
