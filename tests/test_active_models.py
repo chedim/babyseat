@@ -83,3 +83,25 @@ class TestActiveModels(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClaudeRungsAreServed(unittest.TestCase):
+    """The loops' model: a Claude rung the seat's router registered is served
+    here, though Ollama never lists it; one it didn't register is not."""
+    known = staticmethod(AM.known_models)       # the real one: another test stubs AM.known_models
+
+    def _srv_with_router(self, records):
+        srv = _srv()
+        srv.backend = "http://127.0.0.1:1"          # no Ollama answers: its list is empty
+        rec = lambda b: type("Rec", (), {"backend": b})()
+        srv.router = type("Router", (), {"records": {n: rec(b) for n, b in records.items()}})()
+        return srv
+
+    def test_a_registered_claude_rung_is_a_known_model(self):
+        from membrane import claude_agent as CA
+        srv = self._srv_with_router({"claude-agent:sonnet": CA.PROVIDER, "qwen3:8b": "ollama"})
+        self.assertIn("claude-agent:sonnet", self.known(srv) or [])
+
+    def test_an_unregistered_claude_rung_is_still_refused(self):
+        srv = self._srv_with_router({"qwen3:8b": "ollama"})
+        self.assertNotIn("claude-agent:opus", self.known(srv) or [])
