@@ -139,6 +139,11 @@ at the end of the prompt, inside `<membrane-context>` ...
 stays after it. The reply comes back as an ordinary OpenAI response, streamed
 or buffered, with its usage. Each tool Claude ran rides the reply: a
 `membrane_tool` chunk when streamed, a `membrane_tools` list when buffered.
+When streamed, each call's start rides ahead of its result: a
+`membrane_tool_start` chunk as soon as the SDK reports the tool_use, before
+the tool runs (again with the full input; `{"id", "dropped"}` when the
+ceiling's hook denied it). A start is not a ran tool: it never joins
+`membrane_tools`.
 
 ## The prompt cache
 
@@ -285,7 +290,13 @@ Claude's turn is learned like any other model's turn:
   learned as the model's words.
 - **The voice and the predictor** hear Claude's rows like any model's.
 - **The transcript.** The reply and Claude's tool calls show in the chat.
-  Each tool call is a finished tool part with its input and output. The
+  Each tool call shows the way Claude Code shows it: its part appears,
+  state `running`, when the call starts, and the words before it go out and
+  close then, not when the tool finishes; the result completes the same
+  part with its input and output. A call that gets no result (denied, or
+  the reply ended) ends as an error, never left running. Streamed words go
+  out in batches of at most `DELTA_COALESCE_S`, by a timer when no next
+  event comes. The stored row keeps text, call, text in order. The
   assistant row and each of its tool parts are marked
   `madeBy: "claude-agent"`. The mark is provenance only now: nothing skips
   a marked row.

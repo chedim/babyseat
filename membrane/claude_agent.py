@@ -118,6 +118,7 @@ CEILING_MESSAGE = (f"This answer reached its ceiling of "
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
+TOOL_START_KEY = "membrane_tool_start"  # a streamed chunk: a call started (or was dropped)
 TOOLS_KEY = "membrane_tools"        # a buffered response: every tool Claude ran
 CAPPED_KEY = "membrane_capped"      # reply: the answer stopped at the ceiling (#425)
 CAP_MARK = "claudeCapped"           # transcript row: {session, turns, continued}
@@ -821,6 +822,14 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
     pending: dict = {}                   # tool_use id -> (name, input)
     session = str(resume or "")
     steps_seen: set = set()              # #450: one API response, counted once
+    started: set = set()                 # tool_use ids whose start went out
+
+    def start(tid, name, args):
+        # THE CALL'S START (2026-10-24): said as soon as the SDK reports the
+        # tool_use, before the tool runs -- the chat shows it running and the
+        # words before it go out now, not when the tool finishes
+        started.add(tid)
+        put(("tool_start", {"id": tid, "name": _bare(name), "input": args}))
     async for m in sdk.query(prompt=prompt, options=opts):
         kind = type(m).__name__
         if kind == "AssistantMessage" and isinstance(getattr(m, "usage", None), dict):
@@ -839,6 +848,10 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                     put(("text", d["text"]))
                 elif d.get("type") == "thinking_delta" and d.get("thinking"):
                     put(("reasoning", d["thinking"]))
+            elif ev.get("type") == "content_block_start":
+                cb = ev.get("content_block") or {}
+                if cb.get("type") == "tool_use" and cb.get("id"):
+                    start(str(cb["id"]), cb.get("name") or "", {})
         elif kind == "AssistantMessage":
             err = getattr(m, "error", None)
             if err:
@@ -846,8 +859,10 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
             for b in getattr(m, "content", None) or []:
                 bk = type(b).__name__
                 if bk == "ToolUseBlock":
-                    pending[str(getattr(b, "id", ""))] = (
+                    tid = str(getattr(b, "id", ""))
+                    pending[tid] = (
                         _bare(getattr(b, "name", "")), getattr(b, "input", None) or {})
+                    start(tid, getattr(b, "name", ""), pending[tid][1])
                 elif partial:
                     continue                  # the words already came as deltas
                 elif bk == "TextBlock" and getattr(b, "text", ""):
@@ -862,6 +877,8 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                 tid = str(getattr(b, "tool_use_id", ""))
                 name, args = pending.pop(tid, ("", {}))
                 if tid in answer.denied:
+                    if tid in started:    # its start went out: dropped, not running
+                        put(("tool_start", {"id": tid, "dropped": CEILING_MESSAGE}))
                     continue          # the hook's denial: Claude's, never run (#425)
                 put(("tool", {"id": tid, "name": name, "input": args,
                               "output": _result_text(getattr(b, "content", None)),
@@ -887,8 +904,10 @@ _END = object()
 
 def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
                resume=None, auth=None):
-    """The SDK's reply as ("text"|"reasoning"|"tool"|"usage", value) items,
-    in order. `port` is this seat's proxy, where membrane's tools relay.
+    """The SDK's reply as ("text"|"reasoning"|"tool_start"|"tool"|"usage",
+    value) items, in order: a call's "tool_start" when the SDK reports it
+    (before it runs; again with its input; {"id", "dropped"} when denied),
+    its "tool" when its result came. `port` is this seat's proxy, where membrane's tools relay.
     The async SDK runs on its own thread and loop (the proxy's handler
     threads are synchronous); an SDK error re-raises here."""
     sdk = sdk or check_available(auth)
@@ -929,14 +948,16 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
 # ---- the reply as an OpenAI response ---------------------------------------------
 
 def _chunk(model: str, delta: dict, finish=None, usage=None, tool=None,
-           capped=None) -> bytes:
-    side = tool is not None or capped is not None
+           capped=None, tool_start=None) -> bytes:
+    side = tool is not None or capped is not None or tool_start is not None
     obj = {"id": "chatcmpl-claude-agent", "object": "chat.completion.chunk",
            "created": int(time.time()), "model": model, RESP_KEY: PROVIDER,
            "choices": ([] if side else
                        [{"index": 0, "delta": delta, "finish_reason": finish}])}
     if tool is not None:
         obj[TOOL_KEY] = tool
+    if tool_start is not None:
+        obj[TOOL_START_KEY] = tool_start
     if capped is not None:
         obj[CAPPED_KEY] = capped
     if usage is not None:
@@ -998,6 +1019,12 @@ class SSEReply:
                 if kind == "tool":
                     self.tools.append(val)
                     yield _chunk(self.model, {}, tool=val)
+                    yield b"\n"
+                    continue
+                if kind == "tool_start":
+                    # a call started (shown running) or was dropped: not a
+                    # ran tool, never in .tools
+                    yield _chunk(self.model, {}, tool_start=val)
                     yield b"\n"
                     continue
                 d = {"content": val} if kind == "text" else {"reasoning": val}

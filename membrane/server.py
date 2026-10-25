@@ -2178,6 +2178,13 @@ class TurnRunner:
             # hub hung up on it (offline / idle / offline). A part's text now goes
             # out at most every DELTA_COALESCE_S, in order; the rest at the part's end.
             _pend: dict = {}
+            # THE HELD BATCH, TIME-BOUNDED (2026-10-24, "Output is cl"): a
+            # batch went out only when the next event came -- a tool running
+            # sent none, and the last words sat unshown until it finished.
+            # A held batch now goes out after DELTA_COALESCE_S by a timer
+            # too; the lock keeps the timer and the stream's events in order.
+            _plock = threading.RLock()
+            _ptimer = {"t": None, "closed": False}
 
             def _flush(pid, _pend=_pend):
                 e = _pend.get(pid)
@@ -2188,6 +2195,38 @@ class TurnRunner:
                 if e:
                     e[1] = time.time()
 
+            def _flush_held(_pend=_pend):
+                with _plock:
+                    _ptimer["t"] = None
+                    if _ptimer["closed"]:
+                        return
+                    for _k in [k for k in _pend if _pend[k][0]]:
+                        _flush(_k)
+
+            def _arm():
+                if _ptimer["t"] is None and not _ptimer["closed"]:
+                    t = threading.Timer(DELTA_COALESCE_S, _flush_held)
+                    t.daemon = True
+                    _ptimer["t"] = t
+                    t.start()
+
+            def _close_text(_live=live, _pend=_pend):
+                # THE REAL SEQUENCE (#467): the words up to a call are their
+                # own part, closed here; the call's part follows; the next
+                # words open a new part after it
+                for other in [k for k in _pend if _pend[k][0]]:
+                    _flush(other)
+                _lp = _live.get("text")
+                if _lp is not None:
+                    _flush(_lp["id"])
+                    _lp["time"]["end"] = int(time.time() * 1000)
+                    self.hub.publish({"type": "message.part.updated",
+                                      "part": dict(_lp),
+                                      "time": int(time.time() * 1000),
+                                      "sessionID": sid})
+                    _live["placed"] += len(_lp["text"])
+                    _live["text"] = None
+
             def _on_event(kind, val, _live=live, _pend=_pend):
                 if sid in (getattr(self, "_idle_turns", None) or ()):
                     self._turn_activity[sid] = time.time()   # the idle guard's touch
@@ -2196,43 +2235,90 @@ class TurnRunner:
                 if kind == "ext":
                     self._inject_card(sid, val, rounds, mkpart)
                     return False
-                if kind == "tool":
-                    # a tool Claude ran in its own loop (#389): shown, never re-run
-                    for other in [k for k in _pend if _pend[k][0]]:
-                        _flush(other)
-                    # THE REAL SEQUENCE (#467): the words up to this call are
-                    # their own part, closed here; the call's part follows;
-                    # the next words open a new part after it
-                    _lp = _live.get("text")
-                    if _lp is not None:
-                        _flush(_lp["id"])
-                        _lp["time"]["end"] = int(time.time() * 1000)
-                        self.hub.publish({"type": "message.part.updated",
-                                          "part": dict(_lp),
-                                          "time": int(time.time() * 1000),
-                                          "sessionID": sid})
-                        _live["placed"] += len(_lp["text"])
-                        _live["text"] = None
-                    _agent_tool_part(val)
-                    return False
-                p = _live.get(kind)
-                if p is None:
-                    p = _live[kind] = mkpart({"type": kind, "text": "",
-                                              "time": {"start": int(time.time() * 1000)}})
-                p["text"] += val
-                for other in [k for k in _pend if k != p["id"] and _pend[k][0]]:
-                    _flush(other)                        # a new part: the last one's words first
-                e = _pend.setdefault(p["id"], ["", 0.0])
-                e[0] += val
-                if time.time() - e[1] >= DELTA_COALESCE_S:
-                    _flush(p["id"])
+                with _plock:
+                    if kind == "tool_start":
+                        # a call Claude STARTED (2026-10-24): the words before
+                        # it go out and close now; the call shows running
+                        _close_text()
+                        _agent_tool_start(val)
+                        return False
+                    if kind == "tool":
+                        # a tool Claude ran in its own loop (#389): shown, never re-run
+                        _close_text()
+                        _agent_tool_part(val)
+                        return False
+                    p = _live.get(kind)
+                    if p is None:
+                        p = _live[kind] = mkpart({"type": kind, "text": "",
+                                                  "time": {"start": int(time.time() * 1000)}})
+                    p["text"] += val
+                    for other in [k for k in _pend if k != p["id"] and _pend[k][0]]:
+                        _flush(other)                        # a new part: the last one's words first
+                    e = _pend.setdefault(p["id"], ["", 0.0])
+                    e[0] += val
+                    if time.time() - e[1] >= DELTA_COALESCE_S:
+                        _flush(p["id"])
+                    else:
+                        _arm()                               # held: out by the timer at the latest
                 return False
             _agent_shown: set = set()
+            _agent_running: dict = {}            # tool_use id -> its running part
+            _agent_started: set = set()
 
-            def _agent_tool_part(t, _shown=_agent_shown):
+            def _agent_tool_start(t, _run=_agent_running, _shown=_agent_shown):
+                """A call the claude-agent rung STARTED (2026-10-24): its part,
+                state running, as Claude Code shows it; the result completes
+                the same part. {"id", "dropped"}: the hook denied it -- the
+                part ends as an error, never left running."""
+                from . import claude_agent as _CA
+                if not isinstance(t, dict):
+                    return
+                tid = str(t.get("id") or "")
+                if not tid or tid in _shown:
+                    return
+                now = int(time.time() * 1000)
+                tp = _run.get(tid)
+                if t.get("dropped"):
+                    if tp is not None:
+                        _agent_tool_end(tid, str(t["dropped"]))
+                    return
+                name = str(t.get("name") or "") or (tp or {}).get("tool") or ""
+                targs = t.get("input") if isinstance(t.get("input"), dict) else {}
+                if tp is None:
+                    _agent_started.add(tid)
+                    _run[tid] = mkpart({"type": "tool", "callID": tid, "tool": name,
+                                        _CA.MARK_KEY: _CA.PROVIDER,
+                                        "state": {"status": "running", "input": targs,
+                                                  "title": _tool_title(name, targs),
+                                                  "time": {"start": now}},
+                                        "time": {"start": now}})
+                    return
+                if targs:                        # the call's input, now complete
+                    tp["state"]["input"] = targs
+                    tp["state"]["title"] = _tool_title(name, targs)
+                    self.hub.publish({"type": "message.part.updated",
+                                      "part": copy.deepcopy(tp), "time": now,
+                                      "sessionID": sid})
+
+            def _agent_tool_end(tid, why, _run=_agent_running, _shown=_agent_shown):
+                """A started call that will get no result: an error, ended."""
+                tp = _run.pop(tid, None)
+                if tp is None:
+                    return
+                _shown.add(tid)
+                now = int(time.time() * 1000)
+                tp["state"] = dict(tp["state"], status="error", error=why[:300],
+                                   time={"start": tp["state"]["time"]["start"], "end": now})
+                tp["time"]["end"] = now
+                self.hub.publish({"type": "message.part.updated",
+                                  "part": copy.deepcopy(tp), "time": now,
+                                  "sessionID": sid})
+
+            def _agent_tool_part(t, _shown=_agent_shown, _run=_agent_running):
                 """One tool the claude-agent rung ran inside the SDK's loop
-                (#389): a finished tool part, marked claude-agent. Never
-                handed to this runner's executor: it already ran."""
+                (#389): a finished tool part, marked claude-agent -- the
+                running part its start made, completed. Never handed to
+                this runner's executor: it already ran."""
                 from . import claude_agent as _CA
                 if not isinstance(t, dict):
                     return
@@ -2241,36 +2327,54 @@ class TurnRunner:
                     return
                 _shown.add(key)
                 now = int(time.time() * 1000)
-                name = str(t.get("name") or "")
                 targs = t.get("input") if isinstance(t.get("input"), dict) else {}
+                tp = _run.pop(key, None)
+                t0 = tp["state"]["time"]["start"] if tp is not None else now
+                name = str(t.get("name") or "") or (tp or {}).get("tool") or ""
                 st = {"status": "error" if t.get("is_error") else "completed",
                       "input": targs, "title": _tool_title(name, targs),
-                      "time": {"start": now, "end": now}}
+                      "time": {"start": t0, "end": now}}
                 if t.get("is_error"):
                     st["error"] = str(t.get("output") or "")[:300]
                 else:
                     st["output"] = str(t.get("output") or "")
-                tp = mkpart({"type": "tool", "callID": str(t.get("id") or ""),
-                             "tool": name, _CA.MARK_KEY: _CA.PROVIDER, "state": st,
-                             "time": {"start": now, "end": now}})
+                if tp is not None:
+                    tp["tool"] = name
+                    tp["state"] = st
+                    tp["time"] = {"start": t0, "end": now}
+                else:
+                    tp = mkpart({"type": "tool", "callID": str(t.get("id") or ""),
+                                 "tool": name, _CA.MARK_KEY: _CA.PROVIDER, "state": st,
+                                 "time": {"start": now, "end": now}})
                 self.hub.publish({"type": "message.part.updated", "part": dict(tp),
                                   "time": now, "sessionID": sid})
+
+            def _settle(_pend=_pend, _run=_agent_running):
+                # the stream is over: the tail of every part, before it closes;
+                # no timer after the round; a call still running got no result
+                with _plock:
+                    _ptimer["closed"] = True
+                    if _ptimer["t"] is not None:
+                        _ptimer["t"].cancel()
+                        _ptimer["t"] = None
+                    for _pid in list(_pend):
+                        _flush(_pid)
+                    for _tid in list(_run):
+                        _agent_tool_end(_tid, "no result: the reply ended before this call finished")
             _stream = getattr(self.call_ladder, "stream", None) if STREAM_ROUNDS else None
             try:
                 if _stream is not None:
                     try:
                         resp = _stream(body, _on_event)
-                        for _pid in list(_pend):
-                            _flush(_pid)                 # the tail of every part, before it closes
+                        _settle()
                     except SeatBusy:
-                        for _pid in list(_pend):
-                            _flush(_pid)
+                        _settle()
                         raise                        # the busy seat: no second (buffered) call (#431)
                     except Exception as _se:
-                        for _pid in list(_pend):
-                            _flush(_pid)
-                        if live["text"] is not None or live["reasoning"] is not None:
-                            raise                    # words already shown: the round failed for real
+                        _settle()
+                        if live["text"] is not None or live["reasoning"] is not None \
+                                or _agent_started or _agent_shown:
+                            raise                    # words or calls already shown: the round failed for real
                         # the lost stream's steps were spent (#472)
                         _tokens_fill(a_info, {"usage": getattr(_se, "membrane_usage", None)})
                         resp = self.call_ladder(body)   # nothing shown yet: the buffered call, as before
@@ -2865,6 +2969,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     usage = seen["usage"] = d["usage"]
                 if d.get("membrane_provider"):
                     provider = d["membrane_provider"]
+                if isinstance(d.get("membrane_tool_start"), dict):
+                    on_event("tool_start", d["membrane_tool_start"])   # a call started
                 if isinstance(d.get("membrane_tool"), dict):
                     agent_tools.append(d["membrane_tool"])
                     on_event("tool", d["membrane_tool"])
