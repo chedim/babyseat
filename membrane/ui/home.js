@@ -1766,7 +1766,7 @@ const HSTYLE = `
                        background:inherit; z-index:1; }
   .selfpanel .sptitle { font-weight:600; font-size:14px; }
   .selfpanel .spx { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
-  /* #299: sleep / wake, a plain toggle (the 🌱 growth-limit chooser gave way to acceptance) */
+  /* #299 / #460: Blurp's on/off switch, a plain toggle (the 🌱 growth-limit chooser gave way to acceptance) */
   .selfpanel .spsleep { border:1px solid color-mix(in srgb, var(--divider-color,#888) 60%, transparent); background:transparent; color:inherit;
                         font:inherit; font-size:12px; border-radius:999px; padding:3px 10px; cursor:pointer; white-space:nowrap; }
   .selfpanel .spsleep[aria-pressed="true"] { border-color:#5ad17a; }
@@ -2236,15 +2236,15 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const c = this._chat;
       if (!c || typeof c._selfView !== "function") return;
       const v = c._selfView();
-      // #299: the 👶 panel's sleep / wake toggle (the 🌱 growth-limit chooser is gone:
+      // #299 / #460: the 👶 panel's on/off switch (the 🌱 growth-limit chooser is gone:
       // an earned achievement opens what it leads to once the operator accepts it)
       const b = this._spSleep;
       if (b) {
         b.disabled = !v.loaded || !!this._sleepBusy;          // nothing before the seat's state loads
-        b.textContent = v.icon + " " + (v.on ? "awake" : "asleep");
+        b.textContent = v.icon + " " + (v.on ? "on" : "off");
         b.title = v.title;
         b.setAttribute("aria-pressed", v.on ? "true" : "false");
-        b.setAttribute("aria-label", v.label + " -- tap to " + (v.on ? "put it to sleep" : "wake it"));
+        b.setAttribute("aria-label", v.label + " -- tap to " + (v.on ? "switch it off" : "switch it on"));
       }
       if (this._selfStat && !this._selfFlash) {
         if (typeof c._paintExp === "function") c._paintExp(this._selfStat);   // #230: the exp bar
@@ -2323,7 +2323,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }
     }
 
-    /** #299: sleep or wake, from the 👶 panel's toggle; the seat's answer is shown 4 s. */
+    /** #299: switch on or off, from the 👶 panel's toggle; the seat's answer is shown 4 s. */
     _onSleep() {
       const c = this._chat;
       if (!c || typeof c._setSelfMode !== "function" || typeof c._selfView !== "function") return;
@@ -2362,7 +2362,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     // THE 👶 PANEL (#230, the operator's ask 2026-10-19): self's side panel --
     // what it is doing now (its record, newest first) and its report card.
-    // READ-ONLY but for the operator's switches: the 💤/🌱 sleep toggle in its
+    // READ-ONLY but for the operator's switches: the ⏻ on/off switch in its
     // header and the Skill tree's Accept (#299) -- nothing else here changes self (the toys' play buttons, #244, are the one write -- they change
     // a toy in self's world, never self; _onToyPoke below). Open or closed is remembered per browser; it refreshes only
     // while open.
@@ -3150,7 +3150,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <button class="babybtn" aria-label="${nm}: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
                 title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now"><canvas class="bbody" width="72" height="72" aria-hidden="true"></canvas></button>
         <aside class="selfpanel glass" id="selfpanel" aria-label="${nm}'s character sheet" hidden>
-          <div class="sphead"><span class="sptitle"><canvas class="bbody sm" width="52" height="52" aria-hidden="true"></canvas> ${nm}</span><button class="spsleep" type="button" aria-pressed="false" disabled title="${nm} (#161): asleep or awake -- tap to switch">💤 asleep</button><button class="spx" aria-label="close ${nm}'s panel" title="Close">×</button></div>
+          <div class="sphead"><span class="sptitle"><canvas class="bbody sm" width="52" height="52" aria-hidden="true"></canvas> ${nm}</span><button class="spsleep" type="button" aria-pressed="false" disabled title="${nm}: on or off -- tap to switch">⏻ off</button><button class="spx" aria-label="close ${nm}'s panel" title="Close">×</button></div>
           <div class="sptabs" role="tablist" aria-label="${nm}'s panel">
             <button type="button" class="sptab" role="tab" id="sptab-sheet" data-tab="sheet" aria-selected="true" aria-controls="sppane-sheet">Sheet</button>
             <button type="button" class="sptab" role="tab" id="sptab-tree" data-tab="tree" aria-selected="false" aria-controls="sppane-tree" tabindex="-1">Skill tree</button>
@@ -3620,7 +3620,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           return;
         }
         this._msgEl.style.display = "";
-        this._msgEl.textContent = SELF_NAME + " is not moving yet — wake it (💤 in its panel, the tab at the left edge) and talk to the seat";
+        this._msgEl.textContent = SELF_NAME + " is not moving yet — switch it on (⏻ in its panel, the tab at the left edge) and talk to the seat";
         setTimeout(() => { if (this._msgEl.textContent.startsWith(SELF_NAME + " is not")) this._msgEl.style.display = "none"; }, 6000);
         return;
       }

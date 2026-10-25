@@ -87,7 +87,7 @@ class TestPanelSaysBlurp(unittest.TestCase):
 
     def test_the_chooser_title(self):
         st = {"self": {"mode": "off"}}
-        self.assertIn("Blurp (#161) is asleep", _p("L.selfView(%s).title" % json.dumps(st)))
+        self.assertIn("Blurp: off", _p("L.selfView(%s).title" % json.dumps(st)))
 
     def test_the_setter_renames(self):
         html = _p("(L.setSelfName('Zed'), [L.selfSheetHtml({header: {level: 0}}, {}, 0), L.selfName(), "

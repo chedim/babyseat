@@ -415,7 +415,7 @@ def test_the_panel_has_the_sleep_toggle_not_the_chooser():      # #299: the 🌱
     js = (Path(__file__).resolve().parent.parent / "membrane" / "ui" / "panel.js").read_text()
     assert 'class="selfpick"' not in js
     assert 'class="btn icon selfsleep"' in js
-    assert '["selfsleep", SELF_NAME + " asleep"]' in js
+    assert '["selfsleep", SELF_NAME + ": off"]' in js            # #460: the on/off switch
     assert "selfbtn" not in js
 
 

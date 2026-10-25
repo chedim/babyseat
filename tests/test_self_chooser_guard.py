@@ -1,5 +1,5 @@
 """#161: the 🌱 chooser must never switch self off by itself -- and since
-#299 (the chooser gave way to acceptance) neither may the 💤/🌱 sleep toggle.
+#299 (the chooser gave way to acceptance) neither may the on/off switch (⏻, #460).
 
 Live, 2026-10-16: 25 s after a restart the page sent {self_limit: 0} "by
 operator". Every 1.5 s the chooser's options were rebuilt when they changed --
@@ -31,7 +31,7 @@ class TestTheView(unittest.TestCase):
         self.assertFalse(_view(None)["loaded"])
         self.assertFalse(_view({"paused": False})["loaded"])
 
-    def test_with_the_ladder_it_is_loaded_and_says_awake_or_asleep(self):
+    def test_with_the_ladder_it_is_loaded_and_says_on_or_off(self):
         st = {"self": {"mode": "on", "rung": 2, "bar": 0.1,
                        "ladder": [{"rung": 0, "name": "sleep and wake", "state": "passed"},
                                   {"rung": 1, "name": "feel itself", "state": "passed"},
@@ -74,8 +74,8 @@ class TestTheRealStatus(unittest.TestCase):
         self.assertIn("your accept", v["status"])
         self.assertIn("awaiting your accept: kinds", v["title"])
 
-    def test_asleep_and_held(self):
-        self.assertEqual(_view(self._st(mode="off"))["status"], "🌱 asleep")
+    def test_off_and_held(self):
+        self.assertEqual(_view(self._st(mode="off"))["status"], "⏻ off")
         self.assertIn("held", _view(self._st(held=True))["status"])
 
 
@@ -86,7 +86,7 @@ class TestTheFeedback(unittest.TestCase):
 
     def test_a_switch_is_confirmed_by_the_seats_answer(self):
         js = (UI / "panel.js").read_text()
-        self.assertIn('out = { ok: true, on: got.on, text: got.on ? "✓ " + SELF_NAME + " is awake"', js)   # from the response, not the click
+        self.assertIn('out = { ok: true, on: got.on, text: got.on ? "✓ " + SELF_NAME + " is on"', js)   # from the response, not the click
         self.assertIn("this._selfSleep.disabled = true;           // in flight", js)
         home = (UI / "home.js").read_text()
         self.assertIn('this._statusEl.textContent = "🌱 " + text;', home)
