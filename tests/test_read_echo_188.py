@@ -56,7 +56,8 @@ def _world():
         "name": "i",
         "getter_script": ("n = int((membrane.me.properties.get('script_data') or {}).get('beats') or 0)\n"
                           "result = {'state': {'beats': n + 1}}"),
-        "script_data": {"beats": 769}})
+        "script_data": {"beats": 769},
+        "watch_fields": [{"verb": "vel", "arg": 1}]})   # watched: only then does a changed reading post (#549)
     est.docs[eye.eid] = eye
     pool = _Pool()
     srv = type("S", (), {"entity_store": est, "events_pool": pool, "efield": None, "membrane": None})()
