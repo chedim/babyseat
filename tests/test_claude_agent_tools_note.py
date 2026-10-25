@@ -38,7 +38,6 @@ def test_the_note_says_how_to_work():
                    "\"next I'll...\"",
                    "End your turn only when",
                    "the task is done",
-                   "you need the person's decision",
                    "you are blocked",
                    "Say which",
                    "same message as your next tool call",
@@ -70,10 +69,9 @@ def test_the_note_keeps_detach_and_the_decision_card():
     assert "nohup <command> > <log> 2>&1 &" in note
     assert "longer than about 4 minutes" in note
     assert "entity_add class='Decision'" in note
-    # the answer comes back by itself (decision_map.answered): no watch to plant
-    assert "After making a card, end your turn: the answer comes back to you as a message" in note
-    card_rule = note[note.index("To ask the person"):note.index("The doctrine names")]
-    assert "watch" not in card_rule
+    # a card no longer ends the turn (2026-10-25, the operator)
+    assert "After making a card" not in note
+    assert "End your turn only when the task is done or when you are blocked." in note
 
 
 def test_the_note_stays_tight():
