@@ -69,7 +69,8 @@
   import("/ui/www/favicon.js").then((m) => m.startFavicon()).catch(() => {});   // the tab's rocking babyseat
   // THE VIEW (2026-10-13, the operator: the standalone burger menu links the
   // interfaces): ?view=chat -- the conversation alone; ?view=graph -- the
-  // field alone; anything else is everything
+  // field alone; ?view=all -- everything; anything else (none) -- the decision
+  // cockpit, the default (home.js decides)
   window.MEMBRANE_VIEW = new URLSearchParams(location.search).get("view") || "";
   let c = await conf();
   if (c.locked) { await login(); c = await conf(); }

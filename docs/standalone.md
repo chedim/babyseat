@@ -131,8 +131,12 @@ sphere it was the distance to it).
 
 ## The decision cockpit (🗂)
 
-The babyseat menu (top left) opens the page's views: *Chat only*, *Graph only*,
-**Decisions** (`/?view=decisions`) and *Everything*. Decisions is the project
+The decision cockpit is the default view of the page, standalone and under Home
+Assistant alike. The babyseat menu (top left, standalone) opens the other views:
+*Chat only* (`/?view=chat`), *Graph only* (`/?view=graph`), **Decisions**
+(`/?view=decisions`, the default) and *Everything* (`/?view=all`, the page
+before 0.7.2). Under Home Assistant add `?view=all` to the panel's URL for
+Everything. Decisions is the project
 decision map as a cockpit: the time axis runs top to bottom and the chat's
 input bar is *now*. The page's 3D field fills the background behind it all
 and takes no clicks there; the cockpit

@@ -46,21 +46,26 @@ function setSelfName(n) {
 }
 const ACTIVITY_EVERY_MS = 1500;
 // THE VIEW (2026-10-13, the operator: the standalone burger menu "just with
-// links to chat-only and graph-only interfaces"): the standalone page puts
-// ?view= in the URL (index.html) -- chat alone (no field) or the field
-// alone (no chat); #470: ?view=decisions -- the project decision board;
-// anything else is everything.
-const VIEWS = ["chat", "graph", "decisions"];
-/** The view a ?view= value names ("" = everything). */
-function knownView(v) { return VIEWS.includes(v) ? v : ""; }
-/** The standalone menu's rows: the views, and Everything while one is shown. */
+// links to chat-only and graph-only interfaces"): ?view= in the URL -- chat
+// alone (no field), the field alone (no chat), or everything (?view=all).
+// 0.7.2 (the operator): the decision cockpit (#470) is the DEFAULT -- no
+// ?view=, an empty or an unknown one opens it, standalone and under Home
+// Assistant alike.
+const VIEWS = ["chat", "graph", "decisions", "all"];
+/** The view a ?view= value names: "all" is everything (""); a missing, empty
+ * or unknown one is the cockpit. */
+function knownView(v) { return v === "all" ? "" : VIEWS.includes(v) ? v : "decisions"; }
+/** The menu's rows: the views, the current one marked ("" = everything). */
 function standaloneMenu(current) {
+  const here = current || "all";
   const rows = [{ v: "chat", icon: "💬", title: "Chat only" }, { v: "graph", icon: "🕸", title: "Graph only" },
-    { v: "decisions", icon: "🗂", title: "Decisions" }];
-  if (current) rows.push({ v: "", icon: "◎", title: "Everything" });
-  return rows.map((r) => Object.assign(r, { current: r.v === current }));
+    { v: "decisions", icon: "🗂", title: "Decisions" }, { v: "all", icon: "◎", title: "Everything" }];
+  return rows.map((r) => Object.assign(r, { current: r.v === here }));
 }
-const VIEW = typeof window !== "undefined" ? knownView(window.MEMBRANE_VIEW) : "";
+// index.html sets window.MEMBRANE_VIEW standalone; Home Assistant has no
+// index.html, so the URL is read here
+const VIEW = typeof window !== "undefined"
+  ? knownView(window.MEMBRANE_VIEW || new URLSearchParams(location.search).get("view")) : "";
 
 /** The orbit angles that put the camera on the ray from the field's centre
  * through p (beyond it), so it looks at the centre THROUGH p -- the
@@ -3064,7 +3069,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const row = (r) => '<a role="menuitem" href="/' + (r.v ? "?view=" + r.v : "") + '"' +
           (r.current ? ' aria-current="page"' : "") + '><span class="mi">' + r.icon +
           '</span><span>' + esc(r.title) + "</span></a>";
-        this._menu.innerHTML = standaloneMenu(knownView(new URLSearchParams(location.search).get("view") || "") || VIEW)
+        this._menu.innerHTML = standaloneMenu(VIEW)
           .map(row).join("");
         return;
       }
