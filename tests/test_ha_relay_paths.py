@@ -41,6 +41,7 @@ UI_OWNER_WRITES = (
     "membrane/seat/pause",
     "membrane/decision/answer",
     "membrane/decision/chat",
+    "membrane/decision/drop",
     "membrane/quota/resume",
     "membrane/options",
 )
