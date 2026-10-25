@@ -1590,6 +1590,13 @@ def reading_changed(before: dict, state: dict) -> bool:
     return False
 
 
+def is_watched(props: dict) -> bool:
+    """A wake needs a watch (#549): the entity carries a watch spec -- own-motion
+    fields, proximity ops, or a watcher (file/signal). A reading nobody
+    watches is stored and scored, but wakes no loop."""
+    return any((props or {}).get(k) for k in ("watch_fields", "watch_ops", "watch"))
+
+
 def entity_read_back(srv, ent, force: bool = False, by: str = "model",
                      notify: bool = True) -> dict:
     """THE READ-BACK TRIGGER: a READ of a dynamic entity fires its
@@ -1688,7 +1695,7 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model",
         # SECOND loop on the eye; a counter (beats) changes on every read, so
         # the eye ran a pass per read. The reader's own answer is no news.
         pool = getattr(srv, "events_pool", None) if notify else None
-        if pool is not None and changed:
+        if pool is not None and changed and is_watched(ent.properties):
             pool.put({"kind": "getter-applied", "entity": ent.eid,
                       "state": dict(list(state.items())[:8]),
                       "ts": now})

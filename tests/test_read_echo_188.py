@@ -118,6 +118,7 @@ class TestAReadIsNotAnEcho(unittest.TestCase):
     def test_the_fields_own_read_still_posts_the_change(self):
         r, srv, est, pool = _world()
         WA._getter_last_ts.clear()
+        est.docs[EYE].properties["watch_fields"] = [{"verb": "vel", "arg": 1}]   # #549: a wake needs a watch
         WA.entity_read_back(srv, est.docs[EYE], by="field")
         self.assertEqual([e["kind"] for e in pool.items], ["getter-applied"])
 

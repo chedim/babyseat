@@ -34,10 +34,11 @@ class _Srv:
         self.efield = None
 
 
-def _world(code):
+def _world(code, watched=True):
     est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
     ent = QuantumEntity(eid=MEMBRANE_NS + "Component:bat", cls="Component",
-                        properties={"name": "bat", "getter_script": code})
+                        properties={"name": "bat", "getter_script": code,
+                                    **({"watch_fields": [{"verb": "vel", "arg": 1}]} if watched else {})})
     est.docs[ent.eid] = ent
     est._srv = srv = _Srv(est)
     return srv, est, ent
@@ -56,6 +57,25 @@ class TestGetterNews(unittest.TestCase):
         est.docs[ent.eid].properties["getter_script"] = "result = {'state': {'pct': 39}}"
         WA.entity_read_back(srv, ent, force=True)
         self.assertEqual(len(srv.events_pool.items), 2)
+
+    def test_a_ticking_counter_on_an_unwatched_entity_wakes_nobody(self):
+        # #549: 38 of 40 loop wakes were counters (beats, hits, heard_n) on
+        # entities nobody watches; a wake needs a watch on the entity
+        srv, est, ent = _world("result = {'state': {'beats': 1}}", watched=False)
+        WA.entity_read_back(srv, ent, force=True)
+        est.docs[ent.eid].properties["getter_script"] = "result = {'state': {'beats': 2}}"
+        WA.entity_read_back(srv, ent, force=True)
+        self.assertEqual(srv.events_pool.items, [])
+        self.assertEqual(est.docs[ent.eid].properties["script_data"]["beats"], 2)   # still read, still stored
+
+    def test_each_kind_of_watch_counts(self):
+        for key, val in (("watch_fields", [{"verb": "vel", "arg": 1}]),
+                         ("watch_ops", [{"op": "near", "rel": "x", "z": 1}]),
+                         ("watch", {"kind": "file"})):
+            srv, est, ent = _world("result = {'state': {'pct': 40}}", watched=False)
+            est.docs[ent.eid].properties[key] = val
+            WA.entity_read_back(srv, ent, force=True)
+            self.assertEqual(len(srv.events_pool.items), 1, key)
 
     def test_clock_keys_are_not_a_change(self):
         self.assertFalse(WA.reading_changed({"pct": 40, "checked_at": 1}, {"pct": 40, "checked_at": 2, "ts": 3}))
