@@ -136,6 +136,19 @@ def window(doc: dict, since: float) -> dict:
     return out
 
 
+def from_turn(lane: str, out) -> None:
+    """Tally a tool-loop turn (a watch loop's message): its `info.tokens`
+    and `info.modelID`, summed over the turn's rounds (#550)."""
+    try:
+        info = (out or {}).get("info") or {}
+        t = info.get("tokens") or {}
+        record(lane, str(info.get("modelID") or "?"),
+               input=_i(t.get("input")), output=_i(t.get("output")),
+               reasoning=_i(t.get("reasoning")))
+    except Exception:
+        pass
+
+
 def totals(doc: dict) -> dict:
     """The tally summed across lanes and models."""
     out = dict.fromkeys(_KEYS, 0)
