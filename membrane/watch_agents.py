@@ -481,9 +481,9 @@ def loop_task_text(ev: dict) -> str:
                (f" -- about '{ent}'" if ent else "")
         detail = f"Its result:\n{str(ev.get('result') or '')[:1500]}"
     elif kind == "decision":
-        # decision_map.answered: the operator answered a card this loop asked
-        head = str(ev.get("text") or f"a decision card was answered: '{ent}'")
-        detail = ""
+        # decision_map.answer: the operator answered this Decision card
+        head = f"decided: {ev.get('title') or ent} = {ev.get('value', '?')} (card '{ent}')"
+        detail = f"It blocks: {', '.join(map(str, ev['blocks']))}" if ev.get("blocks") else ""
     elif kind == "getter-applied":
         # WHAT CHANGED (2026-10-11 sweep: the loop was woken with an empty task)
         head = f"a reading changed on '{ent}' (its getter ran)"

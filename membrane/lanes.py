@@ -6963,8 +6963,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                          message=str(body.get("message") or ""))
         if not res.get("ok"):
             self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
-        # the answer goes back to the chat that asked (and to what it blocked)
-        _DM.answered_async(srv, res["card"]["eid"])
         self._json_out(res)
 
     def _filetool(self) -> None:

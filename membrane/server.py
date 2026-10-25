@@ -3989,9 +3989,6 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     res = _DM.set_chat(est, str(b.get("card") or ""), str(b.get("chat") or ""))
                 if not res.get("ok"):
                     return self._json_out({"error": res.get("error")}, code=409 if res.get("conflict") else 400)
-                if path.endswith("/answer") and psrv is not None:
-                    # the answer goes back to the chat that asked (and to what it blocked)
-                    _DM.answered_async(psrv, res["card"]["eid"], runner=runner)
                 return self._json_out(res)
             if path == "/membrane/quota/resume":
                 # OUT OF TOKENS: a person's Resume now -- the model's pause is
