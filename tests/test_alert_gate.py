@@ -52,13 +52,21 @@ class TestGate(unittest.TestCase):
         self.assertTrue(g.allow(ev("c:b"), now=61))
 
     def test_new_goal_events_are_never_folded(self):
-        # a NEW plant and its landing pass; a rewake / boot wake of an old
-        # goal pays like any watch event (test_watch_cost, 2026-10-08)
+        # a NEW plant, its landing, and the pulse's rewake of a still-open
+        # goal all pass: a goal is an ask, not noise (#551)
         g = AlertGate(budget=0, window_s=600, mode="digest")
         self.assertTrue(g.allow(ev("goal:1", kind="intent-planted", created=True), now=0))
         self.assertTrue(g.allow(ev("goal:1", kind="intent-landed"), now=0))
         self.assertEqual(g.digest(now=0), [])
-        self.assertFalse(g.allow(ev("goal:2", kind="intent-planted", rewake=True), now=0))
+        self.assertTrue(g.allow(ev("goal:2", kind="intent-planted", rewake=True), now=0))
+        self.assertEqual(g.digest(now=0), [])
+
+    def test_counter_wakes_cannot_starve_a_goal_rewake(self):
+        g = AlertGate(budget=2, window_s=600)
+        self.assertTrue(g.allow(ev("c:a"), now=0))
+        self.assertTrue(g.allow(ev("c:b"), now=1))
+        self.assertFalse(g.allow(ev("c:c"), now=2))        # budget spent
+        self.assertTrue(g.allow(ev("goal:3", kind="intent-planted", rewake=True), now=3))
 
     def test_digest_mode_folds_everything_else(self):
         g = AlertGate(budget=10, window_s=600, mode="digest")

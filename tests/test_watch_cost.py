@@ -124,15 +124,17 @@ class TestQuietStreak(unittest.TestCase):
 
 
 class TestGateCoversRewakes(unittest.TestCase):
-    def test_only_a_new_plant_is_exempt(self):
+    def test_every_open_goal_wake_is_exempt(self):
         g = AT.AlertGate(budget=1, window_s=600)
         new = {"kind": "intent-planted", "entity": "membrane::goal:a", "created": True}
         rewake = {"kind": "intent-planted", "entity": "membrane::goal:b", "rewake": True}
         boot = {"kind": "intent-planted", "entity": "membrane::goal:c", "created": False}
         self.assertTrue(g.allow(new, now=0))
         self.assertTrue(g.allow(new, now=1))          # still exempt
-        self.assertTrue(g.allow(rewake, now=2))       # spends the 1 slot
-        self.assertFalse(g.allow(boot, now=3))        # charged: folds to digest
+        self.assertTrue(g.allow(rewake, now=2))       # a goal is an ask (#551)
+        self.assertTrue(g.allow(boot, now=3))
+        self.assertTrue(g.allow({"kind": "around", "entity": "c:a"}, now=4))   # slot untouched
+        self.assertFalse(g.allow({"kind": "around", "entity": "c:b"}, now=5))
 
     def test_refund_after_an_exempt_event_returns_nothing(self):
         g = AT.AlertGate(budget=1, window_s=600)

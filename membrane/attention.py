@@ -97,13 +97,11 @@ ALERT_EXEMPT = ("intent-planted", "intent-landed")   # the operator's own asks
 
 
 def is_exempt(ev: dict) -> bool:
-    """Only a NEW plant (and its landing) skips the budget. A rewake or a
-    boot wake of an old goal is the loops' own routine and pays like any
-    watch event (the review: the gate covered 0 of 116 runs, 2026-10-08)."""
-    kind = str(ev.get("kind") or "")
-    if kind == "intent-planted":
-        return bool(ev.get("created")) and not ev.get("rewake")
-    return kind in ALERT_EXEMPT
+    """A goal's plant, its landing and the pulse's rewake of a still-open
+    goal skip the budget: a goal is the operator's or Memo's ask, not noise,
+    and counter wakes must not starve it (#551). The pulse only rewakes
+    OPEN goals, paced by its own min-age and batch."""
+    return str(ev.get("kind") or "") in ALERT_EXEMPT
 
 
 class AlertGate:
