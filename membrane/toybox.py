@@ -34,11 +34,13 @@ PLAY (#244): others act on the toys -- poke(name, action, arg, by):
     die    roll (a fresh face)
     drift  nudge [up|down] (one step, bouncing off a wall; no direction: a coin)
     burst  nudge (a fresh value)
-    ball   roll (back to self: only while it is on your side)
+    ball   roll (back to self; #535: a person may roll it whichever side it is on)
     body   nothing: it stays self-only, the control
 fast and slow take no pokes either (their clock is the point). A poke that
-changes nothing (knock a fallen block, rebuild a standing one, roll a ball
-self already has) is refused.
+changes nothing (knock a fallen block, rebuild a standing one, the model
+rolling a ball self already has) is refused; a person's roll is never
+refused for the ball being on self's side (#535: since #333 self rolls only
+when its own nudge aims at the ball, so waiting for its turn deadlocked).
 
 THE KIT (KINDS): fast / slow / burst / drift / die change on their own clock
 (the thinker's tick; a read never changes them), body changes only when self
@@ -55,7 +57,8 @@ words. Its state is whose side it is on (`self` / `other`), its last mover
 (`by`) and when (`at`), and the last PERSON who rolled it (`other_by`,
 `other_at`: a reply's ground truth). Self rolls it to the other on its turn
 (a nudge since #333, roll_self before, `by: self`); a person rolls
-it back (poke); the model may roll it too (`by: model`), which is never the
+it back (poke) -- whichever side it is on (#535), recorded the same way; the
+model may roll it too (`by: model`), which is never the
 other's turn. It has no clock, and a look never moves it. Exactly one shared
 ball (BALL) is provisioned once, by toy_unlocks when first reach is accepted
 (#333 part 3e: meet's apparatus; when rung 6 passed, #267, until then). The
@@ -115,7 +118,7 @@ KINDS = {
     "tower": {"about": "n blocks: self topples a block (and the ones above it) by nudging it, and lifts a fallen one by nudging it; a look changes nothing",
               "params": {"n": 5}, "clock": False},
     "ball": {"about": "a ball self and the other roll back and forth (rung 7's turns, #264): self rolls it to "
-                      "you on its turn; roll it back when it is on your side",
+                      "you by nudging it; roll it to self whenever you like, whichever side it is on",
              "params": {}, "clock": False},
     "mirror": {"about": "self's mirror (rung 9, #312): the glass shows self's own moves a moment late, and a "
                         "stranger beside it shows self's moves from half an hour ago -- the same moves, only "
@@ -519,8 +522,8 @@ def poke(name: str, action: str, arg=None, by: str = "", now: float | None = Non
                 bl[block - 1].update(standing=True, by=by, at=now)
                 _note(st, now, by, "lift", block=block)
         elif k == "ball":
-            if st["side"] == "self":
-                return {"ok": False, "error": f"{name} is on self's side: it rolls it to you on its turn"}
+            if st["side"] == "self" and not is_person(by):   # #535: a person rolls it from either side
+                return {"ok": False, "error": f"{name} is on self's side already"}
             st.update(side="self", by=by, at=now)
             if is_person(by):                                # the other's turn (a reply's ground truth)
                 st.update(other_by=by, other_at=now)
@@ -1211,7 +1214,7 @@ def cli_main(argv: list[str]) -> int:
     m.add_argument("--dry-run", action="store_true", help="only list (the default without --yes)")
     m.add_argument("--yes", action="store_true", help="replace them (each old doc is backed up first)")
     p = sub.add_parser("poke", help="play with a toy as the operator: tower knock|rebuild <k>, die roll, "
-                                    "drift nudge [up|down], burst nudge, ball roll (back to self; body is self's alone)")
+                                    "drift nudge [up|down], burst nudge, ball roll (to self, from either side; body is self's alone)")
     p.add_argument("toy")
     p.add_argument("action")
     p.add_argument("arg", nargs="?", default=None)
