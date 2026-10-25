@@ -292,8 +292,6 @@ class Database:
         L, err = self.lib.L, CBLError()          # ('Invalid document ID',
         with self.lock:                          # issue #11) -- matches nothing
             d = L.CBLCollection_GetDocument(self.coll(coll), S(key), C.byref(err))
-        with self.lock:
-            d = L.CBLCollection_GetDocument(self.coll(coll), S(key), C.byref(err))
             if not d:
                 self.lib.check(False, err, "get")
                 return None
