@@ -59,7 +59,7 @@ def test_a_person_rolls_it_again_and_again():
 
 
 def test_no_new_self_act_and_self_never_moves_on_a_persons_roll():
-    assert sorted(SL.METHODS) == ["expect", "notice", "nudge", "reach", "try"]   # no roll, fetch or timer act
+    assert not hasattr(SL, "METHODS")                  # #576: no acts of its own at all (no roll, fetch or timer)
     TB.create("ball", "toy:ball", now=100.0)
     TB.poke("toy:ball", "roll", by="alice", now=120.0)
     assert TB.tick("toy:ball", now=10_000.0) is False                    # still no clock of its own

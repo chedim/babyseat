@@ -13,8 +13,8 @@ new thing copies heard / heard_n / heard_ts / session from chat:in and on /
 say / said from chat:out; both old entities get `merged_into` the new one,
 so whatever still edits chat:out:<person>.say keeps working; its field spot
 starts at chat:in's live state (else chat:out's); world.json gains it as
-`migrated` (the old two stay members); tempo.json's chat:in key is renamed.
-Record readers alias old lines through chat_io.chat_of."""
+`migrated` (the old two stay members). Record readers alias old lines
+through chat_io.chat_of."""
 import json
 import time
 import types
@@ -24,15 +24,57 @@ import pytest
 
 from membrane import chat_io as CIO
 from membrane import self_loop as SL
-from membrane import self_sheet as SH
 from membrane import self_world as SW
 from membrane import server as S
 from membrane import toybox as TB
 from membrane.eids import field_id
 from membrane.entities import CLASS_COMPONENT, CLASS_CONFIG, EntityStore, MEMBRANE_NS, QuantumEntity, entity_id
 
-from tests.test_nudge_333 import DIM, T0, _field, _lines  # noqa: F401
-from tests.test_nudge_333 import _data  # noqa: F401  autouse fixture
+from membrane import watch_agents as WA
+from membrane.efield import EntityField
+from membrane.efstore import MemBackend
+
+DIM = 16
+T0 = 1_700_000_000.0
+
+
+class _Emb:
+    model = "fake"
+
+    def embed(self, texts):
+        out = []
+        for t in texts:
+            v = np.random.default_rng(sum(map(ord, t)) * 7919 % 2**32).normal(size=DIM)
+            out.append(list(v / np.linalg.norm(v)))
+        return out
+
+
+def _field():
+    return EntityField(MemBackend(), _Emb(), "chat@test")
+
+
+@pytest.fixture(autouse=True)
+def _data(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(WA, "_GETTER_LRU_S", 0.0)
+    monkeypatch.setattr(TB, "_seat_alive", lambda: False)
+    WA._getter_last_ts.clear()
+    WA._getter_paused.clear()
+    yield tmp_path / "data"
+
+
+def _spot(srv, eid):
+    """A thing's live field spot (a unit vector), None when it has none."""
+    st = srv.efield.get(field_id(eid))
+    if st is None or st.tier != "live" or st.state is None:
+        return None
+    v = np.asarray(st.state, dtype=float)
+    return v / np.linalg.norm(v)
+
+
+def _lines(srv):
+    p = SL.record_path(srv)
+    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()] if p.exists() else []
 
 OLD_IN = entity_id(CLASS_COMPONENT, "chat:in:alice")
 OLD_OUT = entity_id(CLASS_CONFIG, "chat:out:alice")
@@ -143,24 +185,23 @@ def test_the_migration_runs_once(_data):
     srv.entity_store.upsert(new, embedder=None)
     _reboot(srv, _data)
     assert srv.entity_store.docs[NEW].properties["heard_n"] == 9      # not copied over again
-    assert json.loads((_data / "self" / "tempo.json").read_text()).get(NEW, {}).get("answered") == 5
 
 
 def test_its_field_spot_starts_at_chat_ins(_data):
     srv = _old_seat(_data, in_spot=True, out_spot=True)
-    old = SL._spot(srv, OLD_IN)
-    new = SL._spot(srv, NEW)
+    old = _spot(srv, OLD_IN)
+    new = _spot(srv, NEW)
     assert new is not None and np.allclose(new, old, atol=1e-3)
 
 
 def test_with_no_chat_in_spot_it_starts_at_chat_outs(_data):
     srv = _old_seat(_data, in_spot=False, out_spot=True)
-    assert np.allclose(SL._spot(srv, NEW), SL._spot(srv, OLD_OUT), atol=1e-3)
+    assert np.allclose(_spot(srv, NEW), _spot(srv, OLD_OUT), atol=1e-3)
 
 
 def test_with_neither_it_has_no_spot_until_its_first_look(_data):
     srv = _old_seat(_data, in_spot=False, out_spot=False)
-    assert SL._spot(srv, NEW) is None
+    assert _spot(srv, NEW) is None
 
 
 def test_the_world_gains_it_as_migrated_and_only_grows(_data):
@@ -171,26 +212,11 @@ def test_the_world_gains_it_as_migrated_and_only_grows(_data):
     assert SW.has(srv, NEW)
 
 
-def test_the_tempo_key_is_renamed(_data):
-    srv = _old_seat(_data)
-    t = json.loads((_data / "self" / "tempo.json").read_text())
-    assert OLD_IN not in t and t[NEW]["answered"] == 5 and t[NEW]["changed"] == 3
-    assert SL._tempo(srv)[NEW]["answered"] == 5
-    assert SL._p_changed(srv, NEW) == pytest.approx((3 + 0.5) / (5 + 1.0))    # its rates go on
-
-
 def test_the_record_is_never_rewritten(_data):
     srv = _old_seat(_data)
     lines = _lines(srv)
     assert lines[0] == {"ts": T0, "kind": "birth", "by": "operator"}
     assert lines[1] == {"ts": T0 + 5, "kind": "reach", "eid": OLD_IN, "answer": "changed", "p": 0.5, "dt": 10.0}
-
-
-def test_a_merged_chat_is_never_looked_at_or_aimed_at(_data):
-    srv = _old_seat(_data, in_spot=True, out_spot=True)
-    assert OLD_IN not in SL._targets(srv) and NEW in SL._targets(srv)
-    spots = SL._spots(srv, DIM)
-    assert OLD_IN not in spots and OLD_OUT not in spots and NEW in spots
 
 
 # ---- a fresh Blurp, join_person, heard() -----------------------------------------------
@@ -323,11 +349,3 @@ def test_a_look_after_a_persons_line_reads_changed_and_blurps_own_send_is_no_new
 
 # ---- the sheet reads old lines through the alias -----------------------------------------
 
-def test_old_chat_in_lines_count_for_the_same_person_in_the_sheet():
-    recs = ([{"ts": T0 + i, "kind": "reach", "eid": OLD_IN, "answer": "changed", "p": 0.5} for i in range(4)]
-            + [{"ts": T0 + 10 + i, "kind": "reach", "eid": NEW, "answer": "unchanged", "p": 0.5} for i in range(3)])
-    rel = SH._relationships(recs, {}, {})
-    alice = [o for o in rel["others"] if o["who"] == "alice"]
-    assert len(alice) == 1
-    assert alice[0]["chat"]["looks"] == 7
-    assert SH._person(OLD_IN) == SH._person(NEW) == "alice"

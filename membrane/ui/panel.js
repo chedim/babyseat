@@ -1572,7 +1572,7 @@ function renderSkillTree(doc, root, sheet, sel) {
   hdr.appendChild(el("span", "lvb", "Lv " + m.level));
   root.appendChild(el("p", "note", m.source === "ladder"
     ? "the ladder read as a tree: this seat doesn't send its skill tree yet, so only the next rung is open"
-    : "each skill is an achievement; its test runs once its prerequisites are earned and you accepted them. Click or tap one; it stays until you pick another."));
+    : "each skill is a branch Blurp learns from the LLM's actions: earned once a guess there pays for itself; your Accept lets it act there. Click or tap one; it stays until you pick another."));
   const box = root.appendChild(el("div", "skbox"));
   box.setAttribute("role", "group");
   box.setAttribute("aria-label", m.name + "'s skill tree");

@@ -717,15 +717,17 @@ function zooAgo(ts, now) {
 /** The 👶 panel's Code tab: Blurp's cliffhanger code -- its own methods
  *  (the sheet's `code`), each a name, its command and its steps; read-only. */
 function selfCodeHtml(sheet) {
+  // #576 D2: Blurp's code is its triggers -- WHEN ... WHERE ...: target = expr --
+  // each with its state (shadow / proposal), balance, hits and firings
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const code = (sheet && Array.isArray(sheet.code)) ? sheet.code : [];
   if (!code.length) return '<p class="cdnone">no code yet</p>';
   return code.map((m) => {
-    const steps = Array.isArray(m.steps) ? m.steps.map((st) =>
-      `<li><span class="cdstep">${esc(st.step || "")}</span> <code>${esc(st.command || st.call || "")}</code></li>`).join("") : "";
-    return `<section class="cdm"><h4><code>${esc(m.name)}</code><span class="cdruns">${m.runs ? esc(m.runs) + " runs" : ""}</span></h4>` +
-      (m.command ? `<pre class="cdcmd"><code>${esc(m.command)}</code></pre>` : "") +
-      (steps ? `<ol class="cdsteps">${steps}</ol>` : "") + "</section>";
+    const head = m.line != null ? m.line : (m.command || "");
+    const meta = m.state ? `${esc(m.state)} · ${m.balance > 0 ? "+" : ""}${esc(m.balance ?? 0)} · ${esc(m.hits ?? 0)} hits · ${esc(m.fired ?? 0)} fired`
+      : (m.runs ? esc(m.runs) + " runs" : "");
+    return `<section class="cdm ${esc(m.state || "")}"><h4><code>${esc(m.branch || m.name || "")}</code><span class="cdruns">${meta}</span></h4>` +
+      `<pre class="cdcmd"><code>${esc(head)}</code></pre></section>`;
   }).join("");
 }
 

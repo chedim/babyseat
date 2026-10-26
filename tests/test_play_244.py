@@ -8,11 +8,8 @@ and the seat's model act on toybox toys, every change tagged by who did it.
   - the surfaces: `membrane toybox poke <toy> <action> [arg]` (the operator),
     the toybox object's poke method (the model), and POST
     /membrane/toybox/poke (the page's person, behind the JWT gate);
-  - self reads others' changes as changes it didn't cause: its reach record
-    keeps who changed the thing since its last look (`by`, ground truth --
-    never in the reading);
-  - every toy (and, on its first reach, anything self looks at) gets a spot
-    in the field, and status() counts the looks that still land off it;
+  - every toy gets a spot in the field (#576 retired self's looks, which
+    read who changed a toy and counted the looks off the field);
   - the page draws a look at an unplaced thing as a ghost at a stable spot
     near the amoeba, never as a field position.
 """
@@ -38,7 +35,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import night as N  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
-from tests._self_cap import cap  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane.efield import EntityField  # noqa: E402
@@ -370,59 +366,6 @@ def test_the_ha_relay_lets_the_poke_through_with_the_ha_user():
     assert '"membrane/toybox/poke"' in person
 
 
-# ---- self reads it as a change it didn't cause -------------------------------------
-
-def _climb(srv, t):
-    cap(srv, 1)
-    for _ in range(SL.RUNG1_CYCLES * 2):
-        SL.cycle(srv, now=t)
-        t += SL.PACE_S
-    assert SL.status(srv)["rung"] == 1
-    cap(srv, 2)
-    return t
-
-
-def _reaches(srv, eid):
-    return [r for r in SL._read(srv) if r.get("kind") == "reach" and r.get("eid") == eid]
-
-
-def test_a_persons_knock_reads_to_self_as_a_change_it_did_not_cause(monkeypatch):
-    srv = _seat()
-    TB.add(srv, "tower", params={"n": 5})
-    t = _climb(srv, 1000.0)
-    whole = _eid("toy:tower")
-    monkeypatch.setattr(SL, "_targets", lambda srv: [whole])
-    SL.cycle(srv, now=t)
-    t += SL.PACE_S
-    first = _reaches(srv, whole)[-1]
-    assert first["by"] == []                                       # nothing changed it yet
-    TB.poke("toy:tower", "knock", 3, by="alice")
-    SL.cycle(srv, now=t)
-    t += SL.PACE_S
-    look = _reaches(srv, whole)[-1]
-    assert look["answer"] == "changed"
-    assert look["by"] == ["alice"] and "self" not in look["by"]    # the ground truth: alice did it
-    SL.cycle(srv, now=t)
-    assert _reaches(srv, whole)[-1]["by"] == [] and _reaches(srv, whole)[-1]["answer"] == "unchanged"
-
-
-def test_selfs_own_nudge_is_tagged_self_on_its_record(monkeypatch):
-    srv = _seat()
-    TB.add(srv, "tower", params={"n": 5})
-    t = _climb(srv, 1000.0)
-    b4 = _eid("toy:tower:b4")
-    monkeypatch.setattr(SL, "_targets", lambda srv: [b4])
-    SL.cycle(srv, now=t)
-    assert _reaches(srv, b4)[-1]["by"] == []                         # #333: a look topples nothing
-    SL._nudge_once(srv, 0, t + 1, b4, None)                          # #333: self topples it by a nudge
-    SL.cycle(srv, now=t + SL.PACE_S)
-    assert _reaches(srv, b4)[-1]["by"] == ["self"]
-    TB.poke("toy:tower", "rebuild", 4, by="model")
-    SL._nudge_once(srv, 0, t + SL.PACE_S + 1, b4, None)
-    SL.cycle(srv, now=t + 2 * SL.PACE_S)
-    assert _reaches(srv, b4)[-1]["by"] == ["model", "self"]          # the model lifted it, self toppled it again
-
-
 # ---- a spot in the field ---------------------------------------------------------------
 
 def _live(fld, eid):
@@ -469,46 +412,6 @@ def test_migrate_gives_the_replaced_toys_their_spots(_data):
     est.docs[e.eid] = e
     TB.migrate(srv, TB.migration_plan(est))
     assert _live(fld, _eid("w:fast"))
-
-
-def _thing(srv, name, summary=""):
-    props = {"name": name, "getter_script": "result = {'state': {'v': 1}}"}
-    if summary:
-        props["summary"] = summary
-    e = QuantumEntity(eid=name, cls="Component", properties=props)
-    srv.entity_store.docs[e.eid] = e
-    return e.eid
-
-
-def test_selfs_first_reach_places_what_it_looks_at(monkeypatch):
-    emb = _Emb()
-    fld = _field(emb)
-    srv = _seat(fld)
-    eye = _thing(srv, "field:vitals", "the field's vital signs")
-    t = _climb(srv, 1000.0)
-    assert not _live(fld, eye)
-    monkeypatch.setattr(SL, "_targets", lambda srv: [eye])
-    SL.cycle(srv, now=t)
-    assert _live(fld, eye)
-    calls = emb.calls
-    SL.cycle(srv, now=t + SL.PACE_S)
-    assert emb.calls == calls                                      # placed once, never again
-    assert _reaches(srv, eye)[-1]["fid"] == field_id(eye)
-
-
-def test_the_off_field_count():
-    fld = _field()
-    fld.emb = None                                                 # nothing can be placed
-    srv = _seat(fld)
-    for i, eid in enumerate(("i", "w:rung", "i")):
-        SL._append(srv, {"ts": 100.0 + i, "kind": "reach", "n": i, "eid": eid, "answer": "changed", "p": 0.5})
-    off = SL.status(srv)["off_field"]
-    assert off["looks"] == 3 and off["off"] == 3 and set(off["things"]) == {"i", "w:rung"}
-    fld.emb = _Emb()
-    assert TB.place(srv, "w:rung") is True
-    SL._rt(srv).pop("off_field", None)
-    off = SL.status(srv)["off_field"]
-    assert off["off"] == 2 and off["things"] == ["i"]
 
 
 # ---- the page: the play buttons and the ghost ----------------------------------------

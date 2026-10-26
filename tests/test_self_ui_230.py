@@ -2,8 +2,7 @@
 
 The seat side: self's record, newest first and capped, on a small read-only
 route (GET /membrane/self/recent?n=30) behind the same JWT gate as every
-route, and the toys (w: / toy: / cradle: things) with a health mark in
-status(). The page side (panel.js / home.js): the exp bar's states, the
+route (#576 retired status()'s toys and their health marks). The page side (panel.js / home.js): the exp bar's states, the
 activity lines rendered plainly, the report card, and the 👶 panel's wiring
 (read-only, remembered per browser, refreshing only while open).
 """
@@ -27,7 +26,7 @@ os.environ.setdefault("MEMBRANE_RUN", "0")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import self_loop as SL  # noqa: E402
-from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
+from membrane.entities import EntityStore, MEMBRANE_NS  # noqa: E402
 
 UI = Path(__file__).resolve().parent.parent / "membrane" / "ui"
 SECRET = "s" * 40
@@ -42,18 +41,6 @@ def _seat():
     srv.efield = None
     SL.bind(srv)
     return srv
-
-
-def _thing(srv, eid, getter=True):
-    props = {"name": eid}
-    if getter:
-        props["getter_script"] = "return 1"
-    srv.entity_store.upsert(QuantumEntity(eid=eid, cls="Component", properties=props), embedder=None)
-
-
-def _reach(srv, eid, answer, ts):
-    SL._append(srv, {"ts": ts, "kind": "reach", "n": int(ts), "eid": eid, "p": 0.5,
-                     "answer": answer, "why": "" if answer != "none" else "throttled"})
 
 
 # ---- the record, newest first and capped --------------------------------------
@@ -83,45 +70,6 @@ class TestRecent(unittest.TestCase):
         SL._append(srv, {"ts": 1.0, "kind": "wait", "n": 1})
         SL.recent(srv)[0]["n"] = 99
         self.assertEqual(SL.recent(srv)[0]["n"], 1)                    # the record is never edited
-
-
-# ---- the toys, with a health mark ---------------------------------------------
-
-class TestToys(unittest.TestCase):
-    def setUp(self):
-        self.srv = _seat()
-        _thing(self.srv, "w:fast")                                     # a word with a getter: a toy
-        _thing(self.srv, "w:plain", getter=False)                      # a word without one: just a word
-        _thing(self.srv, MEMBRANE_NS + "Component:toy:dice")           # never read yet
-        _thing(self.srv, "cradle:mobile", getter=False)                # a toy that lost its getter
-        _thing(self.srv, "toy:mute")                                   # reads, but no answer
-        _thing(self.srv, "f:/tmp/x.py")                                # not a toy
-        from tests._self_cap import world
-        world(self.srv)                                                # #337: all in self's world
-        for i in range(4):
-            _reach(self.srv, "w:fast", "changed" if i % 2 else "unchanged", 100.0 + i)
-            _reach(self.srv, "toy:mute", "none", 200.0 + i)
-
-    def _toys(self):
-        return {t["eid"]: t for t in SL.status(self.srv)["toys"]}
-
-    def test_which_things_are_toys(self):
-        self.assertEqual(set(self._toys()), {"w:fast", MEMBRANE_NS + "Component:toy:dice",
-                                             "cradle:mobile", "toy:mute"})
-
-    def test_health(self):
-        t = self._toys()
-        self.assertEqual(t["w:fast"]["health"], "ok")
-        self.assertTrue(t["w:fast"]["getter"])
-        self.assertEqual((t["w:fast"]["reads"], t["w:fast"]["answered"]), (4, 4))
-        self.assertEqual(t[MEMBRANE_NS + "Component:toy:dice"]["health"], "unread")
-        self.assertEqual(t["cradle:mobile"]["health"], "no getter")
-        self.assertFalse(t["cradle:mobile"]["getter"])
-        self.assertEqual(t["toy:mute"]["health"], "empty")
-        self.assertEqual(t["toy:mute"]["answered"], 0)
-
-    def test_an_empty_seat_has_no_toys(self):
-        self.assertEqual(SL.status(_seat())["toys"], [])
 
 
 # ---- the route: read-only, capped, behind the JWT gate ------------------------
@@ -189,10 +137,16 @@ def _js(expr):
     return json.loads(subprocess.check_output(["node", "-e", js]))
 
 
+# the old ladder's names (#576 retired it in the seat; the page still draws a status that has one)
+RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "look", 3: "tell things apart", 4: "patience",
+              5: "notice the world changed", 6: "meet an other", 7: "time its turn", 8: "expect a reply",
+              9: "recognize itself", 10: "change itself"}
+
+
 def _st(**kw):
     s = {"mode": "on", "limit": 7, "rung": 6, "rung_name": "meet an other", "next": 7, "bar": 0.64,
          "waiting_on": "pairs", "slipping": False, "held": False, "cycles": 10,
-         "ladder": [{"rung": n, "name": SL.RUNG_NAMES[n], "state": "passed" if n <= 6 else "current" if n == 7 else "unbuilt"}
+         "ladder": [{"rung": n, "name": RUNG_NAMES[n], "state": "passed" if n <= 6 else "current" if n == 7 else "unbuilt"}
                     for n in range(11)]}
     s.update(kw)
     return {"self": s}
@@ -228,6 +182,18 @@ class TestExpBar(unittest.TestCase):
 
     def test_the_chooser_view_carries_it(self):
         self.assertEqual(_js("L.selfView(%s).exp.state" % json.dumps(_st())), "growing")
+
+    def test_the_retired_ladders_status_renders(self):
+        """#576: the seat's status with no ladder (level 0, nothing next) draws without an error."""
+        for mode in ("on", "off"):
+            SL.set_mode(srv := _seat(), mode)
+            st = {"self": SL.status(srv)}
+            v = _js("L.selfView(%s)" % json.dumps(st))
+            self.assertTrue(v["loaded"])
+            self.assertEqual(v["on"], mode == "on")
+            self.assertEqual(_js("L.selfExp(%s).rung" % json.dumps(st)), 0)
+            self.assertIn("no status", _js("L.selfCardHtml(null)"))
+            self.assertIsInstance(_js("L.selfCardHtml(%s)" % json.dumps(st)), str)
 
 
 @unittest.skipUnless(shutil.which("node"), "node not installed")

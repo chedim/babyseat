@@ -6,8 +6,9 @@ reserves runs out, rests, and wakes. As it falls asleep, the day's raw
 record moves to dated archives and only summaries stay in memory. Dreaming
 in sleep and paying energy back for confirmed predictions come in part 3.
 The second half of this page is the viewpoint written before sleep was built
-(why Blurp didn't need it, and the signals to watch); it is not a claim
-about brains beyond the published findings it cites.
+(why Blurp didn't need it, and the signals to watch), about the old learner
+that #576 retired; it is not a claim about brains beyond the published
+findings it cites.
 
 Blurp's "off" (sleep and wake in [selfgrowth.md](selfgrowth.md)) is not
 sleep. Off is the operator's switch: it runs nothing, and nothing is
@@ -20,16 +21,15 @@ Code: `membrane/energy.py`; the loop's `self_loop.step()`.
 
 - **Energy** runs from 0 to 1 (shown as 0–100%) and is stored with Blurp
   (`self/energy.json`). A restart neither refills nor drains it, and time
-  while the loop is off, paused or held doesn't count.
+  while the loop is off or paused doesn't count.
 - **Being awake costs energy**, every loop step: `BASAL_PER_S` per second
-  awake plus `CPU_PER_S` per second of CPU the cycle used (measured with
-  `time.thread_time()` on the loop's thread).
+  awake plus `CPU_PER_S` per second of CPU the learner's step used
+  (measured with `time.thread_time()` on the loop's thread; #576: the
+  learner hook, `self_loop.learn_step`, learns nothing until D2, so a step
+  costs the time awake).
 - **An error costs 0.01** (`energy.error()`, recorded as an `error` line
-  with its `cost` and the energy left). Since #333 Blurp's nudge calls it:
-  a nudge the thing refuses (the ball while it is on the person's side, a
-  thing's own `nudge` method failing) and a nudge at anything outside its
-  world; and since #333 part 2, an empty send (nudging a person's chat
-  again with nothing captured in the draft) and a send the chat turns away.
+  with its `cost` and the energy left). The old learner's nudges called it
+  until #576 retired them; nothing calls it today.
 - **The sleep pull is 1 − the lowest reserve.** Each reserve runs from 1
   (full) to 0 (empty):
 
@@ -47,7 +47,7 @@ Code: `membrane/energy.py`; the loop's `self_loop.step()`.
   no reading there is no cap: the reserve reads full and never puts Blurp to
   sleep. The record's size is the bytes of the lines it holds in memory.
 - **Falling asleep:** when a reserve reaches 0, a `sleep` line records which
-  one (`why`) and the energy. While asleep no cycle runs, and energy comes
+  one (`why`) and the energy. While asleep no learner runs, and energy comes
   back at 0.001 a second (empty to full in about 17 minutes).
 - **Waking:** at full energy (`why: rested`) or when a person speaks in a
   chat or by voice (`why: spoke`, `who`). Blurp's own lines and the model's
@@ -81,86 +81,38 @@ Blurp to sleep again on the first step after it woke.
 Code: `self_loop.consolidate()`, run from `energy._fall_asleep`. Tests:
 `tests/test_sleep_consolidate_345.py`.
 
-**At the moment Blurp falls asleep:**
+**At the moment Blurp falls asleep** (#576 D1: the old learner and the
+windows its tests read retired, so the summary is small and plain):
 
-1. **Anything open is dropped.** A turn awaiting its reply check is dropped,
-   and the `sleep` line names it: `"dropped": {"turn": <its push's ts>,
-   "to": <the other>}` (`{}` when nothing was open). A dropped turn is not a
-   missed reply: no reply check follows it, so take turns and expect a reply
-   never score it, and the advisor's stats don't count it as checked. An
-   open draft (#333 part 2) is dropped too, named as `"draft": <the cycle it
-   opened at>, "moves": <how many nudges it had captured>`.
-2. **Every raw line of the waking period moves, unchanged, to its archive.**
+1. **Every raw line of the waking period moves, unchanged, to its archive.**
    The archive is `self/archive/record-<YYYY-MM-DD>.jsonl`, dated by each
    line's own `ts` (UTC). Lines are appended byte for byte and synced; none
    is edited or dropped. `self/archive/manifest.jsonl` gets one line per
    sleep, `{"id", "at", "runs": [[file, count], ...]}`, which is the order
    the lines were written in. Reading the runs back gives the record exactly
    as it was, even where a line's date is out of order.
-3. **The working record is emptied down to one `summary` line:**
+2. **The working record is emptied down to one `summary` line:**
 
    ```
-   {"kind": "summary", "id", "at", "n", "carry": {...}, "stalls": [...], "lines": [...]}
+   {"kind": "summary", "id", "at", "n", "lines": [...]}
    ```
 
-   `lines` are copies of the archived lines that the tests read (the
-   windows, below), in record order. `carry` holds the counts that no
-   window can give back. `stalls` gives each window line's count of record
-   gaps, because curiosity and noticing read the gaps between consecutive
-   lines. The summary is a record line rather than a sidecar file because
-   the readers are functions of the record list: they find the summary
-   where they already look, and the record stays one file swapped in one
-   step.
+   `lines` are copies of the lines read whole (`KEEP`: the `birth`, the
+   operator's `accept` and `accept_migrated` lines) and of the last
+   `RECENT_MAX` lines (the activity feed, `recent()`, and the card's last
+   activity), in record order. A summary written before #576 (with its
+   `carry` and `stalls`) still loads: its lines are read the same way.
 
-**What the readers see.** `_read` returns the summary, its window lines,
-then the lines written since. Within every window, that is the same record
-the readers saw before. The equivalence tests run every test, skill, sheet,
-dock and card function on a long synthetic record before and after
-consolidation, after more lines, after a second sleep and after a restart,
-and require the same result every time. The record reserve recovers: in a
-30,000-cycle synthetic life the summary was 7% of the record (1.8 MB of
-24.6 MB).
+**What the readers see.** `_read` returns the summary, its lines, then the
+lines written since. The equivalence tests run the status, the activity
+feed, the sheet, the dock and the card on a long synthetic record before and
+after consolidation, after more lines, after a second sleep and after a
+restart, and require the same result every time.
 
-**The windows.** Each reader keeps what it reads, by its own constant. No
-window of its own was added (`STEER_LAST` and `RUNG4_LAST` only name the 20
-and 40 that `_steer_stats` and rung 4 already used).
-
-| Reader | What the summary keeps |
-|---|---|
-| `_toys`, `_off_field`, `recent()`, the card | the last `TOY_SCAN` (3000) lines, whole |
-| rung 1, steering, status | the last `RUNG1_CYCLES` world cycles, the last `STEER_LAST` steered cycles, the last cycle that wasn't still |
-| rung 2, the split, the audits | each thing's last `RUNG2_REACHES` answered looks, and the seat's last 4 × that (the base rate) |
-| kinds, rung 3 | each thing's last `RUNG3_WINDOW` looks, the seat's last `RUNG3_WINDOW`, and the last `RUNG3_LOOKS` steered |
-| rung 4 | the last `RUNG4_LAST` timed looks (the fixed-pace looks before them are carried as counts per thing) |
-| rung 5, noticing | the last `RUNG5_LOOKS` looks with noticing on, the last `RUNG5_SHIFTS` shifts, each thing's last shift |
-| rung 6 | the last `RUNG6_PUSHES` pushes per other, and the chat record as it stood at the switch to the ball (its last push, pushes, heard looks and base rate) |
-| rung 7 (take turns) | per other, medium and clock: the last `RUNG7_PUSHES` + `TURN_MEMORY` turns with their checks |
-| rung 8 (expect a reply) | per other, medium and clock: the last `RUNG8_FIT` + `RUNG8_RECENT` checks (and what set each one's gap); the advisor's last `RUNG8_TRUST` checks per model; for a check recorded without its own p_self or calibration (before #254), the checks it is recomputed from |
-| rung 9 (the mirror) | per mirror, its last `MIRROR_FIT` + `MIRROR_OWN` + `MIRROR_PAST` lines and its last `MIRROR_LOOKS` scored lines |
-| rung 10 (change itself) | the last 2 × `CHANGE_WINDOW` proposals and their checks, the first proposal and every adoption (the honesty chain), the last `CHANGE_LOOKS` rate-read looks and the `CHANGE_LOOKS` after each proposal not yet checked, each with the looks its rate fit reads (up to the longest window on the grid, 120) |
-| the live rate fit | each thing's last 120 fittable looks since its last shift, and before it (its own and the seat's) |
-| curiosity | each thing's last 2 × `CURIO_WINDOW` ordinary looks that span no gap, and the look before them |
-| the aims' tilt, rung 13 (first reach) | each thing's last max(2 × `NUDGE_CURIO_WINDOW`, `RUNG13_LOOKS`) nudge checks (answered nudged looks outside audits, with `by`) |
-| rung 11 (speak) | per other, the last `SPEAK_PUSHES` pushes with words or plain, the looks their words cite, and the turns its timing reads (`TURN_MEMORY` before its window) |
-| passes, accepts, unlocks | every `birth`, `rung`, `achieve`, `rung_void`, `accept`, `accept_migrated`, `unlock`, `unlock_built`, `rung7_restart`, `fix` and `audit` line (a few each) |
-| the pairings | each kept push's next push or check, and its first look; each kept check's push; each kept timed look's or check's last shift; the sleep line that dropped a kept turn |
-
-**`carry`, the counts:** the cycles (so `n` continues), the pushes, the
-dreams and their checks, rung 8's checks and replies before its window (per
-other, medium and clock: the running rate's start), rung 4's fixed-pace looks
-per thing, and per other the policy pushes, asks (checked and paired), and
-words, plain and mute pushes.
-
-**Whole history: the sheet and the dock read the archive.** Working hours,
-the growth curve, the traits and their trends, each toy's error early and
-late, and a thing's learning verdict are taken over a thing's whole life.
-Halving a growing history can't be summed up ahead of time. So
-`self_sheet.compute()` (cached 30 s) reads `history()`: the archive by its
-manifest, then the working record's new lines. The dock (polled every few
-seconds) reads the archived looks once per sleep (`_archived_looks`: thing,
-answer and p per look) and keeps them while it is used. Both are off the
-cycle path: no cycle, status, test or practice reads the archive (a test
-checks this).
+**Whole history: the sheet reads the archive.** `self_sheet.compute()`
+(cached 30 s) reads `history()`: the archive by its manifest, then the
+working record's new lines. It is off the step path: no step or status reads
+the archive (a test checks this).
 
 **Restart safety.** The journal `self/consolidating.json` is written first,
 at stage `archive`, with the archive files' sizes before. Then the archive
@@ -177,8 +129,9 @@ the next sleep. No line is lost or doubled, in the working record or the
 archive. The tests kill the seat at each step.
 
 **What else lives outside the record** and so crosses a sleep untouched:
-`model.json`, `tempo.json`, `settings.json` (what change itself adopted),
-`energy.json`, `world.json`, `mode.json`.
+`energy.json`, `world.json`, `mode.json` (the old learner's `model.json`,
+`tempo.json`, `nudged.json`, `parts.json` and `settings.json` are no longer
+read or written since #576; a seat that has them keeps them as history).
 
 ## What sleep does for brains, and why Blurp is exempt
 

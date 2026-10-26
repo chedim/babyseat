@@ -39,29 +39,31 @@ def _seat():
 def test_the_sheet_carries_blurps_own_methods():
     srv = _seat()
     est = srv.entity_store
-    method_define(srv, est, None, None, on=SL._eid(), method="wave", command="self::nudge {{target}}")
+    assert SH.compute(srv)["code"] == []                # #576: no methods of its own until D2
+    method_define(srv, est, None, None, on=SL._eid(), method="wave", command="echo wave")
     other = QuantumEntity(eid=MEMBRANE_NS + "Component:other", cls="Component", properties={"name": "other"})
     est.docs[other.eid] = other
     assert method_define(srv, est, None, None, on=other.eid, method="other_one", command="echo other")["ok"]
     code = SH.compute(srv)["code"]
     by = {m["name"]: m for m in code}
-    for meth, cmd in SL.METHODS.items():
-        assert by[meth]["command"] == cmd, by.get(meth)
-    assert by["wave"]["command"] == "self::nudge {{target}}"
+    assert by["wave"]["command"] == "echo wave"
     assert "other_one" not in by                        # only Blurp's own methods
     assert [m["name"] for m in code] == sorted(by)      # a stable order
     assert SH.empty()["code"] == []
 
 
 @NODE
-def test_the_code_tab_renders_each_method_escaped():
-    sheet = {"code": [{"name": "try", "command": "self::try {{seed}}", "runs": 3, "params": ["seed"]},
-                      {"name": "x<y", "command": "echo <b>", "runs": 0,
-                       "steps": [{"step": "a", "command": "echo 1"}]}]}
+def test_the_code_tab_renders_each_trigger_escaped():
+    # #576 D2: Blurp's code is its triggers, each with its state, balance, hits and firings
+    sheet = {"code": [{"name": "membrane::Trigger:cand-1", "branch": "Component:toy",
+                       "line": "WHEN changed(?x.a) WHERE isa(?x, toy): ?x.b = 2", "state": "proposal",
+                       "balance": 1.0, "hits": 2, "fired": 3},
+                      {"name": "x<y", "branch": "b<r", "line": "WHEN changed(?x.a): ?x.c = '<b>'",
+                       "state": "shadow", "balance": -1.0, "hits": 0, "fired": 1}]}
     js = "const H=require(%r); process.stdout.write(H.selfCodeHtml(%s))" % (str(UI / "home.js"), json.dumps(sheet))
     h = subprocess.check_output(["node", "-e", js]).decode()
-    assert "self::try {{seed}}" in h and "x&lt;y" in h and "echo &lt;b&gt;" in h and "<b>" not in h
-    assert "echo 1" in h
+    assert "WHEN changed(?x.a) WHERE isa(?x, toy): ?x.b = 2" in h and "proposal" in h and "+1" in h
+    assert "b&lt;r" in h and "&lt;b&gt;" in h and "<b>" not in h
     js = "const H=require(%r); process.stdout.write(H.selfCodeHtml({code: []}))" % str(UI / "home.js")
     assert "no code" in subprocess.check_output(["node", "-e", js]).decode()
 

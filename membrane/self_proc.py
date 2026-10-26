@@ -1,6 +1,6 @@
 """BLURP IN ITS OWN PROCESS (#440 part 3); the seat starts it by default since part 5 (MEMBRANE_SELF_PROC=0 keeps the loop in the seat).
 
-Blurp's cycles are pure Python over its record; inside the seat they hold
+Blurp's learner is pure Python over its record; inside the seat it holds
 the GIL the /v1 proxy needs. This module is the child that runs them in a
 process of its own (its own GIL, its own CPU, a lower priority):
 
@@ -8,17 +8,15 @@ process of its own (its own GIL, its own CPU, a lower priority):
 
 - It runs the same self_loop code against a FACADE of the seat: an
   srv-shaped object (FACADE_ATTRS, nothing else) whose entity store is a
-  local mirror of Blurp's own entities (itself and its methods, seeded from
+  local mirror of Blurp's own entities (itself and anything its own, seeded from
   the context's `own` part), whose reads of the seat are
   GET /membrane/self/context and whose acts are POST /membrane/self/effects
   (self_api: a facade carries `self_remote`, and both calls go over HTTP).
-  Blurp's own methods run here, in this process's cliffhanger VM; their run
-  counts and Blurp's own properties go back as `own` effects (flush, after
-  each step). The pause and the CPU share are read from the context.
+  Blurp's own properties go back as `own` effects (flush, after each step). The pause and the CPU share are read from the context.
 - It owns self/ (the record and Blurp's own files) through self_writer.
 - It serves Blurp's views and controls on a loopback port it picks and
   reports on stdout at start (one JSON line: {"self_proc": {"port", "pid"}}):
-  GET /card, /sheet, /recent, /status; POST /control (mode, accept, limit,
+  GET /card, /sheet, /recent, /status; POST /control (mode, accept,
   name) and /chat-in (a person spoke: energy.person_spoke). The seat's own
   token only (or open mode), through the seat's own door (jwtauth.gate).
 - It exits on SIGTERM, and when its stdin closes (macOS has no
@@ -88,14 +86,14 @@ class SeatClient:
             raise SeatError(f"{path}: not a JSON object")
         return out
 
-    def context(self, spots=(), reach: bool = False, only: str | None = None, own: bool = False) -> dict:
-        q = [("spot", str(e)) for e in spots or ()]
-        if reach:
-            q.append(("reach", "1"))
+    def context(self, only: str | None = None, own: bool = False, report: dict | None = None) -> dict:
+        q = []
         if own:
             q.append(("own", "1"))
         if only:
             q.append(("only", str(only)))
+        for k, v in (report or {}).items():          # #576 D2: Blurp's step reports (learn exchange)
+            q.append((f"r_{k}", "1" if v is True else "0" if v is False else str(v)))
         doc = self._call("/membrane/self/context" + ("?" + urllib.parse.urlencode(q) if q else ""))
         if only is None:
             self.last = doc
@@ -162,8 +160,7 @@ class Facade:
         self._sent = {eid: _props(e) for eid, e in docs.items()}
 
     def flush(self) -> list[dict]:
-        """Blurp's own changes since the last flush (its methods' run counts,
-        its own properties) to the seat, as `own` effects: only the keys that
+        """Blurp's own changes since the last flush (its own properties) to the seat, as `own` effects: only the keys that
         changed (script_data key by key). -> the effects' results."""
         from .self_api import _is_own
         est = self.entity_store
@@ -194,7 +191,7 @@ def _props(ent) -> dict:
 
 def bind(fac: Facade) -> None:
     """The child's boot: the mirror from the seat, Blurp's state from self/.
-    (The seat's own boot defines Blurp's methods and runs the migrations.)"""
+    (The seat's own boot makes Blurp's entity and runs the migrations.)"""
     fac.seed()
     _SL().load_state(fac)
 
@@ -278,7 +275,7 @@ def _handler(fac: Facade):
 
 
 def _control(fac: Facade, b: dict) -> tuple[dict, int]:
-    """The panel's self controls, run here: mode, accept, limit, name."""
+    """The panel's self controls, run here: mode, accept, name."""
     from . import self_writer as _W
     by = str(b.get("by") or "operator")
     done, bad = {}, []
@@ -287,8 +284,6 @@ def _control(fac: Facade, b: dict) -> tuple[dict, int]:
         (done.__setitem__("mode", m) if _W.set_mode(fac, m, by=by) else bad.append("mode"))
     if "accept" in b:
         done["accept"] = _W.accept(fac, b["accept"], by=by)
-    if "limit" in b:
-        (done.__setitem__("limit", _SL().limit(fac)) if _W.set_limit(fac, b["limit"], by=by) else bad.append("limit"))
     if "name" in b:
         from . import self_name as _SN
         try:
@@ -313,7 +308,7 @@ def serve(fac: Facade) -> ThreadingHTTPServer:
 
 def run(fac: Facade, stop: threading.Event) -> None:
     """self_loop.start's loop, on this thread, until `stop`: wake on its own
-    change (or a control), one step, then the pace's wait after a cycle."""
+    change (or a control), one step, then the pace's wait after a step with a line."""
     SL = _SL()
     rt = SL._rt(fac)
     while not stop.is_set():

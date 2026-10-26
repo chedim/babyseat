@@ -1604,6 +1604,8 @@ def main() -> None:
                 srv.ch_vm = _CH.VM(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))
                 srv.ch_vm.attach()
                 srv.ch_vm.start()
+                from . import ch_blurp as _CHB    # #576 D2: Blurp's learner, its purse closed until Blurp reports
+                _CHB.attach(srv)
         except Exception as e:
             print(f"[opencode] the cliffhanger VM failed to start ({e})", file=sys.stderr)
         from .watch_agents import enabled_loops as _wa_on, start_goal_pulse

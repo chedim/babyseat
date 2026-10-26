@@ -1,5 +1,17 @@
 # Growing self — the operator's guide to the 0.7 skill tree
 
+> **Retired in [#576](https://github.com/chedim/membrane/issues/576) (part D1).**
+> Blurp starts anew: the try / expect / notice cycle, its `self::` methods,
+> the skill tree and the rungs (0-13) below, the nudge, the mirror, change
+> itself, curiosity and the toy unlocks are gone from the code. What stays is
+> Blurp's body: its entity and name, the ⏻ switch, energy, sleep and wake
+> ([sleep.md](sleep.md)), the record and its archive, and the 👶 panel (its
+> sheet renders empty: level 0, no skills, an empty tree). Every toy kind can
+> be added. The loop keeps turning: each step charges energy and runs the
+> learner hook `self_loop.learn_step`, where the new learner (#576 D2:
+> branches mastered by trigger edges) plugs in. This page is kept as the
+> history of the first learner.
+
 `self` is the seed of the evolving self in
 [#161](https://github.com/chedim/membrane/issues/161): a small loop that learns
 its world one skill at a time. The operator named it **Blurp** (2026-10-19,

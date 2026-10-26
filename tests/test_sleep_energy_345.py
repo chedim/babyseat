@@ -2,9 +2,9 @@
 
 Energy runs 0..1 and lives with Blurp (<self dir>/energy.json): a restart
 neither refills nor drains it. Awake, each loop step costs a basal share of
-the seconds that passed plus a share of the CPU the cycle used; an error
+the seconds that passed plus a share of the CPU the learner step used; an error
 costs ERROR_COST. The sleep pull is 1 - the lowest reserve (energy, disk,
-awake time); when a reserve runs out Blurp falls asleep. Asleep, no cycle
+awake time); when a reserve runs out Blurp falls asleep. Asleep, no learner
 runs and energy comes back at RESTORE_PER_S; it wakes at full energy or when
 a person speaks. Every time here is injected: nothing sleeps.
 """
@@ -273,35 +273,28 @@ class TestFallingAsleep(unittest.TestCase):
         _asleep_at_zero(srv)
         self.assertEqual(SL.mode(srv), "on")
 
-    def test_a_sleeping_blurp_runs_no_cycle(self):
+    def test_the_loop_step_restores_instead_of_learning(self):
         srv, _ = _seat()
         SL.set_mode(srv, "on")
         _asleep_at_zero(srv)
-        with mock.patch.object(SL, "_current", side_effect=AssertionError("a cycle ran")):
-            self.assertIsNone(SL.cycle(srv, now=T0 + 100))
-
-    def test_the_loop_step_restores_instead_of_cycling(self):
-        srv, _ = _seat()
-        SL.set_mode(srv, "on")
-        _asleep_at_zero(srv)
-        with mock.patch.object(SL, "cycle", side_effect=AssertionError("a cycle ran")), \
+        with mock.patch.object(SL, "learn_step", side_effect=AssertionError("the learner ran")), \
                 mock.patch.object(E, "_free", return_value=FREE):
-            SL.step(srv, now=T0 + 101)
+            self.assertIsNone(SL.step(srv, now=T0 + 101))
         self.assertAlmostEqual(E.level(srv), 100 * E.RESTORE_PER_S)
 
-    def test_the_loop_step_charges_the_cycle(self):
+    def test_the_loop_step_charges_the_learner(self):
         srv, _ = _seat()
         SL.set_mode(srv, "on")
-        with mock.patch.object(SL, "cycle", return_value=None) as cyc, \
+        with mock.patch.object(SL, "learn_step", return_value=None) as ls, \
                 mock.patch.object(E, "_free", return_value=FREE):
             SL.step(srv, now=T0)
             SL.step(srv, now=T0 + 600)
-        self.assertEqual(cyc.call_count, 2)
+        self.assertEqual(ls.call_count, 2)
         self.assertAlmostEqual(E.level(srv), 1 - 600 * E.BASAL_PER_S, places=4)
 
     def test_an_off_step_runs_and_costs_nothing(self):
         srv, _ = _seat()                                     # born off
-        with mock.patch.object(SL, "cycle", side_effect=AssertionError("a cycle ran")), \
+        with mock.patch.object(SL, "learn_step", side_effect=AssertionError("the learner ran")), \
                 mock.patch.object(E, "_free", return_value=FREE):
             SL.step(srv, now=T0)
             SL.step(srv, now=T0 + 3600)

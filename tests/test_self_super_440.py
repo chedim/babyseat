@@ -8,11 +8,6 @@ crashes in 10 minutes (shown on the card and the panel's status), stops it
 with SIGTERM then SIGKILL after 10 s, and forwards /membrane/self/* and the
 self controls to its loopback port (5 s, then the last good answer).
 
-The reply checks and the mirror feed (meet, turns, expect, mirror; speak's
-reply checks) read the seat through the boundary too: a `facts` effect (a
-thing's heard_ts and llm_answer, the mirror toy's name), `ask` (the model)
-and `mirror_feed`, so they run the same in the child.
-
 Tests that start a real child stop it on every path and keep it in tmp_path."""
 import json
 import os
@@ -27,15 +22,13 @@ from unittest import mock
 
 import pytest
 
-from membrane import self_api as API
 from membrane import self_loop as SL
 from membrane import self_proc as SP
 from membrane import self_super as SUP
-from membrane import toybox as TB
 
-from tests.test_nudge_333 import T0, _cid, _felt, _lines  # noqa: F401
-from tests.test_nudge_333 import _data  # noqa: F401  autouse fixture
-from tests.test_self_proc_440 import _call, _child_env, _facade, _open_env, _served
+from tests.test_self_proc_440 import T0, _felt, _lines  # noqa: F401
+from tests.test_self_proc_440 import _data  # noqa: F401  autouse fixture
+from tests.test_self_proc_440 import _call, _child_env, _open_env, _served
 
 
 # ---- the approved constants ---------------------------------------------------------------
@@ -141,8 +134,6 @@ class _Stub:
                     applied = {k: b[k] for k in ("mode", "name") if k in b}
                     if "accept" in b:
                         applied["accept"] = {"ok": True, "id": b["accept"], "already": False}
-                    if "limit" in b:
-                        applied["limit"] = 3
                     if "mode" in b:
                         stub.card["mode"] = b["mode"]
                     return self._out({"ok": True, "applied": applied, "refused": []})
@@ -221,11 +212,10 @@ def test_the_panels_self_controls_go_to_the_child(monkeypatch):
         srv = _felt()
         with _forwarding(srv) as (sup, stub):
             before = (SL.record_path(srv).read_text(), (SL._dir(srv) / "mode.json").read_text())
-            out = PANEL.control(srv, {"self": "watch", "accept": "feel", "self_limit": 3, "self_name": "Zed"},
-                                by="tester")
+            out = PANEL.control(srv, {"self": "watch", "accept": "feel", "self_name": "Zed"}, by="tester")
             posts = [b for m, p, b in stub.got if m == "POST" and p == "/control"]
             assert posts and posts[0]["mode"] == "watch" and posts[0]["accept"] == "feel"
-            assert posts[0]["limit"] == 3 and posts[0]["name"] == "Zed" and posts[0]["by"] == "tester"
+            assert "limit" not in posts[0] and posts[0]["name"] == "Zed" and posts[0]["by"] == "tester"
             assert out["applied"]["self"] == "watch" and out["applied"]["accept"]["ok"] is True
             assert out["applied"]["self_name"] == "Zed"
             assert (SL.record_path(srv).read_text(), (SL._dir(srv) / "mode.json").read_text()) == before
@@ -290,7 +280,6 @@ def test_a_supervised_child_runs_restarts_after_a_crash_and_stops_when_switched_
             assert _wait(lambda: sup.diag()["state"] == "up"), sup.diag()
             pid = sup.diag()["pid"]
             assert os.getpriority(os.PRIO_PROCESS, pid) >= SP.NICE
-            assert _wait(lambda: len([r for r in _lines(srv) if r.get("kind") == "cycle"]) >= 1)
             assert sup.view("/card")["proc"]["state"] == "up"
             os.kill(pid, signal.SIGKILL)                               # a crash
             assert _wait(lambda: sup.diag()["state"] == "up" and sup.diag()["pid"] != pid), sup.diag()
@@ -344,50 +333,4 @@ def test_a_child_that_ignores_sigterm_is_killed_after_the_grace(tmp_path):
         sup.close()
 
 
-# ---- the reply checks and the mirror feed, through the boundary ---------------------------------
 
-def test_the_reply_checks_read_the_seats_chat_thing_through_the_boundary(monkeypatch):
-    with _open_env():
-        srv = _felt()
-        chat = _cid("chat:p1")
-        from membrane.entities import QuantumEntity
-        srv.entity_store.upsert(QuantumEntity(eid=chat, cls="Component", properties={
-            "name": "p1", "heard_ts": 1050.0,
-            "llm_answer": {"ts": 1010.0, "text": "VERDICT: 0.7", "model": "m1"}}), embedder=None)
-        with _served(srv) as url:
-            fac = _facade(url, srv)
-            push = {"ts": 1000.0, "to": chat}
-            assert SL._replied(fac, push, 1100.0, "unchanged") is True     # heard after the push, in the seat
-            assert SL._last_spoke(fac, [], chat, 1100.0) == 1050.0
-            assert SL._llm_pred(fac, chat, 1000.0) == pytest.approx(0.7)
-            assert SL._llm_model(fac, chat) == "m1"
-
-
-def test_the_mirror_toy_and_its_feed_are_the_seats(monkeypatch):
-    with _open_env():
-        srv = _felt(toys=("ball", "mirror"))
-        name = SL._mirror_toy(srv)
-        assert name is not None
-        with _served(srv) as url:
-            fac = _facade(url, srv)
-            assert SL._mirror_toy(fac) == name                  # the seat's things, not the child's mirror
-            fed = []
-            real = TB.mirror_feed
-            monkeypatch.setattr(TB, "mirror_feed", lambda n, s, now=None: (fed.append(n), real(n, s, now=now))[1])
-            out = API.effects(fac, [{"kind": "mirror_feed", "toy": name, "s": 0.1, "now": T0}])[0]
-            assert out["ok"] is True and fed == [name]
-
-
-def test_the_model_is_asked_in_the_seat(monkeypatch):
-    from membrane import llm as LLM
-    with _open_env():
-        srv = _felt()
-        asked = []
-        monkeypatch.setattr(LLM, "request", lambda s, prompt, **kw: (asked.append((s, prompt, kw)),
-                                                                      {"rc": 0, "text": "queued"})[1])
-        with _served(srv) as url:
-            fac = _facade(url, srv)
-            out = SL._ask_llm(fac, _cid("chat:p1"), "will they reply?")
-        assert out == {"rc": 0, "text": "queued"}
-        assert asked and asked[0][0] is srv and asked[0][1] == "will they reply?"
-        assert asked[0][2]["about"] == _cid("chat:p1") and asked[0][2]["caller"] == "self"
