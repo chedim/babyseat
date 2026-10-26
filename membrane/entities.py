@@ -2427,6 +2427,8 @@ class EntityStore(MultiParentOps, TimelineOps):
                     " (list via related)")
             return {"ok": False,
                     "error": f"no entity matches {spec!r}{hint}"}
+        if ent.cls == "Trigger":                     # #576: a trigger is the VM's (define), never edited here
+            return {"ok": False, "error": "a trigger is defined by the cliffhanger VM, never edited: define it again"}
         # #158: a script inside `properties` goes through the SCRIPT door --
         # the generic patch cut it at 2000 chars and never compiled it (the
         # 'I' loop died that way); the named argument wins when both are given
@@ -2738,7 +2740,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         before = snaps.get(ent.eid)                # a birth through docs already snapshotted it
         snaps[ent.eid], changes = _W.diff(ent.eid, before, ent)
         for path, old, new in changes:
-            _W.emit(path, old, new)
+            _W.emit(path, old, new, eid=ent.eid)
 
     def remove(self, spec: str) -> int:
         """Model-side entity REMOVE by eid/name fragment (exact single

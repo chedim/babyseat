@@ -308,6 +308,9 @@ class Thinker:
             if not paused and self._beat % SWEEP_EVERY_BEATS == 0:
                 _tw = _tm()
                 sweep_now(srv)
+                _vm = getattr(srv, "ch_vm", None)        # #576 B: the triggers' geometry and clocks,
+                if _vm is not None:                      # swept on the VM's own worker
+                    _vm.request_sweep()
                 _marks["sweep"] = _tm() - _tw
         except Exception:
             traceback.print_exc()

@@ -115,3 +115,39 @@ An effect happens because something writes a property of a field entity, not bec
 - **Its own writes:** those writes are the adapter's (writer `adapter:<branch>`: `adapter:chat`, `adapter:toys`, `adapter:llm`, `adapter:seat`) and fire nothing. Otherwise the writer is provenance: it labels a toy's poker and is the llm's caller tag (its caps, read-only for `script:`); nothing else gates on it.
 - **The edit route** still posts a chat `say` at once and returns its receipt; the adapter then finds the line consumed, so a line is posted once.
 - **The hatches** (`llm::`, `toybox::`, `seat::restart` in `night.run_command_entity`) stay until part B's triggers can write; then they retire.
+
+## Triggers: cliffhanger without hatches (#576, part B)
+
+`membrane/ch.py`. A **trigger** is an entity of class `Trigger`: a reified edge from what it watches to what it writes. One line of it reads:
+
+```
+WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
+```
+
+- **WHEN: watchers.**
+  - **Level watchers** fire once per binding when the conjunction turns true, and re-arm when it turns false: `near` / `away` (1 − cos between positions), `above` / `below` (an expression against a bar), `vel`, `align`, and `quiet` (no write on the entity for dt, by anyone but a trigger).
+  - **Pulses:** `pos` (moved further than d since its stamp) and `around` (the neighbours within z changed) are true only on the evaluation that sees the change.
+  - **Event watchers** fire on the event while the level watchers hold: `changed(?x.prop)` or `changed(<eid>.prop)` (a write on that path) and `every(dt)`. At most one event watcher per trigger.
+  - **Seeding:** the first evaluation of a binding only seeds its state. A trigger fires on a crossing it saw, never on what was already true, so a restart or a redefine re-fires nothing.
+- **WHERE: patterns, no XPath.** `isa(?x, Class)` (the entity's class or an ISA ancestor), `is(?x, eid)`, `filter(expr)`.
+- **WRITE: `[target, expression]`.** The target is `?x.prop` or `<eid>.prop`, `.position` included.
+  - A written value is a scalar, a string, `None` or a list of finite numbers: never an entity, never inf / nan. A position keeps its dimension.
+  - A trigger never writes another trigger, code (`command`, `*_script`, `script_*`) or a definition (`owner`, `owner_sig`, `when`, `where`, `write`). Any other property of any entity it may write: a trigger is how the field writes.
+- **Expressions:** a small safe language over scalars and first-class vectors.
+  - Operators: `+ - * /` (Python arithmetic for scalars, numpy only for vectors; division by zero and non-finite results are refused), comparisons, `and` / `or` / `not`.
+  - Reads: `x.prop`, `x.position`.
+  - Built-ins: `dot`, `norm`, `distance`, `unit`, `abs`, `min`, `max`.
+  - Limits: at most 400 characters and 64 nodes. Each expression is parsed once and cached.
+- **Validation:** an entity of class `Trigger` made any other way is validated like a definition before it runs.
+- **The VM.**
+  - It hears every write (part A) and only queues it.
+  - One worker thread drains the queue: the `changed` triggers on the written path, and level triggers re-read for every variable the written entity can bind.
+  - The same worker runs the sweeps the thinker requests (`request_sweep`) for the geometric and timed watchers. All evaluation happens on one thread, under one lock.
+  - One failing trigger never stops the others (`vm.errors`), and nothing runs while the seat is paused.
+  - A firing writes through the store as `trigger:<eid>`, in the chain that caused it. A sweep starts a fresh chain per firing.
+- **The loop rule:** a firing whose trigger is already in its chain's `via` is refused, unless `self` came after it.
+  - A trigger owned by self appends `self`, so Blurp is the one place a loop may run.
+  - Self's triggers run only with a learner attached (part C), so its energy bounds the loop.
+  - Self's ownership is **signed** by `define`: an HMAC under a key file beside the store (`.ch-key`, mode 0600, never an entity). A trigger that merely says `owner = self` is not self's and falls under the loop rule.
+  - The entity API never edits a trigger, and only this seat's triggers run; an imported one never does.
+  - A chain arriving over the relay cannot claim `self`.
