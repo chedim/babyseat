@@ -64,8 +64,11 @@ def upsert(backend, origin: str, subj: str, rel: str, obj: str, source: str,
            event_key: str = "", ts: float | None = None, dim: int = vsa.DEFAULT_DIM,
            file: str | None = None) -> str:
     key = relation_key(origin, subj, rel, obj)
+    born = []
 
     def merge(cur):
+        if cur is None or cur.get("superseded"):
+            born.append(True)
         if cur is None:
             cur = {"_k": "rel", "origin": origin, "subj": subj, "rel": rel, "obj": obj,
                    "source": source, "n": 0, "first_ts": ts, "last_ts": ts,
@@ -78,6 +81,9 @@ def upsert(backend, origin: str, subj: str, rel: str, obj: str, source: str,
         cur["superseded"] = False
         return cur
     backend.cas_update("relations", key, merge)
+    if born:                                   # #576: a new edge is a write; a repeat only counts
+        from . import writes as _W
+        _W.emit(f"rel:{subj}|{rel}|{obj}", None, source)
     return key
 
 
@@ -99,9 +105,11 @@ def upsert_co(backend, origin: str, a: str, b: str, rbits: str, event_key: str,
     events this edge already counted, and they never count twice."""
     a, b = sorted((a, b))
     key = relation_key(origin, a, "co", b)
+    born = []
 
     def merge(cur):
         if cur is None:
+            born.append(True)
             cur = {"_k": "rel", "origin": origin, "subj": a, "rel": "co", "obj": b,
                    "source": "co-mention", "n": 0, "first_ts": ts, "last_ts": ts,
                    "evidence": [], "superseded": False, "last_seq": -1, "rbits": []}
@@ -118,6 +126,9 @@ def upsert_co(backend, origin: str, a: str, b: str, rbits: str, event_key: str,
         cur["superseded"] = False
         return cur
     backend.cas_update("relations", key, merge)
+    if born:                                   # #576: a new co edge is a write
+        from . import writes as _W
+        _W.emit(f"rel:{a}|co|{b}", None, "co-mention")
     return key
 
 

@@ -23,6 +23,8 @@ chains); its result still lands on the entity and in the field.
 from __future__ import annotations
 
 import threading
+
+from . import writes as _W     # #576: a job's thread keeps its chain
 import time
 
 DEADLINE_S = 3.0
@@ -90,7 +92,7 @@ def _run(runner, sid, name, args, call) -> str:
         except Exception as e:                    # noqa: BLE001
             box["out"] = f"Error: {type(e).__name__}: {e}"[:400]
         done.set()
-    threading.Thread(target=go, daemon=True, name=f"tool-{name}").start()
+    threading.Thread(target=_W.carry(go), daemon=True, name=f"tool-{name}").start()
     if done.wait(DEADLINE_S):
         return box.get("out") or ""
     n = _next()
@@ -101,7 +103,7 @@ def _run(runner, sid, name, args, call) -> str:
         done.wait()
         deliver(runner, sid, n, what, str(box.get("out") or ""), round(time.time() - t0, 1), depth,
                 entity=_spec(args))
-    threading.Thread(target=finish, daemon=True, name=f"job-{n}").start()
+    threading.Thread(target=_W.carry(finish), daemon=True, name=f"job-{n}").start()
     return (f"⏳ job #{n} is still running ({what}) -- it is NOT finished. Don't report its result: "
             f"it arrives as an event, a '[membrane] job #{n} finished' message. Go on with other work "
             f"or end your turn.")
@@ -146,7 +148,7 @@ def _read(runner, sid, args, call) -> str:
             body = "; ".join(f"{k}: {a!s} -> {b!s}" for k, (a, b) in list(moved.items())[:12])
             deliver(runner, sid, n, f"fresh values of {ent.eid}", body, round(time.time() - t0, 1), depth,
                     entity=ent.eid)
-    threading.Thread(target=refresh, daemon=True, name=f"job-{n}").start()
+    threading.Thread(target=_W.carry(refresh), daemon=True, name=f"job-{n}").start()
     return (f"{out}\n(these are the STORED values, {age}; the getter refreshes as job #{n} -- "
             "values that changed arrive as an event)")
 
@@ -181,7 +183,7 @@ def _define(runner, sid, name, args, call) -> str:
             body = ("the new getter's first fire: " + ", ".join(f"{k}={str(v)[:40]}" for k, v in list(st.items())[:10])
                     if st else f"the new getter fired: {str(res.get('note') or 'no state returned')[:300]}")
         deliver(runner, sid, n, f"first fire of {spec}", body, round(time.time() - t0, 1), depth, entity=spec)
-    threading.Thread(target=first_fire, daemon=True, name=f"job-{n}").start()
+    threading.Thread(target=_W.carry(first_fire), daemon=True, name=f"job-{n}").start()
     return f"{out}\n(the getter's first fire runs as job #{n}; its outcome arrives as an event)"
 
 
@@ -243,6 +245,6 @@ def deliver(runner, sid: str, n: int, what: str, result: str, secs: float, depth
     info = {"id": f"msg_jobturn{n}_{now}", "sessionID": sid, "role": "user", "agent": agent,
             "continueTurn": True, "jobTurn": True, "jobDepth": depth + 1, "jobText": text,
             "time": {"created": now}}
-    threading.Thread(target=lambda: runner.run(sid, "", user_info=info, user_parts=[]),
+    threading.Thread(target=_W.carry(lambda: runner.run(sid, "", user_info=info, user_parts=[])),
                      daemon=True, name=f"job-{n}-turn").start()
     return "chat"

@@ -1334,6 +1334,9 @@ class EntityStore(MultiParentOps, TimelineOps):
         self._store_lock = threading.RLock()
         self._load()
         self._load_tracks()
+        # #576: what each entity last held -- an in-place edit + upsert diffs against it
+        from . import writes as _W
+        self._snap = {eid: _W.snapshot(e) for eid, e in list(self.docs.items())}
         self._seed_junk_anchors()
 
     def _seed_junk_anchors(self) -> None:
@@ -1643,6 +1646,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             ent = existing
         else:
             self.docs[ent.eid] = ent
+        self._note_write(ent, is_new)
         self.save_soon()
         if is_new and not (ent.properties or {}).get("ephemeral"):
             self._announce("new", ent)
@@ -2682,6 +2686,21 @@ class EntityStore(MultiParentOps, TimelineOps):
             res["unpublished"] = self.unpublish(ent)
         return res
 
+    def _note_write(self, ent, is_new: bool) -> None:
+        """#576: the write as events -- each changed property (parents too),
+        a move, or the birth -- diffed against what the entity last held."""
+        from . import writes as _W
+        snaps = getattr(self, "_snap", None)
+        if snaps is None:
+            snaps = self._snap = {}
+        before = None if is_new else snaps.get(ent.eid)
+        if before is None and not is_new:          # loaded another way: seen from now on
+            snaps[ent.eid] = _W.snapshot(ent)
+            return
+        snaps[ent.eid], changes = _W.diff(ent.eid, before, ent)
+        for path, old, new in changes:
+            _W.emit(path, old, new)
+
     def remove(self, spec: str) -> int:
         """Model-side entity REMOVE by eid/name fragment (exact single
         match only -- an ambiguous fragment removes nothing)."""
@@ -2689,6 +2708,10 @@ class EntityStore(MultiParentOps, TimelineOps):
         if ent is None:
             return 0
         self.docs.pop(ent.eid, None)
+        if getattr(self, "_snap", None) is not None:
+            self._snap.pop(ent.eid, None)
+        from . import writes as _W
+        _W.emit(ent.eid, ent.eid, None)          # #576: something -> nothing
         self.save()
         coll = self._entities_collection()
         if coll is not None:

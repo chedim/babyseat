@@ -1455,6 +1455,14 @@ class TurnRunner:
 
     def run(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None, _drained: bool = False) -> dict:
+        """#576: the turn writes as the model, in the chain that woke it (a
+        loop's event) or a new one a person's message starts."""
+        from . import writes as _W
+        with _W.turn(sid):
+            return self._run(sid, text, user_info=user_info, user_parts=user_parts, _drained=_drained)
+
+    def _run(self, sid: str, text: str, user_info: dict | None = None,
+             user_parts: list | None = None, _drained: bool = False) -> dict:
         """THE GUARDED ENTRY, now a REAL QUEUE: a second message on a busy
         session first publishes a visible {session.status busy
         queued:true} event, then WAITS FOR ITS TURN -- when the running
@@ -3839,6 +3847,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 self._notfound()
 
         def do_POST(self):
+            from . import writes as _W
+            with _W.from_headers(getattr(self, "headers", None)):     # #576: the caller's chain and writer
+                return self._do_POST_body()
+
+        def _do_POST_body(self):
             if not self._jwt_door():
                 return                       # JWT mode: no valid token, no answer
             if _DIAG.route(self, self.path.split("?", 1)[0]):

@@ -4328,6 +4328,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         super().do_GET()
 
     def do_POST(self):
+        from . import writes as _W
+        with _W.from_headers(getattr(self, "headers", None)):     # #576: the caller's chain and writer
+            return self._do_POST_body()
+
+    def _do_POST_body(self):
         if not self._auth_gate():
             return
         self.server._last_request_ts = time.time()

@@ -74,3 +74,18 @@ everywhere else (the prose the person reads).
 
 See also: [entity-field.md](entity-field.md) (the executor link lane),
 [background-mind.md](background-mind.md) (entity scripts).
+
+## Every write is an event (#576, part A)
+
+Every write on the field is an event `{path, old, new, writer, chain, ts}` (`membrane/writes.py`), delivered to the listeners registered with `writes.on_write`:
+
+- **Paths:** `<eid>` (an entity born or removed), `<eid>.<prop>` (a property, `parents` included), `<eid>.position` (a move), `rel:<subj>|<rel>|<obj>` (a new field relation).
+- **Every write is an overwrite:** nothing → something is a birth, something → nothing a removal. The store diffs each upsert against what the entity last held, so an in-place edit still reports its old value.
+- **Writer:** `field` by default; `llm` for a model's turn and its tool calls, `script:<eid>` for an entity's own script, `person:<name>`, `self`.
+- **Chain:** the causal chain the write belongs to. A source starts it: a person's message, a sensor fire, Blurp. Everything it causes carries it on:
+  - queued events (the watch pool stamps them);
+  - jobs' threads;
+  - the MCP relay (the `X-Membrane-Chain` / `X-Membrane-Writer` headers);
+  - loop turns.
+
+  So a reply minutes later still belongs to the chain that asked for it. The writer and chain are provenance, not authority: they gate nothing.
