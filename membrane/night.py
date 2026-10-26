@@ -3741,13 +3741,22 @@ def note_field_change(srv, est, ent, change_ts: float | None = None) -> None:
     # THE FILTERS RUN unless frozen (the stamps stay FRESH through a
     # freeze -- the melt re-arms against its last pre-freeze stamp)
     hits = [] if is_frozen else _field_filter_hits(ent, props)
-    burst = dict(props.get(WF_BURST_KEY) or {"n": 0, "since": now})
+    # #567: the burst opens on a CROSSING and groups the changes after it;
+    # edits that cross nothing are silence
+    burst = dict(props.get(WF_BURST_KEY) or {})
+    if not burst.get("verb"):
+        burst = {}                        # a pre-#567 burst counted flushes, not crossings
+    if hits and not burst:
+        burst = {"n": 0, "since": now, "verb": hits[0]["verb"]}
+    if not burst:
+        props.pop(WF_BURST_KEY, None)
+        ent.properties = props
+        return
     if not is_frozen:
         burst["n"] = int(burst.get("n") or 0) + 1
-        burst["since"] = burst.get("since") or now
     hot = heat > HEAT_COLD
     latency_ok = (now - float(burst.get("since") or now)) >= WF_MAX_LATENCY_S
-    deliver = bool(hits or int(burst["n"]) > 1) and (
+    deliver = (
         (not hot and not is_frozen)      # cold: deliver immediately
         or latency_ok                    # the forever-hot covenant: the
                                          # burst delivers at max latency
@@ -3766,7 +3775,7 @@ def note_field_change(srv, est, ent, change_ts: float | None = None) -> None:
     pool = getattr(srv, "events_pool", None) or getattr(srv, "_events_pool", None)
     ev = {"kind": "field:changed",
           "entity": ent.eid,
-          "verb": (hits[0]["verb"] if hits else "pos"),
+          "verb": burst["verb"],
           "n_changes": max(n, len(hits) or 1),
           "span_s": span,
           "frozen": bool(is_frozen),

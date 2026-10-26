@@ -512,7 +512,7 @@ never the incoming streams. Fixed verbs, model-defined args:
 stamps live in the entity's props — `wf_stamp_pos/align/vel`).
 
 The field's flush IS the event source: every dirty pass checks the
-filters and delivers ONE `field:changed` event (kind/entity/verb/
+filters, and a pass where a filter CROSSES delivers ONE `field:changed` event (kind/entity/verb/
 n_changes/span) to the ordinary event pool — the drainer admits it like
 any watch fire (3 slots, the loops' turns, the verdict stamps
 `watch_last_decision`). The entity carries `change_script` — the reaction
@@ -520,8 +520,9 @@ runs under the same engine covenants (0.25s budget, gravity, freeze,
 3-strikes); its verdict obeys the whitelist (position move, links for
 this lane, render).
 
-**Gravity's grouping**: a hot entity's changes do not each fire — they
-accumulate into a burst; when the heat subsides (or `WF_MAX_LATENCY_S`
+**Gravity's grouping**: a hot entity's crossings do not each fire — a
+crossing opens a burst and the changes after it accumulate into it (edits
+that cross no filter are silence, #567); when the heat subsides (or `WF_MAX_LATENCY_S`
 = 120s passes — a forever-hot entity delivers a grouped event every 2
 minutes, never silence), ONE event delivers (n_changes, span_s). Heat
 over the freeze bar (`MEMBRANE_HEAT_FREEZE`, default 1.5) freezes the
