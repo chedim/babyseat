@@ -227,8 +227,9 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
   - `bind()` links a stage's program to an existing `shell:<prog>` entity and a file word to an existing `f:` / `files:` entity. No entity is ever made.
 - **Defining:** `method_define` refuses a command or command step that isn't a script. The graph is kept on the entity (`script`, with the `src` it was parsed from).
 - **Running:** every command (method, step, or an entity's own `run`) runs as the bash its graph compiles to. An edited command is parsed again; one that doesn't parse never runs (`blocked: not a script`).
-- **Migration (the operator's call):** at boot, once, the retired link commands go:
-  - a named variant (`shell:<prog>-<label>`) is deleted;
-  - any other non-method entity (the `shell:<prog>` programs) keeps its place without its stale `command`;
-  - methods keep theirs;
-  - a backup (`backup-576-commands-<ts>.json`) is written beside the store first.
+- **Migration (the operator's call): once per store,** marked by `.ch-commands-migrated` beside it. Only the `shell:` namespace is touched:
+  - a generated variant (`shell:<prog>-<label>-<4 hex>`) is deleted;
+  - every other `shell:` entity with a stale command (a program like `shell:git-lfs`, a hand-named command) keeps its place without it;
+  - methods, their steps and every other entity are left alone.
+
+  A backup (`backup-576-commands-<ts>.json`) is written first; with no backup, nothing changes. **To restore,** put each `deleted` entry back as an entity with that command, and each `stripped` command back on its entity.

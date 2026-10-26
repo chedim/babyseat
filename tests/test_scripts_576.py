@@ -161,3 +161,44 @@ def test_the_seat_migrates_at_boot():
     import inspect
     from membrane import opencode
     assert "_SCR.migrate(srv.entity_store)" in inspect.getsource(opencode)
+
+
+# ---- #584 review -----------------------------------------------------------------------------
+
+def test_a_command_entity_made_later_survives_every_boot(tmp_path):
+    est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
+    S.migrate(est, backup_dir=tmp_path)                        # the first boot
+    tool = QuantumEntity(eid=MEMBRANE_NS + "Tool:deploy", cls="Tool",
+                         properties={"name": "deploy", "command": "make deploy", "parents": [MEMBRANE_NS + "Tool:ci"]})
+    est.upsert(tool)
+    late = QuantumEntity(eid=MEMBRANE_NS + "shell:gh-view-1a2b", cls="Component",
+                         properties={"name": "gh-view", "command": "gh pr view 2"})
+    est.upsert(late)
+    S.migrate(est, backup_dir=tmp_path)                        # every later boot: nothing
+    assert est.docs[tool.eid].properties["command"] == "make deploy" and late.eid in est.docs
+
+
+def test_only_generated_variants_are_deleted(tmp_path):
+    est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
+    for tail, cmd in (("git-lfs", "git lfs"), ("gh-head-4d23", "gh pr view | head"), ("net:seat-census", "lsof -i")):
+        est.upsert(QuantumEntity(eid=MEMBRANE_NS + f"shell:{tail}", cls="Component",
+                                 properties={"name": tail, "command": cmd}))
+    other = QuantumEntity(eid=MEMBRANE_NS + "Tool:build", cls="Tool", properties={"name": "build", "command": "make"})
+    est.upsert(other)
+    rep = S.migrate(est, backup_dir=tmp_path)
+    assert rep["deleted"] == 1 and MEMBRANE_NS + "shell:gh-head-4d23" not in est.docs
+    assert "command" not in est.docs[MEMBRANE_NS + "shell:git-lfs"].properties          # a program: kept, stripped
+    assert "command" not in est.docs[MEMBRANE_NS + "shell:net:seat-census"].properties
+    assert est.docs[other.eid].properties["command"] == "make"                         # outside shell:: untouched
+
+
+def test_no_backup_no_change(tmp_path, monkeypatch):
+    est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
+    v = QuantumEntity(eid=MEMBRANE_NS + "shell:gh-head-4d23", cls="Component",
+                      properties={"name": "x", "command": "gh pr view"})
+    est.upsert(v)
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(Path, "write_text", boom)
+    rep = S.migrate(est, backup_dir=tmp_path)
+    assert rep["deleted"] == 0 and rep["stripped"] == 0 and v.eid in est.docs

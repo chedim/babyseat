@@ -186,8 +186,6 @@ def _word_end(s: str, i: int) -> int:
     while j < n:
         c = s[j]
         if c in " \t\n" or c in ";&|()<>":
-            if c in "<>" and j > i and False:
-                pass
             break
         if c == "\\":
             j += 2
@@ -298,7 +296,7 @@ def parse(cmd: str) -> dict:
     toks = _tokens(str(cmd or ""))
     # heredoc bodies arrive after the newline that ends their line: move each next to its stage
     fixed, held = [], []
-    for k, tok in enumerate(toks):
+    for tok in toks:
         if tok[0] == "heredoc":
             held.append(tok)
             continue
@@ -417,46 +415,59 @@ def run_text(doc, est=None) -> str:
     return compile(graph_of(doc, est))
 
 
+MIGRATED_FILE = ".ch-commands-migrated"     # beside the store: the migration ran (it runs once)
+VARIANT = re.compile(r"-[0-9a-f]{4}$")      # a generated link-command name: shell:<prog>-<label>-<4 hex>
+
+
 def migrate(est, backup_dir=None) -> dict:
-    """#576 G, the operator's call, once per store: the retired link commands go.
-    A program entity (`shell:<prog>`, and any other non-method) keeps its place on
-    the field without its stale `command`; a named variant (`shell:<prog>-<label>`)
-    is deleted. Methods and their steps keep theirs. A backup of everything touched
-    is written beside the store first. -> {stripped, deleted, backup}."""
+    """#576 G, the operator's call, ONCE per store (MIGRATED_FILE beside it): the
+    retired link commands go. Only the `shell:` namespace is touched: a generated
+    variant (`shell:<prog>-<label>-<4 hex>`) is deleted; every other `shell:` entity
+    with a stale command (a program, a hand-named command) keeps its place without
+    it. Methods, their steps and every other entity are left alone. A backup is
+    written beside the store FIRST; with no backup, nothing changes. To restore:
+    put each `deleted` entry back as an entity with that command, and each
+    `stripped` command back on its entity. -> {stripped, deleted, backup}."""
     import json
     import time
     from pathlib import Path
     from .entities import MEMBRANE_NS
+    out = {"stripped": 0, "deleted": 0, "backup": None}
+    home = Path(backup_dir) if backup_dir else (Path(est.path).parent if getattr(est, "path", None) else None)
+    if home is None:
+        return out                                     # no backup possible: nothing changes
+    marker = home / MIGRATED_FILE
+    if marker.exists():
+        return out
     docs = getattr(est, "docs", None) or {}
-    method_eids = {e for e, d in docs.items() if (d.properties or {}).get("method_name")}
+    prefix = MEMBRANE_NS + "shell:"
     strip, delete = {}, {}
     for eid, d in list(docs.items()):
         p = d.properties or {}
         cmd = p.get("command")
-        if not (isinstance(cmd, str) and cmd.strip()) or p.get("method_name") or p.get("node_of") in method_eids \
-                or any(eid.startswith(m + ":") for m in method_eids if p.get("step")):
+        if not eid.startswith(prefix) or not (isinstance(cmd, str) and cmd.strip()) \
+                or p.get("method_name") or p.get("node_of") or p.get("step"):
             continue
-        tail = eid[len(MEMBRANE_NS + "shell:"):] if eid.startswith(MEMBRANE_NS + "shell:") else None
-        if tail is not None and "-" in tail:
-            delete[eid] = cmd
-        else:
-            strip[eid] = cmd
-    out = {"stripped": 0, "deleted": 0, "backup": None}
-    if not strip and not delete:
-        return out
-    base = Path(backup_dir) if backup_dir else (Path(est.path).parent if getattr(est, "path", None) else None)
-    if base is not None:
-        f = base / f"backup-576-commands-{int(time.time())}.json"
-        f.write_text(json.dumps({"stripped": strip, "deleted": delete}, indent=1))
+        (delete if VARIANT.search(eid[len(prefix):]) else strip)[eid] = cmd
+    if strip or delete:
+        f = home / f"backup-576-commands-{int(time.time())}.json"
+        try:
+            f.write_text(json.dumps({"stripped": strip, "deleted": delete}, indent=1))
+        except OSError:
+            return out                                 # no backup written: nothing changes
         out["backup"] = str(f)
-    for eid in strip:
-        d = docs.get(eid)
-        if d is None:
-            continue
-        for k in ("command", "script", "last_fed", "pending_run_by"):
-            d.properties.pop(k, None)
-        est.upsert(d)
-        out["stripped"] += 1
-    out["deleted"] = est.remove_many(list(delete)) if hasattr(est, "remove_many") else \
-        sum(1 for eid in delete if est.remove(eid))
+        for eid in strip:
+            d = docs.get(eid)
+            if d is None:
+                continue
+            for k in ("command", "script", "last_fed", "pending_run_by"):
+                d.properties.pop(k, None)
+            est.upsert(d)
+            out["stripped"] += 1
+        out["deleted"] = est.remove_many(list(delete)) if hasattr(est, "remove_many") else \
+            sum(1 for eid in delete if est.remove(eid))
+    try:
+        marker.write_text(json.dumps({"ts": time.time(), **{k: out[k] for k in ("stripped", "deleted")}}))
+    except OSError:
+        pass
     return out
