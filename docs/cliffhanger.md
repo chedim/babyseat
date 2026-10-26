@@ -125,3 +125,8 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
 - **Using the executor inside a method still works.** A method the model defined on another entity whose command runs, or whose steps call the executor (`steps=[{name, call: 'exec', object: 'presence', args: {code}}]`), runs as before: that is programming first.
 - **A call is recorded for the learner.** Each `method_call` sets `last_call = {object: <eid>, args: <the call's args in full>}` on the method entity in the same upsert that bumps its `runs`, so the write event (`<method eid>.last_call`) carries the call.
 - **The library lists methods.** The `commands` section of WHERE WE ARE (`your methods: …`) lists the seat's methods, most called first, with how to call them.
+
+- **A call is recorded for the learner:** `<method>.last_call = {object, args}`.
+  - A value whose key looks secret (token, key, password, secret, auth, cookie, credential) is stored as `<redacted>`.
+  - A string longer than 64 KB is cut with a `…<truncated>` marker (`writes.ARG_MAX`, the operator's cap).
+- **Accountability, not capability (the operator's call):** everything goes through a stored, named method; what a method may run stays open.

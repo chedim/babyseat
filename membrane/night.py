@@ -2824,7 +2824,8 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
         mp["ok_runs"] = int(mp.get("ok_runs") or 0) + 1
     # THE CALL FOR THE LEARNER (#576 part F): which object, the args in full --
     # the write event of this upsert carries it
-    mp["last_call"] = {"object": obj.eid, "args": dict(args or {})}
+    from . import writes as _W
+    mp["last_call"] = {"object": obj.eid, "args": _W.call_record(args)}   # secrets redacted, 64 KB cap
     m.properties = mp
     est.upsert(m, embedder=None)
     _audit(mem, {"event": "agent-method-call", "origin": "mcp", "eid": m.eid,

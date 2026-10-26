@@ -314,7 +314,7 @@ def loop_session(srv, agent: str) -> str:
     With the serve runner wired (srv._loop_runner) the loop gets a REAL
     session in the runner's store, carrying its agent ('watch: <eid>') --
     the runner's agent registry reads it and lanes the turn LISTENER, so
-    the loop holds the entity hands (entity_link -> tool:executor).
+    the loop holds the entity hands (its method calls -> tool:executor).
     2026-10-07: this read `srv.__loop_runner__` (never set) and ALWAYS fell
     back to the bare key below -> the turn laned 'build' -> operator ->
     every exec link refused -> the HA seat's commands never ran.
@@ -1226,7 +1226,7 @@ def main() -> None:
             from .night import seed_executor_entity
             if seed_executor_entity(srv.entity_store):
                 print("[seat] the executor is planted (tool:executor -- "
-                      "entity_link runs commands through it)", file=sys.stderr)
+                      "methods run commands through it)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] executor seeding skipped ({e})", file=sys.stderr)
         # THE WARM-UP (2026-10-10: the first turn after a restart paid 11.8 s

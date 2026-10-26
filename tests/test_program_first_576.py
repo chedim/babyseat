@@ -181,6 +181,22 @@ class TestTheRoute(unittest.TestCase):
         self.assertTrue(ev, [w["path"] for w in seen])
         self.assertEqual(ev[-1]["new"], want)
 
+    def test_secrets_are_redacted_and_huge_args_capped(self):
+        # operator, on Memo's review: up to 64 KB in full, then truncated with a marker;
+        # a value whose key looks secret is stored as <redacted>
+        obj = self._add("greeter")
+        N.method_define(None, self.est, None, None, obj.eid, "hello", "echo {{who}} {{api_token}} {{Password}}")
+        huge = "w" * (W.ARG_MAX + 100)
+        self._post("/membrane/method/call", {"object": obj.eid, "method": "hello",
+                                             "args": {"who": "x", "api_token": "s3cr3t", "Password": "p"}})
+        m = next(d for d in self.est.docs.values() if (d.properties or {}).get("method_name") == "hello")
+        self.assertEqual(m.properties["last_call"]["args"],
+                         {"who": "x", "api_token": "<redacted>", "Password": "<redacted>"})
+        self._post("/membrane/method/call", {"object": obj.eid, "method": "hello",
+                                             "args": {"who": huge, "api_token": "t", "Password": "p"}})
+        rec = m.properties["last_call"]["args"]["who"]
+        self.assertTrue(rec.endswith(W.TRUNCATED) and len(rec) <= W.ARG_MAX + len(W.TRUNCATED))
+
 
 if __name__ == "__main__":
     unittest.main()
