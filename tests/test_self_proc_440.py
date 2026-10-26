@@ -2,15 +2,12 @@
 
 The child runs the same self_loop code against a facade of the seat: an
 srv-shaped object whose entity store is a local mirror of Blurp's own
-entities (itself and its methods), whose reads of the seat are
-GET /membrane/self/context and whose acts are POST /membrane/self/effects.
-The facade covers what part 2 left in-process: a look (the getter read runs
-in the seat: the `reach` effect), Blurp's own method runs and properties
-(the `own` effect, and `own` in the context to seed the mirror), the CPU
-share and the pause (read from the context), and the side acts of a cycle
-(placing a looked-at thing, provisioning unlocked toys, the audits' getter
-pause, the viewer). It owns self/ and serves its card / sheet / recent /
-status / control / chat-in on a loopback port it reports at start.
+entities, whose reads of the seat are GET /membrane/self/context and whose
+acts are POST /membrane/self/effects. The facade covers Blurp's own
+properties (the `own` effect, and `own` in the context to seed the mirror),
+the CPU share and the pause (read from the context). #576 retired the old
+learner's looks and acts. It owns self/ and serves its card / sheet / recent
+/ status / control / chat-in on a loopback port it reports at start.
 
 Behind MEMBRANE_SELF_PROC=1 (default off): in this part the seat does not
 start the child -- a test (or part 4's supervisor) does. Tests that start a
@@ -31,15 +28,42 @@ import pytest
 from membrane import self_api as API
 from membrane import self_loop as SL
 from membrane import self_proc as SP
-from membrane import toybox as TB
-from membrane import watch_agents as WA
+from membrane.entities import EntityStore, QuantumEntity
 
-from tests.test_nudge_333 import DIM, T0, _cid, _felt, _lines  # noqa: F401
-from tests.test_nudge_333 import _data  # noqa: F401  autouse fixture
-from tests import test_self_rung3 as R3
-
-BALL = _cid("toy:ball")
+T0 = 1_700_000_000.0
 SECRET = "s" * 40
+OTHER = "membrane::Component:toy:ball"
+
+
+@pytest.fixture(autouse=True)
+def _data(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path / "data"))
+    yield tmp_path / "data"
+
+
+def _felt():
+    """A seat whose Blurp is on, beside another thing (never Blurp's own)."""
+    import types
+    d = Path(os.environ["MEMBRANE_DATA_DIR"])
+    d.mkdir(parents=True, exist_ok=True)
+    srv = types.SimpleNamespace()
+    est = srv.entity_store = EntityStore(path=str(d / "entities.json"), shared=False)
+    srv._models_path = str(d / "models.json")
+    srv.paused = False
+    srv.events_pool = None
+    srv.membrane = None
+    srv.efield = None
+    est._srv = srv
+    est.upsert(QuantumEntity(eid=OTHER, cls="Component", properties={"name": "toy:ball"}), embedder=None)
+    SL._RT.pop(id(srv), None)
+    SL.bind(srv)
+    SL.set_mode(srv, "on")
+    return srv
+
+
+def _lines(srv):
+    p = SL.record_path(srv)
+    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()] if p.exists() else []
 
 
 def _open_env():
@@ -71,9 +95,6 @@ def _facade(url, srv):
     """The child's view of `srv`'s seat (same data dir, as on a seat)."""
     fac = SP.Facade(SP.SeatClient(url), Path(srv._models_path).parent)
     SP.bind(fac)
-    iso = SL._rt(srv).get("isolate")
-    if iso is not None:
-        SL._rt(fac)["isolate"] = set(iso)
     return fac
 
 
@@ -91,72 +112,23 @@ def test_the_child_uses_the_approved_constants():
 def test_the_context_carries_blurps_own_entities_on_request():
     srv = _felt()
     got = API.context(srv, own=True, only="own")
-    assert set(got) <= {"v", "ts", "own", "spots", "dropped"}
+    assert set(got) <= {"v", "ts", "own"}
     own = got["own"]
-    me = SL._eid()
-    assert me in own
-    meths = {(d["properties"] or {}).get("method_name") for e, d in own.items() if e != me}
-    assert set(SL.METHODS) <= meths
-    assert all(me in (d["properties"].get("method_of") or [me]) for d in own.values())
-    assert BALL not in own                                      # never another thing
+    assert set(own) == {SL._eid()}                              # #576: no methods; never another thing
     assert got == json.loads(json.dumps(got))
     assert "own" not in API.context(srv)                         # only when asked
-
-
-def test_the_context_says_whether_a_viewer_watches():
-    srv = _felt()
-    assert API.context(srv)["viewer"] is False
-    srv._field_pulse = object()
-    assert API.context(srv)["viewer"] is True
 
 
 def test_an_own_effect_updates_blurps_own_entities_and_nothing_else():
     srv = _felt()
     me = SL._eid()
-    meth = next(e for e, d in srv.entity_store.docs.items()
-                if (d.properties or {}).get("method_name") == "try" and me in d.properties.get("method_of", []))
     srv.entity_store.docs[me].properties.setdefault("script_data", {})["pull"] = 0.5
     out = API.effects(srv, [{"kind": "own", "eid": me, "properties": {"script_data": {"kinds": {"x": "moving"}}}},
-                            {"kind": "own", "eid": meth, "properties": {"runs": 7, "ok_runs": 6}},
-                            {"kind": "own", "eid": BALL, "properties": {"name": "stolen"}}])
-    assert [o["ok"] for o in out] == [True, True, False]
+                            {"kind": "own", "eid": OTHER, "properties": {"name": "stolen"}}])
+    assert [o["ok"] for o in out] == [True, False]
     sd = srv.entity_store.docs[me].properties["script_data"]
     assert sd["kinds"] == {"x": "moving"} and sd["pull"] == 0.5      # merged, not replaced
-    assert srv.entity_store.docs[meth].properties["runs"] == 7
-    assert srv.entity_store.docs[BALL].properties["name"] != "stolen"
-
-
-def test_a_reach_effect_reads_the_thing_in_the_seat(monkeypatch):
-    srv = _felt()
-    seen = []
-
-    def read(s, ent, now):
-        seen.append((s, ent.eid, now))
-        return {"fired": True, "state": {"v": 1}, "changed": True}
-    monkeypatch.setattr(SL, "_read_entity", read)
-    out = API.effects(srv, [{"kind": "reach", "eid": BALL, "now": T0},
-                            {"kind": "reach", "eid": _cid("toy:none")}])
-    assert seen == [(srv, BALL, T0)]
-    assert out[0]["read"]["changed"] is True and out[0]["toy"]["name"] == "toy:ball"
-    assert out[0]["toy"]["at1"] >= out[0]["toy"]["at0"] and "by" in out[0]["toy"]
-    assert out[1]["read"] == {"fired": False, "reason": "gone"}
-    assert out == json.loads(json.dumps(out))
-
-
-def test_the_side_effects_run_in_the_seat():
-    srv = _felt()
-    out = API.effects(srv, [{"kind": "getter", "eid": BALL, "until": time.time() + 60}])
-    assert out[0]["ok"] is True and BALL in WA._getter_paused
-    API.effects(srv, [{"kind": "getter", "eid": BALL, "until": None}])
-    assert BALL not in WA._getter_paused
-    got = API.effects(srv, [{"kind": "place", "eid": BALL}])[0]
-    assert got["placed"] in (True, False)                        # placed, or already there
-    assert API.effects(srv, [{"kind": "provision", "toys": [], "now": T0}])[0] == {"added": []}
-    calls = []
-    srv._field_pulse = type("FP", (), {"self_cycle": lambda self, p, s: calls.append((p, s))})()
-    API.effects(srv, [{"kind": "show", "points": {"from": [1.0, 0.0], "aim": None}, "stats": {"n": 3}}])
-    assert calls and list(calls[0][0]["from"]) == [1.0, 0.0] and calls[0][0]["aim"] is None
-    assert calls[0][1] == {"n": 3}
+    assert srv.entity_store.docs[OTHER].properties["name"] != "stolen"
 
 
 # ---- the facade: the same loop, across the boundary -------------------------------------------
@@ -176,65 +148,6 @@ def test_the_facade_holds_only_the_listed_seat_parts():
             assert set(fac.entity_store.docs) == set(API.context(srv, own=True, only="own")["own"])
 
 
-def _same(r):
-    return {k: v for k, v in r.items() if k not in ("dur_s", "ts")}
-
-
-def test_the_child_runs_the_same_cycles_as_the_seat(monkeypatch, tmp_path):
-    """Two seats built alike, each in its own data dir: one runs its loop
-    in-process, the other's runs on the facade over HTTP. The records agree
-    line for line, and the child's acts land in its seat."""
-    monkeypatch.setattr(SL, "AIM_HOLD", 2 * 11.0)
-    with _open_env():
-        monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path / "a"))
-        a = _felt()
-        for k in range(30):
-            SL.cycle(a, now=T0 + 100 + 11 * k)
-        mine = [_same(r) for r in _lines(a)]
-        monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path / "b"))
-        b = _felt()
-        with _served(b) as url:
-            fac = _facade(url, b)
-            for k in range(30):
-                SL.cycle(fac, now=T0 + 100 + 11 * k)
-                fac.flush()
-            theirs = [_same(r) for r in _lines(b)]
-            assert theirs == mine
-            assert len([r for r in theirs if r["kind"] == "cycle"]) == 30
-            assert [r for r in theirs if r["kind"] == "nudge"]
-            pos = b.entity_store.docs[SL._eid()].position                    # its move reached the seat
-            assert list(pos) == pytest.approx(list(fac.entity_store.docs[SL._eid()].position))
-            runs = {(d.properties or {}).get("method_name"): (d.properties or {}).get("runs")
-                    for d in b.entity_store.docs.values() if SL._eid() in ((d.properties or {}).get("method_of") or [])}
-            assert runs["try"] == 30 and runs["expect"] == 30          # its own method runs, in the seat
-            assert TB.peek("toy:ball") is not None
-
-
-def test_the_child_looks_through_the_seat(monkeypatch):
-    """Rung 2-4's looks: the getter fires in the seat (the reach effect), the
-    tempo and the record are the child's; the same answers either way."""
-    with _open_env():
-        monkeypatch.setattr(SL, "_read_entity", R3._Things())
-        a = R3._seat(names=("always", "never", "half"))
-        R3._run(a, 12)
-        mine = [(r["eid"], r["answer"]) for r in R3._reaches(a)]
-        monkeypatch.setattr(SL, "_read_entity", R3._Things())
-        b = R3._seat(names=("always", "never", "half"))
-        seat_reads = []
-        real = API._reach_effect
-
-        def spy(srv, e):
-            seat_reads.append(srv)
-            return real(srv, e)
-        monkeypatch.setitem(API.EFFECTS, "reach", spy)
-        with _served(b) as url:
-            fac = _facade(url, b)
-            R3._run(fac, 12)
-        theirs = [(r["eid"], r["answer"]) for r in R3._reaches(b)]
-        assert theirs == mine and len(mine) == 12
-        assert seat_reads and all(s is b for s in seat_reads)        # every look ran in the seat
-
-
 def test_the_facade_reads_the_pause_and_the_share_from_the_context(monkeypatch):
     from membrane import options as O
     with _open_env():
@@ -249,8 +162,10 @@ def test_the_facade_reads_the_pause_and_the_share_from_the_context(monkeypatch):
             assert SL.cpu_share(fac) == 0.25                     # the seat's, through its context
             srv.paused = True
             assert SL._paused(fac) is True
+            ran = []
+            monkeypatch.setattr(SL, "learn_step", lambda s, now: ran.append(now))
             assert SL.step(fac, now=T0 + 100) is None            # the start check: paused, nothing runs
-            assert not [r for r in _lines(srv) if r.get("kind") == "cycle"]
+            assert ran == []
             srv.paused = False
             assert SL._paused(fac) is False
 
@@ -366,16 +281,8 @@ def test_a_real_child_runs_blurp_and_serves_its_port(tmp_path):
             assert os.getpriority(os.PRIO_PROCESS, kid.pid) >= SP.NICE   # the OS favours the seat
             code, st = _call(kid.port, "/status")
             assert code == 200 and st["mode"] == "on"
-            deadline = time.time() + 60
-            while time.time() < deadline:
-                cyc = [r for r in _lines(srv) if r.get("kind") == "cycle"]
-                if len(cyc) >= 2:
-                    break
-                time.sleep(0.2)
-            assert len(cyc) >= 2                                 # the child's cycles, on the record
-            runs = {(d.properties or {}).get("method_name"): (d.properties or {}).get("runs")
-                    for d in srv.entity_store.docs.values() if (d.properties or {}).get("method_of")}
-            assert (runs.get("try") or 0) >= 1                   # its own method runs reached the seat
+            code, card = _call(kid.port, "/card")
+            assert code == 200 and card["level"] == 0
             assert "ok" in _call(kid.port, "/control", {"mode": "off"})[1]
 
 

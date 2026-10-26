@@ -5,7 +5,7 @@ The operator named self Blurp (#277); that is now the DEFAULT. A seat names its
 own in its settings (`self_name` in <data dir>/settings.json, "" = the
 default), MEMBRANE_SELF_NAME overrides it, and every place the seat says self's
 name to a person reads current(): the sheet's header and prose and the dock
-(self_sheet), a locked toy's refusal (toy_unlocks), the seat card (lanes).
+(self_sheet), the seat card (lanes).
 
 Not the seat's own name: settings' `name` is the assistant's (the name
 ceremony, naming.py -- "Hey Bob"); this one is self's (membrane::self).
@@ -13,9 +13,10 @@ ceremony, naming.py -- "Hey Bob"); this one is self's (membrane::self).
 Set it with `membrane self name <NAME>` (here, cli_main) or the seat's
 control door, POST /membrane/seat/control {"self_name": ...} (seat_panel.control).
 
-#299: `membrane self accept <ID>` (here too) accepts an achievement self
-earned, through the running seat's control door ({"accept": ID}): the seat
-writes the record line, so the CLI never touches the record itself.
+#299: `membrane self accept <ID>` (here too) writes the operator's accept
+line through the running seat's control door ({"accept": ID}): the seat
+writes the record line, so the CLI never touches the record itself (#576:
+it grants nothing until the new learner reads it).
 A name is trimmed and 1..MAX_LEN printable characters. Display only: the ids
 (membrane::self, seat:self), the record's `by: "self"` and the code's
 vocabulary stay.
@@ -157,7 +158,7 @@ def accept_main(ident: str, url: str | None = None) -> int:
 def cli_main(argv: list[str]) -> int:
     """`membrane self name` (show it) | `membrane self name <NAME>` (set it)
     | `membrane self name --reset` (back to the default) | `membrane self
-    accept <ID> [--url URL]` (#299: accept an achievement self earned)."""
+    accept <ID> [--url URL]` (#299: the operator's accept line)."""
     import argparse
     ap = argparse.ArgumentParser(prog="membrane self", description="self (#161) on this seat")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -165,8 +166,8 @@ def cli_main(argv: list[str]) -> int:
                                     f"{ENV} overrides it)")
     n.add_argument("name", nargs="*", help=f"the new name, 1-{MAX_LEN} printable characters")
     n.add_argument("--reset", action="store_true", help=f"back to the default ({DEFAULT})")
-    a = sub.add_parser("accept", help="accept an achievement self earned: it opens what it leads to (#299)")
-    a.add_argument("id", help="the achievement's id (feel, reach, kinds, patience, shift, meet, turns, expect, ...)")
+    a = sub.add_parser("accept", help="the operator's accept line on self's record (#299; #576: it grants nothing yet)")
+    a.add_argument("id", help="what is accepted (an id)")
     a.add_argument("--url", default=None, help=f"the seat's serve URL (default ${SERVE_URL_ENV} or {SERVE_URL})")
     args = ap.parse_args(argv)
     if args.cmd == "accept":

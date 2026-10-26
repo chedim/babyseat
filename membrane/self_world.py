@@ -41,10 +41,9 @@ The field links every message to the entities it mentions (the event's
 field hands each applied event to its `event_listeners` (efield._apply);
 bind() registers on_event there.
 
-EVERY READ BLURP MAKES IS FILTERED THROUGH IT (self_loop: the reach targets,
-a direct reach, the mirror, the toys list, the blind audit; #333: its aims and
-its nudges -- a nudge outside its world is refused and costs the error fee).
-A thing outside the world is never looked at or acted on."""
+Until #576 every read and act of the old learner was filtered through it
+(its looks, aims, nudges, the mirror, the audits); that learner retired, and
+the world is kept (it grows as before) for the new one."""
 from __future__ import annotations
 
 import json

@@ -39,7 +39,7 @@ REFRESH_S = 15.0
 EVENTS_KEEP = 20
 MEM_LOW_MB = 350             # the phone's MemAvailable under this: pressure
 RSS_HIGH_MB = 2300           # the seat itself over this: pressure
-CONTROLS = ("paused", "loops_max", "self", "accept", "self_limit", "self_name")
+CONTROLS = ("paused", "loops_max", "self", "accept", "self_name")
 CALLER_MAX = 80              # #299: the longest caller name a record line keeps
 
 
@@ -312,9 +312,8 @@ def set_pause(srv, on: bool, by: str = "operator") -> dict:
 
 def _self_via(sup, srv, body: dict, done: dict, by: str) -> None:
     """#440 part 4: the self controls, as one request to the supervisor (the
-    child's /control: mode, accept, limit, name)."""
-    req = {k2: body[k1] for k1, k2 in (("self", "mode"), ("accept", "accept"), ("self_limit", "limit"),
-                                       ("self_name", "name")) if k1 in body}
+    child's /control: mode, accept, name)."""
+    req = {k2: body[k1] for k1, k2 in (("self", "mode"), ("accept", "accept"), ("self_name", "name")) if k1 in body}
     if not req:
         return
     req["by"] = by
@@ -327,9 +326,6 @@ def _self_via(sup, srv, body: dict, done: dict, by: str) -> None:
         done["accept"] = ap["accept"]
         if (ap["accept"] or {}).get("ok") and not ap["accept"].get("already"):
             note(srv, "self-accept", value=ap["accept"].get("id"), by=by)
-    if "limit" in ap:
-        done["self_limit"] = ap["limit"]
-        note(srv, "self", value=sup.mode, limit=ap["limit"], by=by)
     if "name" in ap:
         done["self_name"] = ap["name"]
         note(srv, "self-name", value=ap["name"], by=by)
@@ -355,27 +351,19 @@ def control(srv, body: dict, by: str = "operator") -> dict:
     sup = _SUP.of(srv)
     if sup is not None:
         _self_via(sup, srv, body, done, by)
-        body = {k: v for k, v in body.items() if k not in ("self", "accept", "self_limit", "self_name")}
+        body = {k: v for k, v in body.items() if k not in ("self", "accept", "self_name")}
     if "self" in body:                             # #161: the self loop's switch (off / on / watch)
         from . import self_writer as _W        # #440: self/'s one writer
         m = str(body["self"] or "")
         if _W.set_mode(srv, m, by=by):
             done["self"] = m
             note(srv, "self", value=m, by=by)
-    if "accept" in body:                           # #299: the operator accepts an earned achievement
+    if "accept" in body:                           # #299: the operator's accept (#576: a branch, once D2 lands)
         from . import self_writer as _W
         out = _W.accept(srv, body["accept"], by=by)
         done["accept"] = out
         if out.get("ok") and not out.get("already"):
             note(srv, "self-accept", value=out["id"], by=by)
-    if "self_limit" in body:                       # DEPRECATED (#299): a bulk accept of the closure;
-        from . import self_loop as _SELF           # 0 / "off" sleeps (an id, "all"; a number is the old ladder's)
-        from . import self_writer as _W
-        if _W.set_limit(srv, body["self_limit"], by=by):
-            n = _SELF.limit(srv)
-            done["self_limit"] = n
-            done["self_allow"] = _SELF.allow(srv)
-            note(srv, "self", value=_SELF.mode(srv), limit=n, allow=done["self_allow"], by=by)
     if "self_name" in body:                        # #283: self's name on this seat (display only)
         from . import self_name as _SN
         try:

@@ -13,10 +13,7 @@ One entity per person, in the seat's own store:
                  reads `heard_n`, so Blurp's look at it reads news -- changed
                  when the person said something since its last look. Only the
                  person's lines are heard: Blurp's own sends never are, so its
-                 own line is never news (the chat stays an other). Blurp
-                 nudges it to speak (self_loop._nudge_chat: open a draft,
-                 send it). One field spot: curiosity about what changed lands
-                 on the same thing Blurp acts on.
+                 own line is never news (the chat stays an other).
 
 Until part 3a it was two: chat:out:<person> (Config, chat_io "out": the
 writing side, voice:out's twin) and chat:in:<person> (Component, chat_io
@@ -29,7 +26,7 @@ it, so an edit of chat:out:<person>.say -- an agent, a script, the lanes edit
 route -- keeps working); its field spot starts at chat:in's live state (where
 the person's speech put it), else chat:out's, else its first look places it;
 Blurp's world gains it as `migrated` (the old two stay members: the world
-only grows); tempo.json's chat:in key is renamed to it. The record is never
+only grows). The record is never
 rewritten: chat_of() reads an old line's eid as the chat thing it became.
 
 And the field's own way out: an entity's script may return `chat` and/or
@@ -42,9 +39,7 @@ operator's own -- the newest chat that is not a loop's. Never Blurp's
 private chat (#337): that one is Blurp's alone.
 
 BLURP'S PRIVATE CHAT (#337, the PM with Blurp): one session per person,
-marked `blurp: true` (blurp_chat). Blurp's own lines (by="self"; since #333
-part 2 they are sends of its nudges at the chat thing, self_loop._nudge_chat)
-land there, not in the person's newest chat, and the field hears them under
+marked `blurp: true` (blurp_chat). Blurp's own lines (by="self") land there, not in the person's newest chat, and the field hears them under
 the session tag blurp:<person> (blurp_tag). A message the person posts there
 runs no model turn and the voice does not answer (server.py,
 TurnRunner.blurp_message).
@@ -149,25 +144,6 @@ def _place_from(srv, new_eid: str, olds) -> None:
         pass
 
 
-def _rename_tempo(srv, old: str, new: str) -> None:
-    """tempo.json (a state file): chat:in's rates become the chat thing's."""
-    try:
-        from . import self_loop as SL
-        from . import self_writer as _W
-        t = SL._load_json(srv, "tempo.json")
-        if isinstance(t, dict) and old in t:
-            if new not in t:
-                t[new] = t[old]
-            t.pop(old, None)
-            _W.save_json(srv, "tempo.json", t)
-        live = SL._RT.get(id(srv), {}).get("tempo")
-        if isinstance(live, dict) and old in live:
-            live.setdefault(new, live[old])
-            live.pop(old, None)
-    except Exception:
-        pass
-
-
 def _migrate(srv, ent, key: str) -> bool:
     """Fold a person's chat:in / chat:out into their chat thing (once: an old
     entity already merged is left alone). -> whether anything was folded."""
@@ -198,8 +174,6 @@ def _migrate(srv, ent, key: str) -> bool:
         _SW.join(srv, [ent.eid], "migrated")
     except Exception:
         pass
-    if old_in is not None:
-        _rename_tempo(srv, old_in.eid, ent.eid)
     return True
 
 

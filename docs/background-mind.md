@@ -199,6 +199,16 @@ re-embedding. The night reads statistics, not the raw field.
 
 ## The self loop (#161)
 
+> **Retired in #576 (part D1).** The cycle, its `self::` methods (and the
+> `self::` route in night.py), the ladder and skill tree, the nudge, the
+> mirror, change itself, aims, curiosity, the tempo and the toy unlocks
+> described below are gone. Blurp's body stays in `self_loop.py`: the entity,
+> the mode switch, the record and its consolidation, energy and sleep
+> (`energy.py`), the views and the process plumbing (`self_proc.py`,
+> `self_super.py`, `self_writer.py`, `self_api.py`: `context` and the `own`
+> effect). Each loop step charges energy and calls `learn_step`, the one hook
+> the new learner (#576 D2) plugs into. The rest of this section is history.
+
 `membrane::self` is a looped cliffhanger object the operator named Blurp (#277; per seat since #283, Blurp the default;
 its ids stay `self`), the seed of the evolving self in #161. It grows a **skill tree** (#295; a strict ladder of
 rungs until then): each skill is an achievement with a measured pass test, a stable id, a branch and real

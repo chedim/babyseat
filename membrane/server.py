@@ -3799,7 +3799,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     return self._json_out(_sup.view("/card"))
                 self._json_out(_SHEET.card(getattr(runner, "srv", None) if runner is not None else None))
             elif path == "/membrane/self/context":
-                # #440 part 2: the per-cycle snapshot Blurp's own process reads
+                # #440 part 2: the snapshot Blurp's own process reads
                 # (self_api.context; the in-process loop calls the same code).
                 # The seat's own token (or open mode) only: never a person's
                 psrv = getattr(runner, "srv", None) if runner is not None else None
@@ -3809,9 +3809,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     return self._json_err(503, "no seat")
                 from . import self_api as _SAPI
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
-                self._json_out(_SAPI.context(psrv, spots=_q.get("spot") or (),
-                                             reach=(_q.get("reach") or [""])[0] in ("1", "true"),
-                                             only=(_q.get("only") or [None])[0],
+                self._json_out(_SAPI.context(psrv, only=(_q.get("only") or [None])[0],
                                              own=(_q.get("own") or [""])[0] in ("1", "true")))
             elif path == "/membrane/toybox/state":
                 # #249: the toy dock's live source -- the toys alone, cheap
@@ -3888,7 +3886,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     _SHEET.forget_dock(getattr(runner, "srv", None) if runner is not None else None)
                 return self._json_out(out, code=200 if out.get("ok") else 400)
             if path == "/membrane/self/effects":
-                # #440 part 2: the cycle's acts, run in the seat in order
+                # #440 part 2: Blurp's acts, run in the seat in order
                 # (self_api.effects; the in-process loop calls the same code):
                 # {"effects": [...]} -> {"results": [...]}. The seat's own
                 # token (or open mode) only: never a person's

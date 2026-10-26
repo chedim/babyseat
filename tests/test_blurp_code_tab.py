@@ -39,15 +39,14 @@ def _seat():
 def test_the_sheet_carries_blurps_own_methods():
     srv = _seat()
     est = srv.entity_store
-    method_define(srv, est, None, None, on=SL._eid(), method="wave", command="self::nudge {{target}}")
+    assert SH.compute(srv)["code"] == []                # #576: no methods of its own until D2
+    method_define(srv, est, None, None, on=SL._eid(), method="wave", command="echo wave")
     other = QuantumEntity(eid=MEMBRANE_NS + "Component:other", cls="Component", properties={"name": "other"})
     est.docs[other.eid] = other
     assert method_define(srv, est, None, None, on=other.eid, method="other_one", command="echo other")["ok"]
     code = SH.compute(srv)["code"]
     by = {m["name"]: m for m in code}
-    for meth, cmd in SL.METHODS.items():
-        assert by[meth]["command"] == cmd, by.get(meth)
-    assert by["wave"]["command"] == "self::nudge {{target}}"
+    assert by["wave"]["command"] == "echo wave"
     assert "other_one" not in by                        # only Blurp's own methods
     assert [m["name"] for m in code] == sorted(by)      # a stable order
     assert SH.empty()["code"] == []

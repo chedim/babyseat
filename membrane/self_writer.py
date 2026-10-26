@@ -2,8 +2,7 @@
 
 Blurp is moving into its own process (#440): the child will own
 <data dir>/self/ -- the record (record.jsonl), its archive and manifest, the
-consolidation journal, mode.json, model.json, tempo.json, nudged.json,
-settings.json, energy.json and world.json. This module is that owner's
+consolidation journal, mode.json, energy.json and world.json. This module is that owner's
 interface, still in-process: every write under self/ goes through it, and
 nothing else in the seat opens, replaces, truncates, removes or creates a
 file there (tests/test_self_writer_440.py holds both, at run time and in
@@ -14,8 +13,8 @@ Two layers:
   it keeps), `save_json` (a state file, swapped in whole), and the path
   primitives the consolidation's journal steps use (`sync_write`,
   `replace`, `unlink`, `truncate`, `mkdir`).
-- The seat-side requests: the panel's switch, accept and growth limit
-  (`set_mode`, `accept`, `set_limit`) and the sleep's `consolidate`. Today
+- The seat-side requests: the panel's switch and accept (`set_mode`,
+  `accept`) and the sleep's `consolidate`. Today
   they run self_loop's code here; once the child is up (#440 part 4) they
   become requests to it, and the seat stops writing self/.
 """
@@ -54,8 +53,6 @@ def append(srv, rec: dict) -> None:
         if cache is not None:
             cache.append(rec)
             rt["recs_bytes"] = rt.get("recs_bytes", 0) + len(line)
-            if rec.get("kind") == "cycle":
-                rt["recs_cycles"] = rt.get("recs_cycles", 0) + 1     # the running count (cycle_count)
 
 
 def write_json(path: Path, doc, sort_keys: bool = False) -> None:
@@ -108,10 +105,6 @@ def set_mode(srv, m: str, by: str = "operator") -> bool:
 
 def accept(srv, i, by: str = "operator") -> dict:
     return _SL().accept(srv, i, by=by)
-
-
-def set_limit(srv, n, by: str = "operator") -> bool:
-    return _SL().set_limit(srv, n, by=by)
 
 
 def consolidate(srv, now: float | None = None) -> dict | None:

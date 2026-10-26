@@ -921,12 +921,6 @@ def run_command_entity(fld, est, mem, command: str,
             from . import llm as _LLM
             _r = _LLM.from_command(cmd[len("llm::call"):].strip())
             rc, text = _r["rc"], _r["text"]
-        elif cmd.startswith("self::"):
-            # THE SELF LOOP (#161, self_loop.py): its methods run only in its
-            # own loop, never a shell -- any other caller is refused
-            from . import self_loop as _SELF
-            _r = _SELF.from_command(cmd[len("self::"):].strip())
-            rc, text = _r["rc"], _r["text"]
         elif cmd.startswith("toybox::"):
             # SELF'S TOYS (#239, toybox.py): the built-in kit, never a shell
             from . import toybox as _TB

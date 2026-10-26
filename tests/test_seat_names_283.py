@@ -114,9 +114,7 @@ class TestEverySayingReadsIt(unittest.TestCase):
             SN.set_name("Zed")
             s = SS.sheet(srv, now=T0 + 10, fresh=True)
             self.assertEqual(s["header"]["name"], "Zed")
-            text = json.dumps(s)
-            self.assertNotIn("Blurp", text)                    # the prose says it too (the caveat, the attributes)
-            self.assertIn("hours of Zed per month", text)
+            self.assertNotIn("Blurp", json.dumps(s))           # the prose says it too
 
     def test_a_rename_is_not_hidden_by_the_cache(self):
         with _env():
@@ -134,16 +132,6 @@ class TestEverySayingReadsIt(unittest.TestCase):
             self.assertEqual(SN.say("not Blurp's; Blurpy"), "not Zed's; Blurpy")
         with _env():
             self.assertEqual(SN.say("not Blurp's"), "not Blurp's")
-
-    def test_a_locked_toy_says_it(self):
-        from membrane import toy_unlocks as TU
-        with _env():
-            srv = _seat()
-            SL._append(srv, {"ts": T0, "kind": "birth"})
-            SN.set_name("Zed")
-            msg = TU.refusal(srv, "tower")
-            self.assertIn("unlocks when Zed earns 'feel itself'", msg)   # #295: the achievement (#333 3e: the tower's)
-            self.assertIn("Zed topples", msg)
 
     def test_the_seat_card_tells_the_model(self):
         from membrane import lanes as LN
@@ -205,13 +193,12 @@ class TestTheCard(unittest.TestCase):
         with _env():
             srv = _seat()
             SL._append(srv, {"ts": T0, "kind": "birth"})
-            SL._append(srv, {"ts": T0 + 5, "kind": "rung", "rung": 1, "skill": 0.6})
+            SL._append(srv, {"ts": T0 + 5, "kind": "learn"})
             SL.set_mode(srv, "on")
             SN.set_name("Zed")
             c = SS.card(srv, now=T0 + 10)
         self.assertEqual(c["name"], "Zed")
-        self.assertEqual(c["level"], 1)
-        self.assertEqual(c["rung_name"], SL.RUNG_NAMES[1])
+        self.assertEqual((c["level"], c["rung_name"]), (0, ""))      # #576: the ladder retired
         self.assertEqual(c["mode"], "on")
         self.assertTrue(c["awake"])
         self.assertEqual(c["last_activity"], SS.iso(T0 + 5))
