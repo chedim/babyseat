@@ -11,7 +11,7 @@ to the effects that already exist:
   membrane::llm.wake         llm.set_wake: {about, at, prompt}
   membrane::llm.unwake       llm.unwake: the wake's id
   membrane::presence.restart restarts.do_restart: the reason
-  <method>.call              night.method_call: {object, args} (#576 C: a learned call acts)
+  <method>.invoke            night.method_call: {object, args} (#576 C: a learned call acts)
 
 The listener only queues (a listener must not write); the effect runs on the
 adapters' one worker thread, in the chain of the write that caused it. The
@@ -53,7 +53,7 @@ def _branch(path: str) -> tuple[str, str, str] | None:
         return "llm", eid, prop
     if prop == "restart" and eid == MEMBRANE_NS + "presence":
         return "seat", eid, prop
-    if prop == "call":
+    if prop == "invoke":
         return "methods", eid, prop             # a method entity or not: the worker reads method_name
     return None
 
@@ -122,8 +122,9 @@ def _seat(srv, est, ent, prop, new, by) -> None:
 
 
 def _methods(srv, est, ent, prop, new, by) -> None:
-    """#576 C: `<method>.call = {object, args}` runs that method on the object -- how a
-    learned call acts (the call itself records `last_call`, as any call does)."""
+    """#576 C: `<method>.invoke = {object, args}` runs that method on the object -- how a
+    learned call acts (the call itself records `last_call`, as any call does). The
+    executor itself is refused here exactly as on the model's route (#581)."""
     from . import night as N
     name = (ent.properties or {}).get("method_name")
     if not name or not isinstance(new, dict) or not new.get("object"):

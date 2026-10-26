@@ -39,10 +39,18 @@ WRITE_COST = BASAL_PER_S          # every Blurp write: one awake second (approve
 REFUND = 2.0                      # a hit pays back 2x its write cost (approved)
 LOOK_BACK = 3                     # the causes a guess may look back at, in its chain (approved)
 CHAINS_KEPT = 512                 # chains remembered for causes and predictions (a buffer bound)
+GUESS_PER_CHAIN = 3               # new guesses one chain may define (operator, #582 review)
+CANDIDATES_MAX = 256              # live candidates at most; at the cap a new guess replaces the most negative (operator)
+REFUSED_KEPT = 4096               # guesses the VM refused, remembered so they are never retried (a buffer bound)
 
 
 def _scalar(v) -> bool:
     return isinstance(v, (int, float, str, bool)) or v is None
+
+
+def _same(a, b) -> bool:
+    """A copy, not a coincidence: equal AND the same type (True is not 1)."""
+    return _scalar(a) and type(a) is type(b) and a == b
 
 
 def _literal(v) -> str | None:
@@ -60,6 +68,8 @@ class Learner:
         self._recent: collections.OrderedDict = collections.OrderedDict()   # chain -> its last writes
         self._pending: collections.OrderedDict = collections.OrderedDict()  # chain -> [(cand, path, value)]
         self._bal: dict[str, float] = {}
+        self._guessed: collections.OrderedDict = collections.OrderedDict()  # chain -> new guesses defined
+        self._refused: collections.OrderedDict = collections.OrderedDict()  # guess eids the VM refused
 
     # -- the account ------------------------------------------------------------------------
     def balance(self, cand: str) -> float:
@@ -78,9 +88,9 @@ class Learner:
     # -- the VM's hooks ---------------------------------------------------------------------
     @staticmethod
     def _expected(target_path: str) -> str:
-        """A learned call writes `<method>.call`; what it predicts is the call the LLM
+        """A learned call writes `<method>.invoke`; what it predicts is the call the LLM
         records, `<method>.last_call`."""
-        return target_path[:-len(".call")] + ".last_call" if target_path.endswith(".call") else target_path
+        return target_path[:-len(".invoke")] + ".last_call" if target_path.endswith(".invoke") else target_path
 
     def on_fire(self, tr, target_path: str, value) -> str:
         """A candidate fires: 'live' (write the real path), 'shadow' (write the
@@ -88,8 +98,9 @@ class Learner:
         live = self.state(tr.eid) == "proposal" and self.granted(target_path)   # as it stood before this write
         if not self._spend(tr.eid, "fire"):
             return "skip"
-        ch = CH.W.current() or {}
-        self._remember(self._pending, ch.get("id") or "", list).append((tr.eid, self._expected(target_path), value))
+        ch = (CH.W.current() or {}).get("id")
+        if ch:                                  # no chain, nothing can confirm it: no prediction kept
+            self._remember(self._pending, ch, list).append((tr.eid, self._expected(target_path), value))
         return "live" if live else "shadow"     # a live write is confirmed the same way as a shadow one
 
     @staticmethod
@@ -107,30 +118,30 @@ class Learner:
         writer = str(w.get("writer") or "")
         path = str(w.get("path") or "")
         ch = (w.get("chain") or {}).get("id") or ""
-        if writer.startswith(("trigger:", "adapter:")) or not w.get("prop") or path.startswith("rel:"):
+        if writer.startswith(("trigger:", "adapter:")) or not w.get("prop") or path.startswith("rel:") or not ch:
             return                                      # Blurp's own acts never confirm or teach themselves
-        keep = []
-        for cand, p, v in self._pending.get(ch, []):
-            if p != path:
-                keep.append((cand, p, v))
-                continue
-            if v == w.get("new"):
-                back = REFUND * WRITE_COST
-                self.purse.refund(back, "hit")
-                self._bal[cand] = self.balance(cand) + back
-        if ch:
-            if ch in self._pending:
-                self._pending[ch] = keep
-            recent = self._remember(self._recent, ch, lambda: collections.deque(maxlen=LOOK_BACK))
-            causes = list(recent)
-            recent.append(w)
-            if writer == "llm" or writer.startswith("llm:"):   # the target: the LLM's actions (operator, 10-26)
-                for c in causes:
-                    self._guess(c, w)
+        by_llm = writer == "llm" or writer.startswith("llm:")   # the LLM's actions: taught, and confirming
+        if by_llm and ch in self._pending:
+            keep = []
+            for cand, p, v in self._pending[ch]:
+                if p != path:
+                    keep.append((cand, p, v))
+                    continue
+                if v == w.get("new"):
+                    back = REFUND * WRITE_COST
+                    self.purse.refund(back, "hit")
+                    self._bal[cand] = self.balance(cand) + back
+            self._pending[ch] = keep
+        recent = self._remember(self._recent, ch, lambda: collections.deque(maxlen=LOOK_BACK))
+        causes = list(recent)
+        recent.append(w)
+        if by_llm:
+            for c in causes:
+                self._guess(c, w, ch)
 
     # -- guessing ---------------------------------------------------------------------------
-    def _guess(self, c: dict, w: dict) -> None:
-        if not self.purse.can_spend():
+    def _guess(self, c: dict, w: dict, ch: str) -> None:
+        if not self.purse.can_spend() or self._guessed.get(ch, 0) >= GUESS_PER_CHAIN:
             return
         est = self.vm.est
         c_eid, c_prop = str(c.get("eid") or ""), str(c.get("prop") or "")
@@ -140,17 +151,19 @@ class Learner:
             return
         if c_prop == "position" or w_prop == "position":
             return                                     # vectors: the geometric watchers' business
+        if not c_prop.isidentifier() or not w_prop.isidentifier():
+            return                                     # x.odd-name would read as subtraction
         same = c_eid == w_eid
         where = [["isa", "?x", ce.cls]] + ([] if same else [["is", "?y", w_eid]])
         if w_prop == "last_call" and isinstance(w.get("new"), dict):
-            # a method call: the guess CALLS it (writes `<method>.call`), its object and
+            # a method call: the guess CALLS it (writes `<method>.invoke`), its object and
             # arguments copied from the cause where they match, literal otherwise
-            target = f"?x.call" if same else f"?y.call"
+            target = "?x.invoke" if same else "?y.invoke"
             values = [self._call_expr(w["new"], c_eid, c_prop, c.get("new"))]
         else:
             target = f"?x.{w_prop}" if same else f"?y.{w_prop}"
             values = []
-            if w.get("new") == c.get("new") and _scalar(w.get("new")):
+            if _same(w.get("new"), c.get("new")):
                 values.append(f"x.{c_prop}")
             lit = _literal(w.get("new"))
             if lit is not None:
@@ -160,23 +173,42 @@ class Learner:
             name = "cand-" + hashlib.blake2b(json.dumps(spec, sort_keys=True).encode(),
                                              digest_size=6).hexdigest()
             eid = CH.MEMBRANE_NS + f"{CH.CLASS}:{name}"
-            if eid in (est.docs or {}):
+            if eid in (est.docs or {}) or eid in self._refused:
                 continue
-            if not self._spend(eid, "define"):
+            if self._guessed.get(ch, 0) >= GUESS_PER_CHAIN or not self.purse.can_spend() or not self._room():
                 return
             try:
                 self.vm.define(name, owner=CH.SELF, **spec)
             except CH.Refused:
+                self._remember(self._refused, eid, lambda: True)     # never retried, never charged
+                while len(self._refused) > REFUSED_KEPT:
+                    self._refused.popitem(last=False)
                 continue
+            self._spend(eid, "define")                  # charged only for what was defined
+            self._guessed[ch] = self._guessed.get(ch, 0) + 1
+            while len(self._guessed) > CHAINS_KEPT:
+                self._guessed.popitem(last=False)
             doc = est.docs[eid]
-            doc.properties = {**(doc.properties or {}), "shadow": True}
+            doc.properties["shadow"] = True
             est.upsert(doc)
+
+    def _room(self) -> bool:
+        """Under CANDIDATES_MAX, or room made by removing the most negative one."""
+        mine = [t for t in self.vm.triggers() if (t.properties or {}).get("owner") == CH.SELF]
+        if len(mine) < CANDIDATES_MAX:
+            return True
+        worst = min(mine, key=lambda t: self.balance(t.eid))
+        if self.balance(worst.eid) >= 0:
+            return False                                # every candidate pays for itself: no room
+        self.vm.est.remove(worst.eid)
+        self._bal.pop(worst.eid, None)
+        return True
 
     @staticmethod
     def _call_expr(call: dict, c_eid: str, c_prop: str, c_new) -> str:
         obj = "x.eid" if call.get("object") == c_eid else repr(call.get("object"))
         args = call.get("args") if isinstance(call.get("args"), dict) else {}
-        parts = [f"{k!r}: " + (f"x.{c_prop}" if (v == c_new and _scalar(v)) else repr(v)) for k, v in args.items()]
+        parts = [f"{k!r}: " + (f"x.{c_prop}" if _same(v, c_new) else repr(v)) for k, v in args.items()]
         return "{'object': " + obj + ", 'args': {" + ", ".join(parts) + "}}"
 
     # -- sleep ------------------------------------------------------------------------------

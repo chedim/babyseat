@@ -179,7 +179,7 @@ def test_a_method_call_is_learned_as_a_call(world):
     x, y, z = _ent(est, "x"), _ent(est, "y"), _ent(est, "z")
     m = _method(est)
     _turn(est, vm, (x, "a", 7, "person:op"), (m, "last_call", {"object": x.eid, "args": {"n": 7}}))
-    c = next(t for t in _cands(vm) if t.properties["write"][0].endswith(".call"))
+    c = next(t for t in _cands(vm) if t.properties["write"][0].endswith(".invoke"))
     assert c.properties["write"][1] == "{'object': x.eid, 'args': {'n': x.a}}"
     # in shadow it predicts the call the LLM will record, and the LLM's call confirms it
     _turn(est, vm, (y, "a", 3, "person:op"), (m, "last_call", {"object": y.eid, "args": {"n": 3}}))
@@ -194,3 +194,50 @@ def test_dicts_are_values():
     assert CH._writable({"n": 5, "args": {"k": "v"}}) == {"n": 5, "args": {"k": "v"}}
     with pytest.raises(CH.Refused):
         CH.evaluate("{x: 1}", env)                      # keys are literal strings
+
+
+# ---- #582 review ----------------------------------------------------------------------------
+
+def test_a_refused_guess_is_not_charged_and_not_retried(world):
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    for i in range(5):
+        _turn(est, vm, (x, "a", i, "person:op"), (x, "command", f"echo {i}"))   # 'command' is never a trigger's
+    assert purse.spent == 0 and _cands(vm) == []
+
+
+def test_only_the_llm_confirms(world):
+    est, vm, purse, _ = world
+    x, y = _ent(est, "x"), _ent(est, "y")
+    _turn(est, vm, (x, "a", 1, "person:op"), (x, "b", 2))
+    c = _cands(vm)[0]
+    _turn(est, vm, (y, "a", 1, "person:op"), (y, "b", 2, "script:membrane::toy:y"))   # a script writes it
+    assert vm.learner.balance(c.eid) < 0                                             # no refund
+
+
+def test_at_most_three_new_guesses_per_chain(world):
+    est, vm, purse, _ = world
+    ents = [_ent(est, f"e{i}") for i in range(6)]
+    writes = []
+    for i, e in enumerate(ents):
+        writes += [(e, "a", i, "person:op"), (e, f"p{i}", i + 100)]
+    _turn(est, vm, *writes)
+    assert len(_cands(vm)) <= L.GUESS_PER_CHAIN
+
+
+def test_the_candidate_cap_replaces_the_most_negative(world, monkeypatch):
+    est, vm, purse, _ = world
+    monkeypatch.setattr(L, "CANDIDATES_MAX", 2)
+    for i in range(4):
+        e = _ent(est, f"k{i}")
+        _turn(est, vm, (e, "a", 1, "person:op"), (e, f"q{i}", 7))
+    assert len(_cands(vm)) <= 2
+
+
+def test_a_coincidence_of_types_is_not_a_copy_and_names_are_identifiers(world):
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", True, "person:op"), (x, "b", 1))
+    assert all(t.properties["write"][1] != "x.a" for t in _cands(vm))
+    _turn(est, vm, (x, "a", 2, "person:op"), (x, "odd-name", 3))
+    assert all("odd-name" not in t.properties["write"][0] for t in _cands(vm))
