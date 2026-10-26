@@ -97,3 +97,27 @@ Every write on the field is an event `{path, old, new, writer, chain, ts}` (`mem
 - **Other threads:** threads that are not handed the chain start fresh. These are Blurp's loop, the dreamer, consequences, predict, and the claude-agent runner; each is its own root until part D gives Blurp's chain to self. A deleted property and one set to `None` read the same.
 - **Listeners** run inside the writer's call. They must be cheap and **must not write**: a listener that reacts queues the work and writes later. One that raises is counted (`writes.errors`).
 - **Not authority:** the writer and chain are provenance only, and nothing may gate on them. Any local caller can send the headers.
+
+## Triggers: cliffhanger without hatches (#576, part B)
+
+`membrane/ch.py`. A **trigger** is an entity of class `Trigger`: a reified edge from what it watches to what it writes. One line of it reads:
+
+```
+WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
+```
+
+- **WHEN: watchers.**
+  - **Level watchers** fire once per binding when the condition turns true, and re-arm when it turns false: `near` / `away` (1 − cos between positions), `above` / `below` (an expression against a bar), `pos` (moved further than d), `vel`, `align`, `around` (the neighbours within z changed), and `quiet` (no write on the entity for dt).
+  - **Event watchers** fire on the event itself, while the level watchers hold: `changed(?x.prop)` (a write on that path) and `every(dt)`. At most one event watcher per trigger.
+- **WHERE: patterns, no XPath.** `isa(?x, Class)` (the entity's class or an ISA ancestor), `is(?x, eid)`, `filter(expr)`.
+- **WRITE: `[target, expression]`.** The target is `?x.prop` or `<eid>.prop`, `.position` included.
+- **Expressions:** a small safe language over scalars and first-class vectors.
+  - Operators: `+ - * /`, comparisons, `and` / `or` / `not`.
+  - Reads: `x.prop`, `x.position`.
+  - Built-ins: `dot`, `norm`, `distance`, `unit`, `abs`, `min`, `max`.
+  - Nothing else parses: no attributes on non-entities, no `_` names, no lambdas, no comprehensions.
+- **The VM.**
+  - It hears every write (part A) and queues it. Its worker drains the queue outside the writer's call: the `changed` triggers on the written path, and level triggers re-read on the written entity.
+  - The thinker's sweep beat runs `sweep()` for the geometric and timed watchers.
+  - A firing writes through the store as `trigger:<eid>`, in the chain that caused it (a sweep starts its own), with its trigger appended to the chain's `via`.
+- **The loop rule:** a firing whose trigger is already in its chain's `via` is refused, unless the chain passed through self after it. A trigger owned by self appends `self`, so Blurp is the one place a loop may run; its energy bounds it.
