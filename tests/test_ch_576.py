@@ -403,3 +403,22 @@ def test_an_imported_trigger_never_runs(vm):
     vm.est.upsert(guest)
     x.properties["a"] = 1; vm.est.upsert(x); vm.drain()
     assert "b" not in x.properties
+
+
+def test_vel_align_and_around(vm):
+    import types
+    a = _ent(vm.est, "a", cls="toy", pos=[1.0, 0.0])
+    b = _ent(vm.est, "b", cls="toy", pos=[0.0, 1.0])
+    speed = {"v": 0.1}
+    a.ring_velocity = lambda now: speed["v"]
+    coh = {"c": 0.95}
+    vm.est._srv = types.SimpleNamespace(efield=types.SimpleNamespace(
+        get=lambda fid: types.SimpleNamespace(coherence=coh["c"])))
+    vm.define("fast", when=[["vel", "?x", 0.5]], where=[["is", "?x", a.eid]], write=["?x.fast", "1"])
+    vm.define("loose", when=[["align", "?x", 0.9]], where=[["is", "?x", a.eid]], write=["?x.loose", "1"])
+    vm.define("crowd", when=[["around", "?x", 0.2]], where=[["is", "?x", a.eid]], write=["?x.crowd", "1"])
+    vm.sweep(); vm.sweep()                               # seed (around needs two looks)
+    speed["v"], coh["c"] = 0.9, 0.5
+    b.position = [1.0, 0.05]
+    vm.sweep()
+    assert (a.properties.get("fast"), a.properties.get("loose"), a.properties.get("crowd")) == (1, 1, 1)
