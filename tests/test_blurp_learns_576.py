@@ -91,7 +91,7 @@ def test_falling_asleep_prunes_the_negative(seat):
     assert all(t.eid not in bad for t in _cands(seat))            # asleep: nothing new either
 
 
-def test_accept_grants_a_branch_and_only_then_a_proposal_acts(seat):
+def test_accept_grants_a_branch_and_only_then_a_proposal_suggests(seat):
     from membrane import seat_panel as SP
     est = seat.entity_store
     B.exchange(seat, {"awake": True, "mode": "on"})
@@ -105,9 +105,11 @@ def test_accept_grants_a_branch_and_only_then_a_proposal_acts(seat):
     assert seat.ch_vm.learner.state(cand.eid) == "proposal"
     SP.control(seat, {"accept": "branch:Component:toy"})
     assert B.granted(seat, d.eid + ".b")
+    said = []
+    seat.ch_vm.learner.suggest = lambda tr, path, value: said.append(path)
     e = _toy(est, "e")
     _turn(seat, (e, "a", 1, "person:op"))
-    assert e.properties.get("b") == 2                             # granted: it acts
+    assert "b" not in e.properties and said == [e.eid + ".b"]     # granted: it suggests, never acts
 
 
 def test_the_sheet_shows_branches_level_and_code(seat):

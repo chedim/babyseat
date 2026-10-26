@@ -720,7 +720,7 @@ class VM:
         with W.resume(dict(base, via=via)), W.as_writer(f"trigger:{tr.eid}"):
             mode = "live"
             if mine:
-                mode = self.learner.on_fire(tr, f"{ent.eid}.{prop}", value)   # #576 C: shadow / live / asleep
+                mode = self.learner.on_fire(tr, f"{ent.eid}.{prop}", value)   # #576 C/H: shadow or asleep (it suggests, never acts)
             if mode == "skip":
                 return
             if mode == "shadow":                     # the prediction lands on the candidate itself
