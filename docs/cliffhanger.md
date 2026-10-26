@@ -115,7 +115,7 @@ An effect happens because something writes a property of a field entity, not bec
 - **Consumed:** the worker sets the property back to `''` and leaves the effect's receipt in `<prop>_result` (the chat thing keeps its own `said` / `say_refused`), so the next write is the next effect. A write that empties a branch, and a birth that carries one, are no effect.
 - **Its own writes:** those writes are the adapter's (writer `adapter:<branch>`: `adapter:chat`, `adapter:toys`, `adapter:llm`, `adapter:seat`) and fire nothing. Otherwise the writer is provenance: it labels a toy's poker and is the llm's caller tag (its caps, read-only for `script:`); nothing else gates on it.
 - **The edit route** still posts a chat `say` at once and returns its receipt; the adapter then finds the line consumed, so a line is posted once.
-- **The hatches** (`llm::`, `toybox::`, `seat::restart` in `night.run_command_entity`) stay until part B's triggers can write; then they retire.
+- **The hatches are retired (#576 G2):** `llm::`, `toybox::`, `seat::restart` and `js::` no longer dispatch from a command line. Their methods are write steps (below).
 
 ## Triggers: cliffhanger without hatches (#576, part B)
 
@@ -233,3 +233,22 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
   - methods, their steps and every other entity are left alone.
 
   A backup (`backup-576-commands-<ts>.json`) is written first; with no backup, nothing changes. **To restore,** put each `deleted` entry back as an entity with that command, and each `stripped` command back on its entity.
+
+## Write steps: the hatches retire (#576, part G2)
+
+A method step may be a **write**: `{name, write: [target, expr]}`.
+- **The target** is `self.<prop>` or `<eid>.<prop>`, never code or a definition.
+- **The expression** is cliffhanger's safe language over the call's args.
+- **What the step does:** it writes the property, an adapter branch runs the effect, and the step returns the adapter's receipt (`<prop>_result`) and its return code (`<prop>_rc`). A failed step's words become the method's.
+- **Inline:** on the adapters' own worker (a learned `invoke`), or with no worker running, the effect runs inline, so nothing ever waits on itself.
+
+The seeded methods are now write steps, and each boot puts an older seat's form back:
+
+| method | write step |
+|---|---|
+| `llm.call` / `wake` / `unwake` | `self.call = {about, prompt}`, `self.wake = {about, at, prompt}`, `self.unwake = id` |
+| `toybox.list` / `add` / `remove` / `reset` / `poke` | `self.list`, `self.add = spec`, `self.remove = name`, `self.reset = name`, `self.poke = {toy, action}` |
+| `presence.restart` | `self.restart = why` |
+| `presence.exec` | `self.js = code` (the adapters' new `js` branch → an opted-in browser tab) |
+
+`night.run_command_entity` now runs shell lines only; no string-prefix dialect remains.

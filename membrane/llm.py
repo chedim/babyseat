@@ -36,7 +36,6 @@ import time
 
 ENT = "llm"
 METHOD = "call"
-COMMAND = "llm::call {{about}} {{prompt}}"
 CALLER_PER_HOUR = 12
 GLOBAL_PER_HOUR = 120
 PROMPT_MAX = 4000
@@ -49,9 +48,7 @@ RING = 20
 # they survive restarts; one missed while the seat was down fires at boot,
 # marked late. Time only: a CONDITION is a watch's job.
 WAKE_METHOD = "wake"
-WAKE_COMMAND = "llm::wake {{about}} {{at}} {{prompt}}"
 UNWAKE_METHOD = "unwake"
-UNWAKE_COMMAND = "llm::unwake {{id}}"
 WAKE_MIN_S = 300.0
 WAKE_MAX_S = 30 * 86400.0
 WAKES_MAX = 20
@@ -85,6 +82,12 @@ def _entity(srv):
     return ent
 
 
+# #576 G2: the llm entity's methods are writes onto its own adapter branch
+WRITES = (("call", "self.call", "{'about': about, 'prompt': prompt}"),
+          ("wake", "self.wake", "{'about': about, 'at': at, 'prompt': prompt}"),
+          ("unwake", "self.unwake", "id"))
+
+
 def bind(srv) -> None:
     """Boot: the entity and its method."""
     _SEAT["srv"] = srv
@@ -96,11 +99,9 @@ def bind(srv) -> None:
         def _of(d):
             mo = (d.properties or {}).get("method_of")
             return ent.eid in (mo if isinstance(mo, list) else [mo])
-        for meth, cmd in ((METHOD, COMMAND), (WAKE_METHOD, WAKE_COMMAND), (UNWAKE_METHOD, UNWAKE_COMMAND)):
-            if not any(_of(d) and (d.properties or {}).get("method_name") == meth
-                       for d in list((est.docs or {}).values())):
-                from .night import method_define
-                method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd)
+        from .night import ensure_write_method     # #576 G2: each is a write step (the llm branch acts)
+        for meth, target, expr in WRITES:
+            ensure_write_method(srv, est, ent.eid, meth, target, expr)
         _paint_wakes(ent)
         est.upsert(ent, embedder=None)
     except Exception as e:                      # noqa: BLE001
@@ -228,16 +229,6 @@ def _remember(srv, ent, now, caller, about, prompt, refused: str = "") -> None:
     ent.properties = pp
 
 
-def from_command(rest: str, caller: str = "method") -> dict:
-    """`llm::call <about> <prompt>` (the method's command, shell-quoted)."""
-    try:
-        parts = shlex.split(rest)
-    except ValueError:
-        parts = rest.split(None, 1)
-    if len(parts) < 2:
-        return {"rc": 2, "text": "call(about, prompt): name the entity it is about and what to do"}
-    about, prompt = parts[0], " ".join(parts[1:])
-    return request(seat(), prompt, about=about, caller=caller)
 
 
 def answered(srv, ev: dict, text: str, model: str | None = None) -> None:
@@ -464,42 +455,6 @@ def fire_due(srv, now: float | None = None, late_after_s: float = 120.0) -> list
     return out
 
 
-def _decode_call_form(rest: str):
-    """`{about: 'x', at: '18:00', prompt: 'y'}` -> dict or None (#17)."""
-    import re
-    m = re.fullmatch(
-        r"\{\s*about:\s*['\"](?P<about>[^'\"]*)['\"]\s*,\s*"
-        r"at:\s*['\"](?P<at>[^'\"]*)['\"]\s*,\s*"
-        r"prompt:\s*['\"](?P<prompt>[^'\"]*)['\"]\s*,?\s*\}",
-        rest.strip(), re.S)
-    return m.groupdict() if m else None
-
-
-def wake_from_command(rest: str, caller: str = "method") -> dict:
-    """`llm::wake <about> <at> <prompt>` (shell-quoted)."""
-    t = rest.strip()
-    if t.startswith("{"):
-        cf = _decode_call_form(t)
-        if cf:
-            return set_wake(seat(), cf["about"], cf["at"], cf["prompt"],
-                            caller=caller)
-        return {"rc": 2, "text": "wake: unrecognized call-form payload; "
-                                 "use llm::wake <about> <at> <prompt>"}
-    try:
-        parts = shlex.split(t)
-    except ValueError:
-        parts = t.split(None, 2)
-    if len(parts) < 3:
-        return {"rc": 2, "text": "wake(about, at, prompt): the entity, when ('18:00', 'in 2h', '3d'), what to do"}
-    return set_wake(seat(), parts[0], parts[1], " ".join(parts[2:]), caller=caller)
-
-
-def unwake_from_command(rest: str) -> dict:
-    try:
-        parts = shlex.split(rest)
-    except ValueError:
-        parts = rest.split()
-    return unwake(seat(), parts[0] if parts else "")
 
 
 def start_wakes(srv) -> None:

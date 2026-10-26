@@ -79,7 +79,8 @@ clock, and takes no pokes yet.
 
 THE SURFACE: `membrane toybox list|add|remove|reset|migrate|poke` (cli_main),
 the `toybox` object's methods list / add(spec) / remove(name) / reset(name) /
-poke(toy, action) (the `toybox::` no-shell dialect, night.run_command_entity),
+poke(toy, action) (each a write step onto the toybox object, #576 G2: the
+adapters' toybox branch calls from_command),
 and POST /membrane/toybox/poke (server.py: the 👶 panel's play buttons).
 """
 from __future__ import annotations
@@ -963,9 +964,10 @@ def _parse_spec(tokens: list[str]) -> tuple[str, str | None, dict]:
 
 # ---- the toybox object (cliffhanger) ------------------------------------------------
 
-METHODS = {"list": "toybox::list", "add": "toybox::add {{spec}}",
-           "remove": "toybox::remove {{name}}", "reset": "toybox::reset {{name}}",
-           "poke": "toybox::poke {{toy}} {{action}}"}
+METHODS = ("list", "add", "remove", "reset", "poke")       # the verbs from_command answers to
+WRITES = {"list": ("self.list", "1"), "add": ("self.add", "spec"),
+          "remove": ("self.remove", "name"), "reset": ("self.reset", "name"),
+          "poke": ("self.poke", "{'toy': toy, 'action': action}")}        # #576 G2
 
 
 def _eid() -> str:
@@ -992,13 +994,9 @@ def bind(srv) -> None:
                             "roll is never the other's turn; body is self's alone). The kit: "
                             + ", ".join(KINDS) + ". Never write a toy script: add one here.")})
             est.upsert(ent, embedder=None)
-        have = {(d.properties or {}).get("method_name") for d in list(est.docs.values())
-                if ent.eid in ((d.properties or {}).get("method_of") or [])}
-        from .night import method_define
-        for meth, cmd in METHODS.items():
-            if meth not in have:
-                method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd,
-                              read_only=(meth == "list"))
+        from .night import ensure_write_method     # #576 G2: each verb is a write step (adapters' toybox branch)
+        for meth, (target, expr) in WRITES.items():
+            ensure_write_method(srv, est, ent.eid, meth, target, expr, read_only=(meth == "list"))
     except Exception as e:                      # noqa: BLE001
         print(f"[toybox] the toybox object not wired ({e!r})", file=sys.stderr)
     _mirror_getters(est)
@@ -1021,7 +1019,8 @@ def _mirror_getters(est) -> None:
 
 
 def from_command(rest: str) -> dict:
-    """`toybox::<method> <args>` (the no-shell dialect, night.run_command_entity)."""
+    """`<verb> <args>`: the toybox's dispatcher (#576 G2: its adapter branch calls it;
+    no command line reaches it any more)."""
     try:
         parts = shlex.split(rest)
     except ValueError:

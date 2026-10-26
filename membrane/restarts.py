@@ -306,7 +306,6 @@ REMIND_BEFORE_S = 300.0
 OVERDUE_GRACE_S = 60.0
 ENT = "restart"
 METHOD = "restart"
-COMMAND = "seat::restart {{why}}"
 
 
 def _pending(srv) -> dict | None:
@@ -348,16 +347,11 @@ def bind(srv) -> None:
     _SEAT["srv"] = srv
     try:
         from . import seat_panel as SP
-        from .night import method_define
         est = getattr(srv, "entity_store", None)
         pres = SP._entity(srv)
         if est is not None and pres is not None:
-            def _of(d):
-                mo = (d.properties or {}).get("method_of")
-                return pres.eid in (mo if isinstance(mo, list) else [mo])
-            if not any(_of(d) and (d.properties or {}).get("method_name") == METHOD
-                       for d in list((est.docs or {}).values())):
-                method_define(srv, est, None, None, on=pres.eid, method=METHOD, command=COMMAND)
+            from .night import ensure_write_method  # #576 G2: a write step (the adapters' seat branch)
+            ensure_write_method(srv, est, pres.eid, METHOD, "self.restart", "why")
     except Exception as e:                      # noqa: BLE001
         import sys
         print(f"[restarts] presence.restart not wired ({e!r})", file=sys.stderr)

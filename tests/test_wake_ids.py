@@ -37,10 +37,9 @@ def _wakes(srv):
 class TestWakeIds(unittest.TestCase):
     def test_two_wakes_in_the_same_millisecond_stay_distinct(self):
         srv = _world()
-        r1 = L.wake_from_command(
-            "{about: 'Component:bat', at: 'in 1h', prompt: 'p1'}")
-        r2 = L.wake_from_command(
-            "{about: 'Component:bat', at: 'in 1h', prompt: 'p2'}")
+        now = 1_800_000_000.0                       # the same millisecond, twice
+        r1 = L.set_wake(srv, "Component:bat", "in 1h", "p1", now=now)
+        r2 = L.set_wake(srv, "Component:bat", "in 1h", "p2", now=now)
         self.assertEqual((r1["rc"], r2["rc"]), (0, 0), (r1, r2))
         ws = _wakes(srv)
         self.assertEqual(len(ws), 2, ws)
@@ -55,8 +54,7 @@ class TestWakeIds(unittest.TestCase):
         # the id rides back in 'wake w123... set for ...' -- the model
         # quotes it to unwake; it must be the id the plant stored
         srv = _world()
-        r = L.wake_from_command(
-            "{about: 'Component:bat', at: 'in 1h', prompt: 'p'}")
+        r = L.set_wake(srv, "Component:bat", "in 1h", "p")
         self.assertEqual(r["rc"], 0, r)
         wid = r["text"].split(" ")[1]
         self.assertEqual([w["id"] for w in _wakes(srv)], [wid])
