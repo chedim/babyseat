@@ -941,6 +941,9 @@ def _jwt_headers() -> dict:
     return jwtauth.client_headers()
 
 
+from membrane import writes as _W   # noqa: E402  (#576: the relay carries the chain)
+
+
 def _http(port: int, method: str, path: str, body: dict | None = None,
           timeout: float | None = None) -> dict:
     """One relay call to the seat's proxy. THE TIMEOUT HEADROOM (the
@@ -956,7 +959,8 @@ def _http(port: int, method: str, path: str, body: dict | None = None,
     url = f"http://127.0.0.1:{int(port)}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json", **_jwt_headers()})
+                                 headers={"Content-Type": "application/json", **_jwt_headers(),
+                                          **_W.headers(default_writer="llm")})   # #576
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())

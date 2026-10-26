@@ -74,3 +74,26 @@ everywhere else (the prose the person reads).
 
 See also: [entity-field.md](entity-field.md) (the executor link lane),
 [background-mind.md](background-mind.md) (entity scripts).
+
+## Every write is an event (#576, part A)
+
+Every write on the field is an event `{path, old, new, writer, chain, ts}` (`membrane/writes.py`), delivered to the listeners registered with `writes.on_write`:
+
+- **Paths:** `<eid>` (an entity born or removed), `<eid>.<prop>` (a property, `parents` included), `<eid>.position` (a move), `rel:<subj>|<rel>|<obj>` (a new field relation).
+- **Every write is an overwrite:** nothing → something is a birth, something → nothing a removal. The store diffs each upsert against what the entity last held, so an in-place edit still reports its old value.
+- **Writer:** `field` by default; `llm` for a model's turn and its tool calls, `script:<eid>` for an entity's own script, `person:<name>`, `self`.
+- **Chain:** the causal chain the write belongs to. A source starts it: a person's message, a sensor fire, Blurp. Everything it causes carries it on:
+  - queued events (the watch pool stamps them);
+  - jobs' threads;
+  - the MCP relay (the `X-Membrane-Chain` / `X-Membrane-Writer` headers);
+  - loop turns.
+
+  So a reply minutes later still belongs to the chain that asked for it. A wake an LLM sets fires in the chain that set it.
+
+  Every start is its own chain: two messages in one session are two chains.
+- **Births and removals:** a birth or removal straight through `est.docs` (`docs[eid] = …`, `pop`, `del`) is a write too.
+- **Old values:** an old value larger than 2 KB is reported as `writes.BIG`, a string sentinel (only its hash is kept).
+- **Births:** a new entity is one birth event (`<eid>`); its first properties ride the entity, not separate events.
+- **Other threads:** threads that are not handed the chain start fresh. These are Blurp's loop, the dreamer, consequences, predict, and the claude-agent runner; each is its own root until part D gives Blurp's chain to self. A deleted property and one set to `None` read the same.
+- **Listeners** run inside the writer's call. They must be cheap and **must not write**: a listener that reacts queues the work and writes later. One that raises is counted (`writes.errors`).
+- **Not authority:** the writer and chain are provenance only, and nothing may gate on them. Any local caller can send the headers.

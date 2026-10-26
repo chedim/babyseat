@@ -366,6 +366,9 @@ def set_wake(srv, about: str, at: str, prompt: str, caller: str = "", now: float
             _n += 1
         w = {"id": wid, "about": about_eid, "at": round(ts, 1), "prompt": prompt,
              "caller": str(caller or "unknown")[:120], "set_ts": round(now, 1)}
+        from . import writes as _W
+        if _W.current() is not None:            # #576: the wake fires in the chain that planted it
+            w["chain"] = _W.current()
         pp["wakes"] = ws + [w]
         ent.properties = pp
         _paint_wakes(ent, now)
@@ -416,10 +419,12 @@ def fire_due(srv, now: float | None = None, late_after_s: float = 120.0) -> list
     for w in due:
         late = now - float(w["at"]) > late_after_s
         caller = str(w.get("caller") or "unknown")
+        from . import writes as _W
         try:
-            r = request(srv, w["prompt"], about=w.get("about") or "", caller="wake:" + caller, now=now,
-                        readonly=caller.startswith("script:"),
-                        extra={"wake": {"id": w["id"], "at": w["at"], "set_ts": w.get("set_ts"), "late": late}})
+            with _W.resume(w.get("chain")):
+                r = request(srv, w["prompt"], about=w.get("about") or "", caller="wake:" + caller, now=now,
+                            readonly=caller.startswith("script:"),
+                            extra={"wake": {"id": w["id"], "at": w["at"], "set_ts": w.get("set_ts"), "late": late}})
         except Exception as e:                       # noqa: BLE001 -- the wake waits, it isn't lost
             r = {"rc": 127, "text": f"error: {e!r}"[:200]}
         out.append({**w, "late": late, "rc": r["rc"], "text": r["text"]})

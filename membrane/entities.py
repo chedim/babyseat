@@ -1269,6 +1269,46 @@ class TimelineOps:
                     break
         return out
 
+class _Docs(dict):
+    """#576: the store's docs, where a birth (docs[eid] = ent for a new eid) and
+    a removal (pop / del) are writes -- the ~25 direct assignments around the
+    seat included. Replacing an existing doc object is the upsert's to diff.
+    Only __setitem__, pop and del are watched: clear / update / setdefault /
+    popitem are not (no caller uses them on the store's docs)."""
+
+    def __init__(self, init, store):
+        super().__init__(init)
+        self._store = store
+
+    def __setitem__(self, eid, ent):
+        new = eid not in self
+        super().__setitem__(eid, ent)
+        if new:
+            from . import writes as _W
+            snaps = getattr(self._store, "_snap", None)
+            if snaps is not None:
+                snaps[eid] = _W.snapshot(ent)
+            _W.emit(eid, None, eid)
+
+    def _gone(self, eid):
+        snaps = getattr(self._store, "_snap", None)
+        if snaps is not None:
+            snaps.pop(eid, None)
+        from . import writes as _W
+        _W.emit(eid, eid, None)
+
+    def pop(self, eid, *default):
+        had = eid in self
+        out = super().pop(eid, *default)
+        if had:
+            self._gone(eid)
+        return out
+
+    def __delitem__(self, eid):
+        super().__delitem__(eid)
+        self._gone(eid)
+
+
 class EntityStore(MultiParentOps, TimelineOps):
     """Derived entities, three homes, one contract:
 
@@ -1334,6 +1374,11 @@ class EntityStore(MultiParentOps, TimelineOps):
         self._store_lock = threading.RLock()
         self._load()
         self._load_tracks()
+        # #576: what each entity last held -- an in-place edit + upsert diffs against it;
+        # from here on a birth or removal straight through docs is a write too (#577 review)
+        from . import writes as _W
+        self._snap = {eid: _W.snapshot(e) for eid, e in list(self.docs.items())}
+        self.docs = _Docs(self.docs, self)
         self._seed_junk_anchors()
 
     def _seed_junk_anchors(self) -> None:
@@ -1643,6 +1688,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             ent = existing
         else:
             self.docs[ent.eid] = ent
+        self._note_write(ent, is_new)
         self.save_soon()
         if is_new and not (ent.properties or {}).get("ephemeral"):
             self._announce("new", ent)
@@ -2682,13 +2728,25 @@ class EntityStore(MultiParentOps, TimelineOps):
             res["unpublished"] = self.unpublish(ent)
         return res
 
+    def _note_write(self, ent, is_new: bool) -> None:
+        """#576: the write as events -- each changed property (parents too),
+        a move, or the birth -- diffed against what the entity last held."""
+        from . import writes as _W
+        snaps = getattr(self, "_snap", None)
+        if snaps is None:
+            snaps = self._snap = {}
+        before = snaps.get(ent.eid)                # a birth through docs already snapshotted it
+        snaps[ent.eid], changes = _W.diff(ent.eid, before, ent)
+        for path, old, new in changes:
+            _W.emit(path, old, new)
+
     def remove(self, spec: str) -> int:
         """Model-side entity REMOVE by eid/name fragment (exact single
         match only -- an ambiguous fragment removes nothing)."""
         ent = self._resolve_spec(spec)
         if ent is None:
             return 0
-        self.docs.pop(ent.eid, None)
+        self.docs.pop(ent.eid, None)              # #576: the docs dict emits the removal
         self.save()
         coll = self._entities_collection()
         if coll is not None:

@@ -330,7 +330,8 @@ class WatchEvents:
         with self._lk:
             if len(self._items) >= self.max:
                 self._items.pop(0)     # drop-OLDEST
-            self._items.append(dict(ev))
+            from . import writes as _W
+            self._items.append(_W.stamp(dict(ev)))    # #576: the event carries the chain that caused it
 
     def take(self) -> list[dict]:
         with self._lk:
@@ -745,6 +746,11 @@ class _LoopDrainer:
                 _fp.focus(agent, ent, "end")
 
     def _turn(self, ev: dict, ent: str, agent: str) -> str:
+        from . import writes as _W
+        with _W.resume(ev):                  # #576: the pass belongs to the chain that woke it
+            return self._turn_body(ev, ent, agent)
+
+    def _turn_body(self, ev: dict, ent: str, agent: str) -> str:
         srv = self.srv
         sid = srv.create_loop_session(agent, agent)
         if str(ev.get("kind")) == "job-done":

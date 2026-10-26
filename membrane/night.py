@@ -4525,6 +4525,13 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
     ``silent=True`` (the tick pace): the apply lands render + position
     but writes NO field tell and NO audit row.
     Returns the applied summary for the caller's audit."""
+    from . import writes as _W
+    with _W.as_writer(f"script:{getattr(ent, 'eid', '')}"):     # #576: the entity's own script wrote it
+        return _apply_entity_update(srv, ent, out, trigger, silent=silent)
+
+
+def _apply_entity_update(srv, ent, out: dict, trigger: str,
+                         silent: bool = False) -> dict:
     est = getattr(srv, "entity_store", None)
     if est is None or not out:
         return {"applied": 0}
