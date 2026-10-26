@@ -259,6 +259,8 @@ class Supervisor:
         threading.Thread(target=wait, name=f"self-super-wait-{kid.pid}", daemon=True).start()
 
     def _exited(self, kid) -> None:
+        from . import ch_blurp as _CHB             # #576 D2: no report will come -- the purse closes
+        _CHB.close_purse(self.srv)
         with self._lock:
             if self._kid is kid:
                 self._kid, self._port = None, None

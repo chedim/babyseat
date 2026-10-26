@@ -166,7 +166,7 @@ def cli_main(argv: list[str]) -> int:
                                     f"{ENV} overrides it)")
     n.add_argument("name", nargs="*", help=f"the new name, 1-{MAX_LEN} printable characters")
     n.add_argument("--reset", action="store_true", help=f"back to the default ({DEFAULT})")
-    a = sub.add_parser("accept", help="the operator's accept line on self's record (#299; #576: it grants nothing yet)")
+    a = sub.add_parser("accept", help="the operator's accept line on self's record (#299; #576: it grants a branch (#576 D2))")
     a.add_argument("id", help="what is accepted (an id)")
     a.add_argument("--url", default=None, help=f"the seat's serve URL (default ${SERVE_URL_ENV} or {SERVE_URL})")
     args = ap.parse_args(argv)

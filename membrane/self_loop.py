@@ -92,7 +92,25 @@ def bind(srv) -> None:
     _SW.bind(srv)                           # #337: its world (born, or migrated)
     from . import chat_io as _CIO
     _CIO.migrate(srv)                       # #333 part 3a: once -- chat:in + chat:out -> the chat thing
+    _retire_old_methods(srv)                # #576: the retired learner's methods leave the store
     load_state(srv)
+
+
+OLD_METHODS = ("try", "expect", "notice", "reach", "nudge", "roll", "meet")
+
+
+def _retire_old_methods(srv) -> int:
+    """The retired learner's own methods (self.try / expect / notice / ... -- their
+    `self::` commands have no dispatch any more): removed, so nothing calls a dead
+    command and the new learner never sees them. -> how many went."""
+    est = getattr(srv, "entity_store", None)
+    me = _eid()
+    gone = [eid for eid, d in list((est.docs or {}).items())
+            if me in ((d.properties or {}).get("method_of") or [])
+            and (d.properties or {}).get("method_name") in OLD_METHODS] if est is not None else []
+    for eid in gone:
+        est.remove(eid)
+    return len(gone)
 
 
 def load_state(srv) -> None:
@@ -209,7 +227,9 @@ def accept(srv, i, by: str = "operator") -> dict:
     """#299's door, kept for the new learner (#576: Accept grants a branch):
     an `accept` line naming `i`. -> {"ok", "id", "name", "already"} or
     {"ok": False, "error"}; accepting twice writes nothing."""
-    i = str(i if i is not None else "").strip().lower()
+    i = str(i if i is not None else "").strip()
+    if not i.startswith("branch:"):                 # a branch keeps its kind's spelling (#576 D2)
+        i = i.lower()
     if not i:
         return {"ok": False, "error": "accept what? (an id)"}
     with _lock:
@@ -584,6 +604,8 @@ def step(srv, now: float | None = None) -> dict | None:
     rec = learn_step(srv, now)
     cpu = time.thread_time() - t0
     _E.tick(srv, now, cpu_s=cpu)
+    if _E.asleep(srv):                             # it fell asleep on this step: close the purse now
+        _exchange(srv, awake=False, asleep=True)
     return rec
 
 

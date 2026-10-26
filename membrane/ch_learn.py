@@ -49,14 +49,16 @@ def _scalar(v) -> bool:
 
 
 def branch_of(path: str, value=None) -> str:
-    """The kind a target belongs to (#576 D2's skills): `membrane::Component:toy:die.b`
-    -> `Component:toy`, `membrane::ha:light.x` -> `ha`; a learned call's branch is
-    the called object's."""
+    """The kind + type a target belongs to (#576 D2's skills; the operator's grain):
+    `membrane::Component:toy:die.b` -> `Component:toy`, `membrane::ha:light.x` ->
+    `ha:light`; a learned call's branch is the called object's."""
     if isinstance(value, dict) and value.get("object"):
         path = str(value["object"])
     rest = str(path).split("::", 1)[1] if "::" in str(path) else str(path)
     parts = rest.split(":")
-    return f"{parts[0]}:{parts[1].split('.')[0]}" if len(parts) >= 3 else parts[0].split(".")[0]
+    if len(parts) == 1:
+        return parts[0].split(".")[0]
+    return f"{parts[0]}:{parts[1].split('.')[0]}"     # kind + type (operator): ha:light is not ha:lock
 
 
 def _same(a, b) -> bool:

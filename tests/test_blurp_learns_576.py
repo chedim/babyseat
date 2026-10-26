@@ -59,7 +59,7 @@ def _cands(srv):
 
 def test_the_branch_of_a_target():
     assert B.branch_of(MEMBRANE_NS + "Component:toy:die") == "Component:toy"
-    assert B.branch_of(MEMBRANE_NS + "ha:light.port_strip") == "ha"
+    assert B.branch_of(MEMBRANE_NS + "ha:light.port_strip") == "ha:light"
     assert B.branch_of(MEMBRANE_NS + "tool:any.run.invoke", {"object": MEMBRANE_NS + "Component:chat:op"}) \
         == "Component:chat"
 
@@ -146,3 +146,81 @@ def test_the_seat_attaches_the_learner():
     import inspect
     from membrane import opencode
     assert "_CHB.attach(srv)" in inspect.getsource(opencode)
+
+
+# ---- #580 review -----------------------------------------------------------------------------
+
+def test_branches_are_kind_and_type():
+    # operator: kind + type -- lights are not locks
+    assert B.branch_of(MEMBRANE_NS + "ha:light.kitchen.b") == "ha:light"
+    assert B.branch_of(MEMBRANE_NS + "ha:lock.front") == "ha:lock"
+    assert B.branch_of(MEMBRANE_NS + "Component:toy:die.b") == "Component:toy"
+
+
+def test_the_purse_closes_when_blurps_process_goes(seat):
+    B.exchange(seat, {"awake": True, "mode": "on"})
+    seat.ch_purse.charge(0.1)
+    B.close_purse(seat)
+    assert seat.ch_purse.awake is False and seat.ch_purse.delta < 0     # closed, the debt kept for next time
+    import inspect
+    from membrane import self_super
+    assert "_CHB.close_purse(self.srv)" in inspect.getsource(self_super.Supervisor._exited)
+
+
+def test_a_grant_is_live_only_once_saved(seat, tmp_path, monkeypatch):
+    monkeypatch.setattr(B, "_grants_file", lambda srv: tmp_path / "missing-dir" / "g.json")
+    seat._ch_grants = None
+    assert B.grant(seat, "ha:light") is False
+    assert "ha:light" not in B.grants(seat)
+
+
+def test_concurrent_grants_all_land(seat):
+    import json
+    import threading
+    ts = [threading.Thread(target=B.grant, args=(seat, f"k:{i}")) for i in range(40)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    doc = json.loads(B._grants_file(seat).read_text())
+    assert len({g["branch"] for g in doc["grants"]}) == 40
+
+
+def test_a_step_that_falls_asleep_closes_the_purse(tmp_path, monkeypatch):
+    from membrane import energy as E
+    from membrane import self_loop as SL
+    srv = types.SimpleNamespace(entity_store=EntityStore(path=str(tmp_path / "e.json"), shared=False),
+                                _models_path=str(tmp_path / "m.json"), paused=False, efield=None)
+    SL.bind(srv)
+    SL.set_mode(srv, "on")
+    seen = []
+    monkeypatch.setattr(B, "exchange", lambda s, report: seen.append(dict(report)) or {"energy_delta": 0})
+    state = {"asleep": False}
+    monkeypatch.setattr(E, "asleep", lambda s: state["asleep"])
+    real_tick = E.tick
+    monkeypatch.setattr(E, "tick", lambda s, now, cpu_s=0.0: state.update(asleep=True))
+    SL.step(srv)
+    assert [r["awake"] for r in seen] == [True, False] and seen[-1]["asleep"] is True
+
+
+def test_the_old_methods_are_retired_once(tmp_path):
+    from membrane import self_loop as SL
+    est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
+    srv = types.SimpleNamespace(entity_store=est, _models_path=str(tmp_path / "m.json"), paused=False, efield=None)
+    SL.bind(srv)
+    me = SL._eid()
+    for name in ("expect", "try", "notice", "reach", "nudge", "roll", "meet"):
+        m = QuantumEntity(eid=MEMBRANE_NS + f"tool:self.{name}", cls="tool",
+                          properties={"name": f"self.{name}", "method_name": name, "method_of": [me],
+                                      "command": f"self::{name} {{{{seed}}}}"})
+        est.upsert(m)
+    SL.bind(srv)
+    assert not any((d.properties or {}).get("method_of") == [me] for d in est.docs.values())
+
+
+def test_accept_keeps_a_branch_ids_case(tmp_path):
+    from membrane import self_loop as SL
+    srv = types.SimpleNamespace(entity_store=EntityStore(path=str(tmp_path / "e.json"), shared=False),
+                                _models_path=str(tmp_path / "m.json"), paused=False, efield=None)
+    SL.bind(srv)
+    assert SL.accept(srv, "branch:Component:toy")["id"] == "branch:Component:toy"

@@ -201,7 +201,10 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
   - Until Blurp has said it is awake, nothing is spent, so nothing is guessed or fired.
   - When it reports falling asleep, the learner prunes every negative candidate.
 - **Branches and grants.**
-  - A skill is a **branch**: the kind a candidate's target belongs to (`Component:toy`, `Component:chat`, `ha`…). For a learned call, it's the called object's kind. Each candidate records its branch.
+  - A skill is a **branch**: the kind + type a candidate's target belongs to (`Component:toy`, `Component:chat`, `ha:light`, `ha:lock`…; the operator's grain, so lights are not locks). For a learned call, it's the called object's branch. Each candidate records its branch.
+  - Grants are saved first and live after; one Accept at a time. Revoking a grant comes later.
+  - Blurp's process going (stopped or crashed) closes the purse, and so does a step that ends in sleep.
+  - The retired learner's own methods (`self.try` / `expect` / …) are removed at boot.
   - A branch is **open** while Blurp guesses there, **earned** when a guess there pays for itself, and **granted** by the operator's Accept of `branch:<kind>` (`seat_panel.control`; the seat keeps the grants in `ch-grants.json` beside the store).
   - A proposal acts only on a granted branch (the operator's rule).
 - **The sheet.** The seat adds the branches as the skill tree, the **level** as the number of branches granted (the card too), and the **Code tab** as Blurp's triggers: their line, state (shadow / proposal), balance (in write costs), hits and firings.

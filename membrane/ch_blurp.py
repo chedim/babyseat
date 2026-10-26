@@ -21,6 +21,7 @@ balance, firings)."""
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -84,25 +85,33 @@ def grants(srv) -> set:
     return out
 
 
+_GRANT_LOCK = threading.Lock()
+
+
 def grant(srv, branch: str, by: str = "operator") -> bool:
-    """The operator's Accept of `branch:<kind>`: Blurp may act there. -> newly granted?"""
+    """The operator's Accept of `branch:<kind>`: Blurp may act there. -> newly granted?
+    Saved first, live after (an unwritable home grants nothing); one at a time."""
     branch = str(branch or "").strip()
-    g = grants(srv)
-    if not branch or branch in g:
-        return False
-    g.add(branch)
-    f = _grants_file(srv)
-    if f is not None:
-        try:
-            doc = json.loads(f.read_text()) if f.exists() else {}
-        except (OSError, ValueError):
-            doc = {}
-        rows = [r for r in doc.get("grants") or [] if isinstance(r, dict)]
-        rows.append({"branch": branch, "by": str(by or "operator"), "ts": time.time()})
-        tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"grants": rows}, indent=1))
-        tmp.replace(f)
-    return True
+    with _GRANT_LOCK:
+        g = grants(srv)
+        if not branch or branch in g:
+            return False
+        f = _grants_file(srv)
+        if f is not None:
+            try:
+                doc = json.loads(f.read_text()) if f.exists() else {}
+            except (OSError, ValueError):
+                doc = {"grants": [{"branch": b} for b in sorted(g)]}   # never drop what memory holds
+            rows = [r for r in doc.get("grants") or [] if isinstance(r, dict)]
+            rows.append({"branch": branch, "by": str(by or "operator"), "ts": time.time()})
+            try:
+                tmp = f.with_name(f"{f.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+                tmp.write_text(json.dumps({"grants": rows}, indent=1))
+                tmp.replace(f)
+            except OSError:
+                return False
+        g.add(branch)
+        return True
 
 
 def granted(srv, path: str) -> bool:
@@ -118,6 +127,14 @@ def attach(srv) -> None:
         return
     srv.ch_purse = Purse()
     vm.learner = L.Learner(vm, srv.ch_purse, granted=lambda path: granted(srv, path))
+
+
+def close_purse(srv) -> None:
+    """Blurp's process stopped or died: no more spending until it reports again
+    (the debt stays for its next exchange)."""
+    p = getattr(srv, "ch_purse", None)
+    if p is not None:
+        p.awake = False
 
 
 def exchange(srv, report: dict | None) -> dict:
