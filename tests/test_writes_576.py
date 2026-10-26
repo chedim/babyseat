@@ -240,7 +240,7 @@ def test_a_big_old_value_is_marked_not_none(seen):
     seen.clear()
     e.properties["blob"] = "y"
     est.upsert(e)
-    assert seen[0]["old"] is W.BIG
+    assert seen[0]["old"] == W.BIG
 
 
 def test_a_relation_retry_is_not_a_birth(seen):
@@ -277,9 +277,42 @@ def test_a_listener_error_is_counted():
     assert W.errors["n"] == n0 + 1
 
 
-def test_parallel_reads_and_wakes_keep_the_chain():
+def test_a_wake_fires_in_the_chain_that_set_it(monkeypatch):
+    import types
+    import time as _t
+    from membrane import llm as L
+    est = _store()
+    bat = _ent(est, "bat")
+    srv = types.SimpleNamespace(entity_store=est, events_pool=None, paused=False)
+    est._srv = srv
+    now = _t.time()
+    with W.source("person", "op") as ch:
+        assert L.set_wake(srv, bat.eid, "in 2h", "check it", caller="t", now=now)["rc"] == 0
+    got = []
+    monkeypatch.setattr(L, "request", lambda *a, **k: got.append(W.current()) or {"rc": 0, "text": "ok"})
+    L.fire_due(srv, now=now + 7200 + 5)
+    assert got and got[0]["id"] == ch["id"]
+
+
+def test_parallel_reads_run_in_the_turns_chain():
+    from concurrent.futures import ThreadPoolExecutor
+    with W.source("person", "op") as ch:
+        f = ThreadPoolExecutor(1).submit(W.carry(lambda: W.current()))
+    assert f.result()["id"] == ch["id"]
     import inspect
-    from membrane import server, llm
-    assert "_W.carry(_jobs.dispatch)" in inspect.getsource(server)
-    src = inspect.getsource(llm)
-    assert 'w["chain"] = _W.current()' in src and '_W.resume(w.get("chain"))' in src
+    from membrane import server
+    assert "_W.carry(_jobs.dispatch)" in inspect.getsource(server)     # and the turn's reads use it
+
+
+def test_a_new_entity_through_upsert_is_one_birth(seen):
+    est = _store()
+    e = QuantumEntity(eid=MEMBRANE_NS + "Component:fresh", cls="Component",
+                      properties={"name": "fresh", "status": "open"})
+    est.upsert(e)                                  # (the store's own seeded anchors are births too)
+    assert [(w["path"], w["old"], w["new"]) for w in seen if w["path"].startswith(e.eid)] == \
+        [(e.eid, None, e.eid)]                     # one birth; the properties ride the entity
+
+
+def test_big_is_json_safe():
+    import json
+    assert json.loads(json.dumps({"old": W.BIG}))["old"] == W.BIG

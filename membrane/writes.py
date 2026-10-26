@@ -118,12 +118,7 @@ def emit(path: str, old, new) -> None:
 
 # ---- the store's snapshot: what each entity last held, to diff an in-place edit --------
 
-class _Big:
-    def __repr__(self):
-        return "<BIG>"
-
-
-BIG = _Big()          # the old value was too large to keep: only its hash was
+BIG = "\x00<BIG>"     # the old value was too large to keep (only its hash was); a string: JSON-safe
 
 
 def _fp(v):
@@ -137,7 +132,7 @@ def _fp(v):
 
 
 def _old(kept):
-    if kept is BIG or kept is None:
+    if kept == BIG or kept is None:
         return kept
     try:
         return json.loads(kept)

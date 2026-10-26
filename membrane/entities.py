@@ -1272,7 +1272,9 @@ class TimelineOps:
 class _Docs(dict):
     """#576: the store's docs, where a birth (docs[eid] = ent for a new eid) and
     a removal (pop / del) are writes -- the ~25 direct assignments around the
-    seat included. Replacing an existing doc object is the upsert's to diff."""
+    seat included. Replacing an existing doc object is the upsert's to diff.
+    Only __setitem__, pop and del are watched: clear / update / setdefault /
+    popitem are not (no caller uses them on the store's docs)."""
 
     def __init__(self, init, store):
         super().__init__(init)
