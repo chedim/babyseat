@@ -62,7 +62,7 @@ _REPO_DOCTRINE = str(pathlib.Path(__file__).resolve().parent.parent
 _LEGACY_DOCTRINE_FALLBACK = ""
 _RAG_SYSTEM = _load_doctrine()
 
-_DOCTRINE_STAMP = "membrane-doctrine: v1"
+_DOCTRINE_STAMP = "membrane-doctrine: v2"
 
 
 def _has_doctrine_stamp(messages) -> bool:
