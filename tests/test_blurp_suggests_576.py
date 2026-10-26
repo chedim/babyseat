@@ -109,3 +109,37 @@ def test_the_turn_records_its_conversation():
     import inspect
     from membrane import server
     assert "_CHB.note_turn(" in inspect.getsource(server.TurnRunner.run)
+
+
+# ---- #583 review -----------------------------------------------------------------------------
+
+def test_a_suggestion_shown_in_one_turn_and_adopted_in_the_next_is_a_hit(seat):
+    from membrane.capture import conversation_key
+    cand = _teach(seat)
+    B.grant(seat, "Component:toy")
+    lr = seat.ch_vm.learner
+    d = _toy(seat.entity_store, "d")
+    _turn(seat, "s1", (d, "a", 1, "person:op"))                          # fires: a suggestion
+    b0 = lr.balance(cand.eid)
+    conv = conversation_key({"_turn_sid": "s1"})
+    assert conv == "sid:s1"                                               # the banner's key is the turn's
+    out = CB.render({"suggest": B.take_suggestions(seat, conv)}, now=1_800_000_000)
+    assert f"set {d.eid}.b = 2" in out
+    _turn(seat, "s1", (d, "b", 2, "llm"))                                 # the NEXT turn adopts it
+    assert lr.balance(cand.eid) == pytest.approx(b0 + 2 * __import__("membrane.ch_learn").ch_learn.WRITE_COST)
+    _turn(seat, "s1", (d, "b", 2, "llm"))                                 # adopting twice pays once
+    assert lr.balance(cand.eid) == pytest.approx(b0 + 2 * __import__("membrane.ch_learn").ch_learn.WRITE_COST)
+
+
+def test_a_long_or_multiline_value_is_shown_as_data():
+    assert B.suggestion_text("membrane::Component:toy:d.note", "x" * 500) == \
+        "set membrane::Component:toy:d.note = <a 500-char string>"
+    assert B.suggestion_text("membrane::Component:toy:d.note", "a\nb") == \
+        "set membrane::Component:toy:d.note = <a 3-char string>"
+    assert B.suggestion_text("membrane::Component:toy:d.b", "short") == "set membrane::Component:toy:d.b = 'short'"
+
+
+def test_suggestions_outrank_the_rest_of_the_banner():
+    long = ["x" * 200] * 3
+    out = CB.render({"suggest": ["set a.b = 1"], "working": None, "alerts": long}, now=1_800_000_000)
+    assert "set a.b = 1" in out

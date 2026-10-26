@@ -74,11 +74,12 @@ def _literal(v) -> str | None:
 
 
 class Learner:
-    def __init__(self, vm, purse, granted=lambda path: False, suggest=None):
+    def __init__(self, vm, purse, granted=lambda path: False, suggest=None, adopted=None):
         self.vm = vm
         self.purse = purse
         self.granted = granted
         self.suggest = suggest           # (trigger, target path, value): a proposal's suggestion to the LLM
+        self.adopted = adopted           # (write) -> the candidates whose suggestion it adopts (#583: a later turn)
         self._recent: collections.OrderedDict = collections.OrderedDict()   # chain -> its last writes
         self._pending: collections.OrderedDict = collections.OrderedDict()  # chain -> [(cand, path, value)]
         self._bal: dict[str, float] = {}
@@ -89,6 +90,12 @@ class Learner:
     # -- the account ------------------------------------------------------------------------
     def balance(self, cand: str) -> float:
         return self._bal.get(cand, 0.0)
+
+    def _hit(self, cand: str) -> None:
+        back = REFUND * WRITE_COST
+        self.purse.refund(back, "hit")
+        self._bal[cand] = self.balance(cand) + back
+        self._hits[cand] = self.hits(cand) + 1
 
     def hits(self, cand: str) -> int:
         return self._hits.get(cand, 0)
@@ -149,6 +156,7 @@ class Learner:
         if writer.startswith(("trigger:", "adapter:")) or not w.get("prop") or path.startswith("rel:") or not ch:
             return                                      # Blurp's own acts never confirm or teach themselves
         by_llm = writer == "llm" or writer.startswith("llm:")   # the LLM's actions: taught, and confirming
+        paid = set()
         if by_llm and ch in self._pending:
             keep = []
             for cand, p, v in self._pending[ch]:
@@ -156,11 +164,17 @@ class Learner:
                     keep.append((cand, p, v))
                     continue
                 if v == w.get("new"):
-                    back = REFUND * WRITE_COST
-                    self.purse.refund(back, "hit")
-                    self._bal[cand] = self.balance(cand) + back
-                    self._hits[cand] = self.hits(cand) + 1
+                    self._hit(cand)
+                    paid.add(cand)
             self._pending[ch] = keep
+        if by_llm and self.adopted is not None:
+            try:
+                for cand in self.adopted(w):         # a suggestion shown, adopted in a later turn
+                    if cand not in paid:
+                        self._hit(cand)
+                        paid.add(cand)
+            except Exception:
+                pass
         recent = self._remember(self._recent, ch, lambda: collections.deque(maxlen=LOOK_BACK))
         causes = list(recent)
         recent.append(w)

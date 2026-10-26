@@ -129,23 +129,27 @@ def attach(srv) -> None:
         return
     srv.ch_purse = Purse()
     vm.learner = L.Learner(vm, srv.ch_purse, granted=lambda path: granted(srv, path),
-                           suggest=lambda tr, path, value: _suggest(srv, tr, path, value))
+                           suggest=lambda tr, path, value: _suggest(srv, tr, path, value),
+                           adopted=lambda w: adopted(srv, w))
 
 
 # ---- suggestions (#576 H) --------------------------------------------------------------------
 
-TURNS_KEPT = 512                    # turns remembered: chain -> conversation (a buffer bound)
+TURNS_KEPT = 512                    # turns / chats remembered (a buffer bound)
+SUGGEST_VALUE_MAX = 60              # a suggested string value shown inline up to this; longer: as data
 _TURNS: "collections.OrderedDict[str, str]" = collections.OrderedDict()
+_LK = threading.Lock()
 
 
 def note_turn(chain_id: str, conv: str) -> None:
     """An LLM turn's chain belongs to this conversation (TurnRunner.run)."""
     if not chain_id or not conv:
         return
-    _TURNS[chain_id] = conv
-    _TURNS.move_to_end(chain_id)
-    while len(_TURNS) > TURNS_KEPT:
-        _TURNS.popitem(last=False)
+    with _LK:
+        _TURNS[chain_id] = conv
+        _TURNS.move_to_end(chain_id)
+        while len(_TURNS) > TURNS_KEPT:
+            _TURNS.popitem(last=False)
 
 
 def suggestion_text(target_path: str, value, est=None) -> str:
@@ -158,28 +162,71 @@ def suggestion_text(target_path: str, value, est=None) -> str:
             m = (est.docs or {}).get(meth)
             name = str(((m.properties or {}) if m is not None else {}).get("method_name") or "")
         return f"call {name or meth} on {value.get('object')} with {value.get('args') or {}!r}"[:240]
-    return f"set {target_path} = {value!r}"[:240]
+    return f"set {target_path} = {_shown(value)}"[:240]
+
+
+def _shown(v) -> str:
+    """A value as the banner may repeat it: a long or multi-line string is shown as
+    data (its size), never replayed -- it may have come from a fetched page (#583)."""
+    if isinstance(v, str) and (len(v) > SUGGEST_VALUE_MAX or "\n" in v):
+        return f"<a {len(v)}-char string>"
+    return repr(v)
 
 
 def _suggest(srv, tr, target_path: str, value) -> None:
     ch = (W.current() or {}).get("id")
-    conv = _TURNS.get(ch or "")
-    if not conv:
-        return                                         # not an LLM turn: nobody to suggest to
-    box = getattr(srv, "_ch_suggest", None)
+    with _LK:
+        conv = _TURNS.get(ch or "")
+        if not conv:
+            return                                     # not an LLM turn: nobody to suggest to
+        line = suggestion_text(target_path, value, getattr(srv, "entity_store", None))
+        rows = _box(srv, "_ch_suggest").setdefault(conv, [])
+        if line not in rows:
+            rows.append(line)
+            del rows[:-L.GUESS_PER_CHAIN]              # the newest few (the approved per-chain number)
+        # what the LLM must do to adopt it, kept for this chat's later turns (#583)
+        offered = _box(srv, "_ch_offered").setdefault(conv, [])
+        want = (tr.eid, srv.ch_vm.learner._expected(target_path), value)
+        if want not in offered:
+            offered.append(want)
+            del offered[:-L.GUESS_PER_CHAIN]
+
+
+def _box(srv, name: str) -> "collections.OrderedDict":
+    box = getattr(srv, name, None)
     if box is None:
-        box = srv._ch_suggest = {}
-    line = suggestion_text(target_path, value, getattr(srv, "entity_store", None))
-    rows = box.setdefault(conv, [])
-    if line not in rows:
-        rows.append(line)
-        del rows[:-L.GUESS_PER_CHAIN]                  # the newest few (the approved per-chain number)
+        box = collections.OrderedDict()
+        setattr(srv, name, box)
+    while len(box) > TURNS_KEPT:                       # chats that went quiet are forgotten
+        box.popitem(last=False)
+    return box
+
+
+def adopted(srv, w: dict) -> list[str]:
+    """The candidates whose suggestion this LLM write adopts (in any later turn of
+    the chat it was offered in): each pays once."""
+    ch = ((w.get("chain") or {}).get("id")) or ""
+    with _LK:
+        conv = _TURNS.get(ch)
+        offered = getattr(srv, "_ch_offered", None) or {}
+        rows = offered.get(conv) if conv else None
+        if not rows:
+            return []
+        out, keep = [], []
+        for cand, p, v in rows:
+            if p == w.get("path") and v == w.get("new"):
+                out.append(cand)
+            else:
+                keep.append((cand, p, v))
+        offered[conv] = keep
+        return out
 
 
 def take_suggestions(srv, conv: str) -> list[str]:
     """This conversation's suggestions, for its next banner -- each shown once."""
-    box = getattr(srv, "_ch_suggest", None) or {}
-    return box.pop(conv, []) if conv else []
+    with _LK:
+        box = getattr(srv, "_ch_suggest", None) or {}
+        return box.pop(conv, []) if conv else []
 
 
 def close_purse(srv) -> None:

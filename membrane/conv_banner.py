@@ -157,9 +157,9 @@ def render(sec: dict, now: float | None = None, tz=None,
     if sec.get("blurp"):
         cand.append((6.5, (8.5, 0), _clip(sec["blurp"], NEWS_CHARS)))
     for i, s in enumerate(suggest):                    # #576 H: adopt one if it is right, never to please
-        cand.append((2.5, (3.5, i + 1), "- " + s))
+        cand.append((0.5, (3.5, i + 1), "- " + s))     # kept before the rest: a dropped one would read as ignored
     if suggest:
-        cand.append((2.5, (3.5, 0), SUGGEST_HEAD))
+        cand.append((0.5, (3.5, 0), SUGGEST_HEAD))
     if sec.get("more"):
         cand.append((8, (9, 0), MORE_LINE))
     heads = {order[h]: h for h in groups}

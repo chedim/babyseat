@@ -207,7 +207,9 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
   - The retired learner's own methods (`self.try` / `expect` / …) are removed at boot.
   - A branch is **open** while Blurp guesses there, **earned** when a guess there pays for itself, and **granted** by the operator's Accept of `branch:<kind>` (`seat_panel.control`; the seat keeps the grants in `ch-grants.json` beside the store).
   - **A proposal never acts by itself (the operator, #576 H).** On an accepted branch, a proposal firing during an LLM turn becomes a **suggestion** in that conversation's next banner, under BLURP SUGGESTS (each shown once, the newest 3).
-    - The LLM adopting it (making that write or call) is a hit, and Blurp is refunded. Ignoring it drains the guess.
+    - The LLM adopting it (making that write or call) is a hit, and Blurp is refunded, also in a **later** turn of the same chat: a suggestion is shown in the next banner, which may be the next turn's. Each adoption pays once. Ignoring it drains the guess.
+    - A long or multi-line string value is shown as data (`<a N-char string>`), never replayed: it may have come from a fetched page.
+    - Suggestions rank above the rest of the banner, so the budget never drops one unseen.
     - Unaccepted branches and shadow guesses stay silent.
     - `TurnRunner.run` records which conversation each turn's chain belongs to (`ch_blurp.note_turn`).
 - **The sheet.** The seat adds the branches as the skill tree, the **level** as the number of branches granted (the card too), and the **Code tab** as Blurp's triggers: their line, state (shadow / proposal), balance (in write costs), hits and firings.
