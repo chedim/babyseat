@@ -192,7 +192,8 @@ class SpeculativeWork(unittest.TestCase):
         est, _ = _store()
         eid = _card(est, "s", work_needed=True)
         self.assertTrue(est.edit(eid, properties={"speculative": "draft PR #1"})["ok"])
-        self.assertFalse(est.edit(eid, properties={"status": "closed", "receipt": "x"})["ok"])
+        est.edit(eid, properties={"status": "closed", "receipt": "x"})
+        self.assertEqual(_status(est, eid), "open")
 
     def test_drafts_survive_the_answer_that_matches_the_pick(self):
         est, led = _store()
