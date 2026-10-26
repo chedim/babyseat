@@ -3778,9 +3778,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 from . import self_sheet as _SHEET
                 from . import self_super as _SUP
                 _sup = _SUP.of(getattr(runner, "srv", None) if runner is not None else None)
+                from . import ch_blurp as _CHB         # #576 D2: the branches, level and code are the seat's VM's
+                _psrv = getattr(runner, "srv", None) if runner is not None else None
                 if _sup is not None:                   # #440 part 4: Blurp's own process
-                    return self._json_out(_sup.view("/sheet"))
-                self._json_out(_SHEET.sheet(getattr(runner, "srv", None) if runner is not None else None))
+                    return self._json_out(_CHB.augment(_psrv, _sup.view("/sheet")))
+                self._json_out(_CHB.augment(_psrv, _SHEET.sheet(_psrv)))
             elif path == "/membrane/self/card":
                 # #283: the zoo's card -- self's name (per seat), level, rung
                 # name, mode, last activity; cheap to poll across seats
@@ -3788,9 +3790,12 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 from . import self_sheet as _SHEET
                 from . import self_super as _SUP
                 _sup = _SUP.of(getattr(runner, "srv", None) if runner is not None else None)
-                if _sup is not None:                   # #440 part 4: Blurp's own process (its last good card)
-                    return self._json_out(_sup.view("/card"))
-                self._json_out(_SHEET.card(getattr(runner, "srv", None) if runner is not None else None))
+                from . import ch_blurp as _CHB         # #576 D2: its level is the branches granted
+                _psrv = getattr(runner, "srv", None) if runner is not None else None
+                _card = _sup.view("/card") if _sup is not None else _SHEET.card(_psrv)
+                if isinstance(_card, dict) and getattr(getattr(_psrv, "ch_vm", None), "learner", None) is not None:
+                    _card = {**_card, "level": len(_CHB.grants(_psrv))}
+                self._json_out(_card)
             elif path == "/membrane/self/context":
                 # #440 part 2: the snapshot Blurp's own process reads
                 # (self_api.context; the in-process loop calls the same code).
@@ -3802,8 +3807,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     return self._json_err(503, "no seat")
                 from . import self_api as _SAPI
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
+                _rep = {k[2:]: (v[0] == "1" if v[0] in ("0", "1") else v[0])
+                        for k, v in _q.items() if k.startswith("r_") and v}      # #576 D2: the learn exchange
                 self._json_out(_SAPI.context(psrv, only=(_q.get("only") or [None])[0],
-                                             own=(_q.get("own") or [""])[0] in ("1", "true")))
+                                             own=(_q.get("own") or [""])[0] in ("1", "true"),
+                                             report=_rep or None))
             elif path == "/membrane/toybox/state":
                 # #249: the toy dock's live source -- the toys alone, cheap
                 # enough to poll every few seconds (read-only, gated)

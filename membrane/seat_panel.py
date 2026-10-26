@@ -347,6 +347,12 @@ def control(srv, body: dict, by: str = "operator") -> dict:
             note(srv, "loops-cap", value=n, by=by)
         except (TypeError, ValueError):
             pass
+    acc = str(body.get("accept") or "")
+    if acc.startswith("branch:"):                  # #576 D2: Accept grants Blurp a branch (the seat's)
+        from . import ch_blurp as _CHB
+        if _CHB.grant(srv, acc[len("branch:"):], by=by):
+            note(srv, "self-grant", value=acc, by=by)
+            done["granted"] = acc
     from . import self_super as _SUP               # #440 part 4: Blurp's own process takes its controls
     sup = _SUP.of(srv)
     if sup is not None:

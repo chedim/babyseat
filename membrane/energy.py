@@ -305,6 +305,17 @@ def error(srv, why: str, now: float | None = None) -> float:
         return st["energy"]
 
 
+def apply_delta(srv, delta: float) -> float:
+    """#576 D2: the net energy Blurp's learner spent (its writes) and earned back
+    (its hits), as the seat's purse handed it over. -> the energy."""
+    SL = _SL()
+    with SL._lock:
+        st = _state(srv)
+        st["energy"] = max(0.0, min(1.0, st["energy"] + float(delta)))
+        _save(srv, st)
+        return st["energy"]
+
+
 def person_spoke(srv, person: str, now: float | None = None, free: int | None = None,
                  avail: int | None = None) -> bool:
     """A person spoke (chat or voice): a sleeping Blurp wakes. -> woke.

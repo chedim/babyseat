@@ -48,6 +48,17 @@ def _scalar(v) -> bool:
     return isinstance(v, (int, float, str, bool)) or v is None
 
 
+def branch_of(path: str, value=None) -> str:
+    """The kind a target belongs to (#576 D2's skills): `membrane::Component:toy:die.b`
+    -> `Component:toy`, `membrane::ha:light.x` -> `ha`; a learned call's branch is
+    the called object's."""
+    if isinstance(value, dict) and value.get("object"):
+        path = str(value["object"])
+    rest = str(path).split("::", 1)[1] if "::" in str(path) else str(path)
+    parts = rest.split(":")
+    return f"{parts[0]}:{parts[1].split('.')[0]}" if len(parts) >= 3 else parts[0].split(".")[0]
+
+
 def _same(a, b) -> bool:
     """A copy, not a coincidence: equal AND the same type (True is not 1)."""
     return _scalar(a) and type(a) is type(b) and a == b
@@ -68,12 +79,16 @@ class Learner:
         self._recent: collections.OrderedDict = collections.OrderedDict()   # chain -> its last writes
         self._pending: collections.OrderedDict = collections.OrderedDict()  # chain -> [(cand, path, value)]
         self._bal: dict[str, float] = {}
+        self._hits: dict[str, int] = {}
         self._guessed: collections.OrderedDict = collections.OrderedDict()  # chain -> new guesses defined
         self._refused: collections.OrderedDict = collections.OrderedDict()  # guess eids the VM refused
 
     # -- the account ------------------------------------------------------------------------
     def balance(self, cand: str) -> float:
         return self._bal.get(cand, 0.0)
+
+    def hits(self, cand: str) -> int:
+        return self._hits.get(cand, 0)
 
     def state(self, cand: str) -> str:
         return "proposal" if self.balance(cand) > 0 else "shadow"
@@ -95,7 +110,10 @@ class Learner:
     def on_fire(self, tr, target_path: str, value) -> str:
         """A candidate fires: 'live' (write the real path), 'shadow' (write the
         prediction onto itself) or 'skip' (asleep)."""
-        live = self.state(tr.eid) == "proposal" and self.granted(target_path)   # as it stood before this write
+        grant_path = (str(value["object"]) + ".invoke"
+                      if target_path.endswith(".invoke") and isinstance(value, dict) and value.get("object")
+                      else target_path)                  # a call acts on its object's branch
+        live = self.state(tr.eid) == "proposal" and self.granted(grant_path)   # as it stood before this write
         if not self._spend(tr.eid, "fire"):
             return "skip"
         ch = (CH.W.current() or {}).get("id")
@@ -131,6 +149,7 @@ class Learner:
                     back = REFUND * WRITE_COST
                     self.purse.refund(back, "hit")
                     self._bal[cand] = self.balance(cand) + back
+                    self._hits[cand] = self.hits(cand) + 1
             self._pending[ch] = keep
         recent = self._remember(self._recent, ch, lambda: collections.deque(maxlen=LOOK_BACK))
         causes = list(recent)
@@ -190,6 +209,7 @@ class Learner:
                 self._guessed.popitem(last=False)
             doc = est.docs[eid]
             doc.properties["shadow"] = True
+            doc.properties["branch"] = branch_of(w_eid, w.get("new") if w_prop == "last_call" else None)
             est.upsert(doc)
 
     def _room(self) -> bool:

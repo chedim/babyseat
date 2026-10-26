@@ -95,11 +95,16 @@ def _own(srv) -> dict:
     return out
 
 
-def context(srv, only: str | None = None, own: bool = False) -> dict:
-    """The snapshot (see the module doc). Plain JSON, at most CONTEXT_BUDGET bytes."""
+def context(srv, only: str | None = None, own: bool = False, report: dict | None = None) -> dict:
+    """The snapshot (see the module doc). Plain JSON, at most CONTEXT_BUDGET bytes.
+    only="learn" (#576 D2): Blurp's step reports {awake, asleep, mode} and takes
+    the net energy its learner spent and earned (ch_blurp.exchange)."""
     r = _remote(srv)
     if r is not None:
-        return r.context(only=only, own=own)
+        return r.context(only=only, own=own, report=report)
+    if only == "learn":
+        from . import ch_blurp as _CHB
+        return _CHB.exchange(srv, report or {})
     SL = _SL()
     doc: dict = {"v": 1, "ts": time.time()}
     if only != "own":

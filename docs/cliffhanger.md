@@ -191,3 +191,17 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
   - a refused guess is remembered and never charged or retried;
   - a nested value a trigger writes is held to 64 KB;
   - the most recent 512 chains are remembered.
+
+## Blurp anew: the learner on Blurp's body (#576, part D)
+
+`membrane/ch_blurp.py`. The old learner (the cycle, the rung ladder and the `self::` hatch) is retired (#580). Blurp's body stays: its identity, the on/off switch, energy, sleep and the record. The VM's learner (part C) is attached to it.
+
+- **The purse.** The learner charges each Blurp write and refunds each hit into the seat's purse.
+  - Blurp's loop (its own process, or the seat's thread) exchanges with the purse on **every** step, through the context call `context(only="learn", report={awake, asleep, mode})`. It reports whether it is awake, takes the net energy, and applies it (`energy.apply_delta`).
+  - Until Blurp has said it is awake, nothing is spent, so nothing is guessed or fired.
+  - When it reports falling asleep, the learner prunes every negative candidate.
+- **Branches and grants.**
+  - A skill is a **branch**: the kind a candidate's target belongs to (`Component:toy`, `Component:chat`, `ha`…). For a learned call, it's the called object's kind. Each candidate records its branch.
+  - A branch is **open** while Blurp guesses there, **earned** when a guess there pays for itself, and **granted** by the operator's Accept of `branch:<kind>` (`seat_panel.control`; the seat keeps the grants in `ch-grants.json` beside the store).
+  - A proposal acts only on a granted branch (the operator's rule).
+- **The sheet.** The seat adds the branches as the skill tree, the **level** as the number of branches granted (the card too), and the **Code tab** as Blurp's triggers: their line, state (shadow / proposal), balance (in write costs), hits and firings.

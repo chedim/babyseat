@@ -550,6 +550,20 @@ def learn_step(srv, now: float) -> dict | None:
     return None
 
 
+def _exchange(srv, awake: bool, asleep: bool) -> None:
+    """#576 D2: tell the seat's learner whether Blurp is awake, and take the net
+    energy it spent and earned (every step: off, asleep or awake)."""
+    from . import energy as _E
+    from . import self_api as _SAPI
+    try:
+        d = _SAPI.context(srv, only="learn", report={"awake": awake, "asleep": asleep, "mode": mode(srv)})
+        delta = float((d or {}).get("energy_delta") or 0.0)
+    except Exception:
+        return
+    if delta:
+        _E.apply_delta(srv, delta)
+
+
 def step(srv, now: float | None = None) -> dict | None:
     """One turn of the loop's thread (#345): off or paused, nothing runs and
     no time counts; asleep, no learner runs and energy restores (energy.tick);
@@ -558,11 +572,14 @@ def step(srv, now: float | None = None) -> dict | None:
     from . import energy as _E
     if not _runs(srv):
         _E.pause(srv)
+        _exchange(srv, awake=False, asleep=False)
         return None
     now = time.time() if now is None else now
     if _E.asleep(srv):
         _E.tick(srv, now)
+        _exchange(srv, awake=False, asleep=True)
         return None
+    _exchange(srv, awake=True, asleep=False)
     t0 = time.thread_time()
     rec = learn_step(srv, now)
     cpu = time.thread_time() - t0

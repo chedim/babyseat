@@ -86,12 +86,14 @@ class SeatClient:
             raise SeatError(f"{path}: not a JSON object")
         return out
 
-    def context(self, only: str | None = None, own: bool = False) -> dict:
+    def context(self, only: str | None = None, own: bool = False, report: dict | None = None) -> dict:
         q = []
         if own:
             q.append(("own", "1"))
         if only:
             q.append(("only", str(only)))
+        for k, v in (report or {}).items():          # #576 D2: Blurp's step reports (learn exchange)
+            q.append((f"r_{k}", "1" if v is True else "0" if v is False else str(v)))
         doc = self._call("/membrane/self/context" + ("?" + urllib.parse.urlencode(q) if q else ""))
         if only is None:
             self.last = doc

@@ -53,14 +53,17 @@ def test_the_sheet_carries_blurps_own_methods():
 
 
 @NODE
-def test_the_code_tab_renders_each_method_escaped():
-    sheet = {"code": [{"name": "try", "command": "self::try {{seed}}", "runs": 3, "params": ["seed"]},
-                      {"name": "x<y", "command": "echo <b>", "runs": 0,
-                       "steps": [{"step": "a", "command": "echo 1"}]}]}
+def test_the_code_tab_renders_each_trigger_escaped():
+    # #576 D2: Blurp's code is its triggers, each with its state, balance, hits and firings
+    sheet = {"code": [{"name": "membrane::Trigger:cand-1", "branch": "Component:toy",
+                       "line": "WHEN changed(?x.a) WHERE isa(?x, toy): ?x.b = 2", "state": "proposal",
+                       "balance": 1.0, "hits": 2, "fired": 3},
+                      {"name": "x<y", "branch": "b<r", "line": "WHEN changed(?x.a): ?x.c = '<b>'",
+                       "state": "shadow", "balance": -1.0, "hits": 0, "fired": 1}]}
     js = "const H=require(%r); process.stdout.write(H.selfCodeHtml(%s))" % (str(UI / "home.js"), json.dumps(sheet))
     h = subprocess.check_output(["node", "-e", js]).decode()
-    assert "self::try {{seed}}" in h and "x&lt;y" in h and "echo &lt;b&gt;" in h and "<b>" not in h
-    assert "echo 1" in h
+    assert "WHEN changed(?x.a) WHERE isa(?x, toy): ?x.b = 2" in h and "proposal" in h and "+1" in h
+    assert "b&lt;r" in h and "&lt;b&gt;" in h and "<b>" not in h
     js = "const H=require(%r); process.stdout.write(H.selfCodeHtml({code: []}))" % str(UI / "home.js")
     assert "no code" in subprocess.check_output(["node", "-e", js]).decode()
 
