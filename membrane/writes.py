@@ -121,11 +121,16 @@ def stamp(ev: dict) -> dict:
     return ev
 
 
-def emit(path: str, old, new) -> None:
+def emit(path: str, old, new, eid: str | None = None) -> None:
+    """One write. `eid` (when the writer knows it) splits the path exactly --
+    an eid may itself hold dots (`f:router.py`): the event carries eid and prop."""
     if not listeners:
         return
     ch = _CHAIN.get()
-    w = {"path": path, "old": old, "new": new, "writer": _WRITER.get(),
+    if eid is None and not path.startswith("rel:"):
+        eid = path
+    prop = path[len(eid) + 1:] if eid and path.startswith(eid + ".") else ""
+    w = {"path": path, "eid": eid, "prop": prop, "old": old, "new": new, "writer": _WRITER.get(),
          "chain": dict(ch, via=list(ch.get("via") or [])) if ch else None, "ts": time.time()}
     for fn in list(listeners):
         try:
@@ -221,6 +226,8 @@ def from_headers(hdrs):
     except Exception:
         ch = None
     w = hdrs.get(HDR_WRITER) if hdrs is not None else None
+    if isinstance(ch, dict):                  # a caller cannot claim it passed through self (#578 review)
+        ch = dict(ch, via=[v for v in (ch.get("via") or []) if v != "self"])
     with resume(ch if isinstance(ch, dict) else None), as_writer(w or _WRITER.get()):
         yield
 

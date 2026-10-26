@@ -1598,6 +1598,14 @@ def main() -> None:
                 return {"verdict_text": (out or "")[:200], "model": model or None}
             return go
         srv.run_loop_turn = _run_loop_turn()
+        try:                               # #576 B: the cliffhanger VM hears every write
+            from . import ch as _CH
+            if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
+                srv.ch_vm = _CH.VM(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))
+                srv.ch_vm.attach()
+                srv.ch_vm.start()
+        except Exception as e:
+            print(f"[opencode] the cliffhanger VM failed to start ({e})", file=sys.stderr)
         from .watch_agents import enabled_loops as _wa_on, start_goal_pulse
         if _wa_on():                       # MEMBRANE_WATCH_LOOPS=0: the documented kill switch (never read before)
             WA_start_loop_drainer(srv)
