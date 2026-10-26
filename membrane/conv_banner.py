@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 
 # ---- operator-approved values (2026-10-22, #429) ---------------------------
 BANNER_CHAR_BUDGET = 900      # the whole block, NOW and ages included
+SUGGEST_HEAD = "BLURP SUGGESTS: (adopt one only if it is right)"
 FOCUS_K = 5                   # focus entities shown
 FOCUS_MIN_EVENTS = 2          # ...in this many of this chat's events (or named now)
 DECIDED_MAX = 3
@@ -128,13 +129,14 @@ def render(sec: dict, now: float | None = None, tz=None,
     now = time.time() if now is None else now
     paused = bool(sec.get("paused"))
     alerts = [_clip(a, NEWS_CHARS) for a in (sec.get("alerts") or [])][:ALERTS_MAX]
+    suggest = [_clip(s, NEWS_CHARS) for s in (sec.get("suggest") or [])]
     working = sec.get("working")
     about = list(sec.get("about") or [])[:FOCUS_K]
     groups = {"DECIDED:": list(sec.get("decided") or [])[:DECIDED_MAX],
               "OPEN:": list(sec.get("open") or [])[:OPEN_MAX],
               "STABLE:": list(sec.get("stable") or [])[:STABLE_MAX],
               "SINCE YOUR LAST MESSAGE:": list(sec.get("since") or [])[:NEWS_MAX]}
-    if not (paused or alerts or working or any(groups.values())):
+    if not (paused or alerts or working or suggest or any(groups.values())):
         return None
     # (priority, slot, line): a lower priority number is kept first; the
     # slot is the line's place on the page
@@ -154,6 +156,10 @@ def render(sec: dict, now: float | None = None, tz=None,
         cand.append((6, (4, 0), "ABOUT: " + " · ".join(about)))
     if sec.get("blurp"):
         cand.append((6.5, (8.5, 0), _clip(sec["blurp"], NEWS_CHARS)))
+    for i, s in enumerate(suggest):                    # #576 H: adopt one if it is right, never to please
+        cand.append((2.5, (3.5, i + 1), "- " + s))
+    if suggest:
+        cand.append((2.5, (3.5, 0), SUGGEST_HEAD))
     if sec.get("more"):
         cand.append((8, (9, 0), MORE_LINE))
     heads = {order[h]: h for h in groups}
@@ -615,6 +621,15 @@ def note_delivered(srv, conv: str, mark) -> None:
         marks.pop(next(iter(marks)))
 
 
+def _suggestions(srv, conv: str) -> list[str]:
+    """#576 H: Blurp's proposals on accepted branches, for this chat's next turn."""
+    try:
+        from . import ch_blurp as _CHB
+        return _CHB.take_suggestions(srv, conv)
+    except Exception:
+        return []
+
+
 def _blurp(srv) -> str | None:
     try:
         from .seat_panel import _self_status
@@ -644,6 +659,7 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
         "stable": stable(srv, about, fld, tz),
         "since": since(fld, conv, mark, about),
         "blurp": _blurp(srv),
+        "suggest": _suggestions(srv, conv),
         "more": bool((body or {}).get("tools")),
     }
     return render(sec, now, tz)

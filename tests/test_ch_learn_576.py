@@ -143,15 +143,19 @@ def test_sleep_prunes_the_negative(world):
     assert set(bad) <= set(gone) and not any(e in est.docs for e in gone)
 
 
-def test_a_proposal_on_a_granted_branch_writes_for_real(world):
+def test_a_proposal_never_acts_by_itself_it_suggests(world):
+    # operator (#576 H): Blurp never acts while the LLM works -- a proposal on a
+    # granted branch is handed to `suggest`; the real path stays the LLM's
     est, vm, purse, granted = world
+    said = []
+    vm.learner.suggest = lambda tr, path, value: said.append((path, value))
     x, y, z, q = _ent(est, "x"), _ent(est, "y"), _ent(est, "z"), _ent(est, "q")
     _turn(est, vm, (x, "a", 1), (x, "b", 2))
     _turn(est, vm, (y, "a", 1), (y, "b", 2))
     _turn(est, vm, (z, "a", 1), (z, "b", 2))                   # now a proposal
     granted.add(MEMBRANE_NS + "toy:")
     _turn(est, vm, (q, "a", 1))
-    assert q.properties.get("b") == 2                          # live: it wrote q.b itself
+    assert "b" not in q.properties and said == [(q.eid + ".b", 2)]
 
 
 # ---- the LLM's actions are the target (operator, 2026-10-26) ------------------------------

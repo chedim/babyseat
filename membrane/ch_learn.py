@@ -74,10 +74,11 @@ def _literal(v) -> str | None:
 
 
 class Learner:
-    def __init__(self, vm, purse, granted=lambda path: False):
+    def __init__(self, vm, purse, granted=lambda path: False, suggest=None):
         self.vm = vm
         self.purse = purse
         self.granted = granted
+        self.suggest = suggest           # (trigger, target path, value): a proposal's suggestion to the LLM
         self._recent: collections.OrderedDict = collections.OrderedDict()   # chain -> its last writes
         self._pending: collections.OrderedDict = collections.OrderedDict()  # chain -> [(cand, path, value)]
         self._bal: dict[str, float] = {}
@@ -115,13 +116,20 @@ class Learner:
         grant_path = (str(value["object"]) + ".invoke"
                       if target_path.endswith(".invoke") and isinstance(value, dict) and value.get("object")
                       else target_path)                  # a call acts on its object's branch
-        live = self.state(tr.eid) == "proposal" and self.granted(grant_path)   # as it stood before this write
+        suggests = self.state(tr.eid) == "proposal" and self.granted(grant_path)   # as it stood before this write
         if not self._spend(tr.eid, "fire"):
             return "skip"
         ch = (CH.W.current() or {}).get("id")
         if ch:                                  # no chain, nothing can confirm it: no prediction kept
             self._remember(self._pending, ch, list).append((tr.eid, self._expected(target_path), value))
-        return "live" if live else "shadow"     # a live write is confirmed the same way as a shadow one
+        if suggests and self.suggest is not None:
+            # the operator (#576 H): Blurp never acts by itself while the LLM works -- a
+            # proposal on an accepted branch is a SUGGESTION; the LLM adopting it is the hit
+            try:
+                self.suggest(tr, target_path, value)
+            except Exception:
+                pass
+        return "shadow"
 
     @staticmethod
     def _remember(od, key, make):

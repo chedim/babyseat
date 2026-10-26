@@ -1452,6 +1452,8 @@ class TurnRunner:
         loop's event) or a new one a person's message starts."""
         from . import writes as _W
         with _W.turn(sid):
+            from . import ch_blurp as _CHB             # #576 H: this turn's chain is this conversation's
+            _CHB.note_turn((_W.current() or {}).get("id"), "sid:" + str(sid))
             return self._run(sid, text, user_info=user_info, user_parts=user_parts, _drained=_drained)
 
     def _run(self, sid: str, text: str, user_info: dict | None = None,

@@ -185,7 +185,7 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
 - **Shadow.** A candidate's firing writes its prediction onto itself (`predicted` = {path, value, chain}), never onto the real path.
 - **Score.** A later write in the same chain to the predicted path, with the predicted value, by anyone but the candidate, is a hit. Nothing else is refunded, so no timer is needed. A live firing is confirmed the same way.
 - **Energy.** Every Blurp write costs `WRITE_COST` (= `BASAL_PER_S`, one awake second): defining a candidate, and each shadow or live firing. A hit refunds 2× to Blurp's purse and to the candidate's balance. The definition counts against the candidate, so it needs two hits to become a proposal: it has to earn back its own birth. Asleep (`purse.can_spend()` false), nothing is spent, guessed or fired.
-- **Stay positive.** A candidate with a balance above 0 is a proposal. On a granted branch (`granted(path)`, the skill tree's Accept in part D2) a proposal fires live. Below 0 it is back in shadow. Sleep prunes every candidate whose balance is negative (`prune()`).
+- **Stay positive.** A candidate with a balance above 0 is a proposal. On a granted branch (`granted(path)`, the skill tree's Accept) a proposal is suggested to the LLM, never acted (part H). Below 0 it is back in shadow. Sleep prunes every candidate whose balance is negative (`prune()`).
 - **Bounds:**
   - at most 3 new guesses per chain and 256 live candidates; at the cap, a new guess replaces the most negative one (operator);
   - a refused guess is remembered and never charged or retried;
@@ -206,5 +206,8 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
   - Blurp's process going (stopped or crashed) closes the purse, and so does a step that ends in sleep.
   - The retired learner's own methods (`self.try` / `expect` / …) are removed at boot.
   - A branch is **open** while Blurp guesses there, **earned** when a guess there pays for itself, and **granted** by the operator's Accept of `branch:<kind>` (`seat_panel.control`; the seat keeps the grants in `ch-grants.json` beside the store).
-  - A proposal acts only on a granted branch (the operator's rule).
+  - **A proposal never acts by itself (the operator, #576 H).** On an accepted branch, a proposal firing during an LLM turn becomes a **suggestion** in that conversation's next banner, under BLURP SUGGESTS (each shown once, the newest 3).
+    - The LLM adopting it (making that write or call) is a hit, and Blurp is refunded. Ignoring it drains the guess.
+    - Unaccepted branches and shadow guesses stay silent.
+    - `TurnRunner.run` records which conversation each turn's chain belongs to (`ch_blurp.note_turn`).
 - **The sheet.** The seat adds the branches as the skill tree, the **level** as the number of branches granted (the card too), and the **Code tab** as Blurp's triggers: their line, state (shadow / proposal), balance (in write costs), hits and firings.

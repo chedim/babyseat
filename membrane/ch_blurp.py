@@ -20,6 +20,7 @@ branches granted, and the Code tab as Blurp's triggers (their line, state,
 balance, firings)."""
 from __future__ import annotations
 
+import collections
 import json
 import os
 import threading
@@ -28,6 +29,7 @@ from pathlib import Path
 
 from . import ch as CH
 from . import ch_learn as L
+from . import writes as W
 
 branch_of = L.branch_of
 GRANTS_FILE = "ch-grants.json"
@@ -126,7 +128,58 @@ def attach(srv) -> None:
     if vm is None or vm.learner is not None:
         return
     srv.ch_purse = Purse()
-    vm.learner = L.Learner(vm, srv.ch_purse, granted=lambda path: granted(srv, path))
+    vm.learner = L.Learner(vm, srv.ch_purse, granted=lambda path: granted(srv, path),
+                           suggest=lambda tr, path, value: _suggest(srv, tr, path, value))
+
+
+# ---- suggestions (#576 H) --------------------------------------------------------------------
+
+TURNS_KEPT = 512                    # turns remembered: chain -> conversation (a buffer bound)
+_TURNS: "collections.OrderedDict[str, str]" = collections.OrderedDict()
+
+
+def note_turn(chain_id: str, conv: str) -> None:
+    """An LLM turn's chain belongs to this conversation (TurnRunner.run)."""
+    if not chain_id or not conv:
+        return
+    _TURNS[chain_id] = conv
+    _TURNS.move_to_end(chain_id)
+    while len(_TURNS) > TURNS_KEPT:
+        _TURNS.popitem(last=False)
+
+
+def suggestion_text(target_path: str, value, est=None) -> str:
+    """A proposal as the LLM reads it: `set <eid>.<prop> = <value>` or
+    `call <method> on <object> with <args>`."""
+    if target_path.endswith(".invoke") and isinstance(value, dict):
+        meth = target_path[:-len(".invoke")]
+        name = ""
+        if est is not None:
+            m = (est.docs or {}).get(meth)
+            name = str(((m.properties or {}) if m is not None else {}).get("method_name") or "")
+        return f"call {name or meth} on {value.get('object')} with {value.get('args') or {}!r}"[:240]
+    return f"set {target_path} = {value!r}"[:240]
+
+
+def _suggest(srv, tr, target_path: str, value) -> None:
+    ch = (W.current() or {}).get("id")
+    conv = _TURNS.get(ch or "")
+    if not conv:
+        return                                         # not an LLM turn: nobody to suggest to
+    box = getattr(srv, "_ch_suggest", None)
+    if box is None:
+        box = srv._ch_suggest = {}
+    line = suggestion_text(target_path, value, getattr(srv, "entity_store", None))
+    rows = box.setdefault(conv, [])
+    if line not in rows:
+        rows.append(line)
+        del rows[:-L.GUESS_PER_CHAIN]                  # the newest few (the approved per-chain number)
+
+
+def take_suggestions(srv, conv: str) -> list[str]:
+    """This conversation's suggestions, for its next banner -- each shown once."""
+    box = getattr(srv, "_ch_suggest", None) or {}
+    return box.pop(conv, []) if conv else []
 
 
 def close_purse(srv) -> None:
