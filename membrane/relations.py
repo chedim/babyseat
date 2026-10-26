@@ -67,6 +67,7 @@ def upsert(backend, origin: str, subj: str, rel: str, obj: str, source: str,
     born = []
 
     def merge(cur):
+        born.clear()                           # cas_update may retry: only the last attempt counts
         if cur is None or cur.get("superseded"):
             born.append(True)
         if cur is None:
@@ -83,7 +84,7 @@ def upsert(backend, origin: str, subj: str, rel: str, obj: str, source: str,
     backend.cas_update("relations", key, merge)
     if born:                                   # #576: a new edge is a write; a repeat only counts
         from . import writes as _W
-        _W.emit(f"rel:{subj}|{rel}|{obj}", None, source)
+        _W.emit(f"rel:{subj}|{rel}|{obj}", None, key)
     return key
 
 
@@ -108,6 +109,7 @@ def upsert_co(backend, origin: str, a: str, b: str, rbits: str, event_key: str,
     born = []
 
     def merge(cur):
+        born.clear()
         if cur is None:
             born.append(True)
             cur = {"_k": "rel", "origin": origin, "subj": a, "rel": "co", "obj": b,
@@ -128,7 +130,7 @@ def upsert_co(backend, origin: str, a: str, b: str, rbits: str, event_key: str,
     backend.cas_update("relations", key, merge)
     if born:                                   # #576: a new co edge is a write
         from . import writes as _W
-        _W.emit(f"rel:{a}|co|{b}", None, "co-mention")
+        _W.emit(f"rel:{a}|co|{b}", None, key)
     return key
 
 

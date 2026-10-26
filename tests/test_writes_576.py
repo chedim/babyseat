@@ -80,7 +80,7 @@ def test_the_writer_and_the_chain_ride_along(seen):
         e.properties["status"] = "decided"
         est.upsert(e)
     assert seen[0]["writer"] == "llm:sonnet"
-    assert seen[0]["chain"]["id"] == "person-op" and seen[0]["chain"]["root"] == "person"
+    assert seen[0]["chain"]["id"].startswith("person-op-") and seen[0]["chain"]["root"] == "person"
 
 
 def test_a_queued_event_carries_its_chain_to_later_writes(seen):
@@ -91,12 +91,12 @@ def test_a_queued_event_carries_its_chain_to_later_writes(seen):
     with W.source("person", "op"):
         pool.put({"kind": "decision", "entity": e.eid})
     ev = pool.take()[0]
-    assert ev["chain"]["id"] == "person-op"
+    assert ev["chain"]["id"].startswith("person-op-")
     seen.clear()
     with W.resume(ev):                    # the loop turn that handles it, later
         e.properties["status"] = "in_flight"
         est.upsert(e)
-    assert seen[0]["chain"]["id"] == "person-op"
+    assert seen[0]["chain"]["id"] == ev["chain"]["id"]
 
 
 def test_an_entity_loaded_from_disk_reports_its_first_edit(seen, tmp_path):
@@ -146,7 +146,7 @@ def test_a_thread_carries_the_chain():
     with W.source("person", "op"):
         t = threading.Thread(target=W.carry(lambda: got.append(W.current())))
     t.start(); t.join()
-    assert got[0]["id"] == "person-op"
+    assert got[0]["id"].startswith("person-op-")
 
 
 def test_the_relay_headers_round_trip(seen):
@@ -158,15 +158,15 @@ def test_the_relay_headers_round_trip(seen):
     with W.from_headers(h):                       # the seat's handler, another thread
         e.properties["status"] = "decided"
         est.upsert(e)
-    assert seen[0]["chain"]["id"] == "person-op" and seen[0]["writer"] == "llm:sonnet"
+    assert seen[0]["chain"]["id"].startswith("person-op-") and seen[0]["writer"] == "llm:sonnet"
     assert W.headers(default_writer="llm") == {W.HDR_WRITER: "llm"}   # an MCP child with no context
 
 
 def test_a_turn_continues_a_woken_chain_or_starts_a_persons(seen):
     with W.turn("ses_1"):
         assert W.current()["root"] == "person" and W.writer() == "llm"
-    with W.source("watch", "x"), W.turn("ses_loop"):
-        assert W.current()["id"] == "watch-x"
+    with W.source("watch", "x") as ch, W.turn("ses_loop"):
+        assert W.current()["id"] == ch["id"]
 
 
 def test_job_threads_and_the_relay_and_the_turn_are_wired():
@@ -198,3 +198,88 @@ def test_a_sensor_fire_starts_a_chain():
     node._fire_body = lambda eid, trig: got.append(W.current()) or {}
     node._fire("membrane::Component:door", autonode.Trigger("file", {"path": "x"}, 0.0))
     assert got[0]["root"] == "sensor" and got[0]["id"].startswith("sensor-file:")
+
+
+# ---- #577 review ------------------------------------------------------------------------
+
+def test_a_nested_in_place_edit_keeps_the_true_old_value(seen):
+    est = _store()
+    e = _ent(est, script_data={"pct": 40})
+    seen.clear()
+    e.properties["script_data"]["pct"] = 41          # the same dict object, mutated
+    est.upsert(e)
+    assert [(w["old"], w["new"]) for w in seen] == [({"pct": 40}, {"pct": 41})]
+
+
+def test_every_start_is_its_own_chain():
+    with W.turn("ses_1"):
+        a = W.current()["id"]
+    with W.turn("ses_1"):
+        b = W.current()["id"]
+    assert a != b
+
+
+def test_a_birth_straight_through_docs_is_a_write_and_its_first_edit_too(seen):
+    est = _store()
+    e = QuantumEntity(eid=MEMBRANE_NS + "Component:direct", cls="Component",
+                      properties={"name": "direct", "status": "open"})
+    est.docs[e.eid] = e                               # how ~25 call sites create entities
+    assert (seen[-1]["path"], seen[-1]["old"]) == (e.eid, None)
+    seen.clear()
+    e.properties["status"] = "closed"
+    est.upsert(e)
+    assert [(w["path"], w["old"], w["new"]) for w in seen] == [(e.eid + ".status", "open", "closed")]
+    seen.clear()
+    est.docs.pop(e.eid)
+    assert [(w["path"], w["new"]) for w in seen] == [(e.eid, None)]
+
+
+def test_a_big_old_value_is_marked_not_none(seen):
+    est = _store()
+    e = _ent(est, blob="x" * (W.SMALL + 10))
+    seen.clear()
+    e.properties["blob"] = "y"
+    est.upsert(e)
+    assert seen[0]["old"] is W.BIG
+
+
+def test_a_relation_retry_is_not_a_birth(seen):
+    from membrane import relations as R
+
+    class Retry:
+        def cas_update(self, _coll, key, fn):
+            fn(None)                                  # the first attempt saw nothing...
+            fn({"_k": "rel", "n": 3, "evidence": [], "superseded": False})   # ...the retry, the edge
+
+    R.upsert(Retry(), "seat", "lamp", "in", "kitchen", source="test")
+    assert seen == []
+
+
+def test_the_position_event_is_a_copy(seen):
+    est = _store()
+    e = _ent(est)
+    seen.clear()
+    e.position = [0.0, 1.0]
+    est.upsert(e)
+    assert seen[0]["new"] == [0.0, 1.0] and seen[0]["new"] is not e.position
+
+
+def test_a_listener_error_is_counted():
+    n0 = W.errors["n"]
+
+    def bad(_w):
+        raise ValueError("x")
+    W.on_write(bad)
+    try:
+        W.emit("p", None, 1)
+    finally:
+        W.off_write(bad)
+    assert W.errors["n"] == n0 + 1
+
+
+def test_parallel_reads_and_wakes_keep_the_chain():
+    import inspect
+    from membrane import server, llm
+    assert "_W.carry(_jobs.dispatch)" in inspect.getsource(server)
+    src = inspect.getsource(llm)
+    assert 'w["chain"] = _W.current()' in src and '_W.resume(w.get("chain"))' in src

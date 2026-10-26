@@ -1994,7 +1994,8 @@ class TurnRunner:
             return {}
         pool = ThreadPoolExecutor(max_workers=min(PARALLEL_READS_MAX, len(lead)), thread_name_prefix="read")
         from . import jobs as _jobs
-        out = {cid: (nl, pool.submit(_jobs.dispatch, self, sid, nl, a, cid,
+        from . import writes as _W
+        out = {cid: (nl, pool.submit(_W.carry(_jobs.dispatch), self, sid, nl, a, cid,   # #576: the turn's chain
                                      lambda aa, _n=nl, _c=cid: self.executor(_n, aa, _c)))
                for cid, nl, a in lead}
         pool.shutdown(wait=False)

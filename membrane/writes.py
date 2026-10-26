@@ -13,8 +13,14 @@ loop turns hand it on (stamp / resume), so a reply minutes later still belongs
 to the chain that asked for it. `via` lists the triggers the chain has passed
 through, for the loop rule (#576 part B).
 
-Listeners are called synchronously and must be cheap; a listener that raises is
-dropped from that call only. No listeners: a write costs one context read."""
+Listeners are called synchronously, inside the writer's call (the store's lock
+may be held): they must be cheap and MUST NOT write -- a listener that reacts
+queues its work and writes later (part B drains its queue outside). One that
+raises is counted (`errors`), never re-raised. No listeners: a write costs one
+context read. A deleted property and one set to None read the same (new is
+None); BIG stands in for an old value too large to keep (only its hash is).
+Writer and chain are provenance, never authority: nothing may gate on them
+(any local caller can send the headers)."""
 from __future__ import annotations
 
 import contextlib
@@ -28,6 +34,8 @@ _WRITER: contextvars.ContextVar[str] = contextvars.ContextVar("membrane_writer",
 _CHAIN: contextvars.ContextVar[dict | None] = contextvars.ContextVar("membrane_chain", default=None)
 
 listeners: list = []
+errors = {"n": 0, "last": ""}     # a listener that raised (counted; never re-raised)
+VIA_MAX = 16                      # the triggers a chain remembers (the relay header stays small)
 
 SMALL = 2048          # a value this long (serialized) keeps its old value; longer ones keep a hash only
 
@@ -62,7 +70,9 @@ def as_writer(name: str):
 @contextlib.contextmanager
 def source(kind: str, ident: str = ""):
     """A new chain, rooted at a source (a person's turn, a sensor, self)."""
-    tok = _CHAIN.set({"id": f"{kind}-{ident or secrets.token_hex(6)}", "root": str(kind), "via": []})
+    # #577 review: every start is its own chain (a session's messages, a sensor's fires are many)
+    cid = f"{kind}-{ident}-{secrets.token_hex(4)}" if ident else f"{kind}-{secrets.token_hex(6)}"
+    tok = _CHAIN.set({"id": cid, "root": str(kind), "via": []})
     try:
         yield _CHAIN.get()
     finally:
@@ -101,19 +111,38 @@ def emit(path: str, old, new) -> None:
     for fn in list(listeners):
         try:
             fn(w)
-        except Exception:
-            pass
+        except Exception as e:                     # noqa: BLE001
+            errors["n"] += 1
+            errors["last"] = f"{getattr(fn, '__name__', fn)}: {e!r}"[:200]
 
 
 # ---- the store's snapshot: what each entity last held, to diff an in-place edit --------
 
+class _Big:
+    def __repr__(self):
+        return "<BIG>"
+
+
+BIG = _Big()          # the old value was too large to keep: only its hash was
+
+
 def _fp(v):
-    """(fingerprint, the value when small enough to keep)."""
+    """(fingerprint, the value serialized when small enough to keep -- a COPY:
+    an in-place edit must not rewrite the kept old value, #577 review)."""
     try:
         s = json.dumps(v, sort_keys=True, default=str)
     except Exception:
         s = repr(v)
-    return hashlib.blake2b(s.encode(), digest_size=8).hexdigest(), (v if len(s) <= SMALL else None)
+    return hashlib.blake2b(s.encode(), digest_size=8).hexdigest(), (s if len(s) <= SMALL else BIG)
+
+
+def _old(kept):
+    if kept is BIG or kept is None:
+        return kept
+    try:
+        return json.loads(kept)
+    except Exception:
+        return kept
 
 
 def snapshot(ent) -> dict:
@@ -139,9 +168,11 @@ def diff(eid: str, before: dict | None, ent) -> tuple[dict, list]:
         if (b[0] if b else None) == (a[0] if a else None):
             continue
         if k == "\0position":
-            out.append((f"{eid}.position", None, getattr(ent, "position", None)))
+            pos = getattr(ent, "position", None)
+            out.append((f"{eid}.position", None,
+                        [float(x) for x in pos] if pos is not None else None))   # a copy, not the live array
         else:
-            out.append((f"{eid}.{k}", b[1] if b else None, props.get(k)))
+            out.append((f"{eid}.{k}", _old(b[1]) if b else None, props.get(k)))
     return after, out
 
 
@@ -161,7 +192,7 @@ def headers(default_writer: str = "") -> dict:
     out = {}
     ch = _CHAIN.get()
     if ch is not None:
-        out[HDR_CHAIN] = json.dumps(ch)
+        out[HDR_CHAIN] = json.dumps(dict(ch, via=list(ch.get("via") or [])[-VIA_MAX:]))
     w = _WRITER.get()
     if w != "field" or default_writer:
         out[HDR_WRITER] = w if w != "field" else default_writer
