@@ -44,7 +44,7 @@ class TestTheLastPasses(unittest.TestCase):
         self.assertEqual([d["decision"] for d in ent.properties["watch_decisions"]], ["d2", "d3", "d4"])
 
     def test_the_prompt_carries_them(self):
-        t = WA.loop_task_text({"kind": "getter-applied", "entity": "membrane::Component:bat",
+        t = WA.loop_task_text({"kind": "field:changed", "entity": "membrane::Component:bat",
                                "previous": [{"verdict": "done", "decision": "linked the battery getter", "ts": 0}]})
         self.assertIn("Your last passes on it", t)
         self.assertIn("DONE: linked the battery getter", t)

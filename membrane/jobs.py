@@ -133,7 +133,7 @@ def _read(runner, sid, args, call) -> str:
     def refresh():
         try:
             from .watch_agents import entity_read_back
-            res = entity_read_back(srv, ent, by="model", notify=False)   # the job answers the reader (#188)
+            res = entity_read_back(srv, ent, by="model")   # the job answers the reader (#188)
         except Exception as e:                    # noqa: BLE001
             res = {"error": repr(e)}
         after = dict((ent.properties or {}).get("script_data") or {})
@@ -170,7 +170,7 @@ def _define(runner, sid, name, args, call) -> str:
         try:
             ent = est.resolve(spec)
             from .watch_agents import entity_read_back
-            res = entity_read_back(srv, ent, force=True, by="model", notify=False) \
+            res = entity_read_back(srv, ent, force=True, by="model") \
                 if ent is not None else {"error": "gone"}           # the job answers the definer (#188)
         except Exception as e:                    # noqa: BLE001
             res = {"error": repr(e)}
