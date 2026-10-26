@@ -6,7 +6,7 @@ such a task should be treated almost like an event").
   reads    entity read returns the STORED values at once (with their age); the
            getter refreshes in the background, and fresh values that differ
            come back as a job result
-  runs     exec link / call / each, entity read run=true: a result within
+  runs     exec call / each, entity read run=true: a result within
            DEADLINE_S returns inline, as before; a slower one returns
            "job #N running -- NOT finished" and its result comes back later
   defines  scripts set by entity add / edit return at once (the syntax is
@@ -30,7 +30,7 @@ import time
 DEADLINE_S = 3.0
 MAX_DEPTH = 2
 RESULT_MAX = 1500
-RUN_TOOLS = frozenset(("entity_link", "method_call", "method_each"))
+RUN_TOOLS = frozenset(("method_call", "method_each"))
 READ_TOOL = "entity_read"
 DEFINE_TOOLS = frozenset(("entity_edit", "entity_add"))
 _SCRIPT_KEYS = ("getter_script", "tick_script", "watch_script", "mention_script", "thought_script",
@@ -189,9 +189,6 @@ def _define(runner, sid, name, args, call) -> str:
 
 def _what(name: str, args: dict) -> str:
     a = args or {}
-    if name == "entity_link":
-        c = a.get("commands")
-        return f"exec link {str(c if not isinstance(c, list) else c[0])[:80]}"
     if name in ("method_call", "method_each"):
         return f"{_spec(a) or a.get('object', '?')}.{a.get('method', '?')}"
     return f"{name} {_spec(a)}"[:100]

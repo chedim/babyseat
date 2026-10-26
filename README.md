@@ -211,8 +211,8 @@ read the field (`state(section=...)` pulls one part of the seat's WHERE WE ARE:
 tracks, commands, interfaces, classes, loops, timelines, frame, digest, or
 changes since the last message), `learn` to keep a lesson (with the same guards as any turn),
 `forget` to clean up its mistakes, and the entity tools
-(`entity_add/edit/remove/link/inherit`, `entity_query`, `entity_tracks`,
-`entities_related`, …) and Cliffhanger's method tools (`method_define/call/each/inspect`). Commands compose in **Cliffhanger**, membrane's command
+(`entity_add/edit/remove/inherit`, `entity_query`, `entity_tracks`,
+`entities_related`, …) and Cliffhanger's method tools (`method_define/call/each/inspect`). There are no one-shot commands: the model defines a method on an entity, then calls it ([program the field first](docs/cliffhanger.md#program-the-field-first-576-part-f)). Commands compose in **Cliffhanger**, membrane's command
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
 where it came from.

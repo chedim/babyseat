@@ -72,7 +72,7 @@ everywhere else (the prose the person reads).
   compares facts captured as actions with the same facts as prose, asked back
   through `/membrane/ask`.
 
-See also: [entity-field.md](entity-field.md) (the executor link lane),
+See also: [entity-field.md](entity-field.md) (the executor and its queue),
 [background-mind.md](background-mind.md) (entity scripts).
 
 ## Every write is an event (#576, part A)
@@ -151,3 +151,18 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
   - Self's ownership is **signed** by `define`: an HMAC under a key file beside the store (`.ch-key`, mode 0600, never an entity). A trigger that merely says `owner = self` is not self's and falls under the loop rule.
   - The entity API never edits a trigger, and only this seat's triggers run; an imported one never does.
   - A chain arriving over the relay cannot claim `self`.
+
+## Program the field first (#576, part F)
+
+The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be done by programming the field first and then using it." The model does something in one of two ways: it **defines a method** on the entity the work belongs to (or its class) and **calls** it, or it **writes a property** whose write is the effect (above).
+
+- **No direct execution surface.** The `entity_link` / `entity_unlink` tools, `exec(action='link'/'unlink')` and the `POST /membrane/entity/link|unlink` routes are gone. A stored command is a script: it runs inside a method (its command or its steps), or as an entity's own script.
+- **A call straight at the executor is refused.** `method_call` / `method_each` (and `exec(action='call'/'each')`) refuse, before anything runs, a call whose object is `tool:executor` (or inherits from it), the `remote_executor` interface itself, or an entity implementing `remote_executor` called on the interface's own method (`exec`). The refusal ends with `program the field first: define a method on an entity, then call it`. Other methods of an implementation (e.g. `presence.restart`) are not executor calls and still run. The check sits on the method routes, the model's only door to them (`night.direct_exec_refusal`, `night.direct_each_refusal`).
+- **Using the executor inside a method still works.** A method the model defined on another entity whose command runs, or whose steps call the executor (`steps=[{name, call: 'exec', object: 'presence', args: {code}}]`), runs as before: that is programming first.
+- **A call is recorded for the learner.** Each `method_call` sets `last_call = {object: <eid>, args: <the call's args in full>}` on the method entity in the same upsert that bumps its `runs`, so the write event (`<method eid>.last_call`) carries the call.
+- **The library lists methods.** The `commands` section of WHERE WE ARE (`your methods: …`) lists the seat's methods, most called first, with how to call them.
+
+- **A call is recorded for the learner:** `<method>.last_call = {object, args}`.
+  - A value whose key looks secret (token, key, password, secret, auth, cookie, credential) is stored as `<redacted>`.
+  - A string longer than 64 KB is cut with a `…<truncated>` marker (`writes.ARG_MAX`, the operator's cap).
+- **Accountability, not capability (the operator's call):** everything goes through a stored, named method; what a method may run stays open.

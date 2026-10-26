@@ -18,8 +18,8 @@ class TestAPlaceholderNameIsALostName(unittest.TestCase):
     def test_the_real_name_and_args_beside_the_placeholder_route(self):
         got = T.resolve("{function_name}",
                         {"fn_name": "exec",
-                         "args_json": '{"action": "link", "commands": "echo hi"}'})
-        self.assertEqual(got, ("entity_link", {"commands": "echo hi"}), got)
+                         "args_json": '{"action": "call", "object": "o", "method": "m"}'})
+        self.assertEqual(got, ("method_call", {"object": "o", "method": "m"}), got)
 
     def test_the_args_object_beside_the_placeholder_routes(self):
         got = T.resolve("{function_name}",
@@ -37,9 +37,9 @@ class TestAPlaceholderNameIsALostName(unittest.TestCase):
         self.assertEqual(got, ("entity_read", {"spec": "presence"}), got)
 
     def test_the_named_family_beside_the_placeholder_routes_flat(self):
-        got = T.resolve("{toolName}", {"tool_name": "exec", "action": "link",
-                                       "commands": "echo hi"})
-        self.assertEqual(got, ("entity_link", {"commands": "echo hi"}), got)
+        got = T.resolve("{toolName}", {"tool_name": "exec", "action": "call",
+                                       "object": "o", "method": "m"})
+        self.assertEqual(got, ("method_call", {"object": "o", "method": "m"}), got)
 
     def test_a_bare_placeholder_says_it_was_a_placeholder(self):
         with self.assertRaises(ValueError) as cx:

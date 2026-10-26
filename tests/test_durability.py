@@ -48,6 +48,13 @@ def _world():
     return f, est
 
 
+def _owe(f, eid):
+    """An owed `executes` edge (live): what a link left behind before #576
+    part F took the link door away -- the engine still lands or expires it."""
+    R.upsert(f.b, f.origin, MEMBRANE_NS + "tool:executor", N.EXEC_REL, eid,
+             "model-link", ts=time.time())
+
+
 class _Srv:
     def __init__(self, f, est, mem=None):
         self.efield = f
@@ -61,56 +68,6 @@ def _doc(est, spec: str) -> QuantumEntity:
     d = est._resolve_spec(spec)
     assert d is not None, f"missing doc: {spec}"
     return d
-
-
-class TestReceipts(unittest.TestCase):
-    def test_done_landing_writes_its_receipt(self):
-        """THE SYMMETRY RULE: the unlink-on-done's stamp carries the
-        receipt (op done + rc/outcome) ON the edge row -- the relations
-        journal persists it (replayed at boot)."""
-        f, est = _world()
-        srv = _Srv(f, est)
-        N.entity_link(srv, est, f, None, "tool:executor",
-                      ["echo receipt-check"])
-        rows = [d for _k, d in f.b.scan("relations")
-                if d.get("rel") == "executes"]
-        self.assertEqual(len(rows), 1)
-        self.assertTrue(rows[0]["superseded"])
-        r = rows[0]["receipt"]
-        self.assertEqual(r["op"], "done")
-        self.assertEqual(r["rc"], 0)
-        self.assertIn("receipt-check", r["head"])
-
-    def test_manual_withdraw_writes_its_receipt(self):
-        f, est = _world()
-        srv = _Srv(f, est)
-        # an owed edge (cap-continued so it stays live), then withdrawn
-        saved = N.EXEC_WALK_NODES_CAP
-        N.EXEC_WALK_NODES_CAP = 0
-        try:
-            w = QuantumEntity(eid=MEMBRANE_NS + "c:queued-w",
-                              cls=CLASS_TOOL,
-                              properties={"name": "q", "command": "x"})
-            est.docs[w.eid] = w
-            leaf = QuantumEntity(eid=MEMBRANE_NS + "c:qw-l",
-                                 cls=CLASS_TOOL,
-                                 properties={"name": "l",
-                                             "command": "true"})
-            est.docs[leaf.eid] = leaf
-            MultiParentOps.set_parents(est, w.eid, [leaf.eid])
-            N.entity_link(srv, est, f, None, "tool:executor",
-                          ["c:queued-w"])
-            rows = [d for _k, d in f.b.scan("relations")
-                    if d.get("rel") == "executes"]
-            self.assertFalse(rows[0]["superseded"], "still owed")
-            N.entity_unlink(srv, est, f, None, "tool:executor",
-                            ["c:queued-w"])
-            rows = [d for _k, d in f.b.scan("relations")
-                    if d.get("rel") == "executes"]
-            self.assertTrue(rows[0]["superseded"])
-            self.assertEqual(rows[0]["receipt"]["op"], "withdrawn")
-        finally:
-            N.EXEC_WALK_NODES_CAP = saved
 
 
 class TestExpiryWithReceipt(unittest.TestCase):
@@ -128,7 +85,7 @@ class TestExpiryWithReceipt(unittest.TestCase):
                                   properties={"name": "s",
                                               "command": "false"})
             est.docs[stale.eid] = stale
-            N.entity_link(srv, est, f, None, "tool:executor", ["c:stale"])
+            _owe(f, stale.eid)
             # forge age: the edge's first_ts pushed past the TTL
             _now = time.time()
             for key, d in list(f.b.scan("relations")):
@@ -159,7 +116,7 @@ class TestExpiryWithReceipt(unittest.TestCase):
                                   properties={"name": "f",
                                               "command": "true"})
             est.docs[fresh.eid] = fresh
-            N.entity_link(srv, est, f, None, "tool:executor", ["c:fresh"])
+            _owe(f, fresh.eid)
             self.assertEqual(N.expire_stale_edges(srv, est, f,
                                                   srv.membrane, ttl_s=60.0),
                              [])

@@ -27,6 +27,7 @@ import contextlib
 import contextvars
 import hashlib
 import json
+import re
 import secrets
 import time
 
@@ -38,6 +39,24 @@ errors = {"n": 0, "last": ""}     # a listener that raised (counted; never re-ra
 VIA_MAX = 16                      # the triggers a chain remembers (the relay header stays small)
 
 SMALL = 2048          # a value this long (serialized) keeps its old value; longer ones keep a hash only
+ARG_MAX = 64 * 1024   # a recorded call argument / a nested written value, in characters (operator, #576)
+TRUNCATED = "…<truncated>"
+_SECRET = re.compile(r"(token|key|passw|secret|auth|cookie|credential)", re.I)
+
+
+def call_record(args) -> dict:
+    """A call's arguments as the field keeps them: a value whose key looks secret is
+    <redacted>; a string longer than ARG_MAX is cut with a marker (operator, #576)."""
+    def clip(v, depth=3):
+        if isinstance(v, str):
+            return v if len(v) <= ARG_MAX else v[:ARG_MAX] + TRUNCATED
+        if isinstance(v, dict) and depth:
+            return {k: ("<redacted>" if _SECRET.search(str(k)) else clip(x, depth - 1)) for k, x in v.items()}
+        if isinstance(v, list) and depth:
+            return [clip(x, depth - 1) for x in v[:1000]]
+        s = json.dumps(v, default=str)
+        return v if len(s) <= ARG_MAX else s[:ARG_MAX] + TRUNCATED
+    return clip(dict(args or {}))
 
 
 def on_write(fn) -> None:
