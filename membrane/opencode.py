@@ -324,6 +324,16 @@ def loop_session(srv, agent: str) -> str:
     if runner is not None:
         try:
             store = runner.sessions
+            # #570: ONE session per entity -- the pass reuses it and starts it
+            # empty (the task text carries the entity's last verdicts), so
+            # nothing replays and the store keeps one pass per entity
+            with store._lock:
+                mine = [x for x in store.sessions.values() if x.get("agent") == agent]
+            if mine:
+                s = max(mine, key=lambda x: (x.get("time") or {}).get("updated") or 0)
+                runner.messages.delete(s["id"])
+                store.touch(s["id"])
+                return s["id"]
             s = store.create(title=agent)
             # create() already flushed the doc as 'build': stamp the
             # agent AND flush, or a restart revives the loop's session
@@ -338,6 +348,34 @@ def loop_session(srv, agent: str) -> str:
             print(f"[opencode] loop session create failed ({e}); "
                   "falling back to the bare key", file=sys.stderr)
     return f"loop::{agent}"
+
+
+def collapse_loop_sessions(runner) -> int:
+    """#570, once per boot: an older seat made a session per wake -- keep
+    each loop agent's newest, delete the rest with their messages. Chats
+    (agent build / plan / unset) are never touched. -> how many went."""
+    from .server import _lane_of
+    store = runner.sessions
+    with store._lock:
+        rows = list(store.sessions.values())
+    by: dict = {}
+    for x in rows:
+        agent = str(x.get("agent") or "")
+        if agent in ("", "build", "plan") or _lane_of(agent) not in ("listener", "plan"):
+            continue
+        by.setdefault(agent, []).append(x)
+    old = []
+    for xs in by.values():
+        xs.sort(key=lambda x: (x.get("time") or {}).get("updated") or 0)
+        old += [x["id"] for x in xs[:-1]]
+    if not old:
+        return 0
+    runner.messages.delete(*old)                  # one rewrite of the messages file
+    with store._lock:
+        for sid in old:
+            store.sessions.pop(sid, None)
+        store._flush()
+    return len(old)
 
 
 def proxy_bind_host(args) -> str:
@@ -1951,6 +1989,13 @@ def main() -> None:
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
+            try:                                   # #570: an older seat's session per wake, collapsed
+                _gone = collapse_loop_sessions(runner)
+                if _gone:
+                    print(f"[opencode] collapsed {_gone} old loop sessions (one per entity now)",
+                          file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] loop session collapse failed ({e})", file=sys.stderr)
             # THE MINDS' MODELS: the saved picks for the loops + the cortex
             # (+ the think dial; an explicit CLI on/off beats the file, auto defers)
             try:

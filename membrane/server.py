@@ -465,6 +465,35 @@ class MessageStore:
 
     _dirty_sessions: set | None = None
 
+    def delete(self, *sids: str) -> bool:
+        """Forget sessions' messages, in RAM and on disk (the merging flush
+        keeps whatever disk holds, so the file is edited here too -- once
+        for all the ids, #570)."""
+        with self._lock:
+            had = False
+            for sid in sids:
+                had = (self.msgs.pop(sid, None) is not None) or had
+                if self._dirty_sessions:
+                    self._dirty_sessions.discard(sid)
+            if self.path is None:
+                return had
+            try:
+                disk = json.loads(Path(self.path).read_text())
+            except Exception:
+                return had
+            if not isinstance(disk, dict) or not any(sid in disk for sid in sids):
+                return had
+            for sid in sids:
+                disk.pop(sid, None)
+            try:
+                tmp = self.path + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(disk, f)
+                os.replace(tmp, self.path)
+            except Exception:
+                pass
+            return True
+
     def flush(self) -> None:
         with self._lock:
             self._flush()
