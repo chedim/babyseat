@@ -131,11 +131,12 @@ def test_a_suggestion_shown_in_one_turn_and_adopted_in_the_next_is_a_hit(seat):
     assert lr.balance(cand.eid) == pytest.approx(b0 + 2 * __import__("membrane.ch_learn").ch_learn.WRITE_COST)
 
 
-def test_a_long_or_multiline_value_is_shown_as_data():
-    assert B.suggestion_text("membrane::Component:toy:d.note", "x" * 500) == \
-        "set membrane::Component:toy:d.note = <a 500-char string>"
-    assert B.suggestion_text("membrane::Component:toy:d.note", "a\nb") == \
-        "set membrane::Component:toy:d.note = <a 3-char string>"
+def test_a_long_value_is_a_preview_and_a_pointer():
+    # the operator's form: a one-line preview, `->` where the whole value is read
+    line = B.suggestion_text("membrane::Component:toy:d.note", "The meeting moved\nto Thursday " + "x" * 500,
+                             cand="membrane::Trigger:cand-3f2a")
+    assert line.startswith("set membrane::Component:toy:d.note = 'The meeting moved to Thursday ")
+    assert line.endswith("…' -> membrane::Trigger:cand-3f2a.predicted.value")
     assert B.suggestion_text("membrane::Component:toy:d.b", "short") == "set membrane::Component:toy:d.b = 'short'"
 
 

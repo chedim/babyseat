@@ -152,7 +152,7 @@ def note_turn(chain_id: str, conv: str) -> None:
             _TURNS.popitem(last=False)
 
 
-def suggestion_text(target_path: str, value, est=None) -> str:
+def suggestion_text(target_path: str, value, est=None, cand: str = "") -> str:
     """A proposal as the LLM reads it: `set <eid>.<prop> = <value>` or
     `call <method> on <object> with <args>`."""
     if target_path.endswith(".invoke") and isinstance(value, dict):
@@ -162,14 +162,16 @@ def suggestion_text(target_path: str, value, est=None) -> str:
             m = (est.docs or {}).get(meth)
             name = str(((m.properties or {}) if m is not None else {}).get("method_name") or "")
         return f"call {name or meth} on {value.get('object')} with {value.get('args') or {}!r}"[:240]
-    return f"set {target_path} = {_shown(value)}"[:240]
+    return f"set {target_path} = {_shown(value, cand)}"
 
 
-def _shown(v) -> str:
-    """A value as the banner may repeat it: a long or multi-line string is shown as
-    data (its size), never replayed -- it may have come from a fetched page (#583)."""
+def _shown(v, cand: str = "") -> str:
+    """A value as the banner may carry it: short ones whole; a long or multi-line
+    string as a one-line preview `-> <candidate>.predicted.value`, where the LLM
+    reads the whole of it (the banner is small; the operator's form, #583)."""
     if isinstance(v, str) and (len(v) > SUGGEST_VALUE_MAX or "\n" in v):
-        return f"<a {len(v)}-char string>"
+        head = " ".join(v.split())[:SUGGEST_VALUE_MAX]
+        return repr(head + "…") + (f" -> {cand}.predicted.value" if cand else "")
     return repr(v)
 
 
@@ -179,7 +181,7 @@ def _suggest(srv, tr, target_path: str, value) -> None:
         conv = _TURNS.get(ch or "")
         if not conv:
             return                                     # not an LLM turn: nobody to suggest to
-        line = suggestion_text(target_path, value, getattr(srv, "entity_store", None))
+        line = suggestion_text(target_path, value, getattr(srv, "entity_store", None), cand=tr.eid)
         rows = _box(srv, "_ch_suggest").setdefault(conv, [])
         if line not in rows:
             rows.append(line)
