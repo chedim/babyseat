@@ -183,6 +183,6 @@ def test_no_keep_alive_is_emitted_while_a_tool_runs():
 
 def test_the_tools_note_says_to_detach_long_commands():
     note = CA.TOOLS_NOTE
-    for word in ("4 minutes", "detached", "nohup", "entity_link",
+    for word in ("4 minutes", "detached", "nohup", "a method whose command",
                  "entity script", "5 minutes"):
         assert word in note, word

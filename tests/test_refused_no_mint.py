@@ -20,7 +20,7 @@ def test_mounted_name_accepts_families_and_legacy_members():
     assert toolset.mounted_name("entity_read") is True      # a legacy member
     assert toolset.mounted_name("entity/action-read") is True  # family/action
     assert toolset.mounted_name("membrane_exec") is True      # namespace prefix drops
-    assert toolset.mounted_name("entity-link") is True         # dashed legacy member spelling
+    assert toolset.mounted_name("entity-read") is True         # dashed legacy member spelling
     assert toolset.mounted_name("help") is True
 
 

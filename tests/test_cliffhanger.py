@@ -323,25 +323,6 @@ class TestFanOut(unittest.TestCase):
         self.assertNotIn("method_each", S.PHONE_TOOLS)
 
 
-class TestOldNameHabits(unittest.TestCase):
-    """The fan-out probe (2026-10-10): the seat called entity_link with
-    action='each' -- an old name with a family action."""
-
-    def test_an_old_member_name_with_a_family_action_routes_through_the_family(self):
-        self.assertEqual(T.resolve("entity_link", {"action": "each", "over": "ha light", "method": "status", "dry_run": "true"}),
-                         ("method_each", {"over": "ha light", "method": "status", "dry_run": "true"}))
-        self.assertEqual(T.resolve("entity_link", {"action": "call", "object": "o", "method": "m"})[0], "method_call")
-        self.assertEqual(T.resolve("entity_link", {"commands": "uptime"}), ("entity_link", {"commands": "uptime"}))
-
-    def test_link_refuses_a_bare_method_name(self):
-        srv, f, est, light, switch, port, aft, fan = _world()
-        N.method_define(srv, est, f, None, light.eid, "status", "echo st", read_only=True)
-        r = N.entity_link(srv, est, f, None, "", ["status"])
-        self.assertFalse(r["ok"])
-        self.assertIn("is a method", r["error"])
-        self.assertTrue(N.entity_link(srv, est, f, None, "", ["echo still-a-command"])["ok"])
-
-
 class TestFanOutMembersAndRemoval(unittest.TestCase):
     """The seat's first fan-out probe (2026-10-10): a light ran twice (two
     eids, one name), night-minted text tokens rode the sweep, and a cleanup
@@ -385,8 +366,6 @@ class TestFanOutMembersAndRemoval(unittest.TestCase):
         self.assertIn("method 'status'", why)
         self.assertIn("force=true", why)
         self.assertIsNone(N.removal_refusal(est, port.eid))
-        stub = N.entity_link(srv, est, f, None, "", ["echo a-stub"])
-        self.assertTrue(stub["ok"])
 
 
 class TestInterfaces(unittest.TestCase):

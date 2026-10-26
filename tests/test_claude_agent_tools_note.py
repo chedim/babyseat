@@ -1,7 +1,7 @@
 """The Claude rung told the operator it had "no tools to work" (2026-10-23):
 its built-in tools are off and nothing said that membrane's tools are its
-hands -- entity_link runs shell commands (read, edit, test, git, gh) and
-method_call runs an object's method. A fixed note now rides the system
+hands -- method_call runs an object's method (since #576 part F the only
+way to run a command: define the method first, then call it). A fixed note now rides the system
 prompt (fixed text, so the prompt cache still holds). It also says to ask the
 person for a decision as a Decision card on their board, not a list in chat
 (Memo kept asking in chat). And it says how to work, as Claude Code does:
@@ -26,7 +26,7 @@ def _system(system="the doctrine"):
 
 
 def test_the_note_names_the_hands():
-    for word in ("entity_link", "shell", "method_call", "worktree", "query",
+    for word in ("method_define", "method_call", "worktree", "query",
                  "Decision", "'status': 'open'", "pick"):
         assert word in CA.TOOLS_NOTE, word
 
@@ -50,18 +50,20 @@ def test_the_note_says_how_to_work():
 # now says the doctrine's way: reuse what you have, name or define what is
 # worth repeating, keep world things current with getter/tick scripts; raw
 # one-off commands are for exploring and for code work in a worktree.
+# 2026-10-26 (#576 part F): no one-shot commands at all -- define, then call.
 
 def test_the_note_teaches_programming_the_field():
     note = CA.TOOLS_NOTE
     for phrase in ("programming the field", "method_define", "method_call",
                    "method_each", "method_inspect", "entity_query",
-                   "'<label> :: <command>'", "getter_script", "tick_script",
-                   "tick_every", "doctrine", "worktree", "one-off"):
+                   "getter_script", "tick_script", "tick_every", "doctrine",
+                   "worktree", "no one-shot", "program the field first"):
         assert phrase in note, phrase
-    # reuse comes BEFORE a raw command
-    assert note.index("entity_query") < note.index("one-off")
-    # the raw-shell sales pitch is gone
+    # reuse comes BEFORE defining something new
+    assert note.index("entity_query") < note.index("method_define")
+    # the raw-shell sales pitch is gone, and so is the one-shot door
     assert "read files (cat, sed -n" not in note
+    assert "entity_link" not in note and "one-off" not in note
 
 
 def test_the_note_keeps_detach_and_the_decision_card():
@@ -155,7 +157,7 @@ def test_the_one_call_card_lands_on_a_real_store():
 
 
 # ---- the name map (2026-10-23): the doctrine names the seat's tool FAMILIES
-# (exec(action='link'), goal(action='plant')...), the rung has only the MCP
+# (exec(action='call'), goal(action='plant')...), the rung has only the MCP
 # tools; the note maps one onto the other, checked against both registries so
 # it can't go stale.
 

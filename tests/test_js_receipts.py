@@ -8,7 +8,6 @@ import types
 import unittest
 
 from membrane import jsexec as JS
-from membrane import mcp_server as M
 from membrane import toolset as T
 
 
@@ -93,20 +92,6 @@ class TestNoFakeValues(unittest.TestCase):
         r = JS.run("await Promise.resolve(0)", tab="t1")
         self.assertEqual(r["rc"], 0)
         self.assertTrue(r["text"].strip(), "rc 0 with nothing to show must still say something")
-
-
-class TestTheFailedLinkCarriesReason(unittest.TestCase):
-    def test_a_failed_line_shows_the_run_s_own_words(self):
-        """The exec link's receipt said bare 'FAILED -- error': the rc and
-        the run's text (its head) are the reason, both ride."""
-        line = M._failed_line("c:x", {"ok": False, "rc": 1, "outcome": "error",
-                                      "head": "error: SyntaxError: Unexpected identifier 'hi'",
-                                      "tail": ""})
-        self.assertIn("rc=1", line)
-        self.assertIn("SyntaxError", line)
-        line2 = M._failed_line("c:x", {"ok": False, "rc": None, "outcome": "error",
-                                       "head": "the call's code never ran", "tail": ""})
-        self.assertIn("the call's code never ran", line2)
 
 
 class TestActionsListing(unittest.TestCase):

@@ -107,14 +107,14 @@ class TestLaneGate(unittest.TestCase):
             self.assertIn(t, SRV._lane_tools("operator"))
             self.assertIn(t, SRV._lane_tools("listener"))
             self.assertNotIn(t, SRV._lane_tools("plan"))
-        for t in ("entity_link", "entity_unlink"):
+        for t in ("method_define", "method_call", "method_each"):
             self.assertIn(t, SRV._lane_tools("operator"))
             self.assertIn(t, SRV._lane_tools("listener"))
             self.assertNotIn(t, SRV._lane_tools("plan"))
-        self.assertIsNone(SRV._lane_refusal("entity_link", "operator"))
-        self.assertIn("plan mode", SRV._lane_refusal("entity_link", "plan"))
+        self.assertIsNone(SRV._lane_refusal("method_call", "operator"))
+        self.assertIsNotNone(SRV._lane_refusal("method_call", "plan"))
         names = _reach("build")
-        self.assertIn("entity_link", names)
+        self.assertIn("method_call", names)
         self.assertIn("intend", SRV._lane_tools("operator"))
         self.assertNotIn("intend", SRV._lane_tools("listener"))
 
@@ -125,7 +125,7 @@ class TestLaneGate(unittest.TestCase):
         self.assertIn("query", SRV._lane_tools("plan"))
         self.assertIn("learn", SRV._lane_tools("plan"))
         self.assertNotIn("intend", SRV._lane_tools("plan"))
-        for t in ("entity_add", "entity_edit", "entity_link"):
+        for t in ("entity_add", "entity_edit", "method_call"):
             self.assertNotIn(t, SRV._lane_tools("plan"))
 
     def test_cross_lane_call_refuses_honestly(self):

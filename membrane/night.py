@@ -1869,7 +1869,7 @@ def _exec_command_doc(srv, est, fld, mem, doc, args: dict | None = None,
     if missing:
         return {"ok": False, "eid": doc.eid,
                 "error": "needs args: " + ", ".join(missing)
-                         + " -- exec(action='link', commands=<name>, args={"
+                         + " -- pass them: args={"
                          + ", ".join(f"'{m}': ..." for m in missing) + "})"}
     budget = [0]
     out = _exec_node(srv, est, fld, mem, doc, {}, budget, args=args, ctx=ctx)
@@ -2243,59 +2243,6 @@ def lint_command(spec: str) -> str | None:
     return None
 
 
-def command_specs(commands) -> list:
-    """The link/unlink `commands` arg -> a list of command specs. ONE
-    string is ONE command: the comprehension used to iterate it letter by
-    letter -- the first restored loop links ran '1', 'a', 'g' (rc 127) from
-    commands='ag1' (2026-10-07)."""
-    if commands is None:
-        return []
-    if isinstance(commands, (str, bytes)):
-        text = commands.decode() if isinstance(commands, bytes) else commands
-        commands = [text]
-        t = text.strip()
-        if t.startswith("[") and t.endswith("]"):
-            # a JSON-encoded list in a string (exhibit: '["uname -a"]' ran
-            # literally, rc 127); a shell test like `[ -f x ] && ...` is
-            # not valid JSON and stays one command
-            try:
-                import json as _json
-                dec = _json.loads(t)
-                if isinstance(dec, list):
-                    commands = dec
-            except ValueError:
-                # THE GHOST SPECS (issue #87): a command name the model
-                # wrapped as a list/array -- "['pwd-ls-73f4']" (single
-                # quotes, JSON refuses) and "[pwd-ls-73f4]" (bare, not even
-                # a literal) -- minted entities whose NAME was the repr.
-                # ast handles the single-quoted form; the bare bracketed
-                # token (one word, no spaces/operators) strips its brackets.
-                # A shell test `[ -f x ] && echo y` has spaces/operators
-                # (and doesn't even END with ']'), so it never reaches here.
-                import ast as _ast
-                try:
-                    dec = _ast.literal_eval(t)
-                    if isinstance(dec, list):
-                        commands = dec
-                except (ValueError, SyntaxError):
-                    inner = t[1:-1].strip()
-                    if inner and re.fullmatch(r"[A-Za-z0-9._@+-]+", inner):
-                        commands = [inner]
-    elif not isinstance(commands, (list, tuple, set)):
-        commands = [commands]
-    out = []
-    for c in commands:
-        if isinstance(c, dict):
-            # {name, command}: a labelled command (never its str() repr)
-            cmd = str(c.get("command") or c.get("cmd") or "").strip()
-            name = str(c.get("name") or c.get("label") or "").strip()
-            c = f"{name} :: {cmd}" if (name and cmd) else cmd
-        c = str(c or "").strip()
-        if c:
-            out.append(c)
-    return out
-
-
 # a label may be colon-segmented like the seat's own names ('seat:battery.soc
 # :: <command>'): without it the whole line went to the shell and died
 # 'seat:battery.soc: command not found' (2026-10-11 -- the seat took it for
@@ -2362,49 +2309,15 @@ def _action_of(cmd: str) -> str:
     return c.strip() or cmd
 
 
-def command_name(cmd: str) -> str:
-    """An ad-hoc command line's entity name: one plain word keeps its name;
-    anything longer is '<head>-<hash6>' -- distinct per command line,
-    STABLE for the same line (a re-link is the same entity). Every
-    `set -a; ...; curl` was ONE entity, shell:set, each run overwriting
-    the last (158 mentions, 2026-10-08)."""
-    cmd = " ".join((cmd or "").split())
-    act = _action_of(cmd)
-    head = re.match(r"[A-Za-z0-9_-]+", act)
-    head_s = (head.group(0).lower() if head else "cmd")[:24] or "cmd"
-    if re.fullmatch(r"[A-Za-z0-9._-]+", cmd):
-        return head_s
-    # the salient word after the verb: a url's path tail, else the first
-    # plain argument (flags, quotes and variables skipped)
-    sal = ""
-    url = re.search(r"https?://\S+|\$\{?[A-Z_]+\}?(/[\w./-]+)", act)
-    if url:
-        path = (url.group(1) or url.group(0)).split("?")[0].strip("\"'")
-        parts = [p for p in re.split(r"[/.]", path) if p and not p.startswith("$") and p not in ("http:", "https:")]
-        sal = "-".join(parts[-2:])
-    else:
-        for tok in act.split()[1:]:
-            t = tok.strip("\"'")
-            if t and not t.startswith(("-", "$", "{", "<", ">", "|", "&")) and re.match(r"[A-Za-z]", t):
-                sal = t
-                break
-    sal = re.sub(r"[^a-z0-9_]+", "-", sal.lower()).strip("-")[:24]
-    h = hashlib.sha1(cmd.encode()).hexdigest()[:4]
-    return f"{head_s}-{sal}-{h}" if sal else f"{head_s}-{h}"
-
-
-def _norm_cmd(c: str) -> str:
-    return " ".join((c or "").split())
-
-
 LIBRARY_MAX = 12
 _JUNK_NAME = re.compile(r"^(?:[.\-]|cmd-|set-|export-)")
 
 
 def command_library(est, k: int = LIBRARY_MAX) -> str | None:
-    """'your commands: ha-states x14, light-on{entity} x3, ...' -- the seat's
-    own reusable commands, most used first (it cannot reuse what it cannot
-    see). Hash-junk names (the '.-01c5d8' era) stay out."""
+    """'your methods: ha light.turn_on{level} x14, ...' -- the seat's own
+    methods, most used first (it cannot reuse what it cannot see). Since #576
+    part F a method is the only way the LLM runs a command, so a bare command
+    entity (a script's) is not listed. Hash-junk names stay out."""
     if est is None:
         return None
     rows = []
@@ -2413,180 +2326,15 @@ def command_library(est, k: int = LIBRARY_MAX) -> str | None:
         cmd = str(p.get("command") or "")
         n = int(p.get("runs") or 0)
         name = str(p.get("name") or "")
-        if not cmd or n < 1 or not name or _JUNK_NAME.match(name):
+        if not p.get("method_name") or not cmd or n < 1 or not name or _JUNK_NAME.match(name):
             continue
-        if p.get("method_name"):
-            name = str(p.get("name") or name)                 # 'ha light.turn_on'
-        rows.append((n, float(p.get("last_run_ts") or 0), name,
-                     command_params(cmd), bool(p.get("method_name"))))
+        rows.append((n, float(p.get("last_run_ts") or 0), name, command_params(cmd)))
     if not rows:
         return None
     rows.sort(key=lambda r: (-r[0], -r[1]))
-    items = []
-    for n, _, nm, ps, is_m in rows[:k]:
-        body = f"{nm}{('{' + ','.join(ps) + '}') if ps else ''} x{n}"
-        if is_m:
-            # issue #21: a method re-runs through ITS door -- 'exec link
-            # commands=<name>' used to run the raw template with no call
-            # context and lie 'FAILED -- not-found'
-            body += f" [a method: exec action=call object='{nm.rsplit('.', 1)[0]}']"
-        items.append(body)
-    return ("your commands (re-run by name: exec link commands=<name>, args for {params}): "
-            + ", ".join(items))
-
-
-def entity_link(srv, est, fld, mem, executor_spec: str,
-                commands, create: bool = True, args: dict | None = None) -> dict:
-    """THE LINK HAND (the model's exec door, 2026-10-06): link command
-    entities to the executor and RUN them inline -- the edge (a
-    relations triple, rel='executes') IS THE QUEUE: live = owed,
-    SUPERSEDED = processed (the unlink-on-done covenant: every run --
-    success OR error -- stamps its edge done after landing the residue;
-    re-link = the deliberate re-queue; no auto-retry). Residue lands on
-    each command entity; the RETURN carries every command's post-run
-    state (the sync rule: the tool answers AFTER the triggers processed
-    the entities).
-
-    On-the-fly creation: a spec that resolves to nothing becomes a new
-    Tool entity whose `command` prop is the spec itself (one-call
-    authoring; `create=False` refuses instead). The batch cap and the
-    live-edge (queue-depth) cap are hard errors -- never a silent
-    partial link."""
-    if est is None:
-        return {"ok": False, "error": "entity layer unavailable"}
-    specs = command_specs(commands)
-    if not specs:
-        return {"ok": False, "error": "commands required"}
-    for _sp in specs:
-        _bad = lint_command(_sp)
-        if _bad:
-            return {"ok": False, "error": f"refused {_sp[:60]!r}: {_bad}"}
-        # a bare word that names a defined METHOD is not a shell command (it ran
-        # as 'sh: status: not found' and minted a colliding stub, 2026-10-10)
-        if est is not None and re.fullmatch(r"[A-Za-z_][\w.-]*", _sp.strip()):
-            _res = est._resolve_spec(_sp.strip())
-            # issue #21 (THE BANNER LISTED IT): a spec resolving BY NAME to a
-            # method doc must refuse here too -- the old guard only fired on
-            # `_resolve_spec(...) is None`, while a banner-listed method
-            # resolves (properties['name'] == the word) and then ran through
-            # the ctx-less link lane: {{self.*}} literal, step nodes skipped,
-            # shell rc=127 relabeled 'not-found'
-            _mn = (((est.docs or {}).get(_res.eid, _res).properties or {})
-                   .get("method_name")) if _res is not None else None
-            if _mn:
-                _own = str(_res.eid).rsplit(".", 1)[0].split(":")[-1]
-                return {"ok": False,
-                        "error": f"{_sp!r} is a method, not a command line -- "
-                                 f"exec(action='call', object='{_own}', method='{_mn}')"}
-            if _res is None:
-                _nm = _sp.strip().split(".")[-1]
-                if any((d.properties or {}).get("method_name") == _nm for d in list((est.docs or {}).values())):
-                    return {"ok": False, "error": f"{_sp!r} is a method, not a command line -- "
-                                                  f"exec(action='call', object=<entity>, method='{_nm}')"}
-    if len(specs) > EXEC_LINK_BATCH_CAP:
-        return {"ok": False,
-                "error": f"failed to link: batch cap {EXEC_LINK_BATCH_CAP} "
-                         f"(got {len(specs)}) -- link the rest next turn"}
-    ex_ent = est._resolve_spec(executor_spec or EXECUTOR_EID)
-    if ex_ent is None:
-        return {"ok": False, "error": f"no entity matches executor "
-                                      f"{executor_spec!r}"}
-    ex_key = ex_ent.eid
-    be, origin = _relations_backend_of(srv, fld)
-    if be is not None:
-        from . import relations as R
-        live = [e for e in R.of(be, origin, ex_key, EXEC_REL)
-                if e.get("subj") == ex_key and not e.get("superseded")]
-        if len(live) + len(specs) > EXEC_EDGES_CAP:
-            return {"ok": False,
-                    "error": f"failed to link: the executor's edge cap "
-                             f"{EXEC_EDGES_CAP} is reached ({len(live)} "
-                             f"live) -- unlink first"}
-    linked, runs = [], []
-    for spec in specs:
-        label, cmdline = split_label(spec)
-        if label:
-            # a LABELLED command: the label names it, the line is its
-            # command (re-linking the label with a new line updates it)
-            ent = est._resolve_spec(MEMBRANE_NS + overlay_key(E.canon("c", label)))
-            if ent is not None:
-                (ent.properties or {})["command"] = cmdline
-        else:
-            ent = est._resolve_spec(spec)
-        reused = False
-        if ent is None and not label:
-            # RE-USE (2026-10-09): the same command line is the SAME entity
-            # (its runs and history kept) -- the fly-mint below used to
-            # rebuild it from scratch on every link; and a line identical to
-            # a labelled command re-runs that one
-            ent = (est.docs or {}).get(MEMBRANE_NS + overlay_key(E.canon("c", command_name(cmdline))))
-            if ent is None:
-                want = _norm_cmd(cmdline)
-                ent = next((d for d in (est.docs or {}).values()
-                            if _norm_cmd(str((d.properties or {}).get("command") or "")) == want),
-                           None)
-            reused = ent is not None
-        created = False
-        if ent is None:
-            if not create:
-                runs.append({"ok": False, "spec": spec,
-                             "error": f"no entity matches {spec!r}"})
-                continue
-            # ON-THE-FLY: the spec itself is the command line.
-            name = label or command_name(cmdline)
-            ent = QuantumEntity(eid=MEMBRANE_NS + overlay_key(
-                                    E.canon("c", name)),
-                                cls=CLASS_TOOL,
-                                properties={"name": name,
-                                            "command": cmdline,
-                                            "silent_birth": True})
-            est.docs[ent.eid] = ent
-            created = True
-        if created:
-            # THE FLY-MINTED DOC's command IS its spec (already set).
-            pass
-        # THE STALE GUARD BELT (issue #21): any resolution path (label, reuse)
-        # that lands on a method doc stops here -- honest door, no run, no
-        # runs bump on a receipt that lied.
-        _mn = (ent.properties or {}).get("method_name")
-        if _mn:
-            _own = str(ent.eid).rsplit(".", 1)[0].split(":")[-1]
-            return {"ok": False,
-                    "error": f"'{label or spec}' is a method, not a command line -- "
-                             f"exec(action='call', object='{_own}', method='{_mn}')"}
-        # THE EDGE: existence = the link action (re-link bumps n, the
-        # dedupe is the store's own cas merge).
-        if be is not None:
-            from . import relations as R
-            R.upsert(be, origin, ex_key, EXEC_REL, ent.eid, "model-link",
-                     ts=time.time())
-        linked.append({"eid": ent.eid, "created": created})
-        run = _exec_command_doc(srv, est, fld, mem, ent, args=args)
-        _p = ent.properties or {}
-        _p["runs"] = int(_p.get("runs") or 0) + 1
-        _p["last_run_ts"] = time.time()
-        ent.properties = _p
-        run.update({"name": _p.get("name") or ent.eid, "reused": reused or (not created and not label),
-                    "created": created, "labelled": bool(label), "run_n": _p["runs"],
-                    "params": command_params(str(_p.get("command") or ""))})
-        # THE UNLINK-ON-DONE (the queue's honest close): processed --
-        # success OR failure -- stamps the edge superseded WITH ITS
-        # RECEIPT (the seat's symmetry rule: a cancellation as durable
-        # as the debt). A pending-degrade (run continued by the reaper)
-        # keeps the edge live until the reaper's landing.
-        if not run.get("continued"):
-            _supersede_edge(be, origin, ex_key, ent.eid,
-                            receipt={"op": "done", "rc": run.get("rc"),
-                                     "outcome": run.get("outcome"),
-                                     "head": str(run.get("head") or "")[:80],
-                                     "ms": run.get("ms"),
-                                     "why": str(run.get("error") or "")[:160]})
-        runs.append(run)
-    _audit(mem, {"event": "agent-entity-link", "origin": "mcp",
-                 "eid": ex_ent.eid, "ok": True,
-                 "commands": [l["eid"] for l in linked]})
-    return {"ok": True, "executor": ex_ent.eid,
-            "linked": linked, "runs": runs}
+    items = [f"{nm}{('{' + ','.join(ps) + '}') if ps else ''} x{n}" for n, _, nm, ps in rows[:k]]
+    return ("your methods (call one: exec(action='call', object=<an entity of its owner>, "
+            "method=<name>, args for {params})): " + ", ".join(items))
 
 
 # ---- CLIFFHANGER: membrane as an OOP language (2026-10-10, the operator:
@@ -3000,6 +2748,51 @@ def method_inspect(est, obj_spec: str, method: str, args=None) -> dict:
     return out
 
 
+# ---- PROGRAM THE FIELD FIRST (#576 part F, the operator 2026-10-26: "no one-shot
+# commands ANYWHERE, everything MUST be done by programming the field first and
+# then using it"; "if the call to executor or remote executor comes directly thru
+# llm it should be refused"). The method routes (the LLM's only door to them)
+# ask this before a call or a fan-out; a method the LLM defined elsewhere that
+# uses the executor inside its command or steps still runs.
+PROGRAM_FIRST = "program the field first: define a method on an entity, then call it"
+
+
+def direct_exec_refusal(est, obj_spec: str, method: str) -> str | None:
+    """The refusal for a call straight at the executor: the object is
+    tool:executor or remote_executor, inherits from tool:executor, or is a
+    remote_executor implementation called on the interface's own method
+    (exec). None: the call may go."""
+    obj = est._resolve_spec(obj_spec or "") if est is not None else None
+    if obj is None:
+        return None
+    chain = {a.eid for a in [obj] + ancestors(est, obj)}
+    ex = est._resolve_spec(EXECUTOR_EID)
+    rx = est._resolve_spec(REMOTE_EXECUTOR)
+    hit = None
+    if ex is not None and ex.eid in chain:
+        hit = short_name_of(ex)
+    elif rx is not None and obj.eid == rx.eid:
+        hit = REMOTE_EXECUTOR
+    elif rx is not None and rx.eid in chain and (method or "").strip() in {
+            x["name"] for x in abstract_methods(est, obj) if x["interface"] == rx.eid}:
+        hit = f"{short_name_of(obj)}.{(method or '').strip()} ({REMOTE_EXECUTOR})"
+    if hit is None:
+        return None
+    return f"refused: {hit} is the executor, called directly -- {PROGRAM_FIRST}"
+
+
+def direct_each_refusal(est, over: str, method: str) -> str | None:
+    """direct_exec_refusal for a fan-out: the class itself, or any member."""
+    why = direct_exec_refusal(est, over, method) if "*" not in (over or "") else None
+    if why:
+        return why
+    for m in members_of(est, over) if est is not None else []:
+        why = direct_exec_refusal(est, m.eid, method)
+        if why:
+            return why
+    return None
+
+
 def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None,
                 _depth: int = 0) -> dict:
     prep = _prepare_call(est, obj_spec, method, args, _depth)
@@ -3029,7 +2822,11 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
     mp["last_run_ts"] = time.time()
     if run.get("rc") == 0:
         mp["ok_runs"] = int(mp.get("ok_runs") or 0) + 1
+    # THE CALL FOR THE LEARNER (#576 part F): which object, the args in full --
+    # the write event of this upsert carries it
+    mp["last_call"] = {"object": obj.eid, "args": dict(args or {})}
     m.properties = mp
+    est.upsert(m, embedder=None)
     _audit(mem, {"event": "agent-method-call", "origin": "mcp", "eid": m.eid,
                  "object": obj.eid, "rc": run.get("rc"), "ok": run.get("rc") == 0})
     # THE RECEIPT ON THE OBJECT: its call ring + a field event about it (a
@@ -3193,62 +2990,6 @@ def removal_refusal(est, spec: str) -> str | None:
 def short_name_of(obj) -> str:
     from .classes import short_name
     return short_name(obj.eid)
-
-
-def entity_unlink(srv, est, fld, mem, executor_spec: str, commands) -> dict:
-    """THE UNLINK HAND: supersede the executor's `executes` edges to the
-    named commands (mark-don't-delete, the relation store's own idiom).
-    The residue props stay on the command docs; only the edge goes. The
-    unlinked-but-never-run command (a pending degrade) loses also its
-    pending_run_by marker."""
-    if est is None:
-        return {"ok": False, "error": "entity layer unavailable"}
-    specs = command_specs(commands)
-    ex_ent = est._resolve_spec(executor_spec or EXECUTOR_EID)
-    if ex_ent is None:
-        return {"ok": False, "error": f"no entity matches executor "
-                                      f"{executor_spec!r}"}
-    ex_key = ex_ent.eid
-    be, origin = _relations_backend_of(srv, fld)
-    removed, misses = [], []
-    for spec in specs:
-        ent = est._resolve_spec(spec)
-        if ent is None:
-            misses.append(spec)
-            continue
-        hit = False
-        if be is not None:
-            from . import relations as R
-            for e in R.of(be, origin, ex_key, EXEC_REL):
-                if e.get("subj") == ex_key and e.get("obj") == ent.eid \
-                        and not e.get("superseded"):
-                    key = R.relation_key(origin, ex_key, EXEC_REL, ent.eid)
-                    doc = be.get("relations", key)
-
-                    def _super(cur, k=key):
-                        if cur is not None:
-                            cur["superseded"] = True
-                            cur["last_ts"] = time.time()
-                            # THE WITHDRAW'S RECEIPT (the symmetry rule):
-                            cur["receipt"] = {"op": "withdrawn",
-                                              "ts": cur["last_ts"],
-                                              "why": "entity_unlink"}
-                        return cur
-                    be.cas_update("relations", key, _super)
-                    hit = True
-        elif (ent.properties or {}).get("pending_run_by") == ex_key:
-            props = ent.properties or {}
-            props.pop("pending_run_by", None)
-            ent.properties = props
-            est.upsert(ent, embedder=None)
-            hit = True
-        (removed if hit else misses).append(ent.eid if hit else spec)
-    if removed or specs:
-        _audit(mem, {"event": "agent-entity-unlink", "origin": "mcp",
-                     "eid": ex_ent.eid, "ok": True,
-                     "removed": removed, "misses": misses})
-    return {"ok": True, "executor": ex_ent.eid,
-            "removed": removed, "misses": misses}
 
 
 def executor_value(est, exec_spec: str = EXECUTOR_EID, be=None,
@@ -3833,9 +3574,9 @@ def seed_clock_entity(est) -> bool:
 
 def seed_executor_entity(est) -> bool:
     """The boot seeding: plant `tool:executor` ONCE (idempotent -- the
-    model's edits survive every restart). The exec organ: commands link
-    to it (`entity_link` / the 'executes' edges) and the engine runs
-    them inline; FALSE when there is no store or it already lives."""
+    model's edits survive every restart). The exec organ: the engine runs
+    command entities through it (methods, scripts; the LLM never calls it
+    directly, #576 part F); FALSE when there is no store or it already lives."""
     if est is None:
         return False
     eid = MEMBRANE_NS + EXECUTOR_EID
@@ -3844,9 +3585,10 @@ def seed_executor_entity(est) -> bool:
     from .entities import CLASS_TOOL, QuantumEntity
     est.upsert(QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={
         "name": "executor",
-        "summary": "the exec organ: link command entities to it "
-                   "(entity_link) -- the edge runs them, the result "
-                   "lands on the command",
+        "summary": "the exec organ: methods and scripts run their "
+                   "commands through it, the result lands on the "
+                   "command; it is never called directly -- define a "
+                   "method on an entity, then call it",
         "silent_birth": True}))
     try:
         est.flush()

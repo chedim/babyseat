@@ -16,9 +16,10 @@ class TestATemplatePlaceholderNameIsNoName(unittest.TestCase):
                                             "args_json": '{"action": "read", "name": "presence"}'})
         self.assertEqual(got, T.resolve("entity", {"action": "read", "name": "presence"}))
 
-    def test_a_named_exec_with_its_command_runs_it(self):
-        got = T.resolve("{function_name}", {"name": "exec ls -a .membrane/self/", "params": ""})
-        self.assertEqual(got, T.resolve("exec", {"action": "link", "command": "ls -a .membrane/self/"}))
+    def test_a_named_exec_with_a_command_line_never_runs_it(self):
+        # #576 part F: no one-shot commands -- free text after 'exec' is refused
+        with self.assertRaises(ValueError):
+            T.resolve("{function_name}", {"name": "exec ls -a .membrane/self/", "params": ""})
 
     def test_nothing_to_route_by_says_it_is_a_placeholder_with_an_example(self):
         with self.assertRaises(ValueError) as e:
@@ -26,7 +27,7 @@ class TestATemplatePlaceholderNameIsNoName(unittest.TestCase):
         msg = str(e.exception)
         self.assertIn("placeholder", msg.lower())
         self.assertIn("{function_name}", msg)
-        self.assertIn('"action": "link", "command": "ls -a"', msg)   # a real, filled-in call
+        self.assertIn('"action": "call", "object": "presence"', msg)   # a real, filled-in call
 
     def test_other_placeholder_spellings(self):
         for name in ("{fn_name}", "{ function-name }", "{tool_name}"):

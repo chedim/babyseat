@@ -289,19 +289,21 @@ class TestTheKilledJobSpeaksItsWhy(unittest.TestCase):
         self.assertIn("timeout", err)
         self.assertIn("1", err)
 
-    def test_the_executors_summary_carries_it(self):
+    def test_a_method_call_carries_it(self):
+        # since #576 part F a command runs as a method the model defined
         import membrane.night as N
+        from membrane.entities import CLASS_COMPONENT
         f, est = self._seedf()
         srv = self._srv(f, est)
+        obj = est.docs[est.add(cls=CLASS_COMPONENT, name="napper", summary="x")["eid"]]
+        N.method_define(None, est, None, None, obj.eid, "nap", "sleep 5")
         saved = N.EXEC_TIMEOUT_S
         N.EXEC_TIMEOUT_S = 0.5
         try:
-            r = N.entity_link(srv, est, f, None, "tool:executor",
-                              ["sleep 5"])
-            lands = [x for x in (r.get("runs") or []) if x.get("rc") == -1]
-            self.assertTrue(lands, r)
-            self.assertFalse(lands[0].get("ok"))
-            self.assertIn("timeout", lands[0].get("error") or "")
+            r = N.method_call(srv, est, f, None, obj.eid, "nap")
+            self.assertEqual(r.get("rc"), -1, r)
+            self.assertFalse(r.get("ok"))
+            self.assertIn("timeout", r.get("error") or "")
         finally:
             N.EXEC_TIMEOUT_S = saved
 
@@ -312,7 +314,15 @@ class TestTheKilledJobSpeaksItsWhy(unittest.TestCase):
         saved = N.EXEC_TIMEOUT_S
         N.EXEC_TIMEOUT_S = 0.5
         try:
-            N.entity_link(srv, est, f, None, "tool:executor", ["sleep 5"])
+            import time
+            from membrane import relations as R
+            from membrane.entities import CLASS_TOOL, QuantumEntity
+            c = QuantumEntity(eid=NS + "c:sleeper", cls=CLASS_TOOL,
+                              properties={"name": "sleeper", "command": "sleep 5"})
+            est.docs[c.eid] = c
+            # an owed edge a link left behind before #576 part F: the reaper lands it
+            R.upsert(f.b, f.origin, NS + "tool:executor", N.EXEC_REL, c.eid,
+                     "model-link", ts=time.time())
             N.run_pending_links(srv, est, f, None,
                                 NS + "tool:executor")
         finally:

@@ -37,9 +37,12 @@ class TestTheCallInTheNameSlot(unittest.TestCase):
     and wait', note #47844)."""
 
     def test_the_whole_call_riding_the_name_runs(self):
-        leg, args = T.resolve(_SH1_NAME, {})
-        self.assertEqual(leg, "entity_link", args)
-        self.assertEqual(args, {"commands": _SH1_CMDS}, args)
+        # the exhibit was a one-shot link, gone since #576 part F: no family
+        # owns 'link' any more, so it is refused, never run
+        with self.assertRaises(ValueError) as cx:
+            T.resolve(_SH1_NAME, {})
+        self.assertIn("one of entity, exec", str(cx.exception))
+        self.assertTrue(_SH1_CMDS)
 
     def test_a_named_inner_call_unstrangles(self):
         leg, args = T.resolve(

@@ -20,6 +20,7 @@ entity inheritance IS the pipeline; the `executes` edge IS the queue:
 
 import os
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -31,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from _ef_fakes import FakeEmbedder  # noqa: E402
 from membrane import night as N  # noqa: E402
+from membrane import relations as R  # noqa: E402
 from membrane.efield import EntityField  # noqa: E402
 from membrane.efstore import MemBackend  # noqa: E402
 from membrane.entities import (EntityStore, QuantumEntity, CLASS_TOOL,  # noqa: E402
@@ -66,71 +68,6 @@ def _cmd(est, eid: str, command: str, name: str = "") -> QuantumEntity:
                                   "silent_birth": True})
     est.docs[e.eid] = e
     return e
-
-
-class TestUnlinkOnDone(unittest.TestCase):
-    def test_success_supersedes_and_residue_stays(self):
-        f, est = _world()
-        srv = _Srv(f, est)
-        r = N.entity_link(srv, est, f, None, "tool:executor",
-                          ["echo queued-ok"])
-        self.assertTrue(r["ok"])
-        # THE RUN LANDED -> the edge is DONE (processed)
-        v = N.executor_value(est, "tool:executor", be=f.b, origin=f.origin)
-        self.assertEqual(v["pending"], [])
-        self.assertEqual(len(v["done"]), 1)
-        self.assertEqual(v["done"][0]["run_rc"], 0)
-        # THE HISTORY: the row stays (mark-don't-delete), n=1
-        rows = [d for _k, d in f.b.scan("relations")]
-        self.assertEqual(rows[0]["n"], 1)
-        self.assertTrue(rows[0]["superseded"])
-
-    def test_error_supersedes_too(self):
-        """PROCESSED, NOT SUCCEEDED: a failing command's edge is stamped
-        done -- no auto-retry (the re-linking is the model's deliberate
-        re-queue)."""
-        f, est = _world()
-        srv = _Srv(f, est)
-        r = N.entity_link(srv, est, f, None, "tool:executor",
-                          ["false"])
-        self.assertTrue(r["link_ok"] if "link_ok" in r else r["ok"])
-        run = r["runs"][0]
-        # run_command_entity reports honestly
-        self.assertNotEqual(run.get("rc"), 0)
-        v = N.executor_value(est, "tool:executor", be=f.b, origin=f.origin)
-        self.assertEqual(v["pending"], [], "a failed run is PROCESSED")
-        self.assertEqual(len(v["done"]), 1)
-        self.assertNotEqual(v["done"][0]["run_rc"], 0)
-        # the re-link is the DELIBERATE retry (re-queue + re-run)
-        r2 = N.entity_link(srv, est, f, None, "tool:executor", ["false"])
-        self.assertTrue(r2["ok"])
-        v2 = N.executor_value(est, "tool:executor", be=f.b, origin=f.origin)
-        self.assertEqual(v2["done"][0]["n_times"], 2)
-
-    def test_late_landing_keeps_the_edge_till_done(self):
-        """A cap-continued walk keeps its edge LIVE (owed) -- only the
-        landing supersedes."""
-        f, est = _world()
-        srv = _Srv(f, est)
-        saved = N.EXEC_WALK_NODES_CAP
-        N.EXEC_WALK_NODES_CAP = 0     # nothing runs this pass
-        try:
-            leaf = _cmd(est, "c:lazy", "echo later")
-            w = QuantumEntity(eid=MEMBRANE_NS + "c:chainhead",
-                              cls=CLASS_TOOL,
-                              properties={"name": "chain", "command": "x"})
-            est.docs[w.eid] = w
-            MultiParentOps.set_parents(est, w.eid, [leaf.eid])
-            r = N.entity_link(srv, est, f, None, "tool:executor",
-                              ["c:chainhead"])
-            self.assertTrue(r["ok"])
-            self.assertTrue(r["runs"][0].get("continued"))
-            v = N.executor_value(est, "tool:executor", be=f.b,
-                                 origin=f.origin)
-            self.assertEqual([e["eid"] for e in v["pending"]],
-                             [w.eid], "continued = still owed")
-        finally:
-            N.EXEC_WALK_NODES_CAP = saved
 
 
 class TestISAChain(unittest.TestCase):
@@ -270,35 +207,6 @@ class TestISAChain(unittest.TestCase):
 
 
 class TestQueueShape(unittest.TestCase):
-    def test_pending_done_split_after_mixed_work(self):
-        """One link lands (done), one cap-continues (pending): the
-        value's two lists tell the queue's truth."""
-        f, est = _world()
-        srv = _Srv(f, est)
-        saved = N.EXEC_WALK_NODES_CAP
-        N.EXEC_WALK_NODES_CAP = 1
-        try:
-            r1 = N.entity_link(srv, est, f, None, "tool:executor",
-                               ["echo done-one"])
-            self.assertTrue(r1["ok"])
-            w = QuantumEntity(eid=MEMBRANE_NS + "c:wq",
-                              cls=CLASS_TOOL,
-                              properties={"name": "wq", "command": "true"})
-            est.docs[w.eid] = w
-            l = _cmd(est, "c:wq-l", "echo x")
-            MultiParentOps.set_parents(est, w.eid, [l.eid])
-            r2 = N.entity_link(srv, est, f, None, "tool:executor",
-                               ["c:wq"])
-            self.assertTrue(r2["ok"])
-            self.assertTrue(r2["runs"][0].get("continued"))
-            v = N.executor_value(est, "tool:executor", be=f.b,
-                                 origin=f.origin)
-            self.assertEqual([e["eid"] for e in v["pending"]],
-                             [MEMBRANE_NS + "c:wq"])
-            self.assertEqual(len(v["done"]), 1)
-        finally:
-            N.EXEC_WALK_NODES_CAP = saved
-
     def test_reaper_lands_the_owed_and_supersedes(self):
         """run_pending_links: the reaper runs the queue's owed nodes and
         stamps them done (the same unlink-on-done)."""
@@ -307,12 +215,13 @@ class TestQueueShape(unittest.TestCase):
         saved = N.EXEC_WALK_NODES_CAP
         N.EXEC_WALK_NODES_CAP = 0
         try:
-            r = N.entity_link(srv, est, f, None, "tool:executor",
-                              ["echo reaped-ok"])
+            c = _cmd(est, "c:reaped", "echo reaped-ok")
+            R.upsert(f.b, f.origin, MEMBRANE_NS + "tool:executor", N.EXEC_REL, c.eid,
+                     "model-link", ts=time.time())
             self.assertEqual([e["eid"] for e in N.executor_value(
                 est, "tool:executor", be=f.b,
                 origin=f.origin)["pending"]],
-                [r["runs"][0]["eid"]])
+                [c.eid])
             N.EXEC_WALK_NODES_CAP = saved
             lands = N.run_pending_links(srv, est, f, srv.membrane,
                                         MEMBRANE_NS + "tool:executor")
