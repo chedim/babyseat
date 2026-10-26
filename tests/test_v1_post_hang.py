@@ -50,8 +50,21 @@ def _ollama_alive() -> bool:
         return False
 
 
+def _has_granite() -> bool:
+    try:
+        with urllib.request.urlopen(
+                f"http://{_HOST}:{_PORT}/api/tags", timeout=3) as r:
+            tags = json.loads(r.read()).get("models", [])
+        return any("granite4" in m.get("name", "") for m in tags)
+    except Exception:
+        return False
+
+
 if not _ollama_alive():
     pytest.skip("needs a local ollama (the live lane)", allow_module_level=True)
+if not _has_granite():
+    pytest.skip("needs the granite4 model in the local ollama",
+                allow_module_level=True)
 
 
 def _free_port() -> int:

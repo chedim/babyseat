@@ -833,10 +833,13 @@ Blurp as the film draws it -- a soft gold body with a glow, a slight wobble,
 two eyes, a blink now and then, a small smile -- not as a 👶. It shows only
 what the seat reports:
 
-- **asleep** (the seat's card, `GET /membrane/self/card`: `awake` false --
-  switched off or asleep from tiredness, #345): the eyes close and z's drift
-  up beside it. Before the card loads (or from a seat without it) the ⏻
-  switch's state decides.
+- **asleep** (the seat's card, `GET /membrane/self/card`: `awake` false with
+  the mode on -- asleep from tiredness, #345): the eyes close and z's drift
+  up beside it.
+- **off** (#516; the card's mode `off`, the ⏻ switch): a dim, blank body --
+  no glow, no face, no z's -- never drawn as sleep. The zoo card's state says
+  `off`. Before the card loads (or from a seat without it) the ⏻ switch's
+  state decides.
 - **energy** (the same card, 0..1): the glow scales from 30 % of the film's at
   0 to the full glow at 1; a card without energy keeps the full glow.
 - **the look:** while self has a fresh look on the 3D field (the same 8 s
