@@ -235,8 +235,10 @@ def card_of(raw, recent=None) -> dict:
     awake = h.get("awake")                          # the card's own word (#285); the sheet's: its mode
     if not isinstance(awake, bool):
         awake = mode not in ASLEEP_MODES
+    # #516: the operator's off is not sleep -- the state says "off"; real sleep (energy, mode on) stays "asleep"
+    state = "awake" if awake else "off" if mode == "off" else "asleep"
     return {"name": h.get("name"), "level": h.get("level"), "rung_name": h.get("rung_name"), "mode": mode,
-            "state": "awake" if awake else "asleep",
+            "state": state,
             "last_activity": last}
 
 

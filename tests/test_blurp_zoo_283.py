@@ -334,7 +334,7 @@ def test_the_fan_out_reads_every_seat_and_survives_an_offline_one(cc):
                                "state": "awake", "last_activity": "2025-10-09T08:53:20Z"}
     assert by["b"]["active"] is True and by["a"]["active"] is False
     assert by["b"]["name"] == "Boat"                      # the operator's name wins
-    assert by["b"]["card"]["state"] == "asleep" and by["b"]["card"]["level"] == 6
+    assert by["b"]["card"]["state"] == "off" and by["b"]["card"]["level"] == 6
     assert by["b"]["card"]["name"] == "Blurp" and by["b"]["card"]["last_activity"] == 1760000123.5
     assert by["off"]["online"] is False and "card" not in by["off"] and by["off"]["error"]
     assert by["slow"]["online"] is False and by["slow"]["error"] == "timeout"
@@ -433,7 +433,11 @@ def test_a_card_says_asleep_in_its_own_word(cc):
     c = cc.zoo.card_of({"name": "Pip", "level": 2, "rung_name": "r", "mode": "watch", "awake": False,
                         "last_activity": None, "generated": 1.0})
     assert c["state"] == "asleep" and c["last_activity"] is None
-    assert cc.zoo.card_of({"header": {"mode": "off"}})["state"] == "asleep"     # the sheet: by its mode
+    assert cc.zoo.card_of({"header": {"mode": "off"}})["state"] == "off"     # #516: the sheet, switched off
+    assert cc.zoo.card_of({"header": {"mode": "asleep"}})["state"] == "asleep"
+    # the card's own word: awake false from the operator's off says off; from energy (mode on) stays asleep
+    assert cc.zoo.card_of({"mode": "off", "awake": False})["state"] == "off"
+    assert cc.zoo.card_of({"mode": "on", "awake": False})["state"] == "asleep"
     assert cc.zoo.card_of({"header": {"mode": "on"}})["state"] == "awake"
 
 
