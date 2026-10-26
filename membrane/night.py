@@ -2104,6 +2104,13 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
         memo[eid] = res
         return res
     if cmd:
+        from . import scripts as _SC              # #576 G: nothing runs that is not a graph first
+        try:
+            cmd = _SC.run_text(doc, est)
+        except _SC.NotAScript as e:
+            res.update({"ok": False, "status": "blocked", "error": f"not a script: {e}"})
+            memo[eid] = res
+            return res
         if budget[0] >= EXEC_WALK_NODES_CAP:
             res["continued"] = True
             res["ok"] = None               # neither ran nor failed
@@ -2367,15 +2374,25 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
             return {"ok": False, "error": "an abstract method needs its interface (on) and a name"}
     elif not method or not ((command or "").strip() or steps):
         return {"ok": False, "error": "on, method and a command or steps required"}
+    from . import scripts as _SC
     if (command or "").strip():
         bad = lint_command(command)
         if bad:
             return {"ok": False, "error": f"refused {command[:60]!r}: {bad}"}
+        try:
+            _SC.parse(command)                    # #576 G: a command is a graph, or it is refused
+        except _SC.NotAScript as e:
+            return {"ok": False, "error": f"not a script: {e} -- {command[:60]!r}"}
     for st in steps:
         if not isinstance(st, dict) or not (st.get("call") or st.get("command")):
             return {"ok": False, "error": "each step is {name, call, object?, args?}, {name, each, call, args?, max?} or {name, command}"}
         if st.get("command") and lint_command(str(st["command"])):
             return {"ok": False, "error": f"step refused: {lint_command(str(st['command']))}"}
+        if st.get("command"):
+            try:
+                _SC.parse(str(st["command"]))
+            except _SC.NotAScript as e:
+                return {"ok": False, "error": f"step {st.get('name') or ''}: not a script: {e}"}
     owner = est._resolve_spec(on) if on else None
     if on and owner is None:
         # a missing owner is minted as a class (the probe suite: 'ha light' existed,
@@ -2428,6 +2445,12 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
         # its own nodes are replaced; any other parent (a hand-made pipeline) stays
         p["parents"] = nodes + [x for x in old if x not in old_nodes and x not in nodes]
     doc.properties = p
+    if p.get("command"):
+        _SC.graph_of(doc, est)                    # #576 G: its graph, linked to the field's programs and files
+    for ne in nodes:
+        nd = (est.docs or {}).get(ne)
+        if nd is not None and (nd.properties or {}).get("command"):
+            _SC.graph_of(nd, est)
     est.upsert(doc, embedder=None)
     _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
                  "on": owner.eid if owner else "", "method": method, "ok": True})
@@ -4336,6 +4359,13 @@ def _apply_entity_update(srv, ent, out: dict, trigger: str,
     # no route.
     if out.get("run"):
         cmd = str(props.get("command") or "").strip()
+        if cmd:
+            from . import scripts as _SC          # #576 G: the entity's command runs as its graph, or not at all
+            try:
+                cmd = _SC.run_text(ent, est)
+            except _SC.NotAScript as e:
+                cmd = ""
+                out["run_result"] = {"rc": None, "status": "blocked", "error": f"not a script: {e}"}
         if cmd:
             run_out = run_command_entity(getattr(srv, "efield", None),
                                          est,

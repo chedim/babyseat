@@ -2742,6 +2742,20 @@ class EntityStore(MultiParentOps, TimelineOps):
         for path, old, new in changes:
             _W.emit(path, old, new, eid=ent.eid)
 
+    def remove_many(self, eids) -> int:
+        """Remove these exact eids with ONE save (a migration's batch; remove()
+        saves the whole store per call). -> how many went."""
+        gone = [e for e in eids if self.docs.pop(e, None) is not None]
+        if gone:
+            self.save()
+            coll = self._entities_collection()
+            for e in gone if coll is not None else []:
+                try:
+                    coll.remove(e)
+                except Exception:
+                    pass
+        return len(gone)
+
     def remove(self, spec: str) -> int:
         """Model-side entity REMOVE by eid/name fragment (exact single
         match only -- an ambiguous fragment removes nothing)."""
