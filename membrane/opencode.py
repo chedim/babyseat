@@ -2077,6 +2077,8 @@ def main() -> None:
                 _SELF.bind(srv)
                 from . import toybox as _TB       # #239: self's toys, the built-in kit (toybox.add/list/...)
                 _TB.bind(srv)
+                from . import adapters as _AD     # #576 part E: effects are writes (chat, toys, llm, restart)
+                _AD.start(srv)
                 from . import self_super as _SUP  # #440: its own process (default), or in-process with MEMBRANE_SELF_PROC=0
                 _self_host = surf_host if surf_host not in ("0.0.0.0", "::", "") else "127.0.0.1"
                 _SUP.boot(srv, f"http://{_self_host}:{serve_port or 4096}",   # the native serve: its /membrane/self/*
