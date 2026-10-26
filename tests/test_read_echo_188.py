@@ -116,11 +116,11 @@ class TestAReadIsNotAnEcho(unittest.TestCase):
             J.deliver = orig
         self.assertNotIn("getter-applied", [e["kind"] for e in pool.items])
 
-    def test_the_fields_own_read_still_posts_the_change(self):
+    def test_the_fields_own_read_posts_no_wake_571(self):
         r, srv, est, pool = _world()
         WA._getter_last_ts.clear()
         WA.entity_read_back(srv, est.docs[EYE], by="field")
-        self.assertEqual([e["kind"] for e in pool.items], ["getter-applied"])
+        self.assertNotIn("getter-applied", [e["kind"] for e in pool.items])
 
 
 if __name__ == "__main__":

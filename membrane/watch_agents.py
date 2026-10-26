@@ -487,11 +487,6 @@ def loop_task_text(ev: dict) -> str:
             head += (" -- it needs work: set its status to in_flight, do the work, then set its "
                      "receipt and status closed")
         detail = f"It blocks: {', '.join(map(str, ev['blocks']))}" if ev.get("blocks") else ""
-    elif kind == "getter-applied":
-        # WHAT CHANGED (2026-10-11 sweep: the loop was woken with an empty task)
-        head = f"a reading changed on '{ent}' (its getter ran)"
-        st = ev.get("state") if isinstance(ev.get("state"), dict) else {}
-        detail = ("New values: " + ", ".join(f"{k}={str(v)[:40]}" for k, v in list(st.items())[:8])) if st else ""
     elif kind == "field:changed":
         head = (f"the field moved '{ent}': your watch_fields filter '{ev.get('verb', '?')}' crossed"
                 + (" (it was frozen hot; this is the burst after the melt)" if ev.get("frozen") else ""))
@@ -1564,12 +1559,9 @@ _GETTER_KEYS = {"state", "render", "patch", "run", "veto", "delete", "data",
                 "intent", "error", "patch_refused", "run_result", "applied"}
 
 
-# A SAME READING IS NOT NEWS (2026-10-11: a watch on the phone's battery
-# sensor read it, the read fired the getter, the getter posted
-# getter-applied, the event woke the next watch -- a fresh session every
-# 1-4 minutes redoing the same reads, 40% -> 40%). Only a changed value
-# posts the event; a key that is only a clock (ts, *_at, updated, ...)
-# changes every run and says nothing.
+# A SAME READING IS NOT A CHANGE: the read-back reports `changed` only when a
+# value moved; a key that is only a clock (ts, *_at, updated, ...) changes
+# every run and says nothing.
 _CLOCK_KEY = re.compile(r"(^|_)(ts|time|timestamp|at|updated|checked|age|now|epoch)$", re.I)
 
 
@@ -1581,15 +1573,6 @@ def _score(kind: str, **kw) -> None:
         pass
 
 
-def is_watched(props: dict) -> bool:
-    """A wake needs a watch on the entity: the existing spec (`watch`,
-    `watch_ops`, `watch_fields`). A getter's reading on an entity nobody
-    watches is stored and shown, but wakes no loop (#549: 38 of 40 loop
-    wakes in 24 h were ticking counters on unwatched entities)."""
-    p = props or {}
-    return bool(p.get("watch") or p.get("watch_ops") or p.get("watch_fields"))
-
-
 def reading_changed(before: dict, state: dict) -> bool:
     for k, v in (state or {}).items():
         if _CLOCK_KEY.search(str(k)):
@@ -1599,15 +1582,12 @@ def reading_changed(before: dict, state: dict) -> bool:
     return False
 
 
-def entity_read_back(srv, ent, force: bool = False, by: str = "model",
-                     notify: bool = True) -> dict:
+def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
     """THE READ-BACK TRIGGER: a READ of a dynamic entity fires its
     getter_script (the dict return patches script_data + the entity's
     state facts); the LRU (5s per entity) dedups a hammering loop --
     `force=True` (the explicit read tool) bypasses it (a re-run is the
-    caller's call); the getter's kind rides the engine's dispatch.
-    `notify=False`: the reader is answered with the values itself (a
-    job's event) -- no getter-applied for another loop (#188)."""
+    caller's call); the getter's kind rides the engine's dispatch."""
     props = ent.properties or {}
     est = getattr(srv, "entity_store", None)
     if est is None:
@@ -1692,15 +1672,9 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model",
         props["script_data"] = merged
         ent.properties = props
         est.upsert(ent, embedder=None)
-        # A READ IS NOT AN ECHO (#188): a goal's loop read the eye every
-        # pass, its job answered it the fresh values -- and this post woke a
-        # SECOND loop on the eye; a counter (beats) changes on every read, so
-        # the eye ran a pass per read. The reader's own answer is no news.
-        pool = getattr(srv, "events_pool", None) if notify else None
-        if pool is not None and changed and is_watched(ent.properties):
-            pool.put({"kind": "getter-applied", "entity": ent.eid,
-                      "state": dict(list(state.items())[:8]),
-                      "ts": now})
+        # A READING IS NOT A WAKE (#571; #188, #549 before it): the values are
+        # stored and shown; a script that wants to be heard moves the entity
+        # and the geometric watch notifies (watch_fields / watch_ops)
     out["applied"] = applied
     res = {"fired": True, "state": state, "run_result": out.get("run_result"), "changed": changed}
     if inherited_from:
