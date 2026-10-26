@@ -105,13 +105,13 @@ An effect happens because something writes a property of a field entity, not bec
 | Entity | Property | Effect |
 |---|---|---|
 | the chat thing `chat:<person>` | `say` (the line) | `chat_io.on_edit`: posted in the person's latest chat |
-| a toy (an entity with `properties.toybox`) | `poke` (`"roll"`, `"knock 3"`, `"nudge up"`; a tower block's `poke` names its block itself) | `toybox.poke`, by `model` |
+| a toy (an entity with `properties.toybox`) | `poke` (`"roll"`, `"knock 3"`, `"nudge up"`; a tower block's `poke` names its block itself) | `toybox.poke`, by the person when a `person:<name>` wrote it, else `model` |
 | `membrane::llm` | `call` (`{about, prompt}`; a string is the prompt) | `llm.request`, its caller the write's writer |
 | `membrane::llm` | `wake` (`{about, at, prompt}`) / `unwake` (the wake's id) | `llm.set_wake` / `llm.unwake` |
 | `membrane::presence` | `restart` (the reason) | `restarts.do_restart` |
 
 - **Outside the listener:** the listener only queues. The effect runs on the adapters' one worker thread (started at boot), in the chain of the write that caused it, so provenance continues through it.
 - **Consumed:** the worker sets the property back to `''` and leaves the effect's receipt in `<prop>_result` (the chat thing keeps its own `said` / `say_refused`), so the next write is the next effect. A write that empties a branch, and a birth that carries one, are no effect.
-- **Its own writes:** those writes are the adapter's (writer `adapter:<branch>`: `adapter:chat`, `adapter:toys`, `adapter:llm`, `adapter:seat`) and fire nothing. The writer is otherwise provenance only; no branch gates on it.
+- **Its own writes:** those writes are the adapter's (writer `adapter:<branch>`: `adapter:chat`, `adapter:toys`, `adapter:llm`, `adapter:seat`) and fire nothing. Otherwise the writer is provenance: it labels a toy's poker and is the llm's caller tag (its caps, read-only for `script:`); nothing else gates on it.
 - **The edit route** still posts a chat `say` at once and returns its receipt; the adapter then finds the line consumed, so a line is posted once.
 - **The hatches** (`llm::`, `toybox::`, `seat::restart` in `night.run_command_entity`) stay until part B's triggers can write; then they retire.

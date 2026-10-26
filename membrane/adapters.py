@@ -19,8 +19,10 @@ worker CONSUMES the property (back to '') and leaves the effect's receipt in
 writes are the adapter's own (writer `adapter:<branch>`) and fire nothing. A
 write that empties a branch, and a birth that carries one, are no effect.
 
-The writer is provenance only: nothing here gates on it (it guards only the
-adapter's own writes, against a loop).
+The writer is provenance: it labels who poked a toy (a person's write pokes as
+that person, anything else as the model) and is the llm's caller tag (its
+per-caller caps, read-only for a `script:` writer -- as a script's own call is);
+otherwise nothing gates on it but the adapter's own writes, against a loop.
 """
 from __future__ import annotations
 
@@ -89,7 +91,8 @@ def _toys(srv, est, ent, prop, new, by) -> None:
     if not toks:
         return
     arg = str(tb["block"]) if tb.get("block") else (toks[1] if len(toks) > 1 else None)
-    out = TB.poke(str(tb["name"]), toks[0], arg, by="model")
+    who = by.split(":", 1)[1] if by.startswith("person:") else "model"   # a label (who poked), never a gate
+    out = TB.poke(str(tb["name"]), toks[0], arg, by=who)
     _consume(est, ent, prop, new, f"{out.get('action')} {out.get('name')}: now {out.get('reading')}"
              if out.get("ok") else out.get("error"))
 

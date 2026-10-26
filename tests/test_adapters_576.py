@@ -122,6 +122,14 @@ def test_a_toy_poke_write_pokes_the_toy_once(seat, calls):
     assert die.properties["poke"] == "" and "poke_result" in die.properties
 
 
+def test_a_persons_poke_write_pokes_as_that_person(seat, calls):
+    est = seat.entity_store
+    die = _ent(est, MEMBRANE_NS + "Component:toy:die", toybox={"kind": "die", "name": "toy:die"})
+    _write(est, die, "poke", "roll", writer="person:alice")
+    _settle(calls)
+    assert calls[0]["k"].get("by") == "alice"              # the label of who rolled it
+
+
 def test_an_llm_call_write_requests_a_turn_once(seat, calls):
     est = seat.entity_store
     llm = _ent(est, MEMBRANE_NS + "llm", name="llm")
