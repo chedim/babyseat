@@ -151,3 +151,20 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
   - Self's ownership is **signed** by `define`: an HMAC under a key file beside the store (`.ch-key`, mode 0600, never an entity). A trigger that merely says `owner = self` is not self's and falls under the loop rule.
   - The entity API never edits a trigger, and only this seat's triggers run; an imported one never does.
   - A chain arriving over the relay cannot claim `self`.
+
+  - Only `define` sets an owner, and a chain arriving over the relay cannot claim `self`.
+
+## Learning in the VM (#576, part C)
+
+`membrane/ch_learn.py`: Blurp's plasticity, as field physics. Attach it with `vm.learner = Learner(vm, purse, granted)`.
+
+- **Guess.** A write (by anyone but a trigger) is explained by one of the last 3 writes before it in the same chain. The guess is a trigger owned by self:
+  - `WHEN changed(?x.c) WHERE isa(?x, <class>): ?x.w = <value>` when cause and write are on the same entity;
+  - with `is(?y, <eid>)` as the target when they're on different entities.
+
+  The value is a copy of the cause when the values match, else the literal (scalars only). A guess already defined is not defined again.
+- **Shadow.** A candidate's firing writes its prediction onto itself (`predicted` = {path, value, chain}), never onto the real path.
+- **Score.** A later write in the same chain to the predicted path, with the predicted value, by anyone but the candidate, is a hit. Nothing else is refunded, so no timer is needed. A live firing is confirmed the same way.
+- **Energy.** Every Blurp write costs `WRITE_COST` (= `BASAL_PER_S`, one awake second): defining a candidate, and each shadow or live firing. A hit refunds 2× to Blurp's purse and to the candidate's balance. The definition counts against the candidate, so it needs two hits to become a proposal: it has to earn back its own birth. Asleep (`purse.can_spend()` false), nothing is spent, guessed or fired.
+- **Stay positive.** A candidate with a balance above 0 is a proposal. On a granted branch (`granted(path)`, the skill tree's Accept in part D2) a proposal fires live. Below 0 it is back in shadow. Sleep prunes every candidate whose balance is negative (`prune()`).
+- **Bound:** the most recent 512 chains are remembered.
