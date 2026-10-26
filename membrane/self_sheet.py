@@ -1059,6 +1059,25 @@ def _header(st: dict, recs: list, c: dict, t: dict, skill: dict | None = None, l
             "turns": sum(1 for r in recs if r.get("kind") == "push" and SL._medium(r) == "toy")}
 
 
+def _code(srv) -> list[dict]:
+    """The Code tab: Blurp's cliffhanger code -- its own methods (method_of
+    self), each as method_inspect reads it (command, params, steps, runs)."""
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return []
+    from .night import method_inspect
+    me = SL._eid()
+    names = sorted({(d.properties or {}).get("method_name") for d in list((est.docs or {}).values())
+                    if me in ((d.properties or {}).get("method_of") or [])} - {None})
+    out = []
+    for name in names:
+        r = method_inspect(est, me, name)
+        if r.get("found"):
+            out.append({k: r[k] for k in ("command", "params", "steps", "runs", "read_only") if r.get(k)}
+                       | {"name": name, "command": r.get("command") or ""})
+    return out
+
+
 def compute(srv, now: float | None = None) -> dict:
     """The whole sheet, fresh (no cache)."""
     now = time.time() if now is None else float(now)
@@ -1096,7 +1115,7 @@ def compute(srv, now: float | None = None) -> dict:
             "quest": quest, "achievements": ach,
             "growth": _growth(c, ach), "time": t, "inventory": _inventory(recs, st, now),
             "relationships": _relationships(recs, tempo, st), "toys": _toys_section(recs),
-            "energy": E.report(srv)}                     # #345: energy, asleep, the reserves, the pull
+            "energy": E.report(srv), "code": _code(srv)}  # #345: energy, asleep, the reserves, the pull
 
 
 def tree(recs: list, st: dict, progs: dict | None = None) -> list:
@@ -1191,7 +1210,7 @@ def empty() -> dict:
             "attributes": traits([]), "skills": [], "slipping": [],
             "quest": {"rung": None, "criteria": []}, "achievements": [],
             "growth": _growth(c, []), "time": _time(c), "inventory": [],
-            "relationships": {"others": [], "body": [], "other": []}, "toys": [], "energy": None}
+            "relationships": {"others": [], "body": [], "other": []}, "toys": [], "energy": None, "code": []}
 
 
 def sheet(srv, now: float | None = None, fresh: bool = False) -> dict:

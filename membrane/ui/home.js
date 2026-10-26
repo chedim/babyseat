@@ -714,6 +714,21 @@ function zooAgo(ts, now) {
 
 /** One seat's card: its Blurp's name, Lv, rung, awake/asleep -- or offline --
  * the reachability dot, the seat's own name and host, its last activity. */
+/** The 👶 panel's Code tab: Blurp's cliffhanger code -- its own methods
+ *  (the sheet's `code`), each a name, its command and its steps; read-only. */
+function selfCodeHtml(sheet) {
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const code = (sheet && Array.isArray(sheet.code)) ? sheet.code : [];
+  if (!code.length) return '<p class="cdnone">no code yet</p>';
+  return code.map((m) => {
+    const steps = Array.isArray(m.steps) ? m.steps.map((st) =>
+      `<li><span class="cdstep">${esc(st.step || "")}</span> <code>${esc(st.command || st.call || "")}</code></li>`).join("") : "";
+    return `<section class="cdm"><h4><code>${esc(m.name)}</code><span class="cdruns">${m.runs ? esc(m.runs) + " runs" : ""}</span></h4>` +
+      (m.command ? `<pre class="cdcmd"><code>${esc(m.command)}</code></pre>` : "") +
+      (steps ? `<ol class="cdsteps">${steps}</ol>` : "") + "</section>";
+  }).join("");
+}
+
 function zooCard(row, now) {
   const r = row || {}, c = r.card || {};
   const on = !!r.online;
@@ -1521,7 +1536,7 @@ class BlurpBodies {
 const HomeLogic = { knownView, standaloneMenu, pauseView, PauseButton, PAUSE_PATH, quotaWhen, quotaBadgeView, QuotaBadge, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
-  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
+  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards, selfCodeHtml,
   rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView,
   achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody,
   ballAlert, ballAlertText, ballNotifyBody, ballChimeNotes, titleFlash,
@@ -1956,6 +1971,12 @@ const HSTYLE = `
   .selfpanel .sptab[aria-selected="true"] { opacity:1; border-bottom-color:var(--primary-color,#3477d6); }
   .selfpanel .sptab:focus-visible, .sktree .sknode:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
   .selfpanel .sppane[hidden] { display:none; }
+  .spcode .cdm { margin:0 0 12px; }
+  .spcode h4 { display:flex; align-items:baseline; gap:8px; margin:0 0 4px; font-size:14px; }
+  .spcode .cdruns, .spcode .cdnone { opacity:.65; font-size:12px; font-weight:400; }
+  .spcode pre { margin:0; padding:6px 8px; border-radius:8px; overflow-x:auto; white-space:pre-wrap; word-break:break-word;
+    background:color-mix(in srgb, var(--primary-text-color,#ddd) 8%, transparent); font-size:12px; }
+  .spcode .cdsteps { margin:4px 0 0; padding-left:20px; font-size:12px; }
   /* #361: the film's look -- its gold, leaning dark on a light theme and bright on a dark one */
   .sktree { --sk-earned:color-mix(in srgb, #f2c45a 72%, var(--primary-text-color,#ddd)); }
   .sktree .skhdr { display:flex; align-items:center; gap:10px; padding:8px 12px; margin:2px 0 6px; border-radius:12px;
@@ -2173,7 +2194,7 @@ const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open (
 const SELFPANEL_MS = 4000;                        // its activity refresh, only while open
 const SELFPANEL_SEAT_MS = 15000;                  // ...and its character sheet's (the whole status; the seat caches ~30 s)
 const LS_SELFSHEET = "membrane.home.selfsheet";   // #249: which sheet sections are open, per browser
-const LS_SELFTAB = "membrane.home.selftab";       // #296: the 👶 panel's tab (sheet or tree), per browser
+const LS_SELFTAB = "membrane.home.selftab";       // #296: the 👶 panel's tab (sheet, tree or code), per browser
 const DOCK_MS = 3000;                             // #249: the toy dock's poll, only while the page is visible
 const LS_DOCK = "membrane.home.toydock";          // the phone's 🧸: the dock expanded ("1") or not
 
@@ -2401,6 +2422,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._takeName(c);                                 // #277: the sheet carries the name
       }
       this._paintTree();                                   // #296: the Skill tree tab, when it shows
+      this._paintCode();                                   // the Code tab, when it shows
       const card = this._sheet && typeof c._selfSheetHtml === "function"
         ? c._selfSheetHtml(this._sheet, this._sheetOpen) : "<h3>report card</h3>" + c._selfCardHtml();
       if (card !== this._spCardHtml) {
@@ -2416,9 +2438,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         else if (!lines) this._spAct.innerHTML = '<li class="sl none">the record is not reachable right now</li>';
       } finally { this._spBusy = false; }
     }
-    /** #296: the panel's tabs -- the sheet or the Skill tree; remembered per browser. */
+    /** #296: the panel's tabs -- the sheet, the Skill tree or the Code; remembered per browser. */
     _selfTab(tab, focus) {
-      tab = tab === "tree" ? "tree" : "sheet";
+      tab = tab === "tree" || tab === "code" ? tab : "sheet";
       this._spTabNow = tab;
       for (const b of this._spTabs) {
         const on = b.dataset.tab === tab;
@@ -2428,8 +2450,16 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }
       this._spPaneSheet.hidden = tab !== "sheet";
       this._spPaneTree.hidden = tab !== "tree";
+      this._spPaneCode.hidden = tab !== "code";
       lsSet(LS_SELFTAB, tab);
       this._paintTree();
+      this._paintCode();
+    }
+    /** The Code tab: Blurp's methods, from the sheet the panel already read. */
+    _paintCode() {
+      if (!this._spCode || this._spPaneCode.hidden) return;
+      const h = selfCodeHtml(this._sheet);
+      if (h !== this._spCodeHtml) this._spCode.innerHTML = this._spCodeHtml = h;
     }
     /** #296: the Skill tree, from the sheet the panel already read; rebuilt only when it changed. */
     _paintTree() {
@@ -3154,6 +3184,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <div class="sptabs" role="tablist" aria-label="${nm}'s panel">
             <button type="button" class="sptab" role="tab" id="sptab-sheet" data-tab="sheet" aria-selected="true" aria-controls="sppane-sheet">Sheet</button>
             <button type="button" class="sptab" role="tab" id="sptab-tree" data-tab="tree" aria-selected="false" aria-controls="sppane-tree" tabindex="-1">Skill tree</button>
+            <button type="button" class="sptab" role="tab" id="sptab-code" data-tab="code" aria-selected="false" aria-controls="sppane-code" tabindex="-1">Code</button>
           </div>
           <div class="sppane" role="tabpanel" id="sppane-sheet" aria-labelledby="sptab-sheet">
             <div class="spxp"></div>
@@ -3162,6 +3193,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
               <div class="secb"><ol class="spact"><li class="sl none">…</li></ol></div></details>
           </div>
           <div class="sppane" role="tabpanel" id="sppane-tree" aria-labelledby="sptab-tree" hidden><div class="sktree"></div></div>
+          <div class="sppane" role="tabpanel" id="sppane-code" aria-labelledby="sptab-code" hidden><div class="spcode"></div></div>
           <p class="spplay" aria-live="polite" hidden></p>
         </aside>
         <div class="toydock" hidden>
@@ -3321,6 +3353,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // #296: the panel's tabs (the sheet, the Skill tree): arrows move between them
       this._spTabs = Array.from(root.querySelectorAll(".sptab"));
       this._spPaneSheet = $("#sppane-sheet"); this._spPaneTree = $("#sppane-tree"); this._spTree = $(".sktree");
+      this._spPaneCode = $("#sppane-code"); this._spCode = $(".spcode");
       // #299: the tree card's Accept; #394: the clicked skill, remembered per viewer
       this._spTreeSel = { id: lsGet(LS_TREESEL, null) || undefined, onAccept: (id) => this._acceptSelf(id),
                           onPick: (id) => lsSet(LS_TREESEL, id) };
@@ -3331,7 +3364,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         b.addEventListener("keydown", (e) => {
           if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
           e.preventDefault();
-          this._selfTab(this._spTabNow === "tree" ? "sheet" : "tree", true);
+          const tabs = this._spTabs.map((t) => t.dataset.tab), i = tabs.indexOf(this._spTabNow);
+          const j = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1
+            : (i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+          this._selfTab(tabs[j], true);
         });
       }
       this._selfTab(lsGet(LS_SELFTAB, "sheet"));

@@ -1053,11 +1053,19 @@ and self's own record: nothing is claimed about self that the record doesn't
 measure. On a seat too old to serve the sheet, the panel shows the old report
 card instead.
 
+### The Code tab
+
+The Code tab shows Blurp's cliffhanger code, read-only: each of its own methods
+(`method_of` self -- the five it is born with, `try`, `expect`, `notice`, `reach`,
+`nudge`, and any it defines later), with its command, its steps and how many
+times it ran. It is the sheet's `code` list (`method_inspect` per method), so
+it needs no call of its own.
+
 ### The Skill tree tab
 
-The panel has two tabs at its top: **Sheet** (everything above) and **Skill
-tree** (#296); the arrow keys move between them and the one you chose is
-remembered per browser. The Skill tree tab draws self's achievements the way an
+The panel has three tabs at its top: **Sheet** (everything above), **Skill
+tree** (#296) and **Code**; the arrow keys move between them and the one you
+chose is remembered per browser. The Skill tree tab draws self's achievements the way an
 RPG draws a skill tree:
 
 - **lanes by branch** (Self, World, Others), each skill below the ones
