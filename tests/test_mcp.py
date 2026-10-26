@@ -168,12 +168,10 @@ class TestMcpProtocol(unittest.TestCase):
 
                                  "graph",
                                  "entity_inherit",
-                                 "entity_link",
                                  # Cliffhanger: define a method on a class, call it
                                  # on an object or each member, inspect a call
                                  "method_define", "method_call", "method_each",
                                  "method_inspect",
-                                 "entity_unlink",
                                  "entity_read"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)

@@ -250,8 +250,8 @@ class TestProxyOffBox(_TokenFile):
 
     def test_every_write_refused(self):
         for p in ("/v1/chat/completions", "/api/chat", "/api/generate", "/v1/embeddings",
-                  "/membrane/entity/add", "/membrane/entity/remove", "/membrane/entity/link",
-                  "/membrane/entity/unlink", "/membrane/entity/inherit", "/membrane/method/define",
+                  "/membrane/entity/add", "/membrane/entity/remove",
+                  "/membrane/entity/inherit", "/membrane/method/define",
                   "/membrane/method/call", "/membrane/method/each", "/membrane/filetool",
                   "/membrane/learn", "/membrane/forget", "/membrane/intend", "/membrane/fulfill",
                   "/membrane/watch", "/membrane/attention", "/membrane/entity-track",

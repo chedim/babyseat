@@ -149,8 +149,8 @@ def run(code: str, timeout: float = 15.0, tab: str | None = None) -> dict:
         # the why and the door to the shell path)
         return {"rc": 2, "text": "", "err":
                 (f"js:: runs JavaScript in the browser tab, not shell -- {code[:120]!r} "
-                 "reads shell (plain words, no JS syntax). Run it as a plain command instead "
-                 "(exec(action='link', commands='<it>')); if JavaScript is meant, give it JS "
+                 "reads shell (plain words, no JS syntax). Make it a method's command instead "
+                 "(exec(action='define', ...), then exec(action='call', ...)); if JavaScript is meant, give it JS "
                  "shape -- a call, a keyword, an operator (e.g. 'await new Promise(...)').")}
     live = tabs(srv)
     if tab:

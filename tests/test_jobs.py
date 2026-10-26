@@ -72,11 +72,11 @@ class TestRuns(unittest.TestCase):
         def ex(name, args, cid):
             time.sleep(0.6)
             return "rc=0 ran: the scan found 3 devices"
-        lad = _Ladder("entity_link", {"commands": "scan-the-bus"})
+        lad = _Ladder("method_call", {"object": "bus", "method": "scan"})
         r = _runner(lad, ex)
         out = r.run("s1", "[HA user: Dmitrii]\nscan the bus")
         tool_out = [p for row in r.messages.list("s1") for p in row.get("parts") or [] if p.get("type") == "tool"
-                    and p.get("tool") == "entity_link"][0]["state"]["output"]
+                    and p.get("tool") == "method_call"][0]["state"]["output"]
         self.assertIn("NOT finished", tool_out)
         self.assertTrue(_wait(lambda: any("job #" in s and "3 devices" in s for s in lad.seen)), lad.seen)
         rows = r.messages.list("s1")
@@ -87,7 +87,7 @@ class TestRuns(unittest.TestCase):
                              for row in rows if (row.get("info") or {}).get("role") == "user"))   # ... no bubble
 
     def test_a_fast_run_stays_inline(self):
-        lad = _Ladder("entity_link", {"commands": "true"})
+        lad = _Ladder("method_call", {"object": "o", "method": "m"})
         r = _runner(lad, lambda n, a, c: "rc=0 ran: quick")
         r.run("s2", "[HA user: Dmitrii]\nquick one")
         tool_out = [p for row in r.messages.list("s2") for p in row.get("parts") or [] if p.get("type") == "tool"
