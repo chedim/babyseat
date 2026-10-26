@@ -120,7 +120,7 @@ _PY = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
 _NP = {ast.Add: np.add, ast.Sub: np.subtract, ast.Mult: np.multiply, ast.Div: np.divide}
 _CMP = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,
         ast.LtE: lambda a, b: a <= b, ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b}
-_ALLOWED = (ast.Constant, ast.Name, ast.List, ast.Tuple, ast.Attribute, ast.BinOp, ast.UnaryOp,
+_ALLOWED = (ast.Constant, ast.Name, ast.List, ast.Tuple, ast.Dict, ast.Attribute, ast.BinOp, ast.UnaryOp,
             ast.BoolOp, ast.Compare, ast.Call, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div,
             ast.Not, ast.USub, ast.And, ast.Or, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 
@@ -207,6 +207,10 @@ def _ev(node, env):
         raise Refused(f"unbound name {node.id!r}")
     if isinstance(node, (ast.List, ast.Tuple)):
         return [_ev(e, env) for e in node.elts]
+    if isinstance(node, ast.Dict):                      # a call's arguments (#576 C)
+        if not all(isinstance(k, ast.Constant) and isinstance(k.value, str) for k in node.keys):
+            raise Refused("a dict's keys are literal strings")
+        return {k.value: _ev(v, env) for k, v in zip(node.keys, node.values)}
     if isinstance(node, ast.Attribute):
         base = _ev(node.value, env)
         if not isinstance(base, EntityView):
@@ -261,6 +265,9 @@ def _check(node, names: set) -> None:
     for n in ast.walk(node):
         if not isinstance(n, _ALLOWED):
             raise Refused(f"not allowed in an expression: {type(n).__name__}")
+        if isinstance(n, ast.Dict) and not all(isinstance(k, ast.Constant) and isinstance(k.value, str)
+                                               for k in n.keys):
+            raise Refused("a dict's keys are literal strings")
         if isinstance(n, ast.Name) and n.id not in names and n.id not in _NAMES and n.id not in BUILTINS:
             raise Refused(f"unbound name {n.id!r}")
         if isinstance(n, ast.Attribute) and (n.attr.startswith("_") or not isinstance(n.value, ast.Name)):
@@ -274,8 +281,9 @@ def evaluate(expr: str, env: dict):
     return _ev(_parse(expr), env)
 
 
-def _writable(v):
-    """What a trigger may write: a scalar, a string, None, or a list of finite numbers."""
+def _writable(v, _depth: int = 3):
+    """What a trigger may write: a scalar, a string, None, a list of finite numbers,
+    or (a call's arguments) a dict / list of those, nested at most 3 deep."""
     if v is None or isinstance(v, (bool, str)):
         return v
     if isinstance(v, (int, float)):
@@ -285,6 +293,10 @@ def _writable(v):
     if isinstance(v, list) and all(isinstance(x, (int, float)) and not isinstance(x, bool)
                                    and math.isfinite(float(x)) for x in v):
         return [float(x) for x in v]
+    if isinstance(v, dict) and all(isinstance(k, str) for k in v) and _depth > 0:
+        return {k: _writable(x, _depth - 1) for k, x in v.items()}      # a call's arguments
+    if isinstance(v, list) and _depth > 0:
+        return [_writable(x, _depth - 1) for x in v]
     raise Refused(f"cannot write a {type(v).__name__}")
 
 
@@ -706,7 +718,7 @@ class VM:
                 return
             if mode == "shadow":                     # the prediction lands on the candidate itself
                 ch_now = W.current() or {}
-                tr.properties["predicted"] = {"path": f"{ent.eid}.{prop}", "value": value,
+                tr.properties["predicted"] = {"path": self.learner._expected(f"{ent.eid}.{prop}"), "value": value,
                                               "chain": ch_now.get("id"), "ts": now}
                 self.est.upsert(tr)
             elif prop == "position":

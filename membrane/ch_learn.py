@@ -76,6 +76,12 @@ class Learner:
         return True
 
     # -- the VM's hooks ---------------------------------------------------------------------
+    @staticmethod
+    def _expected(target_path: str) -> str:
+        """A learned call writes `<method>.call`; what it predicts is the call the LLM
+        records, `<method>.last_call`."""
+        return target_path[:-len(".call")] + ".last_call" if target_path.endswith(".call") else target_path
+
     def on_fire(self, tr, target_path: str, value) -> str:
         """A candidate fires: 'live' (write the real path), 'shadow' (write the
         prediction onto itself) or 'skip' (asleep)."""
@@ -83,7 +89,7 @@ class Learner:
         if not self._spend(tr.eid, "fire"):
             return "skip"
         ch = CH.W.current() or {}
-        self._remember(self._pending, ch.get("id") or "", list).append((tr.eid, target_path, value))
+        self._remember(self._pending, ch.get("id") or "", list).append((tr.eid, self._expected(target_path), value))
         return "live" if live else "shadow"     # a live write is confirmed the same way as a shadow one
 
     @staticmethod
@@ -101,8 +107,8 @@ class Learner:
         writer = str(w.get("writer") or "")
         path = str(w.get("path") or "")
         ch = (w.get("chain") or {}).get("id") or ""
-        if writer.startswith("trigger:") or "." not in path or path.startswith("rel:"):
-            return
+        if writer.startswith(("trigger:", "adapter:")) or not w.get("prop") or path.startswith("rel:"):
+            return                                      # Blurp's own acts never confirm or teach themselves
         keep = []
         for cand, p, v in self._pending.get(ch, []):
             if p != path:
@@ -118,16 +124,17 @@ class Learner:
             recent = self._remember(self._recent, ch, lambda: collections.deque(maxlen=LOOK_BACK))
             causes = list(recent)
             recent.append(w)
-            for c in causes:
-                self._guess(c, w)
+            if writer == "llm" or writer.startswith("llm:"):   # the target: the LLM's actions (operator, 10-26)
+                for c in causes:
+                    self._guess(c, w)
 
     # -- guessing ---------------------------------------------------------------------------
     def _guess(self, c: dict, w: dict) -> None:
         if not self.purse.can_spend():
             return
         est = self.vm.est
-        c_eid, _, c_prop = str(c["path"]).partition(".")
-        w_eid, _, w_prop = str(w["path"]).partition(".")
+        c_eid, c_prop = str(c.get("eid") or ""), str(c.get("prop") or "")
+        w_eid, w_prop = str(w.get("eid") or ""), str(w.get("prop") or "")
         ce, we = (est.docs or {}).get(c_eid), (est.docs or {}).get(w_eid)
         if ce is None or we is None or not c_prop or not w_prop or ce.cls == CH.CLASS or we.cls == CH.CLASS:
             return
@@ -135,13 +142,19 @@ class Learner:
             return                                     # vectors: the geometric watchers' business
         same = c_eid == w_eid
         where = [["isa", "?x", ce.cls]] + ([] if same else [["is", "?y", w_eid]])
-        target = f"?x.{w_prop}" if same else f"?y.{w_prop}"
-        values = []
-        if w.get("new") == c.get("new") and _scalar(w.get("new")):
-            values.append(f"x.{c_prop}")
-        lit = _literal(w.get("new"))
-        if lit is not None:
-            values.append(lit)
+        if w_prop == "last_call" and isinstance(w.get("new"), dict):
+            # a method call: the guess CALLS it (writes `<method>.call`), its object and
+            # arguments copied from the cause where they match, literal otherwise
+            target = f"?x.call" if same else f"?y.call"
+            values = [self._call_expr(w["new"], c_eid, c_prop, c.get("new"))]
+        else:
+            target = f"?x.{w_prop}" if same else f"?y.{w_prop}"
+            values = []
+            if w.get("new") == c.get("new") and _scalar(w.get("new")):
+                values.append(f"x.{c_prop}")
+            lit = _literal(w.get("new"))
+            if lit is not None:
+                values.append(lit)
         for expr in values:
             spec = {"when": [["changed", f"?x.{c_prop}"]], "where": where, "write": [target, expr]}
             name = "cand-" + hashlib.blake2b(json.dumps(spec, sort_keys=True).encode(),
@@ -158,6 +171,13 @@ class Learner:
             doc = est.docs[eid]
             doc.properties = {**(doc.properties or {}), "shadow": True}
             est.upsert(doc)
+
+    @staticmethod
+    def _call_expr(call: dict, c_eid: str, c_prop: str, c_new) -> str:
+        obj = "x.eid" if call.get("object") == c_eid else repr(call.get("object"))
+        args = call.get("args") if isinstance(call.get("args"), dict) else {}
+        parts = [f"{k!r}: " + (f"x.{c_prop}" if (v == c_new and _scalar(v)) else repr(v)) for k, v in args.items()]
+        return "{'object': " + obj + ", 'args': {" + ", ".join(parts) + "}}"
 
     # -- sleep ------------------------------------------------------------------------------
     def prune(self) -> list[str]:

@@ -109,6 +109,7 @@ An effect happens because something writes a property of a field entity, not bec
 | `membrane::llm` | `call` (`{about, prompt}`; a string is the prompt) | `llm.request`, its caller the write's writer |
 | `membrane::llm` | `wake` (`{about, at, prompt}`) / `unwake` (the wake's id) | `llm.set_wake` / `llm.unwake` |
 | `membrane::presence` | `restart` (the reason) | `restarts.do_restart` |
+| a method entity | `call` (`{object, args}`) | `night.method_call`: how a learned call acts (#576 C) |
 
 - **Outside the listener:** the listener only queues. The effect runs on the adapters' one worker thread (started at boot), in the chain of the write that caused it, so provenance continues through it.
 - **Consumed:** the worker sets the property back to `''` and leaves the effect's receipt in `<prop>_result` (the chat thing keeps its own `said` / `say_refused`), so the next write is the next effect. A write that empties a branch, and a birth that carries one, are no effect.
@@ -158,7 +159,9 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
 
 `membrane/ch_learn.py`: Blurp's plasticity, as field physics. Attach it with `vm.learner = Learner(vm, purse, granted)`.
 
-- **Guess.** A write (by anyone but a trigger) is explained by one of the last 3 writes before it in the same chain. The guess is a trigger owned by self:
+- **The target: the LLM's actions.** Only writes by the LLM (writer `llm`) are guessed at: its property edits, and its method calls, which record `<method>.last_call = {object, args}` (part F). The causes can be anyone's writes. Writes by triggers and adapters never teach or confirm, so Blurp's own acts can't confirm themselves.
+- **A call is learned as a call.** The guess writes `<method>.call = {object, args}`, and the `methods` adapter runs it. The object and arguments are copied from the cause where they match, literal otherwise. In shadow, it predicts the `last_call` the LLM's own call will record.
+- **Guess.** An LLM write is explained by one of the last 3 writes before it in the same chain. The guess is a trigger owned by self:
   - `WHEN changed(?x.c) WHERE isa(?x, <class>): ?x.w = <value>` when cause and write are on the same entity;
   - with `is(?y, <eid>)` as the target when they're on different entities.
 

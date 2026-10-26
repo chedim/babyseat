@@ -11,6 +11,7 @@ to the effects that already exist:
   membrane::llm.wake         llm.set_wake: {about, at, prompt}
   membrane::llm.unwake       llm.unwake: the wake's id
   membrane::presence.restart restarts.do_restart: the reason
+  <method>.call              night.method_call: {object, args} (#576 C: a learned call acts)
 
 The listener only queues (a listener must not write); the effect runs on the
 adapters' one worker thread, in the chain of the write that caused it. The
@@ -52,6 +53,8 @@ def _branch(path: str) -> tuple[str, str, str] | None:
         return "llm", eid, prop
     if prop == "restart" and eid == MEMBRANE_NS + "presence":
         return "seat", eid, prop
+    if prop == "call":
+        return "methods", eid, prop             # a method entity or not: the worker reads method_name
     return None
 
 
@@ -118,7 +121,20 @@ def _seat(srv, est, ent, prop, new, by) -> None:
     _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r)
 
 
-EFFECTS = {"chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat}
+def _methods(srv, est, ent, prop, new, by) -> None:
+    """#576 C: `<method>.call = {object, args}` runs that method on the object -- how a
+    learned call acts (the call itself records `last_call`, as any call does)."""
+    from . import night as N
+    name = (ent.properties or {}).get("method_name")
+    if not name or not isinstance(new, dict) or not new.get("object"):
+        return
+    args = new.get("args") if isinstance(new.get("args"), dict) else {}
+    r = N.method_call(srv, est, getattr(srv, "efield", None), getattr(srv, "membrane", None),
+                      str(new["object"]), str(name), args)
+    _consume(est, ent, prop, new, (r.get("head") or r.get("status") or "") if isinstance(r, dict) else r)
+
+
+EFFECTS = {"chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods}
 
 
 def _run(b, w) -> None:

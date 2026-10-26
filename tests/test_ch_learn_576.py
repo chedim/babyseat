@@ -57,11 +57,13 @@ def world():
 
 
 def _turn(est, vm, *writes, writer="llm"):
-    """One chain: each (entity, prop, value) written in order by `writer`."""
-    with W.source("person", "t"), W.as_writer(writer):
-        for ent, prop, val in writes:
-            ent.properties[prop] = val
-            est.upsert(ent)
+    """One chain: each (entity, prop, value[, writer]) written in order."""
+    with W.source("person", "t"):
+        for wr in writes:
+            ent, prop, val = wr[:3]
+            with W.as_writer(wr[3] if len(wr) > 3 else writer):
+                ent.properties[prop] = val
+                est.upsert(ent)
     vm.drain()
 
 
@@ -150,3 +152,45 @@ def test_a_proposal_on_a_granted_branch_writes_for_real(world):
     granted.add(MEMBRANE_NS + "toy:")
     _turn(est, vm, (q, "a", 1))
     assert q.properties.get("b") == 2                          # live: it wrote q.b itself
+
+
+# ---- the LLM's actions are the target (operator, 2026-10-26) ------------------------------
+
+def test_only_the_llms_writes_are_learned(world):
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2), writer="person:op")
+    _turn(est, vm, (x, "a", 3), (x, "b", 4), writer="field")
+    assert _cands(vm) == []
+    _turn(est, vm, (x, "a", 5, "person:op"), (x, "b", 6, "llm"))     # a person's cause, the LLM's act
+    assert len(_cands(vm)) == 1
+
+
+def _method(est, name="ping"):
+    m = QuantumEntity(eid=MEMBRANE_NS + f"tool:toy.{name}", cls="tool",
+                      properties={"name": f"toy.{name}", "method_name": name, "method_of": [MEMBRANE_NS + "toy:x"],
+                                  "command": "echo {{n}}"})
+    est.upsert(m)
+    return est.docs[m.eid]
+
+
+def test_a_method_call_is_learned_as_a_call(world):
+    est, vm, purse, _ = world
+    x, y, z = _ent(est, "x"), _ent(est, "y"), _ent(est, "z")
+    m = _method(est)
+    _turn(est, vm, (x, "a", 7, "person:op"), (m, "last_call", {"object": x.eid, "args": {"n": 7}}))
+    c = next(t for t in _cands(vm) if t.properties["write"][0].endswith(".call"))
+    assert c.properties["write"][1] == "{'object': x.eid, 'args': {'n': x.a}}"
+    # in shadow it predicts the call the LLM will record, and the LLM's call confirms it
+    _turn(est, vm, (y, "a", 3, "person:op"), (m, "last_call", {"object": y.eid, "args": {"n": 3}}))
+    assert c.properties["predicted"]["path"] == m.eid + ".last_call"
+    _turn(est, vm, (z, "a", 4, "person:op"), (m, "last_call", {"object": z.eid, "args": {"n": 4}}))
+    assert vm.learner.state(c.eid) == "proposal"
+
+
+def test_dicts_are_values():
+    env = {"x": 5}
+    assert CH.evaluate("{'n': x, 'k': [1, 2]}", env) == {"n": 5, "k": [1, 2]}
+    assert CH._writable({"n": 5, "args": {"k": "v"}}) == {"n": 5, "args": {"k": "v"}}
+    with pytest.raises(CH.Refused):
+        CH.evaluate("{x: 1}", env)                      # keys are literal strings
