@@ -2284,7 +2284,7 @@ def substitute_args(cmd: str, args: dict | None) -> str:
 
 
 _NO_SHELL = ("llm::unwake", "llm.unwake", "llm::wake", "llm.wake",
-             "llm::call", "seat::restart", "js::", "self::", "toybox::")
+             "llm::call", "seat::restart", "js::", "toybox::")
 
 def _is_no_shell(act: str) -> bool:
     """The no-shell builtin dialects (the elif chain above in
