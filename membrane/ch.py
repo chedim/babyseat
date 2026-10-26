@@ -6,31 +6,41 @@ what it writes --
     WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
 
 - WHEN: watchers, edge-triggered per binding. Level watchers (near, away, above,
-  below, pos, vel, align, around, quiet) fire when the conjunction turns true and
-  re-arm when it turns false; the event watchers (changed: a write on a path,
-  every: a period) fire on the event while the level ones hold. At most one event
-  watcher per trigger.
-- WHERE: pattern atoms that bind the variables -- isa(?x, Class) (its class or an
-  ISA ancestor), is(?x, eid), filter(expr) -- no XPath.
-- WRITE: [target, expr]: `?x.prop` (or `<eid>.prop`, `.position` included) gets
-  the expression's value. Expressions are a small safe language over scalars and
-  first-class vectors: + - * /, comparisons, and/or/not, x.prop reads, and the
-  built-ins dot, norm, distance (1 - cos, the watches' metric), unit, abs, min, max.
+  below, vel, align, quiet) fire when the conjunction turns true and re-arm when
+  it turns false; `pos` (moved further than d since its stamp) and `around` (the
+  neighbours within z changed) are one-call pulses, true only on the evaluation
+  that sees the change. The event watchers -- changed (a write on a path), every
+  (a period) -- fire on the event while the level ones hold; at most one per
+  trigger. The first evaluation of a binding only SEEDS its state: a trigger
+  fires on a crossing it saw, never on what was already true (a restart or a
+  redefine re-fires nothing).
+- WHERE: pattern atoms binding the variables -- isa(?x, Class) (its class or an
+  ISA ancestor), is(?x, eid), filter(expr). No XPath.
+- WRITE: [target, expr]: `?x.prop` or `<eid>.prop` (`.position` included) gets the
+  value. Expressions: a small safe language over scalars and first-class vectors
+  (+ - * /, comparisons, and/or/not, x.prop reads; dot, norm, distance (1 - cos,
+  the watches' metric), unit, abs, min, max). A written value is a scalar, a
+  string, None or a list of finite numbers -- never an entity, never inf/nan; a
+  position keeps its dimension. Some properties are never a trigger's to write:
+  code (`command`, scripts) and triggers' own definitions.
 
-THE VM hears every field write (writes.on_write, part A) and QUEUES it -- a
-listener never writes; drain() works the queue outside the writer's call, and
-sweep() evaluates the geometric and timed watchers on the thinker's beat. A firing
-writes through the store as `trigger:<eid>`, in the chain that caused it (a
-sweep starts its own), its trigger appended to the chain's `via`.
+THE VM hears every field write (writes.on_write, part A) and only QUEUES it; its
+one worker thread drains the queue and runs the sweeps the thinker asks for
+(request_sweep), so all evaluation is on one thread, one trigger failing never
+stops the others (`errors`), and nothing runs while the seat is paused.
 
 THE LOOP RULE: a firing whose trigger is already in its chain's `via` is refused
-unless the chain passed through self after it (a trigger owned by self appends
-`self` -- Blurp is the one place a loop may run; its energy bounds it, part C)."""
+unless `self` came after it. A trigger owned by self appends `self` -- Blurp is
+the one place a loop may run, and only with a learner attached (part C: its
+energy bounds it); without one, self's triggers are inert. Only `define` sets an
+owner; a chain arriving over the relay cannot claim self (writes.from_headers)."""
 from __future__ import annotations
 
 import ast
 import collections
+import itertools
 import json
+import math
 import re
 import threading
 import time
@@ -44,20 +54,31 @@ SELF = MEMBRANE_NS + "Component:self"
 CLASS = "Trigger"
 _TRIG_PREFIX = MEMBRANE_NS + CLASS + ":"
 QUEUE_MAX = 4096                # writes waiting for the VM (oldest dropped and counted)
+EXPR_MAX = 400                  # an expression's length (characters)
+NODES_MAX = 64                  # and its size (AST nodes)
+VEC_MAX = 8192                  # the longest vector an expression handles
 
 EVENT_VERBS = {"changed", "every"}
 LEVEL_VERBS = {"near", "away", "above", "below", "pos", "vel", "align", "around", "quiet"}
 VERBS = EVENT_VERBS | LEVEL_VERBS
+_DENY = {"command", "owner", "when", "where", "write", "shadow", "predicted"}
 
 
 class Refused(ValueError):
     pass
 
 
+def _denied(prop: str) -> bool:
+    return prop in _DENY or prop.startswith("script_") or prop.endswith("_script")
+
+
 # ---- expressions -----------------------------------------------------------------------------
 
 def _vec(v):
-    return np.asarray(v, dtype=float)
+    a = np.asarray(v, dtype=float)
+    if a.ndim != 1 or len(a) > VEC_MAX:
+        raise Refused("a vector is a flat list of numbers")
+    return a
 
 
 def _out(v):
@@ -86,9 +107,14 @@ BUILTINS = {
     "abs": abs, "min": min, "max": max,
 }
 _NAMES = {"True": True, "False": False, "None": None}
-_BIN = {ast.Add: np.add, ast.Sub: np.subtract, ast.Mult: np.multiply, ast.Div: np.divide}
+_PY = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+       ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b}
+_NP = {ast.Add: np.add, ast.Sub: np.subtract, ast.Mult: np.multiply, ast.Div: np.divide}
 _CMP = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,
         ast.LtE: lambda a, b: a <= b, ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b}
+_ALLOWED = (ast.Constant, ast.Name, ast.List, ast.Tuple, ast.Attribute, ast.BinOp, ast.UnaryOp,
+            ast.BoolOp, ast.Compare, ast.Call, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div,
+            ast.Not, ast.USub, ast.And, ast.Or, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 
 
 class EntityView:
@@ -108,15 +134,58 @@ class EntityView:
         if attr == "cls":
             return ent.cls
         if attr == "position":
-            return _out(_vec(ent.position)) if ent.position is not None else None
+            return _out(np.asarray(ent.position, dtype=float)) if ent.position is not None else None
         return (ent.properties or {}).get(attr)
 
 
+_AST: dict = {}
+
+
 def _parse(expr: str):
+    """Parsed once, checked for length and size; cached."""
+    expr = str(expr)
+    hit = _AST.get(expr)
+    if hit is not None:
+        return hit
+    if len(expr) > EXPR_MAX:
+        raise Refused(f"an expression is at most {EXPR_MAX} characters")
     try:
-        return ast.parse(str(expr), mode="eval").body
-    except SyntaxError as e:
-        raise Refused(f"not an expression: {expr!r} ({e.msg})") from None
+        node = ast.parse(expr, mode="eval").body
+    except (SyntaxError, RecursionError, ValueError) as e:
+        raise Refused(f"not an expression: {expr[:60]!r} ({e})") from None
+    if sum(1 for _ in ast.walk(node)) > NODES_MAX:
+        raise Refused(f"an expression is at most {NODES_MAX} nodes")
+    if len(_AST) > 4096:
+        _AST.clear()
+    _AST[expr] = node
+    return node
+
+
+def _num(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise Refused(f"not a number: {v!r}")
+    return v
+
+
+def _arith(op, a, b):
+    if isinstance(a, list) or isinstance(b, list):
+        x = _vec(a) if isinstance(a, list) else _num(a)
+        y = _vec(b) if isinstance(b, list) else _num(b)
+        with np.errstate(all="raise"):
+            try:
+                return _out(_NP[op](x, y))
+            except (FloatingPointError, ValueError) as e:
+                raise Refused(f"vector arithmetic: {e}") from None
+    if isinstance(a, str) and isinstance(b, str) and op is ast.Add:
+        return a + b
+    a, b = _num(a), _num(b)
+    try:
+        r = _PY[op](a, b)
+    except (ZeroDivisionError, OverflowError) as e:
+        raise Refused(f"arithmetic: {e}") from None
+    if isinstance(r, float) and not math.isfinite(r):
+        raise Refused("not a finite number")
+    return r
 
 
 def _ev(node, env):
@@ -135,19 +204,14 @@ def _ev(node, env):
         if not isinstance(base, EntityView):
             raise Refused("attributes are read on entities only")
         return base.get(node.attr)
-    if isinstance(node, ast.BinOp) and type(node.op) in _BIN:
-        a, b = _ev(node.left, env), _ev(node.right, env)
-        if isinstance(a, list) or isinstance(b, list):
-            return _out(_BIN[type(node.op)](_vec(a) if isinstance(a, list) else a,
-                                            _vec(b) if isinstance(b, list) else b))
-        return _BIN[type(node.op)](a, b).item() if hasattr(_BIN[type(node.op)](a, b), "item") \
-            else _BIN[type(node.op)](a, b)
+    if isinstance(node, ast.BinOp) and type(node.op) in _PY:
+        return _arith(type(node.op), _ev(node.left, env), _ev(node.right, env))
     if isinstance(node, ast.UnaryOp):
         v = _ev(node.operand, env)
         if isinstance(node.op, ast.Not):
             return not v
         if isinstance(node.op, ast.USub):
-            return _out(-_vec(v)) if isinstance(v, list) else -v
+            return _out(-_vec(v)) if isinstance(v, list) else -_num(v)
     if isinstance(node, ast.BoolOp):
         if isinstance(node.op, ast.And):
             v = True
@@ -166,58 +230,54 @@ def _ev(node, env):
         left = _ev(node.left, env)
         for op, right_node in zip(node.ops, node.comparators):
             right = _ev(right_node, env)
-            if not _CMP[type(op)](left, right):
+            try:
+                if not _CMP[type(op)](left, right):
+                    return False
+            except TypeError:
                 return False
             left = right
         return True
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in BUILTINS \
             and not node.keywords:
-        return BUILTINS[node.func.id](*[_ev(a, env) for a in node.args])
+        try:
+            return BUILTINS[node.func.id](*[_ev(a, env) for a in node.args])
+        except Refused:
+            raise
+        except (TypeError, ValueError) as e:
+            raise Refused(f"{node.func.id}: {e}") from None
     raise Refused(f"not allowed in an expression: {type(node).__name__}")
 
 
 def _check(node, names: set) -> None:
-    """The definition-time check: the same whitelist, no evaluation."""
-    if isinstance(node, ast.Constant):
-        return
-    if isinstance(node, ast.Name):
-        if node.id not in names and node.id not in _NAMES:
-            raise Refused(f"unbound name {node.id!r}")
-        return
-    if isinstance(node, (ast.List, ast.Tuple)):
-        for e in node.elts:
-            _check(e, names)
-        return
-    if isinstance(node, ast.Attribute):
-        if node.attr.startswith("_") or not isinstance(node.value, ast.Name):
+    """The definition-time check: the same whitelist, no evaluation (iterative)."""
+    for n in ast.walk(node):
+        if not isinstance(n, _ALLOWED):
+            raise Refused(f"not allowed in an expression: {type(n).__name__}")
+        if isinstance(n, ast.Name) and n.id not in names and n.id not in _NAMES and n.id not in BUILTINS:
+            raise Refused(f"unbound name {n.id!r}")
+        if isinstance(n, ast.Attribute) and (n.attr.startswith("_") or not isinstance(n.value, ast.Name)):
             raise Refused("attributes are read on entities only")
-        _check(node.value, names)
-        return
-    if isinstance(node, ast.BinOp) and type(node.op) in _BIN:
-        _check(node.left, names); _check(node.right, names)
-        return
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.Not, ast.USub)):
-        _check(node.operand, names)
-        return
-    if isinstance(node, ast.BoolOp):
-        for e in node.values:
-            _check(e, names)
-        return
-    if isinstance(node, ast.Compare) and all(type(o) in _CMP for o in node.ops):
-        _check(node.left, names)
-        for c in node.comparators:
-            _check(c, names)
-        return
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in BUILTINS \
-            and not node.keywords:
-        for a in node.args:
-            _check(a, names)
-        return
-    raise Refused(f"not allowed in an expression: {type(node).__name__}")
+        if isinstance(n, ast.Call) and not (isinstance(n.func, ast.Name) and n.func.id in BUILTINS
+                                            and not n.keywords):
+            raise Refused("only the built-ins may be called")
 
 
 def evaluate(expr: str, env: dict):
     return _ev(_parse(expr), env)
+
+
+def _writable(v):
+    """What a trigger may write: a scalar, a string, None, or a list of finite numbers."""
+    if v is None or isinstance(v, (bool, str)):
+        return v
+    if isinstance(v, (int, float)):
+        if isinstance(v, float) and not math.isfinite(v):
+            raise Refused("not a finite number")
+        return v
+    if isinstance(v, list) and all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                                   and math.isfinite(float(x)) for x in v):
+        return [float(x) for x in v]
+    raise Refused(f"cannot write a {type(v).__name__}")
 
 
 # ---- definitions -----------------------------------------------------------------------------
@@ -250,7 +310,7 @@ def _validate(when, where, write) -> dict:
         raise Refused("write is [target, expression]")
     bound = set()
     for a in where:
-        if not a or a[0] not in ("isa", "is", "filter"):
+        if not isinstance(a, (list, tuple)) or not a or a[0] not in ("isa", "is", "filter"):
             raise Refused(f"unknown pattern atom {a!r} (isa, is, filter)")
         if a[0] in ("isa", "is"):
             v = _var(a[1]) if len(a) > 2 else None
@@ -262,45 +322,65 @@ def _validate(when, where, write) -> dict:
             _check(_parse(a[1]), bound)
     n_event = 0
     for a in when:
-        if not a or a[0] not in VERBS:
-            raise Refused(f"unknown watcher {a[0] if a else a!r} ({', '.join(sorted(VERBS))})")
+        if not isinstance(a, (list, tuple)) or not a or a[0] not in VERBS:
+            raise Refused(f"unknown watcher {a!r} ({', '.join(sorted(VERBS))})")
         n_event += a[0] in EVENT_VERBS
         for x in a[1:]:
             v = _var(str(x).split(".", 1)[0]) if isinstance(x, str) else None
             if v and v not in bound:
                 raise Refused(f"?{v} is bound by nothing (WHERE isa/is)")
-        if a[0] in ("above", "below"):
-            _check(_parse(a[1]), bound)
+        try:
+            if a[0] in ("above", "below"):
+                _check(_parse(a[1]), bound)
+                float(a[2])
+            elif a[0] != "changed":
+                float(a[-1])
+        except (TypeError, ValueError, IndexError):
+            raise Refused(f"{a[0]}: a number is missing or wrong in {a!r}") from None
     if n_event > 1:
         raise Refused("one event watcher (changed / every) per trigger")
     tgt, expr = write
-    head, _, prop = str(tgt).partition(".")
-    if not prop:
+    head, _, prop = str(tgt).rpartition(".")
+    if not head or not prop:
         raise Refused(f"write target is ?x.prop or <eid>.prop: {tgt!r}")
+    if _denied(prop):
+        raise Refused(f"a trigger cannot write {prop!r}")
     v = _var(head)
     if v and v not in bound:
         raise Refused(f"?{v} is bound by nothing (WHERE isa/is)")
     _check(_parse(expr), bound)
-    return {"when": when, "where": where, "write": [str(tgt), str(expr)]}
+    return {"when": [list(a) for a in when], "where": [list(a) for a in where],
+            "write": [str(tgt), str(expr)]}
 
 
 # ---- the VM ----------------------------------------------------------------------------------
 
 class VM:
-    def __init__(self, est, clock=time.time):
+    def __init__(self, est, clock=time.time, paused=lambda: False):
         self.est = est
         self.clock = clock
+        self.paused = paused
         self._q: collections.deque = collections.deque()
-        self._lk = threading.Lock()
+        self._qlk = threading.Lock()
+        self._run = threading.RLock()                # all evaluation, one at a time
         self._wake = threading.Event()
+        self._sweep_wanted = False
+        self._stop = False
         self.dropped = 0
         self.refused: dict[str, int] = {}
         self.fired: dict[str, int] = {}
         self.errors: dict[str, str] = {}
         self._seen: dict[str, float] = {}         # eid -> the last write on it (quiet)
-        self._state: dict[str, dict] = {}         # trigger -> binding -> {lv, every, stamp}
+        self._state: dict[str, dict] = {}         # trigger -> binding -> {lv, every, stamp, within}
         self._thread = None
-        self._trig: list | None = None             # the trigger eids (None: rescan)
+        self._trig: tuple | None = None            # (version, eids)
+        self._trig_v = 0
+        self._spec: dict[str, tuple] = {}          # trigger -> (definition fingerprint, spec or None)
+        self._seq = itertools.count()
+        self.learner = None                        # #576 C: ch_learn.Learner (Blurp's plasticity)
+        now = float(self.clock())
+        for eid in list((est.docs or {}).keys()):
+            self._seen[eid] = now                  # everything was last seen when the VM came up
 
     # -- hearing ----------------------------------------------------------------------------
     def attach(self) -> None:
@@ -309,67 +389,106 @@ class VM:
     def detach(self) -> None:
         W.off_write(self._hear)
 
+    @staticmethod
+    def _split(w: dict) -> tuple[str, str]:
+        if w.get("eid") is not None:
+            return str(w["eid"]), str(w.get("prop") or "")
+        path = str(w.get("path") or "")
+        return path, ""
+
     def _hear(self, w: dict) -> None:
         """The write listener: note and queue, never write (part A's rule)."""
-        path = str(w.get("path") or "")
-        if path.startswith(_TRIG_PREFIX):
-            self._trig = None                       # a trigger born, changed or gone
-        if not path.startswith("rel:"):
-            self._seen[path.split(".", 1)[0]] = float(self.clock())     # the VM's own clock
-        with self._lk:
+        if str(w.get("path") or "").startswith("rel:"):
+            return
+        eid, prop = self._split(w)
+        if eid.startswith(_TRIG_PREFIX):
+            self._trig_v += 1                       # a trigger born, changed or gone
+        if w.get("new") is None and not prop:       # a removal: forget it
+            self._seen.pop(eid, None)
+            self._state.pop(eid, None)
+        elif not str(w.get("writer") or "").startswith("trigger:"):
+            self._seen[eid] = float(self.clock())   # the VM's own writes are not the entity's activity
+        with self._qlk:
             if len(self._q) >= QUEUE_MAX:
                 self._q.popleft()
                 self.dropped += 1
             self._q.append(w)
         self._wake.set()
 
-    def note_seen(self, eid: str, ts: float) -> None:
-        self._seen[eid] = float(ts)
-
     # -- defining ---------------------------------------------------------------------------
     def define(self, name: str, when, where, write, owner: str | None = None) -> str:
         spec = _validate(when, where, write)
         eid = MEMBRANE_NS + f"{CLASS}:{_slug(name)}"
-        doc = QuantumEntity(eid=eid, cls=CLASS,
-                            properties={"name": str(name), **spec, "owner": owner or "",
-                                        "from": [str(a[1]) for a in spec["when"] if len(a) > 1],
-                                        "to": spec["write"][0]})
+        props = {"name": str(name), **spec, "owner": owner or "",
+                 "from": [str(a[1]) for a in spec["when"] if len(a) > 1], "to": spec["write"][0]}
         old = (self.est.docs or {}).get(eid)
         if old is not None:
-            old.properties = {**(old.properties or {}), **doc.properties}
+            for k, v in props.items():
+                old.properties[k] = v
             self.est.upsert(old)
         else:
-            self.est.upsert(doc)
+            self.est.upsert(QuantumEntity(eid=eid, cls=CLASS, properties=props))
         self._state.pop(eid, None)
         return eid
 
     def triggers(self) -> list:
         """The trigger entities, cached until a Trigger entity is written."""
-        if self._trig is None:
-            self._trig = [eid for eid, d in list((self.est.docs or {}).items()) if d.cls == CLASS]
+        hit = self._trig
+        if hit is None or hit[0] != self._trig_v:
+            v = self._trig_v
+            hit = (v, [eid for eid, d in list((self.est.docs or {}).items()) if d.cls == CLASS])
+            self._trig = hit
         docs = self.est.docs or {}
-        return [docs[e] for e in self._trig if e in docs]
+        return [docs[e] for e in hit[1] if e in docs]
+
+    def _valid(self, tr) -> dict | None:
+        """A trigger's spec, validated when first used or changed -- an entity of class
+        Trigger made any other way is checked like a definition."""
+        p = tr.properties or {}
+        fp = json.dumps([p.get("when"), p.get("where"), p.get("write")], default=str)
+        hit = self._spec.get(tr.eid)
+        if hit is None or hit[0] != fp:
+            try:
+                hit = (fp, _validate(p.get("when"), p.get("where"), p.get("write")))
+            except (Refused, TypeError, ValueError) as e:
+                hit = (fp, None)
+                self.errors[tr.eid] = f"invalid: {e}"[:200]
+            self._spec[tr.eid] = hit
+        return hit[1]
 
     # -- binding ----------------------------------------------------------------------------
-    def _isa(self, ent, cls: str) -> bool:
+    def _isa(self, ent, cls: str, memo: dict) -> bool:
+        key = (ent.eid, str(cls).lower())
+        if key in memo:
+            return memo[key]
         c = str(cls).lower()
-        if (ent.cls or "").lower() == c:
-            return True
-        from .night import ancestors
-        for a in ancestors(self.est, ent):
-            if a.eid.lower().endswith(":" + c) or str((a.properties or {}).get("name") or "").lower() == c:
-                return True
-        return False
+        ok = (ent.cls or "").lower() == c
+        if not ok:
+            from .night import ancestors
+            ok = any(a.eid.lower().endswith(":" + c) or str((a.properties or {}).get("name") or "").lower() == c
+                     for a in ancestors(self.est, ent))
+        memo[key] = ok
+        return ok
 
-    def _candidates(self, atom) -> list[str]:
+    def _lookup(self, ref) -> str | None:
+        ref = str(ref)
+        docs = self.est.docs or {}
+        if ref in docs:
+            return ref
+        e = self.est.resolve(ref, exact=True) if hasattr(self.est, "resolve") else None
+        return e.eid if e is not None else None
+
+    def _candidates(self, atom, memo) -> list[str]:
         if atom[0] == "is":
-            e = self.est.resolve(str(atom[2]), exact=True) if hasattr(self.est, "resolve") else None
-            e = e or (self.est.docs or {}).get(str(atom[2]))
-            return [e.eid] if e is not None else []
-        return [eid for eid, e in list((self.est.docs or {}).items())
-                if e.cls != CLASS and self._isa(e, atom[2])]
+            e = self._lookup(atom[2])
+            return [e] if e else []
+        key = ("cands", str(atom[2]).lower())
+        if key not in memo:
+            memo[key] = [eid for eid, e in list((self.est.docs or {}).items())
+                         if e.cls != CLASS and self._isa(e, atom[2], memo)]
+        return memo[key]
 
-    def _bindings(self, spec: dict, fixed: dict | None = None) -> list[dict]:
+    def _bindings(self, spec: dict, memo: dict, fixed: dict | None = None) -> list[dict]:
         out = [dict(fixed or {})]
         for a in spec.get("where") or []:
             if a[0] not in ("isa", "is"):
@@ -379,12 +498,11 @@ class VM:
             for b in out:
                 if v in b:
                     ent = (self.est.docs or {}).get(b[v])
-                    ok = ent is not None and (ent.eid in self._candidates(a) if a[0] == "is"
-                                              else self._isa(ent, a[2]))
-                    if ok:
+                    if ent is not None and (ent.eid in self._candidates(a, memo) if a[0] == "is"
+                                            else self._isa(ent, a[2], memo)):
                         nxt.append(b)
                 else:
-                    nxt.extend({**b, v: eid} for eid in self._candidates(a))
+                    nxt.extend({**b, v: eid} for eid in self._candidates(a, memo))
             out = nxt
         res = []
         for b in out:
@@ -399,12 +517,9 @@ class VM:
     def _env(self, binding: dict) -> dict:
         return {v: EntityView(self.est, eid) for v, eid in binding.items()}
 
-    def _resolve_ref(self, ref, binding):
+    def _ref(self, ref, binding):
         v = _var(ref) if isinstance(ref, str) else None
-        if v:
-            return binding.get(v)
-        e = self.est.resolve(str(ref), exact=True) if hasattr(self.est, "resolve") else None
-        return (e.eid if e is not None else None) or (str(ref) if str(ref) in (self.est.docs or {}) else None)
+        return binding.get(v) if v else self._lookup(ref)
 
     def _pos(self, eid):
         e = (self.est.docs or {}).get(eid) if eid else None
@@ -414,51 +529,42 @@ class VM:
     def _level(self, a, binding, env, st, now) -> bool:
         verb = a[0]
         if verb in ("near", "away"):
-            p, q = self._pos(self._resolve_ref(a[1], binding)), self._pos(self._resolve_ref(a[2], binding))
+            p, q = self._pos(self._ref(a[1], binding)), self._pos(self._ref(a[2], binding))
             if p is None or q is None:
                 return False
             d = _dist(p, q)
             return d <= float(a[3]) if verb == "near" else d >= float(a[3])
         if verb in ("above", "below"):
-            try:
-                v = evaluate(a[1], env)
-            except Refused:
-                return False
-            if v is None:
+            v = evaluate(a[1], env)
+            if v is None or isinstance(v, (bool, str, list)):
                 return False
             return float(v) > float(a[2]) if verb == "above" else float(v) < float(a[2])
-        if verb == "pos":
-            p = self._pos(self._resolve_ref(a[1], binding))
+        if verb == "pos":                                # a pulse: true on the call that sees the move
+            p = self._pos(self._ref(a[1], binding))
             if p is None:
                 return False
             stamp = st.get("stamp")
-            if stamp is None:
+            if stamp is None or len(stamp) != len(p):
                 st["stamp"] = [float(x) for x in p]
                 return False
-            if float(np.linalg.norm(_vec(p) - _vec(stamp))) > float(a[2]):
+            if float(np.linalg.norm(np.asarray(p, dtype=float) - np.asarray(stamp, dtype=float))) > float(a[2]):
                 st["stamp"] = [float(x) for x in p]
                 return True
             return False
         if verb == "vel":
-            ent = (self.est.docs or {}).get(self._resolve_ref(a[1], binding))
-            try:
-                return ent is not None and float(ent.ring_velocity(now) or 0.0) > float(a[2])
-            except Exception:
-                return False
+            ent = (self.est.docs or {}).get(self._ref(a[1], binding))
+            return ent is not None and float(ent.ring_velocity(now) or 0.0) > float(a[2])
         if verb == "align":
-            ent = (self.est.docs or {}).get(self._resolve_ref(a[1], binding))
+            ent = (self.est.docs or {}).get(self._ref(a[1], binding))
             srv = getattr(self.est, "_srv", None)
             fld = getattr(srv, "efield", None) if srv is not None else None
             if ent is None or fld is None:
                 return False
-            try:
-                from .eids import field_id
-                s = fld.get(field_id(ent.eid))
-                return s is not None and float(s.coherence or 0.0) < float(a[2])
-            except Exception:
-                return False
-        if verb == "around":
-            me = self._resolve_ref(a[1], binding)
+            from .eids import field_id
+            s = fld.get(field_id(ent.eid))
+            return s is not None and float(s.coherence or 0.0) < float(a[2])
+        if verb == "around":                             # a pulse: true when the neighbours changed
+            me = self._ref(a[1], binding)
             p = self._pos(me)
             if p is None:
                 return False
@@ -468,45 +574,48 @@ class VM:
             st["within"] = within
             return changed
         if verb == "quiet":
-            eid = self._resolve_ref(a[1], binding)
-            last = self._seen.get(eid)
+            last = self._seen.get(self._ref(a[1], binding))
             return last is not None and now - last >= float(a[2])
         return False
 
-    def _consider(self, tr, binding: dict, now: float, event: dict | None = None) -> None:
-        p = tr.properties or {}
+    def _consider(self, tr, spec, binding: dict, now: float, event: dict | None = None) -> None:
         key = json.dumps(binding, sort_keys=True)
         st = self._state.setdefault(tr.eid, {}).setdefault(key, {})
         env = self._env(binding)
-        ev_atoms = [a for a in p.get("when") or [] if a[0] in EVENT_VERBS]
-        lv_atoms = [a for a in p.get("when") or [] if a[0] in LEVEL_VERBS]
+        ev_atoms = [a for a in spec["when"] if a[0] in EVENT_VERBS]
+        lv = [self._level(x, binding, env, st, now) for x in spec["when"] if x[0] in LEVEL_VERBS]   # every atom
+        level = all(lv)
         if ev_atoms:
             a = ev_atoms[0]
             if a[0] == "changed":
                 if event is None:
                     return
-                head, _, prop = str(a[1]).partition(".")
-                if event.get("path") != f"{self._resolve_ref(head, binding)}.{prop}":
+                head, _, prop = str(a[1]).rpartition(".")
+                eid, wprop = self._split(event)
+                if eid != self._ref(head, binding) or wprop != prop:
                     return
-            else:                                   # every
+            else:                                        # every
                 if event is not None:
                     return
                 last = st.get("every")
                 if last is not None and now - last < float(a[1]):
                     return
                 st["every"] = now
-            if all(self._level(x, binding, env, st, now) for x in lv_atoms):
-                self._fire(tr, binding, env, now)
+            if level:
+                self._fire(tr, spec, binding, env, now)
             return
-        level = all(self._level(x, binding, env, st, now) for x in lv_atoms)
+        seeded = "lv" in st
         was = st.get("lv", False)
         st["lv"] = level
-        if level and not was:
-            self._fire(tr, binding, env, now)
+        if seeded and level and not was:
+            self._fire(tr, spec, binding, env, now)
 
     # -- firing -----------------------------------------------------------------------------
-    def _fire(self, tr, binding, env, now) -> None:
+    def _fire(self, tr, spec, binding, env, now) -> None:
         p = tr.properties or {}
+        mine = p.get("owner") == SELF
+        if mine and self.learner is None:
+            return                                   # self's triggers run only with a learner (its energy)
         ch = W.current()
         via = list((ch or {}).get("via") or [])
         if tr.eid in via:
@@ -514,84 +623,163 @@ class VM:
             if "self" not in via[last + 1:]:
                 self.refused[tr.eid] = self.refused.get(tr.eid, 0) + 1
                 return
-        tgt, expr = p.get("write") or [None, None]
-        head, _, prop = str(tgt).partition(".")
-        eid = self._resolve_ref(head, binding)
+        tgt, expr = spec["write"]
+        head, _, prop = tgt.rpartition(".")
+        eid = self._ref(head, binding)
         ent = (self.est.docs or {}).get(str(eid)) if eid else None
-        if ent is None or not prop:
+        if ent is None or ent.cls == CLASS:
             self.errors[tr.eid] = f"no target {tgt!r}"
             return
         try:
-            value = evaluate(str(expr), env)
-        except Exception as e:                      # noqa: BLE001
+            value = _writable(evaluate(expr, env))
+            if prop == "position" and (not isinstance(value, list) or
+                                       (ent.position is not None and len(value) != len(ent.position))):
+                raise Refused("a position is a list of the field's dimension")
+        except Refused as e:
             self.errors[tr.eid] = f"{expr!r}: {e}"[:200]
             return
-        via = via + [tr.eid] + (["self"] if p.get("owner") == SELF else [])
-        base = ch or {"id": f"field-{tr.eid.rsplit(':', 1)[-1]}-{int(now * 1000)}", "root": "field"}
+        if mine:
+            via = via + [tr.eid, "self"]
+            via = via[len(via) - 1:]                 # before self nothing matters to the rule: keep it short
+        else:
+            via = via + [tr.eid]
+        base = ch or {"id": f"field-{tr.eid.rsplit(':', 1)[-1]}-{int(now * 1000)}-{next(self._seq)}",
+                      "root": "field"}
         with W.resume(dict(base, via=via)), W.as_writer(f"trigger:{tr.eid}"):
-            if prop == "position":
-                ent.position = list(value) if value is not None else None
+            mode = "live"
+            if mine:
+                mode = self.learner.on_fire(tr, f"{ent.eid}.{prop}", value)   # #576 C: shadow / live / asleep
+            if mode == "skip":
+                return
+            if mode == "shadow":                     # the prediction lands on the candidate itself
+                ch_now = W.current() or {}
+                tr.properties["predicted"] = {"path": f"{ent.eid}.{prop}", "value": value,
+                                              "chain": ch_now.get("id"), "ts": now}
+                self.est.upsert(tr)
+            elif prop == "position":
+                ent.position = value
+                self.est.upsert(ent)
             else:
-                ent.properties = {**(ent.properties or {}), prop: value}
-            self.est.upsert(ent)
+                ent.properties[prop] = value          # in place: a concurrent writer's keys survive
+                self.est.upsert(ent)
         self.fired[tr.eid] = self.fired.get(tr.eid, 0) + 1
 
     # -- running ----------------------------------------------------------------------------
+    def _vars_for(self, spec, ent, memo) -> list[str]:
+        """The variables the written entity can bind (its isa / is atoms)."""
+        out = []
+        for a in spec.get("where") or []:
+            if a[0] == "is" and self._lookup(a[2]) == ent.eid:
+                out.append(_var(a[1]))
+            elif a[0] == "isa" and self._isa(ent, a[2], memo):
+                out.append(_var(a[1]))
+        return [v for v in out if v]
+
+    def _one(self, tr, fn) -> None:
+        try:
+            fn()
+        except Exception as e:                       # noqa: BLE001 -- one trigger never stops the others
+            self.errors[tr.eid] = f"{type(e).__name__}: {e}"[:200]
+
     def drain(self, max_n: int = 1000) -> int:
-        """Work the queued writes (outside any writer's call): the `changed` triggers
-        on the written path, and the level triggers re-read on the written entity."""
+        """Work the queued writes: the `changed` triggers on the written path, and the
+        level triggers re-read for every variable the written entity can bind."""
         n = 0
-        while n < max_n:
-            with self._lk:
+        while n < max_n and not self.paused():
+            with self._qlk:
                 if not self._q:
                     break
                 w = self._q.popleft()
             n += 1
-            path = str(w.get("path") or "")
-            if path.startswith("rel:"):
-                continue
-            eid = path.split(".", 1)[0]
-            trs = [t for t in self.triggers() if t.eid != eid]
-            if not trs:
-                continue
-            now = float(self.clock())
-            with W.resume(w.get("chain")):
-                for tr in trs:
-                    spec = tr.properties or {}
-                    for v in {_var(str(a[1]).split(".", 1)[0]) for a in spec.get("when") or []
-                              if len(a) > 1 and isinstance(a[1], str)} - {None}:
-                        for b in self._bindings(spec, {v: eid}):
-                            if any(a[0] == "changed" for a in spec.get("when") or []):
-                                self._consider(tr, b, now, event=w)
-                            elif not any(a[0] == "every" for a in spec.get("when") or []):
-                                self._consider(tr, b, now)
+            eid, _prop = self._split(w)
+            with self._run:
+                ent = (self.est.docs or {}).get(eid)
+                trs = [t for t in self.triggers() if t.eid != eid]
+                if trs and ent is not None and ent.cls != CLASS:
+                    now = float(self.clock())
+                    memo: dict = {}
+                    with W.resume(w.get("chain")):
+                        for tr in trs:
+                            self._one(tr, lambda tr=tr: self._on_write(tr, ent, w, now, memo))
+                if self.learner is not None:
+                    with W.resume(w.get("chain")):
+                        try:
+                            self.learner.observe(w)        # #576 C: score the predictions, then guess
+                        except Exception as e:             # noqa: BLE001
+                            self.errors["learner"] = f"{type(e).__name__}: {e}"[:200]
         return n
 
+    def _on_write(self, tr, ent, w, now, memo) -> None:
+        spec = self._valid(tr)
+        if spec is None:
+            return
+        kinds = {a[0] for a in spec["when"]}
+        if "every" in kinds:
+            return
+        if "changed" in kinds:
+            a = next(a for a in spec["when"] if a[0] == "changed")
+            head = str(a[1]).rpartition(".")[0]
+            if not _var(head):                           # a literal eid: every binding hears it
+                if self._lookup(head) == ent.eid:
+                    for b in self._bindings(spec, memo):
+                        self._consider(tr, spec, b, now, event=w)
+                return
+        for v in self._vars_for(spec, ent, memo):
+            for b in self._bindings(spec, memo, {v: ent.eid}):
+                if "changed" in kinds:
+                    self._consider(tr, spec, b, now, event=w)
+                else:
+                    self._consider(tr, spec, b, now)
+
     def sweep(self, now: float | None = None) -> None:
-        """The thinker's beat: the geometric and timed watchers over every binding."""
+        """The geometric and timed watchers over every binding (the seat runs it on the
+        worker: request_sweep)."""
+        if self.paused():
+            return
         now = float(now if now is not None else self.clock())
-        for tr in self.triggers():
-            spec = tr.properties or {}
-            if any(a[0] == "changed" for a in spec.get("when") or []):
-                continue
-            for b in self._bindings(spec):
-                self._consider(tr, b, now)
+        with self._run:
+            memo: dict = {}
+            for tr in self.triggers():
+                def go(tr=tr):
+                    spec = self._valid(tr)
+                    if spec is None or any(a[0] == "changed" for a in spec["when"]):
+                        return
+                    for b in self._bindings(spec, memo):
+                        self._consider(tr, spec, b, now)
+                self._one(tr, go)
+
+    def request_sweep(self) -> None:
+        """The thinker's beat: ask the worker for a sweep (its thread, its pace)."""
+        self._sweep_wanted = True
+        self._wake.set()
 
     def start(self) -> None:
-        """The VM's own worker: drains the queue as writes arrive."""
         if self._thread is not None:
             return
+        self._stop = False
 
         def run():
-            while True:
+            while not self._stop:
                 self._wake.wait(5.0)
                 self._wake.clear()
+                if self._stop:
+                    break
                 try:
                     self.drain()
+                    if self._sweep_wanted:
+                        self._sweep_wanted = False
+                        self.sweep()
                 except Exception as e:              # noqa: BLE001
-                    self.errors["drain"] = repr(e)[:200]
+                    self.errors["worker"] = repr(e)[:200]
         self._thread = threading.Thread(target=run, daemon=True, name="ch-vm")
         self._thread.start()
+
+    def stop(self) -> None:
+        self._stop = True
+        self._wake.set()
+        t, self._thread = self._thread, None
+        if t is not None:
+            t.join(timeout=5)
 
     def report(self) -> dict:
         return {"triggers": len(self.triggers()), "queued": len(self._q), "dropped": self.dropped,

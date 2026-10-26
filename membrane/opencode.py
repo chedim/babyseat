@@ -1600,8 +1600,8 @@ def main() -> None:
         srv.run_loop_turn = _run_loop_turn()
         try:                               # #576 B: the cliffhanger VM hears every write
             from . import ch as _CH
-            if getattr(srv, "entity_store", None) is not None:
-                srv.ch_vm = _CH.VM(srv.entity_store)
+            if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
+                srv.ch_vm = _CH.VM(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))
                 srv.ch_vm.attach()
                 srv.ch_vm.start()
         except Exception as e:

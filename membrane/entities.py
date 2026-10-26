@@ -2738,7 +2738,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         before = snaps.get(ent.eid)                # a birth through docs already snapshotted it
         snaps[ent.eid], changes = _W.diff(ent.eid, before, ent)
         for path, old, new in changes:
-            _W.emit(path, old, new)
+            _W.emit(path, old, new, eid=ent.eid)
 
     def remove(self, spec: str) -> int:
         """Model-side entity REMOVE by eid/name fragment (exact single
