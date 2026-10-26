@@ -213,3 +213,23 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
     - Unaccepted branches and shadow guesses stay silent.
     - `TurnRunner.run` records which conversation each turn's chain belongs to (`ch_blurp.note_turn`).
 - **The sheet.** The seat adds the branches as the skill tree, the **level** as the number of branches granted (the card too), and the **Code tab** as Blurp's triggers: their line, state (shadow / proposal), balance (in write costs), hits and firings.
+
+## Scripts are graphs (#576, part G)
+
+`membrane/scripts.py`. A stored command is a **graph**, compiled to bash only to run.
+
+- **The graph:**
+  - items joined by `&&`, `||`, `;`, `&` or a newline;
+  - pipelines of stages joined by `|`, optionally negated with `!`;
+  - a stage is env prefixes, words and redirects (`2>&1`, `>`, `>>`, `<`, heredocs with their bodies), or a group `( … )`.
+- **Word kinds:** `lit`, `param` (`{{x}}`), `glob`, `var` (`$X`), `subst` (`$( )` or backticks), and `file`.
+  - Every node keeps its **raw shell text**, so compiling a parsed command means exactly what the original meant.
+  - `bind()` links a stage's program to an existing `shell:<prog>` entity and a file word to an existing `f:` / `files:` entity. No entity is ever made.
+- **Defining:** `method_define` refuses a command or command step that isn't a script. The graph is kept on the entity (`script`, with the `src` it was parsed from).
+- **Running:** every command (method, step, or an entity's own `run`) runs as the bash its graph compiles to. An edited command is parsed again; one that doesn't parse never runs (`blocked: not a script`).
+- **Migration (the operator's call): once per store,** marked by `.ch-commands-migrated` beside it. Only the `shell:` namespace is touched:
+  - a generated variant (`shell:<prog>-<label>-<4 hex>`) is deleted;
+  - every other `shell:` entity with a stale command (a program like `shell:git-lfs`, a hand-named command) keeps its place without it;
+  - methods, their steps and every other entity are left alone.
+
+  A backup (`backup-576-commands-<ts>.json`) is written first; with no backup, nothing changes. **To restore,** put each `deleted` entry back as an entity with that command, and each `stripped` command back on its entity.

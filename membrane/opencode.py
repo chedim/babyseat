@@ -1598,6 +1598,15 @@ def main() -> None:
                 return {"verdict_text": (out or "")[:200], "model": model or None}
             return go
         srv.run_loop_turn = _run_loop_turn()
+        try:                               # #576 G: the retired link commands go (once; a backup is kept)
+            from . import scripts as _SCR
+            if getattr(srv, "entity_store", None) is not None:
+                _rep = _SCR.migrate(srv.entity_store)
+                if _rep["stripped"] or _rep["deleted"]:
+                    print(f"[opencode] old commands: {_rep['stripped']} program entities stripped, "
+                          f"{_rep['deleted']} variants deleted (backup {_rep['backup']})", file=sys.stderr)
+        except Exception as e:
+            print(f"[opencode] command migration failed ({e})", file=sys.stderr)
         try:                               # #576 B: the cliffhanger VM hears every write
             from . import ch as _CH
             if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
