@@ -130,6 +130,10 @@ def _methods(srv, est, ent, prop, new, by) -> None:
     if not name or not isinstance(new, dict) or not new.get("object"):
         return
     args = new.get("args") if isinstance(new.get("args"), dict) else {}
+    why = N.direct_exec_refusal(est, str(new["object"]), str(name))   # the executor: refused as on the route
+    if why:
+        _consume(est, ent, prop, new, why)
+        return
     r = N.method_call(srv, est, getattr(srv, "efield", None), getattr(srv, "membrane", None),
                       str(new["object"]), str(name), args)
     _consume(est, ent, prop, new, (r.get("head") or r.get("status") or "") if isinstance(r, dict) else r)

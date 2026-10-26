@@ -282,6 +282,13 @@ def evaluate(expr: str, env: dict):
 
 
 def _writable(v, _depth: int = 3):
+    out = _writable_inner(v, _depth)
+    if isinstance(out, (dict, list)) and len(json.dumps(out)) > W.ARG_MAX:
+        raise Refused(f"a written value is at most {W.ARG_MAX} characters")
+    return out
+
+
+def _writable_inner(v, _depth: int = 3):
     """What a trigger may write: a scalar, a string, None, a list of finite numbers,
     or (a call's arguments) a dict / list of those, nested at most 3 deep."""
     if v is None or isinstance(v, (bool, str)):
@@ -294,9 +301,9 @@ def _writable(v, _depth: int = 3):
                                    and math.isfinite(float(x)) for x in v):
         return [float(x) for x in v]
     if isinstance(v, dict) and all(isinstance(k, str) for k in v) and _depth > 0:
-        return {k: _writable(x, _depth - 1) for k, x in v.items()}      # a call's arguments
+        return {k: _writable_inner(x, _depth - 1) for k, x in v.items()}      # a call's arguments
     if isinstance(v, list) and _depth > 0:
-        return [_writable(x, _depth - 1) for x in v]
+        return [_writable_inner(x, _depth - 1) for x in v]
     raise Refused(f"cannot write a {type(v).__name__}")
 
 

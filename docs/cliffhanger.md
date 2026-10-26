@@ -109,7 +109,7 @@ An effect happens because something writes a property of a field entity, not bec
 | `membrane::llm` | `call` (`{about, prompt}`; a string is the prompt) | `llm.request`, its caller the write's writer |
 | `membrane::llm` | `wake` (`{about, at, prompt}`) / `unwake` (the wake's id) | `llm.set_wake` / `llm.unwake` |
 | `membrane::presence` | `restart` (the reason) | `restarts.do_restart` |
-| a method entity | `call` (`{object, args}`) | `night.method_call`: how a learned call acts (#576 C) |
+| a method entity | `invoke` (`{object, args}`) | `night.method_call`: how a learned call acts (#576 C) |
 
 - **Outside the listener:** the listener only queues. The effect runs on the adapters' one worker thread (started at boot), in the chain of the write that caused it, so provenance continues through it.
 - **Consumed:** the worker sets the property back to `''` and leaves the effect's receipt in `<prop>_result` (the chat thing keeps its own `said` / `say_refused`), so the next write is the next effect. A write that empties a branch, and a birth that carries one, are no effect.
@@ -165,7 +165,8 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
 
 - **A call is recorded for the learner:** `<method>.last_call = {object, args}`.
   - A value whose key looks secret (token, key, password, secret, auth, cookie, credential) is stored as `<redacted>`.
-  - A string longer than 64 KB is cut with a `…<truncated>` marker (`writes.ARG_MAX`, the operator's cap).
+  - A long string is cut with a `…<truncated>` marker, and the whole record is held to 64 KB (`writes.ARG_MAX`, the operator's cap).
+  - A secret inside a string value (a header in a command, say) is not caught by key names.
 - **Accountability, not capability (the operator's call):** everything goes through a stored, named method; what a method may run stays open.
 
   - Only `define` sets an owner, and a chain arriving over the relay cannot claim `self`.
@@ -175,7 +176,7 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
 `membrane/ch_learn.py`: Blurp's plasticity, as field physics. Attach it with `vm.learner = Learner(vm, purse, granted)`.
 
 - **The target: the LLM's actions.** Only writes by the LLM (writer `llm`) are guessed at: its property edits, and its method calls, which record `<method>.last_call = {object, args}` (part F). The causes can be anyone's writes. Writes by triggers and adapters never teach or confirm, so Blurp's own acts can't confirm themselves.
-- **A call is learned as a call.** The guess writes `<method>.call = {object, args}`, and the `methods` adapter runs it. The object and arguments are copied from the cause where they match, literal otherwise. In shadow, it predicts the `last_call` the LLM's own call will record.
+- **A call is learned as a call.** The guess writes `<method>.invoke = {object, args}`, and the `methods` adapter runs it. The adapter refuses the executor itself, exactly as the model's route does. The object and arguments are copied from the cause where they match, literal otherwise. In shadow, it predicts the `last_call` the LLM's own call will record.
 - **Guess.** An LLM write is explained by one of the last 3 writes before it in the same chain. The guess is a trigger owned by self:
   - `WHEN changed(?x.c) WHERE isa(?x, <class>): ?x.w = <value>` when cause and write are on the same entity;
   - with `is(?y, <eid>)` as the target when they're on different entities.
@@ -185,4 +186,8 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
 - **Score.** A later write in the same chain to the predicted path, with the predicted value, by anyone but the candidate, is a hit. Nothing else is refunded, so no timer is needed. A live firing is confirmed the same way.
 - **Energy.** Every Blurp write costs `WRITE_COST` (= `BASAL_PER_S`, one awake second): defining a candidate, and each shadow or live firing. A hit refunds 2× to Blurp's purse and to the candidate's balance. The definition counts against the candidate, so it needs two hits to become a proposal: it has to earn back its own birth. Asleep (`purse.can_spend()` false), nothing is spent, guessed or fired.
 - **Stay positive.** A candidate with a balance above 0 is a proposal. On a granted branch (`granted(path)`, the skill tree's Accept in part D2) a proposal fires live. Below 0 it is back in shadow. Sleep prunes every candidate whose balance is negative (`prune()`).
-- **Bound:** the most recent 512 chains are remembered.
+- **Bounds:**
+  - at most 3 new guesses per chain and 256 live candidates; at the cap, a new guess replaces the most negative one (operator);
+  - a refused guess is remembered and never charged or retried;
+  - a nested value a trigger writes is held to 64 KB;
+  - the most recent 512 chains are remembered.

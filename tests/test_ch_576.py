@@ -422,3 +422,9 @@ def test_vel_align_and_around(vm):
     b.position = [1.0, 0.05]
     vm.sweep()
     assert (a.properties.get("fast"), a.properties.get("loose"), a.properties.get("crowd")) == (1, 1, 1)
+
+
+def test_a_nested_written_value_is_capped():
+    with pytest.raises(CH.Refused):
+        CH._writable({"xs": ["w" * 1000] * 200})
+    assert CH._writable({"xs": ["w" * 10]}) == {"xs": ["w" * 10]}

@@ -34,3 +34,25 @@ def test_an_invoke_write_runs_the_method_for_real(tmp_path):
         A.stop()
     assert m.properties["invoke"] == "" and "hi-bob" in m.properties.get("invoke_result", "")
     assert m.properties["last_call"]["args"] == {"who": "bob"}
+
+
+def test_invoking_the_executor_is_refused_like_the_route(tmp_path):
+    est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
+    srv = types.SimpleNamespace(entity_store=est, efield=None, membrane=None)
+    night.seed_executor_entity(est)
+    ran = []
+    real = night.method_call
+    night.method_call = lambda *a, **k: ran.append(a) or real(*a, **k)
+    m = QuantumEntity(eid=MEMBRANE_NS + "tool:any.run", cls="tool",
+                      properties={"name": "any.run", "method_name": "run", "command": "echo x"})
+    est.upsert(m)
+    A.start(srv)
+    try:
+        with W.source("person", "op"), W.as_writer("llm"):
+            m.properties["invoke"] = {"object": night.EXECUTOR_EID, "args": {}}
+            est.upsert(m)
+        A.drain()
+    finally:
+        A.stop()
+        night.method_call = real
+    assert ran == [] and "program the field first" in m.properties.get("invoke_result", "")
