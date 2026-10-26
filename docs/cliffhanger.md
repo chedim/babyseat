@@ -114,7 +114,7 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
 - **WHERE: patterns, no XPath.** `isa(?x, Class)` (the entity's class or an ISA ancestor), `is(?x, eid)`, `filter(expr)`.
 - **WRITE: `[target, expression]`.** The target is `?x.prop` or `<eid>.prop`, `.position` included.
   - A written value is a scalar, a string, `None` or a list of finite numbers: never an entity, never inf / nan. A position keeps its dimension.
-  - A trigger never writes another trigger, code (`command`, `*_script`, `script_*`) or a definition (`owner`, `when`, `where`, `write`).
+  - A trigger never writes another trigger, code (`command`, `*_script`, `script_*`) or a definition (`owner`, `owner_sig`, `when`, `where`, `write`). Any other property of any entity it may write: a trigger is how the field writes.
 - **Expressions:** a small safe language over scalars and first-class vectors.
   - Operators: `+ - * /` (Python arithmetic for scalars, numpy only for vectors; division by zero and non-finite results are refused), comparisons, `and` / `or` / `not`.
   - Reads: `x.prop`, `x.position`.
@@ -130,4 +130,6 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
 - **The loop rule:** a firing whose trigger is already in its chain's `via` is refused, unless `self` came after it.
   - A trigger owned by self appends `self`, so Blurp is the one place a loop may run.
   - Self's triggers run only with a learner attached (part C), so its energy bounds the loop.
-  - Only `define` sets an owner, and a chain arriving over the relay cannot claim `self`.
+  - Self's ownership is **signed** by `define`: an HMAC under a key file beside the store (`.ch-key`, mode 0600, never an entity). A trigger that merely says `owner = self` is not self's and falls under the loop rule.
+  - The entity API never edits a trigger, and only this seat's triggers run; an imported one never does.
+  - A chain arriving over the relay cannot claim `self`.

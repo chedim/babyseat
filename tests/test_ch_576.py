@@ -356,3 +356,50 @@ def test_below_away_pos_filter_and_a_position_write(vm):
     assert (s.properties.get("cold"), s.properties.get("far"), s.properties.get("moved")) == (1, 1, 1)
     s.properties["go"] = 1; vm.est.upsert(s); vm.drain()
     assert list(s.position) == [1.0, 0.0]                # the 2-d write landed; the 1-d one was refused
+
+
+# ---- #578 re-review: self's ownership cannot be forged ---------------------------------------
+
+def test_a_forged_self_trigger_falls_under_the_loop_rule(vm):
+    vm.learner = _Live()
+    x = _ent(vm.est, "x", cls="toy", a=0)
+    forged = QuantumEntity(eid=MEMBRANE_NS + "Trigger:forged", cls="Trigger",
+                           properties={"name": "forged", "owner": CH.SELF, "when": [["changed", "?x.a"]],
+                                       "where": [["isa", "?x", "toy"]], "write": ["?x.a", "x.a + 1"]})
+    vm.est.upsert(forged)
+    x.properties["a"] = 1; vm.est.upsert(x)
+    vm.drain(max_n=60)
+    assert x.properties["a"] == 2 and vm.refused.get(forged.eid) == 1     # one hop, then the rule
+
+
+def test_a_defined_self_trigger_is_signed_and_loops(vm):
+    vm.learner = _Live()
+    x = _ent(vm.est, "x", cls="toy", a=0)
+    t = vm.define("mine", when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]], write=["?x.a", "x.a + 1"],
+                  owner=CH.SELF)
+    assert vm.est.docs[t].properties.get("owner_sig")
+    x.properties["a"] = 1; vm.est.upsert(x)
+    vm.drain(max_n=20)
+    assert x.properties["a"] > 3
+
+
+def test_the_signature_survives_a_new_vm_on_the_same_store(vm):
+    t = vm.define("mine", when=[["every", 60]], where=[["isa", "?x", "toy"]], write=["?x.n", "1"], owner=CH.SELF)
+    vm2 = CH.VM(vm.est)
+    assert vm2._is_selfs(vm.est.docs[t]) and vm._is_selfs(vm.est.docs[t])
+
+
+def test_a_trigger_is_never_edited_through_the_entity_api(vm):
+    t = vm.define("t", when=[["every", 60]], where=[["isa", "?x", "toy"]], write=["?x.n", "1"])
+    res = vm.est.edit(t, properties={"owner": CH.SELF})
+    assert not res.get("ok") and vm.est.docs[t].properties.get("owner") == ""
+
+
+def test_an_imported_trigger_never_runs(vm):
+    x = _ent(vm.est, "x", cls="toy", a=0)
+    guest = QuantumEntity(eid="entity::peer::Trigger:theirs", cls="Trigger",
+                          properties={"name": "theirs", "when": [["changed", "?x.a"]],
+                                      "where": [["isa", "?x", "toy"]], "write": ["?x.b", "1"]})
+    vm.est.upsert(guest)
+    x.properties["a"] = 1; vm.est.upsert(x); vm.drain()
+    assert "b" not in x.properties

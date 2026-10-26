@@ -2427,6 +2427,8 @@ class EntityStore(MultiParentOps, TimelineOps):
                     " (list via related)")
             return {"ok": False,
                     "error": f"no entity matches {spec!r}{hint}"}
+        if ent.cls == "Trigger":                     # #576: a trigger is the VM's (define), never edited here
+            return {"ok": False, "error": "a trigger is defined by the cliffhanger VM, never edited: define it again"}
         # #158: a script inside `properties` goes through the SCRIPT door --
         # the generic patch cut it at 2000 chars and never compiled it (the
         # 'I' loop died that way); the named argument wins when both are given

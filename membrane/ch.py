@@ -32,13 +32,20 @@ stops the others (`errors`), and nothing runs while the seat is paused.
 THE LOOP RULE: a firing whose trigger is already in its chain's `via` is refused
 unless `self` came after it. A trigger owned by self appends `self` -- Blurp is
 the one place a loop may run, and only with a learner attached (part C: its
-energy bounds it); without one, self's triggers are inert. Only `define` sets an
-owner; a chain arriving over the relay cannot claim self (writes.from_headers)."""
+energy bounds it); without one, self's triggers are inert. Self's ownership is
+SIGNED by define (an HMAC under a key file beside the store, never an entity): a
+trigger that merely says owner=self is not self's. The entity API never edits a
+trigger, only this seat's triggers run (an imported one never does), and a chain
+arriving over the relay cannot claim self (writes.from_headers)."""
 from __future__ import annotations
 
 import ast
 import collections
+import hashlib
+import hmac
 import itertools
+import os
+import secrets
 import json
 import math
 import re
@@ -61,7 +68,8 @@ VEC_MAX = 8192                  # the longest vector an expression handles
 EVENT_VERBS = {"changed", "every"}
 LEVEL_VERBS = {"near", "away", "above", "below", "pos", "vel", "align", "around", "quiet"}
 VERBS = EVENT_VERBS | LEVEL_VERBS
-_DENY = {"command", "owner", "when", "where", "write", "shadow", "predicted"}
+_DENY = {"command", "owner", "owner_sig", "when", "where", "write", "shadow", "predicted"}
+KEY_FILE = ".ch-key"            # beside the store: signs self's ownership (never an entity)
 
 
 class Refused(ValueError):
@@ -353,6 +361,43 @@ def _validate(when, where, write) -> dict:
             "write": [str(tgt), str(expr)]}
 
 
+# ---- self's ownership: signed ------------------------------------------------------------------
+
+def _key(est) -> bytes:
+    """The key that signs self's triggers: a file beside the store (mode 0600, never
+    an entity, so no tool can read or write it), in RAM for a store without a path."""
+    hit = getattr(est, "_ch_key", None)
+    if hit:
+        return hit
+    from pathlib import Path
+    path = getattr(est, "path", None)
+    key = None
+    if path:
+        f = Path(path).parent / KEY_FILE
+        try:
+            key = f.read_bytes()
+        except OSError:
+            key = secrets.token_bytes(32)
+            try:
+                fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(key)
+            except FileExistsError:
+                key = f.read_bytes()
+            except OSError:
+                pass
+    key = key or secrets.token_bytes(32)
+    try:
+        est._ch_key = key
+    except Exception:
+        pass
+    return key
+
+
+def _sig(est, eid: str) -> str:
+    return hmac.new(_key(est), eid.encode(), hashlib.sha256).hexdigest()
+
+
 # ---- the VM ----------------------------------------------------------------------------------
 
 class VM:
@@ -421,6 +466,7 @@ class VM:
         eid = MEMBRANE_NS + f"{CLASS}:{_slug(name)}"
         props = {"name": str(name), **spec, "owner": owner or "",
                  "from": [str(a[1]) for a in spec["when"] if len(a) > 1], "to": spec["write"][0]}
+        props["owner_sig"] = _sig(self.est, eid) if owner == SELF else ""   # only define signs self's
         old = (self.est.docs or {}).get(eid)
         if old is not None:
             for k, v in props.items():
@@ -431,12 +477,20 @@ class VM:
         self._state.pop(eid, None)
         return eid
 
+    def _is_selfs(self, tr) -> bool:
+        """Self's trigger: owner self AND signed by define (a forged owner is not)."""
+        p = tr.properties or {}
+        sig = str(p.get("owner_sig") or "")
+        return p.get("owner") == SELF and bool(sig) and hmac.compare_digest(sig, _sig(self.est, tr.eid))
+
     def triggers(self) -> list:
-        """The trigger entities, cached until a Trigger entity is written."""
+        """This seat's trigger entities (an imported one never runs), cached until a
+        Trigger entity is written."""
         hit = self._trig
         if hit is None or hit[0] != self._trig_v:
             v = self._trig_v
-            hit = (v, [eid for eid, d in list((self.est.docs or {}).items()) if d.cls == CLASS])
+            hit = (v, [eid for eid, d in list((self.est.docs or {}).items())
+                       if d.cls == CLASS and eid.startswith(_TRIG_PREFIX)])
             self._trig = hit
         docs = self.est.docs or {}
         return [docs[e] for e in hit[1] if e in docs]
@@ -612,8 +666,7 @@ class VM:
 
     # -- firing -----------------------------------------------------------------------------
     def _fire(self, tr, spec, binding, env, now) -> None:
-        p = tr.properties or {}
-        mine = p.get("owner") == SELF
+        mine = self._is_selfs(tr)
         if mine and self.learner is None:
             return                                   # self's triggers run only with a learner (its energy)
         ch = W.current()
