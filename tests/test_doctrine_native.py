@@ -51,7 +51,7 @@ class TestDoctrineNative(unittest.TestCase):
 
     def test_doctrine_names_the_run_lane(self):
         self.assertIn("run", self.text)
-        self.assertIn("command entity", self.text)
+        self.assertIn("define a METHOD", self.text)   # #576 part F: commands run as methods
 
     def test_doctrine_says_builtin_free_by_default(self):
         self.assertIn("NO built-in", self.text)

@@ -52,12 +52,12 @@ class TestTheCaughtSpellingsRoute(unittest.TestCase):
                          "field_watch")
 
     def test_the_tongue_slip_and_space_prefixed_spellings(self):
-        self.assertEqual(T.resolve("membranes-exec", {"action": "link",
-                                                      "commands": "ls"}),
-                         ("entity_link", {"commands": "ls"}))
-        self.assertEqual(T.resolve("membrane exec", {"action": "link",
-                                                     "commands": "ls"})[0],
-                         "entity_link")
+        self.assertEqual(T.resolve("membranes-exec", {"action": "call", "object": "o",
+                                                      "method": "m"}),
+                         ("method_call", {"object": "o", "method": "m"}))
+        self.assertEqual(T.resolve("membrane exec", {"action": "call", "object": "o",
+                                                     "method": "m"})[0],
+                         "method_call")
 
     def test_the_unnamed_call_artifact_routes_by_action(self):
         rl, _ = T.resolve("functions._name_0", {"action": "read",

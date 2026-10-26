@@ -71,14 +71,14 @@ class TestLoopSessionMaker(unittest.TestCase):
 class TestLoopTurnLane(unittest.TestCase):
     def test_loop_session_turn_is_the_listener_lane(self):
         """The runner resolves the loop session's agent -> the LISTENER
-        lane, whose hands include the exec link."""
+        lane, whose hands include the method call."""
         runner = _runner()
         sid = OC.loop_session(_Srv(runner), AGENT)
         agent = runner._turn_agent(sid, None)
         self.assertEqual(agent, AGENT)
         lane = MS._lane_of(agent)
         self.assertEqual(lane, "listener")
-        self.assertIsNone(MS._lane_refusal("entity_link", lane))
+        self.assertIsNone(MS._lane_refusal("method_call", lane))
         self.assertIsNone(MS._lane_refusal("entity_add", lane))
 
     def test_bare_loop_key_never_lanes_as_operator(self):

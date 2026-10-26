@@ -27,6 +27,7 @@ import contextlib
 import contextvars
 import hashlib
 import json
+import re
 import secrets
 import time
 
@@ -38,6 +39,32 @@ errors = {"n": 0, "last": ""}     # a listener that raised (counted; never re-ra
 VIA_MAX = 16                      # the triggers a chain remembers (the relay header stays small)
 
 SMALL = 2048          # a value this long (serialized) keeps its old value; longer ones keep a hash only
+ARG_MAX = 64 * 1024   # a recorded call argument / a nested written value, in characters (operator, #576)
+TRUNCATED = "…<truncated>"
+_SECRET = re.compile(r"(token|key|passw|secret|auth|cookie|credential)", re.I)
+
+
+def call_record(args) -> dict:
+    """A call's arguments as the field keeps them: a value whose key looks secret is
+    <redacted> at any depth; a string longer than ARG_MAX is cut with a marker; and
+    the whole record is held to ARG_MAX (operator, #576). A secret INSIDE a string
+    (a header in a command) is not caught by key names."""
+    def clip(v, depth=32):
+        if isinstance(v, str):                    # 1 KB under the cap: one big arg still fits the record
+            return v if len(v) <= ARG_MAX - 1024 else v[:ARG_MAX - 1024] + TRUNCATED
+        if isinstance(v, dict) and depth:
+            return {k: ("<redacted>" if _SECRET.search(str(k)) else clip(x, depth - 1)) for k, x in v.items()}
+        if isinstance(v, list) and depth:
+            return [clip(x, depth - 1) for x in v[:1000]]
+        if isinstance(v, (int, float, bool)) or v is None:
+            return v
+        s = json.dumps(v, default=str)
+        return s[:ARG_MAX] + TRUNCATED if len(s) > ARG_MAX else s
+    rec = clip(dict(args or {}))
+    s = json.dumps(rec, default=str)
+    if len(s) > ARG_MAX:                          # the whole record, not only each string
+        return {"_truncated": s[:ARG_MAX] + TRUNCATED}
+    return rec
 
 
 def on_write(fn) -> None:
@@ -102,11 +129,16 @@ def stamp(ev: dict) -> dict:
     return ev
 
 
-def emit(path: str, old, new) -> None:
+def emit(path: str, old, new, eid: str | None = None) -> None:
+    """One write. `eid` (when the writer knows it) splits the path exactly --
+    an eid may itself hold dots (`f:router.py`): the event carries eid and prop."""
     if not listeners:
         return
     ch = _CHAIN.get()
-    w = {"path": path, "old": old, "new": new, "writer": _WRITER.get(),
+    if eid is None and not path.startswith("rel:"):
+        eid = path
+    prop = path[len(eid) + 1:] if eid and path.startswith(eid + ".") else ""
+    w = {"path": path, "eid": eid, "prop": prop, "old": old, "new": new, "writer": _WRITER.get(),
          "chain": dict(ch, via=list(ch.get("via") or [])) if ch else None, "ts": time.time()}
     for fn in list(listeners):
         try:
@@ -202,6 +234,8 @@ def from_headers(hdrs):
     except Exception:
         ch = None
     w = hdrs.get(HDR_WRITER) if hdrs is not None else None
+    if isinstance(ch, dict):                  # a caller cannot claim it passed through self (#578 review)
+        ch = dict(ch, via=[v for v in (ch.get("via") or []) if v != "self"])
     with resume(ch if isinstance(ch, dict) else None), as_writer(w or _WRITER.get()):
         yield
 

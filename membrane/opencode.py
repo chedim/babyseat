@@ -314,7 +314,7 @@ def loop_session(srv, agent: str) -> str:
     With the serve runner wired (srv._loop_runner) the loop gets a REAL
     session in the runner's store, carrying its agent ('watch: <eid>') --
     the runner's agent registry reads it and lanes the turn LISTENER, so
-    the loop holds the entity hands (entity_link -> tool:executor).
+    the loop holds the entity hands (its method calls -> tool:executor).
     2026-10-07: this read `srv.__loop_runner__` (never set) and ALWAYS fell
     back to the bare key below -> the turn laned 'build' -> operator ->
     every exec link refused -> the HA seat's commands never ran.
@@ -1226,7 +1226,7 @@ def main() -> None:
             from .night import seed_executor_entity
             if seed_executor_entity(srv.entity_store):
                 print("[seat] the executor is planted (tool:executor -- "
-                      "entity_link runs commands through it)", file=sys.stderr)
+                      "methods run commands through it)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] executor seeding skipped ({e})", file=sys.stderr)
         # THE WARM-UP (2026-10-10: the first turn after a restart paid 11.8 s
@@ -1598,6 +1598,14 @@ def main() -> None:
                 return {"verdict_text": (out or "")[:200], "model": model or None}
             return go
         srv.run_loop_turn = _run_loop_turn()
+        try:                               # #576 B: the cliffhanger VM hears every write
+            from . import ch as _CH
+            if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
+                srv.ch_vm = _CH.VM(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))
+                srv.ch_vm.attach()
+                srv.ch_vm.start()
+        except Exception as e:
+            print(f"[opencode] the cliffhanger VM failed to start ({e})", file=sys.stderr)
         from .watch_agents import enabled_loops as _wa_on, start_goal_pulse
         if _wa_on():                       # MEMBRANE_WATCH_LOOPS=0: the documented kill switch (never read before)
             WA_start_loop_drainer(srv)
@@ -2077,6 +2085,8 @@ def main() -> None:
                 _SELF.bind(srv)
                 from . import toybox as _TB       # #239: self's toys, the built-in kit (toybox.add/list/...)
                 _TB.bind(srv)
+                from . import adapters as _AD     # #576 part E: effects are writes (chat, toys, llm, restart)
+                _AD.start(srv)
                 from . import self_super as _SUP  # #440: its own process (default), or in-process with MEMBRANE_SELF_PROC=0
                 _self_host = surf_host if surf_host not in ("0.0.0.0", "::", "") else "127.0.0.1"
                 _SUP.boot(srv, f"http://{_self_host}:{serve_port or 4096}",   # the native serve: its /membrane/self/*

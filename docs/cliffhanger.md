@@ -72,7 +72,7 @@ everywhere else (the prose the person reads).
   compares facts captured as actions with the same facts as prose, asked back
   through `/membrane/ask`.
 
-See also: [entity-field.md](entity-field.md) (the executor link lane),
+See also: [entity-field.md](entity-field.md) (the executor and its queue),
 [background-mind.md](background-mind.md) (entity scripts).
 
 ## Every write is an event (#576, part A)
@@ -97,3 +97,97 @@ Every write on the field is an event `{path, old, new, writer, chain, ts}` (`mem
 - **Other threads:** threads that are not handed the chain start fresh. These are Blurp's loop, the dreamer, consequences, predict, and the claude-agent runner; each is its own root until part D gives Blurp's chain to self. A deleted property and one set to `None` read the same.
 - **Listeners** run inside the writer's call. They must be cheap and **must not write**: a listener that reacts queues the work and writes later. One that raises is counted (`writes.errors`).
 - **Not authority:** the writer and chain are provenance only, and nothing may gate on them. Any local caller can send the headers.
+
+## Effects are writes (#576, part E)
+
+An effect happens because something writes a property of a field entity, not because a command string is dispatched. `membrane/adapters.py` registers one write listener that maps these writes to the effects the seat already has:
+
+| Entity | Property | Effect |
+|---|---|---|
+| the chat thing `chat:<person>` | `say` (the line) | `chat_io.on_edit`: posted in the person's latest chat |
+| a toy (an entity with `properties.toybox`) | `poke` (`"roll"`, `"knock 3"`, `"nudge up"`; a tower block's `poke` names its block itself) | `toybox.poke`, by the person when a `person:<name>` wrote it, else `model` |
+| `membrane::llm` | `call` (`{about, prompt}`; a string is the prompt) | `llm.request`, its caller the write's writer |
+| `membrane::llm` | `wake` (`{about, at, prompt}`) / `unwake` (the wake's id) | `llm.set_wake` / `llm.unwake` |
+| `membrane::presence` | `restart` (the reason) | `restarts.do_restart` |
+| a method entity | `invoke` (`{object, args}`) | `night.method_call`: how a learned call acts (#576 C) |
+
+- **Outside the listener:** the listener only queues. The effect runs on the adapters' one worker thread (started at boot), in the chain of the write that caused it, so provenance continues through it.
+- **Consumed:** the worker sets the property back to `''` and leaves the effect's receipt in `<prop>_result` (the chat thing keeps its own `said` / `say_refused`), so the next write is the next effect. A write that empties a branch, and a birth that carries one, are no effect.
+- **Its own writes:** those writes are the adapter's (writer `adapter:<branch>`: `adapter:chat`, `adapter:toys`, `adapter:llm`, `adapter:seat`) and fire nothing. Otherwise the writer is provenance: it labels a toy's poker and is the llm's caller tag (its caps, read-only for `script:`); nothing else gates on it.
+- **The edit route** still posts a chat `say` at once and returns its receipt; the adapter then finds the line consumed, so a line is posted once.
+- **The hatches** (`llm::`, `toybox::`, `seat::restart` in `night.run_command_entity`) stay until part B's triggers can write; then they retire.
+
+## Triggers: cliffhanger without hatches (#576, part B)
+
+`membrane/ch.py`. A **trigger** is an entity of class `Trigger`: a reified edge from what it watches to what it writes. One line of it reads:
+
+```
+WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
+```
+
+- **WHEN: watchers.**
+  - **Level watchers** fire once per binding when the conjunction turns true, and re-arm when it turns false: `near` / `away` (1 − cos between positions), `above` / `below` (an expression against a bar), `vel`, `align`, and `quiet` (no write on the entity for dt, by anyone but a trigger).
+  - **Pulses:** `pos` (moved further than d since its stamp) and `around` (the neighbours within z changed) are true only on the evaluation that sees the change.
+  - **Event watchers** fire on the event while the level watchers hold: `changed(?x.prop)` or `changed(<eid>.prop)` (a write on that path) and `every(dt)`. At most one event watcher per trigger.
+  - **Seeding:** the first evaluation of a binding only seeds its state. A trigger fires on a crossing it saw, never on what was already true, so a restart or a redefine re-fires nothing.
+- **WHERE: patterns, no XPath.** `isa(?x, Class)` (the entity's class or an ISA ancestor), `is(?x, eid)`, `filter(expr)`.
+- **WRITE: `[target, expression]`.** The target is `?x.prop` or `<eid>.prop`, `.position` included.
+  - A written value is a scalar, a string, `None` or a list of finite numbers: never an entity, never inf / nan. A position keeps its dimension.
+  - A trigger never writes another trigger, code (`command`, `*_script`, `script_*`) or a definition (`owner`, `owner_sig`, `when`, `where`, `write`). Any other property of any entity it may write: a trigger is how the field writes.
+- **Expressions:** a small safe language over scalars and first-class vectors.
+  - Operators: `+ - * /` (Python arithmetic for scalars, numpy only for vectors; division by zero and non-finite results are refused), comparisons, `and` / `or` / `not`.
+  - Reads: `x.prop`, `x.position`.
+  - Built-ins: `dot`, `norm`, `distance`, `unit`, `abs`, `min`, `max`.
+  - Limits: at most 400 characters and 64 nodes. Each expression is parsed once and cached.
+- **Validation:** an entity of class `Trigger` made any other way is validated like a definition before it runs.
+- **The VM.**
+  - It hears every write (part A) and only queues it.
+  - One worker thread drains the queue: the `changed` triggers on the written path, and level triggers re-read for every variable the written entity can bind.
+  - The same worker runs the sweeps the thinker requests (`request_sweep`) for the geometric and timed watchers. All evaluation happens on one thread, under one lock.
+  - One failing trigger never stops the others (`vm.errors`), and nothing runs while the seat is paused.
+  - A firing writes through the store as `trigger:<eid>`, in the chain that caused it. A sweep starts a fresh chain per firing.
+- **The loop rule:** a firing whose trigger is already in its chain's `via` is refused, unless `self` came after it.
+  - A trigger owned by self appends `self`, so Blurp is the one place a loop may run.
+  - Self's triggers run only with a learner attached (part C), so its energy bounds the loop.
+  - Self's ownership is **signed** by `define`: an HMAC under a key file beside the store (`.ch-key`, mode 0600, never an entity). A trigger that merely says `owner = self` is not self's and falls under the loop rule.
+  - The entity API never edits a trigger, and only this seat's triggers run; an imported one never does.
+  - A chain arriving over the relay cannot claim `self`.
+
+## Program the field first (#576, part F)
+
+The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be done by programming the field first and then using it." The model does something in one of two ways: it **defines a method** on the entity the work belongs to (or its class) and **calls** it, or it **writes a property** whose write is the effect (above).
+
+- **No direct execution surface.** The `entity_link` / `entity_unlink` tools, `exec(action='link'/'unlink')` and the `POST /membrane/entity/link|unlink` routes are gone. A stored command is a script: it runs inside a method (its command or its steps), or as an entity's own script.
+- **A call straight at the executor is refused.** `method_call` / `method_each` (and `exec(action='call'/'each')`) refuse, before anything runs, a call whose object is `tool:executor` (or inherits from it), the `remote_executor` interface itself, or an entity implementing `remote_executor` called on the interface's own method (`exec`). The refusal ends with `program the field first: define a method on an entity, then call it`. Other methods of an implementation (e.g. `presence.restart`) are not executor calls and still run. The check sits on the method routes, the model's only door to them (`night.direct_exec_refusal`, `night.direct_each_refusal`).
+- **Using the executor inside a method still works.** A method the model defined on another entity whose command runs, or whose steps call the executor (`steps=[{name, call: 'exec', object: 'presence', args: {code}}]`), runs as before: that is programming first.
+- **A call is recorded for the learner.** Each `method_call` sets `last_call = {object: <eid>, args: <the call's args in full>}` on the method entity in the same upsert that bumps its `runs`, so the write event (`<method eid>.last_call`) carries the call.
+- **The library lists methods.** The `commands` section of WHERE WE ARE (`your methods: …`) lists the seat's methods, most called first, with how to call them.
+
+- **A call is recorded for the learner:** `<method>.last_call = {object, args}`.
+  - A value whose key looks secret (token, key, password, secret, auth, cookie, credential) is stored as `<redacted>`.
+  - A long string is cut with a `…<truncated>` marker, and the whole record is held to 64 KB (`writes.ARG_MAX`, the operator's cap).
+  - A secret inside a string value (a header in a command, say) is not caught by key names.
+- **Accountability, not capability (the operator's call):** everything goes through a stored, named method; what a method may run stays open.
+
+  - Only `define` sets an owner, and a chain arriving over the relay cannot claim `self`.
+
+## Learning in the VM (#576, part C)
+
+`membrane/ch_learn.py`: Blurp's plasticity, as field physics. Attach it with `vm.learner = Learner(vm, purse, granted)`.
+
+- **The target: the LLM's actions.** Only writes by the LLM (writer `llm`) are guessed at: its property edits, and its method calls, which record `<method>.last_call = {object, args}` (part F). The causes can be anyone's writes. Writes by triggers and adapters never teach or confirm, so Blurp's own acts can't confirm themselves.
+- **A call is learned as a call.** The guess writes `<method>.invoke = {object, args}`, and the `methods` adapter runs it. The adapter refuses the executor itself, exactly as the model's route does. The object and arguments are copied from the cause where they match, literal otherwise. In shadow, it predicts the `last_call` the LLM's own call will record.
+- **Guess.** An LLM write is explained by one of the last 3 writes before it in the same chain. The guess is a trigger owned by self:
+  - `WHEN changed(?x.c) WHERE isa(?x, <class>): ?x.w = <value>` when cause and write are on the same entity;
+  - with `is(?y, <eid>)` as the target when they're on different entities.
+
+  The value is a copy of the cause when the values match, else the literal (scalars only). A guess already defined is not defined again.
+- **Shadow.** A candidate's firing writes its prediction onto itself (`predicted` = {path, value, chain}), never onto the real path.
+- **Score.** A later write in the same chain to the predicted path, with the predicted value, by anyone but the candidate, is a hit. Nothing else is refunded, so no timer is needed. A live firing is confirmed the same way.
+- **Energy.** Every Blurp write costs `WRITE_COST` (= `BASAL_PER_S`, one awake second): defining a candidate, and each shadow or live firing. A hit refunds 2× to Blurp's purse and to the candidate's balance. The definition counts against the candidate, so it needs two hits to become a proposal: it has to earn back its own birth. Asleep (`purse.can_spend()` false), nothing is spent, guessed or fired.
+- **Stay positive.** A candidate with a balance above 0 is a proposal. On a granted branch (`granted(path)`, the skill tree's Accept in part D2) a proposal fires live. Below 0 it is back in shadow. Sleep prunes every candidate whose balance is negative (`prune()`).
+- **Bounds:**
+  - at most 3 new guesses per chain and 256 live candidates; at the cap, a new guess replaces the most negative one (operator);
+  - a refused guess is remembered and never charged or retried;
+  - a nested value a trigger writes is held to 64 KB;
+  - the most recent 512 chains are remembered.

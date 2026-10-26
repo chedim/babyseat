@@ -27,10 +27,10 @@ class TestLane(unittest.TestCase):
         tools = S._lane_tools("phone")
         for t in ("entity_read", "query", "learn", "intend", "state"):
             self.assertIn(t, tools)
-        for t in ("entity_link", "entity_add", "entity_edit", "entity_remove",
+        for t in ("method_call", "entity_add", "entity_edit", "entity_remove",
                   "fulfill", "field_watch", "entity_inherit", "peer_post"):
             self.assertNotIn(t, tools)
-        r = S._lane_refusal("entity_link", "phone")
+        r = S._lane_refusal("method_call", "phone")
         self.assertIn("phone", r)
         self.assertNotIn("plan mode", r)
 

@@ -221,8 +221,9 @@ membrane/server.py):
   `fulfill`), room (`peer_post`, `peer_seats`, `peer_read`, `junk_cut`), the watches
   (`entity_watch`, `entity_unwatch`, `field_watch`, `attention`) and the
   entity hands (`entity_add`, `entity_edit`, `entity_remove`,
-  `entity_inherit`, `entity_link`, `entity_unlink`). The chat runs a
-  one-line command itself instead of planting a goal for it.
+  `entity_inherit`) and the method tools (`method_define`, `method_call`,
+  `method_each`, `method_inspect`). The chat defines and calls a method
+  itself instead of planting a goal for it.
 - **Event listener** (agent `watch:<eid>` — the thinking loops): the
   operator's set **minus** `intend` (a loop takes the next step, closes
   with `fulfill`, or ends BLOCKED; it never plants new goals).
@@ -267,23 +268,23 @@ by construction: every lane that would react is down too.
 
 ## The executor (2026-10-06): the queue + the ISA pipeline
 
-`tool:executor` (seeded at boot) is the seat's exec organ. The model's
-exec door:
+`tool:executor` (seeded at boot) is the seat's exec organ. Since #576
+part F the model has no door to it: the `entity_link` / `entity_unlink`
+tools and their routes are gone, and a method call straight at the
+executor is refused — the model defines a method, then calls it
+([cliffhanger.md](cliffhanger.md#program-the-field-first-576-part-f)).
+What stays is the engine's side:
 
-- **`entity_link(executor, commands)`** — link command entities to the
-  executor and run them; a spec that resolves to nothing is created on
-  the fly (the spec IS the command line; `create=False` refuses). The
-  **`executes` edge (a relations triple) IS THE QUEUE**: live = owed
-  work, **superseded = processed** (the unlink-on-done: success AND
-  failure stamp done after the residue lands — processed ≠ succeeded;
-  re-linking = the deliberate re-queue, **no auto-retry**). The queue
-  caps at 32 owed edges (a landed run never counts).
+- **The `executes` edge (a relations triple) IS THE QUEUE**: live = owed
+  work, **superseded = processed** (success AND failure stamp done after
+  the residue lands — processed ≠ succeeded; **no auto-retry**). The
+  background reaper finishes a run that was continued.
 - **Residue** (`run_rc/outcome/head/tail/ms`) always lands on the
-  COMMAND's own doc — every later reuse reads the freshest truth. The
-  link response carries every command's post-run state (the sync
-  rule).
+  COMMAND's own doc (a method is one) — every later reuse reads the
+  freshest truth. A method call's response carries the post-run state
+  (the sync rule).
 - **Composition IS inheritance**: a command entity's ISA parents
-  (`entity_inherit`) are its pipeline. `entity_link` runs the node's
+  (`entity_inherit`) are its pipeline. A run runs the node's
   whole ancestry **post-order** (parents first), MEMOIZED per eid (a
   diamond's shared ancestor runs once), then the node itself — fed
   the parents' outputs through substitution: `{{parent.head}}` /
@@ -301,11 +302,10 @@ exec door:
 - **Reading the queue**: `entity_read` on the executor (or any node)
   returns the value **after** processing + the queue split:
   `pending` (owed, live edges) / `done` (processed, with residues and
-  the re-link count `n_times`). `entity_unlink` supersedes live edges
-  manually (withdraw owed work).
+  the run count `n_times`).
 
-The composition loop: author small command entities once (build,
-test, scan), wire ISA parents into pipelines REUSING them, link, and
+The composition loop: author small methods once (build, test, scan),
+wire them into pipelines REUSING them (steps or ISA parents), call, and
 every step's residue stays readable for the next composition. The
 model-facing teaching: doctrine.md + the `entity_add`/`entity_watch`
 tool descriptions.

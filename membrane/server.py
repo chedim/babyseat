@@ -744,9 +744,9 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
 # ---- THE LANE GATE (the division of hands, 2026-10-06) ----------------------
 # The seat's two minds have different hands: the OPERATOR (build/plan
 # sessions -- the main chat) plants INTENTS, commits and runs commands
-# through the executor (entity_link/unlink); the LISTENERS
+# through the methods it defines (#576 part F); the LISTENERS
 # (the watch loops -- agent 'watch:<eid>') hold the ENTITY HANDS --
-# add/edit/remove/link/unlink -- the events they process are their
+# add/edit/remove -- the events they process are their
 # material. Reads and memory are both lanes'. Plan mode (the agent
 # 'plan') is the operator minus `intend` (planning sessions don't plant
 # commitments -- the direction needs the user's build-mode voice).
@@ -795,11 +795,9 @@ OPERATOR_TOOLS = frozenset((
     # interrupt vs fold into the WHERE WE ARE digest
     "attention",
     # THE EXECUTOR'S DOOR (2026-10-08, the operator's call): the operator
-    # runs commands itself -- link to tool:executor runs inline, the
-    # receipt comes back in the same turn. The HA seat's main chat kept
-    # planting 'run X' goals and waiting a whole loop pass for a listener
-    # to do a one-line command. The other entity hands stay the listeners'.
-    "entity_link", "entity_unlink", "method_define", "method_call", "method_each",
+    # runs commands itself, the receipt comes back in the same turn -- since
+    # #576 part F only as methods it defines and calls (no one-shot link)
+    "method_define", "method_call", "method_each",
     # a method's read (issue #80): runs nothing, so plans may look too
     "method_inspect",
     # THE FLOOD GATES (2026-10-08, the operator's call: "open the flood gates
@@ -813,15 +811,15 @@ OPERATOR_TOOLS = frozenset((
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
-    "entity_link", "entity_unlink", "method_define", "method_call", "method_each",
+    "method_define", "method_call", "method_each",
     # the board's spatial watches (2026-10-08): attention is the
     # listeners' to allocate; the chat lane announces through intend
     "field_watch",
 }) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
-PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "entity_link", "method_define", "method_call", "method_each",
+PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_call", "method_each",
                                "method_inspect",
-                               "entity_unlink", "entity_add", "entity_edit",
+                               "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
                                "entity_inherit"}
 
@@ -841,11 +839,6 @@ _LANE_REFUSALS = {
                     "session -- the build-mode turn does it"),
     "entity_remove": ("plan mode: entities aren't removed from a planning "
                       "session -- the build-mode turn does it"),
-    "entity_link": ("plan mode: commands don't run from a planning "
-                    "session -- the build-mode turn links them to the "
-                    "executor"),
-    "entity_unlink": ("plan mode: the executor's links change from a "
-                      "build-mode turn"),
     "fulfill": ("plan mode: goals aren't closed from a planning "
                 "session -- the build-mode turn (or a listener with the "
                 "receipt) closes them"),
@@ -3241,8 +3234,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
 def mcp_executor(port: int):
     """The default executor: the MCP tool impls themselves -- the same
     relay surface the TUI uses (all guards stay in the proxy). Unknown
-    tools are a clean error, never a crash. The local models' entity_link
-    and method_call keep their short head (mcp_server.LOCAL_TOOL_IMPLS)."""
+    tools are a clean error, never a crash. The local models'
+    method_call keeps their short head (mcp_server.LOCAL_TOOL_IMPLS)."""
     def exec_tool(name: str, args: dict, call_id: str = "") -> str:
         impl = _mcp.LOCAL_TOOL_IMPLS.get(name)
         if impl is None:

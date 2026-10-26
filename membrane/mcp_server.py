@@ -49,7 +49,7 @@ HTTP_TIMEOUT_S = 120.0   # the relay headroom: a live turn's tool call may
                          # bound the real work.
 
 # THE SHELL'S REPLY (operator report 2026-10-24, "Output is clipped"):
-# entity_link answers like Claude Code's Bash tool -- a command's FULL output
+# method_call answers like Claude Code's Bash tool -- a command's FULL output
 # (stdout+stderr as run) up to LINK_OUTPUT_CAP chars; past it the head (2/3)
 # and the tail (1/3) around a cut marker, the total size and how to read the
 # rest. The cap is cut where the command runs (night.run_command_entity), so
@@ -123,8 +123,8 @@ TOOLS: list[dict] = [
             "conflicts), the replay A/B ledger, and the last night pass. "
             "Read-only, computed from the running proxy. Use for "
             "memory-health checks. With `section`, just that part of the "
-            "seat's WHERE WE ARE: tracks, commands (your most-run, with "
-            "counts), interfaces, classes (class proposals), loops, "
+            "seat's WHERE WE ARE: tracks, commands (your methods, most "
+            "called first), interfaces, classes (class proposals), loops, "
             "timelines, frame, digest, or changes (what moved since your "
             "last message)."),
         "inputSchema": {"type": "object", "properties": {
@@ -162,7 +162,7 @@ TOOLS: list[dict] = [
         "description": (
             "Close an OPEN goal you have PROVEN done: its status flips to "
             "fulfilled on the shared board (every seat's active set drops "
-            "it). Requires evidence -- the receipt (a linked command's "
+            "it). Requires evidence -- the receipt (a method call's "
             "rc=0 output, the entity state you read back). Never close on "
             "intent or a plan; an unfinished goal stays open and you take "
             "its next concrete step instead."),
@@ -386,8 +386,8 @@ TOOLS: list[dict] = [
             "Merge-on-collision: the same name updates the existing "
             "entity instead of duplicating. For COMMAND entities (class "
             "Tool + a `command` prop): the entity's ISA PARENTS (set via "
-            "entity_inherit) compose it into a PIPELINE -- the executor "
-            "(entity_link) runs the parents first and feeds their outputs "
+            "entity_inherit) compose it into a PIPELINE -- a run "
+            "runs the parents first and feeds their outputs "
             "into the child's command via {{parent.head}}/{{parent.tail}} "
             "(the fan-in names a parent: {{parent:<eid>.head}}). Small "
             "reusable steps + composed pipelines = the composition loop. "
@@ -722,42 +722,6 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "entity_link",
-        "description": (
-            "THE EXEC LINK: link command entities to the executor and run "
-            "them inline -- command entities are created on the fly when a "
-            "spec does not resolve yet (the spec itself becomes the command "
-            "line). Each command's post-run state (rc/outcome/head, the "
-            "result props on ITS OWN entity) rides the SAME tool response: "
-            "no one-turn wait. The edge (rel 'executes') is the ledger -- "
-            "the link action's marker; a re-link re-runs (n bumps). "
-            "Caps: 3 commands per call, 32 live edges per executor -- over "
-            "the cap the tool ERRORS ('failed to link'), never partially "
-            "links. A link that finishes within 3s returns inline; a slower "
-            "one returns a 'job #N running' placeholder and its result "
-            "arrives as a '[membrane] job #N finished' event on the next "
-            "turn (it still lands on the command entity). Each command's "
-            "run budget is 20s: past that its outcome is 'timeout' (the "
-            "result still lands on the command entity)."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "executor": {"type": "string",
-                             "description": "The executor entity (default "
-                                            "'tool:executor')."},
-                "commands": {"type": ["string", "array"],
-                             "items": {"type": "string"},
-                             "description": "Command entity specs -- or "
-                                            "raw command lines (created "
-                                            "on the fly)."},
-                "create": {"type": "boolean",
-                           "description": "Create unresolved specs as new "
-                                          "command entities (default true)."},
-            },
-            "required": ["commands"],
-        },
-    },
-    {
         "name": "method_define",
         "description": (
             "CLIFFHANGER DEFINE: give a class or object a METHOD once, then "
@@ -807,10 +771,11 @@ TOOLS: list[dict] = [
         "description": (
             "CLIFFHANGER CALL: run a method on an object -- an entity or a "
             "class. Dispatch walks the object, then its ISA classes, then the "
-            "globals (help('cliffhanger')). Use this, not entity_link, for "
-            "`<object>.<method>`: e.g. object='presence', method='exec', "
-            "args={'code': 'return document.title'} runs JS in the person's "
-            "opted-in page; object='presence', method='restart' restarts the "
+            "globals (help('cliffhanger')). PROGRAM THE FIELD FIRST: there "
+            "are no one-shot commands -- define the method (method_define), "
+            "then call it here; a call straight at the executor "
+            "(tool:executor, remote_executor or an implementation's exec) is "
+            "refused. E.g. object='presence', method='restart' restarts the "
             "seat. The receipt (rc, outcome, head) lands on the object."),
         "inputSchema": {
             "type": "object",
@@ -865,26 +830,6 @@ TOOLS: list[dict] = [
                 "args": {"type": "object", "description": "Optional {{param}} values to bind."},
             },
             "required": ["object", "method"],
-        },
-    },
-    {
-        "name": "entity_unlink",
-        "description": (
-            "THE EXEC UNLINK: supersede the executor's 'executes' edges to "
-            "the named commands -- the edge is the only thing removed; the "
-            "command entity and its run residue stay. Unlinking a "
-            "not-linked spec is an honest no-op (reported in 'misses')."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "executor": {"type": "string",
-                             "description": "The executor entity (default "
-                                            "'tool:executor')."},
-                "commands": {"type": ["string", "array"],
-                             "items": {"type": "string"},
-                             "description": "Command entity specs to unlink."},
-            },
-            "required": ["commands"],
         },
     },
     {
@@ -1571,81 +1516,9 @@ def tool_entity_query(args: dict, port: int) -> str:
     return "no entities match"
 
 
-def _link_commands(args: dict) -> list:
-    """`commands` as the link/unlink hands want it: a LIST. The models pass
-    one string, or reach for `command` / `spec` (the seat's exhibits) --
-    a single command line is one command, never its letters."""
-    from .night import command_specs
-    raw = args.get("commands")
-    if raw in (None, "", []):
-        raw = args.get("command") or args.get("spec")
-    return command_specs(raw)
-
-
-def tool_entity_link(args: dict, port: int, head_cap: int | None = None) -> str:
-    """The executor's link hand: link + inline run, post-run state back.
-    Each run's full output rides the reply up to LINK_OUTPUT_CAP;
-    `head_cap` (the local models' path) keeps the short head instead."""
-    body = {"commands": _link_commands(args),
-            "executor": str(args.get("executor") or "")}
-    if isinstance(args.get("args"), dict):
-        body["args"] = args["args"]
-    if args.get("create") is not None:
-        body["create"] = bool(args.get("create"))
-    out = _http(port, "POST", "/membrane/entity/link", body)
-    if not out.get("ok"):
-        return f"failed to link: {out.get('error', 'unknown error')}"
-    lines = [f"executor {out.get('executor')}: linked "
-             f"{len(out.get('linked') or [])} command(s), ran inline:"]
-    for r in out.get("runs") or []:
-        eid = str(r.get("eid") or "?")
-        # THE LIBRARY'S RECEIPT: which command ran, and how to reuse it
-        tag = ""
-        if r.get("name"):
-            p = r.get("params") or []
-            sig = r["name"] + (("{" + ",".join(p) + "}") if p else "")
-            if r.get("created") and not r.get("labelled"):
-                tag = (f" [new command '{sig}' -- reuse it by name: commands='{r['name']}'; "
-                       f"name it yourself with '<label> :: <command>']")
-            else:
-                tag = f" [re-ran '{sig}', run #{r.get('run_n')}]"
-        if head_cap is not None:
-            if r.get("ok"):
-                lines.append(f"- {eid}{tag}: rc={r.get('rc')} {r.get('outcome')} "
-                             f"({r.get('ms', 0)}ms) "
-                             f"head: {str(r.get('head'))[:head_cap]}")
-            else:
-                lines.append(_failed_line(eid, r))
-        elif r.get("ok"):
-            lines.append(f"- {eid}{tag}: rc={r.get('rc')} {r.get('outcome')} "
-                         f"({r.get('ms', 0)}ms) {_link_output(r)}")
-        else:
-            # a failing run (a red test run, a missing file) is where the
-            # output matters most: the reason line, then the output itself
-            fl = _failed_line(eid, r)
-            lines.append(fl + (f"\n{_link_output(r)}" if r.get("output") else ""))
-    return "\n".join(lines)
-
-
 def tool_method_call_local(args: dict, port: int) -> str:
     """method_call for the local models (server.mcp_executor): the short head."""
     return tool_method_call(args, port, head_cap=LOCAL_LINK_HEAD)
-
-
-def tool_entity_link_local(args: dict, port: int) -> str:
-    """entity_link for the local models (server.mcp_executor): the short head."""
-    return tool_entity_link(args, port, head_cap=LOCAL_LINK_HEAD)
-
-
-def _failed_line(eid: str, r: dict) -> str:
-    """A failed exec carries the reason (issue #2, 2026-10-14): the rc AND
-    the run's own words -- an outcome word alone read back as the bare
-    'FAILED -- error' the issue caught, with the run's text (the why, js
-    stack or stderr) shown nowhere."""
-    why = str(r.get("error") or "")
-    if not why:
-        why = str(r.get("head") or r.get("tail") or r.get("outcome") or "").strip()
-    return f"- {eid}: FAILED -- rc={r.get('rc')} {why[:200]}"
 
 
 def _steps_arg(v):
@@ -1688,7 +1561,7 @@ def tool_method_define(args: dict, port: int) -> str:
 
 def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
     """A method call; the run's full output rides the reply up to
-    LINK_OUTPUT_CAP, as entity_link's does; `head_cap` (the local models'
+    LINK_OUTPUT_CAP; `head_cap` (the local models'
     path) keeps the short head instead."""
     def shown(out: dict) -> str:
         if head_cap is not None:
@@ -1771,21 +1644,6 @@ def tool_method_each(args: dict, port: int) -> str:
     return (head + f"{out.get('n_ok', 0)}/{out.get('n')} ok, ran {out.get('ran')}"
             + (" (stopped at the first failure; on_fail='continue' runs the rest)" if out.get("stopped") else "")
             + f" -- {rows}" + skip)
-
-
-def tool_entity_unlink(args: dict, port: int) -> str:
-    """The executor's unlink hand: supersede the edges."""
-    out = _http(port, "POST", "/membrane/entity/unlink", {
-        "executor": str(args.get("executor") or ""),
-        "commands": _link_commands(args)})
-    if not out.get("ok"):
-        return f"failed to unlink: {out.get('error', 'unknown error')}"
-    n = len(out.get("removed") or [])
-    misses = out.get("misses") or []
-    msg = f"executor {out.get('executor')}: unlinked {n} command(s)."
-    if misses:
-        msg += f" No matching edge for: {', '.join(map(str, misses))}."
-    return msg
 
 
 def tool_entity_read(args: dict, port: int) -> str:
@@ -1891,18 +1749,15 @@ TOOL_IMPLS = {
     "graph": tool_graph,
     "entity_query": tool_entity_query,
     "entity_inherit": tool_entity_inherit,
-    "entity_link": tool_entity_link,
     "method_define": tool_method_define,
     "method_call": tool_method_call,
     "method_each": tool_method_each,
     "method_inspect": tool_method_inspect,
-    "entity_unlink": tool_entity_unlink,
     "entity_read": tool_entity_read,
 }
 # the local models' toolset path (server.mcp_executor): the same tools, with
-# entity_link's and method_call's short head (their context is small)
-LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "entity_link": tool_entity_link_local,
-                    "method_call": tool_method_call_local}
+# method_call's short head (their context is small)
+LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "method_call": tool_method_call_local}
 
 
 # ---- the JSON-RPC loop ---------------------------------------------------------

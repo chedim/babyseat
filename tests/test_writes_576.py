@@ -316,3 +316,11 @@ def test_a_new_entity_through_upsert_is_one_birth(seen):
 def test_big_is_json_safe():
     import json
     assert json.loads(json.dumps({"old": W.BIG}))["old"] == W.BIG
+
+
+def test_a_call_record_redacts_at_any_depth_and_caps_the_whole():
+    deep = {"a": {"b": {"c": {"d": {"api_token": "s"}}}}}
+    assert W.call_record(deep)["a"]["b"]["c"]["d"]["api_token"] == "<redacted>"
+    big = {"xs": ["w" * W.ARG_MAX] * 20}
+    import json as _j
+    assert len(_j.dumps(W.call_record(big))) <= W.ARG_MAX + 200

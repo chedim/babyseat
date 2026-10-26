@@ -62,6 +62,7 @@ SCRIPT_PUSH_GAP_S = 30.0
 OPERATOR = "operator"             # the seat with no people: its operator's chat thing
 _BLURP_LOCK = threading.Lock()    # #337: one private chat per person, even when two ask at once
 _MIGRATE_LOCK = threading.RLock()
+_SAY_LOCK = threading.RLock()     # #576 part E: one post per `say`, whoever reads it first
 
 _GETTER = (
     "result = {'state': {'heard_n': int(membrane.me.properties.get('heard_n') or 0)}}"
@@ -435,7 +436,13 @@ def _post(srv, sid: str, text: str, by: str = "") -> None:
 def on_edit(srv, ent, by: str = "") -> dict | None:
     """An edit of a chat thing's `say` (an unmigrated chat:out's too): post it
     (or say why not). `by` names a non-seat author (self's sends, #208) for
-    _post to mark."""
+    _post to mark. One at a time (#576 part E: the edit route and the chat
+    adapter both see a `say`; the first consumes it, the other finds it gone)."""
+    with _SAY_LOCK:
+        return _on_edit(srv, ent, by)
+
+
+def _on_edit(srv, ent, by: str = "") -> dict | None:
     pp = (getattr(ent, "properties", None) or {})
     if pp.get("chat_io") not in ("chat", "out") or not str(pp.get("say") or "").strip():
         return None
