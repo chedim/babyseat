@@ -4312,6 +4312,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 self._field_entity(); return
             if path == "/membrane/map/distance":
                 self._map_distance(); return
+            if path == "/membrane/map/blurp":            # #576: Blurp's overlay on the field map
+                from . import ch_blurp as _CHB
+                self._json_out(_CHB.overlay(self.server)); return
             if path == "/membrane/map/field3d":
                 self._map_field3d(); return
             if path == "/membrane/massage/preview":

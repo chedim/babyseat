@@ -297,6 +297,36 @@ def tree(srv) -> list[dict]:
     return nodes
 
 
+def overlay(srv, limit: int = 100) -> dict:
+    """The field map's Blurp layer (GET /membrane/map/blurp): Blurp's recent firings
+    in FIELD ids, each with its trigger's state NOW -- shadow, proposal, or suggest
+    (a proposal on an accepted branch) -- and the counts over its triggers."""
+    from .eids import field_id
+    vm = getattr(srv, "ch_vm", None)
+    lr = getattr(vm, "learner", None) if vm is not None else None
+    if vm is None or lr is None:
+        return {"firings": [], "counts": {"shadow": 0, "proposal": 0, "suggest": 0}, "triggers": 0}
+
+    def state(trig_eid: str, to_eid: str) -> str:
+        st = lr.state(trig_eid)
+        return "suggest" if st == "proposal" and granted(srv, to_eid + ".x") else st
+    docs = vm.est.docs or {}
+    rows = []
+    for f in list(vm.recent)[-limit:]:
+        tr = docs.get(f["trig"])
+        if tr is None or not vm._is_selfs(tr):
+            continue                                   # Blurp's own triggers only
+        rows.append({"from": field_id(f["from"]), "to": field_id(f["to"]), "trig": f["trig"],
+                     "state": state(f["trig"], f["to"]), "ts": f["ts"]})
+    counts = {"shadow": 0, "proposal": 0, "suggest": 0}
+    for t in _mine(srv):
+        st = lr.state(t.eid)
+        if st == "proposal" and branch_of(str((t.properties or {}).get("branch") or "")) in grants(srv):
+            st = "suggest"
+        counts[st] = counts.get(st, 0) + 1
+    return {"firings": rows, "counts": counts, "triggers": sum(counts.values())}
+
+
 def augment(srv, sheet: dict) -> dict:
     """The sheet (or card) Blurp's process made, with what the seat's VM knows."""
     if not isinstance(sheet, dict) or getattr(getattr(srv, "ch_vm", None), "learner", None) is None:
