@@ -8,8 +8,7 @@ and your AI say passes through it, and it learns from every message as it
 happens. 
 
 ![Membrane](screenshot.png)
-
-![Membrane](docs/comparison.png)
+> the new "Decisions Cockpit" UI with Membrane field in the background.
 
 It runs locally in front of [Ollama](https://ollama.com), on its own or inside
 [Home Assistant](docs/home-assistant.md).
@@ -25,6 +24,8 @@ It runs locally in front of [Ollama](https://ollama.com), on its own or inside
 ---
 
 ## What makes it different
+
+![Membrane](docs/comparison.png)
 
 Most memory projects give your agent a database to search. membrane is a
 different kind of thing.
