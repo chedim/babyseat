@@ -139,8 +139,10 @@ def _mint(srv, lang: str, n: Node, be, origin) -> str:
         est.upsert(QuantumEntity(eid=eid, cls=CLASS_COMPONENT, properties={
             "name": " ".join(str(shown or n.text or n.kind).split())[:80], "lang": lang,
             "kind": n.kind, "text": n.text, "args": kids, "silent_birth": True}), embedder=None)
-        if be is not None:
-            from . import relations as R
+    if be is not None and kids:
+        from . import relations as R
+        # a node minted while the relations store was off gets its edges once it is on
+        if not be.get("relations", R.relation_key(origin, eid, f"arg:{len(kids)}", kids[-1])):
             for i, k in enumerate(kids, 1):
                 R.upsert(be, origin, eid, f"arg:{i}", k, SOURCE, ts=time.time())
     return eid
@@ -260,10 +262,16 @@ def process(srv, root: str, ex: str, timeout_s=None) -> dict | None:
         _finish(srv, root, ex, {"op": "refused", "why": why[:180]}, None)
         return {"ok": False, "root": root, "executor": ex, "error": why}
     code = text(est, root)
-    run = {k: v for k, v in (LANGS[lang].runner(srv, code, timeout_s) or {}).items() if k != "doc"}
+    try:
+        run = {k: v for k, v in (LANGS[lang].runner(srv, code, timeout_s) or {}).items() if k != "doc"}
+    except Exception as e:                  # a runner that raises still ends the run on a result
+        run = {"ok": False, "rc": None, "outcome": "failed", "error": f"{type(e).__name__}: {e}"[:300]}
     doc = est.docs[root]
-    n = int(doc.properties.get("runs") or 0) + 1
-    doc.properties["runs"] = n
+    with _LK:                               # one number per run: a result never overwrites another
+        n = int(doc.properties.get("runs") or 0) + 1
+        while f"{MEMBRANE_NS}result:{root.rsplit(':', 1)[-1]}:{n}" in (est.docs or {}):
+            n += 1
+        doc.properties["runs"] = n
     est.upsert(doc, embedder=None)
     res = f"{MEMBRANE_NS}result:{root.rsplit(':', 1)[-1]}:{n}"
     keep = {k: run.get(k) for k in ("rc", "outcome", "head", "tail", "ms", "error") if run.get(k) is not None}

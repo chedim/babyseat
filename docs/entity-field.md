@@ -285,6 +285,7 @@ The model runs code with `exec(action='run', code=..., lang='sh')`
   compare-and-set that turns it into `-executing->` (in progress); when
   the run lands, that becomes `root -result-> result:<root>:<n>`, a
   result entity for that run (`rc, outcome, head, tail, ms, text, ts`).
+  A runner that raises still ends on a result (`outcome: failed`).
   Anyone may write the execute edge (the tool, a loop, a trigger): the
   `exec` adapter branch reacts at once, and the thinker's reaper takes
   what is still owed each minute.
@@ -300,7 +301,11 @@ The model runs code with `exec(action='run', code=..., lang='sh')`
   (`owed` / `executing` / `idle`) and runs; on the executor, its queue:
   `pending`, `running`, `done` (with receipts).
 - **Without a relations store** (capture off) the same states live as
-  properties (`pending_run_by`, `executing_on`, `results`).
+  properties (`pending_run_by`, `executing_on`, `results`); a node
+  minted then gets its `arg:N` edges once the store is on.
+- **Code is stored as written**: every node and each result's `text`
+  keep the literal code, so a token typed into a command stays in the
+  field. Pass secrets through the environment, never in the code.
 
 Methods still run their commands through the same `run_command_entity`
 (a method call straight at the executor is refused); their composition:
@@ -334,7 +339,7 @@ Three homes, one rule — **facts durable, states volatile, wakes
 derived**:
 
 - **The receipts** (the symmetry rule): every supersession carries a
-  RECEIPT written on the edge row — `{op: done|expired|withdrawn, ts,
+  RECEIPT written on the edge row — `{op: done|expired|died|withdrawn, ts,
   rc, outcome, why}` — the relations journal persists it (a reload
   replays the receipts). A cancellation is as durable as the debt;
   the phantom-debt exhibit (46 live no-receipt edges surviving boot
@@ -343,7 +348,9 @@ derived**:
   `EXEC_EDGE_TTL_S`, counted from the execute edge's last write)
   expires — stamped + received — never run; the boot's book-balance
   runs it, so does every NightClock pass. Re-running the root is the
-  deliberate re-queue.
+  deliberate re-queue. A run still `-executing->` past the longest a
+  run may last (`RUN_TIMEOUT_MAX_S`, 600 s) died with its seat: the
+  same pass ends it with an `op: died` receipt.
 - **Boot-derived wakes**: the boot reads the open intents and
   re-queues an `intent-planted` event per unclaimed goal (a
   `intent_planted_ts` stamp guards the double-fire). The volatile —

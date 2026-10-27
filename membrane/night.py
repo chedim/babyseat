@@ -1707,7 +1707,8 @@ def expire_stale_edges(srv, est, fld, mem, exec_key: str = EXECUTOR_EID,
     edge's first_ts; a re-link bumps n + last_ts -- the clock is honest)
     EXPIRES: superseded + a receipt {op: 'expired', age_s, never-run
     the age}. Never run (the covenant: expired debt dies with its
-    receipt, never resurrects).
+    receipt, never resurrects). A run still EXECUTING past RUN_TIMEOUT_MAX_S
+    died with its seat and ends on a 'died' receipt.
     The boot runs this + the NightClock's pass carries it. Returns the
     receipts."""
     be, origin = _relations_backend_of(srv, fld)
@@ -1735,6 +1736,21 @@ def expire_stale_edges(srv, est, fld, mem, exec_key: str = EXECUTOR_EID,
         if ok:
             out.append({"eid": root, "receipt": why})
             _audit(mem, {"event": "agent-exec-expired", "origin": "expiry",
+                         "eid": root, "age_s": round(now - born)})
+    # a run taken longer ago than any run may last died with its seat: it ends on a receipt
+    for e in R.history_of(be, origin, exec_key, "executing"):
+        if e.get("obj") != exec_key or e.get("superseded"):
+            continue
+        born = float(e.get("last_ts") or e.get("first_ts") or 0.0)
+        if not born or now - born < RUN_TIMEOUT_MAX_S:
+            continue
+        root = str(e.get("subj") or "")
+        why = (f"died: taken {now - born:.0f}s ago, past the {RUN_TIMEOUT_MAX_S:.0f}s "
+               f"a run may last, and never finished; re-run the root")
+        if _supersede_edge(be, origin, root, exec_key, rel="executing",
+                           receipt={"op": "died", "age_s": round(now - born), "why": why[:180]}):
+            out.append({"eid": root, "receipt": why})
+            _audit(mem, {"event": "agent-exec-died", "origin": "expiry",
                          "eid": root, "age_s": round(now - born)})
     return out
 

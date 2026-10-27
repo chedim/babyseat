@@ -200,6 +200,51 @@ class TestTheRun(unittest.TestCase):
         self.assertEqual((st["code"], st["lang"], st["state"]), ("echo hi", "sh", "idle"))
         self.assertEqual([r["eid"] for r in st["results"]], [out["result"]])
 
+    def test_a_runner_that_raises_still_ends_on_a_result(self):
+        srv = _seat()
+        real = LG.LANGS["sh"].runner
+
+        def boom(srv_, text, timeout_s=None):
+            raise OSError("no shell")
+        LG.LANGS["sh"].runner = boom
+        try:
+            out = LG.run(srv, code="echo hi")
+        finally:
+            LG.LANGS["sh"].runner = real
+        self.assertFalse(out["ok"])
+        self.assertIn("no shell", out["error"])
+        self.assertEqual(_rows(srv, out["root"], "executing"), [])
+        self.assertEqual([r["obj"] for r in _rows(srv, out["root"], "result")], [out["result"]])
+        self.assertEqual(LG.state(srv, out["root"])["state"], "idle")
+
+    def test_a_run_whose_seat_died_expires(self):
+        srv = _seat()
+        root = LG.mint(srv, "sh", "echo hi")
+        R.upsert(srv.efield.b, srv.efield.origin, root, "executing", EX, "test",
+                 ts=0.0 + 1)                                           # taken long ago, never finished
+        N.expire_stale_edges(srv, srv.entity_store, srv.efield, None, EX)
+        self.assertEqual(_rows(srv, root, "executing"), [])
+        self.assertEqual(LG.state(srv, root)["state"], "idle")
+        fresh = LG.mint(srv, "sh", "echo fresh")
+        R.upsert(srv.efield.b, srv.efield.origin, fresh, "executing", EX, "test", ts=N.time.time())
+        N.expire_stale_edges(srv, srv.entity_store, srv.efield, None, EX)
+        self.assertEqual(len(_rows(srv, fresh, "executing")), 1)         # a live run is left alone
+
+    def test_a_result_never_overwrites_another(self):
+        srv = _seat()
+        first = LG.run(srv, code="echo hi")
+        srv.entity_store.docs[first["root"]].properties["runs"] = 0     # a counter read stale
+        again = LG.run(srv, node=first["root"])
+        self.assertNotEqual(again["result"], first["result"])
+        self.assertIn(first["result"], srv.entity_store.docs)
+
+    def test_a_node_minted_without_relations_gets_its_edges_later(self):
+        srv = _seat(relations=False)
+        root = LG.mint(srv, "sh", "ls ..")
+        srv.capturer.mode = "on"
+        self.assertEqual(LG.mint(srv, "sh", "ls .."), root)
+        self.assertEqual([_text(srv, a) for a in _args(srv, _stage(srv, root))], ["ls", ".."])
+
     def test_the_old_executor_reaper_runs_the_new_edges(self):
         srv = _seat()
         root = LG.mint(srv, "sh", "echo via-night")
