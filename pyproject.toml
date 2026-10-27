@@ -11,7 +11,9 @@ requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Dmitrii Chechetkin" }]
-dependencies = ["numpy>=1.26"]
+dependencies = ["numpy>=1.26",
+                # the code tree's grammars (#622): code is parsed into nodes in the field
+                "tree-sitter>=0.25", "tree-sitter-bash>=0.25", "tree-sitter-javascript>=0.25"]
 
 [project.optional-dependencies]
 couchbase = ["couchbase>=4.6"]      # a Couchbase cluster for the field / peers; the default stores need none

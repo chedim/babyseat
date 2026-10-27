@@ -275,14 +275,17 @@ description}` is the same run under the name Claude Code and opencode
 give their shell tool: the MCP list carries it, and a local model's
 `bash` call resolves to `code_run` (`toolset.bash_args`):
 
-- **The code becomes nodes.** It is parsed (sh: `scripts.parse`) into a
-  tree, one entity per node, **content-addressed**:
+- **The code becomes nodes.** It is parsed with the language's
+  tree-sitter grammar (`tree-sitter-bash`, `tree-sitter-javascript`) into
+  a tree, one entity per named syntax node (its `kind` is the grammar's
+  node type), **content-addressed**:
   `node:<lang>:<hash>` over (lang, kind, text, ordered children). The
   same subtree is one entity wherever it appears (`..`, `git status`), so
   the field sees what code shares. Children are ordered edges `-arg:1->`,
   `-arg:2->` ... (relations rows; the order is in the label, so `cp a a`
-  keeps both places). Printing the tree gives back what the parser
-  means (`scripts.compile`).
+  keeps both places). A node keeps its source text with a hole per
+  child, so printing the tree gives back the code exactly as written.
+  Code with a syntax error is refused.
 - **The run is an edge** (the chat adapter's shape: a write, then its
   effect): `root -execute-> executor` is owed work; taking it is a
   compare-and-set that turns it into `-executing->` (in progress); when
@@ -300,12 +303,7 @@ give their shell tool: the MCP list carries it, and a local model's
   `lang`; a root of another language is refused with a receipt. The
   sh runner is `run_command_entity`, so the `c:<head>` doc, the
   observation event and the audit line still record every run.
-- **js** (`lang_js.py`): a statement-level parser with no new
-  dependency. A program is its statements, a statement's blocks
-  (`if (x) {...}`, `function f() {...}`, `() => {...}`) are its
-  children, and each block is its statements again; every node keeps
-  its raw text with a hole per child, so a program prints back exactly
-  as written. Its executor is the seat's `presence`: the run goes to an
+- **js**: its executor is the seat's `presence`: the run goes to an
   opted-in browser tab (`jsexec.run`, 15 s). The old door, the
   `presence.exec` method, is retired and removed at boot.
 - **Reading**: `entity_read` on a root shows its code, state

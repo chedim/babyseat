@@ -35,7 +35,6 @@ from _ef_fakes import FakeEmbedder  # noqa: E402
 from membrane import lang as LG  # noqa: E402
 from membrane import night as N  # noqa: E402
 from membrane import relations as R  # noqa: E402
-from membrane import scripts as SC  # noqa: E402
 from membrane.efield import EntityField  # noqa: E402
 from membrane.efstore import MemBackend  # noqa: E402
 from membrane.entities import CLASS_TOOL, EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
@@ -65,20 +64,23 @@ def _args(srv, eid):
 
 
 def _stage(srv, root):
-    """The first stage of a one-command script: script -> pipe -> stage."""
-    return _args(srv, _args(srv, root)[0])[0]
+    """The first command of a one-command script: program -> command."""
+    return _args(srv, root)[0]
 
 
 def _text(srv, eid):
-    return srv.entity_store.docs[eid].properties["text"]
+    """A node's code, printed from its subtree."""
+    return LG.text(srv.entity_store, eid)
 
 
 class TestTheTree(unittest.TestCase):
-    def test_a_command_is_a_stage_with_its_arguments_in_order(self):
+    def test_a_command_is_a_node_with_its_arguments_in_order(self):
         srv = _seat()
         root = LG.mint(srv, "sh", "ls -la ..")
         self.assertTrue(root.startswith(MEMBRANE_NS + "node:sh:"))
-        self.assertEqual([_text(srv, a) for a in _args(srv, _stage(srv, root))], ["ls", "-la", ".."])
+        cmd = _stage(srv, root)
+        self.assertEqual(srv.entity_store.docs[cmd].properties["kind"], "command")
+        self.assertEqual([_text(srv, a) for a in _args(srv, cmd)], ["ls", "-la", ".."])
 
     def test_the_same_subtree_is_one_entity(self):
         srv = _seat()
@@ -86,8 +88,9 @@ class TestTheTree(unittest.TestCase):
         b = LG.mint(srv, "sh", "cd .. && ls ..")
         self.assertEqual(LG.mint(srv, "sh", "ls .."), a)                  # same code, same root
         dotdot = _args(srv, _stage(srv, a))[1]
-        self.assertIn(dotdot, _args(srv, _stage(srv, b)))                 # `..` is one entity
-        self.assertEqual(_args(srv, _args(srv, b)[1])[0], _stage(srv, a))   # so is `ls ..`
+        lst = _args(srv, b)[0]                                            # program -> list
+        self.assertIn(dotdot, _args(srv, _args(srv, lst)[0]))             # `..` is one entity
+        self.assertEqual(_args(srv, lst)[1], _stage(srv, a))              # so is `ls ..`
 
     def test_a_repeated_argument_keeps_both_places(self):
         srv = _seat()
@@ -96,20 +99,18 @@ class TestTheTree(unittest.TestCase):
         self.assertEqual(len(args), 3)
         self.assertEqual(args[1], args[2])
 
-    def test_the_tree_prints_what_the_parser_means(self):
+    def test_every_script_prints_back_as_written(self):
         srv = _seat()
         for code in ("ls -la ..", "A=1 ls 2>&1 | grep -v x && echo ok", "! true || false; echo $(pwd)",
                      "(cd /tmp; cat <<EOF\nhi\nEOF\n) > out.txt", "echo {{x}} 'a b' \"$HOME\"",
-                     "for f in *.py; do echo $f; done"):
-            try:
-                want = SC.compile(SC.parse(code))
-            except SC.NotAScript:
-                continue
-            self.assertEqual(LG.text(srv.entity_store, LG.mint(srv, "sh", code)), want, code)
+                     "for f in *.py; do echo $f; done", "  echo hi  \n# a comment\n",
+                     "if [ -f x ]; then\n  cat x | wc -l\nfi"):
+            self.assertEqual(LG.text(srv.entity_store, LG.mint(srv, "sh", code)), code, code)
 
     def test_what_is_not_code_is_refused(self):
-        with self.assertRaises(SC.NotAScript):
-            LG.mint(_seat(), "sh", "echo 'unclosed")
+        for code in ("echo 'unclosed", "if true; then", "a\x00b"):
+            with self.assertRaises(ValueError, msg=code):
+                LG.mint(_seat(), "sh", code)
 
 
 class TestTheRun(unittest.TestCase):
