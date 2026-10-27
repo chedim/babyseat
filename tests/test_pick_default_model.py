@@ -16,5 +16,8 @@ def test_explicit_unlisted_is_not_swapped():
 
 
 def test_no_preference_uses_family_order():
-    assert _pick_default_model(TAGS, None) == "glm-5.3-flash:cloud"
+    # #600: with nobody's pick, a cloud model is never the default (a fresh seat
+    # locked up on glm-5.3-flash:cloud's rate limit); the family order runs on local ones
+    assert _pick_default_model(TAGS, None) == "qwen3:8b"
+    assert _pick_default_model(["glm-4.7:local", "qwen3:8b"], None) == "glm-4.7:local"
     assert _pick_default_model([], None) is None

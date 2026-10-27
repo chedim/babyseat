@@ -968,7 +968,9 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
         finally:
             q.put(_END)
 
-    threading.Thread(target=run, daemon=True, name="claude-agent").start()
+    from . import writes as _W
+    # #576: the SDK thread runs in the turn's context, so its tool calls carry the turn's chain
+    threading.Thread(target=_W.carry(run), daemon=True, name="claude-agent").start()
     so_far: dict = {}                       # the answer's usage, step by step (#472)
     while True:
         item = q.get()

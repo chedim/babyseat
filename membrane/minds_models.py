@@ -41,6 +41,17 @@ def read(srv) -> dict:
             "think": "on" if think is True else "off" if think is False else "auto"}
 
 
+def picked(srv) -> bool:
+    """#600: was the Goal worker's model (the chat's default too: one runner) ever
+    picked -- saved in the seat's models.json? A fresh seat's first run asks."""
+    path = getattr(srv, "_models_path", None)
+    try:
+        saved = json.load(open(path)) if path else {}
+    except (OSError, ValueError):
+        saved = {}
+    return isinstance(saved, dict) and isinstance(saved.get("loops"), str) and bool(saved["loops"])
+
+
 def _auth_of(srv, mind: str) -> str:
     v = (getattr(srv, "_minds_auth", None) or {}).get(mind)
     return v if v in AUTH_CHOICES else "chat"

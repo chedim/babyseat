@@ -66,6 +66,44 @@
     });
   }
 
+  // #600: a fresh seat asks which model to use (the chat's and the watch loops':
+  // the Goal worker's, one runner), beside the name -- nothing runs on a model
+  // nobody picked. Saved through the ⚙ window's own route, so it applies at once.
+  async function options() {
+    try {
+      const r = await fetch("/membrane/options", { credentials: "same-origin" });
+      return r.ok ? await r.json() : null;
+    } catch (e) { return null; }
+  }
+
+  function askModel(models) {
+    const local = models.filter((m) => !/[:-]cloud$/.test(m) && !m.startsWith("claude-agent:"));
+    return new Promise((done) => {
+      const box = document.createElement("div");
+      box.className = "who";
+      box.innerHTML = `<form><h1>Which model?</h1><p>The model membrane talks with, and the one its background work uses. You can change it later in ⚙ (Background work).</p>
+        <select name="m"></select><button>Use it</button>
+        <div class="note">Cloud and Claude models may be rate-limited or need a key; a local one always answers.</div></form>`;
+      const sel = box.querySelector("select");
+      for (const m of local.concat(models.filter((m) => !local.includes(m)))) {
+        const o = document.createElement("option");
+        o.value = m;
+        o.textContent = m + (local.includes(m) ? "" : "  (cloud)");
+        sel.appendChild(o);
+      }
+      sel.style.cssText = "width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:10px 12px;border-radius:10px";
+      box.querySelector("form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const r = await fetch("/membrane/options", { method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ loops: sel.value }) }).catch(() => null);
+        if (!r || !r.ok) { box.querySelector(".note").textContent = "The seat didn't take it -- try again, or pick it later in ⚙."; return; }
+        box.remove(); done(sel.value);
+      });
+      document.body.appendChild(box);
+      sel.focus();
+    });
+  }
+
   import("/ui/www/favicon.js").then((m) => m.startFavicon()).catch(() => {});   // the tab's rocking babyseat
   // THE VIEW (2026-10-13, the operator: the standalone burger menu links the
   // interfaces): ?view=chat -- the conversation alone; ?view=graph -- the
@@ -83,6 +121,9 @@
   // JWT mode: the token says who you are -- no name to ask
   const name = c.who ? (c.who.name || c.who.sub)
     : (savedName() || await askName(c.name, !window.isSecureContext));
+  const opts = await options();
+  const bg = opts && opts.background;
+  if (bg && bg.picked === false && (bg.models || []).length) await askModel(bg.models);
   await import("/ui/www/panel.js");          // the chat element defined first: home.js sets its hass at once
   await import("/ui/www/home.js");
   await customElements.whenDefined("membrane-home-panel");

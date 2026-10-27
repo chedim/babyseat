@@ -3803,11 +3803,13 @@ def _pick_default_model(models: list, preferred: str | None) -> str | None:
         # answers unpulled: glm-5.3:cloud) is the caller's to honor -- the
         # family heuristic below silently swapped it for glm-5.3-flash
         return None
+    # #600: nobody picked -- never a cloud model (a fresh seat locked up on one's rate limit)
+    local = [m for m in models if not re.search(r"[:-]cloud$", m)]
     for want in ("glm", "qwen3", "qwen2.5-coder", "llama3.1", "mistral", "gemma"):
-        for m in models:
+        for m in local:
             if m.startswith(want):
                 return m
-    return models[0] if models else None
+    return local[0] if local else None
 
 
 def _pick_idle_cortex_model(backend: str, preferred: str | None) -> str:

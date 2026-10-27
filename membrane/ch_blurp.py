@@ -252,7 +252,42 @@ def exchange(srv, report: dict | None) -> dict:
     if was and not p.awake and report.get("asleep"):
         with vm._run:                                  # sleep: stay positive (not mid-drain)
             pruned = vm.learner.prune()
+    if p.awake:
+        try:
+            _show_body(srv, vm)
+        except Exception:
+            pass                                       # the body is display only: never the exchange's failure
     return {"energy_delta": p.take(), "pruned": len(pruned), "awake": p.awake}
+
+
+SEAT_FID = "seat:self"      # where the body rests before its first firing (the map's seat)
+
+
+def _show_body(srv, vm) -> None:
+    """The body on the map (fieldpulse.self_cycle, the old cycle's channel): at the
+    entity its newest firing watched, looking at what it wrote; at the seat before
+    any firing. Points are field vectors; the beat places them."""
+    from . import fieldpulse as FP
+    from .eids import field_id
+    fp, fld = FP.of(srv), getattr(srv, "efield", None)
+    if fp is None or fld is None:
+        return
+
+    def vec(fid):
+        st = fld.get(fid)
+        v = getattr(st, "state", None) if st is not None else None
+        return None if v is None else [float(x) for x in v]
+    docs = vm.est.docs or {}
+    last = next((f for f in reversed(list(vm.recent))
+                 if f["trig"] in docs and vm._is_selfs(docs[f["trig"]])), None)
+    at = vec(field_id(last["from"])) if last else None
+    at = at or vec(SEAT_FID)
+    if at is None:
+        return
+    look = vec(field_id(last["to"])) if last and last["to"] != last["from"] else None
+    prev = getattr(srv, "_ch_body_at", None) or at
+    srv._ch_body_at = at
+    fp.self_cycle({"from": prev, "at": at, "aim": look}, {"mode": "on", "rung": len(grants(srv))})   # the tag reads its level
 
 
 # ---- the sheet -------------------------------------------------------------------------------
