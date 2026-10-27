@@ -81,7 +81,6 @@ class TestScriptRefusalsAreVisible(unittest.TestCase):
         self.assertTrue(any("delete" in k for k in pr["keys"]))
         self.assertEqual(e.properties["script_data"]["v"], 1)
 
-
     def test_a_clean_run_clears_the_refusal_and_a_new_one_sets_it_again(self):
         est = _est()
         e = QuantumEntity(eid=MEMBRANE_NS + "Component:t2", cls="Component", properties={"name": "t2"})
@@ -94,6 +93,17 @@ class TestScriptRefusalsAreVisible(unittest.TestCase):
         self.assertEqual(e.properties["script_data"]["v"], 2)
         N.apply_entity_update(srv, e, {"patch": {"status": "y"}}, "tick", silent=True)
         self.assertIn("patch_refused", e.properties)
+
+    def test_a_clean_run_of_another_trigger_keeps_the_refusal(self):
+        est = _est()
+        e = QuantumEntity(eid=MEMBRANE_NS + "Component:t3", cls="Component", properties={"name": "t3"})
+        est.docs[e.eid] = e
+        srv = type("S", (), {"entity_store": est, "efield": None, "membrane": None})()
+        N.apply_entity_update(srv, e, {"patch": {"status": "x"}}, "tick", silent=True)
+        N.apply_entity_update(srv, e, {"patch": {"script_data": {"v": 1}}}, "getter", silent=True)
+        self.assertEqual(e.properties["patch_refused"]["trigger"], "tick")
+        N.apply_entity_update(srv, e, {"patch": {"script_data": {"v": 2}}}, "tick", silent=True)
+        self.assertNotIn("patch_refused", e.properties)
 
 
 class TestWakesSayWhatChanged(unittest.TestCase):
