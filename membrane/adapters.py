@@ -198,7 +198,27 @@ def write_and_wait(est, eid: str, prop: str, value, timeout: float = 20.0, srv=N
     import time as _t
     ent = (est.docs or {}).get(eid)
     if ent is None:
-        return None
+        return {"text": f"no entity {eid}", "rc": 2}
+    if value in (None, "", {}, []):
+        return {"text": f"{prop}: an empty value is no effect", "rc": 2}
+    with _prop_lock(eid, prop):                      # one write step per property at a time: its own receipt
+        return _write_and_wait(est, ent, eid, prop, value, timeout, srv)
+
+
+_LOCKS: dict = {}
+_LOCKS_LK = threading.Lock()
+
+
+def _prop_lock(eid: str, prop: str) -> threading.Lock:
+    with _LOCKS_LK:
+        lk = _LOCKS.get((eid, prop))
+        if lk is None:
+            lk = _LOCKS[(eid, prop)] = threading.Lock()
+        return lk
+
+
+def _write_and_wait(est, ent, eid, prop, value, timeout, srv) -> dict:
+    import time as _t
     b = _branch(f"{eid}.{prop}")
     srv = srv or _SEAT["srv"] or getattr(est, "_srv", None)
     if b is None or srv is None:
@@ -218,7 +238,8 @@ def write_and_wait(est, eid: str, prop: str, value, timeout: float = 20.0, srv=N
         while (ent.properties or {}).get(prop) == value and _t.time() < end:
             _DONE.wait(min(0.5, max(0.01, end - _t.time())))
     if (ent.properties or {}).get(prop) == value:
-        return {"text": f"(no receipt within {timeout:g}s: the effect is still queued)", "rc": None}
+        return {"text": f"(no receipt within {timeout:g}s: the effect may still be queued or running "
+                        f"-- do not repeat it; read {prop}_result later)", "rc": None}
     return _receipt(ent, prop)
 
 

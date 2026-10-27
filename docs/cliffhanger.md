@@ -251,4 +251,7 @@ The seeded methods are now write steps, and each boot puts an older seat's form 
 | `presence.restart` | `self.restart = why` |
 | `presence.exec` | `self.js = code` (the adapters' new `js` branch → an opted-in browser tab) |
 
-`night.run_command_entity` now runs shell lines only; no string-prefix dialect remains.
+`night.run_command_entity` now runs shell lines only:
+- **A stored line in a retired dialect** (`llm::`, `llm.wake`, `toybox::`, `seat::`, `js::`, `self::`) is **refused** with rc 2 and a pointer to the method. It is never split into a label plus a shell command.
+- **Write steps on one property are serialised,** so each call gets its own receipt. An empty value is refused at once.
+- **On a timeout,** the receipt says the effect may still be queued or running: don't repeat it.

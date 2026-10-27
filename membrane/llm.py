@@ -229,8 +229,6 @@ def _remember(srv, ent, now, caller, about, prompt, refused: str = "") -> None:
     ent.properties = pp
 
 
-
-
 def answered(srv, ev: dict, text: str, model: str | None = None) -> None:
     """A called turn ended: its one line onto the entity (llm_answer) and the echo,
     with the model that answered when the turn knows it (#254: self weighs an
@@ -453,8 +451,6 @@ def fire_due(srv, now: float | None = None, late_after_s: float = 120.0) -> list
     except Exception:
         pass
     return out
-
-
 
 
 def start_wakes(srv) -> None:

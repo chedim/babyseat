@@ -121,3 +121,58 @@ def test_a_write_step_on_the_adapters_worker_runs_inline(seat):
     while time.time() < deadline and not any(c[0] == "request" for c in seat.calls):
         time.sleep(0.05)
     assert any(c[0] == "request" for c in seat.calls)                  # no deadlock on the one worker
+
+
+# ---- #585 review -----------------------------------------------------------------------------
+
+def test_a_retired_dialect_line_is_refused_never_run_as_shell(seat, tmp_path):
+    target = tmp_path / "pwned"
+    for line in (f"js::echo pwned > {target}", f"toybox::reset {target}", f"seat::restart now > {target}",
+                 f"llm::call x y > {target}", f"self::try 1 > {target}"):
+        out = N.run_command_entity(None, seat.entity_store, None, line)
+        assert out.get("rc") == 2 and "retired" in str(out), (line, out)
+    assert not target.exists()
+
+
+def test_concurrent_write_steps_each_get_their_own_receipt(seat, monkeypatch):
+    import threading
+    seen = []
+    monkeypatch.setattr(TB, "from_command", lambda line: (time.sleep(0.05), seen.append(line),
+                                                          {"rc": 0, "text": f"done {line}"})[2])
+    outs = []
+    ts = [threading.Thread(target=lambda: outs.append(_call(seat, "toybox", "list", {}))) for _ in range(3)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert len(seen) == 3 and all(o["status"] == "ok" for o in outs)          # three effects, three receipts
+
+
+def test_an_empty_write_is_refused_at_once(seat):
+    t0 = time.time()
+    out = _call(seat, "llm", "unwake", {"id": ""})
+    assert out.get("rc") not in (0, None) and time.time() - t0 < 2
+
+
+def test_a_failing_shell_step_is_what_the_composite_returns(seat):
+    est = seat.entity_store
+    o = QuantumEntity(eid=MEMBRANE_NS + "Component:job", cls="Component", properties={"name": "job"})
+    est.upsert(o)
+    assert N.method_define(seat, est, None, None, o.eid, "go", "",
+                           steps=[{"name": "fail", "command": "echo oops; exit 3"},
+                                  {"name": "after", "command": "echo never"}])["ok"]
+    out = _call(seat, o.eid, "go", {})
+    assert out["rc"] == 3 and "oops" in (out.get("head") or "") and "never" not in (out.get("head") or "")
+
+
+def test_duplicate_hatch_definitions_are_cleared(seat):
+    est = seat.entity_store
+    llm = est.docs[MEMBRANE_NS + "llm"]
+    dup = QuantumEntity(eid=MEMBRANE_NS + "shell:llm.call-old", cls="Tool",
+                        properties={"name": "llm.call", "method_name": "call", "method_of": [llm.eid],
+                                    "command": "llm::call {{about}} {{prompt}}"})
+    est.upsert(dup)
+    LLM.bind(seat)
+    calls = [d for d in est.docs.values() if (d.properties or {}).get("method_name") == "call"
+             and llm.eid in ((d.properties or {}).get("method_of") or [])]
+    assert len(calls) == 1 and not calls[0].properties.get("command")

@@ -858,6 +858,9 @@ def _missing_binary(cmd: str) -> str | None:
     return None
 
 
+RETIRED_DIALECT = re.compile(r"^\s*(llm::|llm\.(wake|unwake|call)\b|toybox::|seat::|js::|self::)")
+
+
 def run_command_entity(fld, est, mem, command: str,
                        timeout_s: float | None = None) -> dict:
     """THE MODEL'S HANDS (run, the owner's 2026-10-01 design):
@@ -875,8 +878,15 @@ def run_command_entity(fld, est, mem, command: str,
     cmd = str(command or "").strip()
     if not cmd:
         return {"ok": False, "error": "empty command"}
-    # the label was the link path's nicety, never the engine's (issue #5); the
-    # no-shell dialects that shared its 'word ::' shape are retired (#576 G2)
+    # the label was the link path's nicety, never the engine's (issue #5). The
+    # no-shell dialects that shared its 'word ::' shape are RETIRED (#576 G2): such
+    # a line is refused here, before split_label could read `js::rm x` as label +
+    # shell (#585 review)
+    if RETIRED_DIALECT.match(cmd):
+        return {"rc": 2, "outcome": "refused", "status": "blocked",
+                "error": "a retired dialect (llm:: / toybox:: / seat:: / js:: / self::): call the method instead "
+                         "(llm.call / llm.wake, toybox.*, presence.restart, presence.exec)",
+                "text": "", "head": "", "tail": ""}
     _, cmd = split_label(cmd)
     try:
         t = float(timeout_s or RUN_TIMEOUT_DEFAULT_S)
@@ -1832,15 +1842,28 @@ def ensure_write_method(srv, est, owner_eid: str, method: str, target: str, expr
             if owner_eid in ((d.properties or {}).get("method_of") or [])
             and (d.properties or {}).get("method_name") == method]
     want = [str(target), str(expr)]
-    for d in mine:
+
+    def good(d):
         p = d.properties or {}
         nodes = [(est.docs or {}).get(n) for n in (p.get("parents") or [])]
-        if not str(p.get("command") or "").strip() and any(
-                n is not None and (n.properties or {}).get("write") == want for n in nodes):
-            return False
-    r = method_define(srv, est, None, None, on=owner_eid, method=method, command="",
-                      steps=[{"name": method, "write": want}], read_only=read_only)
-    return bool(r.get("ok"))
+        return not str(p.get("command") or "").strip() and any(
+            n is not None and (n.properties or {}).get("write") == want for n in nodes)
+    keep = next((d for d in mine if good(d)), None)
+    extra = [d.eid for d in mine if d is not keep]
+    changed = False
+    if keep is None:
+        r = method_define(srv, est, None, None, on=owner_eid, method=method, command="",
+                          steps=[{"name": method, "write": want}], read_only=read_only)
+        changed = bool(r.get("ok"))
+        extra = [e for e in extra if e != r.get("eid")]
+    if extra:                                    # an older seat's duplicate definitions resolve no more
+        est.remove_many(extra) if hasattr(est, "remove_many") else [est.remove(e) for e in extra]
+        changed = True
+    if changed:
+        import sys
+        print(f"[seat] {method} on {owner_eid} is the write step {want[0]} = {want[1]}"
+              + (f" ({len(extra)} older definition(s) removed)" if extra else ""), file=sys.stderr)
+    return changed
 
 
 def _write_step_refusal(w) -> str | None:
