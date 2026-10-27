@@ -14,7 +14,7 @@ identifiers:
     value: "10.5281/zenodo.23644272"
     description: "Version DOI of 0.7.2"
 repository-code: "https://github.com/chedim/babyseat"
-license: PolyForm-Noncommercial-1.0.0
+license: MIT
 abstract: >-
   babyseat is a local AI seat with a memory (membrane) that learns in real time:
   it sits in front of a local model server such as Ollama, and everything a person

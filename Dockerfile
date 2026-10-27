@@ -21,7 +21,7 @@ LABEL org.opencontainers.image.title="babyseat" \
       org.opencontainers.image.source="https://github.com/chedim/membrane" \
       org.opencontainers.image.url="https://github.com/chedim/membrane" \
       org.opencontainers.image.documentation="https://github.com/chedim/membrane/blob/main/docs/docker.md" \
-      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0" \
+      org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
 
 # A container has no terminal, no browser and no git checkout to update:

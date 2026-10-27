@@ -643,9 +643,9 @@ _EX = [
       "words": "Remember: the dinghy anchor is a 5 kg Danforth. Decided: use the Danforth "
                "from now on. Remind: buy a spare shear pin. Noted, and the shear pin is on the list."}),
     ("what's the license again?",
-     {"python": 'assistant.says("It\'s PolyForm Noncommercial 1.0.0.")',
-      "text": "SAY: It's PolyForm Noncommercial 1.0.0.",
-      "words": "It's PolyForm Noncommercial 1.0.0."}),
+     {"python": 'assistant.says("It\'s MIT.")',
+      "text": "SAY: It's MIT.",
+      "words": "It's MIT."}),
     ("forget the shear pin, I found one. what time is the regatta?",
      {"python": 'decide("drop the shear-pin task: one was found")\n'
                 'assistant.says("Done, the shear pin is off the list. I don\'t have the regatta time in memory.")',
