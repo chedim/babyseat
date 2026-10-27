@@ -119,6 +119,7 @@ def load_state(srv) -> None:
     seat's bind ends with it, and Blurp's own process (#440, self_proc) boots
     with it alone."""
     _rt(srv)["mode"] = _load_mode(srv)
+    _rt(srv)["bound"] = True                # #309: the mode is loaded -- a sheet built now may be cached
     _read(srv)
 
 
