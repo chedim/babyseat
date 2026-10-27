@@ -69,6 +69,24 @@ def test_it_sits_where_it_last_fired_and_looks_at_what_it_wrote(seat):
     pts, _ = seat._field_pulse.sent[-1]
     assert pts["at"] == seat.efield.vecs[field_id(f["from"])]
     assert pts["from"] == [1.0, 0.0, 0.0]                       # it glides from the seat
+    assert pts.get("aim") is None                              # it wrote on the entity it watched
+    assert seat._field_pulse.sent[-1][1]["rung"] == 0          # the tag's level: no branch granted
+
+
+def test_its_eyes_look_at_the_other_entity_it_wrote(seat):
+    est = seat.entity_store
+    B.exchange(seat, {"awake": True, "mode": "on"})          # its purse opens on the first report
+    for n in "abc":
+        e = _toy(est, n)
+        _turn(seat, (e, "a", 1, "person:op"), (e, "b", 2, "llm"))
+    trig = next(r["trig"] for r in seat.ch_vm.recent if seat.ch_vm._is_selfs(est.docs[r["trig"]]))
+    x, y = _toy(est, "x"), _toy(est, "y")
+    seat.efield.vecs[field_id(x.eid)] = [0.0, 1.0, 0.0]
+    seat.efield.vecs[field_id(y.eid)] = [0.0, 0.0, 1.0]
+    seat.ch_vm.recent.append({"trig": trig, "from": x.eid, "to": y.eid, "ts": 1e12, "mode": "shadow"})
+    B.exchange(seat, {"awake": True, "mode": "on"})
+    pts, _ = seat._field_pulse.sent[-1]
+    assert pts["at"] == [0.0, 1.0, 0.0] and pts["aim"] == [0.0, 0.0, 1.0]
 
 
 def test_asleep_or_off_no_body(seat):

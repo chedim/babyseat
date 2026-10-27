@@ -253,7 +253,10 @@ def exchange(srv, report: dict | None) -> dict:
         with vm._run:                                  # sleep: stay positive (not mid-drain)
             pruned = vm.learner.prune()
     if p.awake:
-        _show_body(srv, vm)
+        try:
+            _show_body(srv, vm)
+        except Exception:
+            pass                                       # the body is display only: never the exchange's failure
     return {"energy_delta": p.take(), "pruned": len(pruned), "awake": p.awake}
 
 
