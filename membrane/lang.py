@@ -65,13 +65,22 @@ LANGS: dict[str, Lang] = {}
 HOLE = "\x00"          # where a child goes in its parent's template
 GRAMMARS = {"sh": "tree_sitter_bash", "js": "tree_sitter_javascript"}
 _TS: dict = {}
+INSTALL = ("pip install tree-sitter tree-sitter-bash tree-sitter-javascript "
+           "(where no wheel exists, e.g. Termux or HA on a Raspberry Pi, a C compiler first)")
+
+
+class NoGrammar(RuntimeError):
+    """The language's grammar is not installed: the run surface says what to install."""
 
 
 def _language(lang: str):
     if lang not in _TS:
         import importlib
-        import tree_sitter as ts
-        _TS[lang] = ts.Language(importlib.import_module(GRAMMARS[lang]).language())
+        try:
+            import tree_sitter as ts
+            _TS[lang] = ts.Language(importlib.import_module(GRAMMARS[lang]).language())
+        except ImportError as e:
+            raise NoGrammar(f"the code tree needs tree-sitter ({e}): {INSTALL}") from None
     return _TS[lang]
 
 
@@ -107,9 +116,10 @@ def parse(lang: str, text: str) -> Node:
         raise ValueError("a NUL byte is not code")
     if not text.strip():
         raise ValueError("no code")
+    language = _language(lang)
     import tree_sitter as ts
     src = text.encode()
-    root = ts.Parser(_language(lang)).parse(src).root_node
+    root = ts.Parser(language).parse(src).root_node
     if root.has_error:
         e = _first_error(root)
         row, col = e.start_point
@@ -347,6 +357,8 @@ def run(srv, code: str | None = None, lang: str = "sh", node: str | None = None,
             return {"ok": False, "error": "nothing to run: give code, or node=<a root> to re-run"}
         try:
             root = mint(srv, lang, str(code))
+        except NoGrammar as e:
+            return {"ok": False, "error": str(e)}
         except ValueError as e:              # NotAScript is a ValueError
             return {"ok": False, "error": f"not {lang} code: {e}"}
     if on:

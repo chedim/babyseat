@@ -113,6 +113,34 @@ class TestTheTree(unittest.TestCase):
                 LG.mint(_seat(), "sh", code)
 
 
+class TestTheGrammar(unittest.TestCase):
+    def test_overlapping_children_keep_the_text_whole(self):
+        src = b"abcdef"
+        n = types.SimpleNamespace
+        kids = [n(type="w", start_byte=0, end_byte=4, named_children=[]),
+                n(type="w", start_byte=2, end_byte=6, named_children=[])]
+        node = LG._ts_node(n(type="x", named_children=kids), src, 0, 6)
+        self.assertEqual((node.kind, node.text, node.args), ("x", "abcdef", []))
+
+    def test_a_missing_grammar_says_what_to_install(self):
+        import builtins
+        real = builtins.__import__
+
+        def no_ts(name, *a, **k):
+            if name.startswith("tree_sitter"):
+                raise ImportError(f"No module named {name!r}")
+            return real(name, *a, **k)
+        LG._TS.clear()
+        builtins.__import__ = no_ts
+        try:
+            out = LG.run(_seat(), code="echo hi")
+        finally:
+            builtins.__import__ = real
+            LG._TS.clear()
+        self.assertFalse(out["ok"])
+        self.assertIn("pip install tree-sitter tree-sitter-bash", out["error"])
+
+
 class TestTheRun(unittest.TestCase):
     def test_a_run_ends_on_a_result_entity(self):
         srv = _seat()
