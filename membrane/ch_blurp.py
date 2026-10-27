@@ -307,9 +307,11 @@ def overlay(srv, limit: int = 100) -> dict:
     if vm is None or lr is None:
         return {"firings": [], "counts": {"shadow": 0, "proposal": 0, "suggest": 0}, "triggers": 0}
 
-    def state(trig_eid: str, to_eid: str) -> str:
-        st = lr.state(trig_eid)
-        return "suggest" if st == "proposal" and granted(srv, to_eid + ".x") else st
+    held = grants(srv)
+
+    def state(tr) -> str:                              # one reading for lines and counts: the trigger's branch
+        st = lr.state(tr.eid)
+        return "suggest" if st == "proposal" and str((tr.properties or {}).get("branch") or "") in held else st
     docs = vm.est.docs or {}
     rows = []
     for f in list(vm.recent)[-limit:]:
@@ -317,12 +319,10 @@ def overlay(srv, limit: int = 100) -> dict:
         if tr is None or not vm._is_selfs(tr):
             continue                                   # Blurp's own triggers only
         rows.append({"from": field_id(f["from"]), "to": field_id(f["to"]), "trig": f["trig"],
-                     "state": state(f["trig"], f["to"]), "ts": f["ts"]})
+                     "state": state(tr), "ts": f["ts"]})
     counts = {"shadow": 0, "proposal": 0, "suggest": 0}
     for t in _mine(srv):
-        st = lr.state(t.eid)
-        if st == "proposal" and branch_of(str((t.properties or {}).get("branch") or "")) in grants(srv):
-            st = "suggest"
+        st = state(t)
         counts[st] = counts.get(st, 0) + 1
     return {"firings": rows, "counts": counts, "triggers": sum(counts.values())}
 

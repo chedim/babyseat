@@ -959,7 +959,10 @@ class Field3DView {
     this._blurp = L;
     if (this.showBlurp && !first) {
       const now = performance.now();
-      for (const p of L.fresh) this.edgePulses.push({ a: p.a, b: p.b, t0: now, dur: 1400, col: [1.0, 0.82, 0.35] });
+      for (const p of L.fresh) {
+        if (p.a === p.b) { const s = this.slots.get(p.a); if (s != null) this.pulses.set(s, now); continue; }   // one entity: it glows
+        this.edgePulses.push({ a: p.a, b: p.b, t0: now, dur: 1400, col: [1.0, 0.82, 0.35] });
+      }
     }
     this._rebuildBlurp();
   }

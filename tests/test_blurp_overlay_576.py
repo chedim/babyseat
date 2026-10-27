@@ -78,6 +78,21 @@ def test_the_overlay_is_in_field_ids_with_live_states(seat):
     json.dumps(ov)
 
 
+def test_lines_and_counts_read_one_state(seat):
+    """Memo's #587 note: a firing's line and the counts must agree -- both read the
+    trigger's own branch (what the learner gates on), never the target's."""
+    est = seat.entity_store
+    for n in "abc":
+        e = _toy(est, n)
+        _turn(seat, (e, "a", 1, "person:op"), (e, "b", 2, "llm"))
+    trig = est.docs[next(f["trig"] for f in B.overlay(seat)["firings"] if f["state"] == "proposal")]
+    trig.properties["branch"] = "ha:light"            # the trigger's branch is not the target's kind
+    B.grant(seat, "ha:light")
+    ov = B.overlay(seat)
+    mine = [f for f in ov["firings"] if f["trig"] == trig.eid]
+    assert mine and all(f["state"] == "suggest" for f in mine) and ov["counts"]["suggest"] >= 1
+
+
 def test_the_route_serves_it():
     import inspect
     from membrane import lanes
