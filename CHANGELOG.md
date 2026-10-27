@@ -1,3 +1,34 @@
+## v0.7.3 (2026-10-27) — the Great Cliffhangization
+
+0.7.3 rebuilds membrane's tool layer as a cliffhanger VM with no Python hatches (#576), and Blurp starts anew on it. **From 0.7.3 babyseat is MIT-licensed** (#593); releases up to 0.7.2 stay under PolyForm Noncommercial 1.0.0. **Blurp is reborn: its old ladder, skills and level are retired, and it starts with nothing but watchers.**
+
+- **Every write is an event with provenance** (#577). Every change on the field (upsert, edit, add, remove, parents, position) emits its path, old and new value, writer and causal chain. The chain rides through jobs, model calls and loop turns, so any write can say what caused it.
+- **The cliffhanger core** (#578, `membrane/ch.py`). Triggers are entities on the field: `WHEN <watchers> where <pattern>: <write>`. Values are scalars and first-class vectors with built-in operators. Patterns match over edges (`isa`, properties, relations, `near`), never XPath. Watchers are edge-triggered per binding: they fire on the crossing and re-arm on the return (`pos`, `align`, `vel`, `near`, `away`, `around`, `changed`, `above`/`below`, `every`, `quiet`). A trigger is an edge from what it watches to what it writes. A chain may not revisit a trigger unless the loop passes through self. Blurp's own triggers are signed (`.ch-key`).
+- **Effects are writes** (#579, #585). Saying something in a chat, moving a toy, calling a model, running JavaScript and restarting the seat are writes to adapter branches, run by one adapter worker after the write returns. The `llm::`, `toybox::`, `seat::restart`, `js::` and `self::` hatches are gone; a line in that dialect is refused and points at the method to call instead. Methods that wrapped them are now write steps (`{name, write: [target, expr]}`).
+- **Program the field first** (#581). The LLM no longer executes commands directly (`exec` / `entity_link`): it defines methods and triggers on the field, then calls or writes them, so the field is the action library. Call arguments are recorded with the call (up to 64 KB; secret-named keys are redacted).
+- **Scripts are graphs** (#584, #595). A stored command parses into a graph (sequences, pipes, groups, redirects, heredocs and typed words, linked to the field's programs and files) and compiles back to bash only to run. A one-time migration removes the generated link-command variants and strips stale commands, writing a backup first.
+- **Blurp learns in the VM** (#580, #582). It guesses the LLM's next write from the chain (looking back up to 3 crossings), runs each candidate in shadow, and scores it by hits in the same chain. Every write costs one awake second of energy, and a hit refunds twice that. A candidate that stays net positive becomes a proposal; sleep prunes the most draining ones. A skill is a branch (kind and type, such as `ha:light`) where Blurp's triggers are net positive; Accept on the skill tree grants that branch, and Blurp's level is the number of branches granted.
+- **Blurp sees what a Claude turn does** (#599). A Claude turn's tool calls now carry the turn's causal chain, so Blurp learns from Memo's and the watch loops' writes; before this every one of them arrived without a chain and was skipped.
+- **Blurp suggests, never acts** (#583). A proposal on a granted branch becomes a suggestion in the LLM's banner (BLURP SUGGESTS); the LLM adopting it counts as the hit.
+- **A new seat asks which model to use** (#600, #601, #602), right after your name, and never defaults to a cloud model nobody picked (a fresh seat could lock up on one's rate limit). The pick is the ⚙ window's Background work model and applies without a restart.
+- **Blurp on the field map** (#587, #598). The map's "blurp" toggle draws Blurp's recent firings: lines between entities and halos on one, faint for shadow, gold for proposal, bright for suggest, pulsing as they fire (`GET /membrane/map/blurp`). Blurp's body is back on the map: it sits where its newest firing happened and looks at what that firing wrote (the "Blurp" and "Blurp's eyes" cameras), and rests at the seat before its first firing (#598). Blurp's panel has a Code tab with its triggers (#574).
+- **Decision cards have a lifecycle** (#547, #564). Cards go open, decided, in flight, closed or dropped; a card that needs work closes only with a receipt, and the operator can drop an open card. An agent may attach reversible drafts to an undecided card (`speculative`); the answer keeps them only if it matches the option they assumed.
+- **Watch loops wake less** (#553, #556, #568, #572, #575). A getter reading wakes no loop, a `watch_fields` watch fires only when a filter crosses, each watched entity has one loop session that starts empty, and a goal's rewake no longer spends the alert budget. Watch-loop tokens are counted in their own lane (#557), and a loop can run on a Claude rung (#559).
+- **The decision cockpit's open pile stacks** (#540, #546): the cards stack behind the first rows and pop over the rest on hover, so the pile never pushes the input bar off the page.
+- **Doctrine v2** (#563, #565): rules first, machinery after.
+
+### Fixes
+
+- **Command methods work after a restart** (#595): a stored command's graph came back from disk cut into strings, so every command method failed and the proxy dropped the connection.
+- **Removing an entity is fast again** (#590, #591): the whole-store save left the request thread (over a minute on a large seat).
+- **Composite receipts list their steps** and name the step that halted; `entity_remove` takes `force`, and a class that owns methods is removed with them only when forced (#588, #589, #592).
+- **A field read fetches its document once** (#543, #544): the native store was asked twice and leaked a handle on every cold read.
+- **Home Assistant** (#526, #527, #530, shipped in 0.7.2.1): no hard-coded seat names, a detached seat gets the HA address for where it runs, and the relay forwards the cockpit's and home's paths.
+- **The ball can be rolled from either side** (#535, #536).
+- **Blurp switched off shows off, not asleep**, on its body and zoo card (#516, #566).
+- **No stray SIGTERM in the test suite** (#408, #594).
+- **Citation and README**: 0.7.2's version DOI (#517) and LoCoMo results beside a plain-cosine baseline (#537).
+
 ## v0.7.2 (2026-10-25) — the seat
 
 0.7.2 is a seat (substrate) release on the 0.7 line, not a Blurp level release. It carries what merged on main since 0.7.0 (0.7.1 was a citation-only patch from the `release-0.7` branch). Four defaults change: the per-turn conversation block, Blurp's own process, the decision cockpit as the page membrane home opens on (the cockpit bullet), and the serve window's start moving in steps of 4 for every model (under Prompt caching).

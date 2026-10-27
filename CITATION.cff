@@ -30,8 +30,8 @@ keywords:
   - Home Assistant
   - real-time learning
   - child machine
-version: "0.7.2"
-date-released: "2026-10-25"
+version: "0.7.3"
+date-released: "2026-10-27"
 references:
   - type: article
     title: "Evaluating Very Long-Term Conversational Memory of LLM Agents"
