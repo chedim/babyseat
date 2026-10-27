@@ -559,6 +559,11 @@ these rules (`membrane/watch_agents.py`, pinned in
   last wake, doubled for each trailing pass that wasn't a STEP (capped
   ×16). A boot wakes only what the pulse would; it no longer re-fires
   every open goal.
+- **Picked up once.** A loop that takes a goal marks it `picked_up_by`
+  (its `loop-N`) and `picked_up_ts`; every chat's banner shows the goal as
+  "picked up by loop-N at HH:MM". A goal notification sent before the
+  goal's latest pickup is dropped instead of running a second pass, and the
+  pool keeps one queued notification per goal (the newest).
 - **The verdict.** Every pass ends with one line: `DONE <receipt>`,
   `STEP <what moved>`, `BLOCKED <on whom>` or `ignored: <reason>`. A pass
   that ends with no text is `aborted`, and its last tool calls ride into

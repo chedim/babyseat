@@ -331,7 +331,13 @@ class WatchEvents:
             if len(self._items) >= self.max:
                 self._items.pop(0)     # drop-OLDEST
             from . import writes as _W
-            self._items.append(_W.stamp(dict(ev)))    # #576: the event carries the chain that caused it
+            ev = _W.stamp(dict(ev))                   # #576: the event carries the chain that caused it
+            if ev.get("kind") == "intent-planted" and ev.get("entity"):
+                for i, it in enumerate(self._items):  # one queued notification per goal: the newest
+                    if it.get("kind") == "intent-planted" and it.get("entity") == ev["entity"]:
+                        self._items[i] = ev
+                        return
+            self._items.append(ev)
 
     def take(self) -> list[dict]:
         with self._lk:
@@ -563,6 +569,38 @@ def parse_verdict(text: str) -> tuple[str, str]:
 _WAKE = threading.local()                       # the running wake's turn facts, for its ledger line
 
 
+def _goal_doc(srv, eid: str):
+    from .entities import CLASS_GOAL
+    doc = (getattr(getattr(srv, "entity_store", None), "docs", None) or {}).get(eid) if eid else None
+    return doc if doc is not None and doc.cls == CLASS_GOAL else None
+
+
+def _mark_picked_up(srv, eid: str, by: str) -> None:
+    """A loop takes a goal: the goal says who has it and since when (every
+    chat's banner shows it, and older notifications for it are dropped)."""
+    doc = _goal_doc(srv, eid)
+    if doc is None:
+        return
+    try:
+        doc.properties["picked_up_by"] = by or "a loop"
+        doc.properties["picked_up_ts"] = time.time()
+        srv.entity_store.upsert(doc, embedder=None)
+    except Exception:
+        pass
+
+
+def _picked_up_since(srv, ev: dict) -> bool:
+    """A goal notification sent before the goal's latest pickup: that pass
+    already had the goal in hand."""
+    if ev.get("kind") != "intent-planted" or not ev.get("ts"):
+        return False
+    doc = _goal_doc(srv, str(ev.get("entity") or ""))
+    try:
+        return doc is not None and float((doc.properties or {}).get("picked_up_ts") or 0) > float(ev["ts"])
+    except (TypeError, ValueError):
+        return False
+
+
 class _LoopDrainer:
     """The queue's consumer: takes events (skipping the operator's --
     the main chat IS that lane's reaction), admits a loop worker, runs
@@ -687,6 +725,8 @@ class _LoopDrainer:
             pass
         if is_operator_event(ev):
             return "skip"           # the operator lane: the chat is it
+        if _picked_up_since(self.srv, ev):
+            return "skip"           # a loop took the goal after this was sent: no second pass
         # OFFLINE (offline.py, a walk): no model to answer -- the event waits
         try:
             from . import offline as _OFF
@@ -735,6 +775,7 @@ class _LoopDrainer:
             titles.append(agent)
         if _fp is not None:
             _fp.focus(agent, ent, "start")
+        _mark_picked_up(self.srv, ent, _fp.loop_slot(agent) if _fp is not None else "")
         try:
             return self._turn(ev, ent, agent)
         except Exception:
