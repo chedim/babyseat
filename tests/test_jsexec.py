@@ -27,6 +27,13 @@ def _seat(answer=None):
     return srv, jobs
 
 
+def _is_js_write(est, m) -> bool:
+    """#576 G2: presence.exec is one write step, self.js = code (no command)."""
+    nodes = [est.docs.get(n) for n in (m.properties.get("parents") or [])]
+    return not (m.properties.get("command") or "").strip() and any(
+        n is not None and (n.properties or {}).get("write") == ["self.js", "code"] for n in nodes)
+
+
 class TestJsExec(unittest.TestCase):
     def test_no_opted_in_tab_is_an_honest_error(self):
         srv, _ = _seat()
@@ -43,13 +50,6 @@ class TestJsExec(unittest.TestCase):
         self.assertEqual(jobs[0]["sessionID"], "ses_1")                 # only the owner's tab's session
         self.assertEqual(jobs[0]["job"]["code"], "console.log(1); return 2+3")
 
-    def test_a_js_command_never_reaches_a_shell(self):
-        srv, _ = _seat(answer=lambda job: {"ok": False, "error": "ReferenceError: nope"})
-        JS.register(srv, "tab_a", "ses_1", "D")
-        out = N.run_command_entity(None, None, None, "js::nope()", timeout_s=2)
-        self.assertNotEqual(out["rc"], 0)
-        self.assertIn("ReferenceError", out["head"])
-
     def test_the_seat_entity_implements_remote_executor(self):
         srv, _ = _seat()
         est = srv.entity_store
@@ -58,7 +58,7 @@ class TestJsExec(unittest.TestCase):
         of = lambda d: pres.eid in ((d.properties or {}).get("method_of") or [])
         m = [d for d in est.docs.values() if of(d) and (d.properties or {}).get("method_name") == "exec"]
         self.assertEqual(len(m), 1)
-        self.assertEqual(m[0].properties.get("command"), "js::{{code}}")
+        self.assertTrue(_is_js_write(est, m[0]))                          # #576 G2: self.js = code
         iface = est._resolve_spec("remote_executor")
         if iface is not None:                                            # seeded on a real seat
             self.assertIn(iface.eid, pres.properties.get("parents") or [])
@@ -79,7 +79,7 @@ class TestJsExec(unittest.TestCase):
         JS.bind(srv)
         doors = [d for d in est.docs.values() if of(d) and (d.properties or {}).get("method_name") == "exec"]
         self.assertEqual(len(doors), 1)
-        self.assertEqual(doors[0].properties.get("command"), "js::{{code}}")
+        self.assertTrue(_is_js_write(est, doors[0]))                      # #576 G2: restored as the write step
 
     def test_turning_a_tab_off_drops_it(self):
         srv, _ = _seat()

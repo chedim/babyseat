@@ -4,8 +4,8 @@ it should run in the browser. And yes, make it an opt-in ... do the js for
 seats; for running shell/python there could be a different agent").
 
 The seat's presence entity implements remote_executor: its `exec(code,
-timeout)` method's command is `js::{{code}}`, and a `js::` command never
-reaches a shell -- it goes to a browser tab that opted in ("let the seat act as
+timeout)` method is one write step, `self.js = code` (#576 G2), and the adapters'
+js branch hands the code to a browser tab that opted in ("let the seat act as
 you here", per tab, off by default). The tab runs it IN ITS WINDOW (the
 operator's choice: "why a sandbox? why not let it access the window?") --
 the page, the HA connection, the chat panel in reach, i.e. as that person;
@@ -28,7 +28,6 @@ import time
 TAB_TTL_S = 45.0
 RESULT_MAX = 4000
 METHOD = "exec"
-COMMAND = "js::{{code}}"
 
 _seat = None                                   # the running seat (bind() at boot)
 _jobs: dict[str, dict] = {}
@@ -62,22 +61,13 @@ def _implement(srv) -> None:
             pp["parents"] = parents + [iface.eid]
     pp["executes"] = "js (in an opted-in browser tab)"
     ent.properties = pp
-    def _of(d):
-        mo = (d.properties or {}).get("method_of")
-        return ent.eid in (mo if isinstance(mo, list) else [mo])
-    mine = [d for d in list((est.docs or {}).values())
-            if _of(d) and (d.properties or {}).get("method_name") == METHOD]
-    # THE DOOR IS KEPT, NOT JUST CREATED (2026-10-15, the live seat): a model
-    # call had REDEFINED presence.exec with a literal shell line, and the JS door
-    # stayed dead across every restart -- the boot only defined it when missing
-    broken = [d for d in mine if str((d.properties or {}).get("command") or "") != COMMAND]
-    if not mine or broken:
-        from .night import method_define
-        method_define(srv, est, None, None, on=ent.eid, method=METHOD, command=COMMAND)
-        if broken:
-            import sys
-            print(f"[jsexec] the seat's {METHOD} door was redefined "
-                  f"({str(broken[0].properties.get('command'))[:60]!r}); restored to {COMMAND}", file=sys.stderr)
+    # THE DOOR IS KEPT, NOT JUST CREATED (2026-10-15): a redefined presence.exec is
+    # restored at every boot -- #576 G2: as a write step (self.js = code; the adapters'
+    # js branch runs it in an opted-in tab)
+    from .night import ensure_write_method
+    if ensure_write_method(srv, est, ent.eid, METHOD, "self.js", "code"):
+        import sys
+        print(f"[jsexec] the seat's {METHOD} door is the write step self.js = code", file=sys.stderr)
     try:
         est.upsert(ent, embedder=None)
     except Exception:
@@ -148,7 +138,7 @@ def run(code: str, timeout: float = 15.0, tab: str | None = None) -> dict:
         # shell-looked: rejected loudly, nothing rides (the receipt carries
         # the why and the door to the shell path)
         return {"rc": 2, "text": "", "err":
-                (f"js:: runs JavaScript in the browser tab, not shell -- {code[:120]!r} "
+                (f"presence.exec runs JavaScript in the browser tab, not shell -- {code[:120]!r} "
                  "reads shell (plain words, no JS syntax). Make it a method's command instead "
                  "(exec(action='define', ...), then exec(action='call', ...)); if JavaScript is meant, give it JS "
                  "shape -- a call, a keyword, an operator (e.g. 'await new Promise(...)').")}

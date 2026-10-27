@@ -114,17 +114,6 @@ class TestArgusRestarts(unittest.TestCase):
         self.assertIn("method='restart'", t)
         self.assertIn("STEP", t)
 
-    def test_the_command_never_reaches_a_shell(self):
-        from membrane import night as N
-        srv = _Srv()
-        RS._SEAT["srv"] = srv
-        with mock.patch.object(RS, "do_restart", return_value={"rc": 0, "text": "restarting"}) as dr, \
-                mock.patch("subprocess.run") as sh:
-            N.run_command_entity(None, srv.entity_store, None, "seat::restart 'all quiet'")
-        dr.assert_called_once()
-        self.assertEqual(dr.call_args[0][1], "all quiet")
-        sh.assert_not_called()
-
     def test_the_doctrine_says_the_restart_is_his(self):
         d = (Path(__file__).resolve().parent.parent / "doctrine.md").read_text()
         self.assertIn("RESTARTS:", d)

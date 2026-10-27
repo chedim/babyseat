@@ -36,6 +36,7 @@ WRITER = "adapter:"
 _q: queue.Queue = queue.Queue()
 _SEAT: dict = {"srv": None, "thread": None}
 _busy = threading.Event()             # a job is running (drain() waits it out)
+_DONE = threading.Condition()         # a job finished (write_and_wait)
 
 
 def _branch(path: str) -> tuple[str, str, str] | None:
@@ -44,6 +45,11 @@ def _branch(path: str) -> tuple[str, str, str] | None:
     if not eid:
         return None
     from .entities import MEMBRANE_NS
+    from . import toybox as _TBX
+    if eid == _TBX._eid() and prop in ("list", "add", "remove", "reset", "poke"):
+        return "toybox", eid, prop             # #576 G2: the toybox object's verbs
+    if prop == "js" and eid == MEMBRANE_NS + "presence":
+        return "js", eid, prop                 # #576 G2: the seat's JS (an opted-in browser tab)
     if prop == "say":
         from . import chat_io as CIO
         return ("chat", eid, prop) if CIO.person_of(eid) is not None else None
@@ -70,11 +76,25 @@ def listen(w: dict) -> None:
 
 # ---- the effects (the existing functions) ------------------------------------------
 
-def _consume(est, ent, prop: str, new, receipt: str) -> None:
+def _rc(r, default: int = 0):
+    """The effect's return code: its rc, or 0 / 1 from an ok / status."""
+    if not isinstance(r, dict):
+        return default
+    if r.get("rc") is not None:
+        return r["rc"]
+    if "ok" in r:
+        return 0 if r["ok"] else 2
+    if r.get("status"):
+        return 0 if r["status"] == "ok" else 1
+    return default
+
+
+def _consume(est, ent, prop: str, new, receipt: str, rc=0) -> None:
     pp = ent.properties or {}
     if pp.get(prop) == new:                  # a newer write stays for its own turn
         pp[prop] = ""
-    pp[prop + "_result"] = str(receipt)[:400]
+    pp[prop + "_result"] = str(receipt)[:4000]
+    pp[prop + "_rc"] = rc                    # #576 G2: a write step reports the effect's outcome
     ent.properties = pp
     est.upsert(ent, embedder=None)
 
@@ -97,7 +117,7 @@ def _toys(srv, est, ent, prop, new, by) -> None:
     who = by.split(":", 1)[1] if by.startswith("person:") else "model"   # a label (who poked), never a gate
     out = TB.poke(str(tb["name"]), toks[0], arg, by=who)
     _consume(est, ent, prop, new, f"{out.get('action')} {out.get('name')}: now {out.get('reading')}"
-             if out.get("ok") else out.get("error"))
+             if out.get("ok") else out.get("error"), rc=_rc(out))
 
 
 def _llm(srv, est, ent, prop, new, by) -> None:
@@ -111,14 +131,14 @@ def _llm(srv, est, ent, prop, new, by) -> None:
                          caller=by)
     else:
         r = LLM.unwake(srv, str(d.get("id") or "") if d else str(new))
-    _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r)
+    _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r, rc=_rc(r))
 
 
 def _seat(srv, est, ent, prop, new, by) -> None:
     from . import restarts as RS
     why = str(new.get("why") or "") if isinstance(new, dict) else str(new)
     r = RS.do_restart(srv, why)                    # it signals the stop a moment later, on its own thread
-    _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r)
+    _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r, rc=_rc(r))
 
 
 def _methods(srv, est, ent, prop, new, by) -> None:
@@ -132,18 +152,108 @@ def _methods(srv, est, ent, prop, new, by) -> None:
     args = new.get("args") if isinstance(new.get("args"), dict) else {}
     why = N.direct_exec_refusal(est, str(new["object"]), str(name))   # the executor: refused as on the route
     if why:
-        _consume(est, ent, prop, new, why)
+        _consume(est, ent, prop, new, why, rc=2)
         return
     r = N.method_call(srv, est, getattr(srv, "efield", None), getattr(srv, "membrane", None),
                       str(new["object"]), str(name), args)
-    _consume(est, ent, prop, new, (r.get("head") or r.get("status") or "") if isinstance(r, dict) else r)
+    _consume(est, ent, prop, new, (r.get("head") or r.get("status") or "") if isinstance(r, dict) else r, rc=_rc(r))
 
 
-EFFECTS = {"chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods}
+def _toybox(srv, est, ent, prop, new, by) -> None:
+    """#576 G2: the toybox object's verbs as writes -- list / add <spec> / remove <name> /
+    reset <name> / poke {toy, action}; its own dispatcher answers."""
+    import shlex
+    from . import toybox as TB
+    if prop == "list":
+        line = "list"
+    elif prop == "poke":
+        d = new if isinstance(new, dict) else {}
+        line = f"poke {shlex.quote(str(d.get('toy') or ''))} {shlex.quote(str(d.get('action') or ''))}"
+    else:
+        line = f"{prop} {shlex.quote(str(new))}"
+    r = TB.from_command(line)
+    _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r, rc=_rc(r))
 
 
-def _run(b, w) -> None:
-    srv = _SEAT["srv"]
+def _js(srv, est, ent, prop, new, by) -> None:
+    """#576 G2: presence's `js` -- the code runs in an opted-in browser tab (jsexec)."""
+    from . import jsexec as JS
+    r = JS.run(str(new or ""), timeout=float(getattr(srv, "_js_timeout", 15.0)))
+    text = str(r.get("text") or "") if isinstance(r, dict) else str(r)
+    err = str(r.get("err") or "") if isinstance(r, dict) else ""
+    if err and (r.get("rc") if isinstance(r, dict) else 0) != -1:
+        text = (text + "\n" if text else "") + err
+    _consume(est, ent, prop, new, text, rc=_rc(r))
+
+
+EFFECTS = {"chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
+           "toybox": _toybox, "js": _js}
+
+
+def write_and_wait(est, eid: str, prop: str, value, timeout: float = 20.0, srv=None) -> dict:
+    """#576 G2, a method's WRITE STEP: write the property and return the adapter's
+    receipt (`<prop>_result`; the chat thing's `said`). On the adapters' own worker (a
+    learned invoke running a method) the effect runs inline -- one worker never waits
+    on itself."""
+    import time as _t
+    ent = (est.docs or {}).get(eid)
+    if ent is None:
+        return {"text": f"no entity {eid}", "rc": 2}
+    if value in (None, "", {}, []):
+        return {"text": f"{prop}: an empty value is no effect", "rc": 2}
+    with _prop_lock(eid, prop):                      # one write step per property at a time: its own receipt
+        return _write_and_wait(est, ent, eid, prop, value, timeout, srv)
+
+
+_LOCKS: dict = {}
+_LOCKS_LK = threading.Lock()
+
+
+def _prop_lock(eid: str, prop: str) -> threading.Lock:
+    with _LOCKS_LK:
+        lk = _LOCKS.get((eid, prop))
+        if lk is None:
+            lk = _LOCKS[(eid, prop)] = threading.Lock()
+        return lk
+
+
+def _write_and_wait(est, ent, eid, prop, value, timeout, srv) -> dict:
+    import time as _t
+    b = _branch(f"{eid}.{prop}")
+    srv = srv or _SEAT["srv"] or getattr(est, "_srv", None)
+    if b is None or srv is None:
+        ent.properties[prop] = value                 # a plain write: no effect to wait for
+        est.upsert(ent, embedder=None)
+        return {"text": "written", "rc": 0}
+    t = _SEAT.get("thread")
+    if threading.current_thread() is t or t is None or not t.is_alive() or _SEAT["srv"] is None:
+        # inline: on the worker itself (a learned invoke), or with no worker running
+        _run(b, {"path": f"{eid}.{prop}", "eid": eid, "prop": prop, "new": value,
+                 "writer": W.writer(), "chain": W.current()}, srv=srv)
+        return _receipt(ent, prop)
+    ent.properties[prop] = value
+    est.upsert(ent, embedder=None)                   # the listener queues the effect
+    end = _t.time() + max(0.1, float(timeout))
+    with _DONE:
+        while (ent.properties or {}).get(prop) == value and _t.time() < end:
+            _DONE.wait(min(0.5, max(0.01, end - _t.time())))
+    if (ent.properties or {}).get(prop) == value:
+        return {"text": f"(no receipt within {timeout:g}s: the effect may still be queued or running "
+                        f"-- do not repeat it; read {prop}_result later)", "rc": None}
+    return _receipt(ent, prop)
+
+
+def _receipt(ent, prop: str) -> dict:
+    pp = ent.properties or {}
+    text = pp.get(prop + "_result")
+    if text is None and prop == "say":
+        said = pp.get("said")
+        text = said[-1].get("text") if isinstance(said, list) and said and isinstance(said[-1], dict) else said
+    return {"text": text, "rc": pp.get(prop + "_rc", 0)}
+
+
+def _run(b, w, srv=None) -> None:
+    srv = srv if srv is not None else _SEAT["srv"]
     est = getattr(srv, "entity_store", None)
     branch, eid, prop = b
     ent = (est.docs or {}).get(eid) if est is not None else None
@@ -169,6 +279,8 @@ def _worker() -> None:
         finally:
             _busy.clear()
             _q.task_done()
+            with _DONE:
+                _DONE.notify_all()
 
 
 def start(srv) -> None:

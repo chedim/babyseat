@@ -858,6 +858,9 @@ def _missing_binary(cmd: str) -> str | None:
     return None
 
 
+RETIRED_DIALECT = re.compile(r"^\s*(llm::|llm\.(wake|unwake|call)\b|toybox::|seat::|js::|self::)")
+
+
 def run_command_entity(fld, est, mem, command: str,
                        timeout_s: float | None = None) -> dict:
     """THE MODEL'S HANDS (run, the owner's 2026-10-01 design):
@@ -875,15 +878,16 @@ def run_command_entity(fld, est, mem, command: str,
     cmd = str(command or "").strip()
     if not cmd:
         return {"ok": False, "error": "empty command"}
-    # the label was the link path's nicety, never the engine's (issue #5
-    # residual: a stored 'label :: llm.wake ...' line fell to /bin/sh raw
-    # and died -- the builtins gate below reads the ACTION line); BUT the
-    # no-shell dialects share the label's 'word ::' shape (split_label
-    # reads 'seat::restart x' as the LABEL seat, js::nope() as the label
-    # js) -- the gate reads the RAW line first; only a plain shell line
-    # is split
-    if not _is_no_shell(_action_of(cmd)):
-        _, cmd = split_label(cmd)
+    # the label was the link path's nicety, never the engine's (issue #5). The
+    # no-shell dialects that shared its 'word ::' shape are RETIRED (#576 G2): such
+    # a line is refused here, before split_label could read `js::rm x` as label +
+    # shell (#585 review)
+    if RETIRED_DIALECT.match(cmd):
+        return {"rc": 2, "outcome": "refused", "status": "blocked",
+                "error": "a retired dialect (llm:: / toybox:: / seat:: / js:: / self::): call the method instead "
+                         "(llm.call / llm.wake, toybox.*, presence.restart, presence.exec)",
+                "text": "", "head": "", "tail": ""}
+    _, cmd = split_label(cmd)
     try:
         t = float(timeout_s or RUN_TIMEOUT_DEFAULT_S)
     except (TypeError, ValueError):
@@ -896,74 +900,32 @@ def run_command_entity(fld, est, mem, command: str,
     t0 = time.time()
     err = ""
     try:
-        # BUILTINS-FIRST (#17): wake/unwake specs arrive in the native
-        # `llm::` dialect AND the call-form `llm.` dialect (auto-minted
-        # from raw failed calls). Both route to the llm entity -- NEITHER
-        # may fall through to /bin/sh, where a call-form spec dies rc=127.
-        # The gate reads the ACTION form (issue #5 residual): a setup
-        # prefix ('cd /x; ') on a stored method's line hid the builtin and
-        # the line went to /bin/sh raw.
-        _act = _action_of(cmd)
-        _p_unwake = next((p for p in ("llm::unwake", "llm.unwake")
-                          if _act.startswith(p)), None)
-        _p_wake = None if _p_unwake else next(
-            (p for p in ("llm::wake", "llm.wake") if _act.startswith(p)),
-            None)
-        if _p_unwake or _p_wake:
-            # SELF-SCHEDULED WAKES (llm.py): kept on the llm entity, never a shell
-            from . import llm as _LLM
-            _pfx = _p_unwake or _p_wake
-            _fn = _LLM.unwake_from_command if _p_unwake else _LLM.wake_from_command
-            _r = _fn(_act[len(_pfx):].strip())
-            rc, text = _r["rc"], _r["text"]
-        elif cmd.startswith("llm::call"):
-            # THE MODEL AS AN ENTITY (llm.py): a queued loop turn, never a shell
-            from . import llm as _LLM
-            _r = _LLM.from_command(cmd[len("llm::call"):].strip())
-            rc, text = _r["rc"], _r["text"]
-        elif cmd.startswith("toybox::"):
-            # SELF'S TOYS (#239, toybox.py): the built-in kit, never a shell
-            from . import toybox as _TB
-            _r = _TB.from_command(cmd[len("toybox::"):].strip())
-            rc, text = _r["rc"], _r["text"]
-        elif cmd.startswith("seat::restart"):
-            # THE SEAT RESTARTS ITSELF (restarts.py): never a shell
-            from . import restarts as _RS
-            from .jsexec import _unquote
-            _r = _RS.do_restart(_RS._seat_srv(), _unquote(cmd[len("seat::restart"):].strip()))
-            rc, text = _r["rc"], _r["text"]
-        elif cmd.startswith("js::"):
-            # THE SEAT'S JS (jsexec.py): never a shell -- an opted-in browser tab runs it
-            from . import jsexec as _JS
-            _r = _JS.run(cmd[4:], timeout=t)
-            rc, text, err = _r["rc"], _r["text"], _r.get("err") or ""
-            if err and rc != -1:
-                text, err = (text + "\n" if text else "") + err, ""
+        # #576 G2: the hatches (llm::, toybox::, seat::restart, js::) are retired -- those
+        # effects are writes now (adapters.py, method write steps); every line here is shell
+        # THE PLATFORM GATE (issue #103): the primary executable must
+        # exist on this seat; a missing one is refused here, before the
+        # subprocess -- no run, an honest reason, the receipt rides the
+        # same lanes a real rc 127 would (script_last_error, edge why).
+        _miss = _missing_binary(cmd)
+        if _miss:
+            rc = 127
+            err = f"'{_miss}' not found on this platform (no such command in PATH)"
+            text = ""
         else:
-            # THE PLATFORM GATE (issue #103): the primary executable must
-            # exist on this seat; a missing one is refused here, before the
-            # subprocess -- no run, an honest reason, the receipt rides the
-            # same lanes a real rc 127 would (script_last_error, edge why).
-            _miss = _missing_binary(cmd)
-            if _miss:
-                rc = 127
-                err = f"'{_miss}' not found on this platform (no such command in PATH)"
-                text = ""
-            else:
-                # THE NON-UTF-8 RECEIPT (2026-10-14): text=True decodes
-                # STRICTLY -- one bad byte in a command's output raised
-                # UnicodeDecodeError out of the engine, the thinker's
-                # run_pending_links died before landing, and the same link
-                # was retried forever (the seat's own log: the same pending
-                # link crashed every beat). Bytes + errors='replace' makes
-                # the receipt honest instead: rc and the output with U+FFFD
-                # where the bytes were.
-                p = subprocess.run(cmd, shell=True, capture_output=True,
-                                   timeout=t, cwd=os.getcwd())
-                rc = p.returncode
-                text = "\n".join(
-                    x.decode(errors="replace").replace("\r\n", "\n")
-                    .rstrip("\n") for x in (p.stdout, p.stderr) if x)
+            # THE NON-UTF-8 RECEIPT (2026-10-14): text=True decodes
+            # STRICTLY -- one bad byte in a command's output raised
+            # UnicodeDecodeError out of the engine, the thinker's
+            # run_pending_links died before landing, and the same link
+            # was retried forever (the seat's own log: the same pending
+            # link crashed every beat). Bytes + errors='replace' makes
+            # the receipt honest instead: rc and the output with U+FFFD
+            # where the bytes were.
+            p = subprocess.run(cmd, shell=True, capture_output=True,
+                               timeout=t, cwd=os.getcwd())
+            rc = p.returncode
+            text = "\n".join(
+                x.decode(errors="replace").replace("\r\n", "\n")
+                .rstrip("\n") for x in (p.stdout, p.stderr) if x)
     except subprocess.TimeoutExpired as e:
         rc = -1
         err = f"timeout after {t:g}s"
@@ -1872,9 +1834,60 @@ def _exec_command_doc(srv, est, fld, mem, doc, args: dict | None = None,
     return out
 
 
+def ensure_write_method(srv, est, owner_eid: str, method: str, target: str, expr: str,
+                        read_only: bool = False) -> bool:
+    """#576 G2: a seeded method is ONE write step (`target = expr`), defined when missing
+    or when an older seat holds another form (a hatch command). -> redefined?"""
+    mine = [d for d in list((est.docs or {}).values())
+            if owner_eid in ((d.properties or {}).get("method_of") or [])
+            and (d.properties or {}).get("method_name") == method]
+    want = [str(target), str(expr)]
+
+    def good(d):
+        p = d.properties or {}
+        nodes = [(est.docs or {}).get(n) for n in (p.get("parents") or [])]
+        return not str(p.get("command") or "").strip() and any(
+            n is not None and (n.properties or {}).get("write") == want for n in nodes)
+    keep = next((d for d in mine if good(d)), None)
+    extra = [d.eid for d in mine if d is not keep]
+    changed = False
+    if keep is None:
+        r = method_define(srv, est, None, None, on=owner_eid, method=method, command="",
+                          steps=[{"name": method, "write": want}], read_only=read_only)
+        changed = bool(r.get("ok"))
+        extra = [e for e in extra if e != r.get("eid")]
+    if extra:                                    # an older seat's duplicate definitions resolve no more
+        est.remove_many(extra) if hasattr(est, "remove_many") else [est.remove(e) for e in extra]
+        changed = True
+    if changed:
+        import sys
+        print(f"[seat] {method} on {owner_eid} is the write step {want[0]} = {want[1]}"
+              + (f" ({len(extra)} older definition(s) removed)" if extra else ""), file=sys.stderr)
+    return changed
+
+
+def _write_step_refusal(w) -> str | None:
+    """#576 G2: a write step is [target, expr] -- `self.<prop>` or `<eid>.<prop>`, and
+    a cliffhanger expression over the call's args (ch.py's safe language)."""
+    from . import ch as _CH
+    if not isinstance(w, (list, tuple)) or len(w) != 2:
+        return "write is [target, expression]"
+    head, _, prop = str(w[0]).rpartition(".")
+    if not head or not prop or _CH._denied(prop):
+        return f"write target {w[0]!r} is not a writable <self|eid>.<prop>"
+    try:
+        node = _CH._parse(str(w[1]))
+        import ast as _ast
+        names = {n.id for n in _ast.walk(node) if isinstance(n, _ast.Name)}
+        _CH._check(node, names)
+    except _CH.Refused as e:
+        return f"write expression: {e}"
+    return None
+
+
 def _is_step(props: dict) -> bool:
     """A Cliffhanger node that runs without a shell command: a guard, a call or a fan-out."""
-    return bool(props.get("guard") or props.get("call") or props.get("each"))
+    return bool(props.get("guard") or props.get("call") or props.get("each") or props.get("write"))
 
 
 def _step_name(doc) -> str:
@@ -2014,6 +2027,9 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
                 break
             if not sub.get("ok"):
                 res["failed_step"] = pp
+                for k in ("head", "tail", "rc"):          # the failing step's own words are the method's
+                    if res.get(k) is None and sub.get(k) is not None:
+                        res[k] = sub[k]
                 res["failed_reason"] = (f"rc={sub.get('rc')} "
                                         f"{sub.get('outcome')}"
                                         if sub.get("error") is None
@@ -2101,6 +2117,34 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
                     "output": r.get("output"), "output_len": r.get("output_len"),
                     "status": "blocked" if r.get("status") == "blocked" else None,
                     "error": r.get("error")})
+        memo[eid] = res
+        return res
+    if props.get("write") and ctx is not None:
+        # #576 G2: a WRITE STEP -- the effect is a write; the adapter's receipt is the output
+        from . import ch as _CH
+        from . import adapters as _AD
+        tgt, expr = props["write"]
+        head, _, wprop = str(tgt).rpartition(".")
+        weid = ctx.get("self_eid") if head == "self" else (est._resolve_spec(head).eid if est._resolve_spec(head) else None)
+        env = {k: v for k, v in (ctx.get("vars") or {}).items() if isinstance(k, str) and k.isidentifier()}
+        if ctx.get("self_eid"):
+            env["self"] = _CH.EntityView(est, ctx["self_eid"])
+        try:
+            value = _CH._writable(_CH.evaluate(str(expr), env))
+        except _CH.Refused as e:
+            res.update({"ok": False, "status": "blocked", "error": f"write {tgt}: {e}"})
+            memo[eid] = res
+            return res
+        if not weid:
+            res.update({"ok": False, "status": "blocked", "error": f"write {tgt}: no such entity"})
+            memo[eid] = res
+            return res
+        rec = _AD.write_and_wait(est, weid, wprop, value, timeout=_call_timeout(args), srv=ctx.get("srv"))
+        rc = rec.get("rc")
+        res.update({"ok": rc == 0, "rc": rc, "outcome": "ok" if rc == 0 else "error",
+                    "head": str(rec.get("text") or "")[:4000], "tail": ""})
+        ctx.setdefault("steps", {})[_step_name(doc)] = {"rc": rc, "status": "ok" if rc == 0 else "error",
+                                                         "head": res["head"], "state": _parsed(res["head"])}
         memo[eid] = res
         return res
     if cmd:
@@ -2290,16 +2334,6 @@ def substitute_args(cmd: str, args: dict | None) -> str:
     return _QUOTED_PARAM.sub(rep, cmd)
 
 
-_NO_SHELL = ("llm::unwake", "llm.unwake", "llm::wake", "llm.wake",
-             "llm::call", "seat::restart", "js::", "toybox::")
-
-def _is_no_shell(act: str) -> bool:
-    """The no-shell builtin dialects (the elif chain above in
-    run_command_entity) -- a line starting with one never goes through
-    the label split, or the peel eats the head it dispatches on."""
-    return any(act.startswith(p) for p in _NO_SHELL)
-
-
 def _action_of(cmd: str) -> str:
     c = cmd
     for _ in range(6):
@@ -2384,8 +2418,13 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
         except _SC.NotAScript as e:
             return {"ok": False, "error": f"not a script: {e} -- {command[:60]!r}"}
     for st in steps:
-        if not isinstance(st, dict) or not (st.get("call") or st.get("command")):
-            return {"ok": False, "error": "each step is {name, call, object?, args?}, {name, each, call, args?, max?} or {name, command}"}
+        if not isinstance(st, dict) or not (st.get("call") or st.get("command") or st.get("write")):
+            return {"ok": False, "error": "each step is {name, call, object?, args?}, {name, each, call, args?, max?}, "
+                                          "{name, command} or {name, write: [target, expr]}"}
+        if st.get("write"):                       # #576 G2: a write step -- an effect is a write
+            why = _write_step_refusal(st["write"])
+            if why:
+                return {"ok": False, "error": f"step {st.get('name') or ''}: {why}"}
         if st.get("command") and lint_command(str(st["command"])):
             return {"ok": False, "error": f"step refused: {lint_command(str(st['command']))}"}
         if st.get("command"):
@@ -2436,6 +2475,8 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
         elif st.get("call"):
             props.update({"call": str(st["call"]), "object": str(st.get("object") or "self"),
                           "args": dict(st.get("args") or {})})
+        elif st.get("write"):
+            props["write"] = [str(st["write"][0]), str(st["write"][1])]
         else:
             props["command"] = str(st["command"])
         nodes.append(_node(est, eid, name, props))
@@ -2466,7 +2507,7 @@ def _node(est, method_eid: str, name: str, props: dict) -> str:
         d = QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={"name": f"{name}", "silent_birth": True})
         est.docs[eid] = d
     dp = d.properties or {}
-    for k in ("guard", "call", "object", "args", "command", "each", "max", "on_fail"):
+    for k in ("guard", "call", "object", "args", "command", "each", "max", "on_fail", "write"):
         dp.pop(k, None)
     dp.update(props)
     dp["node_of"] = method_eid
@@ -2755,7 +2796,8 @@ def method_inspect(est, obj_spec: str, method: str, args=None) -> dict:
         d = (est.docs or {}).get(pe)
         if d is not None:
             pp = d.properties or {}
-            steps.append({k: pp[k] for k in ("step", "command", "call", "object", "each", "guard", "args") if pp.get(k)})
+            steps.append({k: pp[k] for k in ("step", "command", "call", "object", "each", "guard", "args", "write")
+                          if pp.get(k)})
     if steps:
         out["steps"] = steps
     if "blocked" in prep:
@@ -2817,6 +2859,7 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
         return prep["blocked"]
     obj, m, via, mro, full, template, ctx, args = (prep[k] for k in (
         "obj", "m", "via", "mro", "full", "template", "ctx", "args"))
+    ctx["srv"] = srv                              # #576 G2: a write step runs its effect on this seat
     # a call is a synchronous EVENT, not a queued link: the method entity
     # runs directly (its id would read as a 'label :: command' line to the
     # link parser); the run count and success rate land on the method
