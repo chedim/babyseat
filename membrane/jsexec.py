@@ -5,7 +5,7 @@ seats; for running shell/python there could be a different agent").
 
 The seat's presence entity implements remote_executor and is the executor of
 the `js` language (#614): JS is code like any other, a tree of node entities
-(lang_js.py), run by linking its root to presence (exec(action='run',
+(lang.py, tree-sitter-javascript), run by linking its root to presence (exec(action='run',
 lang='js')). The run hands the code to a browser tab that opted in ("allow
 JS scripting in this window", per tab, off by default). The tab runs it IN ITS WINDOW
 (the operator's choice: "why a sandbox? why not let it access the window?") --

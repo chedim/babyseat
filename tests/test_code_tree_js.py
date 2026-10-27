@@ -1,11 +1,11 @@
 """JS IS A TREE IN THE FIELD TOO (#614 part B).
 
 Pinned here:
-  - JS is minted as node entities like the shell: a program's statements in
-    order, a statement's blocks as its children, each block's statements again;
-    an object literal is not a block; the same statement is one entity;
+  - JS is minted as node entities like the shell (tree-sitter's grammar, #622):
+    a program's statements in order, a block's statements inside it; an
+    object literal is not a block; the same statement is one entity;
   - every program prints back exactly as written (strings, template literals,
-    comments, regexes, no semicolons) and what is not JS is refused;
+    comments, regexes, no semicolons, non-ASCII) and what is not JS is refused;
   - a js root runs on the seat's presence, in an opted-in browser tab, through
     the same execute -> executing -> result edges; a root of another language
     is refused either way;
@@ -66,7 +66,17 @@ def _kids(srv, eid):
 
 
 def _text(srv, eid):
-    return srv.entity_store.docs[eid].properties["text"]
+    return LG.text(srv.entity_store, eid)
+
+
+def _kind(srv, eid):
+    return srv.entity_store.docs[eid].properties["kind"]
+
+
+def _walk(srv, eid):
+    yield eid
+    for k in srv.entity_store.docs[eid].properties.get("args") or []:
+        yield from _walk(srv, k)
 
 
 class TestTheTree(unittest.TestCase):
@@ -80,20 +90,21 @@ class TestTheTree(unittest.TestCase):
     def test_a_block_holds_its_statements(self):
         srv = _seat()
         root = LG.mint(srv, "js", "if (x) { a(); b(); } else { c(); }")
-        stmt = _kids(srv, root)[0]
-        blocks = _kids(srv, stmt)
+        blocks = [e for e in _walk(srv, root) if _kind(srv, e) == "statement_block"]
         self.assertEqual([[_text(srv, s) for s in _kids(srv, b)] for b in blocks], [["a();", "b();"], ["c();"]])
 
     def test_an_object_literal_is_not_a_block(self):
         srv = _seat()
         root = LG.mint(srv, "js", "const o = { a: 1, b: 2 };")
-        self.assertEqual(_kids(srv, _kids(srv, root)[0]), [])
+        kinds = {_kind(srv, e) for e in _walk(srv, root)}
+        self.assertIn("object", kinds)
+        self.assertNotIn("statement_block", kinds)
 
     def test_the_same_statement_is_one_entity(self):
         srv = _seat()
         a = LG.mint(srv, "js", "a(); b();")
         b = LG.mint(srv, "js", "function f() { a(); }")
-        self.assertIn(_kids(srv, a)[0], _kids(srv, _kids(srv, _kids(srv, b)[0])[0]))
+        self.assertIn(_kids(srv, a)[0], set(_walk(srv, b)))
 
     def test_every_program_prints_back_as_written(self):
         srv = _seat()
@@ -102,11 +113,11 @@ class TestTheTree(unittest.TestCase):
                      "// a comment }\nfoo() /* { */\nbar()",
                      "if (/[}]/.test(s)) { n = a / b / c } else x = /;/g",
                      "class A extends B {\n  m() { return 1 }\n  static n = 2\n}",
-                     "const f = async (x) => {\n  await g(x)\n  return x\n}\nf(1).then(v => console.log(v))",
+                     "const f = async (x) => {\n  await g(x?.y ?? 1)\n  return x\n}\nf(1).then(v => console.log(v))",
                      "for (let i = 0; i < 3; i++) {\n  if (i)\n    continue\n}",
                      "try { x() } catch (e) { y(e) } finally { z() }",
                      "switch (k) { case 1: a(); break; default: b() }",
-                     "let x = 1\n;[1, 2].forEach(n => x += n)\nx++\nx"):
+                     "let x = 1\n;[1, 2].forEach(n => x += n)\nx++\nx", "const café = 'naïve ☕'"):
             root = LG.mint(srv, "js", code)
             self.assertEqual(LG.text(srv.entity_store, root), code, code)
 

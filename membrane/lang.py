@@ -19,7 +19,8 @@ Re-running is re-creating the execute edge; each run keeps its own result, the
 newest RESULTS_KEEP per root. Taking an owed edge is a compare-and-set (the
 execute row's supersede), so a run happens once however many hands reach it.
 
-THE LANGUAGES. A registry: a parser into nodes, a printer out of them, and the
+THE LANGUAGES. A registry: a parser into nodes (the language's tree-sitter
+grammar, #622; one generic conversion for all), a printer out of them, and the
 runner its executors use -- `sh` on tool:executor, `js` on the seat's presence
 (an opted-in browser tab). An executor entity says its language in `lang` (else
 it is the default executor of one); a root of another language is refused.
@@ -59,54 +60,88 @@ class Lang:
 LANGS: dict[str, Lang] = {}
 
 
-# ---- sh: the scripts.py graph as nodes ------------------------------------------------------
+# ---- parsing: tree-sitter grammars (#622) ---------------------------------------------------
 
-def _sh_node(g: dict) -> Node:
-    items = []
-    for it in g.get("items") or []:
-        stages = []
-        for st in it["pipe"]["stages"]:
-            kids = []
-            if st.get("group") is not None:
-                kids.append(Node("group", "", [_sh_node(st["group"])]))
-            kids += [Node("env", e["raw"]) for e in st.get("env") or []]
-            kids += [Node("word:" + str(w.get("kind") or "lit"), w["raw"]) for w in st.get("words") or []]
-            for r in st.get("redirs") or []:
-                kids.append(Node("redir", r["raw"], [Node("body", r["body"])] if "body" in r else []))
-            stages.append(Node("stage", "", kids))
-        items.append(Node("pipe!" if it["pipe"].get("neg") else "pipe", it.get("sep") or "", stages))
-    return Node("script", "", items)
+HOLE = "\x00"          # where a child goes in its parent's template
+GRAMMARS = {"sh": "tree_sitter_bash", "js": "tree_sitter_javascript"}
+_TS: dict = {}
+INSTALL = ("pip install tree-sitter tree-sitter-bash tree-sitter-javascript "
+           "(where no wheel exists, e.g. Termux or HA on a Raspberry Pi, a C compiler first)")
 
 
-def _sh_graph(n: Node) -> dict:
-    items = []
-    for p in n.args:
-        stages = []
-        for s in p.args:
-            st: dict = {"env": [], "words": [], "redirs": [], "group": None}
-            for k in s.args:
-                if k.kind == "group":
-                    st["group"] = _sh_graph(k.args[0])
-                elif k.kind == "env":
-                    st["env"].append({"raw": k.text})
-                elif k.kind.startswith("word:"):
-                    st["words"].append({"raw": k.text, "kind": k.kind[5:]})
-                elif k.kind == "redir":
-                    st["redirs"].append({"raw": k.text, **({"body": k.args[0].text} if k.args else {})})
-            stages.append(st)
-        items.append({"sep": p.text or None, "pipe": {"neg": p.kind == "pipe!", "stages": stages}})
-    return {"v": 1, "items": items}
+class NoGrammar(RuntimeError):
+    """The language's grammar is not installed: the run surface says what to install."""
 
 
-def _sh_parse(text: str) -> Node:
-    from . import scripts as SC
-    return _sh_node(SC.parse(text))
+def _language(lang: str):
+    if lang not in _TS:
+        import importlib
+        try:
+            import tree_sitter as ts
+            _TS[lang] = ts.Language(importlib.import_module(GRAMMARS[lang]).language())
+        except ImportError as e:
+            raise NoGrammar(f"the code tree needs tree-sitter ({e}): {INSTALL}") from None
+    return _TS[lang]
 
 
-def _sh_print(n: Node) -> str:
-    from . import scripts as SC
-    return SC.compile(_sh_graph(n))
+def _first_error(n):
+    if n.type == "ERROR" or n.is_missing:
+        return n
+    for c in n.children:
+        if c.has_error:
+            return _first_error(c)
+    return n
 
+
+def _ts_node(n, src: bytes, a: int, b: int) -> Node:
+    """A syntax node -> a Node: a leaf keeps its text; a node keeps its source span
+    with a HOLE per named child, so printing is filling the holes."""
+    kids = [c for c in n.named_children if a <= c.start_byte and c.end_byte <= b]
+    if not kids:
+        return Node(n.type, src[a:b].decode())
+    tpl, out, last = [], [], a
+    for c in kids:
+        if c.start_byte < last:                  # overlapping spans: keep the text whole
+            return Node(n.type, src[a:b].decode())
+        tpl += [src[last:c.start_byte].decode(), HOLE]
+        out.append(_ts_node(c, src, c.start_byte, c.end_byte))
+        last = c.end_byte
+    tpl.append(src[last:b].decode())
+    return Node(n.type, "".join(tpl), out)
+
+
+def parse(lang: str, text: str) -> Node:
+    """Code -> its Node tree; ValueError for what the grammar cannot read."""
+    if HOLE in text:
+        raise ValueError("a NUL byte is not code")
+    if not text.strip():
+        raise ValueError("no code")
+    language = _language(lang)
+    import tree_sitter as ts
+    src = text.encode()
+    root = ts.Parser(language).parse(src).root_node
+    if root.has_error:
+        e = _first_error(root)
+        row, col = e.start_point
+        raise ValueError(f"a syntax error at line {row + 1}, column {col + 1}: "
+                         f"{src[e.start_byte:e.end_byte][:40].decode(errors='replace')!r}")
+    try:
+        return _ts_node(root, src, 0, len(src))     # the root spans all of it (edge space too)
+    except RecursionError:
+        raise ValueError("the code nests too deep to keep as a tree")
+
+
+def print_(n: Node) -> str:
+    if not n.args:
+        return n.text
+    parts = n.text.split(HOLE)
+    out = [parts[0]]
+    for kid, rest in zip(n.args, parts[1:]):
+        out += [print_(kid), rest]
+    return "".join(out)
+
+
+# ---- sh: tool:executor -----------------------------------------------------------------------
 
 def _sh_run(srv, text: str, timeout_s=None) -> dict:
     from . import night as N
@@ -116,10 +151,10 @@ def _sh_run(srv, text: str, timeout_s=None) -> dict:
                                 text, timeout_s=t)
 
 
-LANGS["sh"] = Lang("sh", _sh_parse, _sh_print, MEMBRANE_NS + "tool:executor", _sh_run)
+LANGS["sh"] = Lang("sh", lambda t: parse("sh", t), print_, MEMBRANE_NS + "tool:executor", _sh_run)
 
 
-# ---- js: statements in an opted-in browser tab (lang_js.py, jsexec.py) ----------------------
+# ---- js: presence, an opted-in browser tab (jsexec.py) ---------------------------------------
 
 def _js_run(srv, text: str, timeout_s=None) -> dict:
     from . import jsexec as JS
@@ -134,12 +169,7 @@ def _js_run(srv, text: str, timeout_s=None) -> dict:
             "ms": max(1, int((time.time() - t0) * 1000)), "output": shown, "error": err}
 
 
-def _js_lang() -> Lang:
-    from . import lang_js as J
-    return Lang("js", J.parse, J.print_, MEMBRANE_NS + "presence", _js_run)
-
-
-LANGS["js"] = _js_lang()
+LANGS["js"] = Lang("js", lambda t: parse("js", t), print_, MEMBRANE_NS + "presence", _js_run)
 
 
 # ---- the store -----------------------------------------------------------------------------
@@ -159,8 +189,8 @@ def _mint(srv, lang: str, n: Node, be, origin) -> str:
     eid = f"{MEMBRANE_NS}node:{lang}:{_hash(lang, n, kids)}"
     est = srv.entity_store
     if eid not in (est.docs or {}):
-        shown = (n.text if not n.args else LANGS[lang].print(n) if n.kind in ("script", "program")
-                 else n.text.replace("\x00", "…"))
+        shown = (n.text if not n.args else print_(n) if n.kind == "program"
+                 else n.text.replace(HOLE, "…"))
         est.upsert(QuantumEntity(eid=eid, cls=CLASS_COMPONENT, properties={
             "name": " ".join(str(shown or n.text or n.kind).split())[:80], "lang": lang,
             "kind": n.kind, "text": n.text, "args": kids, "silent_birth": True}), embedder=None)
@@ -327,6 +357,8 @@ def run(srv, code: str | None = None, lang: str = "sh", node: str | None = None,
             return {"ok": False, "error": "nothing to run: give code, or node=<a root> to re-run"}
         try:
             root = mint(srv, lang, str(code))
+        except NoGrammar as e:
+            return {"ok": False, "error": str(e)}
         except ValueError as e:              # NotAScript is a ValueError
             return {"ok": False, "error": f"not {lang} code: {e}"}
     if on:
