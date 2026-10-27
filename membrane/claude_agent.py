@@ -691,7 +691,7 @@ TOOLS_NOTE = (
     "(the doctrine: a library, not one-shots). There are no one-shot "
     "commands: program the field first, then use it. Before anything new, "
     "find what you have (entity_query, graph, method_inspect) and call it. "
-    "To run code, code_run it: it becomes a tree of entities in the field, "
+    "To run code, code_run (or bash) it: it becomes a tree of entities in the field, "
     "linked to its executor, and returns rc, output and a result entity; "
     "re-run a root with node=. For a step worth repeating, define a method "
     "on the entity it belongs to or its class (method_define, {{name}} "

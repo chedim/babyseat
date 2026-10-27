@@ -813,6 +813,22 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "bash",
+        "description": (
+            "Run a shell command: code_run under the name you know (the command "
+            "becomes a tree in the field, the run a result entity; re-run with "
+            "code_run node=<root>)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The command to run."},
+                "timeout": {"type": "number", "description": "Optional timeout in milliseconds."},
+                "description": {"type": "string", "description": "What the command does, in a few words."},
+            },
+            "required": ["command"],
+        },
+    },
+    {
         "name": "method_each",
         "description": (
             "CLIFFHANGER EACH: call one method on every member of a class "
@@ -1648,7 +1664,7 @@ def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
 def tool_code_run(args: dict, port: int, head_cap: int | None = None) -> str:
     """Run code through its tree (#614); the output rides the reply like a
     method call's (`head_cap`: the local models' short head)."""
-    body = {k: str(args[k]) for k in ("code", "lang", "node", "on") if args.get(k) not in (None, "")}
+    body = {k: str(args[k]) for k in ("code", "lang", "node", "on", "timeout") if args.get(k) not in (None, "")}
     out = _http(port, "POST", "/membrane/code/run", body)
     if not out.get("root") or (not out.get("ok") and out.get("rc") is None):
         return f"run refused: {out.get('error', 'unknown error')}" + (f" [root {out['root']}]" if out.get("root") else "")
@@ -1659,6 +1675,17 @@ def tool_code_run(args: dict, port: int, head_cap: int | None = None) -> str:
 
 def tool_code_run_local(args: dict, port: int) -> str:
     return tool_code_run(args, port, head_cap=LOCAL_LINK_HEAD)
+
+
+def tool_bash(args: dict, port: int) -> str:
+    """bash: code_run under the shell tool's familiar name (toolset.bash_args)."""
+    from .toolset import bash_args
+    return tool_code_run(bash_args(args), port)
+
+
+def tool_bash_local(args: dict, port: int) -> str:
+    from .toolset import bash_args
+    return tool_code_run_local(bash_args(args), port)
 
 
 def tool_method_inspect(args: dict, port: int) -> str:
@@ -1809,6 +1836,7 @@ TOOL_IMPLS = {
     "method_define": tool_method_define,
     "method_call": tool_method_call,
     "code_run": tool_code_run,
+    "bash": tool_bash,
     "method_each": tool_method_each,
     "method_inspect": tool_method_inspect,
     "entity_read": tool_entity_read,
@@ -1816,7 +1844,7 @@ TOOL_IMPLS = {
 # the local models' toolset path (server.mcp_executor): the same tools, with
 # method_call's short head (their context is small)
 LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "method_call": tool_method_call_local,
-                    "code_run": tool_code_run_local}
+                    "code_run": tool_code_run_local, "bash": tool_bash_local}
 
 
 # ---- the JSON-RPC loop ---------------------------------------------------------

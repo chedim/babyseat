@@ -40,8 +40,10 @@ class TestSurfaceNames(unittest.TestCase):
         self.assertEqual(names & FILE_TOOLS, set())
 
     def test_no_collision_with_opencode_builtins(self):
+        # bash is the one deliberate exception (the operator, 2026-10-27): an alias
+        # of code_run under the name models know; opencode names it membrane_bash
         names = {t["name"] for t in M.TOOLS}
-        self.assertEqual(names & OC_BUILTINS, set())
+        self.assertEqual(names & OC_BUILTINS, {"bash"})
 
     def test_impls_cover_every_advertised_tool(self):
         names = {t["name"] for t in M.TOOLS}

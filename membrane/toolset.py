@@ -304,6 +304,18 @@ def _scripts_of(args: dict) -> dict:
 
 
 _LEGACY_FAMILY = {leg: fam for fam, f in FAMILIES.items() for leg in f["actions"].values()}
+_LEGACY_FAMILY["bash"] = "exec"                  # Claude Code's and opencode's name for code_run
+
+
+def bash_args(args: dict) -> dict:
+    """bash {command, timeout ms, description} -> code_run {code, lang sh, timeout s}."""
+    out = {"code": args.get("command", args.get("code")), "lang": "sh"}
+    try:
+        if args.get("timeout") not in (None, ""):
+            out["timeout"] = float(args["timeout"]) / 1000.0
+    except (TypeError, ValueError):
+        pass
+    return out
 
 
 def _json_obj(v):
@@ -334,6 +346,8 @@ def canonical(name: str, args: dict) -> tuple[str, dict]:
     # ISSUE #60 (Memo): a route string reused as a tool name kept its leading
     # slash -- '/exec' on a headless seat's watch pulse, refused though exec is mounted
     name = _NS.sub("", str(name or "").strip().lstrip("/").strip())
+    if name.lower() == "bash":                   # the shell tool's familiar name is code_run
+        return "code_run", bash_args(args or {})
     m = _FAM_ACT.match(name)
     if m and m.group(1).lower() in FAMILIES:
         fam, act = m.group(1).lower(), m.group(2).lower()
