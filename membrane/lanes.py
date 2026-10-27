@@ -4391,6 +4391,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         if path in ("/membrane/method/define", "/membrane/method/call", "/membrane/method/each",
                     "/membrane/method/inspect"):
             self._method(path.rsplit("/", 1)[-1]); return
+        if path == "/membrane/code/run":
+            self._code_run(); return
         if path == "/membrane/entity/remove":
             self._entity_remove(); return
         if path == "/membrane/filetool":
@@ -7104,6 +7106,28 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_out(out); return
         self._entity_audit("remove", {"ok": out["removed"] > 0, "eid": spec, "count": out["removed"]})
         self._json_out(out)
+
+    def _code_run(self) -> None:
+        """POST /membrane/code/run {code, lang, node, on} (#614): the code's
+        tree is minted and linked to its executor; the run's result entity
+        comes back. The method route's gates: the pause, the owner."""
+        body = self._json_body()
+        srv = self.server
+        if self._paused_write_refused():
+            return
+        if getattr(srv, "entity_store", None) is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        from . import seatauth as _SA
+        if not _SA.owner(self):                            # #253: code is code
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
+        from . import lang as _LG
+        res = _LG.run(srv, code=body.get("code"), lang=str(body.get("lang") or "sh"),
+                      node=body.get("node") or None, on=body.get("on") or None)
+        _write_audit(srv.membrane, {"event": "agent-code-run", "origin": "code_run",
+                                    "root": res.get("root"), "result": res.get("result"),
+                                    "rc": res.get("rc"), "ok": bool(res.get("ok"))})
+        self._json_out(res)
 
     def _method(self, op: str) -> None:
         """POST /membrane/method/define|call: Cliffhanger's two verbs.

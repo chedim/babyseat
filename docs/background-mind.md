@@ -98,9 +98,9 @@ the seat's ACTING lanes down — the stable point from which the operator
   plan's artifact: the operator looks around, plans into the board, then
   `membrane: resume` — and the accumulated world pours in honestly
   (loop drains, speech delivers, the scanner's diff bursts bounded). The
-  executor's queue is part of the pause: owed work keeps its pending
-  edges and runs on resume (the executor mechanics:
-  [entity-field.md](entity-field.md) — the queue + the ISA pipeline).
+  executor's queue is part of the pause: owed runs keep their
+  `-execute->` edges and run on resume (the executor mechanics:
+  [entity-field.md](entity-field.md) — code is a tree in the field).
   One method call goes through the pause: `presence.restart` (#388) — a
   staged deploy never waits for a resume.
 - **Never on disk** (a persisted pause is a stuck seat — a paused-looking

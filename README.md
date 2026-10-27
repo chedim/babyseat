@@ -244,7 +244,7 @@ tracks, commands, interfaces, classes, loops, timelines, frame, digest, or
 changes since the last message), `learn` to keep a lesson (with the same guards as any turn),
 `forget` to clean up its mistakes, and the entity tools
 (`entity_add/edit/remove/inherit`, `entity_query`, `entity_tracks`,
-`entities_related`, …) and Cliffhanger's method tools (`method_define/call/each/inspect`). There are no one-shot commands: the model defines a method on an entity, then calls it ([program the field first](docs/cliffhanger.md#program-the-field-first-576-part-f)). Commands compose in **Cliffhanger**, membrane's command
+`entities_related`, …), `code_run` and Cliffhanger's method tools (`method_define/call/each/inspect`). Code the model runs becomes a tree of entities in the field, linked to its executor, and each run ends on its own result entity ([the executor](docs/entity-field.md#the-executor-code-is-a-tree-in-the-field-614)); what it will do again it defines as a method on an entity, then calls ([program the field first](docs/cliffhanger.md#program-the-field-first-576-part-f)). Commands compose in **Cliffhanger**, membrane's command
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
 where it came from.

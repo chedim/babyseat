@@ -74,20 +74,22 @@ FAMILIES: dict[str, dict] = {
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {
-        "description": "Cliffhanger: program the field first -- define a method on a class "
-                       "or object, then call it (or each over a class); inspect looks "
-                       "without running. help('cliffhanger').",
-        "actions": {"call": "method_call", "each": "method_each", "define": "method_define",
-                    "inspect": "method_inspect"},
+        "description": "run: code becomes a tree on the field, its executor runs it (node= "
+                       "re-runs). Methods: define, call, each (over a class), inspect. "
+                       "help('cliffhanger').",
+        "actions": {"run": "code_run", "call": "method_call", "each": "method_each",
+                    "define": "method_define", "inspect": "method_inspect"},
         "params": {"args": {"type": "object", "description": "{{param}} values"},
-                   "object": _S("call: target"), "on": _S("define: owner"),
-                   "over": _S("each: class or pattern"), "max": _I("each: cap (20)"),
+                   "code": _S("run: code"), "lang": _S("run: sh"), "node": _S("run: root"),
+                   "object": _S("call: target"), "on": _S("define: owner; run: executor"),
+                   "over": _S("each: class|pattern"), "max": _I("each: cap (20)"),
                    "dry_run": _B("each: list only"), "on_fail": _S("each: abort|continue"),
-                   "method": _S("method name"), "command": _S("define: command template"),
+                   "method": _S("method name"), "command": _S("define: template"),
                    "read_only": _B("define: a read"), "guard": _S("define: guard"),
                    "abstract": _B("define: f(a,b), no command"),
                    "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"}},
-        "map": {"call": lambda a: _pick(a, "object", "method", "args"),
+        "map": {"run": lambda a: _pick(a, "code", "lang", "node", "on"),
+                "call": lambda a: _pick(a, "object", "method", "args"),
                 "inspect": lambda a: _pick(a, "object", "method", "args"),
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
                 "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps", "abstract")},
@@ -163,8 +165,13 @@ HELP = {
         "membrane.speak(text), membrane.call_llm(prompt), membrane.wake(at, prompt). "
         "Rewriting a script clears its cooldowns. A real cooldown says 'retry in Ns'."),
     "exec": (
-        "PROGRAM THE FIELD FIRST: there are no one-shot commands. To do something, define a "
-        "method on the entity it belongs to (or its class), then call it: exec(action='define', "
+        "RUN CODE: exec(action='run', code='ls -la ..') -- the code becomes a tree of entities in "
+        "the field (one per node, shared wherever the same code appears) and its root is linked "
+        "to its language's executor (sh: tool:executor): -execute-> owed, -executing-> running, "
+        "-result-> a result entity for that run; you get rc + output, the root and the result. "
+        "Re-run: exec(action='run', node=<root>). entity(action='read') on a root shows its code, "
+        "state and runs. PROGRAM THE FIELD FIRST: what you will do again is a method -- define it "
+        "on the entity it belongs to (or its class), then call it: exec(action='define', "
         "on='ha light', method='turn_on', command='curl ... {{self.entity_id}} {{level}}'), then "
         "exec(action='call', object='ha:light.port_strip', method='turn_on', args={'level': 40}) -- "
         "it returns rc + output (dash shell on this seat: use '.' not 'source'); or write a "

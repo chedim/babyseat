@@ -30,7 +30,7 @@ import time
 DEADLINE_S = 3.0
 MAX_DEPTH = 2
 RESULT_MAX = 1500
-RUN_TOOLS = frozenset(("method_call", "method_each"))
+RUN_TOOLS = frozenset(("method_call", "method_each", "code_run"))
 READ_TOOL = "entity_read"
 DEFINE_TOOLS = frozenset(("entity_edit", "entity_add"))
 _SCRIPT_KEYS = ("getter_script", "tick_script", "watch_script", "mention_script", "thought_script",

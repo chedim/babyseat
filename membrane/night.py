@@ -1617,15 +1617,14 @@ def file_edit_entity(fld, est, mem, path, old_string, new_string,
             "created": ent_created, "ms": ms}
 
 
-# ---- THE EXECUTOR (the edge-backed exec organ, 2026-10-06) ------------------
-# The model LINKS command entities to the seeded `tool:executor`; the edge
-# (a relations triple: subj=executor, rel='executes', obj=command entity)
-# IS the ledger: its existence marks the link action; the run's residue
-# (run_rc/outcome/head/tail/ms) always lands on the COMMAND entity --
-# the run-lane covenant, reached through a different door.
+# ---- THE EXECUTOR (the edge-backed exec organ, 2026-10-06; #614) ------------
+# Code is a tree in the field (lang.py): its ROOT is linked to the seeded
+# `tool:executor` -- root -execute-> executor is owed work, -executing-> is in
+# progress, -result-> a result entity is done. The edges are the ledger; this
+# is the reaper's and the expiry's side of it.
 
 EXECUTOR_EID = "tool:executor"
-EXEC_REL = "executes"
+EXEC_REL = "execute"          # root -execute-> executor (lang.EXECUTE)
 EXEC_LINK_BATCH_CAP = 3      # commands run inline per link turn
 EXEC_TIMEOUT_S = 20.0        # an inline run's budget -- the same one
                              # budget two doors apart starved the
@@ -1644,54 +1643,16 @@ def _relations_backend(srv):
     return fld.b, fld.origin
 
 
-def _edge_runs_pending(est, be, origin, exec_key: str) -> list[str]:
-    """The executor's OWED commands (the queue's live edges): linked but
-    not yet processed -- `run_rc is None` means never landed; a
-    `continued` walk (the node cap) also stays owed (its residue lands
-    on a later reaper beat; the edge supersedes only then)."""
-    out = []
-    if be is not None:
-        obj_keys = [str(e.get("obj") or "") for e in
-                    _live_edges(be, origin, exec_key)]
-    else:
-        obj_keys = [k[len(MEMBRANE_NS):] for k in (est.docs or {})
-                    if k.startswith(MEMBRANE_NS)
-                    and (est.docs[k].properties or {}).get("pending_run_by")
-                    == exec_key]
-    for obj in obj_keys:
-        key = obj if obj.startswith(MEMBRANE_NS) else MEMBRANE_NS + obj
-        doc = (est.docs or {}).get(key)
-        props = (doc.properties or {}) if doc is not None else {}
-        if props.get("command") or props.get("parents"):
-            out.append(key)
-    return out
-
-
 def run_pending_links(srv, est, fld, mem, exec_key: str,
                       cap: int = EXEC_LINK_BATCH_CAP) -> list[dict]:
-    """The queue's reaper (the thinker tick / a later link's turn): run
-    the executor's OWED nodes (never-run + cap-continued), oldest edge
-    first, up to cap; each landing supersedes its edge (the same
-    unlink-on-done covenant as the link turn). Returns the run
-    summaries."""
-    be, origin = _relations_backend_of(srv, fld)
+    """The queue's reaper (the thinker's minute): the runs owed to this
+    executor -- execute edges anyone wrote -- oldest first, up to cap
+    (lang.reap). Returns the runs."""
     if est is None:
         return []
-    results = []
-    for key in _edge_runs_pending(est, be, origin, exec_key)[:max(1, cap)]:
-        doc = (est.docs or {}).get(key)
-        if doc is None:
-            continue
-        run = _exec_command_doc(srv, est, fld, mem, doc)
-        if not run.get("continued"):
-            _supersede_edge(be, origin, exec_key, doc.eid,
-                            receipt={"op": "done", "rc": run.get("rc"),
-                                     "outcome": run.get("outcome"),
-                                     "head": str(run.get("head") or "")[:80],
-                                     "ms": run.get("ms"),
-                                     "why": str(run.get("error") or "")[:160]})
-        results.append(run)
-    return results
+    from . import lang as LG
+    ex = exec_key if exec_key.startswith(MEMBRANE_NS) else MEMBRANE_NS + exec_key
+    return LG.reap(srv, cap=cap, ex=ex)
 
 
 def _relations_backend_of(srv, fld=None) -> tuple:
@@ -1745,8 +1706,9 @@ def expire_stale_edges(srv, est, fld, mem, exec_key: str = EXECUTOR_EID,
     an OWED edge older than EXEC_EDGE_TTL_S (the debt's born_ts is the
     edge's first_ts; a re-link bumps n + last_ts -- the clock is honest)
     EXPIRES: superseded + a receipt {op: 'expired', age_s, never-run
-    proof: run_rc still None on its command doc}. Never re-run (the
-    covenant: expired debt dies with its receipt, never resurrects).
+    the age}. Never run (the covenant: expired debt dies with its
+    receipt, never resurrects). A run still EXECUTING past RUN_TIMEOUT_MAX_S
+    died with its seat and ends on a 'died' receipt.
     The boot runs this + the NightClock's pass carries it. Returns the
     receipts."""
     be, origin = _relations_backend_of(srv, fld)
@@ -1758,39 +1720,39 @@ def expire_stale_edges(srv, est, fld, mem, exec_key: str = EXECUTOR_EID,
     now = time.time()
     out = []
     for e in R.history_of(be, origin, exec_key, EXEC_REL):
-        if e.get("subj") != exec_key or e.get("superseded"):
+        if e.get("obj") != exec_key or e.get("superseded"):
             continue          # live edges only
-        born = float(e.get("first_ts") or 0.0)
+        # owed since its last write: a re-run revives the same row (first_ts stays the first run's)
+        born = float(e.get("last_ts") or e.get("first_ts") or 0.0)
         if not born or now - born < ttl:
             continue
-        obj = str(e.get("obj") or "")
-        cdoc = (est.docs or {}).get(obj if obj.startswith(MEMBRANE_NS)
-                                    else MEMBRANE_NS + obj)
-        cprops = (cdoc.properties or {}) if cdoc is not None else {}
-        why = (f"expired at boot/night: the edge was owed {now - born:.0f}s "
-               f"(past the {ttl:.0f}s TTL) and never landed "
-               f"(run_rc {'is None' if cprops.get('run_rc') is None else 'on '
-                         + obj}) -- the debt dies WITH its receipt; "
-               f"re-link to re-queue deliberately")
-        ok = _supersede_edge(be, origin, exec_key, obj,
+        root = str(e.get("subj") or "")
+        why = (f"expired at boot/night: the run was owed {now - born:.0f}s "
+               f"(past the {ttl:.0f}s TTL) and never taken -- the debt dies "
+               f"WITH its receipt; re-run the root to owe it again")
+        ok = _supersede_edge(be, origin, root, exec_key,
                              receipt={"op": "expired", "age_s":
                                       round(now - born), "why": why[:180]})
         if ok:
-            out.append({"eid": obj, "receipt": why})
+            out.append({"eid": root, "receipt": why})
             _audit(mem, {"event": "agent-exec-expired", "origin": "expiry",
-                         "eid": obj, "age_s": round(now - born)})
+                         "eid": root, "age_s": round(now - born)})
+    # a run taken longer ago than any run may last died with its seat: it ends on a receipt
+    for e in R.history_of(be, origin, exec_key, "executing"):
+        if e.get("obj") != exec_key or e.get("superseded"):
+            continue
+        born = float(e.get("last_ts") or e.get("first_ts") or 0.0)
+        if not born or now - born < RUN_TIMEOUT_MAX_S:
+            continue
+        root = str(e.get("subj") or "")
+        why = (f"died: taken {now - born:.0f}s ago, past the {RUN_TIMEOUT_MAX_S:.0f}s "
+               f"a run may last, and never finished; re-run the root")
+        if _supersede_edge(be, origin, root, exec_key, rel="executing",
+                           receipt={"op": "died", "age_s": round(now - born), "why": why[:180]}):
+            out.append({"eid": root, "receipt": why})
+            _audit(mem, {"event": "agent-exec-died", "origin": "expiry",
+                         "eid": root, "age_s": round(now - born)})
     return out
-
-
-def _live_edges(be, origin: str, exec_key: str) -> list[dict]:
-    """The executor's live (owed) executes-edges, oldest delivery first."""
-    if be is None:
-        return []
-    from . import relations as R
-    return sorted((e for e in R.of(be, origin, exec_key, EXEC_REL)
-                   if e.get("subj") == exec_key and not e.get("superseded")),
-                  key=lambda e: (float(e.get("last_ts") or 0.0),
-                                 str(e.get("obj"))))
 
 
 EXEC_WALK_NODES_CAP = 12   # nodes run per pass (the reaper continues)
@@ -3082,57 +3044,59 @@ def short_name_of(obj) -> str:
 
 def executor_value(est, exec_spec: str = EXECUTOR_EID, be=None,
                    origin: str = "") -> dict:
-    """The executor's (or any entity's) VALUE -- the model-facing post-
-    processing shape: eid/class/properties (script_ internals hidden)
-    + THE QUEUE: pending (the live executes-edges = owed work, oldest
-    first) and done (the superseded edges' commands with their
-    residues). The edge IS the state -- the drop-oldest cap bounds the
-    pending depth."""
+    """An entity's VALUE -- the model-facing shape: eid/class/properties
+    (script_ internals hidden). An executor adds ITS QUEUE (#614): pending
+    (roots owed to it, oldest first), running (-executing->) and done (its
+    finished runs with their receipts); a code root adds its code, state and
+    runs (lang.state). The edges ARE the state."""
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
     ent = est._resolve_spec(exec_spec)
     if ent is None:
         return {"ok": False, "error": f"no entity matches {exec_spec!r}"}
+    srv = getattr(est, "_srv", None)
+    be, origin = (be, origin) if be is not None else _relations_backend_of(srv or type("S", (), {})())
 
-    def _node(key: str) -> dict | None:
-        key = key if key.startswith(MEMBRANE_NS) else MEMBRANE_NS + key
+    def _root(key: str, row: dict | None = None) -> dict:
         doc = (est.docs or {}).get(key)
-        if doc is None:
-            return None
-        props = doc.properties or {}
-        return {"eid": key,
-                "command": str(props.get("command"))[:160] or None,
-                "run_rc": props.get("run_rc"),
-                "run_outcome": props.get("run_outcome"),
-                "run_head": props.get("run_head"),
-                "run_ms": props.get("run_ms")}
-    pending, done = [], []
-    be, origin = (be, origin) if be is not None else _relations_backend_of(
-        getattr(est, "_srv", None) or type("S", (), {})())
+        out = {"eid": key, "code": str(((doc.properties or {}).get("name") if doc is not None else "") or "")[:160]}
+        if row is not None:
+            out["n_times"] = int(row.get("n") or 1)
+            if row.get("receipt"):
+                out["receipt"] = row["receipt"]
+        return out
+    pending, running, done = [], [], []
     if be is not None:
         from . import relations as R
-        for e in R.history_of(be, origin, ent.eid, EXEC_REL):
-            if e.get("subj") != ent.eid:
+        for e in R.history_of(be, origin, ent.eid):
+            if e.get("obj") != ent.eid:
                 continue
-            n = _node(str(e.get("obj") or ""))
-            if n is None:
-                continue
-            (done if e.get("superseded") else pending).append({**n,
-                "n_times": int(e.get("n") or 1)})
+            if e.get("rel") == EXEC_REL and not e.get("superseded"):
+                pending.append((float(e.get("last_ts") or 0), _root(str(e.get("subj")), e)))
+            elif e.get("rel") == "executing":
+                (done if e.get("superseded") else running).append(
+                    (float(e.get("last_ts") or 0), _root(str(e.get("subj")), e)))
     else:
         for key, doc in (est.docs or {}).items():
             props = doc.properties or {}
             if props.get("pending_run_by") == ent.eid:
-                n = _node(key)
-                if n is not None:
-                    pending.append(n)
-    pending.sort(key=lambda e: str(e.get("eid")))
-    done.sort(key=lambda e: str(e.get("eid")))
-    return {"ok": True, "eid": ent.eid, "cls": ent.cls,
-            "properties": {k: v for k, v in (ent.properties or {}).items()
-                           if not str(k).startswith("script_")},
-            "pending": pending[:EXEC_EDGES_CAP],
-            "done": done[-EXEC_EDGES_CAP:]}
+                pending.append((0.0, _root(key)))
+            elif props.get("executing_on") == ent.eid:
+                running.append((0.0, _root(key)))
+    val = {"ok": True, "eid": ent.eid, "cls": ent.cls,
+           "properties": {k: v for k, v in (ent.properties or {}).items()
+                          if not str(k).startswith("script_")},
+           "pending": [r for _, r in sorted(pending, key=lambda x: x[0])][:EXEC_EDGES_CAP],
+           "running": [r for _, r in sorted(running, key=lambda x: x[0])],
+           "done": [r for _, r in sorted(done, key=lambda x: x[0])][-EXEC_EDGES_CAP:]}
+    if str(ent.eid).startswith(MEMBRANE_NS + "node:") and srv is not None \
+            and getattr(srv, "entity_store", None) is est:
+        try:
+            from . import lang as LG
+            val["code"] = LG.state(srv, ent.eid)
+        except Exception:
+            pass
+    return val
 
 
 def _walk_files(root: str, cap: int = FILE_GREP_MAX_FILES):
@@ -3673,10 +3637,11 @@ def seed_executor_entity(est) -> bool:
     from .entities import CLASS_TOOL, QuantumEntity
     est.upsert(QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={
         "name": "executor",
-        "summary": "the exec organ: methods and scripts run their "
-                   "commands through it, the result lands on the "
-                   "command; it is never called directly -- define a "
-                   "method on an entity, then call it",
+        "summary": "the sh executor: code linked to it (root "
+                   "-execute-> executor) runs here, -executing-> while "
+                   "it runs, then -result-> a result entity per run; "
+                   "run code with exec(action='run', code=...)",
+        "lang": "sh",
         "silent_birth": True}))
     try:
         est.flush()

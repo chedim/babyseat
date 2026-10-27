@@ -50,8 +50,8 @@ class TestDoctrineNative(unittest.TestCase):
         self.assertIn("REMOTE clients", self.text)
 
     def test_doctrine_names_the_run_lane(self):
-        self.assertIn("run", self.text)
-        self.assertIn("define a METHOD", self.text)   # #576 part F: commands run as methods
+        self.assertIn("exec(action='run', code=", self.text)   # #614: code runs as a tree in the field
+        self.assertIn("is a METHOD", self.text)                 # #576 part F: what repeats is a method
 
     def test_doctrine_says_builtin_free_by_default(self):
         self.assertIn("NO built-in", self.text)

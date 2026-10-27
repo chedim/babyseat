@@ -798,6 +798,8 @@ OPERATOR_TOOLS = frozenset((
     # runs commands itself, the receipt comes back in the same turn -- since
     # #576 part F only as methods it defines and calls (no one-shot link)
     "method_define", "method_call", "method_each",
+    # #614: code runs as a tree linked to its executor
+    "code_run",
     # a method's read (issue #80): runs nothing, so plans may look too
     "method_inspect",
     # THE FLOOD GATES (2026-10-08, the operator's call: "open the flood gates
@@ -811,13 +813,13 @@ OPERATOR_TOOLS = frozenset((
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
-    "method_define", "method_call", "method_each",
+    "method_define", "method_call", "method_each", "code_run",
     # the board's spatial watches (2026-10-08): attention is the
     # listeners' to allocate; the chat lane announces through intend
     "field_watch",
 }) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
-PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_call", "method_each",
+PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_call", "method_each", "code_run",
                                "method_inspect",
                                "entity_add", "entity_edit",
                                "entity_remove", "field_watch",

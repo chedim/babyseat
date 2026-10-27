@@ -20,6 +20,7 @@ delivered 2026-10-06):
 import os
 import sys
 import time
+import types
 import unittest
 from pathlib import Path
 
@@ -48,11 +49,15 @@ def _world():
     return f, est
 
 
-def _owe(f, eid):
-    """An owed `executes` edge (live): what a link left behind before #576
-    part F took the link door away -- the engine still lands or expires it."""
-    R.upsert(f.b, f.origin, MEMBRANE_NS + "tool:executor", N.EXEC_REL, eid,
-             "model-link", ts=time.time())
+def _owe(f, est, code):
+    """An owed run (#614): code's root -execute-> the executor, as anyone may
+    write it -- the engine lands it or expires it. Returns the root."""
+    from membrane import lang as LG
+    srv = types.SimpleNamespace(efield=f, entity_store=est, membrane=None, capturer=None)
+    root = LG.mint(srv, "sh", code)
+    R.upsert(f.b, f.origin, root, N.EXEC_REL, MEMBRANE_NS + "tool:executor",
+             "test", ts=time.time())
+    return root
 
 
 class _Srv:
@@ -72,59 +77,31 @@ def _doc(est, spec: str) -> QuantumEntity:
 
 class TestExpiryWithReceipt(unittest.TestCase):
     def test_stale_owed_edge_expires_with_receipt_never_reruns(self):
-        """THE METABOLISM: an edge owed past its TTL expires -- stamped
-        + received; the command doc is NEVER executed by the expire
-        (run_rc stays None); the re-link re-queues honestly."""
+        """THE METABOLISM: a run owed past its TTL expires -- stamped +
+        received; the code is NEVER run by the expiry (no result); a re-run
+        owes it again honestly."""
         f, est = _world()
         srv = _Srv(f, est)
-        saved = N.EXEC_WALK_NODES_CAP
-        N.EXEC_WALK_NODES_CAP = 0
-        try:
-            stale = QuantumEntity(eid=MEMBRANE_NS + "c:stale",
-                                  cls=CLASS_TOOL,
-                                  properties={"name": "s",
-                                              "command": "false"})
-            est.docs[stale.eid] = stale
-            _owe(f, stale.eid)
-            # forge age: the edge's first_ts pushed past the TTL
-            _now = time.time()
-            for key, d in list(f.b.scan("relations")):
-                if d.get("rel") == "executes":
-                    d["first_ts"] = _now - 100_000.0
-                    f.b.upsert("relations", key, d)
-            receipts = N.expire_stale_edges(srv, est, f, srv.membrane,
-                                            ttl_s=60.0)
-            self.assertEqual(len(receipts), 1)
-            rows = [d for _k, d in f.b.scan("relations")
-                    if d.get("rel") == "executes"]
-            self.assertTrue(rows[0]["superseded"])
-            self.assertEqual(rows[0]["receipt"]["op"], "expired")
-            # NEVER RE-RUN: the command doc carries no residue
-            self.assertIsNone((_doc(est, stale.eid).properties
-                               or {}).get("run_rc"))
-        finally:
-            N.EXEC_WALK_NODES_CAP = saved
+        root = _owe(f, est, "false")
+        _now = time.time()                       # forge age: owed since long ago
+        for key, d in list(f.b.scan("relations")):
+            if d.get("rel") == "execute":
+                d["first_ts"] = d["last_ts"] = _now - 100_000.0
+                f.b.upsert("relations", key, d)
+        receipts = N.expire_stale_edges(srv, est, f, srv.membrane, ttl_s=60.0)
+        self.assertEqual([r["eid"] for r in receipts], [root])
+        rows = [d for _k, d in f.b.scan("relations") if d.get("rel") == "execute"]
+        self.assertTrue(rows[0]["superseded"])
+        self.assertEqual(rows[0]["receipt"]["op"], "expired")
+        self.assertEqual([d for _k, d in f.b.scan("relations") if d.get("rel") == "result"], [])
 
     def test_fresh_edges_survive_the_pass(self):
         f, est = _world()
         srv = _Srv(f, est)
-        saved = N.EXEC_WALK_NODES_CAP
-        N.EXEC_WALK_NODES_CAP = 0
-        try:
-            fresh = QuantumEntity(eid=MEMBRANE_NS + "c:fresh",
-                                  cls=CLASS_TOOL,
-                                  properties={"name": "f",
-                                              "command": "true"})
-            est.docs[fresh.eid] = fresh
-            _owe(f, fresh.eid)
-            self.assertEqual(N.expire_stale_edges(srv, est, f,
-                                                  srv.membrane, ttl_s=60.0),
-                             [])
-            rows = [d for _k, d in f.b.scan("relations")
-                    if d.get("rel") == "executes"]
-            self.assertFalse(rows[0]["superseded"], "still owed: fresh")
-        finally:
-            N.EXEC_WALK_NODES_CAP = saved
+        _owe(f, est, "true")
+        self.assertEqual(N.expire_stale_edges(srv, est, f, srv.membrane, ttl_s=60.0), [])
+        rows = [d for _k, d in f.b.scan("relations") if d.get("rel") == "execute"]
+        self.assertFalse(rows[0]["superseded"], "still owed: fresh")
 
 
 class TestBootWakes(unittest.TestCase):

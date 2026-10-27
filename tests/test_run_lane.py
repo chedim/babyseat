@@ -317,18 +317,19 @@ class TestTheKilledJobSpeaksItsWhy(unittest.TestCase):
             import time
             from membrane import relations as R
             from membrane.entities import CLASS_TOOL, QuantumEntity
-            c = QuantumEntity(eid=NS + "c:sleeper", cls=CLASS_TOOL,
-                              properties={"name": "sleeper", "command": "sleep 5"})
-            est.docs[c.eid] = c
-            # an owed edge a link left behind before #576 part F: the reaper lands it
-            R.upsert(f.b, f.origin, NS + "tool:executor", N.EXEC_REL, c.eid,
-                     "model-link", ts=time.time())
+            from membrane import lang as LG
+            import types
+            srv.capturer = types.SimpleNamespace(mode="on")
+            root = LG.mint(srv, "sh", "sleep 5")
+            # an owed run anyone wrote (#614): the reaper lands it
+            R.upsert(f.b, f.origin, root, N.EXEC_REL, NS + "tool:executor",
+                     "test", ts=time.time())
             N.run_pending_links(srv, est, f, None,
                                 NS + "tool:executor")
         finally:
             N.EXEC_TIMEOUT_S = saved
         rows = [d for _k, d in f.b.scan("relations")
-                if d.get("rel") == "executes"]
+                if d.get("rel") == "executing"]
         self.assertTrue(rows)
         rcp = (rows[-1].get("receipt") or {})
         self.assertEqual(rcp.get("op"), "done")
