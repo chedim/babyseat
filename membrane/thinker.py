@@ -43,6 +43,12 @@ import time
 import traceback
 from collections import deque
 
+
+def _write_soon(fld, evs, session=""):
+    from .efield import write_soon       # #617: a request never waits on the embedder
+    write_soon(fld, evs, session=session)
+
+
 # THE CONSTANT HUM (the operator's call): the thinker is never off -- a
 # 1s heartbeat tick, continuously chewing what it can, throttled by the
 # DUTY-CYCLE CONTROLLER (the compactor's, retargeted): measured think work
@@ -519,8 +525,7 @@ class Thinker:
                                     outcome="ok", ts=time.time(),
                                     subject=field_id(ent.eid)))
             if evs:
-                fld.write_events(evs, session="")
-                fld.process(limit=8)
+                _write_soon(fld, evs, session="")        # #617: the beat never waits on the embedder
         except Exception:
             traceback.print_exc()
 

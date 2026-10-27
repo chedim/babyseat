@@ -215,8 +215,9 @@ def _entity_post_process(srv, res: dict) -> None:
                             "run_result": fired.get("run_result"),
                             "state": fired.get("state"),
                             "applied": fired.get("applied")}
+        from .efield import has_worker as _has_worker
         fld = _efield_on(srv)
-        if fld is not None:
+        if fld is not None and not _has_worker(fld):   # #617: the worker embeds what the getter wrote
             fld.process(limit=8)
     except Exception as e:
         res["processed"] = {"error": str(e)[:120]}

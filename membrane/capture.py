@@ -181,6 +181,7 @@ class Capturer:
         if start and self.mode != "off":
             self._t = threading.Thread(target=self._run, name="efield-capture", daemon=True)
             self._t.start()
+            field.capturer = self                  # #617: request paths hand their events here
 
     # ---- the hooks (all non-blocking, all swallow) ----------------------------------
     def on_turn(self, query: str, prose: str = "", thought: str = "",
@@ -224,18 +225,21 @@ class Capturer:
             CE.store_relations(self.field, graph, rels)
         self._put(lambda: (evs, after))
 
-    def on_events(self, evs: list) -> None:
-        """Already-built events (code evidence, notes, ingest)."""
-        self._put(lambda: list(evs))
+    def on_events(self, evs: list, session: str | None = None) -> None:
+        """Already-built events (code evidence, notes, ingest, a run's observation)."""
+        if session is None:
+            self._put(lambda: list(evs))
+        else:                                       # "" keeps a run off the conversation's lane
+            self._put(lambda: list(evs), session=session, exact_session=True)
 
     # ---- the worker ------------------------------------------------------------------
     def _put(self, build, discourse: bool = False, session: str | None = None,
-             conv: str | None = None) -> None:
+             conv: str | None = None, exact_session: bool = False) -> None:
         if self.mode == "off":
             return
         try:
             # the key is read HERE, on the caller's (request) thread
-            item = (build, session or self.sessions.current(),
+            item = (build, session if exact_session else (session or self.sessions.current()),
                     current_conversation() if conv is None else conv)
             try:
                 self.q.put_nowait(item)

@@ -38,8 +38,14 @@ from . import eids as E
 from . import streams as ST
 from .efstore import unpack_f16
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
+
                        CLASS_TOOL, CLASS_CONCEPT, QuantumEntity, _KIND_CLASS,
                        MultiParentOps, kind_class, entity_id)
+
+
+def _write_soon(fld, evs, session=""):
+    from .efield import write_soon       # #617: a request never waits on the embedder
+    write_soon(fld, evs, session=session)
 
 
 # ---- programmable entities (the script constants live in entities.py --
@@ -799,12 +805,12 @@ def _script_tell(fld, eid: str, kind: str, ok: bool, text: str) -> None:
         return
     try:
         subj = E.field_id(eid)             # the one spelling (class entities had none)
-        fld.write_events([ST.Event(stream="discourse", role="note",
-                                   text=text, ts=time.time(),
-                                   src=f"script:{kind}", subject=subj)],
-                         session="")
-        if subj and getattr(fld.emb, "model", "?") != "?":
-            fld.process(limit=8)
+        evs = [ST.Event(stream="discourse", role="note", text=text, ts=time.time(),
+                        src=f"script:{kind}", subject=subj)]
+        if subj:
+            _write_soon(fld, evs, session="")          # #617: never waits on the embedder
+        else:
+            fld.write_events(evs, session="")
     except Exception as e:
         print(f"[night] script event skipped ({e})", file=sys.stderr)
 
@@ -988,13 +994,11 @@ def run_command_entity(fld, est, mem, command: str,
     est.upsert(tdoc)
     if fld is not None:
         try:
-            fld.write_events([ST.Event(
+            _write_soon(fld, [ST.Event(              # #617: never waits on the embedder
                 stream="observation", tool="shell",
                 args={"command": cmd, "eid": canon_e},
                 result_head=head, result_tail=tail, result_len=len(text),
                 outcome=oc, ts=time.time(), subject=canon_e)], session="")
-            if getattr(fld.emb, "model", "?") != "?":
-                fld.process(limit=8)
         except Exception as e:
             print(f"[night] run event skipped ({e})", file=sys.stderr)
     if not ok:
@@ -1103,12 +1107,10 @@ def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
     oc = "ok" if ok else "error"
     if fld is not None:
         try:
-            fld.write_events([ST.Event(
+            _write_soon(fld, [ST.Event(              # #617: never waits on the embedder
                 stream="observation", tool=action, args={"path": fp},
                 result_head=head, result_tail="", result_len=len(head),
                 outcome=oc, ts=time.time(), subject=eid)], session="")
-            if getattr(fld.emb, "model", "?") != "?":
-                fld.process(limit=8)
         except Exception as e:
             print(f"[night] file {action} event skipped ({e})", file=sys.stderr)
     if est is not None and not ok and key is not None:
