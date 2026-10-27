@@ -596,9 +596,9 @@ DEFAULT_FILETREE_WATCH_SCRIPT = (
     "ev = py.get('event') or x.get('kind') or '?'\n"
     "pth = py.get('path') or py.get('topic') or py.get('name') or ''\n"
     "result = {'render': 'filetree: ' + str(ev) + ' ' + str(pth),\n"
-    "          'patch': {'last_change': {'event': str(ev),\n"
+    "          'patch': {'script_data': {'last_change': {'event': str(ev),\n"
     "                                    'path': str(pth),\n"
-    "                                    'ts': _t.time()}}}"
+    "                                    'ts': _t.time()}}}}"
 )
 
 
