@@ -335,6 +335,16 @@ class TestSeedFiletree(unittest.TestCase):
         self.assertEqual(est.docs[eid].properties.get("watch_script"),
                          "result = {'render': 'mine'}")   # rewrite survives
 
+    def test_an_old_default_is_refreshed_but_a_rewrite_is_kept(self):
+        est = _Srv().entity_store
+        AN.seed_filetree_entity(est)
+        eid = f"{MEMBRANE_NS}tool:filetree"
+        est.edit("tool:filetree", watch_script=AN.OLD_FILETREE_WATCH_SCRIPT)
+        self.assertTrue(AN.seed_filetree_entity(est))
+        self.assertEqual(est.docs[eid].properties.get("watch_script"),
+                         AN.DEFAULT_FILETREE_WATCH_SCRIPT)
+        self.assertFalse(AN.seed_filetree_entity(est))   # settled
+
     def test_the_template_script_reports_a_file_trigger(self):
         est = _Srv().entity_store
         AN.seed_filetree_entity(est)

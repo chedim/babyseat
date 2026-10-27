@@ -602,6 +602,18 @@ DEFAULT_FILETREE_WATCH_SCRIPT = (
 )
 
 
+# The default shipped before #597: it patched `last_change` at the top level,
+# which the engine refuses. A seat still holding exactly this text never
+# rewrote it, so boot swaps it for the current default (a rewrite is kept).
+OLD_FILETREE_WATCH_SCRIPT = DEFAULT_FILETREE_WATCH_SCRIPT.replace(
+    "'patch': {'script_data': {'last_change': {'event': str(ev),\n"
+    "                                                  'path': str(pth),\n"
+    "                                                  'ts': _t.time()}}}}",
+    "'patch': {'last_change': {'event': str(ev),\n"
+    "                                    'path': str(pth),\n"
+    "                                    'ts': _t.time()}}}")
+
+
 def seed_filetree_entity(est) -> bool:
     """The boot seeding: plant `tool:filetree` ONCE (idempotent -- a
     model-rewritten watcher survives every restart). The template the
@@ -610,8 +622,16 @@ def seed_filetree_entity(est) -> bool:
         return False
     from .entities import (CLASS_TOOL, MEMBRANE_NS, QuantumEntity)
     eid = MEMBRANE_NS + "tool:filetree"
-    if eid in (est.docs or {}):
-        return False
+    doc = (est.docs or {}).get(eid)
+    if doc is not None:
+        if (doc.properties or {}).get("watch_script") != OLD_FILETREE_WATCH_SCRIPT:
+            return False
+        est.edit("tool:filetree", watch_script=DEFAULT_FILETREE_WATCH_SCRIPT)
+        try:
+            est.flush()
+        except Exception:
+            pass
+        return True
     est.upsert(QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={
         "name": "filetree",
         "watch_script": DEFAULT_FILETREE_WATCH_SCRIPT,
