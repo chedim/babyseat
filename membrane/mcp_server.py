@@ -798,7 +798,8 @@ TOOLS: list[dict] = [
             "(one entity per node, shared wherever the same code appears) and its "
             "root is linked to an executor of its language: -execute-> while owed, "
             "-executing-> while it runs, then -result-> a result entity for this run. "
-            "lang='sh' (default) runs on tool:executor. Re-run a root with "
+            "lang='sh' (default) runs on tool:executor, lang='js' in an opted-in browser "
+            "tab (presence). Re-run a root with "
             "node=<its id> (each run keeps its own result); entity_read on a root "
             "shows its code, state and runs. Returns the root, the result, rc and "
             "the output."),
@@ -806,7 +807,7 @@ TOOLS: list[dict] = [
             "type": "object",
             "properties": {
                 "code": {"type": "string", "description": "The code, e.g. 'ls -la ..'."},
-                "lang": {"type": "string", "description": "Its language (default 'sh')."},
+                "lang": {"type": "string", "description": "Its language: 'sh' (default) or 'js'."},
                 "node": {"type": "string", "description": "A root to re-run instead of code."},
                 "on": {"type": "string", "description": "An executor of that language (default: the language's own)."},
             },

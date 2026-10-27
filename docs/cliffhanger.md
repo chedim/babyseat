@@ -253,7 +253,7 @@ The seeded methods are now write steps, and each boot puts an older seat's form 
 | `llm.call` / `wake` / `unwake` | `self.call = {about, prompt}`, `self.wake = {about, at, prompt}`, `self.unwake = id` |
 | `toybox.list` / `add` / `remove` / `reset` / `poke` | `self.list`, `self.add = spec`, `self.remove = name`, `self.reset = name`, `self.poke = {toy, action}` |
 | `presence.restart` | `self.restart = why` |
-| `presence.exec` | `self.js = code` (the adapters' new `js` branch → an opted-in browser tab) |
+| ~~`presence.exec`~~ | retired (#614): JS is code, `exec(action='run', lang='js')` runs its tree on presence |
 
 `night.run_command_entity` now runs shell lines only:
 - **A stored line in a retired dialect** (`llm::`, `llm.wake`, `toybox::`, `seat::`, `js::`, `self::`) is **refused** with rc 2 and a pointer to the method. It is never split into a label plus a shell command.

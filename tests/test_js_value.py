@@ -125,7 +125,8 @@ class TestTheSeatRendersTheTabsValue(unittest.TestCase):
         srv._loop_runner = types.SimpleNamespace(hub=types.SimpleNamespace(publish=publish))
         JS.bind(srv)
         JS.register(srv, "tab_a", "ses_1", "D")
-        r = N.method_call(srv, srv.entity_store, None, None, MEMBRANE_NS + "presence", "exec", {"code": "1+1"})
+        from membrane import lang as LG
+        r = LG.run(srv, code="1+1", lang="js")                         # #614: JS is code
         self.assertEqual(r.get("rc"), 0, r)
         self.assertIn("=> 2", str(r.get("head")))
         self.assertNotIn("returned no value", str(r.get("head")))

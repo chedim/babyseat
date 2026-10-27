@@ -80,7 +80,7 @@ def test_llm_methods_are_writes_and_return_the_receipt(seat):
     assert [c[0] for c in seat.calls] == ["request", "set_wake", "unwake"]
 
 
-def test_toybox_presence_restart_and_js_are_writes(seat):
+def test_toybox_and_presence_restart_are_writes(seat):
     out = _call(seat, "toybox", "list", {})
     assert "toys: die" in (out.get("head") or "")
     _call(seat, "toybox", "poke", {"toy": "toy:die", "action": "roll"})
@@ -88,8 +88,8 @@ def test_toybox_presence_restart_and_js_are_writes(seat):
     pres = SP._entity(seat).eid
     _call(seat, pres, "restart", {"why": "test"})
     assert seat.calls[-1][0] == "do_restart"
-    out = _call(seat, pres, "exec", {"code": "6*7"})
-    assert seat.calls[-1][0] == "js" and "=> 42" in (out.get("head") or "")
+    out = _call(seat, pres, "exec", {"code": "6*7"})          # #614: JS runs as code, not a method
+    assert out.get("status") != "ok" and seat.calls[-1][0] == "do_restart"
 
 
 def test_the_hatch_prefixes_no_longer_dispatch(seat):

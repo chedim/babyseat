@@ -1,5 +1,6 @@
 """THE SEAT RUNS JS IN AN OPTED-IN BROWSER TAB (2026-10-11): the seat entity
-implements remote_executor; a js:: command goes to a tab, never a shell."""
+implements remote_executor; JS goes to a tab, never a shell. Since #614 JS is
+code like any other (exec(action='run', lang='js'), tests/test_code_tree_js.py)."""
 import sys
 import threading
 import types
@@ -27,13 +28,6 @@ def _seat(answer=None):
     return srv, jobs
 
 
-def _is_js_write(est, m) -> bool:
-    """#576 G2: presence.exec is one write step, self.js = code (no command)."""
-    nodes = [est.docs.get(n) for n in (m.properties.get("parents") or [])]
-    return not (m.properties.get("command") or "").strip() and any(
-        n is not None and (n.properties or {}).get("write") == ["self.js", "code"] for n in nodes)
-
-
 class TestJsExec(unittest.TestCase):
     def test_no_opted_in_tab_is_an_honest_error(self):
         srv, _ = _seat()
@@ -44,42 +38,24 @@ class TestJsExec(unittest.TestCase):
     def test_a_tab_runs_the_job_and_answers(self):
         srv, jobs = _seat(answer=lambda job: {"ok": True, "value": "5", "logs": ["hi"]})
         JS.register(srv, "tab_a", "ses_1", "Dmitrii Chechetkin", "computer")
-        r = JS.run("'console.log(1); return 2+3'", timeout=2)       # arrives shell-quoted, like a method arg
+        r = JS.run("console.log(1); return 2+3", timeout=2)          # #614: arrives as written
         self.assertEqual(r["rc"], 0)
         self.assertIn("=> 5", r["text"])
         self.assertEqual(jobs[0]["sessionID"], "ses_1")                 # only the owner's tab's session
         self.assertEqual(jobs[0]["job"]["code"], "console.log(1); return 2+3")
 
     def test_the_seat_entity_implements_remote_executor(self):
+        """#614: presence is the js executor; its old exec method is retired."""
         srv, _ = _seat()
         est = srv.entity_store
         pres = est.docs.get(MEMBRANE_NS + "presence")
         self.assertIsNotNone(pres)
         of = lambda d: pres.eid in ((d.properties or {}).get("method_of") or [])
-        m = [d for d in est.docs.values() if of(d) and (d.properties or {}).get("method_name") == "exec"]
-        self.assertEqual(len(m), 1)
-        self.assertTrue(_is_js_write(est, m[0]))                          # #576 G2: self.js = code
+        self.assertEqual([d for d in est.docs.values() if of(d) and (d.properties or {}).get("method_name") == "exec"], [])
+        self.assertIn("lang='js'", pres.properties.get("executes", ""))
         iface = est._resolve_spec("remote_executor")
         if iface is not None:                                            # seeded on a real seat
             self.assertIn(iface.eid, pres.properties.get("parents") or [])
-        JS.bind(srv)                                                     # idempotent
-        self.assertEqual(len([d for d in est.docs.values() if of(d)]), 1)
-
-    def test_a_corrupted_door_is_repaired_at_boot(self):
-        """2026-10-15, the live seat: presence.exec had been REDEFINED with a
-        literal shell line ('presence.exec{code: ps -eo ...}') -- the JS door was
-        dead across every restart, because the boot only defined it when MISSING.
-        The seat's own door is its to keep: a wrong command is put back."""
-        srv, _ = _seat()
-        est = srv.entity_store
-        pres = est.docs.get(MEMBRANE_NS + "presence")
-        of = lambda d: pres.eid in ((d.properties or {}).get("method_of") or [])
-        m = next(d for d in est.docs.values() if of(d) and (d.properties or {}).get("method_name") == "exec")
-        m.properties["command"] = "presence.exec{code: ps -eo lstart,pid,args | grep -m5 [m]embrane}"
-        JS.bind(srv)
-        doors = [d for d in est.docs.values() if of(d) and (d.properties or {}).get("method_name") == "exec"]
-        self.assertEqual(len(doors), 1)
-        self.assertTrue(_is_js_write(est, doors[0]))                      # #576 G2: restored as the write step
 
     def test_turning_a_tab_off_drops_it(self):
         srv, _ = _seat()

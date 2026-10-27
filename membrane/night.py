@@ -891,7 +891,7 @@ def run_command_entity(fld, est, mem, command: str,
     if RETIRED_DIALECT.match(cmd):
         return {"rc": 2, "outcome": "refused", "status": "blocked",
                 "error": "a retired dialect (llm:: / toybox:: / seat:: / js:: / self::): call the method instead "
-                         "(llm.call / llm.wake, toybox.*, presence.restart, presence.exec)",
+                         "(llm.call / llm.wake, toybox.*, presence.restart; JS runs by exec(action='run', lang='js'))",
                 "text": "", "head": "", "tail": ""}
     _, cmd = split_label(cmd)
     try:

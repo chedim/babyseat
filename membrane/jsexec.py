@@ -3,14 +3,16 @@ remote_executor implementations and allow running js code ... in the browser,
 it should run in the browser. And yes, make it an opt-in ... do the js for
 seats; for running shell/python there could be a different agent").
 
-The seat's presence entity implements remote_executor: its `exec(code,
-timeout)` method is one write step, `self.js = code` (#576 G2), and the adapters'
-js branch hands the code to a browser tab that opted in ("let the seat act as
-you here", per tab, off by default). The tab runs it IN ITS WINDOW (the
-operator's choice: "why a sandbox? why not let it access the window?") --
+The seat's presence entity implements remote_executor and is the executor of
+the `js` language (#614): JS is code like any other, a tree of node entities
+(lang_js.py), run by linking its root to presence (exec(action='run',
+lang='js')). The run hands the code to a browser tab that opted in ("allow
+JS scripting in this window", per tab, off by default). The tab runs it IN ITS WINDOW
+(the operator's choice: "why a sandbox? why not let it access the window?") --
 the page, the HA connection, the chat panel in reach, i.e. as that person;
 the switch is the consent. Value and console come back. No opted-in tab =
-an honest error.
+an honest error. The old door, the presence.exec method (a write of
+presence.js), is retired: an older seat's definition is removed at boot.
 
 Tabs register over the relay (the person is the HA user, stamped by the
 relay) and heartbeat; a job goes out as a membrane.jsexec event on the tab's
@@ -21,13 +23,13 @@ from __future__ import annotations
 import json
 import re
 import secrets
-import shlex
 import threading
 import time
 
 TAB_TTL_S = 45.0
 RESULT_MAX = 4000
-METHOD = "exec"
+TIMEOUT_S = 15.0                               # a JS run's budget
+RETIRED = "exec"                               # presence.exec: JS runs as code now (#614)
 
 _seat = None                                   # the running seat (bind() at boot)
 _jobs: dict[str, dict] = {}
@@ -59,15 +61,16 @@ def _implement(srv) -> None:
         parents = list(pp.get("parents") or [])
         if iface.eid not in parents:
             pp["parents"] = parents + [iface.eid]
-    pp["executes"] = "js (in an opted-in browser tab)"
+    pp["executes"] = "js (in an opted-in browser tab): exec(action='run', lang='js')"
     ent.properties = pp
-    # THE DOOR IS KEPT, NOT JUST CREATED (2026-10-15): a redefined presence.exec is
-    # restored at every boot -- #576 G2: as a write step (self.js = code; the adapters'
-    # js branch runs it in an opted-in tab)
-    from .night import ensure_write_method
-    if ensure_write_method(srv, est, ent.eid, METHOD, "self.js", "code"):
+    old = [d.eid for d in list((est.docs or {}).values())
+           if ent.eid in ((d.properties or {}).get("method_of") or [])
+           and (d.properties or {}).get("method_name") == RETIRED]
+    if old:                                     # #614: the write-step door retires; JS is code
+        est.remove_many(old) if hasattr(est, "remove_many") else [est.remove(e) for e in old]
         import sys
-        print(f"[jsexec] the seat's {METHOD} door is the write step self.js = code", file=sys.stderr)
+        print(f"[jsexec] presence.{RETIRED} retired ({len(old)} definition(s)); "
+              "JS runs by exec(action='run', lang='js')", file=sys.stderr)
     try:
         est.upsert(ent, embedder=None)
     except Exception:
@@ -104,17 +107,6 @@ def _note(srv, kind, **kw):
         pass
 
 
-def _unquote(code: str) -> str:
-    """{{code}} arrives shell-quoted (a method's args are): one quoted word -> the code."""
-    try:
-        parts = shlex.split(code)
-        if len(parts) == 1:
-            return parts[0]
-    except ValueError:
-        pass
-    return code
-
-
 # THE SHELL-LOOKING PAYLOAD (issue #2, 2026-10-14): the door runs ANYTHING
 # as JavaScript -- 'echo hi' rode the full round trip, died in the tab as
 # SyntaxError or sat till the timeout. Plain words with a space and no JS
@@ -127,20 +119,20 @@ _JS_HEADS = {"await", "async", "return", "function", "let", "const", "var",
              "in", "instanceof"}
 
 
-def run(code: str, timeout: float = 15.0, tab: str | None = None) -> dict:
+def run(code: str, timeout: float = TIMEOUT_S, tab: str | None = None) -> dict:
     """Run JS in an opted-in tab: {rc, text, err}. rc 0 = it returned."""
     srv = _seat
     if srv is None:
         return {"rc": 127, "text": "", "err": "no seat bound"}
-    code = _unquote(str(code or ""))
+    code = str(code or "")
     _first = code.split()[:1]
     if _SHELL_LOOKS.match(code) and not (_first and _first[0].lower() in _JS_HEADS):
         # shell-looked: rejected loudly, nothing rides (the receipt carries
         # the why and the door to the shell path)
         return {"rc": 2, "text": "", "err":
-                (f"presence.exec runs JavaScript in the browser tab, not shell -- {code[:120]!r} "
-                 "reads shell (plain words, no JS syntax). Make it a method's command instead "
-                 "(exec(action='define', ...), then exec(action='call', ...)); if JavaScript is meant, give it JS "
+                (f"this runs JavaScript in the browser tab, not shell -- {code[:120]!r} "
+                 "reads shell (plain words, no JS syntax). Run it as shell: "
+                 "exec(action='run', code=..., lang='sh'); if JavaScript is meant, give it JS "
                  "shape -- a call, a keyword, an operator (e.g. 'await new Promise(...)').")}
     live = tabs(srv)
     if tab:
@@ -149,7 +141,7 @@ def run(code: str, timeout: float = 15.0, tab: str | None = None) -> dict:
         return {"rc": 127, "text": "", "err": "no browser tab runs JS for this seat -- someone has to opt in "
                                             "(membrane home: 'allow JS scripting in this window')"}
     t = live[0]
-    job = {"id": "js_" + secrets.token_hex(5), "code": _unquote(str(code or "")), "timeout": float(timeout),
+    job = {"id": "js_" + secrets.token_hex(5), "code": code, "timeout": float(timeout),
            "tab": t["tab"], "done": threading.Event(), "result": None}
     with _lock:
         _jobs[job["id"]] = job

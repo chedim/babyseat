@@ -300,6 +300,14 @@ give their shell tool: the MCP list carries it, and a local model's
   `lang`; a root of another language is refused with a receipt. The
   sh runner is `run_command_entity`, so the `c:<head>` doc, the
   observation event and the audit line still record every run.
+- **js** (`lang_js.py`): a statement-level parser with no new
+  dependency. A program is its statements, a statement's blocks
+  (`if (x) {...}`, `function f() {...}`, `() => {...}`) are its
+  children, and each block is its statements again; every node keeps
+  its raw text with a hole per child, so a program prints back exactly
+  as written. Its executor is the seat's `presence`: the run goes to an
+  opted-in browser tab (`jsexec.run`, 15 s). The old door, the
+  `presence.exec` method, is retired and removed at boot.
 - **Reading**: `entity_read` on a root shows its code, state
   (`owed` / `executing` / `idle`) and runs; on the executor, its queue:
   `pending`, `running`, `done` (with receipts).

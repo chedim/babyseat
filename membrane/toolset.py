@@ -74,13 +74,13 @@ FAMILIES: dict[str, dict] = {
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {
-        "description": "run: code becomes a tree on the field, its executor runs it (node= "
+        "description": "run: code becomes a field tree, its executor runs it (node= "
                        "re-runs). Methods: define, call, each (over a class), inspect. "
                        "help('cliffhanger').",
         "actions": {"run": "code_run", "call": "method_call", "each": "method_each",
                     "define": "method_define", "inspect": "method_inspect"},
         "params": {"args": {"type": "object", "description": "{{param}} values"},
-                   "code": _S("run: code"), "lang": _S("run: sh"), "node": _S("run: root"),
+                   "code": _S("run: code"), "lang": _S("run: sh|js"), "node": _S("run: root"),
                    "object": _S("call: target"), "on": _S("define: owner; run: executor"),
                    "over": _S("each: class|pattern"), "max": _I("each: cap (20)"),
                    "dry_run": _B("each: list only"), "on_fail": _S("each: abort|continue"),
@@ -167,7 +167,8 @@ HELP = {
     "exec": (
         "RUN CODE: exec(action='run', code='ls -la ..') -- the code becomes a tree of entities in "
         "the field (one per node, shared wherever the same code appears) and its root is linked "
-        "to its language's executor (sh: tool:executor): -execute-> owed, -executing-> running, "
+        "to its language's executor (sh: tool:executor; js, lang='js': presence, an opted-in "
+        "browser tab): -execute-> owed, -executing-> running, "
         "-result-> a result entity for that run; you get rc + output, the root and the result. "
         "Re-run: exec(action='run', node=<root>). entity(action='read') on a root shows its code, "
         "state and runs. PROGRAM THE FIELD FIRST: what you will do again is a method -- define it "
