@@ -392,14 +392,25 @@ def bind(g: dict, est) -> dict:
 
 # ---- on the field ----------------------------------------------------------------------------
 
+def _whole(g) -> bool:
+    """A kept graph survived the disk: the store's json-safe screen turns values
+    past its depth into strings, and a stage's words sit past it."""
+    try:
+        return all(isinstance(x, dict) for st in stages(g)
+                   for x in (st.get("env") or []) + (st.get("words") or []) + (st.get("redirs") or []))
+    except Exception:
+        return False
+
+
 def graph_of(doc, est=None) -> dict:
     """The graph a command entity runs: kept on it as `script` (with the `src` it
-    was parsed from); parsed again when the command was edited. NotAScript when the
-    command is not one -- then it never runs."""
+    was parsed from); parsed again when the command was edited or the kept graph
+    came back from the disk screened. NotAScript when the command is not one --
+    then it never runs."""
     props = doc.properties if doc.properties is not None else {}
     src = str(props.get("command") or "").strip()
     sc = props.get("script")
-    if isinstance(sc, dict) and sc.get("src") == src:
+    if isinstance(sc, dict) and sc.get("src") == src and _whole(sc):
         return sc
     g = parse(src)
     if est is not None:
@@ -411,8 +422,10 @@ def graph_of(doc, est=None) -> dict:
 
 
 def run_text(doc, est=None) -> str:
-    """What runs: the bash the entity's graph compiles to."""
-    return compile(graph_of(doc, est))
+    """What runs: the bash the entity's graph compiles to -- parsed from its
+    command, never from the kept copy (the disk screen may have cut it)."""
+    graph_of(doc, est)
+    return compile(parse(str((doc.properties or {}).get("command") or "").strip()))
 
 
 MIGRATED_FILE = ".ch-commands-migrated"     # beside the store: the migration ran (it runs once)
