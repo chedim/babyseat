@@ -91,8 +91,7 @@ overwritten. Teams can opt into one merged field
 
 No account, no cloud, no telemetry. Chat and embeddings run on your Ollama, the
 field lives on your disk, and a shared bucket is optional: with it down, the
-seat still boots. The license is PolyForm Noncommercial: free for personal, research and
-other noncommercial use ([LICENSE](LICENSE)).
+seat still boots. The license is MIT ([LICENSE](LICENSE)).
 
 ### How it maps to the patterns you've already seen
 
@@ -623,10 +622,8 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 A working lab, used every day to build itself: this repo's own field holds
 about 14,000 entities, and its background mind digests, dreams and talks
 about its own work. Version **0.7.2**; API and flag surfaces may still
-move. Licensing: **PolyForm Noncommercial 1.0.0** (see [LICENSE](LICENSE)) —
-free to use, modify and share for any noncommercial purpose (personal, hobby,
-research, education, charities and public institutions); commercial use needs
-the author's written permission — ask.
+move. Licensing: **MIT** from 0.7.3 (see [LICENSE](LICENSE)); releases up to
+0.7.2 stay under PolyForm Noncommercial 1.0.0.
 
 ## Cite
 
