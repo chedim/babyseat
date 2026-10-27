@@ -270,7 +270,10 @@ by construction: every lane that would react is down too.
 
 `tool:executor` (seeded at boot, `lang: sh`) is the seat's shell executor.
 The model runs code with `exec(action='run', code=..., lang='sh')`
-(`code_run`, `membrane/lang.py`):
+(`code_run`, `membrane/lang.py`). `bash {command, timeout (ms),
+description}` is the same run under the name Claude Code and opencode
+give their shell tool: the MCP list carries it, and a local model's
+`bash` call resolves to `code_run` (`toolset.bash_args`):
 
 - **The code becomes nodes.** It is parsed (sh: `scripts.parse`) into a
   tree, one entity per node, **content-addressed**:

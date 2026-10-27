@@ -171,7 +171,7 @@ class TestMcpProtocol(unittest.TestCase):
                                  # Cliffhanger: define a method on a class, call it
                                  # on an object or each member, inspect a call
                                  "method_define", "method_call",
-                                 "code_run", "method_each",
+                                 "code_run", "bash", "method_each",
                                  "method_inspect",
                                  "entity_read"])
         for t in resp["result"]["tools"]:
