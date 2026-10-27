@@ -11,6 +11,10 @@ or an object, and a **call** is an event on an object — dispatched through the
 object's own method, then its classes (ISA order), then global methods. The same
 name on two classes is two implementations (polymorphism).
 
+- **Run code:** `exec(action='run', code='ls -la ..')` turns the code into a tree
+  of node entities in the field and links its root to its executor; the run ends
+  on a result entity, and `node=<root>` re-runs it
+  ([entity-field.md](entity-field.md#the-executor-code-is-a-tree-in-the-field-614)).
 - **Define once, call many:** `exec(action='define', on='ha light',
   method='turn_on', command='…')`; then
   `exec(action='call', object='ha:light.port_strip', method='turn_on')`.
@@ -155,9 +159,9 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
 
 ## Program the field first (#576, part F)
 
-The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be done by programming the field first and then using it." The model does something in one of two ways: it **defines a method** on the entity the work belongs to (or its class) and **calls** it, or it **writes a property** whose write is the effect (above).
+The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be done by programming the field first and then using it." The model does something in one of three ways: it **runs code**, which becomes a tree kept in the field and re-runnable (#614, 2026-10-27: "executors work as blurp's chat works"); it **defines a method** on the entity the work belongs to (or its class) and **calls** it; or it **writes a property** whose write is the effect (above).
 
-- **No direct execution surface.** The `entity_link` / `entity_unlink` tools, `exec(action='link'/'unlink')` and the `POST /membrane/entity/link|unlink` routes are gone. A stored command is a script: it runs inside a method (its command or its steps), or as an entity's own script.
+- **No raw edges.** The `entity_link` / `entity_unlink` tools, `exec(action='link'/'unlink')` and the `POST /membrane/entity/link|unlink` routes are gone. Code reaches an executor only as a tree: `exec(action='run')` mints it and writes its `-execute->` edge (#614).
 - **A call straight at the executor is refused.** `method_call` / `method_each` (and `exec(action='call'/'each')`) refuse, before anything runs, a call whose object is `tool:executor` (or inherits from it), the `remote_executor` interface itself, or an entity implementing `remote_executor` called on the interface's own method (`exec`). The refusal ends with `program the field first: define a method on an entity, then call it`. Other methods of an implementation (e.g. `presence.restart`) are not executor calls and still run. The check sits on the method routes, the model's only door to them (`night.direct_exec_refusal`, `night.direct_each_refusal`).
 - **Using the executor inside a method still works.** A method the model defined on another entity whose command runs, or whose steps call the executor (`steps=[{name, call: 'exec', object: 'presence', args: {code}}]`), runs as before: that is programming first.
 - **A call is recorded for the learner.** Each `method_call` sets `last_call = {object: <eid>, args: <the call's args in full>}` on the method entity in the same upsert that bumps its `runs`, so the write event (`<method eid>.last_call`) carries the call.

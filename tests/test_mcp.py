@@ -170,7 +170,8 @@ class TestMcpProtocol(unittest.TestCase):
                                  "entity_inherit",
                                  # Cliffhanger: define a method on a class, call it
                                  # on an object or each member, inspect a call
-                                 "method_define", "method_call", "method_each",
+                                 "method_define", "method_call",
+                                 "code_run", "method_each",
                                  "method_inspect",
                                  "entity_read"])
         for t in resp["result"]["tools"]:

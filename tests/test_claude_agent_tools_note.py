@@ -51,13 +51,14 @@ def test_the_note_says_how_to_work():
 # worth repeating, keep world things current with getter/tick scripts; raw
 # one-off commands are for exploring and for code work in a worktree.
 # 2026-10-26 (#576 part F): no one-shot commands at all -- define, then call.
+# 2026-10-27 (#614): code runs as a tree kept in the field (code_run), re-runnable.
 
 def test_the_note_teaches_programming_the_field():
     note = CA.TOOLS_NOTE
     for phrase in ("programming the field", "method_define", "method_call",
                    "method_each", "method_inspect", "entity_query",
                    "getter_script", "tick_script", "tick_every", "doctrine",
-                   "worktree", "no one-shot", "program the field first"):
+                   "worktree", "no one-shot", "program the field first", "code_run"):
         assert phrase in note, phrase
     # reuse comes BEFORE defining something new
     assert note.index("entity_query") < note.index("method_define")

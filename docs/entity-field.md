@@ -266,23 +266,45 @@ EVENT (`intent-planted`) a thinking loop receives as its next turn
 executes. While the seat is paused, planting still works and is inert
 by construction: every lane that would react is down too.
 
-## The executor (2026-10-06): the queue + the ISA pipeline
+## The executor: code is a tree in the field (#614)
 
-`tool:executor` (seeded at boot) is the seat's exec organ. Since #576
-part F the model has no door to it: the `entity_link` / `entity_unlink`
-tools and their routes are gone, and a method call straight at the
-executor is refused — the model defines a method, then calls it
-([cliffhanger.md](cliffhanger.md#program-the-field-first-576-part-f)).
-What stays is the engine's side:
+`tool:executor` (seeded at boot, `lang: sh`) is the seat's shell executor.
+The model runs code with `exec(action='run', code=..., lang='sh')`
+(`code_run`, `membrane/lang.py`):
 
-- **The `executes` edge (a relations triple) IS THE QUEUE**: live = owed
-  work, **superseded = processed** (success AND failure stamp done after
-  the residue lands — processed ≠ succeeded; **no auto-retry**). The
-  background reaper finishes a run that was continued.
-- **Residue** (`run_rc/outcome/head/tail/ms`) always lands on the
-  COMMAND's own doc (a method is one) — every later reuse reads the
-  freshest truth. A method call's response carries the post-run state
-  (the sync rule).
+- **The code becomes nodes.** It is parsed (sh: `scripts.parse`) into a
+  tree, one entity per node, **content-addressed**:
+  `node:<lang>:<hash>` over (lang, kind, text, ordered children). The
+  same subtree is one entity wherever it appears (`..`, `git status`), so
+  the field sees what code shares. Children are ordered edges `-arg:1->`,
+  `-arg:2->` ... (relations rows; the order is in the label, so `cp a a`
+  keeps both places). Printing the tree gives back what the parser
+  means (`scripts.compile`).
+- **The run is an edge** (the chat adapter's shape: a write, then its
+  effect): `root -execute-> executor` is owed work; taking it is a
+  compare-and-set that turns it into `-executing->` (in progress); when
+  the run lands, that becomes `root -result-> result:<root>:<n>`, a
+  result entity for that run (`rc, outcome, head, tail, ms, text, ts`).
+  Anyone may write the execute edge (the tool, a loop, a trigger): the
+  `exec` adapter branch reacts at once, and the thinker's reaper takes
+  what is still owed each minute.
+- **Re-running** is re-creating the execute edge
+  (`exec(action='run', node=<root>)`): each run keeps its own result,
+  the newest 20 per root (`lang.RESULTS_KEEP`).
+- **Languages** are a registry (`lang.LANGS`): a parser into nodes, a
+  printer out of them, and a runner. An executor names its language in
+  `lang`; a root of another language is refused with a receipt. The
+  sh runner is `run_command_entity`, so the `c:<head>` doc, the
+  observation event and the audit line still record every run.
+- **Reading**: `entity_read` on a root shows its code, state
+  (`owed` / `executing` / `idle`) and runs; on the executor, its queue:
+  `pending`, `running`, `done` (with receipts).
+- **Without a relations store** (capture off) the same states live as
+  properties (`pending_run_by`, `executing_on`, `results`).
+
+Methods still run their commands through the same `run_command_entity`
+(a method call straight at the executor is refused); their composition:
+
 - **Composition IS inheritance**: a command entity's ISA parents
   (`entity_inherit`) are its pipeline. A run runs the node's
   whole ancestry **post-order** (parents first), MEMOIZED per eid (a
@@ -299,10 +321,6 @@ What stays is the engine's side:
 - **The caps**: 12 nodes per pass (a deeper ancestry reports
   `continued: True` and the background reaper finishes it next beat);
   depth 16 (the ISA walk's own MAX_CHAIN).
-- **Reading the queue**: `entity_read` on the executor (or any node)
-  returns the value **after** processing + the queue split:
-  `pending` (owed, live edges) / `done` (processed, with residues and
-  the run count `n_times`).
 
 The composition loop: author small methods once (build, test, scan),
 wire them into pipelines REUSING them (steps or ISA parents), call, and
@@ -321,10 +339,11 @@ derived**:
   replays the receipts). A cancellation is as durable as the debt;
   the phantom-debt exhibit (46 live no-receipt edges surviving boot
   after boot) dies here.
-- **Expiry-with-residue**: an owed edge past its TTL (24h,
-  `EXEC_EDGE_TTL_S`; a re-link bumps the clock honestly) expires —
-  stamped + received — never re-run; the boot's book-balance runs it,
-  so does every NightClock pass. Re-link = the deliberate re-queue.
+- **Expiry-with-residue**: a run owed past its TTL (24h,
+  `EXEC_EDGE_TTL_S`, counted from the execute edge's last write)
+  expires — stamped + received — never run; the boot's book-balance
+  runs it, so does every NightClock pass. Re-running the root is the
+  deliberate re-queue.
 - **Boot-derived wakes**: the boot reads the open intents and
   re-queues an `intent-planted` event per unclaimed goal (a
   `intent_planted_ts` stamp guards the double-fire). The volatile —

@@ -775,9 +775,9 @@ TOOLS: list[dict] = [
         "description": (
             "CLIFFHANGER CALL: run a method on an object -- an entity or a "
             "class. Dispatch walks the object, then its ISA classes, then the "
-            "globals (help('cliffhanger')). PROGRAM THE FIELD FIRST: there "
-            "are no one-shot commands -- define the method (method_define), "
-            "then call it here; a call straight at the executor "
+            "globals (help('cliffhanger')). PROGRAM THE FIELD FIRST: define "
+            "the method (method_define), then call it here (code itself runs "
+            "with code_run); a call straight at the executor "
             "(tool:executor, remote_executor or an implementation's exec) is "
             "refused. E.g. object='presence', method='restart' restarts the "
             "seat. The receipt (rc, outcome, head) lands on the object."),
@@ -789,6 +789,27 @@ TOOLS: list[dict] = [
                 "args": {"type": "object", "description": "The method's {{param}} values."},
             },
             "required": ["object", "method"],
+        },
+    },
+    {
+        "name": "code_run",
+        "description": (
+            "RUN CODE (#614): the code is parsed into a tree of nodes in the field "
+            "(one entity per node, shared wherever the same code appears) and its "
+            "root is linked to an executor of its language: -execute-> while owed, "
+            "-executing-> while it runs, then -result-> a result entity for this run. "
+            "lang='sh' (default) runs on tool:executor. Re-run a root with "
+            "node=<its id> (each run keeps its own result); entity_read on a root "
+            "shows its code, state and runs. Returns the root, the result, rc and "
+            "the output."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "The code, e.g. 'ls -la ..'."},
+                "lang": {"type": "string", "description": "Its language (default 'sh')."},
+                "node": {"type": "string", "description": "A root to re-run instead of code."},
+                "on": {"type": "string", "description": "An executor of that language (default: the language's own)."},
+            },
         },
     },
     {
@@ -1624,6 +1645,22 @@ def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
             f"{_ran(out)}\n{shown(out)}")
 
 
+def tool_code_run(args: dict, port: int, head_cap: int | None = None) -> str:
+    """Run code through its tree (#614); the output rides the reply like a
+    method call's (`head_cap`: the local models' short head)."""
+    body = {k: str(args[k]) for k in ("code", "lang", "node", "on") if args.get(k) not in (None, "")}
+    out = _http(port, "POST", "/membrane/code/run", body)
+    if not out.get("root") or (not out.get("ok") and out.get("rc") is None):
+        return f"run refused: {out.get('error', 'unknown error')}" + (f" [root {out['root']}]" if out.get("root") else "")
+    shown = (f"head: {str(out.get('head') or '')[:head_cap]}" if head_cap is not None else _link_output(out))
+    return (f"[{out.get('outcome') or ('ok' if out.get('ok') else 'failed')}] {out.get('text') or ''}\n"
+            f"root {out['root']} on {out.get('executor')} -> result {out.get('result')}: rc={out.get('rc')}\n{shown}")
+
+
+def tool_code_run_local(args: dict, port: int) -> str:
+    return tool_code_run(args, port, head_cap=LOCAL_LINK_HEAD)
+
+
 def tool_method_inspect(args: dict, port: int) -> str:
     """A method's read (issue #80): where a call resolves, the definition, and the
     dry run -- nothing runs."""
@@ -1771,13 +1808,15 @@ TOOL_IMPLS = {
     "entity_inherit": tool_entity_inherit,
     "method_define": tool_method_define,
     "method_call": tool_method_call,
+    "code_run": tool_code_run,
     "method_each": tool_method_each,
     "method_inspect": tool_method_inspect,
     "entity_read": tool_entity_read,
 }
 # the local models' toolset path (server.mcp_executor): the same tools, with
 # method_call's short head (their context is small)
-LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "method_call": tool_method_call_local}
+LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "method_call": tool_method_call_local,
+                    "code_run": tool_code_run_local}
 
 
 # ---- the JSON-RPC loop ---------------------------------------------------------

@@ -208,31 +208,24 @@ class TestISAChain(unittest.TestCase):
 
 class TestQueueShape(unittest.TestCase):
     def test_reaper_lands_the_owed_and_supersedes(self):
-        """run_pending_links: the reaper runs the queue's owed nodes and
-        stamps them done (the same unlink-on-done)."""
+        """run_pending_links (#614): the reaper runs the runs owed to the
+        executor -- root -execute-> executor -- and each lands a result."""
+        import types
+        from membrane import lang as LG
         f, est = _world()
         srv = _Srv(f, est)
-        saved = N.EXEC_WALK_NODES_CAP
-        N.EXEC_WALK_NODES_CAP = 0
-        try:
-            c = _cmd(est, "c:reaped", "echo reaped-ok")
-            R.upsert(f.b, f.origin, MEMBRANE_NS + "tool:executor", N.EXEC_REL, c.eid,
-                     "model-link", ts=time.time())
-            self.assertEqual([e["eid"] for e in N.executor_value(
-                est, "tool:executor", be=f.b,
-                origin=f.origin)["pending"]],
-                [c.eid])
-            N.EXEC_WALK_NODES_CAP = saved
-            lands = N.run_pending_links(srv, est, f, srv.membrane,
-                                        MEMBRANE_NS + "tool:executor")
-            self.assertTrue(lands and lands[0].get("ok"))
-            self.assertIn("reaped-ok", lands[0].get("head") or "")
-            v = N.executor_value(est, "tool:executor", be=f.b,
-                                 origin=f.origin)
-            self.assertEqual(v["pending"], [])
-            self.assertEqual(len(v["done"]), 1)
-        finally:
-            N.EXEC_WALK_NODES_CAP = saved
+        srv.capturer = types.SimpleNamespace(mode="on")
+        root = LG.mint(srv, "sh", "echo reaped-ok")
+        R.upsert(f.b, f.origin, root, N.EXEC_REL, MEMBRANE_NS + "tool:executor",
+                 "test", ts=time.time())
+        self.assertEqual([e["eid"] for e in N.executor_value(
+            est, "tool:executor", be=f.b, origin=f.origin)["pending"]], [root])
+        lands = N.run_pending_links(srv, est, f, srv.membrane, MEMBRANE_NS + "tool:executor")
+        self.assertTrue(lands and lands[0].get("ok"))
+        self.assertIn("reaped-ok", lands[0].get("head") or "")
+        v = N.executor_value(est, "tool:executor", be=f.b, origin=f.origin)
+        self.assertEqual(v["pending"], [])
+        self.assertEqual(len(v["done"]), 1)
 
 
 if __name__ == "__main__":

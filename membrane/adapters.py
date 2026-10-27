@@ -12,6 +12,8 @@ to the effects that already exist:
   membrane::llm.unwake       llm.unwake: the wake's id
   membrane::presence.restart restarts.do_restart: the reason
   <method>.invoke            night.method_call: {object, args} (#576 C: a learned call acts)
+  rel:<root>|execute|<ex>    lang.process: the code tree runs on its executor (#614);
+                             the edge is the write, -executing-> then -result-> its receipt
 
 The listener only queues (a listener must not write); the effect runs on the
 adapters' one worker thread, in the chain of the write that caused it. The
@@ -40,7 +42,11 @@ _DONE = threading.Condition()         # a job finished (write_and_wait)
 
 
 def _branch(path: str) -> tuple[str, str, str] | None:
-    """(branch, eid, prop) when this path is an adapter branch's property."""
+    """(branch, eid, prop) when this path is an adapter branch's property (for
+    an execute edge: ('exec', the root, the executor))."""
+    if path.startswith("rel:"):
+        parts = path[4:].split("|")
+        return ("exec", parts[0], parts[2]) if len(parts) == 3 and parts[1] == "execute" else None
     eid, _, prop = path.rpartition(".")
     if not eid:
         return None
@@ -71,6 +77,10 @@ def listen(w: dict) -> None:
     b = _branch(str(w.get("path") or ""))
     if b is None or w.get("writer") == WRITER + b[0]:
         return
+    if b[0] == "exec":
+        from . import lang as LG
+        if LG.inline(b[1], b[2]):
+            return                             # the tool runs it itself, in the caller's turn
     _q.put((b, w))
 
 
@@ -186,7 +196,12 @@ def _js(srv, est, ent, prop, new, by) -> None:
     _consume(est, ent, prop, new, text, rc=_rc(r))
 
 
-EFFECTS = {"chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
+def _exec(srv, est, ent, prop, new, by) -> None:
+    from . import lang as LG
+    LG.process(srv, ent.eid, prop)              # prop: the executor; a taken edge is a no-op
+
+
+EFFECTS = {"exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
            "toybox": _toybox, "js": _js}
 
 
