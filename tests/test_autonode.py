@@ -347,7 +347,9 @@ class TestSeedFiletree(unittest.TestCase):
         out = run_entity_script(ent.properties["watch_script"], st)
         self.assertIn("created", out.get("render", ""))
         self.assertIn("src/a.py", out.get("render", ""))
-        self.assertIn("last_change", out.get("patch", {}))
+        patch = out.get("patch", {})
+        self.assertEqual(set(patch), {"script_data"})   # #597: only allowed keys
+        self.assertEqual(patch["script_data"]["last_change"]["path"], "src/a.py")
 
     def test_the_template_script_absorbs_other_kinds(self):
         est = _Srv().entity_store
