@@ -2743,11 +2743,10 @@ class EntityStore(MultiParentOps, TimelineOps):
             _W.emit(path, old, new, eid=ent.eid)
 
     def remove_many(self, eids) -> int:
-        """Remove these exact eids with ONE save (a migration's batch; remove()
-        saves the whole store per call). -> how many went."""
+        """Remove these exact eids (a migration's batch), one coalesced save. -> how many went."""
         gone = [e for e in eids if self.docs.pop(e, None) is not None]
         if gone:
-            self.save()
+            self.save_soon()
             coll = self._entities_collection()
             for e in gone if coll is not None else []:
                 try:
@@ -2763,7 +2762,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         if ent is None:
             return 0
         self.docs.pop(ent.eid, None)              # #576: the docs dict emits the removal
-        self.save()
+        self.save_soon()                          # coalesced like every write (a whole-store save took >1 min live)
         coll = self._entities_collection()
         if coll is not None:
             try:
