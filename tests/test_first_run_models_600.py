@@ -54,3 +54,23 @@ def test_the_first_run_asks_for_the_model_beside_the_name():
     src = (UI / "index.html").read_text()
     assert "/membrane/options" in src and ".picked" in src       # asked only when nobody picked
     assert '"loops"' in src or "loops:" in src                   # saved as the Goal worker's model
+
+
+def test_a_boot_is_not_a_pick(monkeypatch, tmp_path):
+    """The boot plants the active-model entities and reapplies them: that must not
+    save models.json, or every fresh seat reads as picked and never asks (seen on
+    a throwaway fresh seat). Only a real pick saves."""
+    from membrane import active_models as AM
+    from membrane.entities import EntityStore, QuantumEntity, MEMBRANE_NS
+    srv = _Srv(str(tmp_path))
+    srv.entity_store = EntityStore(path=None, shared=False)
+    for name in ("qwen3:8b", "glm-5.3-flash:cloud"):
+        e = QuantumEntity(eid=MEMBRANE_NS + "models:" + name, cls="AIModel", properties={"name": name})
+        srv.entity_store.docs[e.eid] = e
+    monkeypatch.setattr(AM, "known_models", lambda s: ["qwen3:8b", "glm-5.3-flash:cloud"])
+    AM.load(srv)
+    assert MM.picked(srv) is False
+    ent = srv.entity_store._resolve_spec("active-model:loops")
+    ent.properties["model"] = "glm-5.3-flash:cloud"
+    AM.on_change(srv, ent)                                     # a person's edit is a pick
+    assert MM.picked(srv) is True
