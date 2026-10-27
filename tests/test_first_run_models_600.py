@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import minds_models as MM  # noqa: E402
 from membrane import options as OP  # noqa: E402
-from membrane.opencode import _pick_default_model  # noqa: E402
+from membrane.lanes import _pick_default_model  # noqa: E402
 
 UI = Path(__file__).resolve().parent.parent / "membrane" / "ui"
 
