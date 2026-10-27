@@ -82,6 +82,20 @@ class TestScriptRefusalsAreVisible(unittest.TestCase):
         self.assertEqual(e.properties["script_data"]["v"], 1)
 
 
+    def test_a_clean_run_clears_the_refusal_and_a_new_one_sets_it_again(self):
+        est = _est()
+        e = QuantumEntity(eid=MEMBRANE_NS + "Component:t2", cls="Component", properties={"name": "t2"})
+        est.docs[e.eid] = e
+        srv = type("S", (), {"entity_store": est, "efield": None, "membrane": None})()
+        N.apply_entity_update(srv, e, {"patch": {"status": "x"}}, "tick", silent=True)
+        self.assertIn("patch_refused", e.properties)
+        N.apply_entity_update(srv, e, {"patch": {"script_data": {"v": 2}}}, "tick", silent=True)
+        self.assertNotIn("patch_refused", e.properties)
+        self.assertEqual(e.properties["script_data"]["v"], 2)
+        N.apply_entity_update(srv, e, {"patch": {"status": "y"}}, "tick", silent=True)
+        self.assertIn("patch_refused", e.properties)
+
+
 class TestWakesSayWhatChanged(unittest.TestCase):
     def test_field_wakes(self):
         t = WA.loop_task_text({"kind": "field:changed", "entity": "membrane::bat", "verb": "pos", "n_changes": 3,

@@ -4420,6 +4420,8 @@ def _apply_entity_update(srv, ent, out: dict, trigger: str,
     if _ref:
         props["patch_refused"] = {"keys": _ref[:12], "trigger": trigger, "ts": round(time.time(), 1),
                                   "allowed": "render, patch.script_data, patch.position, run, intent"}
+    else:
+        props.pop("patch_refused", None)   # a clean run retires the old stamp (#612)
     # THE RUN VERDICT (the exec's only lane, the operator's ruling
     # 2026-10-02): a script returning {run: true} makes the ENGINE
     # exec the entity's OWN 'command' prop (run_command_entity -- the
