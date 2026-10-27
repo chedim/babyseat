@@ -3658,7 +3658,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           return;
         }
         this._msgEl.style.display = "";
-        this._msgEl.textContent = SELF_NAME + " is not moving yet — switch it on (⏻ in its panel, the tab at the left edge) and talk to the seat";
+        this._msgEl.textContent = SELF_NAME + " is not on the field yet — it shows up while it is on and awake (⏻ in its panel, the tab at the left edge)";
         setTimeout(() => { if (this._msgEl.textContent.startsWith(SELF_NAME + " is not")) this._msgEl.style.display = "none"; }, 6000);
         return;
       }
