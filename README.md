@@ -10,8 +10,11 @@ happens.
 ![Membrane](screenshot.png)
 > the new "Decisions Cockpit" UI with Membrane field in the background.
 
-It runs locally in front of [Ollama](https://ollama.com), on its own or inside
-[Home Assistant](docs/home-assistant.md).
+It runs locally, on its own or inside [Home Assistant](docs/home-assistant.md),
+in front of your models: [Ollama](https://ollama.com) (local or its cloud
+models), OpenAI-compatible cloud APIs, and Claude through the Claude Code engine.
+Any OpenAI, Ollama or MCP client, Claude Code included, can talk to it
+([models and clients](#models-and-clients)).
 
 > **The names.** **babyseat** is the whole project: the seat, its web UI,
 > Blurp, the Home Assistant integration and the Docker image
@@ -105,7 +108,9 @@ seat still boots. The license is MIT ([LICENSE](LICENSE)).
 babyseat runs three ways: standalone, in Docker, or inside Home Assistant. All
 need an [Ollama](https://ollama.com) server with one chat model and one
 embedding model (`ollama pull qwen3:8b && ollama pull mxbai-embed-large`, or
-any cloud model Ollama serves), and 1–3 GB of RAM for the seat.
+any cloud model Ollama serves), and 1–3 GB of RAM for the seat. Chat can also
+run on a cloud API or on Claude ([models and clients](#models-and-clients));
+embeddings always come from Ollama.
 
 ### Standalone: its own web UI
 
@@ -128,6 +133,39 @@ read freely, and they ask once for the seat token before writing
 refused, unless you turn on [JWT mode](docs/auth.md). The microphone needs
 `localhost` (a secure origin), and the first voice use downloads about 65 MB
 of speech models.
+
+### Models and clients
+
+**Models membrane runs on:**
+
+- **Ollama**: any chat model it serves, local or cloud (`glm-5.3-flash:cloud`,
+  `gpt-oss:20b-cloud`, …). Embeddings always come from Ollama.
+- **OpenAI-compatible cloud APIs**: `membrane auth <provider>` stores a key
+  (`anthropic`, `openrouter`, `gemini`, `groq`, `github`, `mistral`, `zen`), and
+  that provider's models become routable rungs beside Ollama's.
+- **Claude, through the Claude Code engine**: `membrane auth claude-agent` adds
+  Claude rungs (`claude-agent:sonnet`, `:opus`, `:haiku`) that run the Claude
+  Agent SDK on your Anthropic API key. Claude Code's built-in tools are off;
+  Claude works through membrane's own tools, and its replies are learned like
+  any model's ([docs/claude-agent.md](docs/claude-agent.md)).
+
+**Clients that can talk to membrane:**
+
+- **OpenAI-compatible clients** at `http://127.0.0.1:11500/v1`
+  (`/v1/chat/completions`, `/v1/models`).
+- **Ollama clients** (Open WebUI, ollama-python, an Ollama provider) at
+  `http://127.0.0.1:11500`: `/api/chat` and `/api/generate` go through the same
+  memory turn, and every other `/api/*` path passes through to Ollama.
+- **MCP clients, Claude Code included**: membrane's tools (recall, learn,
+  entities, methods) over MCP stdio, relayed to the running seat:
+
+  ```bash
+  claude mcp add membrane -- python -m membrane.mcp_server --port 11500
+  ```
+
+  Claude Code keeps its own model; membrane is its memory and its field.
+- **opencode**: `membrane opencode` attaches the opencode TUI to membrane's own
+  serve surface ([First run in a project](#first-run-in-a-project)).
 
 ### Docker
 
