@@ -355,16 +355,16 @@ def main(argv: list[str] | None = None) -> int:
     fac = Facade(SeatClient(a.seat), a.data_dir)
     bind(fac)
     httpd = serve(fac)
-    os.write(1, (json.dumps({HANDSHAKE: {"port": httpd.server_address[1], "pid": os.getpid()}}) + "\n").encode())
-    os.dup2(2, 1)                                   # nothing else goes to the handshake pipe
-    install_safe_stdio()
     stop = threading.Event()
     rt = _SL()._rt(fac)
 
     def on_term(*_):
         stop.set()
         rt["wake"].set()
-    signal.signal(signal.SIGTERM, on_term)
+    signal.signal(signal.SIGTERM, on_term)          # before the handshake: the parent may stop us at once (#408)
+    os.write(1, (json.dumps({HANDSHAKE: {"port": httpd.server_address[1], "pid": os.getpid()}}) + "\n").encode())
+    os.dup2(2, 1)                                   # nothing else goes to the handshake pipe
+    install_safe_stdio()
     threading.Thread(target=_watch_stdin, args=(stop, rt["wake"]), name="self-proc-stdin", daemon=True).start()
     try:
         run(fac, stop)

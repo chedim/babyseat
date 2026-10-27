@@ -56,7 +56,9 @@ def _until(fn, timeout=3.0):
 
 
 @pytest.fixture
-def seat():
+def seat(monkeypatch):
+    # monkeypatch first, so its undo runs AFTER AD.stop(): a restart write still
+    # queued at teardown must meet the stub, never the real SIGTERM (#408)
     srv = _Srv()
     AD.start(srv)
     yield srv
