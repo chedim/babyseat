@@ -54,8 +54,6 @@ def _branch(path: str) -> tuple[str, str, str] | None:
     from . import toybox as _TBX
     if eid == _TBX._eid() and prop in ("list", "add", "remove", "reset", "poke"):
         return "toybox", eid, prop             # #576 G2: the toybox object's verbs
-    if prop == "js" and eid == MEMBRANE_NS + "presence":
-        return "js", eid, prop                 # #576 G2: the seat's JS (an opted-in browser tab)
     if prop == "say":
         from . import chat_io as CIO
         return ("chat", eid, prop) if CIO.person_of(eid) is not None else None
@@ -185,24 +183,13 @@ def _toybox(srv, est, ent, prop, new, by) -> None:
     _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r, rc=_rc(r))
 
 
-def _js(srv, est, ent, prop, new, by) -> None:
-    """#576 G2: presence's `js` -- the code runs in an opted-in browser tab (jsexec)."""
-    from . import jsexec as JS
-    r = JS.run(str(new or ""), timeout=float(getattr(srv, "_js_timeout", 15.0)))
-    text = str(r.get("text") or "") if isinstance(r, dict) else str(r)
-    err = str(r.get("err") or "") if isinstance(r, dict) else ""
-    if err and (r.get("rc") if isinstance(r, dict) else 0) != -1:
-        text = (text + "\n" if text else "") + err
-    _consume(est, ent, prop, new, text, rc=_rc(r))
-
-
 def _exec(srv, est, ent, prop, new, by) -> None:
     from . import lang as LG
     LG.process(srv, ent.eid, prop)              # prop: the executor; a taken edge is a no-op
 
 
 EFFECTS = {"exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
-           "toybox": _toybox, "js": _js}
+           "toybox": _toybox}
 
 
 def write_and_wait(est, eid: str, prop: str, value, timeout: float = 20.0, srv=None) -> dict:

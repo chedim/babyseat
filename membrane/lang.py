@@ -20,7 +20,8 @@ newest RESULTS_KEEP per root. Taking an owed edge is a compare-and-set (the
 execute row's supersede), so a run happens once however many hands reach it.
 
 THE LANGUAGES. A registry: a parser into nodes, a printer out of them, and the
-runner its executors use. An executor entity says its language in `lang` (else
+runner its executors use -- `sh` on tool:executor, `js` on the seat's presence
+(an opted-in browser tab). An executor entity says its language in `lang` (else
 it is the default executor of one); a root of another language is refused.
 """
 from __future__ import annotations
@@ -118,6 +119,29 @@ def _sh_run(srv, text: str, timeout_s=None) -> dict:
 LANGS["sh"] = Lang("sh", _sh_parse, _sh_print, MEMBRANE_NS + "tool:executor", _sh_run)
 
 
+# ---- js: statements in an opted-in browser tab (lang_js.py, jsexec.py) ----------------------
+
+def _js_run(srv, text: str, timeout_s=None) -> dict:
+    from . import jsexec as JS
+    from . import streams as ST
+    t = JS.TIMEOUT_S if timeout_s is None else min(float(timeout_s), JS.TIMEOUT_S)
+    t0 = time.time()
+    r = JS.run(text, timeout=t)
+    out, err, rc = str(r.get("text") or ""), str(r.get("err") or ""), r.get("rc")
+    shown = out or err
+    return {"ok": rc == 0, "rc": rc, "head": shown[:ST.RESULT_HEAD], "tail": shown[-ST.RESULT_TAIL:],
+            "outcome": "ok" if rc == 0 else "timeout" if rc == -1 else "refused" if rc == 2 else "error",
+            "ms": max(1, int((time.time() - t0) * 1000)), "output": shown, "error": err}
+
+
+def _js_lang() -> Lang:
+    from . import lang_js as J
+    return Lang("js", J.parse, J.print_, MEMBRANE_NS + "presence", _js_run)
+
+
+LANGS["js"] = _js_lang()
+
+
 # ---- the store -----------------------------------------------------------------------------
 
 def _rel(srv):
@@ -135,7 +159,8 @@ def _mint(srv, lang: str, n: Node, be, origin) -> str:
     eid = f"{MEMBRANE_NS}node:{lang}:{_hash(lang, n, kids)}"
     est = srv.entity_store
     if eid not in (est.docs or {}):
-        shown = n.text if not n.args else LANGS[lang].print(n) if n.kind == "script" else ""
+        shown = (n.text if not n.args else LANGS[lang].print(n) if n.kind in ("script", "program")
+                 else n.text.replace("\x00", "…"))
         est.upsert(QuantumEntity(eid=eid, cls=CLASS_COMPONENT, properties={
             "name": " ".join(str(shown or n.text or n.kind).split())[:80], "lang": lang,
             "kind": n.kind, "text": n.text, "args": kids, "silent_birth": True}), embedder=None)
