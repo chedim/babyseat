@@ -116,7 +116,7 @@ def known_models(srv) -> list[str] | None:
     return out or None
 
 
-def on_change(srv, ent, known=None) -> dict | None:
+def on_change(srv, ent, known=None, persist: bool = True) -> dict | None:
     """An active-model entity was edited or linked: switch its role (or say
     why not, on the entity). Returns what happened, None when not ours."""
     est = _est(srv)
@@ -143,7 +143,7 @@ def on_change(srv, ent, known=None) -> dict | None:
     ent.properties = pp
     if role in ("loops", "cortex"):
         from . import minds_models as MM
-        MM.apply(srv, **{role: model}, mirror=False)
+        MM.apply(srv, **{role: model}, mirror=False, persist=persist)
     else:
         am = srv.__dict__.setdefault("_active_models", {})
         am["chat:" + person if person else "chat"] = model
@@ -202,7 +202,7 @@ def load(srv) -> None:
     for d in list((est.docs or {}).values()):
         if str((d.properties or {}).get("name") or "").startswith(PREFIX):
             try:
-                on_change(srv, d, known=known)
+                on_change(srv, d, known=known, persist=False)   # #600: a boot reapplies, it is nobody's pick
             except Exception:
                 pass
 
