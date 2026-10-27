@@ -61,6 +61,7 @@ SELF = MEMBRANE_NS + "Component:self"
 CLASS = "Trigger"
 _TRIG_PREFIX = MEMBRANE_NS + CLASS + ":"
 QUEUE_MAX = 4096                # writes waiting for the VM (oldest dropped and counted)
+RECENT_FIRINGS = 200            # firings remembered for the field map's Blurp overlay (a buffer bound)
 EXPR_MAX = 400                  # an expression's length (characters)
 NODES_MAX = 64                  # and its size (AST nodes)
 VEC_MAX = 8192                  # the longest vector an expression handles
@@ -442,6 +443,7 @@ class VM:
         self._spec: dict[str, tuple] = {}          # trigger -> (definition fingerprint, spec or None)
         self._seq = itertools.count()
         self.learner = None                        # #576 C: ch_learn.Learner (Blurp's plasticity)
+        self.recent: collections.deque = collections.deque(maxlen=RECENT_FIRINGS)   # the map's overlay
         now = float(self.clock())
         for eid in list((est.docs or {}).keys()):
             self._seen[eid] = now                  # everything was last seen when the VM came up
@@ -735,6 +737,8 @@ class VM:
                 ent.properties[prop] = value          # in place: a concurrent writer's keys survive
                 self.est.upsert(ent)
         self.fired[tr.eid] = self.fired.get(tr.eid, 0) + 1
+        src = binding.get("x") or next(iter(binding.values()), None) or ent.eid
+        self.recent.append({"trig": tr.eid, "from": src, "to": ent.eid, "ts": now, "mode": mode})
 
     # -- running ----------------------------------------------------------------------------
     def _vars_for(self, spec, ent, memo) -> list[str]:

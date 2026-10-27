@@ -410,7 +410,7 @@ function defineFieldPanel() {
           <span class="card ctl only3d"><label>X</label><select class="a3" data-i="0"></select><span class="axchip3" data-i="0"></span>
             <label>Y</label><select class="a3" data-i="1"></select><span class="axchip3" data-i="1"></span>
             <label>Z</label><select class="a3" data-i="2"></select><span class="axchip3" data-i="2"></span></span>
-          <span class="card ctl only3d"><button class="btn on edges3" title="Relations">edges</button><button class="btn on labels3">labels</button>
+          <span class="card ctl only3d"><button class="btn on edges3" title="Relations">edges</button><button class="btn on labels3">labels</button><button class="btn on blurp3" title="Blurp's guesses: shadow (faint), proposals (gold), suggestions (bright); a pulse when one fires">blurp</button>
             <span class="status3" style="opacity:.75;font-size:12px"></span></span>
           <span class="card ctl only2d"><label>X</label><select class="ax"></select><span class="axchip" data-axis="x"></span>
             <label>Y</label><select class="ay"></select><span class="axchip" data-axis="y"></span>
@@ -447,7 +447,7 @@ function defineFieldPanel() {
       const tog3 = (sel, key) => $(sel).addEventListener("click", (e) => {
         if (!this._v3) return; this._v3[key] = !this._v3[key]; e.target.classList.toggle("on", this._v3[key]);
         this._v3._edgesDirty = true; if (key === "showLabels" && !this._v3.showLabels) this._v3.labels.forEach((l) => { l.style.display = "none"; }); });
-      tog3(".edges3", "showEdges"); tog3(".labels3", "showLabels");
+      tog3(".edges3", "showEdges"); tog3(".labels3", "showLabels"); tog3(".blurp3", "showBlurp");   // #576
       this._msg = $(".msg"); this._hud = $(".hud"); this._legend = $(".legend");
       this._drawer = $(".drawer"); this._tip = $(".tip"); this._hits = $(".hits");
       this._axSel = $(".ax"); this._aySel = $(".ay"); this._q = $(".q");

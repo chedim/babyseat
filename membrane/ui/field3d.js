@@ -684,7 +684,33 @@ function faceOn(x, y, z, min, out) {
   return out;
 }
 
-const F3Logic = { faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+// #576 -- BLURP'S OVERLAY: its recent firings (GET /membrane/map/blurp) as layers. A
+// firing between two entities on the map is a line, coloured by its trigger's state
+// (shadow faint, proposal gold, suggest bright); one on a single entity is a halo; a
+// firing newer than the last one seen pulses. Pure, so the node tests can call it.
+const BLURP_POLL_MS = 3000;
+const BLURP_STATES = ["shadow", "proposal", "suggest"];
+function blurpLayers(ov, has, lastTs) {
+  const lines = { shadow: [], proposal: [], suggest: [] }, halos = [], fresh = [];
+  const seen = new Set(), seenH = new Set();
+  let last = lastTs || 0;
+  for (const f of (ov && ov.firings) || []) {
+    if (!f) continue;
+    if (f.ts > last) last = f.ts;
+    if (!has(f.from) || !has(f.to)) continue;
+    const st = BLURP_STATES.includes(f.state) ? f.state : "shadow";
+    if (f.from === f.to) {
+      if (!seenH.has(f.from)) { seenH.add(f.from); halos.push({ id: f.from, state: st }); }
+    } else {
+      const k = f.from + "|" + f.to + "|" + st;
+      if (!seen.has(k)) { seen.add(k); lines[st].push([f.from, f.to]); }
+    }
+    if (lastTs && f.ts > lastTs) fresh.push({ a: f.from, b: f.to, state: st });
+  }
+  return { lines, halos, fresh, last };
+}
+
+const F3Logic = { blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -749,6 +775,9 @@ class Field3DView {
   async start() {
     const THREE = this.THREE = await loadThree();
     this._alive = true;
+    clearInterval(this._blurpTimer);                 // #576: Blurp's overlay, polled
+    this._blurpTimer = setInterval(() => { if (this._alive && !(typeof document !== "undefined" && document.hidden)) this._pollBlurp(); },
+      BLURP_POLL_MS);
     const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: !!this.api.preserve });
     r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.renderer = r;
@@ -847,6 +876,31 @@ class Field3DView {
     this.scene.add(this.curHead);
     this.cur = { trail: [], head: null, tau: 0, dirty: false, filledAt: 0 };
     this.showEdges = true; this.showLabels = true;
+    // #576: Blurp's layer -- a line set per trigger state, and halos for same-entity firings
+    this.showBlurp = true; this._blurp = null; this._blurpLast = 0; this.blurpCap = 512;
+    this.blurpLines = {};
+    for (const [st, op] of [["shadow", 0.22], ["proposal", 0.6], ["suggest", 1.0]]) {
+      const bg = new THREE.BufferGeometry();
+      const arr = new Float32Array(this.blurpCap * 6);
+      bg.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+      bg.setDrawRange(0, 0);
+      bg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
+      const ln = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: 0xffc04d, transparent: true,
+        opacity: op, depthWrite: false }));
+      ln.renderOrder = 2;
+      this.scene.add(ln);
+      this.blurpLines[st] = { ln, arr };
+    }
+    const hg2 = new THREE.BufferGeometry();
+    this.blurpHaloA = new Float32Array(this.blurpCap * 3); this.blurpHaloC = new Float32Array(this.blurpCap * 3);
+    hg2.setAttribute("position", new THREE.BufferAttribute(this.blurpHaloA, 3));
+    hg2.setAttribute("color", new THREE.BufferAttribute(this.blurpHaloC, 3));
+    hg2.setDrawRange(0, 0);
+    hg2.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
+    this.blurpHalos = new THREE.Points(hg2, new THREE.PointsMaterial({ size: 16, sizeAttenuation: false, vertexColors: true,
+      transparent: true, opacity: 0.7, depthWrite: false }));
+    this.blurpHalos.renderOrder = 2;
+    this.scene.add(this.blurpHalos);
     this._wire();
     this._ro = new ResizeObserver(() => this._resize());
     this._ro.observe(this.host);
@@ -893,7 +947,58 @@ class Field3DView {
     this.snap.put("snapshot", snapshotOf(this.info, this.cache.tiles)).catch(() => {});
   }
 
+  // #576: Blurp's overlay -- polled while the view runs; new firings pulse
+  _pollBlurp() {
+    if (!this.api || typeof this.api.get !== "function") return;
+    Promise.resolve(this.api.get("/membrane/map/blurp")).then((ov) => this.setBlurp(ov)).catch(() => {});
+  }
+  setBlurp(ov) {
+    const first = !this._blurpLast;
+    const L = blurpLayers(ov, (id) => this.slots.has(id), first ? 0 : this._blurpLast);
+    this._blurpLast = L.last || this._blurpLast;
+    this._blurp = L;
+    if (this.showBlurp && !first) {
+      const now = performance.now();
+      for (const p of L.fresh) {
+        if (p.a === p.b) { const s = this.slots.get(p.a); if (s != null) this.pulses.set(s, now); continue; }   // one entity: it glows
+        this.edgePulses.push({ a: p.a, b: p.b, t0: now, dur: 1400, col: [1.0, 0.82, 0.35] });
+      }
+    }
+    this._rebuildBlurp();
+  }
+  _rebuildBlurp() {
+    if (!this.blurpLines) return;
+    const L = this.showBlurp ? this._blurp : null;
+    for (const st of BLURP_STATES) {
+      const { ln, arr } = this.blurpLines[st];
+      let n = 0;
+      for (const [a, b] of (L && L.lines[st]) || []) {
+        const sa = this.slots.get(a), sb = this.slots.get(b);
+        if (sa == null || sb == null || n >= this.blurpCap) continue;
+        arr.set(this.posA.subarray(sa * 3, sa * 3 + 3), n * 6);
+        arr.set(this.posA.subarray(sb * 3, sb * 3 + 3), n * 6 + 3);
+        n++;
+      }
+      ln.geometry.setDrawRange(0, n * 2);
+      ln.geometry.attributes.position.needsUpdate = true;
+    }
+    let h = 0;
+    const lum = { shadow: 0.35, proposal: 0.7, suggest: 1.0 };
+    for (const halo of (L && L.halos) || []) {
+      const s = this.slots.get(halo.id);
+      if (s == null || h >= this.blurpCap) continue;
+      this.blurpHaloA.set(this.posA.subarray(s * 3, s * 3 + 3), h * 3);
+      const k = lum[halo.state] || 0.35;
+      this.blurpHaloC.set([1.0 * k, 0.75 * k, 0.3 * k], h * 3);
+      h++;
+    }
+    this.blurpHalos.geometry.setDrawRange(0, h);
+    this.blurpHalos.geometry.attributes.position.needsUpdate = true;
+    this.blurpHalos.geometry.attributes.color.needsUpdate = true;
+  }
+
   stop() {
+    clearInterval(this._blurpTimer);
     this._saveSnapshot();
     clearInterval(this._snapTimer);
     this._alive = false; cancelAnimationFrame(this._raf);
@@ -1141,7 +1246,7 @@ class Field3DView {
       moved = true;
     }
     if (moved) { this._dirtyPoints(); this._edgesDirty = true; }
-    if (this._edgesDirty) this._rebuildEdges();
+    if (this._edgesDirty) { this._rebuildEdges(); this._rebuildBlurp(); }
     this._stepRings(now);
     this._stepEdgePulses(now);
     this._stepAvatars(dt);

@@ -255,3 +255,13 @@ The seeded methods are now write steps, and each boot puts an older seat's form 
 - **A stored line in a retired dialect** (`llm::`, `llm.wake`, `toybox::`, `seat::`, `js::`, `self::`) is **refused** with rc 2 and a pointer to the method. It is never split into a label plus a shell command.
 - **Write steps on one property are serialised,** so each call gets its own receipt. An empty value is refused at once.
 - **On a timeout,** the receipt says the effect may still be queued or running: don't repeat it.
+
+## Blurp on the field map (#576)
+
+Blurp's triggers show on the 3D field: on the home page and in the HA panel, with a "blurp" toggle on the panel.
+- **The VM keeps its recent firings:** 200, each with trigger, from, to and time.
+- **`GET /membrane/map/blurp`** returns Blurp's own firings in field ids, each with its trigger's state now: **shadow**, **proposal**, or **suggest** (a proposal on an accepted branch). It also returns the counts over its triggers.
+- **The view polls it every 3 s while visible** (`blurpLayers`, pure):
+  - a firing between two entities is a line, faint for shadow, gold for a proposal, bright gold for a suggestion;
+  - a firing on one entity (most learned guesses: `?x.c` → `?x.w`) is a halo on it;
+  - each firing it hadn't seen yet pulses along its line or on its entity.
