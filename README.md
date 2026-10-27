@@ -8,6 +8,7 @@ and your AI say passes through it, and it learns from every message as it
 happens. 
 
 ![Membrane](screenshot.png)
+> the new "Decisions Cockpit" UI with Membrane field in the background.
 
 ![Membrane](docs/comparison.png)
 
