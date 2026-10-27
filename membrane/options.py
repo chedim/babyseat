@@ -104,7 +104,7 @@ def _background(srv):
     return {"loops": mm["loops"], "cortex": mm["cortex"],
             "loops_auth": mm["loops_auth"], "cortex_auth": mm["cortex_auth"],
             "models": models, "claude": [m for m in models if CA.is_claude_rung(srv, m)],
-            "chat_auth": chat_auth}
+            "chat_auth": chat_auth, "picked": MM.picked(srv)}
 
 
 def read(srv=None) -> dict:

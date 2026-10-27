@@ -75,7 +75,13 @@ sphere it was the distance to it).
 1. The page asks **your** name once (kept in that browser). Every message you send
    carries it, so the seat knows who is talking. (In [JWT mode](auth.md) it asks for
    your token instead, and the token carries your name.)
-2. The seat is **Bob** ("Hey Bob") until you agree on a name. It asks for one in its
+2. On a new seat it then asks **which model** to use: the one membrane talks with,
+   which its background work (the watch loops) uses too. Local models are listed
+   first; cloud and Claude models are marked, since they may be rate-limited or need
+   a key. The pick is saved in the seat's `models.json` and applies at once; change it
+   later in ⚙ (Background work). Until someone picks, the seat never defaults to a
+   cloud model.
+3. The seat is **Bob** ("Hey Bob") until you agree on a name. It asks for one in its
    first reply; when you've chosen, it adopts it itself (the `name` entity). A name
    must be one word of two or three syllables that the in-page speech recognizer
    knows — otherwise "Hey <name>" could never be heard, and the seat says why and
