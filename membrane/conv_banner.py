@@ -464,6 +464,18 @@ def decided(srv, conv: str) -> list[Item]:
     return out[:DECIDED_MAX]
 
 
+def _picked_up(srv, eid: str, p: dict) -> str:
+    """Who has the goal: the loop on it now (the pool's live hold, so a pass
+    its seat lost never reads as running), else who worked it last."""
+    def hm(ts) -> str:
+        return time.strftime("%H:%M", time.localtime(float(ts)))
+    start, end = float(p.get("picked_up_ts") or 0), float(p.get("picked_up_end_ts") or 0)
+    holds = getattr(getattr(srv, "loops", None), "holds", None)
+    if end < start and callable(holds) and holds(eid):
+        return f"being worked by {p['picked_up_by']} since {hm(start)}"
+    return f"last worked by {p['picked_up_by']} at {hm(max(start, end))}"
+
+
 def open_items(srv, conv: str) -> list[Item]:
     """Open goals, labelled with where they came from: those planted in this
     chat first, then another chat's and the board's, newest first (#466)."""
@@ -487,8 +499,7 @@ def open_items(srv, conv: str) -> list[Item]:
         if (p.get("status") or "open") == "open":
             r, src = origin(p.get("convs"))
             if p.get("picked_up_by") and p.get("picked_up_ts"):
-                src += (f" \u00b7 picked up by {p['picked_up_by']} at "
-                        f"{time.strftime('%H:%M', time.localtime(float(p['picked_up_ts'])))}")
+                src += " \u00b7 " + _picked_up(srv, g.eid, p)
             rows.append((r, Item(str(p.get("name") or g.eid), src, p.get("born"))))
     rows.sort(key=lambda ri: (ri[0], -(float(ri[1].ts) if ri[1].ts is not None else 0.0)))
     return [it for _r, it in rows][:OPEN_MAX]

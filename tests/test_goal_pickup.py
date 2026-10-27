@@ -71,6 +71,23 @@ class TestPickup(unittest.TestCase):
         WA._LoopDrainer(srv).handle({**old, "ts": time.time() + 1})        # a later wake still runs
         self.assertEqual(len(srv.turns), 2)
 
+    def test_a_notification_sent_during_the_pass_runs_no_second_pass(self):
+        est = _store()
+        srv = _srv(est)
+        eid = _goal(est, "list")
+        during = []
+
+        def turn(sid, text, agent):            # the pulse/a re-plant lands mid-pass
+            srv.turns.append(text)
+            during.append({"kind": "intent-planted", "entity": eid, "text": "list",
+                           "ts": time.time()})
+            return {"text": "STEP moved"}
+        srv.run_loop_turn = turn
+        WA._LoopDrainer(srv).handle({"kind": "intent-planted", "entity": eid, "text": "list",
+                                     "ts": time.time()})
+        self.assertEqual(WA._LoopDrainer(srv).handle(during[0]), "skip")
+        self.assertEqual(len(srv.turns), 1)
+
     def test_the_pool_keeps_one_notification_per_goal(self):
         pool = WA.WatchEvents()
         pool.put({"kind": "intent-planted", "entity": "membrane::goal:a", "ts": 1})
@@ -80,14 +97,37 @@ class TestPickup(unittest.TestCase):
         self.assertEqual([(e["entity"], e["ts"]) for e in evs],
                          [("membrane::goal:a", 3), ("membrane::goal:b", 2)])
 
-    def test_the_banner_says_who_picked_it_up(self):
+    def test_the_banner_says_who_is_working_it_and_who_last_did(self):
         est = _store()
         ts = time.mktime((2026, 10, 27, 9, 31, 0, 0, 0, -1))
-        _goal(est, "list", picked_up_by="loop-1", picked_up_ts=ts)
+        end = time.mktime((2026, 10, 27, 9, 36, 0, 0, 0, -1))
+        run = _goal(est, "run", picked_up_by="loop-1", picked_up_ts=ts)
+        _goal(est, "done", picked_up_by="loop-2", picked_up_ts=ts, picked_up_end_ts=end)
+        _goal(est, "dead", picked_up_by="loop-3", picked_up_ts=ts)    # its seat died mid-pass
+        loops = WA.LoopRunner(max_loops=3)
+        loops.admit(WA.LoopDesc("watch", eid=run))
+        srv = types.SimpleNamespace(entity_store=est, loops=loops)
+        items = {i.text: i.src for i in CB.open_items(srv, "c1")}
+        self.assertIn("being worked by loop-1 since 09:31", items["run"])
+        self.assertIn("last worked by loop-2 at 09:36", items["done"])
+        self.assertIn("last worked by loop-3 at 09:31", items["dead"])
+
+    def test_a_goal_nobody_took_says_nothing(self):
+        est = _store()
         _goal(est, "free")
         items = {i.text: i.src for i in CB.open_items(types.SimpleNamespace(entity_store=est), "c1")}
-        self.assertIn("picked up by loop-1 at 09:31", items["list"])
-        self.assertNotIn("picked up", items["free"])
+        self.assertNotIn("worked", items["free"])
+
+    def test_a_failed_mark_is_logged(self):
+        srv = _srv(_store())
+        eid = _goal(srv.entity_store, "list")
+        srv.entity_store.upsert = lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            WA._mark_picked_up(srv, eid, "loop-1")
+        self.assertIn("disk full", buf.getvalue())
 
 
 if __name__ == "__main__":

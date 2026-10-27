@@ -575,28 +575,36 @@ def _goal_doc(srv, eid: str):
     return doc if doc is not None and doc.cls == CLASS_GOAL else None
 
 
-def _mark_picked_up(srv, eid: str, by: str) -> None:
-    """A loop takes a goal: the goal says who has it and since when (every
-    chat's banner shows it, and older notifications for it are dropped)."""
+def _mark_picked_up(srv, eid: str, by: str, end: bool = False) -> None:
+    """A loop takes a goal (and later lets it go): the goal says who has it
+    and since when, and when the pass ended (every chat's banner shows it,
+    and notifications sent before the pass ended are dropped)."""
     doc = _goal_doc(srv, eid)
     if doc is None:
         return
     try:
-        doc.properties["picked_up_by"] = by or "a loop"
-        doc.properties["picked_up_ts"] = time.time()
+        if end:
+            doc.properties["picked_up_end_ts"] = time.time()
+        else:
+            doc.properties["picked_up_by"] = by or "a loop"
+            doc.properties["picked_up_ts"] = time.time()
         srv.entity_store.upsert(doc, embedder=None)
-    except Exception:
-        pass
+    except Exception as e:
+        import sys
+        print(f"[loops] could not mark {eid} picked up: {e}", file=sys.stderr)
 
 
 def _picked_up_since(srv, ev: dict) -> bool:
-    """A goal notification sent before the goal's latest pickup: that pass
-    already had the goal in hand."""
+    """A goal notification sent before the goal's latest pass ended (or while
+    it runs): that pass already had the goal in hand."""
     if ev.get("kind") != "intent-planted" or not ev.get("ts"):
         return False
     doc = _goal_doc(srv, str(ev.get("entity") or ""))
+    if doc is None:
+        return False
+    p = doc.properties or {}
     try:
-        return doc is not None and float((doc.properties or {}).get("picked_up_ts") or 0) > float(ev["ts"])
+        return max(float(p.get("picked_up_ts") or 0), float(p.get("picked_up_end_ts") or 0)) > float(ev["ts"])
     except (TypeError, ValueError):
         return False
 
@@ -786,6 +794,7 @@ class _LoopDrainer:
                 titles.remove(agent)
             if _fp is not None:
                 _fp.focus(agent, ent, "end")
+            _mark_picked_up(self.srv, ent, "", end=True)
 
     def _turn(self, ev: dict, ent: str, agent: str) -> str:
         from . import writes as _W
