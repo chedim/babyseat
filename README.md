@@ -5,13 +5,7 @@
 
 babyseat is an AI seat with a memory that learns in real time. Everything you
 and your AI say passes through it, and it learns from every message as it
-happens. Inside lives Blurp, a small self that grows up on that memory, one
-tested skill at a time: Alan Turing's "child machine" idea, taken literally.
-
-- **Works today:** real-time learning, a body, aiming at its own targets.
-- **Still learning:** recognizing itself (its earlier pass was voided and is
-  being rebuilt), inventing new things, writing its own replies, running on an
-  embedding model alone.
+happens. 
 
 ![Membrane](screenshot.png)
 
