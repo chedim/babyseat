@@ -8,7 +8,11 @@ store) with a ``status`` that moves right to left:
 
 A card tagged work_needed=False closes on the answer; one needing work stays
 decided until a watcher loop moves it to in_flight, and it closes only once a
-receipt is on it. The operator may also drop an open card. (An untagged answer
+receipt is on it. The operator may also drop an open card. An agent may work on an
+undecided card without committing to it: reversible drafts go in its ``speculative``
+property; the card stays open (no in_flight, no close) until the answer, which keeps
+the drafts only if it is the pick they assumed. (Cards without a work_needed tag are
+legacy and may still go open -> in_flight.) (An untagged answer
 stays decided, as before.)
 
 A Decision with no status is a legacy one, already decided. A card asks for
@@ -39,6 +43,7 @@ STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_DECIDED, STATUS_CLOSED, STATUS
 AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_CLOSED)    # what entity_edit may set
 LOCKED = (STATUS_CLOSED, STATUS_DROPPED)
 ANSWER_OWNED = ("value", "set_by", "set_at")        # only answer() writes these
+SPECULATIVE = "speculative"     # reversible drafts an agent attaches to an undecided card
 EDGE_KEYS = ("blocks", "led_to", "carried_by")
 VAR_TYPES = ("int", "float", "bool", "string", "option")
 MESSAGE_ID_MAX = 200                # a chat message id's clip (ids are short; never a paste)
@@ -69,6 +74,12 @@ def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
     if key == "status" and value == STATUS_IN_FLIGHT and cur == STATUS_DECIDED \
             and (props or {}).get("work_needed") is not True:
         return "the card was decided as needing no work; it cannot go in flight"
+    if key == "status" and value == STATUS_IN_FLIGHT and cur == STATUS_OPEN \
+            and (props or {}).get("work_needed") is not None:
+        return ("the card is not decided yet: attach reversible drafts in its "
+                "speculative property and wait for the answer")
+    if key == SPECULATIVE and cur not in (None, STATUS_OPEN):
+        return "speculative drafts attach only to an open card"
     if key == "status" and value == STATUS_CLOSED:
         if cur not in (STATUS_DECIDED, STATUS_IN_FLIGHT):
             return "only a decided or in-flight card closes"
@@ -228,13 +239,18 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
         message = str(message or "").strip()[:MESSAGE_ID_MAX]
         if message and p["chat"] == conv:     # the message is in the card's own chat
             p["message"] = message
+    spec_kept = None
+    if p.get(SPECULATIVE):      # drafts built on the agent's pick live only if the answer is that pick
+        spec_kept = str(v) == str(p.get("pick"))
+        if not spec_kept:
+            p["speculative_discarded"] = p.pop(SPECULATIVE)
     ent.properties = p
     est.upsert(ent)
     pool = getattr(est, "_events_pool", None)   # the watcher loops' events pool (the proxy wires it)
     if pool is not None:                        # the answer wakes a loop pass, like a fired watch
         pool.put({"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
                   "blocks": p.get("blocks") or [], "work_needed": work is True,
-                  "ts": time.time()})
+                  "speculative_kept": spec_kept, "ts": time.time()})
     return {"ok": True, "card": _card_of(ent)}
 
 

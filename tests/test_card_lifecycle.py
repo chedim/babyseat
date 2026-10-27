@@ -175,3 +175,49 @@ class AnsweredCardsStayAnswered(unittest.TestCase):
         eid = _card(est, "legacy")
         self.assertTrue(est.edit(eid, properties={"status": "in_flight"})["ok"])
         self.assertTrue(DM.answer(est, led, eid, True)["ok"])
+
+
+class SpeculativeWork(unittest.TestCase):
+    """An agent may work on an undecided card (reversible drafts in `speculative`)
+    but not commit to it: no in_flight, no close. The answer keeps the drafts
+    only if it is the pick they assumed."""
+
+    def test_a_new_undecided_card_cannot_go_in_flight(self):
+        est, _ = _store()
+        eid = _card(est, "s", work_needed=True)
+        self.assertFalse(est.edit(eid, properties={"status": "in_flight"})["ok"])
+        self.assertEqual(_status(est, eid), "open")
+
+    def test_agent_attaches_drafts_to_an_open_card(self):
+        est, _ = _store()
+        eid = _card(est, "s", work_needed=True)
+        self.assertTrue(est.edit(eid, properties={"speculative": "draft PR #1"})["ok"])
+        est.edit(eid, properties={"status": "closed", "receipt": "x"})
+        self.assertEqual(_status(est, eid), "open")
+
+    def test_drafts_survive_the_answer_that_matches_the_pick(self):
+        est, led = _store()
+        est._events_pool = pool = _Pool()
+        eid = _card(est, "s", work_needed=True, pick=True)
+        est.edit(eid, properties={"speculative": "draft"})
+        self.assertTrue(DM.answer(est, led, eid, True)["ok"])
+        p = est.resolve(eid, exact=True).properties
+        self.assertEqual(p["speculative"], "draft")
+        self.assertTrue(pool.events[0]["speculative_kept"])
+
+    def test_drafts_are_discarded_when_the_answer_differs(self):
+        est, led = _store()
+        est._events_pool = pool = _Pool()
+        eid = _card(est, "s", work_needed=True, pick=True)
+        est.edit(eid, properties={"speculative": "draft"})
+        self.assertTrue(DM.answer(est, led, eid, False)["ok"])
+        p = est.resolve(eid, exact=True).properties
+        self.assertNotIn("speculative", p)
+        self.assertEqual(p["speculative_discarded"], "draft")
+        self.assertFalse(pool.events[0]["speculative_kept"])
+
+    def test_drafts_do_not_attach_to_a_decided_card(self):
+        est, led = _store()
+        eid = _card(est, "s", work_needed=True)
+        DM.answer(est, led, eid, True)
+        self.assertFalse(est.edit(eid, properties={"speculative": "late"})["ok"])
