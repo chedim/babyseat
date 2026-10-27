@@ -90,6 +90,7 @@ READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/self/card",                # #283: the zoo's card: name, Lv, rung, awake
                    "membrane/toybox/state",             # #249: the toy dock's live toys
                    "membrane/map/search",               # the 3D view's catalog search
+                   "membrane/map/blurp",                # #576: Blurp's overlay on the 3D field
                    "membrane/decisions",                # #470: the decision cockpit's board
                    "membrane/goals",                    # #470: the cockpit's goals
                    "membrane/stats",                    # the 📊 window's tokenomics
