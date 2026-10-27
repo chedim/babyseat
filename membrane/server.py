@@ -465,6 +465,35 @@ class MessageStore:
 
     _dirty_sessions: set | None = None
 
+    def delete(self, *sids: str) -> bool:
+        """Forget sessions' messages, in RAM and on disk (the merging flush
+        keeps whatever disk holds, so the file is edited here too -- once
+        for all the ids, #570)."""
+        with self._lock:
+            had = False
+            for sid in sids:
+                had = (self.msgs.pop(sid, None) is not None) or had
+                if self._dirty_sessions:
+                    self._dirty_sessions.discard(sid)
+            if self.path is None:
+                return had
+            try:
+                disk = json.loads(Path(self.path).read_text())
+            except Exception:
+                return had
+            if not isinstance(disk, dict) or not any(sid in disk for sid in sids):
+                return had
+            for sid in sids:
+                disk.pop(sid, None)
+            try:
+                tmp = self.path + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(disk, f)
+                os.replace(tmp, self.path)
+            except Exception:
+                pass
+            return True
+
     def flush(self) -> None:
         with self._lock:
             self._flush()
@@ -715,9 +744,9 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
 # ---- THE LANE GATE (the division of hands, 2026-10-06) ----------------------
 # The seat's two minds have different hands: the OPERATOR (build/plan
 # sessions -- the main chat) plants INTENTS, commits and runs commands
-# through the executor (entity_link/unlink); the LISTENERS
+# through the methods it defines (#576 part F); the LISTENERS
 # (the watch loops -- agent 'watch:<eid>') hold the ENTITY HANDS --
-# add/edit/remove/link/unlink -- the events they process are their
+# add/edit/remove -- the events they process are their
 # material. Reads and memory are both lanes'. Plan mode (the agent
 # 'plan') is the operator minus `intend` (planning sessions don't plant
 # commitments -- the direction needs the user's build-mode voice).
@@ -766,11 +795,9 @@ OPERATOR_TOOLS = frozenset((
     # interrupt vs fold into the WHERE WE ARE digest
     "attention",
     # THE EXECUTOR'S DOOR (2026-10-08, the operator's call): the operator
-    # runs commands itself -- link to tool:executor runs inline, the
-    # receipt comes back in the same turn. The HA seat's main chat kept
-    # planting 'run X' goals and waiting a whole loop pass for a listener
-    # to do a one-line command. The other entity hands stay the listeners'.
-    "entity_link", "entity_unlink", "method_define", "method_call", "method_each",
+    # runs commands itself, the receipt comes back in the same turn -- since
+    # #576 part F only as methods it defines and calls (no one-shot link)
+    "method_define", "method_call", "method_each",
     # a method's read (issue #80): runs nothing, so plans may look too
     "method_inspect",
     # THE FLOOD GATES (2026-10-08, the operator's call: "open the flood gates
@@ -784,15 +811,15 @@ OPERATOR_TOOLS = frozenset((
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
-    "entity_link", "entity_unlink", "method_define", "method_call", "method_each",
+    "method_define", "method_call", "method_each",
     # the board's spatial watches (2026-10-08): attention is the
     # listeners' to allocate; the chat lane announces through intend
     "field_watch",
 }) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
-PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "entity_link", "method_define", "method_call", "method_each",
+PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_call", "method_each",
                                "method_inspect",
-                               "entity_unlink", "entity_add", "entity_edit",
+                               "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
                                "entity_inherit"}
 
@@ -812,11 +839,6 @@ _LANE_REFUSALS = {
                     "session -- the build-mode turn does it"),
     "entity_remove": ("plan mode: entities aren't removed from a planning "
                       "session -- the build-mode turn does it"),
-    "entity_link": ("plan mode: commands don't run from a planning "
-                    "session -- the build-mode turn links them to the "
-                    "executor"),
-    "entity_unlink": ("plan mode: the executor's links change from a "
-                      "build-mode turn"),
     "fulfill": ("plan mode: goals aren't closed from a planning "
                 "session -- the build-mode turn (or a listener with the "
                 "receipt) closes them"),
@@ -1426,6 +1448,16 @@ class TurnRunner:
 
     def run(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None, _drained: bool = False) -> dict:
+        """#576: the turn writes as the model, in the chain that woke it (a
+        loop's event) or a new one a person's message starts."""
+        from . import writes as _W
+        with _W.turn(sid):
+            from . import ch_blurp as _CHB             # #576 H: this turn's chain is this conversation's
+            _CHB.note_turn((_W.current() or {}).get("id"), "sid:" + str(sid))
+            return self._run(sid, text, user_info=user_info, user_parts=user_parts, _drained=_drained)
+
+    def _run(self, sid: str, text: str, user_info: dict | None = None,
+             user_parts: list | None = None, _drained: bool = False) -> dict:
         """THE GUARDED ENTRY, now a REAL QUEUE: a second message on a busy
         session first publishes a visible {session.status busy
         queued:true} event, then WAITS FOR ITS TURN -- when the running
@@ -1957,7 +1989,8 @@ class TurnRunner:
             return {}
         pool = ThreadPoolExecutor(max_workers=min(PARALLEL_READS_MAX, len(lead)), thread_name_prefix="read")
         from . import jobs as _jobs
-        out = {cid: (nl, pool.submit(_jobs.dispatch, self, sid, nl, a, cid,
+        from . import writes as _W
+        out = {cid: (nl, pool.submit(_W.carry(_jobs.dispatch), self, sid, nl, a, cid,   # #576: the turn's chain
                                      lambda aa, _n=nl, _c=cid: self.executor(_n, aa, _c)))
                for cid, nl, a in lead}
         pool.shutdown(wait=False)
@@ -3203,8 +3236,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
 def mcp_executor(port: int):
     """The default executor: the MCP tool impls themselves -- the same
     relay surface the TUI uses (all guards stay in the proxy). Unknown
-    tools are a clean error, never a crash. The local models' entity_link
-    and method_call keep their short head (mcp_server.LOCAL_TOOL_IMPLS)."""
+    tools are a clean error, never a crash. The local models'
+    method_call keeps their short head (mcp_server.LOCAL_TOOL_IMPLS)."""
     def exec_tool(name: str, args: dict, call_id: str = "") -> str:
         impl = _mcp.LOCAL_TOOL_IMPLS.get(name)
         if impl is None:
@@ -3747,9 +3780,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 from . import self_sheet as _SHEET
                 from . import self_super as _SUP
                 _sup = _SUP.of(getattr(runner, "srv", None) if runner is not None else None)
+                from . import ch_blurp as _CHB         # #576 D2: the branches, level and code are the seat's VM's
+                _psrv = getattr(runner, "srv", None) if runner is not None else None
                 if _sup is not None:                   # #440 part 4: Blurp's own process
-                    return self._json_out(_sup.view("/sheet"))
-                self._json_out(_SHEET.sheet(getattr(runner, "srv", None) if runner is not None else None))
+                    return self._json_out(_CHB.augment(_psrv, _sup.view("/sheet")))
+                self._json_out(_CHB.augment(_psrv, _SHEET.sheet(_psrv)))
             elif path == "/membrane/self/card":
                 # #283: the zoo's card -- self's name (per seat), level, rung
                 # name, mode, last activity; cheap to poll across seats
@@ -3757,11 +3792,14 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 from . import self_sheet as _SHEET
                 from . import self_super as _SUP
                 _sup = _SUP.of(getattr(runner, "srv", None) if runner is not None else None)
-                if _sup is not None:                   # #440 part 4: Blurp's own process (its last good card)
-                    return self._json_out(_sup.view("/card"))
-                self._json_out(_SHEET.card(getattr(runner, "srv", None) if runner is not None else None))
+                from . import ch_blurp as _CHB         # #576 D2: its level is the branches granted
+                _psrv = getattr(runner, "srv", None) if runner is not None else None
+                _card = _sup.view("/card") if _sup is not None else _SHEET.card(_psrv)
+                if isinstance(_card, dict) and getattr(getattr(_psrv, "ch_vm", None), "learner", None) is not None:
+                    _card = {**_card, "level": len(_CHB.grants(_psrv))}
+                self._json_out(_card)
             elif path == "/membrane/self/context":
-                # #440 part 2: the per-cycle snapshot Blurp's own process reads
+                # #440 part 2: the snapshot Blurp's own process reads
                 # (self_api.context; the in-process loop calls the same code).
                 # The seat's own token (or open mode) only: never a person's
                 psrv = getattr(runner, "srv", None) if runner is not None else None
@@ -3771,10 +3809,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     return self._json_err(503, "no seat")
                 from . import self_api as _SAPI
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
-                self._json_out(_SAPI.context(psrv, spots=_q.get("spot") or (),
-                                             reach=(_q.get("reach") or [""])[0] in ("1", "true"),
-                                             only=(_q.get("only") or [None])[0],
-                                             own=(_q.get("own") or [""])[0] in ("1", "true")))
+                _rep = {k[2:]: (v[0] == "1" if v[0] in ("0", "1") else v[0])
+                        for k, v in _q.items() if k.startswith("r_") and v}      # #576 D2: the learn exchange
+                self._json_out(_SAPI.context(psrv, only=(_q.get("only") or [None])[0],
+                                             own=(_q.get("own") or [""])[0] in ("1", "true"),
+                                             report=_rep or None))
             elif path == "/membrane/toybox/state":
                 # #249: the toy dock's live source -- the toys alone, cheap
                 # enough to poll every few seconds (read-only, gated)
@@ -3810,6 +3849,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 self._notfound()
 
         def do_POST(self):
+            from . import writes as _W
+            with _W.from_headers(getattr(self, "headers", None)):     # #576: the caller's chain and writer
+                return self._do_POST_body()
+
+        def _do_POST_body(self):
             if not self._jwt_door():
                 return                       # JWT mode: no valid token, no answer
             if _DIAG.route(self, self.path.split("?", 1)[0]):
@@ -3845,7 +3889,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     _SHEET.forget_dock(getattr(runner, "srv", None) if runner is not None else None)
                 return self._json_out(out, code=200 if out.get("ok") else 400)
             if path == "/membrane/self/effects":
-                # #440 part 2: the cycle's acts, run in the seat in order
+                # #440 part 2: Blurp's acts, run in the seat in order
                 # (self_api.effects; the in-process loop calls the same code):
                 # {"effects": [...]} -> {"results": [...]}. The seat's own
                 # token (or open mode) only: never a person's

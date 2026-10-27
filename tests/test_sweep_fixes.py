@@ -52,7 +52,9 @@ class TestFieldChangedReachesThePool(unittest.TestCase):
         ent = QuantumEntity(eid=MEMBRANE_NS + "Component:x", cls="Component",
                             properties={"name": "x", "watch_fields": [{"verb": "pos", "arg": 0.01}]})
         srv.entity_store.docs[ent.eid] = ent
+        ent.position = [1.0, 0.0]
         N.note_field_change(srv, srv.entity_store, ent, change_ts=1000.0)
+        ent.position = [0.0, 1.0]                  # #567: only a crossing delivers
         N.note_field_change(srv, srv.entity_store, ent, change_ts=1001.0)
         self.assertTrue([e for e in srv.events_pool.items if e["kind"] == "field:changed"])
 

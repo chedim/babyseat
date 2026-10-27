@@ -314,7 +314,7 @@ def loop_session(srv, agent: str) -> str:
     With the serve runner wired (srv._loop_runner) the loop gets a REAL
     session in the runner's store, carrying its agent ('watch: <eid>') --
     the runner's agent registry reads it and lanes the turn LISTENER, so
-    the loop holds the entity hands (entity_link -> tool:executor).
+    the loop holds the entity hands (its method calls -> tool:executor).
     2026-10-07: this read `srv.__loop_runner__` (never set) and ALWAYS fell
     back to the bare key below -> the turn laned 'build' -> operator ->
     every exec link refused -> the HA seat's commands never ran.
@@ -324,6 +324,16 @@ def loop_session(srv, agent: str) -> str:
     if runner is not None:
         try:
             store = runner.sessions
+            # #570: ONE session per entity -- the pass reuses it and starts it
+            # empty (the task text carries the entity's last verdicts), so
+            # nothing replays and the store keeps one pass per entity
+            with store._lock:
+                mine = [x for x in store.sessions.values() if x.get("agent") == agent]
+            if mine:
+                s = max(mine, key=lambda x: (x.get("time") or {}).get("updated") or 0)
+                runner.messages.delete(s["id"])
+                store.touch(s["id"])
+                return s["id"]
             s = store.create(title=agent)
             # create() already flushed the doc as 'build': stamp the
             # agent AND flush, or a restart revives the loop's session
@@ -338,6 +348,34 @@ def loop_session(srv, agent: str) -> str:
             print(f"[opencode] loop session create failed ({e}); "
                   "falling back to the bare key", file=sys.stderr)
     return f"loop::{agent}"
+
+
+def collapse_loop_sessions(runner) -> int:
+    """#570, once per boot: an older seat made a session per wake -- keep
+    each loop agent's newest, delete the rest with their messages. Chats
+    (agent build / plan / unset) are never touched. -> how many went."""
+    from .server import _lane_of
+    store = runner.sessions
+    with store._lock:
+        rows = list(store.sessions.values())
+    by: dict = {}
+    for x in rows:
+        agent = str(x.get("agent") or "")
+        if agent in ("", "build", "plan") or _lane_of(agent) not in ("listener", "plan"):
+            continue
+        by.setdefault(agent, []).append(x)
+    old = []
+    for xs in by.values():
+        xs.sort(key=lambda x: (x.get("time") or {}).get("updated") or 0)
+        old += [x["id"] for x in xs[:-1]]
+    if not old:
+        return 0
+    runner.messages.delete(*old)                  # one rewrite of the messages file
+    with store._lock:
+        for sid in old:
+            store.sessions.pop(sid, None)
+        store._flush()
+    return len(old)
 
 
 def proxy_bind_host(args) -> str:
@@ -1188,7 +1226,7 @@ def main() -> None:
             from .night import seed_executor_entity
             if seed_executor_entity(srv.entity_store):
                 print("[seat] the executor is planted (tool:executor -- "
-                      "entity_link runs commands through it)", file=sys.stderr)
+                      "methods run commands through it)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] executor seeding skipped ({e})", file=sys.stderr)
         # THE WARM-UP (2026-10-10: the first turn after a restart paid 11.8 s
@@ -1560,6 +1598,25 @@ def main() -> None:
                 return {"verdict_text": (out or "")[:200], "model": model or None}
             return go
         srv.run_loop_turn = _run_loop_turn()
+        try:                               # #576 G: the retired link commands go (once; a backup is kept)
+            from . import scripts as _SCR
+            if getattr(srv, "entity_store", None) is not None:
+                _rep = _SCR.migrate(srv.entity_store)
+                if _rep["stripped"] or _rep["deleted"]:
+                    print(f"[opencode] old commands: {_rep['stripped']} program entities stripped, "
+                          f"{_rep['deleted']} variants deleted (backup {_rep['backup']})", file=sys.stderr)
+        except Exception as e:
+            print(f"[opencode] command migration failed ({e})", file=sys.stderr)
+        try:                               # #576 B: the cliffhanger VM hears every write
+            from . import ch as _CH
+            if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
+                srv.ch_vm = _CH.VM(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))
+                srv.ch_vm.attach()
+                srv.ch_vm.start()
+                from . import ch_blurp as _CHB    # #576 D2: Blurp's learner, its purse closed until Blurp reports
+                _CHB.attach(srv)
+        except Exception as e:
+            print(f"[opencode] the cliffhanger VM failed to start ({e})", file=sys.stderr)
         from .watch_agents import enabled_loops as _wa_on, start_goal_pulse
         if _wa_on():                       # MEMBRANE_WATCH_LOOPS=0: the documented kill switch (never read before)
             WA_start_loop_drainer(srv)
@@ -1951,6 +2008,13 @@ def main() -> None:
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
+            try:                                   # #570: an older seat's session per wake, collapsed
+                _gone = collapse_loop_sessions(runner)
+                if _gone:
+                    print(f"[opencode] collapsed {_gone} old loop sessions (one per entity now)",
+                          file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] loop session collapse failed ({e})", file=sys.stderr)
             # THE MINDS' MODELS: the saved picks for the loops + the cortex
             # (+ the think dial; an explicit CLI on/off beats the file, auto defers)
             try:
@@ -2032,6 +2096,8 @@ def main() -> None:
                 _SELF.bind(srv)
                 from . import toybox as _TB       # #239: self's toys, the built-in kit (toybox.add/list/...)
                 _TB.bind(srv)
+                from . import adapters as _AD     # #576 part E: effects are writes (chat, toys, llm, restart)
+                _AD.start(srv)
                 from . import self_super as _SUP  # #440: its own process (default), or in-process with MEMBRANE_SELF_PROC=0
                 _self_host = surf_host if surf_host not in ("0.0.0.0", "::", "") else "127.0.0.1"
                 _SUP.boot(srv, f"http://{_self_host}:{serve_port or 4096}",   # the native serve: its /membrane/self/*

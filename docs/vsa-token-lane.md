@@ -170,6 +170,10 @@ fires still land (the queue + the banner report them).
   f:membrane/server.py` (the `loop_agent_name` contract) -- the
   operator's ask ("show in its name the id of the entity whose event
   it processes").
+- ONE session per entity (#570): a pass reuses its entity's session
+  and starts it empty -- the task text already carries the entity's
+  last verdicts -- so nothing replays and the store keeps one pass per
+  entity; the boot collapses the duplicates an older seat left.
 - `/agent` advertises the `watch` agent (mode: subagent) --
   `_agent_shapes()` (server.py).
 - `/experimental/capabilities`: `backgroundSubagents: true` -- the

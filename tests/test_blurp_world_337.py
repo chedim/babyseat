@@ -11,7 +11,7 @@ the model's prose, in any chat -- adds the entities it mentions (why "heard");
 one from Blurp's private chat (session blurp:<person>) joins as "chat"; what
 the adults DO (tool-call observations) joins as "seen". The model's unsaid
 reasoning adds nothing, and the room's past (events before birth) is not
-heard or seen. Every read Blurp makes is filtered through the world.
+heard or seen. (#576 retired the old learner whose reads it filtered.)
 
 Blurp's private chat (the PM with Blurp): one model-free session per person,
 marked `blurp: true`; a message there never runs a model turn and the voice
@@ -162,45 +162,6 @@ def test_a_toy_joins_when_it_is_provisioned():
     fid = field_id(out["eids"][0])
     assert SW.has(srv, fid)
     assert _doc(srv)["members"][fid]["why"] == "toy"
-
-
-# ---- every read is filtered -----------------------------------------------------------
-
-def test_an_entity_outside_the_world_is_never_looked_at():
-    from _self_cap import cap
-    srv = _seat(names=("inside", "outside"))
-    SW.join(srv, [MEMBRANE_NS + "Component:inside"], "toy")
-    cap(srv, 2)
-    for i in range(40):
-        SL.cycle(srv, now=1000.0 + i * SL.PACE_S)
-    looked = {r.get("eid") for r in _record(srv) if r.get("kind") == "reach"}
-    assert MEMBRANE_NS + "Component:inside" in looked
-    assert MEMBRANE_NS + "Component:outside" not in looked
-    assert MEMBRANE_NS + "Component:outside" not in SL._targets(srv)
-
-
-def test_a_direct_reach_outside_the_world_reads_nothing():
-    srv = _seat(names=("outside",))
-    SL._ctx.cycle = {"srv": srv, "act": "reach", "now": 1000.0}
-    try:
-        SL._reach(srv, MEMBRANE_NS + "Component:outside")
-        read = SL._ctx.cycle["read"]
-    finally:
-        SL._ctx.cycle = None
-    assert read["fired"] is False and "world" in read["reason"]
-    assert "script_data" not in srv.entity_store.docs[MEMBRANE_NS + "Component:outside"].properties
-
-
-def test_the_ball_and_the_mirror_outside_the_world_are_not_blurps():
-    srv = _seat()
-    for kind in ("ball", "mirror"):
-        TB.add(srv, kind, locked_ok=True)
-    ball = MEMBRANE_NS + "Component:toy:ball"
-    assert SL._in_world(srv, ball) and SL._mirror_toy(srv) is not None   # #333: the ball is nudged, never rolled
-    rt = SL._rt(srv)
-    rt["world"]["members"] = {k: v for k, v in rt["world"]["members"].items() if "toy:" not in k}
-    assert not SL._in_world(srv, ball)                                   # ...so a nudge at it is refused
-    assert SL._mirror_toy(srv) is None
 
 
 # ---- Blurp hears the room -------------------------------------------------------------

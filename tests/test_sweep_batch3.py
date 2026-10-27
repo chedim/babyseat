@@ -83,9 +83,7 @@ class TestScriptRefusalsAreVisible(unittest.TestCase):
 
 
 class TestWakesSayWhatChanged(unittest.TestCase):
-    def test_getter_and_field_wakes(self):
-        t = WA.loop_task_text({"kind": "getter-applied", "entity": "membrane::bat", "state": {"pct": 61}})
-        self.assertIn("pct=61", t)
+    def test_field_wakes(self):
         t = WA.loop_task_text({"kind": "field:changed", "entity": "membrane::bat", "verb": "pos", "n_changes": 3,
                                "span_s": 4.0})
         self.assertIn("'pos' crossed", t)

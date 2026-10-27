@@ -17,7 +17,7 @@ Supervisor runs membrane.self_proc (part 3) as its child instead:
 - Stop: its stdin closed and SIGTERM, then SIGKILL after STOP_GRACE_S. The
   child also exits by itself when its stdin closes (the seat gone).
 - Forwarding: the seat's /membrane/self/card|sheet|recent|status, the panel's
-  self controls (mode, accept, limit, name) and a person speaking (chat-in)
+  self controls (mode, accept, name) and a person speaking (chat-in)
   go to the child's loopback port with FORWARD_TIMEOUT_S; a view that does
   not come back in time is the last good one (`proc.stale`), so the UI needs
   no change while the child restarts.
@@ -259,6 +259,8 @@ class Supervisor:
         threading.Thread(target=wait, name=f"self-super-wait-{kid.pid}", daemon=True).start()
 
     def _exited(self, kid) -> None:
+        from . import ch_blurp as _CHB             # #576 D2: no report will come -- the purse closes
+        _CHB.close_purse(self.srv)
         with self._lock:
             if self._kid is kid:
                 self._kid, self._port = None, None
@@ -338,7 +340,7 @@ class Supervisor:
         for k in list(rt):
             if k not in ("wake", "srv"):
                 rt.pop(k, None)
-        rt.update(mode="off", last=None, fails=0, held=False)
+        rt.update(mode="off")
         SL.load_state(self.srv)
         SL._read(self.srv)
         self._stale_seat = False
@@ -426,20 +428,14 @@ class Supervisor:
         before = self.mode
         if "mode" in ap:
             self.mode = str(ap["mode"])
-        if "limit" in ap and "limit" in body:
-            ids = SL._limit_ids(body["limit"])
-            if ids == set():
-                self.mode = "off"
-            elif ids and self.mode == "off":
-                self.mode = "on"
-        if self.mode in ("on", "watch") and (before == "off" or "mode" in ap or "limit" in ap):
+        if self.mode in ("on", "watch") and (before == "off" or "mode" in ap):
             self._crashes.clear()                    # the person switched it on: a hold ends, afresh
             self._next_at = 0.0
         if self.srv is not None:
             SL._rt(self.srv)["mode"] = self.mode
 
     def control(self, body: dict) -> tuple[int, dict]:
-        """The self controls (mode, accept, limit, name, by): the child's when
+        """The self controls (mode, accept, name, by): the child's when
         it runs; the seat's own when no process exists; refused while one starts."""
         body = dict(body or {})
         with self._lock:

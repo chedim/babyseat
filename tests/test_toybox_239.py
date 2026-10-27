@@ -24,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import night as N  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
-from tests._self_cap import cap  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
@@ -112,7 +111,7 @@ def test_a_toy_is_an_entity_with_a_stub_getter_not_model_code():
     assert p["toybox"]["kind"] == "die"
     assert "toybox" in p["getter_script"] and len(p["getter_script"]) < 120
     assert "toybox" in p["tick_script"] and len(p["tick_script"]) < 120
-    assert SL._eid() not in SL._targets(srv) and _eid("toy:die") in SL._targets(srv)
+    assert e.eid != SL._eid()
 
 
 def test_bad_kind_and_bad_params_are_refused():
@@ -291,43 +290,6 @@ def test_a_seat_restart_keeps_the_toys_and_their_state(_data):
 
 # ---- end to end: self's reach through the real self loop --------------------------
 
-def test_tower_through_selfs_real_nudge_path(monkeypatch):
-    srv = _seat()
-    TB.add(srv, "tower", params={"n": 5})        # #267: on the bench before birth (it unlocks at rung 3)
-    cap(srv, 1)
-    t = 1000.0
-    for i in range(SL.RUNG1_CYCLES * 2):                          # rung 1 first: the ladder is climbed in order
-        SL.cycle(srv, now=t)
-        t += SL.PACE_S
-    assert SL.status(srv)["rung"] == 1
-    cap(srv, 2)
-    b = {k: _eid(f"toy:tower:b{k}") for k in range(1, 6)}
-    monkeypatch.setattr(SL, "_targets", lambda srv: [b[3]])
-    SL.cycle(srv, now=t)                                          # #333: a look, and nothing moves
-    t += SL.PACE_S
-    assert all(x["standing"] for x in TB.state("toy:tower")["blocks"])
-    SL._nudge_once(srv, 0, t - 1.0, b[3], None)                   # its nudge, through self::nudge
-    SL.cycle(srv, now=t)
-    t += SL.PACE_S
-    reach = [r for r in SL._read(srv) if r.get("kind") == "reach"][-1]
-    assert reach["eid"] == b[3] and reach["answer"] == "changed"
-    bl = TB.state("toy:tower")["blocks"]
-    assert [x["standing"] for x in bl] == [True, True, False, False, False]
-    assert all(x["by"] == "self" for x in bl[2:])
-    # the model's own read of a block changes nothing
-    WA.entity_read_back(srv, srv.entity_store.docs[b[1]], by="model")
-    assert TB.state("toy:tower")["blocks"][0]["standing"] is True
-    monkeypatch.setattr(SL, "_targets", lambda srv: [b[4]])
-    SL.cycle(srv, now=t)
-    t += SL.PACE_S
-    SL._nudge_once(srv, 0, t - 1.0, b[4], None)
-    SL.cycle(srv, now=t)
-    reach = [r for r in SL._read(srv) if r.get("kind") == "reach"][-1]
-    assert reach["eid"] == b[4] and reach["answer"] == "changed"
-    assert [x["standing"] for x in TB.state("toy:tower")["blocks"]] == [True, True, False, True, False]
-    lifts = [e for e in _log("toy:tower") if e["what"] == "lift"]
-    assert lifts and lifts[-1]["by"] == "self" and lifts[-1]["block"] == 4
-
 
 def test_the_getter_is_told_who_reads():
     """The marker: entity_read_back hands its `by` to the getter (state.extra.by)."""
@@ -338,19 +300,6 @@ def test_the_getter_is_told_who_reads():
     srv.entity_store.docs[e.eid] = e
     assert WA.entity_read_back(srv, e, by="self")["state"] == {"by": "self"}
     assert WA.entity_read_back(srv, e, by="model")["state"] == {"by": "model"}
-
-
-# ---- status: the 👶 panel's toys -----------------------------------------------------
-
-def test_status_lists_toybox_toys_with_their_kind():
-    srv = _seat()
-    TB.add(srv, "body", name="pet")                               # no toy: prefix: still a toy
-    TB.add(srv, "die")
-    SL._rt(srv).pop("toys", None)
-    toys = {t["eid"]: t for t in SL.status(srv)["toys"]}
-    assert toys[_eid("pet")]["kind"] == "body"
-    assert toys[_eid("toy:die")]["kind"] == "die"
-    assert toys[_eid("toy:die")]["health"] == "unread"
 
 
 # ---- the surface: the toybox object (cliffhanger) and the CLI ------------------------

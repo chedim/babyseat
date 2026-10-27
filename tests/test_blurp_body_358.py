@@ -65,11 +65,23 @@ def test_an_awake_card_at_full_energy():
 @NODE
 def test_asleep_from_the_card():
     assert _run("out = H.blurpPose({awake: false, asleep: true, energy: 0.2, mode: 'on'})")["asleep"] is True
-    assert _run("out = H.blurpPose({awake: false, asleep: false, energy: 0.9, mode: 'off'})")["asleep"] is True
-    # an older card (no `awake`): its mode; the zoo's card: its state
-    assert _run("out = H.blurpPose({mode: 'off'})")["asleep"] is True
+    # #516: switched off is not asleep -- real sleep (awake false, mode on) keeps the closed eyes
+    assert _run("out = H.blurpPose({awake: false, asleep: false, energy: 0.9, mode: 'off'})")["asleep"] is False
+    assert _run("out = H.blurpPose({awake: false, asleep: true, energy: 0.9, mode: 'watch'})")["asleep"] is True
     assert _run("out = H.blurpPose({state: 'asleep'})")["asleep"] is True
     assert _run("out = H.blurpPose({state: 'awake'})")["asleep"] is False
+
+
+@NODE
+def test_off_from_the_card_is_not_asleep():
+    for card in ("{awake: false, mode: 'off', energy: 0.9}", "{mode: 'off'}", "{state: 'off'}"):
+        p = _run("out = H.blurpPose(%s)" % card)
+        assert p["off"] is True and p["asleep"] is False, card
+    for card in ("{awake: true, mode: 'on'}", "{awake: false, mode: 'on'}", "{state: 'asleep'}", "{state: 'awake'}"):
+        assert _run("out = H.blurpPose(%s)" % card)["off"] is False, card
+    # the toggle's own view (before the card loads): switched off
+    p = _run("out = H.blurpPose(null, {loaded: true, on: false})")
+    assert p["off"] is True and p["asleep"] is False
 
 
 @NODE
@@ -83,7 +95,7 @@ def test_the_glow_scales_with_energy():
 
 @NODE
 def test_without_a_card_the_sleep_toggle_decides_then_nothing():
-    assert _run("out = H.blurpPose(null, {loaded: true, on: false})")["asleep"] is True
+    assert _run("out = H.blurpPose(null, {loaded: true, on: false})")["off"] is True
     assert _run("out = H.blurpPose(null, {loaded: true, on: true})")["asleep"] is False
     p = _run("out = H.blurpPose(null, {loaded: false, on: false})")    # nothing known yet
     assert p["asleep"] is False and p["glow"] == pytest.approx(1)
@@ -158,6 +170,15 @@ def test_asleep_the_eyes_close_and_zs_drift():
     assert sum(1 for c in log if c[0] == "ellipse") == 1     # the body only
     assert sum(1 for c in log if c[0] == "arc") == 3         # two closed eyes + the smile
     assert any(c[0] == "fillText" and c[1] == "z" for c in log)
+
+
+@NODE
+def test_off_it_is_a_dim_blank_body_no_closed_eyes_no_zs():
+    log = _draw(0.5, {"asleep": False, "off": True, "glow": 1, "look": None})
+    assert sum(1 for c in log if c[0] == "ellipse") == 1     # the body only
+    assert not any(c[0] == "arc" for c in log)              # no closed-eye arcs, no smile
+    assert not any(c[0] == "fillText" for c in log)         # no z's
+    assert next(c[1] for c in log if c[0] == "fill@blur") == 0   # no glow
 
 
 @NODE
@@ -257,6 +278,15 @@ def test_an_online_zoo_card_carries_its_blurps_body():
          "card": {"name": "Pip", "level": 3, "state": "asleep", "energy": 0.4}}))
     assert re.search(r'<canvas class="zbody"[^>]*aria-hidden="true"', h)
     assert 'data-asleep="1"' in h and 'data-energy="0.4"' in h
+
+
+@NODE
+def test_an_off_zoo_card_says_off_not_asleep():
+    h = _run("out = H.zooCard(%s, 1760000600)" % json.dumps(
+        {"id": "laptop", "name": "Laptop", "online": True,
+         "card": {"name": "Pip", "level": 3, "mode": "off", "state": "off"}}))
+    assert 'data-off="1"' in h and 'data-asleep="0"' in h
+    assert "asleep" not in h.replace('data-asleep', '')
 
 
 @NODE

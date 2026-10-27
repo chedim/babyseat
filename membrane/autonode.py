@@ -383,6 +383,11 @@ class Autonode:
 
     # ---- the bounded fire ------------------------------------------------
     def _fire(self, eid: str, trig: Trigger) -> dict:
+        from . import writes as _W
+        with _W.source("sensor", f"{trig.kind}:{eid}"):      # #576: a sensor's change starts a chain
+            return self._fire_body(eid, trig)
+
+    def _fire_body(self, eid: str, trig: Trigger) -> dict:
         try:
             ent = (self.est.docs or {}).get(eid)
             if ent is None:

@@ -1,5 +1,17 @@
 # Growing self — the operator's guide to the 0.7 skill tree
 
+> **Retired in [#576](https://github.com/chedim/membrane/issues/576) (part D1).**
+> Blurp starts anew: the try / expect / notice cycle, its `self::` methods,
+> the skill tree and the rungs (0-13) below, the nudge, the mirror, change
+> itself, curiosity and the toy unlocks are gone from the code. What stays is
+> Blurp's body: its entity and name, the ⏻ switch, energy, sleep and wake
+> ([sleep.md](sleep.md)), the record and its archive, and the 👶 panel (its
+> sheet renders empty: level 0, no skills, an empty tree). Every toy kind can
+> be added. The loop keeps turning: each step charges energy and runs the
+> learner hook `self_loop.learn_step`, where the new learner (#576 D2:
+> branches mastered by trigger edges) plugs in. This page is kept as the
+> history of the first learner.
+
 `self` is the seed of the evolving self in
 [#161](https://github.com/chedim/membrane/issues/161): a small loop that learns
 its world one skill at a time. The operator named it **Blurp** (2026-10-19,
@@ -833,10 +845,13 @@ Blurp as the film draws it -- a soft gold body with a glow, a slight wobble,
 two eyes, a blink now and then, a small smile -- not as a 👶. It shows only
 what the seat reports:
 
-- **asleep** (the seat's card, `GET /membrane/self/card`: `awake` false --
-  switched off or asleep from tiredness, #345): the eyes close and z's drift
-  up beside it. Before the card loads (or from a seat without it) the ⏻
-  switch's state decides.
+- **asleep** (the seat's card, `GET /membrane/self/card`: `awake` false with
+  the mode on -- asleep from tiredness, #345): the eyes close and z's drift
+  up beside it.
+- **off** (#516; the card's mode `off`, the ⏻ switch): a dim, blank body --
+  no glow, no face, no z's -- never drawn as sleep. The zoo card's state says
+  `off`. Before the card loads (or from a seat without it) the ⏻ switch's
+  state decides.
 - **energy** (the same card, 0..1): the glow scales from 30 % of the film's at
   0 to the full glow at 1; a card without energy keeps the full glow.
 - **the look:** while self has a fresh look on the 3D field (the same 8 s
@@ -1050,11 +1065,19 @@ and self's own record: nothing is claimed about self that the record doesn't
 measure. On a seat too old to serve the sheet, the panel shows the old report
 card instead.
 
+### The Code tab
+
+The Code tab shows Blurp's cliffhanger code, read-only: each of its own methods
+(`method_of` self -- the five it is born with, `try`, `expect`, `notice`, `reach`,
+`nudge`, and any it defines later), with its command, its steps and how many
+times it ran. It is the sheet's `code` list (`method_inspect` per method), so
+it needs no call of its own.
+
 ### The Skill tree tab
 
-The panel has two tabs at its top: **Sheet** (everything above) and **Skill
-tree** (#296); the arrow keys move between them and the one you chose is
-remembered per browser. The Skill tree tab draws self's achievements the way an
+The panel has three tabs at its top: **Sheet** (everything above), **Skill
+tree** (#296) and **Code**; the arrow keys move between them and the one you
+chose is remembered per browser. The Skill tree tab draws self's achievements the way an
 RPG draws a skill tree:
 
 - **lanes by branch** (Self, World, Others), each skill below the ones

@@ -69,7 +69,8 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(R("goal", {"action": "close", "spec": "g", "evidence": "rc=0"}),
                          ("fulfill", {"spec": "g", "evidence": "rc=0"}))
         self.assertEqual(R("memory", {"action": "learn", "text": "x"}), ("learn", {"lesson": "x"}))
-        self.assertEqual(R("exec", {"action": "link", "commands": "uptime"}), ("entity_link", {"commands": "uptime"}))
+        self.assertEqual(R("exec", {"action": "call", "object": "o", "method": "m"}),
+                         ("method_call", {"object": "o", "method": "m"}))
         self.assertEqual(R("track", {"action": "list"}), ("entity_tracks", {}))
         self.assertEqual(R("field_watch", {"action": "dial", "budget": 4}), ("attention", {"action": "set", "budget": 4}))
         self.assertEqual(R("state", {}), ("state", {}))
@@ -143,7 +144,7 @@ class TestTheTurn(unittest.TestCase):
         self.assertNotIn("entity_edit", sent)
 
     def test_the_lane_gate_still_holds(self):
-        seen, tools, _ = _turn("phone", [("exec", {"action": "link", "commands": "reboot"})])
+        seen, tools, _ = _turn("phone", [("exec", {"action": "call", "object": "presence", "method": "restart"})])
         self.assertEqual(seen, [])
         self.assertIn("Refused", tools[0]["state"]["output"])
 
@@ -211,8 +212,8 @@ class TestOldEditTakesParents(unittest.TestCase):
             leg, a = T.resolve(name, args)
             self.assertEqual((leg, a.get("spec")), ("entity_read", "m:x"), name)
             self.assertIsNone(S._lane_refusal(leg, "operator"), name)
-        leg, a = T.resolve("exec/action-link", {"command": "c1", "params": '{"needle": "x"}'})
-        self.assertEqual((leg, a["commands"], a["args"]), ("entity_link", "c1", {"needle": "x"}))
+        leg, a = T.resolve("exec/action-call", {"object": "o", "method": "m", "args": {"needle": "x"}})
+        self.assertEqual((leg, a["object"], a["args"]), ("method_call", "o", {"needle": "x"}))
         self.assertEqual(T.resolve("membrane-query", {"topic": "t"})[0], "query")
         self.assertEqual(T.resolve("nonsense/action-read", {})[0], "nonsense/action-read")   # still refused, honestly
 

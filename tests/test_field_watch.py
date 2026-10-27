@@ -195,3 +195,55 @@ def test_drainer_runs_the_change_script(tmp_path):
     assert len(evs) == 1
     assert evs[0].get("kind") == "field:changed"
     assert evs[0].get("entity") == ent.eid
+
+def test_edits_without_a_crossing_deliver_nothing_567(tmp_path):
+    """#567: plain edits (a tick script's own writes, links) that leave
+    the position inside the bar are silence -- the burst counts
+    crossings, not flushes."""
+    srv, est = _seat(tmp_path)
+    ent = _watched(est, filters=[{"verb": "pos", "arg": 0.1}])
+    ent.position = [1.0, 0.0]
+    ent.properties["wf_stamp_pos"] = [0.99, 0.0]
+    for _ in range(5):
+        note_field_change(srv, est, ent)
+    assert srv._events_pool.take() == []
+
+
+def test_a_hot_entity_without_a_crossing_delivers_nothing_567(tmp_path):
+    srv, est = _seat(tmp_path)
+    ent = _watched(est, filters=[{"verb": "pos", "arg": 0.1}])
+    ent.properties["entity_heat"] = 1.0
+    ent.position = [1.0, 0.0]
+    ent.properties["wf_stamp_pos"] = [0.99, 0.0]
+    for _ in range(5):
+        note_field_change(srv, est, ent)
+    ent.properties["entity_heat"] = 0.1
+    note_field_change(srv, est, ent)
+    assert srv._events_pool.take() == []
+
+
+def test_the_event_names_the_filter_that_crossed_567(tmp_path):
+    """A hot entity's grouped crossing keeps the crossed verb, never a
+    'pos' fallback."""
+    srv, est = _seat(tmp_path)
+    ent = _watched(est, filters=[{"verb": "vel", "arg": 0.5}])
+    ent.properties["entity_heat"] = 1.0
+    ent.properties["wf_stamp_vel"] = 0.1
+    ent.properties["ring_velocity"] = 0.9
+    note_field_change(srv, est, ent)
+    note_field_change(srv, est, ent)
+    ent.properties["entity_heat"] = 0.1
+    note_field_change(srv, est, ent)
+    evs = srv._events_pool.take()
+    assert len(evs) == 1 and evs[0]["verb"] == "vel", evs
+
+
+def test_a_burst_saved_before_567_is_dropped(tmp_path):
+    srv, est = _seat(tmp_path)
+    ent = _watched(est, filters=[{"verb": "pos", "arg": 0.1}])
+    ent.position = [1.0, 0.0]
+    ent.properties["wf_stamp_pos"] = [0.99, 0.0]
+    ent.properties[night.WF_BURST_KEY] = {"n": 4, "since": time.time() - 500}
+    note_field_change(srv, est, ent)
+    assert srv._events_pool.take() == []
+    assert night.WF_BURST_KEY not in ent.properties

@@ -1,19 +1,16 @@
 """#440 part 1: ONE WRITER FOR self/.
 
-Blurp is moving into its own process (#440); that child will own
-<data dir>/self/ (the record, its archive, mode, model, tempo, nudged,
-settings, energy, world). Before it can, every write under self/ goes
-through one interface, membrane.self_writer, still in-process: no other
-module opens, replaces, truncates, removes or creates anything there, and
-the seat-side writers (the panel's accept / set_mode / set_limit, the toy
-unlocks, energy, the chat thing's tempo) call the writer, not self_loop's
-file helpers. No behaviour change: the files are the same files.
+Blurp runs in its own process (#440); that child owns <data dir>/self/
+(the record, its archive, mode, energy, world). Every write under self/
+goes through one interface, membrane.self_writer: no other module opens,
+replaces, truncates, removes or creates anything there, and the seat-side
+writers (the panel's accept / set_mode, energy) call the writer, not
+self_loop's file helpers.
 
 Two checks: at run time (every write under self/ while a seat boots, is
-switched on, accepts, unlocks a toy, sleeps, wakes, consolidates, recovers
-and errs has self_writer on its stack) and in the source (no file-writing
-call in the self modules outside the writer, no seat-side writer reaching
-past it).
+switched on, accepts, sleeps, wakes, consolidates, recovers and errs has
+self_writer on its stack) and in the source (no file-writing call in the
+self modules outside the writer, no seat-side writer reaching past it).
 """
 import ast
 import builtins
@@ -25,29 +22,43 @@ import sys
 from pathlib import Path
 from unittest import mock
 
-import pytest
-
 os.environ.setdefault("MEMBRANE_STORE", "json")
 os.environ.setdefault("MEMBRANE_RUN", "0")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from membrane import chat_io as CIO  # noqa: E402
 from membrane import energy as E  # noqa: E402
 from membrane import seat_panel as SP  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
 from membrane import self_writer as W  # noqa: E402
-from membrane import toy_unlocks as TU  # noqa: E402
-from tests.test_accept_299 import _boot, _kinds, _live_record, _pass  # noqa: E402
+from membrane.entities import EntityStore  # noqa: E402
 
 PKG = ROOT / "membrane"
 WRITER_FILE = os.sep + os.path.join("membrane", "self_writer.py")
-SELF_MODULES = ("self_loop", "energy", "self_world", "toy_unlocks", "chat_io", "seat_panel", "self_sheet",
-                "self_name")
-SEAT_SIDE = ("toy_unlocks", "energy", "chat_io", "seat_panel")
-REACH_PAST = {"_append", "_save_json", "_save_mode", "_save_model", "_save_settings", "set_mode", "accept",
-              "set_limit", "consolidate"}
+SELF_MODULES = ("self_loop", "energy", "self_world", "chat_io", "seat_panel", "self_sheet", "self_name")
+SEAT_SIDE = ("energy", "chat_io", "seat_panel")
+REACH_PAST = {"_append", "_save_mode", "set_mode", "accept", "consolidate"}
 
+
+def _boot(lines):
+    import tempfile
+    import types
+    d = Path(tempfile.mkdtemp())
+    srv = types.SimpleNamespace()
+    srv.entity_store = EntityStore(path=str(d / "entities.json"), shared=False)
+    srv._models_path = str(d / "models.json")
+    srv.paused = False
+    srv.efield = None
+    p = d / "self" / "record.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("".join(json.dumps(r) + "\n" for r in lines))
+    SL._RT.pop(id(srv), None)
+    SL.bind(srv)
+    return srv, d
+
+
+def _kinds(srv, k):
+    return [r for r in SL._read(srv) if r.get("kind") == k]
 
 
 # ---- the run-time guard -----------------------------------------------------------------------
@@ -128,21 +139,14 @@ class _Guard:
 
 
 def test_every_write_under_self_goes_through_the_writer(monkeypatch):
-    srv, d = _boot(_live_record())
+    srv, d = _boot([{"ts": 1.0, "kind": "birth", "by": "operator"}])
     sd = d / "self"
     g = _Guard(sd).install(monkeypatch)
 
     SL.bind(srv)                                            # a restart: the migrations, the world
     SP.control(srv, {"self": "on"})                         # the panel's switch
-    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3, "ladder": 3})
-    SP.control(srv, {"accept": "turns"}, by="ha:alice")     # the panel's accept
-    SP.control(srv, {"self_limit": "all"})                  # the deprecated bulk accept
-    _pass(monkeypatch, 1, 2, 3)
-    TU.sync(srv, now=3000.0)                                # a toy's unlock line
-    SL._save_model(srv, {"mp": 1})
-    SL._save_settings(srv, {})
-    SL._save_json(srv, SL.NUDGED_FILE, {})
-    CIO._rename_tempo(srv, "old", "new")                    # the chat thing's tempo rename
+    SL._append(srv, {"ts": 200.0, "kind": "learn"})
+    SP.control(srv, {"accept": "chat"}, by="ha:alice")      # the panel's accept
     with mock.patch.object(E, "_avail_ram", return_value=None):
         E.error(srv, "a wrong use", now=3001.0)             # energy's own file + an error line
         st = E._state(srv)
@@ -230,6 +234,6 @@ def test_seat_side_writers_call_the_writer_not_self_loop():
 
 
 def test_the_writer_interface():
-    for name in ("dir_of", "append", "save_json", "set_mode", "accept", "set_limit", "consolidate",
+    for name in ("dir_of", "append", "save_json", "set_mode", "accept", "consolidate",
                  "sync_write", "replace", "unlink", "truncate", "mkdir"):
         assert callable(getattr(W, name, None)), name

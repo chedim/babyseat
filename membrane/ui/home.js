@@ -714,6 +714,23 @@ function zooAgo(ts, now) {
 
 /** One seat's card: its Blurp's name, Lv, rung, awake/asleep -- or offline --
  * the reachability dot, the seat's own name and host, its last activity. */
+/** The 👶 panel's Code tab: Blurp's cliffhanger code -- its own methods
+ *  (the sheet's `code`), each a name, its command and its steps; read-only. */
+function selfCodeHtml(sheet) {
+  // #576 D2: Blurp's code is its triggers -- WHEN ... WHERE ...: target = expr --
+  // each with its state (shadow / proposal), balance, hits and firings
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const code = (sheet && Array.isArray(sheet.code)) ? sheet.code : [];
+  if (!code.length) return '<p class="cdnone">no code yet</p>';
+  return code.map((m) => {
+    const head = m.line != null ? m.line : (m.command || "");
+    const meta = m.state ? `${esc(m.state)} · ${m.balance > 0 ? "+" : ""}${esc(m.balance ?? 0)} · ${esc(m.hits ?? 0)} hits · ${esc(m.fired ?? 0)} fired`
+      : (m.runs ? esc(m.runs) + " runs" : "");
+    return `<section class="cdm ${esc(m.state || "")}"><h4><code>${esc(m.branch || m.name || "")}</code><span class="cdruns">${meta}</span></h4>` +
+      `<pre class="cdcmd"><code>${esc(head)}</code></pre></section>`;
+  }).join("");
+}
+
 function zooCard(row, now) {
   const r = row || {}, c = r.card || {};
   const on = !!r.online;
@@ -725,7 +742,7 @@ function zooCard(row, now) {
   const title = r.active ? "the house talks to this seat" : on ? "talk to this seat (the whole house switches)" : "offline -- the house can still switch to it";
   // #358: an online seat's Blurp drawn from its own card (asleep, energy when the card has it)
   const pz = on ? blurpPose(c) : null;
-  const body = pz ? `<canvas class="zbody" width="48" height="48" aria-hidden="true" data-asleep="${pz.asleep ? 1 : 0}"` +
+  const body = pz ? `<canvas class="zbody" width="48" height="48" aria-hidden="true" data-asleep="${pz.asleep ? 1 : 0}" data-off="${pz.off ? 1 : 0}"` +
     (typeof c.energy === "number" && isFinite(c.energy) ? ` data-energy="${zooEsc(c.energy)}"` : "") + "></canvas>" : "";
   return `<button type="button" class="${cls}" data-id="${zooEsc(r.id)}"${r.active ? ' aria-current="true"' : ""} title="${zooEsc(title)}">` +
     `<span class="zrow"><span class="dot ${on ? "on" : "off"}" aria-hidden="true"></span>${body}<span class="zname">${zooEsc(who)}</span>${lv}</span>` +
@@ -1364,21 +1381,23 @@ const BODY_EYE_K = 1.25;            // the eyes a little bigger than the film's:
 const BODY_CARD_MS = 15000;         // how often the page re-reads the card while visible
 
 /** The pose from the seat's card (or, before it loads, the sleep toggle's
- *  view) and a look angle on the screen (null: forward). asleep: the card's
- *  own word (awake false), else its mode / the zoo's state; glow: 1 at full
+ *  view) and a look angle on the screen (null: forward). asleep: real sleep
+ *  (the card's awake false with the mode on, else the zoo's state); off (#516):
+ *  switched off (mode off), drawn blank and dim, never as sleep; glow: 1 at full
  *  energy down to BODY_GLOW_MIN at none; no energy on the card: the film's 1. */
 function blurpPose(card, view, look) {
-  let asleep = false, glow = 1;
+  let asleep = false, off = false, glow = 1;
   if (card && typeof card === "object") {
-    if (typeof card.awake === "boolean") asleep = !card.awake;
-    else if (card.state) asleep = card.state === "asleep";
-    else asleep = card.mode === "off" || card.asleep === true;
+    // #516: switched off (mode off) is its own pose, not sleep; real sleep keeps the closed eyes
+    if (typeof card.awake === "boolean") { off = !card.awake && card.mode === "off"; asleep = !card.awake && !off; }
+    else if (card.state) { off = card.state === "off"; asleep = card.state === "asleep"; }
+    else { off = card.mode === "off"; asleep = !off && card.asleep === true; }
     if (typeof card.energy === "number" && isFinite(card.energy)) {
       const e = Math.max(0, Math.min(1, card.energy));
       glow = BODY_GLOW_MIN + (1 - BODY_GLOW_MIN) * e;
     }
-  } else if (view && view.loaded) asleep = !view.on;
-  return { asleep, glow, look: typeof look === "number" && isFinite(look) ? look : null };
+  } else if (view && view.loaded) off = !view.on;
+  return { asleep, off, glow, look: typeof look === "number" && isFinite(look) ? look : null };
 }
 
 /** The eyes' offset toward a look angle (the film's s*.1 across, s*.08 down); none: forward. */
@@ -1414,18 +1433,20 @@ function blurpRuns(docHidden, shown, still) { return !docHidden && shown > 0 && 
  *  z (the z's colour: the page's text colour)}. The film's blurp(), sized to the box. */
 function drawBlurp(g, w, h, t, pose, o) {
   o = o || {};
-  const still = !!o.still, p = pose || {}, sleepy = p.asleep ? 1 : 0;
+  const still = !!o.still, p = pose || {}, sleepy = p.asleep ? 1 : 0, off = !!p.off;
   const glow = typeof p.glow === "number" ? p.glow : 1;
   const tt = still ? 0 : t;
   const s = Math.min(w, h) * 0.34, x = w / 2, y = h * 0.57;
-  const wob = still ? 0 : Math.sin(tt * 2.2) * (1 - sleepy * 0.7);
+  const wob = still || off ? 0 : Math.sin(tt * 2.2) * (1 - sleepy * 0.7);
   g.save();
+  if (off) g.globalAlpha = 0.45;                  // #516: switched off: dim, no glow, no face
   const grd = g.createRadialGradient(x - s * 0.3, y - s * 0.4, s * 0.1, x, y, s * 1.1);
   grd.addColorStop(0, BODY_LIGHT); grd.addColorStop(1, BODY_GOLD);
-  g.shadowColor = BODY_GOLD; g.shadowBlur = s * 0.4 * glow * (1 - sleepy * 0.6);
+  g.shadowColor = BODY_GOLD; g.shadowBlur = off ? 0 : s * 0.4 * glow * (1 - sleepy * 0.6);
   g.beginPath(); g.ellipse(x, y + s * 0.012 * wob, s * (1 + 0.016 * wob), s * (0.92 - 0.016 * wob), 0, 0, Math.PI * 2);
   g.fillStyle = grd; g.fill();
   g.shadowBlur = 0;
+  if (off) { g.restore(); return; }
   const e = blurpEyes(sleepy ? null : p.look, s);
   for (const sx of [-1, 1]) {
     const cx = x + sx * s * 0.32 + e.dx, cy = y - s * 0.12 + e.dy;
@@ -1473,7 +1494,7 @@ class BlurpBodies {
   set(cv, pose) {
     const it = this.items.get(cv); if (!it) return;
     pose = pose || blurpPose(null);
-    const same = it.pose && it.pose.asleep === pose.asleep && it.pose.glow === pose.glow && it.pose.look === pose.look;
+    const same = it.pose && it.pose.asleep === pose.asleep && it.pose.off === pose.off && it.pose.glow === pose.glow && it.pose.look === pose.look;
     it.pose = pose;
     if (!same && it.shown && !this._raf) this._paint(cv, it);
   }
@@ -1517,7 +1538,7 @@ class BlurpBodies {
 const HomeLogic = { knownView, standaloneMenu, pauseView, PauseButton, PAUSE_PATH, quotaWhen, quotaBadgeView, QuotaBadge, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
-  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
+  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards, selfCodeHtml,
   rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView,
   achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody,
   ballAlert, ballAlertText, ballNotifyBody, ballChimeNotes, titleFlash,
@@ -1952,6 +1973,12 @@ const HSTYLE = `
   .selfpanel .sptab[aria-selected="true"] { opacity:1; border-bottom-color:var(--primary-color,#3477d6); }
   .selfpanel .sptab:focus-visible, .sktree .sknode:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
   .selfpanel .sppane[hidden] { display:none; }
+  .spcode .cdm { margin:0 0 12px; }
+  .spcode h4 { display:flex; align-items:baseline; gap:8px; margin:0 0 4px; font-size:14px; }
+  .spcode .cdruns, .spcode .cdnone { opacity:.65; font-size:12px; font-weight:400; }
+  .spcode pre { margin:0; padding:6px 8px; border-radius:8px; overflow-x:auto; white-space:pre-wrap; word-break:break-word;
+    background:color-mix(in srgb, var(--primary-text-color,#ddd) 8%, transparent); font-size:12px; }
+  .spcode .cdsteps { margin:4px 0 0; padding-left:20px; font-size:12px; }
   /* #361: the film's look -- its gold, leaning dark on a light theme and bright on a dark one */
   .sktree { --sk-earned:color-mix(in srgb, #f2c45a 72%, var(--primary-text-color,#ddd)); }
   .sktree .skhdr { display:flex; align-items:center; gap:10px; padding:8px 12px; margin:2px 0 6px; border-radius:12px;
@@ -2169,7 +2196,7 @@ const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open (
 const SELFPANEL_MS = 4000;                        // its activity refresh, only while open
 const SELFPANEL_SEAT_MS = 15000;                  // ...and its character sheet's (the whole status; the seat caches ~30 s)
 const LS_SELFSHEET = "membrane.home.selfsheet";   // #249: which sheet sections are open, per browser
-const LS_SELFTAB = "membrane.home.selftab";       // #296: the 👶 panel's tab (sheet or tree), per browser
+const LS_SELFTAB = "membrane.home.selftab";       // #296: the 👶 panel's tab (sheet, tree or code), per browser
 const DOCK_MS = 3000;                             // #249: the toy dock's poll, only while the page is visible
 const LS_DOCK = "membrane.home.toydock";          // the phone's 🧸: the dock expanded ("1") or not
 
@@ -2314,7 +2341,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._zooEls = Array.from(this._zooList.querySelectorAll("canvas.zbody"));
       for (const cv of this._zooEls) {
         const en = cv.getAttribute("data-energy");
-        this._bodies.add(cv, blurpPose({ state: cv.getAttribute("data-asleep") === "1" ? "asleep" : "awake",
+        this._bodies.add(cv, blurpPose({ state: cv.getAttribute("data-off") === "1" ? "off" : cv.getAttribute("data-asleep") === "1" ? "asleep" : "awake",
                                          energy: en == null ? null : Number(en) }));
       }
     }
@@ -2397,6 +2424,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._takeName(c);                                 // #277: the sheet carries the name
       }
       this._paintTree();                                   // #296: the Skill tree tab, when it shows
+      this._paintCode();                                   // the Code tab, when it shows
       const card = this._sheet && typeof c._selfSheetHtml === "function"
         ? c._selfSheetHtml(this._sheet, this._sheetOpen) : "<h3>report card</h3>" + c._selfCardHtml();
       if (card !== this._spCardHtml) {
@@ -2412,9 +2440,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         else if (!lines) this._spAct.innerHTML = '<li class="sl none">the record is not reachable right now</li>';
       } finally { this._spBusy = false; }
     }
-    /** #296: the panel's tabs -- the sheet or the Skill tree; remembered per browser. */
+    /** #296: the panel's tabs -- the sheet, the Skill tree or the Code; remembered per browser. */
     _selfTab(tab, focus) {
-      tab = tab === "tree" ? "tree" : "sheet";
+      tab = tab === "tree" || tab === "code" ? tab : "sheet";
       this._spTabNow = tab;
       for (const b of this._spTabs) {
         const on = b.dataset.tab === tab;
@@ -2424,8 +2452,16 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }
       this._spPaneSheet.hidden = tab !== "sheet";
       this._spPaneTree.hidden = tab !== "tree";
+      this._spPaneCode.hidden = tab !== "code";
       lsSet(LS_SELFTAB, tab);
       this._paintTree();
+      this._paintCode();
+    }
+    /** The Code tab: Blurp's methods, from the sheet the panel already read. */
+    _paintCode() {
+      if (!this._spCode || this._spPaneCode.hidden) return;
+      const h = selfCodeHtml(this._sheet);
+      if (h !== this._spCodeHtml) this._spCode.innerHTML = this._spCodeHtml = h;
     }
     /** #296: the Skill tree, from the sheet the panel already read; rebuilt only when it changed. */
     _paintTree() {
@@ -3150,6 +3186,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <div class="sptabs" role="tablist" aria-label="${nm}'s panel">
             <button type="button" class="sptab" role="tab" id="sptab-sheet" data-tab="sheet" aria-selected="true" aria-controls="sppane-sheet">Sheet</button>
             <button type="button" class="sptab" role="tab" id="sptab-tree" data-tab="tree" aria-selected="false" aria-controls="sppane-tree" tabindex="-1">Skill tree</button>
+            <button type="button" class="sptab" role="tab" id="sptab-code" data-tab="code" aria-selected="false" aria-controls="sppane-code" tabindex="-1">Code</button>
           </div>
           <div class="sppane" role="tabpanel" id="sppane-sheet" aria-labelledby="sptab-sheet">
             <div class="spxp"></div>
@@ -3158,6 +3195,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
               <div class="secb"><ol class="spact"><li class="sl none">…</li></ol></div></details>
           </div>
           <div class="sppane" role="tabpanel" id="sppane-tree" aria-labelledby="sptab-tree" hidden><div class="sktree"></div></div>
+          <div class="sppane" role="tabpanel" id="sppane-code" aria-labelledby="sptab-code" hidden><div class="spcode"></div></div>
           <p class="spplay" aria-live="polite" hidden></p>
         </aside>
         <div class="toydock" hidden>
@@ -3317,6 +3355,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // #296: the panel's tabs (the sheet, the Skill tree): arrows move between them
       this._spTabs = Array.from(root.querySelectorAll(".sptab"));
       this._spPaneSheet = $("#sppane-sheet"); this._spPaneTree = $("#sppane-tree"); this._spTree = $(".sktree");
+      this._spPaneCode = $("#sppane-code"); this._spCode = $(".spcode");
       // #299: the tree card's Accept; #394: the clicked skill, remembered per viewer
       this._spTreeSel = { id: lsGet(LS_TREESEL, null) || undefined, onAccept: (id) => this._acceptSelf(id),
                           onPick: (id) => lsSet(LS_TREESEL, id) };
@@ -3327,7 +3366,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         b.addEventListener("keydown", (e) => {
           if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
           e.preventDefault();
-          this._selfTab(this._spTabNow === "tree" ? "sheet" : "tree", true);
+          const tabs = this._spTabs.map((t) => t.dataset.tab), i = tabs.indexOf(this._spTabNow);
+          const j = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1
+            : (i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+          this._selfTab(tabs[j], true);
         });
       }
       this._selfTab(lsGet(LS_SELFTAB, "sheet"));

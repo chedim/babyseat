@@ -68,15 +68,6 @@ class TestTheCall(unittest.TestCase):
             self.assertIn("paused", L.request(srv, "x", caller="a")["text"])
         self.assertEqual(srv.events_pool.items, [])
 
-    def test_the_method_command_never_reaches_a_shell(self):
-        srv = _Srv()
-        L._SEAT["srv"] = srv
-        with mock.patch("subprocess.run") as sh:
-            N.run_command_entity(None, srv.entity_store, None, "llm::call Component:bat 'is it charging?'")
-        sh.assert_not_called()
-        self.assertEqual(srv.events_pool.items[-1]["prompt"], "is it charging?")
-        self.assertEqual(L.from_command("only-one")["rc"], 2)
-
     def test_a_script_calls_once_per_fire(self):
         srv = _Srv()
         ent = srv.entity_store.docs[MEMBRANE_NS + "Component:bat"]

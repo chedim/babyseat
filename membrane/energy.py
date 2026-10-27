@@ -2,14 +2,14 @@
 
 Energy runs from 0 to 1 (shown as 0-100%) and lives with Blurp in
 <self dir>/energy.json, so a restart neither refills nor drains it: the
-first loop step after a boot, or after the loop was off, paused or held
+first loop step after a boot, or after the loop was off or paused
 (pause()), counts no time. A Blurp with no stored energy starts rested (1.0).
 
   BASAL_PER_S    energy an awake second costs: 1 / (16 h), so a rested, idle
                  Blurp runs out after a human waking day. Part 2 sets it
                  from the room's measured rhythm instead.
-  CPU_PER_S      energy a second of the cycle's CPU costs (time.thread_time()
-                 around the cycle, on the loop's own thread): the same as an
+  CPU_PER_S      energy a second of the learner's CPU costs (time.thread_time()
+                 around its step, on the loop's own thread): the same as an
                  awake second, so at a 50% share Blurp tires 1.5x as fast
                  (~10.7 h).
   AWAKE_LEN_S    the awake reserve's length, 16 h: a placeholder for the
@@ -38,8 +38,8 @@ reserve runs from 1 (full) to 0 (empty):
            reading: no cap, the reserve reads 1.0 (a bad reading never
            puts Blurp to sleep) and the card says the cap is unknown.
 When a reserve runs out (the pull reaches 1) Blurp falls asleep: a `sleep`
-line says which (`why`) and the energy. Asleep, no cycle runs (cycle() and
-the loop's step() check asleep()), and energy comes back at RESTORE_PER_S.
+line says which (`why`) and the energy. Asleep, no learner runs (the loop's
+step() checks asleep()), and energy comes back at RESTORE_PER_S.
 It wakes when energy is full again (`why: rested`) or when a person speaks
 (person_spoke(): a chat or voice message from a person, never Blurp's own
 lines or the model's; `why: spoke`, `who`). Waking starts a fresh day: the
@@ -49,8 +49,7 @@ Asleep is not the operator's off: the mode stays as it was.
 share(throttle, srv) is the person's CPU throttle x energy, for #343's
 pacing (a tired Blurp gets less CPU): self_loop.pace_share reads it.
 
-CONSOLIDATION (#345 part 2): falling asleep drops what is open (a turn
-awaiting its reply check: the sleep line's `dropped`) and consolidates the
+CONSOLIDATION (#345 part 2): falling asleep consolidates the
 day (self_loop.consolidate): every raw line to its dated archive, the
 working record down to one summary line, so the record reserve recovers.
 
@@ -233,15 +232,11 @@ def _changed(srv) -> None:
 
 
 def _fall_asleep(srv, st: dict, now: float, why: str, rs: dict) -> None:
-    """Falling asleep: what is open is dropped (named on the sleep line:
-    `dropped`, {} when nothing was), then the day is consolidated (#345 part
-    2: self_loop.consolidate -- the raw lines to the dated archive, the
+    """Falling asleep: a `sleep` line, then the day is consolidated (#345
+    part 2: self_loop.consolidate -- the raw lines to the dated archive, the
     working record down to its summary)."""
-    SL = _SL()
     st.update(asleep=True, since=now)
-    dropped = SL._open_at_sleep(srv, now)
-    _W.append(srv, {"ts": now, "kind": "sleep", "why": why, "energy": st["energy"], "reserves": rs,
-                     "dropped": dropped})
+    _W.append(srv, {"ts": now, "kind": "sleep", "why": why, "energy": st["energy"], "reserves": rs})
     _W.consolidate(srv, now)
     _changed(srv)
 
@@ -254,17 +249,17 @@ def _wake(srv, st: dict, now: float, why: str, free, avail, who: str | None = No
         rec["who"] = who
     _W.append(srv, rec)
     _changed(srv)
-    _SL()._rt(srv)["wake"].set()            # the loop runs its next cycle
+    _SL()._rt(srv)["wake"].set()            # the loop runs its next step
 
 
 def pause(srv) -> None:
-    """The loop is not running (off, paused, held): the next step counts no time."""
+    """The loop is not running (off, paused): the next step counts no time."""
     _SL()._rt(srv).pop("energy_last", None)
 
 
 def tick(srv, now: float, cpu_s: float = 0.0, free: int | None = None, avail: int | None = None) -> dict:
     """One loop step: awake, drain (BASAL_PER_S x the seconds since the last
-    step + CPU_PER_S x the cycle's CPU seconds) and fall asleep when a reserve
+    step + CPU_PER_S x the step's CPU seconds) and fall asleep when a reserve
     is out; asleep, restore and wake at full energy. -> report()."""
     SL = _SL()
     now = float(now)
@@ -306,6 +301,17 @@ def error(srv, why: str, now: float | None = None) -> float:
         st["energy"] = max(0.0, st["energy"] - ERROR_COST)
         _W.append(srv, {"ts": now, "kind": "error", "why": str(why or "")[:200], "cost": ERROR_COST,
                          "energy": st["energy"]})
+        _save(srv, st)
+        return st["energy"]
+
+
+def apply_delta(srv, delta: float) -> float:
+    """#576 D2: the net energy Blurp's learner spent (its writes) and earned back
+    (its hits), as the seat's purse handed it over. -> the energy."""
+    SL = _SL()
+    with SL._lock:
+        st = _state(srv)
+        st["energy"] = max(0.0, min(1.0, st["energy"] + float(delta)))
         _save(srv, st)
         return st["energy"]
 

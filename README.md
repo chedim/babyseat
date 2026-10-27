@@ -91,8 +91,7 @@ overwritten. Teams can opt into one merged field
 
 No account, no cloud, no telemetry. Chat and embeddings run on your Ollama, the
 field lives on your disk, and a shared bucket is optional: with it down, the
-seat still boots. The license is PolyForm Noncommercial: free for personal, research and
-other noncommercial use ([LICENSE](LICENSE)).
+seat still boots. The license is MIT ([LICENSE](LICENSE)).
 
 ### How it maps to the patterns you've already seen
 
@@ -211,8 +210,8 @@ read the field (`state(section=...)` pulls one part of the seat's WHERE WE ARE:
 tracks, commands, interfaces, classes, loops, timelines, frame, digest, or
 changes since the last message), `learn` to keep a lesson (with the same guards as any turn),
 `forget` to clean up its mistakes, and the entity tools
-(`entity_add/edit/remove/link/inherit`, `entity_query`, `entity_tracks`,
-`entities_related`, …) and Cliffhanger's method tools (`method_define/call/each/inspect`). Commands compose in **Cliffhanger**, membrane's command
+(`entity_add/edit/remove/inherit`, `entity_query`, `entity_tracks`,
+`entities_related`, …) and Cliffhanger's method tools (`method_define/call/each/inspect`). There are no one-shot commands: the model defines a method on an entity, then calls it ([program the field first](docs/cliffhanger.md#program-the-field-first-576-part-f)). Commands compose in **Cliffhanger**, membrane's command
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
 where it came from.
@@ -341,7 +340,7 @@ pass through to Ollama unchanged.
 | `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): from another machine, every write to either port needs it (Bearer, Basic's password, or the web UI's one-time prompt); reads and localhost need none; see [docs/auth.md](docs/auth.md) |
 | `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running the optional JWT mode (`MEMBRANE_JWT_SECRET`); see [docs/auth.md](docs/auth.md) |
 | `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, plus the background model calls from `bg-usage.json`; no model call) |
-| `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Toys unlock as self earns achievements (#267, #295): a locked kind is refused, the dock shows the next ones greyed. See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
+| `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Every kind can be added (#576 retired the unlocks with the ladder). See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
 
 `MEMBRANE_EFIELD` selects the field's mode: `on` (the default: capture,
@@ -588,9 +587,9 @@ multi-hop and adversarial; the other three names follow the common mapping.
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The opt-in merged field: the origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion and consensus (shared only on the merged field) |
 | [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer, the NightClock, entity scripts and tracks, the intent steering wheel, **the pause**, kill switches |
-| [docs/selfgrowth.md](docs/selfgrowth.md) | **Growing self (#161)**, named Blurp (#277; each seat names its own, #283). Switching it on (⏻ on/off) and accepting what it earns (#299: an earned achievement opens its children only once the operator accepts it), reading its exp bar, the 👶 panel as a character sheet (attributes: measured traits; the skills it is learning now; growth curve, working hours, toys, relationships, live activity) and the toy dock, the amoeba and the brain on the screen (what it looks at, its trail of looks, shift pulses, the caption; ◎ self framing and 👁 self's eyes), the skill tree (#295: achievements with real prerequisites, earned out of order) and their real pass tests, the nudge (#333: Blurp's one act on the things of its world, aimed mostly at things it can look at, tilted toward those whose nudge outcomes it is learning fastest; first reach (rung 13) passes when its nudges at one thing beat that thing's tempo and the changes were its own; it speaks by nudging chat:out, a draft whose line is the NNLS fit over sentences heard in its private chat; recognize itself rebuilt on its looks at the mirror (rows only at a look; opens with feel and first reach, no person needed); meet an other rebuilt on delayed contingency (the look 30 s after a nudge's check finds a change its tempo does not predict, and not its own; opens with look and first reach); toys unlock by skill in #337's order; time its turn and expect a reply rebuilt on meet's other (its nudges timed by a bandit over the other's age, and its own prediction of each follow-up; the model advisor out)), how to help it climb, troubleshooting |
+| [docs/selfgrowth.md](docs/selfgrowth.md) | **Retired in #576 (D1): Blurp starts anew** -- the body stays (the ⏻ switch, energy and sleep, the record, the 👶 panel, rendering empty), the learner below is history until D2 plugs the new one into `self_loop.learn_step`. **Growing self (#161)**, named Blurp (#277; each seat names its own, #283). Switching it on (⏻ on/off) and accepting what it earns (#299: an earned achievement opens its children only once the operator accepts it), reading its exp bar, the 👶 panel as a character sheet (attributes: measured traits; the skills it is learning now; growth curve, working hours, toys, relationships, live activity) and the toy dock, the amoeba and the brain on the screen (what it looks at, its trail of looks, shift pulses, the caption; ◎ self framing and 👁 self's eyes), the skill tree (#295: achievements with real prerequisites, earned out of order) and their real pass tests, the nudge (#333: Blurp's one act on the things of its world, aimed mostly at things it can look at, tilted toward those whose nudge outcomes it is learning fastest; first reach (rung 13) passes when its nudges at one thing beat that thing's tempo and the changes were its own; it speaks by nudging chat:out, a draft whose line is the NNLS fit over sentences heard in its private chat; recognize itself rebuilt on its looks at the mirror (rows only at a look; opens with feel and first reach, no person needed); meet an other rebuilt on delayed contingency (the look 30 s after a nudge's check finds a change its tempo does not predict, and not its own; opens with look and first reach); toys unlock by skill in #337's order; time its turn and expect a reply rebuilt on meet's other (its nudges timed by a bandit over the other's age, and its own prediction of each follow-up; the model advisor out)), how to help it climb, troubleshooting |
 | [docs/patient-hm.md](docs/patient-hm.md) | Patient H.M., viewed from membrane: epilepsy as a loop that excites itself (the seat's brakes, a seizure's signature in the field, running out of energy as its end), and cutting sleep's consolidation as H.M.'s surgery, with the experiment that tests it |
-| [docs/sleep.md](docs/sleep.md) | Sleep, viewed from Blurp: its energy, sleep and wake (#345: the reserves, the sleep pull, what wakes it), consolidation (the day's raw record to dated archives, a summary of the windows its tests read, restart-safe), and the viewpoint from before it slept (one store, no open loops, windowed beliefs, per-thing models; its cycle pace against its record's growth) |
+| [docs/sleep.md](docs/sleep.md) | Sleep, viewed from Blurp: its energy, sleep and wake (#345: the reserves, the sleep pull, what wakes it), consolidation (the day's raw record to dated archives, a summary of the birth, the accepts and the last lines, restart-safe), and the viewpoint from before it slept (one store, no open loops, windowed beliefs, per-thing models; its cycle pace against its record's growth) |
 | [docs/vsa-token-lane.md](docs/vsa-token-lane.md) | **Entity keys + relations (the VSA lane).** Canonical ids, key binding, the relations composites, structure-awareness numbers |
 | [docs/token-economics.md](docs/token-economics.md) | Where the savings come from + the router: the ladder, the ceiling, the outage fallback |
 | [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, `/monologue` toggle |
@@ -623,10 +622,8 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 A working lab, used every day to build itself: this repo's own field holds
 about 14,000 entities, and its background mind digests, dreams and talks
 about its own work. Version **0.7.2**; API and flag surfaces may still
-move. Licensing: **PolyForm Noncommercial 1.0.0** (see [LICENSE](LICENSE)) —
-free to use, modify and share for any noncommercial purpose (personal, hobby,
-research, education, charities and public institutions); commercial use needs
-the author's written permission — ask.
+move. Licensing: **MIT** from 0.7.3 (see [LICENSE](LICENSE)); releases up to
+0.7.2 stay under PolyForm Noncommercial 1.0.0.
 
 ## Cite
 

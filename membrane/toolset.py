@@ -74,29 +74,23 @@ FAMILIES: dict[str, dict] = {
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {
-        "description": "Cliffhanger: define methods on classes, call or inspect them on "
-                       "objects; link runs a command. help('cliffhanger').",
+        "description": "Cliffhanger: program the field first -- define a method on a class "
+                       "or object, then call it (or each over a class); inspect looks "
+                       "without running. help('cliffhanger').",
         "actions": {"call": "method_call", "each": "method_each", "define": "method_define",
-                    "inspect": "method_inspect",
-                    "link": "entity_link", "unlink": "entity_unlink"},
-        "params": {"commands": {"type": ["string", "array"], "description": "link: command line(s)"},
-                   "args": {"type": "object", "description": "{{param}} values"},
+                    "inspect": "method_inspect"},
+        "params": {"args": {"type": "object", "description": "{{param}} values"},
                    "object": _S("call: target"), "on": _S("define: owner"),
                    "over": _S("each: class or pattern"), "max": _I("each: cap (20)"),
                    "dry_run": _B("each: list only"), "on_fail": _S("each: abort|continue"),
                    "method": _S("method name"), "command": _S("define: command template"),
                    "read_only": _B("define: a read"), "guard": _S("define: guard"),
                    "abstract": _B("define: f(a,b), no command"),
-                   "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"},
-                   "executor": _T("string"), "create": _T("boolean")},
+                   "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"}},
         "map": {"call": lambda a: _pick(a, "object", "method", "args"),
                 "inspect": lambda a: _pick(a, "object", "method", "args"),
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
-                "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps", "abstract"),
-                "link": lambda a: _pick({**a, "commands": a.get("commands") or a.get("command"),
-                                         "args": a.get("args") or _json_obj(a.get("params"))},
-                                        "commands", "executor", "create", "args"),
-                "unlink": lambda a: _pick(a, "commands", "executor")},
+                "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps", "abstract")},
     },
     "goal": {
         "description": "Your commitments: plant one, list the board, close one with its "
@@ -169,18 +163,17 @@ HELP = {
         "membrane.speak(text), membrane.call_llm(prompt), membrane.wake(at, prompt). "
         "Rewriting a script clears its cooldowns. A real cooldown says 'retry in Ns'."),
     "exec": (
-        "exec(action='link', commands='...') runs a command now (dash shell on this seat: use '.' "
-        "not 'source') and returns rc + output; the command becomes an entity (stable name; "
-        "'label :: cmd' names it). COMPOSITION IS INHERITANCE: entity(action='inherit', "
-        "spec=cmd, parents=[...]) makes the parents run first; their output feeds {{parent.head}} / "
-        "{{parent.tail}}. A failed step halts the pipeline. THE EDGE IS THE QUEUE: a link stays owed "
-        "until its run lands (success or failure); there is no auto-retry -- re-link to re-run. "
-        "entity(action='read') on a command shows its last run (rc/head/tail); on the executor, "
-        "pending/done. Caps: 32 owed links, 12 steps a pass. REUSE: a command you keep is a "
-        "tool -- name it ('light-on :: curl ... {{entity}} ...'), give it {{name}} parameters, "
-        "re-run it with exec(action='link', commands='light-on', args={'entity': 'switch.x'}); "
-        "the same command line re-runs its existing entity. Your named commands ride your "
-        "context ('your commands: ...')."),
+        "PROGRAM THE FIELD FIRST: there are no one-shot commands. To do something, define a "
+        "method on the entity it belongs to (or its class), then call it: exec(action='define', "
+        "on='ha light', method='turn_on', command='curl ... {{self.entity_id}} {{level}}'), then "
+        "exec(action='call', object='ha:light.port_strip', method='turn_on', args={'level': 40}) -- "
+        "it returns rc + output (dash shell on this seat: use '.' not 'source'); or write a "
+        "property whose write is the effect (help('cliffhanger')). A call straight at the "
+        "executor (tool:executor, remote_executor, an implementation's exec) is refused. "
+        "COMPOSITION: steps=[...] on a define, or entity(action='inherit', spec=<method>, "
+        "parents=[...]) -- the parents run first and feed {{parent.head}} / {{parent.tail}}; a "
+        "failed step halts. entity(action='read') on a method shows its last run (rc/head/tail). "
+        "Your methods ride your context ('your methods: ...')."),
     "goals": (
         "goal(action='plant') makes a commitment; the watch loops take it up. A loop ends each pass "
         "with one line: DONE <receipt> / STEP <what moved> / BLOCKED <on whom, or 'on <entity>', or "
@@ -190,7 +183,7 @@ HELP = {
         "direction worth keeping across sessions, plant it; plant only when it serves the work."),
     "state": (
         "state() is membrane's vitals plus the seat's whole WHERE WE ARE. state(section=...) pulls "
-        "one part: tracks (the watched entities' stories), commands (your most-run, with counts), "
+        "one part: tracks (the watched entities' stories), commands (your methods, most called first),"
         "interfaces, classes (class proposals), loops (the thinking loops), timelines (open "
         "branches), frame (the watch frame), digest (watch events past your alert budget), "
         "changes (what moved since your last message). Other seats: peer(action='seats' / "
@@ -495,7 +488,7 @@ _PLACEHOLDER_ARG_KEYS = ("args_json", "arguments", "args", "params", "parameters
 
 def _placeholder_call(placeholder: str, args: dict) -> tuple[str, dict]:
     """A call whose name is a template placeholder: the tool is named by one of
-    its fields (a family, or 'exec <command>'), its arguments by another (JSON);
+    its fields (a family), its arguments by another (JSON);
     else the honest refusal with a filled-in example."""
     named = next((str(args[k]).strip() for k in _PLACEHOLDER_NAME_KEYS
                   if isinstance(args.get(k), str) and args[k].strip()), "")
@@ -514,15 +507,13 @@ def _placeholder_call(placeholder: str, args: dict) -> tuple[str, dict]:
         if inner is not None:
             return resolve(fam, dict(inner))
         text = rest.strip() or (raw.strip() if isinstance(raw, str) else "")
-        if fam == "exec" and text:
-            return resolve("exec", {"action": "link", "command": text})
         if not text:
             return resolve(fam, {})
     raise ValueError(
         f"the call's name {placeholder!r} is a template placeholder from your call format, not a tool: "
         f"write the real tool's name in its place -- one of {', '.join(sorted(FAMILIES))} -- and its "
-        "arguments as JSON. For example, to run a command: name exec, arguments "
-        '{"action": "link", "command": "ls -a"}; to read an entity: name entity, arguments '
+        "arguments as JSON. For example, to call a method: name exec, arguments "
+        '{"action": "call", "object": "presence", "method": "status"}; to read an entity: name entity, arguments '
         '{"action": "read", "name": "presence"}')
 
 
@@ -576,7 +567,7 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
         if _owner and any(k != "action" for k in (args or {})):
             return resolve(_owner, dict(args or {}))
         if _placeholder:
-            # nothing above named the call: 'exec <command>' in a name field,
+            # nothing above named the call: a family in a name field,
             # the arguments as a JSON string, else the refusal with an example
             return _placeholder_call(_placeholder, dict(args or {}))
         raise ValueError(

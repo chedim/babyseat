@@ -1,23 +1,13 @@
 """#249 (part of #161): self's 👶 panel as a character sheet.
 
-The Self's record charts move into the seat: membrane/self_sheet.py computes
-one JSON sheet from self's record, status() and the toybox (cached ~30 s) and
-GET /membrane/self/sheet serves it read-only behind the JWT gate. The sheet is
-laid out like an RPG character's: a header (name, Lv, the exp bar, age and
-WORKING hours), attributes (one measured skill per rung), the quest log (the
-current rung's staged criteria), achievements (the pass records), the growth
-curve (against the fastest possible and a child, rescaled), where the time
-went, the inventory (toys) and relationships (the others it has met).
-
-Working hours = running time (the record's gaps over GAP_S taken out) minus
-the windows a known bug held a rung shut (#191, #208 -- a small data list with
-their fix times; a window applies only on a seat whose rung passed before the
-fix). The page side (panel.js) is tested with node.
-
-#258 (the ladder flip): rung 7 is take turns and rung 8 understand an other
-(the #254 predictor, moved up unchanged). The seat that lived through the
-bugs is at rung 6 working on the new rung 7; its reply checks are rung 8's
-pairs, read where a seat has passed the new rung 7 (_lived8).
+membrane/self_sheet.py computes one JSON sheet from self's record, status()
+and energy (cached ~30 s) and GET /membrane/self/sheet serves it read-only
+behind the JWT gate. The sheet is laid out like an RPG character's: a header
+(name, Lv, age), attributes, the quest log, achievements, the growth curve,
+where the time went, the inventory and relationships. #576 retired the old
+learner: those sections are empty until the new one fills them, and the page
+renders them as they are. The page side (panel.js) is tested with node, and
+so is the toy dock (GET /membrane/toybox/state).
 """
 import datetime as dt
 import json
@@ -51,10 +41,6 @@ H = 3600.0
 # the operator's seat was born 2026-10-16 13:55Z: a seat born that morning
 # lived through both bugs
 T0 = dt.datetime(2026, 10, 16, 13, 0, 0, tzinfo=dt.timezone.utc).timestamp()
-FIX191 = dt.datetime(2026, 10, 16, 21, 43, 37, tzinfo=dt.timezone.utc).timestamp()
-OP = MEMBRANE_NS + "Component:chat:in:operator"
-ALICE = MEMBRANE_NS + "Component:chat:in:alice"
-
 
 
 def _seat():
@@ -72,43 +58,9 @@ def _put(srv, rec):
     SL._append(srv, rec)
 
 
-def _cycles(srv, t0, t1, every=60.0, gap=0.04, naive=0.1):
-    t = t0
-    while t < t1:
-        _put(srv, {"ts": t, "kind": "cycle", "act": "move", "gap": gap, "naive": naive, "change": "world"})
-        t += every
-
-
-def _lived(srv):
-    """A seat that lived through both bugs: born T0, down for an hour (1h..2h),
-    rungs 1-4 before #191's fix, rung 5 after it, rung 6 against the empty
-    operator slot (#208), then the person (alice) and rung 7's pairs."""
+def _born(srv):
+    """A Blurp born at T0 (its birth line)."""
     _put(srv, {"ts": T0, "kind": "birth", "by": "operator"})
-    _cycles(srv, T0 + 1, T0 + 1 * H)
-    _cycles(srv, T0 + 2 * H, T0 + 12 * H)                         # the seat was down 1h..2h
-    _put(srv, {"ts": T0 + 0.5 * H, "kind": "rung", "rung": 1, "skill": 0.6})
-    _put(srv, {"ts": T0 + 2.5 * H, "kind": "rung", "rung": 2, "skill": 0.3, "eid": "w:fast"})
-    _put(srv, {"ts": T0 + 2.6 * H, "kind": "rung", "rung": 3, "skill": 0.9})
-    _put(srv, {"ts": T0 + 2.7 * H, "kind": "rung", "rung": 4, "skill": 0.8})
-    _put(srv, {"ts": T0 + 9.0 * H, "kind": "rung", "rung": 5, "skill": 1.0})
-    for i in range(10):                                           # to the empty slot
-        _put(srv, {"ts": T0 + 9.0 * H + 60 + i * 60, "kind": "push", "eid": "chat:out:operator", "to": OP})
-    _put(srv, {"ts": T0 + 9.5 * H, "kind": "rung", "rung": 6, "skill": 1.0, "eid": OP, "ladder": SL.LADDER_V})
-    # the person: 10 lines to alice and 20 answered looks at her
-    t = T0 + 9.8 * H
-    for i in range(10):
-        _put(srv, {"ts": t + i * 120, "kind": "push", "eid": "chat:out:alice", "to": ALICE, "asked": True})
-    for i in range(20):
-        _put(srv, {"ts": t + 60 + i * 60, "kind": "reach", "eid": ALICE, "p": 0.5,
-                   "answer": "changed" if i % 2 else "unchanged", "reply": True, "replied": bool(i % 2),
-                   "p_llm": 0.9 if i % 2 == 0 else 0.1,           # the model bets wrong every time
-                   "p_self": 0.9 if i % 2 == 0 else 0.1})          # ...and so does self (#254 grades self)
-    srv._real6 = t + 60 + 19 * 60                                  # the 20th look: both counts met
-    srv._first_person = t
-    SL._RT.pop(id(srv), None)
-    SL.bind(srv)
-    srv.efield = types.SimpleNamespace(current=lambda: [1.0, 0.0])   # a live current: not "waiting on the world"
-    SL._rt(srv)["mode"], SL._rt(srv)["isolate"] = "on", SL._limit_ids(7)   # #299: the limit is gone; rungs 1..7 run alone
     return srv
 
 
@@ -116,377 +68,37 @@ def _sheet(srv, now):
     return SH.sheet(srv, now=now, fresh=True)
 
 
-# #305: every test built before birth -- no walls. The lived seat is born
-# 2026-10-16 13:00Z, before rung 1's test merged (13:07Z): where a test reads
-# only the downtime or a bug window, it runs with this (the walls are
-# test_growth_walls_305's)
-BUILT_FROM_BIRTH = {i: {**m, "merged": 0.0} for i, m in SH.BUILT_AT.items()}   # #333: the whole tree
-
-
-def _lived8(srv):
-    """#258: the lived seat one rung on -- it passed the new rung 7 (take
-    turns) before its pairs, and may grow to 8: rung 8 reads the pairs."""
-    _lived(srv)
-    _put(srv, {"ts": T0 + 9.6 * H, "kind": "rung", "rung": 6, "skill": 0.5, "eid": ALICE, "ladder": SL.LADDER_V})
-    _put(srv, {"ts": T0 + 9.7 * H, "kind": "rung", "rung": 7, "skill": 0.1, "eid": ALICE, "ladder": SL.LADDER_V})
-    t = T0 + 9.85 * H                         # #333 part 3f: rung 8 reads the follow-ups at meet's other (alice)
-    for i in range(20):
-        _put(srv, {"ts": t + i * 60, "kind": "reach", "eid": ALICE, "p": 0.5, "nudged": 0, "follow": True,
-                   "answer": "changed" if i % 2 else "unchanged",
-                   "p_self": 0.9 if i % 2 == 0 else 0.1})          # self bets wrong every time
-    SL._RT.pop(id(srv), None)
-    SL.bind(srv)
-    srv.efield = types.SimpleNamespace(current=lambda: [1.0, 0.0])
-    SL._rt(srv)["mode"], SL._rt(srv)["isolate"] = "on", SL._limit_ids(8)   # #299: the limit is gone; rungs 1..8 run alone
-    return srv
-
-
-# ---- the clocks: running time, the record's gaps, the bugs ------------------------
-
-class TestRunningTime(unittest.TestCase):
-    def test_gaps_longer_than_the_floor_are_down_time(self):
-        ts = [0, 60, 120, 1000, 1060]                              # one gap of 880 s
-        gaps = SH.gaps(ts)
-        self.assertEqual(gaps, [(120, 1000)])
-        self.assertEqual(SH.running(gaps, 0, 1060), 1060 - 880)
-        self.assertEqual(SH.running(gaps, 500, 1060), 60)          # only the part inside [t0, t1]
-        self.assertEqual(SH.running(gaps, 10, 5), 0.0)
-
-    def test_a_gap_at_the_floor_is_not_down(self):
-        self.assertEqual(SH.gaps([0, SH.GAP_S, 2 * SH.GAP_S]), [])
-
-    def test_the_tail_since_the_last_line_counts_as_down(self):
-        # asleep or down since the last record line: not running
-        srv = _seat()
-        _put(srv, {"ts": T0, "kind": "birth"})
-        _cycles(srv, T0 + 1, T0 + 1 * H)
-        s = _sheet(srv, T0 + 3 * H)
-        self.assertAlmostEqual(s["time"]["alive_h"], 3.0, places=2)
-        self.assertAlmostEqual(s["time"]["running_h"], 1.0, places=1)
-        self.assertAlmostEqual(s["time"]["down_h"], 2.0, places=1)
-        self.assertEqual(s["time"]["bugs_h"], 0.0)
-
-
-class TestBugWindows(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.srv = _lived(_seat())
-        cls.now = T0 + 12 * H
-        cls.s = _sheet(cls.srv, cls.now)
-
-    def test_the_bug_list_is_data_with_fix_times(self):
-        by = {b["issue"]: b for b in SH.BUGS}
-        self.assertEqual(set(by), {191, 208, 254, 259})
-        self.assertEqual(by[191]["fixed"], FIX191)
-        self.assertEqual(by[191]["opens_after"], 4)
-        self.assertEqual(by[208]["opens_after"], 5)
-        self.assertEqual(by[208]["until"], "first_person")
-
-    def test_191_runs_from_rung_4_to_its_fix(self):
-        b = {x["issue"]: x for x in self.s["time"]["bugs"]}[191]
-        self.assertAlmostEqual(b["running_h"], (FIX191 - (T0 + 2.7 * H)) / H, places=2)
-
-    def test_208_runs_from_rung_5_to_the_first_line_to_a_person(self):
-        b = {x["issue"]: x for x in self.s["time"]["bugs"]}[208]
-        self.assertAlmostEqual(b["running_h"], (self.srv._first_person - (T0 + 9 * H)) / H, places=2)
-
-    def test_working_is_running_minus_the_bugs(self):
-        t = self.s["time"]
-        self.assertAlmostEqual(t["alive_h"], 12.0, places=2)
-        self.assertAlmostEqual(t["down_h"], 1.0, places=1)
-        self.assertAlmostEqual(t["running_h"], 11.0, places=1)
-        self.assertAlmostEqual(t["bugs_h"], sum(b["running_h"] for b in t["bugs"]), places=1)
-        # #305: and the walls -- the third exclusion, never counted twice with a bug
-        self.assertAlmostEqual(t["working_h"], t["running_h"] - t["bugs_h"] - t["walls_h"], places=1)
-        self.assertAlmostEqual(t["alive_h"], t["down_h"] + t["bugs_h"] + t["walls_h"] + t["working_h"], places=1)
-        self.assertEqual(self.s["header"]["working_h"], t["working_h"])
-
-    def test_a_seat_born_after_the_fixes_has_no_bug_time(self):
-        srv = _seat()
-        t0 = dt.datetime(2026, 10, 20, 9, 0, tzinfo=dt.timezone.utc).timestamp()
-        _put(srv, {"ts": t0, "kind": "birth"})
-        _cycles(srv, t0 + 1, t0 + 3 * H)
-        _put(srv, {"ts": t0 + 0.1 * H, "kind": "fix", "issue": 259})   # runs the #259 fix
-        for n, h in ((1, 0.2), (2, 0.5), (3, 0.6), (4, 0.7), (5, 1.0)):
-            _put(srv, {"ts": t0 + h * H, "kind": "rung", "rung": n, "skill": 1.0})
-        _put(srv, {"ts": t0 + 1.2 * H, "kind": "push", "to": ALICE})
-        s = _sheet(srv, t0 + 3 * H)
-        self.assertEqual(s["time"]["bugs"], [])
-        self.assertEqual(s["time"]["bugs_h"], 0.0)
-
-
-# ---- the pass records, the growth curve ------------------------------------------
-
-class TestAchievements(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.srv = _lived(_seat())
-        cls.s = _sheet(cls.srv, T0 + 12 * H)
-
-    def test_one_per_rung_passed_with_its_record(self):
-        with mock.patch.object(SH, "BUILT_AT", BUILT_FROM_BIRTH):        # #305: the downtime alone
-            a = {x["rung"]: x for x in _sheet(self.srv, T0 + 12 * H)["achievements"]}
-        self.assertEqual(sorted(a), [1, 2, 3, 4, 5, 6])
-        self.assertEqual(a[2]["skill"], 0.3)
-        self.assertEqual(a[2]["name"], "look")                         # #333: rung 2's pass is the look
-        self.assertEqual(a[2]["at"], "2026-10-16T15:30:00+00:00")
-        self.assertAlmostEqual(a[1]["working_h"], 0.5, places=2)
-        self.assertAlmostEqual(a[2]["wall_h"], 2.5, places=2)
-        self.assertAlmostEqual(a[2]["working_h"], 1.5, delta=0.02)   # the hour down taken out
-
-    def test_rung_6_carries_its_honest_re_pass(self):
-        a = {x["rung"]: x for x in self.s["achievements"]}[6]
-        self.assertEqual(a["at"], "2026-10-16T22:30:00+00:00")     # the record's first pass, kept
-        self.assertIn("208", a["note"])
-        self.assertEqual(a["earned_at"], SH.iso(self.srv._real6))  # earned with the person
-
-    def test_the_growth_curve_counts_rung_6_from_the_honest_pass(self):
-        rows = {r["rung"]: r for r in self.s["growth"]["rows"]}
-        a6 = {x["rung"]: x for x in self.s["achievements"]}[6]
-        self.assertEqual(rows[6]["working_h"], a6["working_h"])
-        self.assertGreater(rows[6]["wall_h"], 9.5)                  # from the honest pass, not the first
-
-
-class TestGrowth(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.s = _sheet(_lived(_seat()), T0 + 12 * H)
-        cls.rows = {r["rung"]: r for r in cls.s["growth"]["rows"]}
-
-    def test_the_fastest_floors_come_from_the_loops_constants(self):
-        floors = SH.fastest_cycles()
-        self.assertEqual(floors[1], SL.RUNG1_CYCLES)
-        self.assertEqual(floors[2], SL.RUNG2_REACHES + SL.AUDIT_REACHES)
-        self.assertEqual(floors[3], SL.RUNG3_WINDOW - SL.RUNG2_REACHES - SL.AUDIT_REACHES)
-        self.assertEqual(floors[4], SL.RUNG4_TIMED)
-        self.assertEqual(floors[5], SL.RUNG5_LOOKS)
-        self.assertEqual(floors[6], SL.RUNG6_LOOKS * (2 + SL.FOLLOW_S / SL.PACE_S))   # #333 3e: nudge, check, follow-up
-        self.assertEqual(floors[7], SL.RUNG7_NUDGES * (2 + SL.FOLLOW_S / SL.PACE_S))  # #333 3f: timed nudge, check, follow-up
-        self.assertEqual(floors[8], SL.RUNG8_LOOKS * (2 + SL.FOLLOW_S / SL.PACE_S))   # ...a predicted follow-up each
-        self.assertEqual(floors[13], 2 * SL.RUNG13_LOOKS)              # #333 part 3c: a nudge, then its check
-        self.assertEqual(set(floors), set(SL.PROGRESS))             # every built rung has one
-
-    def test_the_fastest_line_is_cumulative_at_the_pace(self):
-        floors = SH.fastest_cycles()
-        cum = 0
-        for n in range(1, 12):                                      # #258: 8 rungs built; #312: 9; #320: all 11
-            cum += floors[n]
-            self.assertAlmostEqual(self.rows[n]["fastest_h"], round(cum * SL.PACE_S / H, 3), places=3)
-            self.assertTrue(self.rows[n]["built"])
-
-    def test_the_child_scale_is_one_factor_the_median_over_the_rungs_passed(self):
-        g = self.s["growth"]
-        ratios = sorted(self.rows[n]["working_h"] / SH.CHILD[n][0] for n in range(2, 7))
-        k = ratios[len(ratios) // 2]
-        self.assertAlmostEqual(g["hours_per_child_month"], k, places=3)
-        for n in range(1, 12):                                      # #258: one more rung on the scale
-            self.assertAlmostEqual(self.rows[n]["child_h"], SH.CHILD[n][0] * k, delta=0.01)
-            self.assertTrue(self.rows[n]["child_milestone"])
-        self.assertIn("analogy", g["caveat"])
-
-    def test_every_milestone_cites_a_source(self):
-        for n, (months, what) in SH.CHILD.items():
-            self.assertRegex(what, r"\(.*\)", n)
-
-    def test_no_child_scale_before_rung_2(self):
-        srv = _seat()
-        _put(srv, {"ts": T0, "kind": "birth"})
-        _cycles(srv, T0 + 1, T0 + H)
-        _put(srv, {"ts": T0 + 0.3 * H, "kind": "rung", "rung": 1, "skill": 0.6})
-        g = _sheet(srv, T0 + H)["growth"]
-        self.assertIsNone(g["hours_per_child_month"])
-        self.assertTrue(all(r["child_h"] is None for r in g["rows"]))
-
-
-# ---- the attributes and the quest -----------------------------------------------
-
-class TestAttributes(unittest.TestCase):
-    """#300: the attributes are traits of self as a whole (tests/test_self_card_300.py
-    has their formulas); each skill's own score rides on its card while it is learned."""
-    @classmethod
-    def setUpClass(cls):
-        cls.srv = _lived(_seat())
-        cls.s = _sheet(cls.srv, T0 + 12 * H)
-        cls.a = {x["key"]: x for x in cls.s["attributes"]}
-
-    def test_the_traits_in_order(self):
-        self.assertEqual([x["label"] for x in self.s["attributes"]],
-                         ["Curiosity", "Insight", "Adaptability", "Focus", "Sociability"])
-
-    def test_each_skills_number_is_on_its_card(self):
-        k = {x["id"]: x for x in self.s["skills"]}
-        self.assertEqual(list(k), ["turns"])                       # the one it is learning (limit 7)
-        self.assertEqual(k["turns"]["trend"]["pass"], SL.RUNG7_PAY_MARGIN)
-        self.assertIsNone(k["turns"]["trend"]["value"])           # no timed lines on this record
-
-    def test_a_negative_skill_is_reported_negative(self):
-        k = {x["id"]: x for x in _sheet(_lived8(_seat()), T0 + 12 * H)["skills"]}["expect"]
-        self.assertLess(k["trend"]["value"], 0)                    # the model bets wrong every time
-        self.assertEqual(k["trend"]["pass"], SL.RUNG8_MARGIN)
-
-    def test_a_passed_rung_whose_test_fails_now_is_slipping(self):
-        sl = {x["id"] for x in self.s["slipping"]}
-        self.assertIn("reach", sl)                                 # no looks at w:fast on this record
-        self.assertNotIn("feel", sl)
-
-    def test_nothing_measured_is_none_not_zero(self):
-        self.assertIsNone(self.a["adaptability"]["value"])        # no shift noticed on this record
-
-
-class TestQuest(unittest.TestCase):
-    def test_rung_7_take_turns_staged(self):
-        # #258: the new rung 7 -- timed lines, then contingency, then payoff
-        q = _sheet(_lived(_seat()), T0 + 12 * H)["quest"]
-        self.assertEqual(q["rung"], 7)
-        self.assertEqual(q["name"], "time its turn")                # #300
-        c = {x["key"]: x for x in q["criteria"]}
-        self.assertEqual(list(c), ["nudges", "contingency", "payoff"])                 # #333 part 3f
-        self.assertEqual(c["nudges"]["text"], f"0/{SL.RUNG7_NUDGES} timed nudges at its other, followed up")
-        self.assertRegex(c["contingency"]["text"], r"^nudges in its window – vs chance – \(z 0\.0 → 3\.0, \+0\.10\)$")
-        self.assertRegex(c["payoff"]["text"], r"^replies gained over timing-blind – \(t 0\.0 → 5\.0, \+0\.05\)$")
-        self.assertEqual(q["waiting_on"], "nudges")
-
-    def test_rung_8_staged_with_its_counts_and_skill(self):
-        # the old rung 7 test, one rung up (#258)
-        s = _sheet(_lived8(_seat()), T0 + 12 * H)
-        q = s["quest"]
-        self.assertEqual(q["rung"], 8)
-        self.assertEqual(q["name"], "expect a reply")               # #300
-        c = {x["key"]: x for x in q["criteria"]}
-        self.assertEqual(list(c), ["looks", "skill"])
-        # #254: rung 8 (rung 7 until #258) reads 100 reply checks and grades self against the running rate
-        self.assertFalse(c["looks"]["met"])
-        self.assertEqual(c["looks"]["text"], f"20/{SL.RUNG8_LOOKS} follow-ups it predicted")   # #333 part 3f
-        self.assertFalse(c["skill"]["met"])
-        self.assertRegex(c["skill"]["text"], r"^skill vs running rate −\d\.\d\d → \+0\.08$")
-        self.assertEqual(q["waiting_on"], "looks")
-        self.assertIn(f"20/{SL.RUNG8_LOOKS} follow-ups it predicted · skill vs running rate −", q["summary"])
-
-    def test_asleep_before_birth(self):
-        s = _sheet(_seat(), T0)
-        self.assertTrue(s["empty"])
-        self.assertIsNone(s["quest"]["rung"])
-
-
-# ---- the inventory and the relationships ------------------------------------------
-
-class TestToysAndOthers(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.mkdtemp()
-        cls.env = mock.patch.dict(os.environ, {"MEMBRANE_DATA_DIR": cls.tmp})
-        cls.env.start()
-        srv = _lived(_seat())
-        assert TB.add(srv, "die", "toy:die", now=T0)["ok"]
-        TB.poke("toy:die", "roll", by="alice", now=T0 + 3 * H)
-        TB.poke("toy:die", "roll", by="model", now=T0 + 3.1 * H)
-        TB.tick("toy:die", now=T0 + 6 * H)
-        die = MEMBRANE_NS + "Component:toy:die"
-        # 8 looks: the early half badly predicted, the later half well
-        for i in range(8):
-            by = ["alice"] if i == 1 else ["model"] if i == 2 else ["world"] if i % 2 else []
-            _put(srv, {"ts": T0 + 10 * H + i * 60, "kind": "reach", "eid": die,
-                       "p": (0.1 if i % 2 else 0.9) if i < 4 else (0.9 if i % 2 else 0.1),
-                       "answer": "changed" if i % 2 or i in (1, 2) else "unchanged", "by": by})
-        cls.srv = srv
-        cls.s = _sheet(srv, T0 + 12 * H)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.env.stop()
-
-    def test_a_toy_with_its_kind_health_looks_and_error_halves(self):
-        t = {x["name"]: x for x in self.s["inventory"]}["toy:die"]
-        self.assertEqual(t["kind"], "die")
-        self.assertEqual(t["toy"], "toy:die")                       # the play buttons' target
-        self.assertEqual(t["health"], "ok")
-        self.assertEqual(t["looks"], 8)
-        self.assertGreater(t["error_early"], t["error_late"])       # it learned
-        self.assertEqual(t["changes"]["alice"], 1)                  # the toybox's ground truth
-        self.assertEqual(t["changes"]["model"], 1)
-        self.assertGreaterEqual(t["changes"]["world"], 1)
-
-    def test_the_others_it_has_met(self):
-        o = {x["who"]: x for x in self.s["relationships"]["others"]}
-        alice = o["alice"]
-        self.assertEqual(alice["kind"], "person")
-        self.assertTrue(alice["current"])
-        self.assertEqual(alice["chat"]["looks"], 20)
-        self.assertEqual(alice["chat"]["lines"], 10)
-        self.assertAlmostEqual(alice["chat"]["replied"], 0.5)
-        self.assertAlmostEqual(alice["chat"]["brier"], 0.25)        # habit's p 0.5 every time
-        self.assertEqual(alice["play"]["changes"], 1)               # she rolled the die too
-        self.assertIn("operator", o)                                # the empty slot it once met
-        model = o["the seat's model"]
-        self.assertEqual(model["kind"], "model")
-        self.assertEqual(model["play"]["changes"], 1)
-        self.assertNotIn("rung8", model)                            # #333 part 3f: the advisor stays out
-
-    def test_the_body_set(self):
-        r = self.s["relationships"]
-        self.assertIn("body", r)
-        self.assertIn("other", r)
-        self.assertIsInstance(r["body"], list)
-
-
 # ---- the header, the empty record, the cache --------------------------------------
 
 class TestHeaderAndCache(unittest.TestCase):
     def test_the_header(self):
-        s = _sheet(_lived(_seat()), T0 + 12 * H)
+        s = _sheet(_born(_seat()), T0 + 12 * H)
         h = s["header"]
         self.assertEqual(h["name"], "Blurp")
-        self.assertEqual(h["level"], 6)
-        self.assertEqual(h["rung_name"], "meet an other")
-        self.assertEqual(h["next"], ["nudge", "turns", "expect"])    # #295: the open achievements (#333: first reach; 3d: the mirror after it; 3e: tree order)
+        self.assertEqual((h["level"], h["rung_name"], h["next"]), (0, "", []))   # #576: the ladder retired
         self.assertAlmostEqual(h["age_h"], 12.0, places=2)
         self.assertEqual(h["born"], "2026-10-16T13:00:00+00:00")
-        self.assertEqual(h["lines_sent"], 20)
-        self.assertEqual(h["looks"], 20)
-
-    def test_the_skill_at_a_glance(self):
-        # the operator: "I don't see the skill level anywhere" -- the skill the
-        # bar reads, the line it has to beat, and where it is heading
-        # #258: on a seat past the new rung 7 the bar reads rung 8 (the old rung 7)
-        srv = _lived8(_seat())
-        st = SL.status(srv)
-        self.assertEqual(st["skill_rung"], 8)
-        self.assertEqual(st["skill_pass"], SL.RUNG8_MARGIN)
-        sk = _sheet(srv, T0 + 12 * H)["header"]["skill"]
-        self.assertEqual(sk["rung"], 8)
-        self.assertAlmostEqual(sk["value"], st["skill"], places=4)
-        self.assertLess(sk["value"], 0)
-        self.assertEqual(sk["pass"], SL.RUNG8_MARGIN)
-        self.assertEqual(sk["label"], "skill vs running rate")
-        self.assertEqual(sk["trend_h"], 0.0)                         # the same 20 pairs an hour ago
-        self.assertEqual([p["ago_h"] for p in sk["series"]], [4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5, 0.0])
-        self.assertIsNone(sk["series"][0]["value"])                  # 4 h ago: no pairs yet
-        self.assertAlmostEqual(sk["series"][-1]["value"], sk["value"], places=4)
-
-    def test_no_skill_before_birth(self):
-        self.assertIsNone(_sheet(_seat(), T0)["header"]["skill"])
+        self.assertIsNone(h["skill"])
 
     def test_an_empty_record_has_the_whole_shape(self):
         s = _sheet(_seat(), T0)
-        for key in ("header", "attributes", "quest", "achievements", "growth", "time", "inventory", "relationships"):
+        for key in ("header", "attributes", "quest", "achievements", "growth", "time", "inventory", "relationships",
+                    "tree", "skills", "toys", "energy", "code"):
             self.assertIn(key, s)
         self.assertTrue(s["empty"])
         self.assertEqual(s["achievements"], [])
         self.assertEqual(s["header"]["level"], 0)
-        self.assertEqual(s["time"]["alive_h"], 0.0)
-        self.assertEqual(len(s["attributes"]), 5)                   # #300: the five traits
-        self.assertTrue(all(a["value"] is None or a["value"] == 0 for a in s["attributes"]))
+        self.assertEqual(s["header"]["age_h"], 0.0)
         json.dumps(s)                                               # it serialises
 
     def test_it_is_cached_for_30_seconds(self):
         srv = _seat()
-        _put(srv, {"ts": T0, "kind": "birth"})
         a = SH.sheet(srv, now=T0 + 10)
-        _put(srv, {"ts": T0 + 11, "kind": "rung", "rung": 1, "skill": 0.6})
+        _put(srv, {"ts": T0 + 11, "kind": "birth"})
         self.assertIs(SH.sheet(srv, now=T0 + 10 + SH.CACHE_S - 1), a)
         b = SH.sheet(srv, now=T0 + 10 + SH.CACHE_S + 1)
         self.assertIsNot(b, a)
-        self.assertEqual(b["header"]["level"], 1)
+        self.assertEqual(b["header"]["born"], SH.iso(T0 + 11))
 
 
 # ---- the route: read-only, behind the JWT gate -------------------------------------
@@ -502,7 +114,7 @@ class TestRoute(unittest.TestCase):
     def setUpClass(cls):
         from membrane import server as NS
         from tests.test_server import _CFG, _StubRunner, _store
-        cls.srv = _lived(_seat())
+        cls.srv = _born(_seat())
         runner = _StubRunner()
         runner.srv = cls.srv
         handler = NS.make_handler(hub=NS.SSEHub(), sessions=_store(), messages=NS.MessageStore(),
@@ -531,8 +143,7 @@ class TestRoute(unittest.TestCase):
         self.assertEqual(code, 200)
         for key in ("header", "attributes", "quest", "achievements", "growth", "time", "inventory", "relationships"):
             self.assertIn(key, body)
-        self.assertEqual(body["header"]["level"], 6)
-        self.assertEqual(len(body["attributes"]), 5)                # #300: the five traits
+        self.assertEqual(body["header"]["level"], 0)
 
     def test_behind_the_jwt_gate(self):
         from membrane import jwtauth as J
@@ -638,12 +249,6 @@ class TestSkillAtAGlance(unittest.TestCase):
         x = _js("L.selfExp(%s)" % json.dumps(self._st(skill=0.0, skill_pass=0.15, skill_measured=False)))
         self.assertEqual(x["skill"], "skill not measured yet / +0.15")
 
-    def test_status_says_whether_it_is_measured(self):
-        self.assertFalse(SL.status(_lived(_seat()))["skill_measured"])   # #258: rung 7 has no timed lines yet
-        self.assertTrue(SL.status(_lived8(_seat()))["skill_measured"])   # rung 8 reads the pairs
-        srv = _seat()
-        SL._rt(srv)["mode"], SL._rt(srv)["isolate"] = "on", SL._limit_ids(7)   # #299: the limit is gone; rungs 1..7 run alone
-        self.assertFalse(SL.status(srv)["skill_measured"])
 
     def test_the_markup_has_a_place_for_it(self):
         panel = (UI / "panel.js").read_text()
@@ -826,17 +431,13 @@ class TestDockData(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp()
         cls.env = mock.patch.dict(os.environ, {"MEMBRANE_DATA_DIR": cls.tmp})
         cls.env.start()
-        srv = _lived(_seat())
+        srv = _born(_seat())
         now = T0 + 12 * H
         for kind, name in (("tower", "toy:tower"), ("die", "toy:die"), ("drift", "toy:drift"),
                            ("burst", "toy:burst"), ("body", "toy:body"), ("fast", "toy:fast")):
             assert TB.add(srv, kind, name, now=T0)["ok"], kind
         TB.poke("toy:tower", "knock", 4, by="alice", now=now - 3)
         TB.poke("toy:die", "roll", by="model", now=now - 100)
-        tb = MEMBRANE_NS + "Component:toy:tower:b4"
-        for i in range(4):
-            _put(srv, {"ts": now - 600 + i, "kind": "reach", "eid": tb, "p": 0.5,
-                       "answer": "changed" if i % 2 else "unchanged", "by": []})
         cls.srv, cls.now = srv, now
         cls.d = {t["name"]: t for t in SH.dock(srv, now=now, fresh=True)["toys"]}
 
@@ -862,11 +463,8 @@ class TestDockData(unittest.TestCase):
         self.assertEqual(self.d["toy:die"]["last"]["by"], "model")
         self.assertIsNone(self.d["toy:body"]["last"])               # never changed
 
-    def test_the_stats_over_all_its_entities(self):
-        t = self.d["toy:tower"]
-        self.assertEqual(t["looks"], 4)                              # a block's looks count for its tower
-        self.assertEqual(t["changes"]["alice"], 1)
-        self.assertIn(t["health"], ("ok", "empty", "unread", "no getter"))
+    def test_the_change_counts(self):
+        self.assertEqual(self.d["toy:tower"]["changes"]["alice"], 1)
 
     def test_burst_live_matches_its_clock(self):
         st = TB.state("toy:burst")

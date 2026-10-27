@@ -36,7 +36,6 @@ import time
 
 ENT = "llm"
 METHOD = "call"
-COMMAND = "llm::call {{about}} {{prompt}}"
 CALLER_PER_HOUR = 12
 GLOBAL_PER_HOUR = 120
 PROMPT_MAX = 4000
@@ -49,9 +48,7 @@ RING = 20
 # they survive restarts; one missed while the seat was down fires at boot,
 # marked late. Time only: a CONDITION is a watch's job.
 WAKE_METHOD = "wake"
-WAKE_COMMAND = "llm::wake {{about}} {{at}} {{prompt}}"
 UNWAKE_METHOD = "unwake"
-UNWAKE_COMMAND = "llm::unwake {{id}}"
 WAKE_MIN_S = 300.0
 WAKE_MAX_S = 30 * 86400.0
 WAKES_MAX = 20
@@ -85,6 +82,12 @@ def _entity(srv):
     return ent
 
 
+# #576 G2: the llm entity's methods are writes onto its own adapter branch
+WRITES = (("call", "self.call", "{'about': about, 'prompt': prompt}"),
+          ("wake", "self.wake", "{'about': about, 'at': at, 'prompt': prompt}"),
+          ("unwake", "self.unwake", "id"))
+
+
 def bind(srv) -> None:
     """Boot: the entity and its method."""
     _SEAT["srv"] = srv
@@ -96,11 +99,9 @@ def bind(srv) -> None:
         def _of(d):
             mo = (d.properties or {}).get("method_of")
             return ent.eid in (mo if isinstance(mo, list) else [mo])
-        for meth, cmd in ((METHOD, COMMAND), (WAKE_METHOD, WAKE_COMMAND), (UNWAKE_METHOD, UNWAKE_COMMAND)):
-            if not any(_of(d) and (d.properties or {}).get("method_name") == meth
-                       for d in list((est.docs or {}).values())):
-                from .night import method_define
-                method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd)
+        from .night import ensure_write_method     # #576 G2: each is a write step (the llm branch acts)
+        for meth, target, expr in WRITES:
+            ensure_write_method(srv, est, ent.eid, meth, target, expr)
         _paint_wakes(ent)
         est.upsert(ent, embedder=None)
     except Exception as e:                      # noqa: BLE001
@@ -226,18 +227,6 @@ def _remember(srv, ent, now, caller, about, prompt, refused: str = "") -> None:
         n = len(_calls)
     pp["state"] = f"{n} call(s) in the last hour (cap {GLOBAL_PER_HOUR}; {CALLER_PER_HOUR} per caller)"
     ent.properties = pp
-
-
-def from_command(rest: str, caller: str = "method") -> dict:
-    """`llm::call <about> <prompt>` (the method's command, shell-quoted)."""
-    try:
-        parts = shlex.split(rest)
-    except ValueError:
-        parts = rest.split(None, 1)
-    if len(parts) < 2:
-        return {"rc": 2, "text": "call(about, prompt): name the entity it is about and what to do"}
-    about, prompt = parts[0], " ".join(parts[1:])
-    return request(seat(), prompt, about=about, caller=caller)
 
 
 def answered(srv, ev: dict, text: str, model: str | None = None) -> None:
@@ -366,6 +355,9 @@ def set_wake(srv, about: str, at: str, prompt: str, caller: str = "", now: float
             _n += 1
         w = {"id": wid, "about": about_eid, "at": round(ts, 1), "prompt": prompt,
              "caller": str(caller or "unknown")[:120], "set_ts": round(now, 1)}
+        from . import writes as _W
+        if _W.current() is not None:            # #576: the wake fires in the chain that planted it
+            w["chain"] = _W.current()
         pp["wakes"] = ws + [w]
         ent.properties = pp
         _paint_wakes(ent, now)
@@ -416,10 +408,12 @@ def fire_due(srv, now: float | None = None, late_after_s: float = 120.0) -> list
     for w in due:
         late = now - float(w["at"]) > late_after_s
         caller = str(w.get("caller") or "unknown")
+        from . import writes as _W
         try:
-            r = request(srv, w["prompt"], about=w.get("about") or "", caller="wake:" + caller, now=now,
-                        readonly=caller.startswith("script:"),
-                        extra={"wake": {"id": w["id"], "at": w["at"], "set_ts": w.get("set_ts"), "late": late}})
+            with _W.resume(w.get("chain")):
+                r = request(srv, w["prompt"], about=w.get("about") or "", caller="wake:" + caller, now=now,
+                            readonly=caller.startswith("script:"),
+                            extra={"wake": {"id": w["id"], "at": w["at"], "set_ts": w.get("set_ts"), "late": late}})
         except Exception as e:                       # noqa: BLE001 -- the wake waits, it isn't lost
             r = {"rc": 127, "text": f"error: {e!r}"[:200]}
         out.append({**w, "late": late, "rc": r["rc"], "text": r["text"]})
@@ -457,44 +451,6 @@ def fire_due(srv, now: float | None = None, late_after_s: float = 120.0) -> list
     except Exception:
         pass
     return out
-
-
-def _decode_call_form(rest: str):
-    """`{about: 'x', at: '18:00', prompt: 'y'}` -> dict or None (#17)."""
-    import re
-    m = re.fullmatch(
-        r"\{\s*about:\s*['\"](?P<about>[^'\"]*)['\"]\s*,\s*"
-        r"at:\s*['\"](?P<at>[^'\"]*)['\"]\s*,\s*"
-        r"prompt:\s*['\"](?P<prompt>[^'\"]*)['\"]\s*,?\s*\}",
-        rest.strip(), re.S)
-    return m.groupdict() if m else None
-
-
-def wake_from_command(rest: str, caller: str = "method") -> dict:
-    """`llm::wake <about> <at> <prompt>` (shell-quoted)."""
-    t = rest.strip()
-    if t.startswith("{"):
-        cf = _decode_call_form(t)
-        if cf:
-            return set_wake(seat(), cf["about"], cf["at"], cf["prompt"],
-                            caller=caller)
-        return {"rc": 2, "text": "wake: unrecognized call-form payload; "
-                                 "use llm::wake <about> <at> <prompt>"}
-    try:
-        parts = shlex.split(t)
-    except ValueError:
-        parts = t.split(None, 2)
-    if len(parts) < 3:
-        return {"rc": 2, "text": "wake(about, at, prompt): the entity, when ('18:00', 'in 2h', '3d'), what to do"}
-    return set_wake(seat(), parts[0], parts[1], " ".join(parts[2:]), caller=caller)
-
-
-def unwake_from_command(rest: str) -> dict:
-    try:
-        parts = shlex.split(rest)
-    except ValueError:
-        parts = rest.split()
-    return unwake(seat(), parts[0] if parts else "")
 
 
 def start_wakes(srv) -> None:

@@ -336,8 +336,9 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
         L.append(
             "- EXEC: you have NO built-in tools this seat (bash/read/edit/"
             "grep/... are switched off in the config) -- every command, "
-            "file work rides the executor (exec(action='link'): it runs inline "
-            "and the result rides the SAME tool call) or an entity script's "
+            "file work is a method you define and call (exec(action='define') "
+            "then exec(action='call'): it runs inline and the result rides "
+            "the SAME tool call) or an entity script's "
             "verdicts (one shell command -> one `c:<head>` membrane entity "
             "it runs THROUGH: the result lands on the entity, errors reach "
             "your next banner). Entity scripts run UNSANDBOXED: imports "
@@ -4328,6 +4329,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         super().do_GET()
 
     def do_POST(self):
+        from . import writes as _W
+        with _W.from_headers(getattr(self, "headers", None)):     # #576: the caller's chain and writer
+            return self._do_POST_body()
+
+    def _do_POST_body(self):
         if not self._auth_gate():
             return
         self.server._last_request_ts = time.time()
@@ -4377,13 +4383,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._entity_edit(); return
         if path == "/membrane/entity/inherit":
             self._entity_inherit(); return
-        if path == "/membrane/entity/link":
-            self._entity_link_unlink(link=True); return
         if path in ("/membrane/method/define", "/membrane/method/call", "/membrane/method/each",
                     "/membrane/method/inspect"):
             self._method(path.rsplit("/", 1)[-1]); return
-        if path == "/membrane/entity/unlink":
-            self._entity_link_unlink(link=False); return
         if path == "/membrane/entity/remove":
             self._entity_remove(); return
         if path == "/membrane/filetool":
@@ -4393,16 +4395,15 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # ENGINE'S script paths only (a c: entity's tick/getter script
         # returns {run: true} and the ENGINE runs its command; the
         # observation + result lanes fire there, never a direct call)
-        # ... now with the executor's door beside them (2026-10-06):
-        # entity_link links command entities to tool:executor and the
-        # ENGINE runs them inline.
+        # (#576 part F: the link door beside them went too -- the LLM
+        # programs the field first: it defines a method, then calls it)
         if path == "/membrane/run" or path == "/membrane/entity-run":
             self._json_err_raw(410, "the run route was demolished: the "
                                "only exec is a command entity's OWN "
                                "script (getter/tick) returning "
                                "{run: true} -- the engine applies; "
-                               "or link it to the executor "
-                               "(entity_link)"); return
+                               "or program the field first: define a "
+                               "method on an entity, then call it"); return
         if path == "/membrane/intend":
             self._membrane_intend(); return
         if path == "/membrane/fulfill":
@@ -7119,6 +7120,16 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             from . import jwtauth as _JWT
             _JWT.send_unauthorized(self); return
         from .night import method_define, method_call, method_each, method_inspect
+        if op in ("call", "each"):
+            # #576 part F: a call straight at the executor is refused
+            from .night import direct_exec_refusal, direct_each_refusal
+            meth = str(body.get("method") or "")
+            why = (direct_each_refusal(est, str(body.get("over") or ""), meth) if op == "each"
+                   else direct_exec_refusal(est, str(body.get("object") or ""), meth))
+            if why:
+                self._json_out({"ok": False, "status": "blocked", "error": why, "method": meth,
+                                "object": str(body.get("object") or "") or None,
+                                "over": str(body.get("over") or "") or None}); return
         if op == "inspect":
             a = body.get("args")
             self._json_out(method_inspect(est, str(body.get("object") or ""), str(body.get("method") or ""),
@@ -7142,35 +7153,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             res = method_call(srv, est, _efield_on(srv), srv.membrane, str(body.get("object") or ""),
                               str(body.get("method") or ""), a if isinstance(a, (dict, list)) else {})
         if not res.get("ok") and not res.get("object"):
-            self._json_err_raw(400, str(res.get("error"))); return
-        self._json_out(res)
-
-    def _entity_link_unlink(self, link: bool) -> None:
-        """POST /membrane/entity/link | /membrane/entity/unlink: the
-        EXECUTOR'S hands (2026-10-06) -- link command entities to the
-        executor and run them inline (the edge IS the ledger), or
-        supersede the edges away. The return carries every command's
-        post-run state (the sync rule: the tool answers AFTER the
-        triggers processed the entities)."""
-        if self._paused_write_refused():
-            return
-        srv = self.server
-        est = getattr(srv, "entity_store", None)
-        if est is None:
-            self._json_err_raw(503, "entity layer unavailable"); return
-        body = self._json_body()
-        from .night import entity_link, entity_unlink
-        if link:
-            res = entity_link(srv, est, _efield_on(srv), srv.membrane,
-                              str(body.get("executor") or ""),
-                              body.get("commands"),
-                              create=bool(body.get("create", True)),
-                              args=body.get("args") if isinstance(body.get("args"), dict) else None)
-        else:
-            res = entity_unlink(srv, est, _efield_on(srv), srv.membrane,
-                                str(body.get("executor") or ""),
-                                body.get("commands"))
-        if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
 

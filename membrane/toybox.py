@@ -60,13 +60,12 @@ words. Its state is whose side it is on (`self` / `other`), its last mover
 it back (poke) -- whichever side it is on (#535), recorded the same way; the
 model may roll it too (`by: model`), which is never the
 other's turn. It has no clock, and a look never moves it. Exactly one shared
-ball (BALL) is provisioned once, by toy_unlocks when first reach is accepted
-(#333 part 3e: meet's apparatus; when rung 6 passed, #267, until then). The
+ball (BALL) is added like any toy (#576: toy unlocks retired with the ladder). The
 other's last act -- a person's poke on ANY toy -- is kept in one small file
 (last_person_poke): what rung 7's timing reads.
 
 THE MIRROR (#312): rung 9's apparatus -- recognize itself. Self feeds it its
-own move each cycle (mirror_feed: one scalar, self_loop._mirror_move), and
+own move (mirror_feed: one scalar; the old learner fed it until #576), and
 it has two sides: the GLASS shows the move from `delay` feeds back, the
 STRANGER self's own move from `lag_s` (MIRROR_LAG) seconds before the glass's
 (#343: it was `lag` feeds, 187 at the old 10 s cycle) -- the same
@@ -80,7 +79,8 @@ clock, and takes no pokes yet.
 
 THE SURFACE: `membrane toybox list|add|remove|reset|migrate|poke` (cli_main),
 the `toybox` object's methods list / add(spec) / remove(name) / reset(name) /
-poke(toy, action) (the `toybox::` no-shell dialect, night.run_command_entity),
+poke(toy, action) (each a write step onto the toybox object, #576 G2: the
+adapters' toybox branch calls from_command),
 and POST /membrane/toybox/poke (server.py: the 👶 panel's play buttons).
 """
 from __future__ import annotations
@@ -125,7 +125,7 @@ KINDS = {
                         "the glass follows what self does now",
                "params": {"delay": 1, "lag_s": 1870.0, "jitter": 0.1}, "clock": False},
 }
-MIRROR_LAG = KINDS["mirror"]["params"]["lag_s"]   # #312: the stranger's replay, s behind the glass (self_loop.MIRROR_LAG; #343)
+MIRROR_LAG = KINDS["mirror"]["params"]["lag_s"]   # #312: the stranger's replay, s behind the glass (#343)
 ACTIONS = {"tower": ("knock", "rebuild"), "die": ("roll",), "drift": ("nudge",), "burst": ("nudge",),
            "ball": ("roll",)}
 RESERVED_BY = ("self", "world")         # only the toy itself and self's own looks write these
@@ -486,8 +486,7 @@ def poke(name: str, action: str, arg=None, by: str = "", now: float | None = Non
     name, arg = _resolve(name, arg)
     arg = None if arg is None or str(arg).strip() == "" else str(arg).strip().lower()
     if not _path(name).exists():
-        from . import toy_unlocks as _TU                 # #267: a placeholder or a locked toy
-        return {"ok": False, "error": _TU.poke_refusal(name) or f"no toy named {name!r} (membrane toybox list)"}
+        return {"ok": False, "error": f"no toy named {name!r} (membrane toybox list)"}
     with _locked(name):
         st = _load(name)
         k = st["kind"]
@@ -833,19 +832,13 @@ def place(srv, eid: str, text: str | None = None):
 
 
 def add(srv, kind: str, name: str | None = None, params: dict | None = None,
-        now: float | None = None, locked_ok: bool = False) -> dict:
-    """Switch a toy on: its state, then its entities (a tower: one per block too).
-    A kind self has not unlocked yet is refused (#267, toy_unlocks; migrate,
-    which only replaces toys the seat already has, passes locked_ok)."""
+        now: float | None = None) -> dict:
+    """Switch a toy on: its state, then its entities (a tower: one per block too)."""
     from .entities import CLASS_COMPONENT, entity_id
     est = getattr(srv, "entity_store", None)
     if est is None:
         return {"ok": False, "error": "the entity layer is off"}
     kind = str(kind or "").strip().lower()
-    from . import toy_unlocks as _TU
-    why = None if locked_ok and kind not in _TU.PLACEHOLDERS else _TU.refusal(srv, kind)
-    if why:
-        return {"ok": False, "error": why}
     if kind not in KINDS:
         return {"ok": False, "error": f"no toy kind {kind!r}; the kit: {', '.join(KINDS)}"}
     name = str(name or f"toy:{kind}").strip().lower()
@@ -971,9 +964,10 @@ def _parse_spec(tokens: list[str]) -> tuple[str, str | None, dict]:
 
 # ---- the toybox object (cliffhanger) ------------------------------------------------
 
-METHODS = {"list": "toybox::list", "add": "toybox::add {{spec}}",
-           "remove": "toybox::remove {{name}}", "reset": "toybox::reset {{name}}",
-           "poke": "toybox::poke {{toy}} {{action}}"}
+METHODS = ("list", "add", "remove", "reset", "poke")       # the verbs from_command answers to
+WRITES = {"list": ("self.list", "1"), "add": ("self.add", "spec"),
+          "remove": ("self.remove", "name"), "reset": ("self.reset", "name"),
+          "poke": ("self.poke", "{'toy': toy, 'action': action}")}        # #576 G2
 
 
 def _eid() -> str:
@@ -1000,13 +994,9 @@ def bind(srv) -> None:
                             "roll is never the other's turn; body is self's alone). The kit: "
                             + ", ".join(KINDS) + ". Never write a toy script: add one here.")})
             est.upsert(ent, embedder=None)
-        have = {(d.properties or {}).get("method_name") for d in list(est.docs.values())
-                if ent.eid in ((d.properties or {}).get("method_of") or [])}
-        from .night import method_define
-        for meth, cmd in METHODS.items():
-            if meth not in have:
-                method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd,
-                              read_only=(meth == "list"))
+        from .night import ensure_write_method     # #576 G2: each verb is a write step (adapters' toybox branch)
+        for meth, (target, expr) in WRITES.items():
+            ensure_write_method(srv, est, ent.eid, meth, target, expr, read_only=(meth == "list"))
     except Exception as e:                      # noqa: BLE001
         print(f"[toybox] the toybox object not wired ({e!r})", file=sys.stderr)
     _mirror_getters(est)
@@ -1029,7 +1019,8 @@ def _mirror_getters(est) -> None:
 
 
 def from_command(rest: str) -> dict:
-    """`toybox::<method> <args>` (the no-shell dialect, night.run_command_entity)."""
+    """`<verb> <args>`: the toybox's dispatcher (#576 G2: its adapter branch calls it;
+    no command line reaches it any more)."""
     try:
         parts = shlex.split(rest)
     except ValueError:
@@ -1167,7 +1158,7 @@ def migrate(srv, plan: list[dict]) -> list[str]:
     est.save()
     for r in plan:
         if r["action"] == "replace":
-            out = add(srv, r["kind"], name=r["name"], params=r["params"], locked_ok=True)
+            out = add(srv, r["kind"], name=r["name"], params=r["params"])
             done.append(f"{r['name']} -> {r['kind']}: " + ("ok" if out["ok"] else out["error"]))
     return done
 
@@ -1189,7 +1180,7 @@ def _offline_seat():
     from .settings import data_dir
     srv = types.SimpleNamespace()
     srv.entity_store = EntityStore(path=str(data_dir() / "entities.json"), shared=False)
-    srv._models_path = str(data_dir() / "models.json")    # #267: self's record (what is unlocked)
+    srv._models_path = str(data_dir() / "models.json")
     return srv
 
 
@@ -1202,8 +1193,7 @@ def cli_main(argv: list[str]) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="the toys, their params and their change counts")
     a = sub.add_parser("add", help="switch a toy on")
-    from .toy_unlocks import PLACEHOLDERS
-    a.add_argument("kind", choices=sorted(set(KINDS) | set(PLACEHOLDERS)))  # a placeholder: refused by add, plainly
+    a.add_argument("kind", choices=sorted(KINDS))
     a.add_argument("--name", default=None, help="its name (default toy:<kind>)")
     a.add_argument("--param", action="append", default=[], metavar="K=V", help="a param (repeatable); seed=N too")
     r = sub.add_parser("remove", help="switch a toy off (its history is archived, not deleted)")
