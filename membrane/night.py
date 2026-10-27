@@ -3048,6 +3048,33 @@ def removal_refusal(est, spec: str) -> str | None:
             f"every member of {owners} loses it; force=true removes it anyway")
 
 
+def owned_methods(est, eid: str) -> list[str]:
+    """A class's (or object's) own methods, with their step nodes (#589)."""
+    docs = est.docs or {}
+    meths = [e for e, d in list(docs.items()) if eid in ((d.properties or {}).get("method_of") or [])]
+    nodes = [e for e in list(docs) if any(e.startswith(m + ":") for m in meths)]
+    return meths + nodes
+
+
+def remove_entity(est, spec: str, force: bool = False) -> dict:
+    """#589: remove one entity. A live method, or an entity that owns methods, is
+    refused unless forced; forced, an owner takes its methods (and their step
+    nodes) with it, so none is orphaned. -> {removed, refused?}."""
+    why = None if force else removal_refusal(est, spec)
+    if why:
+        return {"removed": 0, "refused": why}
+    ent = est._resolve_spec(spec)
+    if ent is None:
+        return {"removed": 0}
+    owned = owned_methods(est, ent.eid)
+    if owned and not force:
+        names = sorted({str((est.docs[e].properties or {}).get("method_name"))
+                        for e in owned if (est.docs[e].properties or {}).get("method_name")})
+        return {"removed": 0, "refused": f"{ent.eid} owns {len(names)} methods ({', '.join(names)}) -- "
+                                         "force=true removes them with it"}
+    return {"removed": est.remove_many([ent.eid] + owned)}
+
+
 def short_name_of(obj) -> str:
     from .classes import short_name
     return short_name(obj.eid)

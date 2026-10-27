@@ -623,11 +623,15 @@ TOOLS: list[dict] = [
         "name": "entity_remove",
         "description": (
             "Remove an entity (noise cleanup): resolve by eid or exact "
-            "name. Ambiguous fragments remove nothing."),
+            "name. Ambiguous fragments remove nothing. A live method, or a class "
+            "that owns methods, is refused unless force=true (a forced class "
+            "removal takes its methods with it)."),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "spec": {"type": "string"},
+                "force": {"type": "boolean",
+                          "description": "remove a live method, or a class together with its methods"},
             },
             "required": ["spec"],
         },
@@ -1332,7 +1336,7 @@ def tool_entity_remove(args: dict, port: int) -> str:
     if out.get("refused"):
         return f"Not removed: {out['refused']}"
     n = int(out.get("removed") or 0)
-    return f"Removed {spec!r}." if n \
+    return (f"Removed {spec!r}" + (f" and {n - 1} of its methods / steps." if n > 1 else ".")) if n \
         else (f"Nothing removed: no single entity matches {spec!r} "
               f"(ambiguous fragments are refused).")
 
@@ -1559,6 +1563,22 @@ def tool_method_define(args: dict, port: int) -> str:
             f"inherits from) its owner: exec(action='call', object=..., method=...)")
 
 
+def _ran(out: dict) -> str:
+    """#588: what ran -- the command line, or a composite's steps with their rc --
+    and, on a halt, the failing step with its output."""
+    steps = out.get("steps") if isinstance(out.get("steps"), dict) else {}
+    if str(out.get("fed") or "").strip() or not steps:
+        line = f"ran: {str(out.get('fed') or '')[:300]}"
+    else:
+        line = "ran: " + " > ".join(f"{name} (rc {v.get('rc')})" for name, v in steps.items())
+    bad = next(((n, v) for n, v in steps.items() if v.get("rc") not in (0, None)
+                or v.get("status") in ("error", "blocked", "timeout")), None)
+    if bad and (out.get("error") or out.get("rc") not in (0, None)):
+        n, v = bad
+        line += f"\nhalted at {n}: rc {v.get('rc')}" + (f" -- {str(v.get('head') or '')[:300]}" if v.get("head") else "")
+    return line
+
+
 def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
     """A method call; the run's full output rides the reply up to
     LINK_OUTPUT_CAP; `head_cap` (the local models'
@@ -1581,7 +1601,7 @@ def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
             return (f"call {out.get('status', 'blocked')}: {out.get('error', 'unknown error')}"
                     + (f" [resolution order: {' > '.join(out['mro'])}]" if out.get("mro") else ""))
         return (f"[{out.get('status')}] {out['method']} on {out['object']} (via {out['via']}): "
-                f"rc={out.get('rc')} {out.get('outcome')}\nran: {str(out.get('fed') or '')[:300]}\n"
+                f"rc={out.get('rc')} {out.get('outcome') or out.get('status')}\n{_ran(out)}\n"
                 f"{shown(out)}")
     a = dict(a) if isinstance(a, dict) else {}
     # THE PARAM BAG (issue #5 residual): the models put the wake's
@@ -1600,8 +1620,8 @@ def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
         return (f"call {out.get('status', 'blocked')}: {out.get('error', 'unknown error')}"
                 + (f" [resolution order: {' > '.join(out['mro'])}]" if out.get("mro") else ""))
     return (f"[{out.get('status')}] {out['method']} on {out['object']} (via {out['via']}; order "
-            f"{' > '.join(out.get('mro') or [])}): rc={out.get('rc')} {out.get('outcome')}\n"
-            f"ran: {str(out.get('fed') or '')[:300]}\n{shown(out)}")
+            f"{' > '.join(out.get('mro') or [])}): rc={out.get('rc')} {out.get('outcome') or out.get('status')}\n"
+            f"{_ran(out)}\n{shown(out)}")
 
 
 def tool_method_inspect(args: dict, port: int) -> str:
