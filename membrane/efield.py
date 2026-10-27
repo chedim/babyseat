@@ -2618,3 +2618,21 @@ def wire_store_names(fld, est, refresh_s: float = 60.0) -> None:
         return b in cache["names"]
 
     fld.name_ok = ok
+
+
+def has_worker(fld) -> bool:
+    """A capture worker is running for this field (#617)."""
+    cap = getattr(fld, "capturer", None)
+    return cap is not None and cap.mode == "on" and cap._t is not None
+
+
+def write_soon(fld, evs: list, session: str = "") -> None:
+    """A request path's events (#617): the capture worker writes and embeds
+    them, so the request never waits on the embedder; with no worker running
+    (tests, capture off) they are written and embedded inline."""
+    if has_worker(fld):
+        fld.capturer.on_events(evs, session=session)
+        return
+    fld.write_events(evs, session=session)
+    if getattr(getattr(fld, "emb", None), "model", "?") != "?" or not hasattr(fld, "emb"):
+        fld.process(limit=8)
