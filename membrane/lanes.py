@@ -1068,7 +1068,7 @@ def _injection_mode(srv) -> str:
     # restores the old state block
     m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "conversation")
     m = str(m).strip().lower()
-    return m if m in ("massage", "banner", "entities") else "conversation"
+    return m if m in ("massage", "banner", "entities", "ids") else "conversation"
 
 
 def _note_massage(srv, stats: dict) -> None:
@@ -4108,6 +4108,19 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     _st = types.SimpleNamespace(mark=mark)
     _is_tool_round = is_tool_round
     ctx = None
+    if _injection_mode(srv) == "ids":               # EXPERIMENT #649: the message's entities, ids only
+        fld = _efield_on(srv)
+        if fld is not None and not getattr(srv, "no_banner", False):
+            try:
+                from .entity_block import question_entities
+                ids = question_entities(fld, _last_user_text(body), vec)
+                if ids:
+                    ctx = ("RELATED ENTITIES (ids only; read one with entity_read when you need it): "
+                           + " · ".join(ids))
+            except Exception as e:
+                print(f"[ids-block] error: {e}", file=sys.stderr)
+        mark("recall+banner")
+        return ctx, None
     if _injection_mode(srv) == "entities":          # EXPERIMENT #649: the message's entities only
         fld = _efield_on(srv)
         if fld is not None and not getattr(srv, "no_banner", False):
