@@ -258,7 +258,8 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
         p["work_needed"] = bool(work)
     p.update({"value": v, "status": STATUS_CLOSED if work is False else STATUS_DECIDED,
               "set_by": "operator",
-              "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+              "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "value_ts": time.time()})   # #643: a goal parked on the card wakes
     if conv:
         p["chat"] = p.get("chat") or conv     # a card keeps the chat it already has
         message = str(message or "").strip()[:MESSAGE_ID_MAX]
@@ -292,7 +293,8 @@ def drop(est, spec: str) -> dict:
         if _status(p) != STATUS_OPEN:
             return {"ok": False, "conflict": True, "error": "only an open card can be dropped"}
         p.update({"status": STATUS_DROPPED, "set_by": "operator",
-                  "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+                  "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "value_ts": time.time()})
         ent.properties = p
         est.upsert(ent)
         _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,

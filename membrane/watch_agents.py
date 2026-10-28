@@ -900,6 +900,11 @@ class _LoopDrainer:
                 props.pop("blocked_until", None)
                 props.pop("blocked_entity", None)
                 props.update(blocked_condition(decision))
+                if not props.get("blocked_until") and not props.get("blocked_entity"):
+                    card = ask_operator(est, goal.eid, props, decision)   # #643: plain BLOCKED asks
+                    if card:
+                        props["blocked_card"] = card
+                        props["blocked_entity"] = card     # the answer moves it: the goal wakes
             elif verdict in ("step", "done"):
                 for k in ("blocked_ts", "blocked_on", "blocked_until", "blocked_entity"):
                     props.pop(k, None)
@@ -1138,6 +1143,43 @@ def blocked_condition(detail: str, now: float | None = None) -> dict:
     if m:
         out["blocked_entity"] = m.group(1).rstrip(".")
     return out
+
+
+_ON_OPERATOR_RE = re.compile(r"^\s*on\s+(?:the\s+)?operator\b[\s:,.\-–—]*", re.IGNORECASE)
+
+
+def ask_operator(est, goal_eid: str, props: dict, question: str) -> str:
+    """A GOAL BLOCKED ON THE OPERATOR ASKS (#643): plant a Decision card (the
+    loop's line, a free answer, planted by the watch, blocking the goal) and
+    return its eid; the goal's still-open card is reused. '' when no card
+    could be planted (the goal parks on the operator as before)."""
+    if est is None or not goal_eid:
+        return ""
+    from .decision_map import STATUS_OPEN, _one_line, _status
+    from .eids import _BAD_CHARS, NAME_MAX
+    from .entities import CLASS_DECISION
+    old = (est.docs or {}).get(str((props or {}).get("blocked_card") or ""))
+    if old is not None and _status(old.properties or {}) == STATUS_OPEN:
+        return old.eid
+    q = _ON_OPERATOR_RE.sub("", str(question or "")) or str(question or "")
+    name = _one_line("".join(ch for ch in q if ch not in _BAD_CHARS), NAME_MAX)
+    if not name:
+        return ""
+    try:
+        r = est.add(cls=CLASS_DECISION, name=name, summary=str(question or "")[:500])
+        if not r.get("ok"):
+            return ""
+        card = est.docs.get(r["eid"])
+        if r.get("merged") and card is not None and \
+                _status(card.properties or {}) != STATUS_OPEN:
+            return ""                               # an old card keeps its answer
+        if not est.edit(r["eid"], properties={
+                "status": STATUS_OPEN, "var": {"type": "string"},
+                "planted_by": "watch", "blocks": [goal_eid]}).get("ok"):
+            return ""
+    except Exception:
+        return ""
+    return r["eid"]
 
 
 def _entity_moved_since(srv, spec: str, ts: float) -> bool:
