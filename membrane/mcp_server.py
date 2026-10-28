@@ -947,7 +947,8 @@ def _http(port: int, method: str, path: str, body: dict | None = None,
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
                                  headers={"Content-Type": "application/json", **_jwt_headers(),
-                                          **_W.headers(default_writer="llm")})   # #576
+                                          **_W.headers(default_writer="llm"),
+                                          _W.HDR_CALLER: _client_caller()})   # #576
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
@@ -1859,12 +1860,23 @@ def _rpc_error(req_id, code: int, message: str) -> dict:
             "error": {"code": code, "message": message}}
 
 
+_CLIENT = ""      # #646: the client's name + version from initialize
+
+
+def _client_caller() -> str:
+    """The caller header: the client's name/version and this process's pid."""
+    return f"{_CLIENT} pid {os.getpid()}" if _CLIENT else f"pid {os.getpid()}"
+
+
 def _handle(req: dict, port: int) -> dict | None:
     """One request -> one response (or None for notifications)."""
     method = req.get("method") or ""
     req_id = req.get("id")
     params = req.get("params") or {}
     if method == "initialize":
+        global _CLIENT
+        ci = params.get("clientInfo") or {}
+        _CLIENT = " ".join(str(ci.get(k) or "") for k in ("name", "version")).strip()[:100]
         return _rpc_result(req_id, {
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {}},

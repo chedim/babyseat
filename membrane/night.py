@@ -243,6 +243,8 @@ def _with_caller(rec: dict) -> dict:
     if ch:
         out.setdefault("chain", ch.get("id"))
         out.setdefault("chain_root", ch.get("root"))
+    elif _W.caller():                  # an external MCP client: no chain, but a name + pid
+        out.setdefault("caller", _W.caller())
     return out
 
 
