@@ -175,6 +175,6 @@ def score(root):
 
 
 if __name__ == "__main__":
-    cmd, root = sys.argv[1], sys.argv[2]
+    cmd, root = sys.argv[1], os.path.abspath(sys.argv[2])   # the seat's cwd is the arm dir
     {"setup": lambda: setup(root), "ask": lambda: ask(root, sys.argv[3]),
      "score": lambda: score(root)}[cmd]()
