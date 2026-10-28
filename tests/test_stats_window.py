@@ -287,3 +287,17 @@ def test_a_lone_row_is_not_marked_hot():
     one = {"chat": {"calls": 1, "input": 5, "output": 1}}
     assert 'class="hot"' not in _node('H.statsTable("mind", [["chat", "Chat"], ["loops", "Goal worker"]], %s, %s)'
                                       % (json.dumps(one), json.dumps(one)))
+
+# ---- a loop turn counts once (561) ----
+
+def test_a_serve_loop_turn_counts_once_not_in_both_the_rows_and_the_watch_tally(tmp_path, monkeypatch):
+    """A serve loop turn is a stored row AND a from_turn tally; the window takes it from the row only. The proxy-only degrade (lane watch, no row) still comes from the tally."""
+    monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(bgusage.time, "time", lambda: NOW - 60)
+    bgusage.from_turn("watch-turn", {"info": {"modelID": "m1", "tokens": {"input": 300, "output": 30}}})
+    bgusage.record("watch", "m1", input=5, output=1)
+    msgs = {"ses_loop": [_row("assistant", NOW - 60, model="m1", agent="watch: goal-1", inp=300, out=30)]}
+    out = TK._assemble(TK.foreground(msgs, MIDNIGHT, NOW - 3600), bgusage.load(bgusage.path()), None, NOW, MIDNIGHT)
+    assert out["hour"]["minds"]["loops"] == {"calls": 2, "input": 305, "output": 31}
+    assert out["hour"]["total"] == {"calls": 2, "input": 305, "output": 31}
+    assert "other" not in out["hour"]["minds"]

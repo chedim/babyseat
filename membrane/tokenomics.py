@@ -35,6 +35,8 @@ _SPLIT = ("cache_read", "cache_write", "input", "output")
 
 # the background lanes -> the minds (bgusage's lane names)
 _LANE_MIND = {"thinker": "cortex", "claim-judge": "cortex", "watch": "loops"}
+# lanes whose turns are ALSO stored serve rows (the foreground counts them) (#561)
+_ROW_LANES = ("watch-turn",)
 
 
 def _i(v) -> int:
@@ -91,6 +93,8 @@ def background(doc: dict | None, since: float) -> dict:
     """bg-usage.json's slots since `since`, as a window."""
     w = _window()
     for lane, models in bgusage.window(doc or {}, since).items():
+        if lane in _ROW_LANES:
+            continue
         for model, row in models.items():
             _add(w, _LANE_MIND.get(lane, "other"), model,
                  _i(row.get("calls")), _i(row.get("input")), _i(row.get("output")))

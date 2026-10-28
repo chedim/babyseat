@@ -1574,7 +1574,7 @@ def main() -> None:
                 if runner is not None:
                     out = runner.run(session_id, text)
                     from . import bgusage
-                    bgusage.from_turn("watch", out)   # #550: the turn's tokens
+                    bgusage.from_turn("watch-turn", out)   # #550: the turn tokens; #561: its own lane, the window counts the stored row
                     parts = (out or {}).get("parts") or []
                     txt = "\n".join(str(p.get("text") or "")
                                     for p in parts if p.get("type") == "text")
