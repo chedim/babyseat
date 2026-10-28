@@ -1068,7 +1068,7 @@ def _injection_mode(srv) -> str:
     # restores the old state block
     m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "conversation")
     m = str(m).strip().lower()
-    return m if m in ("massage", "banner") else "conversation"
+    return m if m in ("massage", "banner", "entities") else "conversation"
 
 
 def _note_massage(srv, stats: dict) -> None:
@@ -4108,6 +4108,18 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     _st = types.SimpleNamespace(mark=mark)
     _is_tool_round = is_tool_round
     ctx = None
+    if _injection_mode(srv) == "entities":          # EXPERIMENT #649: the message's entities only
+        fld = _efield_on(srv)
+        if fld is not None and not getattr(srv, "no_banner", False):
+            try:
+                from .entity_block import entities_for, render
+                from .conv_banner import BANNER_CHAR_BUDGET
+                ctx = render(entities_for(fld, _last_user_text(body), vec),
+                             budget=BANNER_CHAR_BUDGET)
+            except Exception as e:
+                print(f"[entities-block] error: {e}", file=sys.stderr)
+        mark("recall+banner")
+        return ctx, None
     if _injection_mode(srv) == "conversation":
         fld = _efield_on(srv)
         efield_mark = None
@@ -5560,6 +5572,14 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # MEMBRANE_INJECTION=banner restores the old block (the A/B arm).
         ctx, efield_mark = _state_ctx(srv, body, vec, _is_tool_round, _st.mark)
         fld = _efield_on(srv)
+        if os.environ.get("MEMBRANE_EXP_DUMP"):          # EXPERIMENT #649: the injected block, per turn
+            try:
+                with open(os.environ["MEMBRANE_EXP_DUMP"], "a") as _df:
+                    _df.write(json.dumps({"ts": time.time(), "mode": _injection_mode(srv),
+                                          "q": _last_user_text(body)[:300], "tool_round": _is_tool_round,
+                                          "ctx": ctx or ""}) + "\n")
+            except Exception:
+                pass
         # THE SPEECH RELAY: membrane's held messages ride the next
         # model-bound request as a marked block -- the model relays them
         # into the conversation verbatim (the mouth), where they enter the
