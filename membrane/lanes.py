@@ -4115,7 +4115,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
                 from .entity_block import recall_answers, render_past
                 from .conv_banner import BANNER_CHAR_BUDGET
                 ctx = render_past(recall_answers(fld, _last_user_text(body), vec),
-                                  budget=BANNER_CHAR_BUDGET)
+                                  budget=int(os.environ.get("MEMBRANE_EXP_BUDGET") or BANNER_CHAR_BUDGET))
             except Exception as e:
                 print(f"[facts-block] error: {e}", file=sys.stderr)
         mark("recall+banner")
@@ -4140,7 +4140,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
                 from .entity_block import entities_for, render
                 from .conv_banner import BANNER_CHAR_BUDGET
                 ctx = render(entities_for(fld, _last_user_text(body), vec),
-                             budget=BANNER_CHAR_BUDGET)
+                             budget=int(os.environ.get("MEMBRANE_EXP_BUDGET") or BANNER_CHAR_BUDGET))
             except Exception as e:
                 print(f"[entities-block] error: {e}", file=sys.stderr)
         mark("recall+banner")
