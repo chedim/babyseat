@@ -44,13 +44,55 @@ _ZERO_TOKENS = {"total": 0, "input": 0, "output": 0, "reasoning": 0,
 _INJ_RE = re.compile(r"~(\d+) tokens")
 
 
+def read_raw(path: str) -> dict[str, list[dict]]:
+    """The store as it stands on disk (#542): the snapshot `path`, then the
+    append journal `path + ".jnl"` replayed over it -- one JSON line per
+    changed row, {"sid", "row"}. Rows union by message id, the newer
+    completed/created ts wins (a tie goes to the later line), first
+    positions stay. A torn last line (a crash mid-append) is skipped."""
+    try:
+        base = json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        base = {}
+    if not isinstance(base, dict):
+        base = {}
+    try:
+        text = Path(path + ".jnl").read_text()
+    except FileNotFoundError:
+        return base
+    pos: dict = {}                      # (sid, mid) -> index in its list
+    for sid, rows in base.items():
+        for i, r in enumerate(rows):
+            pos[(sid, str((r.get("info") or {}).get("id") or ""))] = i
+    for ln in text.splitlines():
+        try:
+            e = json.loads(ln)
+            sid, row = e["sid"], e["row"]
+            info = row.get("info") or {}
+        except Exception:
+            continue                    # torn or foreign line
+        mid = str(info.get("id") or "")
+        if not mid:
+            continue
+        tm = info.get("time") or {}
+        ver = tm.get("completed") or tm.get("created") or 0
+        rows = base.setdefault(sid, [])
+        i = pos.get((sid, mid))
+        if i is None:
+            pos[(sid, mid)] = len(rows)
+            rows.append(row)
+        else:
+            ot = (rows[i].get("info") or {}).get("time") or {}
+            if (ot.get("completed") or ot.get("created") or 0) <= ver:
+                rows[i] = row
+    return base
+
+
 def load_store(path: str) -> dict[str, list[dict]]:
     """Read + dedupe a serve-msgs store, mirroring `server.MessageStore`'s
     load: rows collapse on message id (last snapshot wins, first position
     stays), and assistant rows missing a tokens dict are mended to zeros."""
-    raw = json.loads(Path(path).read_text())
-    if not isinstance(raw, dict):
-        return {}
+    raw = read_raw(path)
     out: dict[str, list[dict]] = {}
     for sid, rows in raw.items():
         merged: dict[str, dict] = {}
