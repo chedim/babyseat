@@ -77,10 +77,25 @@ PRICE_TABLE: list[tuple[str, float]] = [
     ("kimi", 2.0),
     # OpenAI o-series: "^" anchors at the name's start or right after a "/"
     # or ":" so a short fragment cannot hit qwen3 / llama3.1 / gpt-4o.
-    # Mini rows first (first hit wins). Values: OpenAI list OUTPUT $/1M, read 2026-10-28.
-    ("^o1-mini", 4.4), ("^o3-mini", 4.4), ("^o4-mini", 4.4),
-    ("^o1", 60.0), ("^o3", 8.0), ("^o4", 4.4),
+    # Mini rows first (first hit wins). Values: OpenAI list OUTPUT $/1M, read
+    # 2026-10-28, divided by 2 to sit on this table's relative scale (gpt-4o
+    # $10 -> 5.0): o1 $60 -> 30, o3 $8 -> 4, the minis and o4 $4.40 -> 2.2.
+    ("^o1-mini", 2.2), ("^o3-mini", 2.2), ("^o4-mini", 2.2),
+    ("^o1", 30.0), ("^o3", 4.0), ("^o4", 2.2),
 ]
+
+LAMBDA_TIME = 0.05         # score units per pressure-inflated second
+LAMBDA_COST = 1.0          # score units per money unit
+FREE_TIER_PRICE = 0.1      # the near-floor pin for zero-token-cost rungs
+                           # (below every paid cloud price, above local 0)
+COLD_LOAD_S_PER_GIB = 1.2  # cold-loading a local model costs ~1.2s/GiB
+CLOUD_LATENCY = 4.0        # network + big-model baseline, seconds
+PRIOR_MASS_K = 3.0         # phantom trials standing behind the imprint claim
+DEFAULT_PRESSURE_THRESHOLD = 10.0   # local p95 (s) where cloud may win, pre-evidence
+LATENCY_ALPHA = 0.25       # EWMA friction for measured latencies
+COMPETENCE_ALPHA = 0.6     # EMA friction for the earned direction
+LOSS_FIT_W = 0.35          # fit removed per unit of earned loss-topic alignment
+CALIBRATION_MIN = 8        # calibration records before the measured line wins
 
 
 def table_price(name: str) -> float | None:
@@ -94,18 +109,7 @@ def table_price(name: str) -> float | None:
         elif frag in low:
             return usd
     return None
-LAMBDA_TIME = 0.05         # score units per pressure-inflated second
-LAMBDA_COST = 1.0          # score units per money unit
-FREE_TIER_PRICE = 0.1      # the near-floor pin for zero-token-cost rungs
-                           # (below every paid cloud price, above local 0)
-COLD_LOAD_S_PER_GIB = 1.2  # cold-loading a local model costs ~1.2s/GiB
-CLOUD_LATENCY = 4.0        # network + big-model baseline, seconds
-PRIOR_MASS_K = 3.0         # phantom trials standing behind the imprint claim
-DEFAULT_PRESSURE_THRESHOLD = 10.0   # local p95 (s) where cloud may win, pre-evidence
-LATENCY_ALPHA = 0.25       # EWMA friction for measured latencies
-COMPETENCE_ALPHA = 0.6     # EMA friction for the earned direction
-LOSS_FIT_W = 0.35          # fit removed per unit of earned loss-topic alignment
-CALIBRATION_MIN = 8        # calibration records before the measured line wins
+
 
 # ---- opencode compatibility (the DECLARED filter) --------------------------
 # A local model is eligible only if it can actually serve an opencode coding

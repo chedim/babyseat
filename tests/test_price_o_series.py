@@ -15,6 +15,15 @@ def test_short_fragments_do_not_collide(name, want):
     assert table_price(name) == want
 
 
-def test_o_series_not_cheaper_than_gpt():
-    assert table_price("o1") >= table_price("gpt-4o")
-    assert table_price("o3") >= table_price("gpt-4o")
+@pytest.mark.parametrize("name,want", [
+    ("o1", 30.0), ("o3", 4.0), ("o4", 2.2), ("openai/o3-mini", 2.2),
+    ("o1-mini:cloud", 2.2), ("o4-mini-deep-research", 2.2),
+])
+def test_o_series_on_the_relative_scale(name, want):
+    # output $/1M divided by 2, so gpt-4o ($10) is 5.0 like the existing rows
+    assert table_price(name) == want
+
+
+def test_o_series_order_follows_list_price():
+    assert table_price("o1") > table_price("gpt-4o")
+    assert table_price("o3") < table_price("gpt-4o")
