@@ -314,5 +314,53 @@ class TestFreeDetection(unittest.TestCase):
                                  ("a/paid", False, 0)])
 
 
+class TestOpenAIProvider(unittest.TestCase):
+    """The openai row (#630): api.openai.com on the generic provider seam."""
+
+    def test_row_shape(self):
+        p = A.PROVIDERS["openai"]
+        self.assertEqual(p["base"], "https://api.openai.com")
+        self.assertEqual(p["chat_path"], "/v1/chat/completions")
+        self.assertEqual(p["models_path"], "/v1/models")
+        self.assertEqual(p["auth_style"], "bearer")
+        self.assertEqual(p["env"], ("OPENAI_API_KEY",))
+        self.assertEqual(A._headers("openai", "sk-x"),
+                         {"Authorization": "Bearer sk-x"})
+
+    def test_env_key(self):
+        got = A.load_api_key("openai", home=Path(tempfile.mkdtemp()),
+                             environ={"OPENAI_API_KEY": "sk-env"})
+        self.assertEqual(got, "sk-env")
+
+    def test_listing_keeps_chat_models_only(self):
+        rows = {"data": [{"id": i} for i in (
+            "gpt-4o", "gpt-5", "o3-mini", "text-embedding-3-small",
+            "whisper-1", "tts-1", "dall-e-3", "gpt-image-1",
+            "omni-moderation-latest", "gpt-4o-transcribe",
+            "gpt-4o-realtime-preview", "gpt-4o-audio-preview",
+            "davinci-002", "babbage-002", "gpt-3.5-turbo-instruct",
+            "o1-pro", "o3-pro", "codex-mini-latest",
+            "computer-use-preview")]}
+
+        class _R:
+            def read(self):
+                return json.dumps(rows).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        import urllib.request
+        real = urllib.request.urlopen
+        urllib.request.urlopen = lambda *a, **k: _R()
+        try:
+            ids = A.fetch_models("openai", "sk-x")
+        finally:
+            urllib.request.urlopen = real
+        self.assertEqual(ids, ["gpt-4o", "gpt-5", "o3-mini"])
+
+
 if __name__ == "__main__":
     unittest.main()

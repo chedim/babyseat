@@ -146,6 +146,23 @@ PROVIDERS: dict[str, dict] = {
         "free_suffixes": ("-free",),
         "key_hint": "the OpenCode Zen API key (opencode.ai/auth)",
     },
+    # OpenAI proper (#630). default_price None: the router's PRICE_TABLE
+    # (gpt-5 -> 8.0, gpt -> 5.0) prices it as the paid rung it is. Its
+    # /v1/models lists every modality, so `skip_substrings` drops the ids
+    # that are not chat (embeddings, speech, images, moderation, realtime).
+    "openai": {
+        "base": "https://api.openai.com",
+        "chat_path": "/v1/chat/completions",
+        "models_path": "/v1/models",
+        "auth_style": "bearer",
+        "env": ("OPENAI_API_KEY",),
+        "default_price": None,
+        "skip_substrings": ("embedding", "whisper", "tts", "dall-e",
+                            "image", "moderation", "transcribe",
+                            "realtime", "audio", "davinci", "babbage",
+                            "instruct", "-pro", "codex", "computer-use"),
+        "key_hint": "sk-...",
+    },
     "mistral": {
         "base": "https://api.mistral.ai/v1",
         "chat_path": "/chat/completions",
@@ -249,7 +266,8 @@ def fetch_models_info(provider: str, key: str,
         for m in rows:
             if isinstance(m, dict):
                 mid = str(m.get("id") or m.get("name") or "").strip()
-                if mid:
+                skip = prov.get("skip_substrings", ())
+                if mid and not any(x in mid.lower() for x in skip):
                     out.append((mid, is_free_model(m, mid, provider),
                                 int(m.get("context_length") or 0)))
         return out

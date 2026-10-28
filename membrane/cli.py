@@ -439,7 +439,7 @@ def _auth(argv: list[str]) -> int:
     """`membrane auth <provider>`: store a cloud API key outside the repo.
 
     Providers come from auth.PROVIDERS (anthropic, openrouter, gemini, groq,
-    github, mistral; claude-agent from auth.AGENT_PROVIDERS stores no key of
+    github, zen, mistral, openai; claude-agent from auth.AGENT_PROVIDERS stores no key of
     its own -- it runs on the anthropic key, issues #384 / #413). The key
     goes to
     ~/.membrane/auth.json (600); the
@@ -643,7 +643,7 @@ def main() -> None:
         "  connect    offer to connect a shared Couchbase field for THIS\n"
         "             project (creds go to ~/.membrane/projects/, not the repo)\n"
         "  auth       store a cloud API key (anthropic, openrouter, gemini,\n"
-        "             groq, github, zen, mistral): ~/.membrane/auth.json (600);\n"
+        "             groq, github, zen, mistral, openai): ~/.membrane/auth.json (600);\n"
         "             its models become routable rungs + picker entries;\n"
         "             `auth claude-agent` enables Claude through the Agent SDK\n"
         "             on the anthropic key (docs/claude-agent.md)\n"
