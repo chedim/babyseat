@@ -77,9 +77,9 @@ PRICE_TABLE: list[tuple[str, float]] = [
     ("kimi", 2.0),
     # OpenAI o-series: "^" anchors at the name's start or right after a "/"
     # or ":" so a short fragment cannot hit qwen3 / llama3.1 / gpt-4o.
-    # Mini rows first (first hit wins). Values await operator approval.
-    ("^o1-mini", 4.0), ("^o3-mini", 4.0), ("^o4-mini", 4.0),
-    ("^o1", 8.0), ("^o3", 6.0), ("^o4", 6.0),
+    # Mini rows first (first hit wins). Values: OpenAI list OUTPUT $/1M, read 2026-10-28.
+    ("^o1-mini", 4.4), ("^o3-mini", 4.4), ("^o4-mini", 4.4),
+    ("^o1", 60.0), ("^o3", 8.0), ("^o4", 4.4),
 ]
 
 
