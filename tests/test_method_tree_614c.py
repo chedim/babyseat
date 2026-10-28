@@ -101,6 +101,38 @@ class TestTheMethodsTree(unittest.TestCase):
         self.assertEqual(out["head"].strip(), "hi")
         self.assertTrue(est.docs[m.eid].properties.get("code"))
 
+    def test_without_a_call_context_a_missing_param_is_refused_too(self):
+        # a command entity run with bare args (no call context): the pipeline's
+        # gate names the missing one before any code is bound -- no {{b}} reaches a shell
+        srv, est, f, box = _world()
+        cmd = QuantumEntity(eid=MEMBRANE_NS + "Component:echoer", cls="Component",
+                            properties={"name": "echoer", "command": "echo {{a}} {{b}}"})
+        est.upsert(cmd, embedder=None)
+        out = N._exec_command_doc(srv, est, f, None, cmd, args={"a": "x y"})
+        self.assertIsNone(out.get("rc"))
+        self.assertIn("needs args: b", out["error"])
+        ok = N._exec_command_doc(srv, est, f, None, cmd, args={"a": "x y", "b": "z"})
+        self.assertEqual(ok["head"].strip(), "x y z")
+
+    def test_a_feed_that_is_not_shell_is_refused_before_it_runs(self):
+        srv, est, f, box = _world()
+        root = N._code_root(srv, est, f, None, est.docs[_define(srv, est, f, box, "echo {{parent.head}}").eid])
+        code, missing = N._bind(est, root, {}, None, {"p": {"head": "it's", "rc": 0}}, ["p"])
+        self.assertEqual((code, missing), ("echo it's", []))          # a feed goes in as printed
+        out = LG.run(srv, code=code)
+        self.assertFalse(out["ok"])
+        self.assertIn("syntax error", out["error"])
+        self.assertIsNone(out.get("root"))                              # nothing minted, nothing ran
+
+    def test_a_run_verdict_on_code_that_does_not_parse_is_blocked(self):
+        srv, est, f, box = _world()
+        ent = QuantumEntity(eid=MEMBRANE_NS + "Component:broken", cls="Component",
+                            properties={"name": "broken", "command": "echo 'unclosed"})
+        est.upsert(ent, embedder=None)
+        N.apply_entity_update(srv, ent, {"run": True}, "tick", silent=True)
+        rr = est.docs[ent.eid].properties.get("run_rc", "absent")
+        self.assertEqual(rr, "absent")                                  # no residue: nothing ran
+
     def test_code_run_keeps_braces_literal(self):
         srv, est, f, box = _world()
         out = LG.run(srv, code="echo {{x}}")

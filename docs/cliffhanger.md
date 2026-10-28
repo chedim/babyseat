@@ -23,7 +23,10 @@ name on two classes is two implementations (polymorphism).
   `$n`, `$1` do not), and an arg the command never names is refused. The
   command is a code tree whose `{{name}}`s are `param` nodes (#614 part C):
   a call fills them, each value shell-quoted once, and runs the bound code
-  as code (a result entity per call).
+  as code (a result entity per call). Write a placeholder as its own word
+  (`{{x}}`) or as a whole quoted word (`'{{x}}'`, `"{{x}}"`): inside a
+  longer quoted string (`'foo {{x}} bar'`) the quoted value breaks the
+  quoting.
 - **Compose:** a method's `steps` run in order (composite depth ≤ 3), stopping
   on failure; `{{steps.<name>.state.<field>}}` reads a step's captured result.
 - **Guard and read:** `guard="result = {'ok': …}"` runs first (false = blocked,
