@@ -252,6 +252,9 @@ class SessionStore:
             self._flush()
 
 
+from .stats import read_raw as _read_raw
+
+
 class MessageStore:
     """A session's messages: rows of {info, parts}. Write-through (a
     model turn is minutes apart -- the file write is nothing), atomic
@@ -262,10 +265,10 @@ class MessageStore:
         self.msgs: dict[str, list[dict]] = {}
         self._lock = threading.Lock()
         self._last_flush_ts = 0.0
-        self._dirty_sessions: set | None = None
+        self._dirty_rows: set | None = None
         if path is not None:
             try:
-                d = json.loads(Path(path).read_text())
+                d = _read_raw(path)       # snapshot + journal (#542)
                 if isinstance(d, dict):
                     # a stored file may predate the snapshot upsert (one
                     # message saved once per tool-part state change):
@@ -324,13 +327,13 @@ class MessageStore:
                 # read the disk); a tool-state snapshot waits for the
                 # cadence (the 24-round turn rewrote the 10MB file per
                 # state change before)
-                self._dirty_sessions = (self._dirty_sessions or set())
-                self._dirty_sessions.add(sid)
+                self._dirty_rows = (self._dirty_rows or set())
+                self._dirty_rows.add((sid, mid))
                 self._flush()
                 self._last_flush_ts = time.time()
             else:
-                self._dirty_sessions = (self._dirty_sessions or set())
-                self._dirty_sessions.add(sid)
+                self._dirty_rows = (self._dirty_rows or set())
+                self._dirty_rows.add((sid, mid))
                 self._flush_maybe()
         return row
 
@@ -373,8 +376,8 @@ class MessageStore:
                 minted_info = info      # the wire's row-before-part
             else:
                 row["parts"] = list(row.get("parts") or []) + [part]
-            self._dirty_sessions = (self._dirty_sessions or set())
-            self._dirty_sessions.add(sid)
+            self._dirty_rows = (self._dirty_rows or set())
+            self._dirty_rows.add((sid, str(row["info"].get("id") or "")))
             self._flush_maybe()
         if hub is not None and minted_info is not None:
             # THE ROW BEFORE ITS PART: the reducer must HOLD the row
@@ -408,90 +411,103 @@ class MessageStore:
                          if r["info"].get("id") == mid), None)
 
     def _flush(self) -> None:
+        """AN APPEND COSTS AN APPEND (#542): the rows this writer changed
+        go onto the journal `path.jnl` as one JSON line each (a single
+        O_APPEND write under a file lock -- a crash leaves at most a torn
+        last line, which the readers skip). The snapshot is rewritten only
+        by `_compact`, when the journal has outgrown it, so the cost
+        stays proportional to the change, not to the 67 MB history.
+        THE MULTI-WRITER MERGE (the vanishing-reply fix) lives in the
+        readers now: two seats serving out of one cwd both append, and
+        `stats.read_raw` unions rows by message id, the newer
+        completed/created ts winning -- a stale empty row never displaces
+        a finished one. With no dirty set a flush is a no-op.
+        A row is journaled whole on each change, so the journal can reach
+        the snapshot's size before it compacts (a boot reads up to ~2x)."""
         if self.path is None:
             return
         try:
-            # THE MULTI-WRITER MERGE (the vanishing-reply fix): two seats can
-            # serve out of one cwd (an old seat that survived its restart, a
-            # sibling test seat) and this is a WHOLE-FILE snapshot flush --
-            # a stale boot copy would clobber the other writer's final-text
-            # rows with this boot's older view: the assistant row reverts to
-            # its empty opening state, the client's completion re-render
-            # shows a vanished reply, and the exchange reads as 'my message
-            # sitting under the model's previous response'. So the flush
-            # re-reads disk first, unions sessions, unions rows by message
-            # id, and lets the NEWER row win -- an unfinished row (created
-            # only) never displaces a finished one (completed), and our RAM
-            # row only displaces an OLDER disk row. Disk-first insertion
-            # keeps first positions stable, per the load contract.
-            try:
-                disk = json.loads(Path(self.path).read_text())
-            except Exception:
-                disk = {}
-            # THE DIRTY SET (the throttle fix): only the sessions THIS
-            # writer touched merge + rewrite; the untouched sides ride
-            # disk-bytes-forward (a sibling writer's file stays theirs)
-            disk_out: dict = {}
-            merged_targets = self._dirty_sessions or set(self.msgs) or \
-                set(disk)
-            disk_out = disk
-            self._dirty_sessions = None
-            merged: dict = {}
-            for src in (disk, self.msgs):
-                for sid, rows in (src or {}).items():
-                    if sid not in merged_targets:
-                        continue          # untouched: another writer's lane
-                    bucket = merged.setdefault(sid, {})
-                    for r in rows:
-                        info = r.get("info") or {}
-                        mid = str(info.get("id") or "")
-                        if not mid:
-                            continue
-                        tm = info.get("time") or {}
-                        ver = tm.get("completed") or tm.get("created") or 0
-                        cur = bucket.get(mid)
-                        if cur is None or cur[0] <= ver:
-                            bucket[mid] = (ver, r)
-            out = dict(disk)
-            for sid, b in merged.items():
-                if b:
-                    out[sid] = [v[1] for v in b.values()]
-            tmp = self.path + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(out, f)
-            os.replace(tmp, self.path)
+            dirty = self._dirty_rows
+            self._dirty_rows = None
+            if not dirty:
+                return                      # nothing changed: nothing to write
+            rows = []
+            for sid, mid in dirty:
+                r = next((r for r in self.msgs.get(sid) or []
+                          if str(r["info"].get("id") or "") == mid), None)
+                if r is not None:
+                    rows.append((sid, r))
+            if not rows:
+                return
+            data = "".join(json.dumps({"sid": sid, "row": r}) + "\n"
+                           for sid, r in rows).encode()
+            with self._file_lock():
+                fd = os.open(self.path + ".jnl",
+                             os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+                try:
+                    os.write(fd, data)
+                    jsize = os.fstat(fd).st_size
+                finally:
+                    os.close(fd)
+                try:
+                    bsize = os.stat(self.path).st_size
+                except OSError:
+                    bsize = 0
+                if jsize > bsize:           # the journal outgrew the snapshot
+                    self._compact_locked()
         except Exception:
             pass
 
-    _dirty_sessions: set | None = None
+    _dirty_rows: set | None = None
+
+    def _file_lock(self):
+        import contextlib
+        import fcntl
+
+        @contextlib.contextmanager
+        def _lk():
+            fd = os.open(self.path + ".lock", os.O_WRONLY | os.O_CREAT, 0o644)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                yield
+            finally:
+                os.close(fd)             # closing releases the flock
+        return _lk()
+
+    def _compact_locked(self, drop: tuple = ()) -> None:
+        """Fold snapshot + journal into a new snapshot (atomic replace),
+        then empty the journal. The caller holds the file lock. A crash
+        between the replace and the truncate only replays rows the
+        snapshot already holds -- harmless (same ids, same versions)."""
+        raw = _read_raw(self.path)
+        for sid in drop:
+            raw.pop(sid, None)
+        tmp = self.path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(raw, f)
+        os.replace(tmp, self.path)
+        open(self.path + ".jnl", "w").close()
 
     def delete(self, *sids: str) -> bool:
-        """Forget sessions' messages, in RAM and on disk (the merging flush
-        keeps whatever disk holds, so the file is edited here too -- once
-        for all the ids, #570)."""
+        """Forget sessions' messages, in RAM and on disk (the journal is
+        folded into the snapshot with the sessions dropped, once for all
+        the ids, #570)."""
         with self._lock:
             had = False
             for sid in sids:
                 had = (self.msgs.pop(sid, None) is not None) or had
-                if self._dirty_sessions:
-                    self._dirty_sessions.discard(sid)
+                if self._dirty_rows:
+                    self._dirty_rows = {k for k in self._dirty_rows
+                                        if k[0] != sid}
             if self.path is None:
                 return had
             try:
-                disk = json.loads(Path(self.path).read_text())
+                with self._file_lock():
+                    if not any(sid in _read_raw(self.path) for sid in sids):
+                        return had
+                    self._compact_locked(drop=sids)
             except Exception:
                 return had
-            if not isinstance(disk, dict) or not any(sid in disk for sid in sids):
-                return had
-            for sid in sids:
-                disk.pop(sid, None)
-            try:
-                tmp = self.path + ".tmp"
-                with open(tmp, "w") as f:
-                    json.dump(disk, f)
-                os.replace(tmp, self.path)
-            except Exception:
-                pass
             return True
 
     def flush(self) -> None:
