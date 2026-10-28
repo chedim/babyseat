@@ -337,7 +337,10 @@ class TestOpenAIProvider(unittest.TestCase):
             "gpt-4o", "gpt-5", "o3-mini", "text-embedding-3-small",
             "whisper-1", "tts-1", "dall-e-3", "gpt-image-1",
             "omni-moderation-latest", "gpt-4o-transcribe",
-            "gpt-4o-realtime-preview", "gpt-4o-audio-preview")]}
+            "gpt-4o-realtime-preview", "gpt-4o-audio-preview",
+            "davinci-002", "babbage-002", "gpt-3.5-turbo-instruct",
+            "o1-pro", "o3-pro", "codex-mini-latest",
+            "computer-use-preview")]}
 
         class _R:
             def read(self):

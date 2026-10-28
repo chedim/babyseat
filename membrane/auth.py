@@ -159,7 +159,8 @@ PROVIDERS: dict[str, dict] = {
         "default_price": None,
         "skip_substrings": ("embedding", "whisper", "tts", "dall-e",
                             "image", "moderation", "transcribe",
-                            "realtime", "audio", "davinci", "babbage"),
+                            "realtime", "audio", "davinci", "babbage",
+                            "instruct", "-pro", "codex", "computer-use"),
         "key_hint": "sk-...",
     },
     "mistral": {
