@@ -570,7 +570,12 @@ these rules (`membrane/watch_agents.py`, pinned in
   `STEP <what moved>`, `BLOCKED <on whom>` or `ignored: <reason>`. A pass
   that ends with no text is `aborted`, and its last tool calls ride into
   the next wake. `DONE` with the goal still open gets one "call fulfill
-  now" nudge. `BLOCKED` parks the goal until the operator next speaks.
+  now" nudge. `BLOCKED retry after 2h` parks the goal on a timer and
+  `BLOCKED on <entity-id>` until that entity moves. Plain `BLOCKED` (on the
+  operator) plants a Decision card with the loop's line, which blocks the goal,
+  and parks the goal on it: answering or dropping the card wakes the goal. A
+  goal still blocked reuses its open card. The operator speaking unparks
+  every kind.
 - **The budget.** About 8 tool calls per pass. The next wake carries the
   whole goal text and the last three landings.
 - **The gate.** Only a NEW plant (and its landing) skips the alert budget.
