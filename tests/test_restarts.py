@@ -139,7 +139,8 @@ class TestARestartRestarts(unittest.TestCase):
              mock.patch("membrane.seat_panel.note"):
             RS.do_restart(srv, "staged fixes", delay_s=0)
         th.return_value.start.assert_called_once()
-        self.assertTrue(RS.RESTART["requested"])
+        # #647 review: the flag is raised by the thread, after the hold
+        self.assertFalse(RS.RESTART["requested"])
 
     def test_a_requested_restart_reexecs_the_same_command(self):
         RS.RESTART["requested"] = True
@@ -196,3 +197,98 @@ class TestRestartKeepsPorts648(unittest.TestCase):
             RS.reexec_if_requested()
         self.assertEqual(ex.call_args[0][1][-5:],
                          ["--standalone", "--listen", "11501", "--serve-port", "4097"][-5:])
+
+class TestRestartHoldsWhileBusy647(unittest.TestCase):
+    """#647: presence.restart waited 2 s whatever ran, and a person's reply was
+    lost. The signal now waits on busy(), up to the same cap as a planned one."""
+
+    def test_the_hold_returns_when_the_seat_goes_idle(self):
+        seq = [["turn s1"], ["turn s1"], []]
+        with mock.patch.object(RS, "busy", side_effect=lambda s: seq.pop(0)) as b, \
+             mock.patch.object(RS.time, "sleep") as sl:
+            held = RS.hold_until_idle(_Srv())
+        self.assertEqual(held, ["turn s1"])
+        self.assertEqual(b.call_count, 3)
+        self.assertEqual(sl.call_count, 2)
+
+    def test_the_hold_is_capped(self):
+        clock = iter([0, 1, RS.MAX_DELAY_MIN * 60 + 5, RS.MAX_DELAY_MIN * 60 + 6])
+        with mock.patch.object(RS, "busy", return_value=["1 loop(s)"]), \
+             mock.patch.object(RS.time, "sleep"), \
+             mock.patch.object(RS.time, "time", side_effect=lambda: next(clock)):
+            held = RS.hold_until_idle(_Srv())
+        self.assertEqual(held, ["1 loop(s)"])
+
+    def test_do_restart_signals_only_after_the_hold(self):
+        order = []
+        with mock.patch.object(RS, "hold_until_idle", side_effect=lambda s: order.append("hold") or []), \
+             mock.patch.object(RS.os, "kill", side_effect=lambda *a: order.append("kill")), \
+             mock.patch.object(RS.time, "sleep"), \
+             mock.patch("membrane.seat_panel.note"):
+            RS.RESTART["requested"] = False
+            RS.do_restart(_Srv(), "x", delay_s=0)
+            for t in RS.threading.enumerate():
+                if t.name == "restart":
+                    t.join(2)
+        RS.RESTART["requested"] = False
+        self.assertEqual(order, ["hold", "kill"])
+
+
+class TestPlainStopDuringTheHold647(unittest.TestCase):
+    """#647 review: a ctrl+c during the hold must stop the seat, not re-exec it."""
+
+    def setUp(self):
+        RS.RESTART["requested"] = False
+
+    def tearDown(self):
+        RS.RESTART["requested"] = False
+
+    def test_the_flag_and_reason_wait_for_the_hold_to_end(self):
+        import tempfile, threading
+        seen = {}
+        gate = threading.Event()
+        release = threading.Event()
+
+        def hold(s):
+            seen["requested"] = RS.RESTART["requested"]
+            seen["reason"] = os.path.exists(os.path.join(RS._dir(srv), RS.REASON_FILE))
+            gate.set()
+            release.wait(2)
+            return []
+        with tempfile.TemporaryDirectory() as d:
+            srv = _Srv()
+            with mock.patch.object(RS, "_dir", return_value=d), \
+                 mock.patch.object(RS, "hold_until_idle", side_effect=hold), \
+                 mock.patch.object(RS, "busy", return_value=["turn s1"]), \
+                 mock.patch.object(RS.os, "kill") as kill, \
+                 mock.patch("membrane.seat_panel.note"):
+                RS.do_restart(srv, "x", delay_s=0)
+                gate.wait(2)
+                self.assertFalse(seen["requested"])
+                self.assertFalse(seen["reason"])
+                release.set()
+                for t in threading.enumerate():
+                    if t.name == "restart":
+                        t.join(2)
+                self.assertTrue(RS.RESTART["requested"])
+                self.assertTrue(os.path.exists(os.path.join(d, RS.REASON_FILE)))
+                kill.assert_called_once()
+
+    def test_a_second_restart_during_the_hold_adds_no_second_signal(self):
+        import tempfile, threading
+        release = threading.Event()
+        with tempfile.TemporaryDirectory() as d:
+            srv = _Srv()
+            with mock.patch.object(RS, "_dir", return_value=d), \
+                 mock.patch.object(RS, "hold_until_idle", side_effect=lambda s: release.wait(2) or []), \
+                 mock.patch.object(RS, "busy", return_value=["turn s1"]), \
+                 mock.patch.object(RS.os, "kill") as kill, \
+                 mock.patch("membrane.seat_panel.note"):
+                RS.do_restart(srv, "x", delay_s=0)
+                out = RS.do_restart(srv, "y", delay_s=0)
+                self.assertIn("already waiting", str(out))
+                release.set()
+                for t in threading.enumerate():
+                    if t.name == "restart":
+                        t.join(2)
+                self.assertEqual(kill.call_count, 1)

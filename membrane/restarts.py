@@ -233,6 +233,22 @@ def busy(srv) -> list[str]:
     return out
 
 
+def hold_until_idle(srv) -> list[str]:
+    """#647: wait until no turn or loop runs, up to MAX_DELAY_MIN; returns what
+    it last saw running (empty = idle). The caller's own turn ends once its
+    call returns, so a restart asked from inside one waits for it to finish."""
+    cap = time.time() + MAX_DELAY_MIN * 60
+    held: list[str] = []
+    while True:
+        b = busy(srv)
+        if not b:
+            return held
+        held = b
+        if time.time() >= cap:
+            return held
+        time.sleep(IDLE_POLL_S)
+
+
 def ask(srv, what: str, reason: str, in_s: int = 60, wait_idle: bool = True) -> dict:
     """The heads-up, his answer, the hold: {delay_s, asked_min, reply, busy}.
     The caller restarts after delay_s."""
@@ -496,15 +512,13 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
     """presence.restart: the reason for the next boot, then a clean SIGTERM
     (the drain runs as on any stop; the teardown's end re-execs, #151)."""
     import signal
-    RESTART["requested"] = True
+    for t in threading.enumerate():             # #647 review: one restart waits at a time
+        if t.name == "restart" and t.is_alive():
+            return {"rc": 0, "text": f"a restart is already waiting on {', '.join(busy(srv)) or 'the seat'} -- "
+                            "you'll get a notice when the seat is back"}
     pend = _pending(srv) or {}
     files = ", ".join(pend.get("files") or [])
     why = " ".join(str(why or "").split())[:200] or "no reason given"
-    try:
-        with open(os.path.join(_dir(srv), REASON_FILE), "w") as f:
-            f.write(f"the seat restarted it ({why})" + (f"; it loads the staged {files}" if files else ""))
-    except Exception:
-        pass
     try:
         from . import seat_panel as SP
         SP.note(srv, "restart", by="seat", why=why)
@@ -513,9 +527,19 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
 
     def bye():
         time.sleep(delay_s)
+        hold_until_idle(srv)                    # #647: never cut a person's turn off
+        # only now is it a restart: a plain stop during the hold must stay a stop
+        RESTART["requested"] = True
+        try:
+            with open(os.path.join(_dir(srv), REASON_FILE), "w") as f:
+                f.write(f"the seat restarted it ({why})" + (f"; it loads the staged {files}" if files else ""))
+        except Exception:
+            pass
         os.kill(os.getpid(), signal.SIGTERM)
     threading.Thread(target=bye, daemon=True, name="restart").start()
-    text = f"restarting in {delay_s:g}s -- you'll get a notice when the seat is back"
+    waiting = busy(srv)
+    text = (f"restarting once {', '.join(waiting)} finish(es) (up to {MAX_DELAY_MIN} min) -- "
+            if waiting else f"restarting in {delay_s:g}s -- ") + "you'll get a notice when the seat is back"
     try:
         from .lanes import person_paused
         kept = person_paused(srv)
