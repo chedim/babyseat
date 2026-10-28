@@ -1,4 +1,5 @@
-"""An answered Decision card wakes the watcher loops (2026-10-25): the answer
+"""An answered Decision card a watch loop planted wakes the watcher loops (2026-10-25;
+other cards tell their chat instead, test_decision_event_routing): the answer
 puts one `decision` event (the card, its title and value, what it blocks)
 into the loops' existing events pool, the way a fired watch arrives, and the
 drainer admits a loop pass on it."""
@@ -34,7 +35,7 @@ def _card(est, name, **props):
 def test_an_answer_enqueues_one_decision_event():
     est, led = _seat()
     goal = est.add(cls="Goal", name="ship the new suite", summary="x")["eid"]
-    eid = _card(est, "Which test runner", blocks=[goal])
+    eid = _card(est, "Which test runner", blocks=[goal], planted_by="watch")
     assert DM.answer(est, led, eid, "pytest")["ok"]
     [ev] = est._events_pool.take()
     assert (ev["kind"], ev["entity"], ev["title"], ev["value"]) == \
@@ -53,7 +54,7 @@ def test_a_refused_answer_enqueues_nothing():
 
 def test_the_drainer_wakes_a_loop_pass_on_it():
     est, led = _seat()
-    eid = _card(est, "Which test runner")
+    eid = _card(est, "Which test runner", planted_by="watch")
     assert DM.answer(est, led, eid, "unittest")["ok"]
     [ev] = est._events_pool.take()
 

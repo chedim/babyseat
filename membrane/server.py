@@ -778,6 +778,25 @@ def stamp_watch_owner(name: str, args, agent) -> dict:
     return out
 
 
+def stamp_card_planter(name: str, args, agent) -> dict:
+    """A new Decision card carries who planted it (`planted_by`): "watch" from a
+    watch loop's lane, "chat" otherwise; an explicit value is kept. The answer's
+    decision event routes by it (decision_map._tell)."""
+    if not str(name).endswith("entity_add") or not isinstance(args, dict) \
+            or str(args.get("class") or "").lower() != "decision":
+        return args
+    props = args.get("properties")
+    if isinstance(props, str):
+        try:
+            props = json.loads(props)
+        except ValueError:
+            return args
+    props = dict(props) if isinstance(props, dict) else {}
+    # "listener" = the watch loops and any other agent (subagents too)
+    props.setdefault("planted_by", "watch" if _lane_of(agent) == "listener" else "chat")
+    return {**args, "properties": props}
+
+
 OPERATOR_TOOLS = frozenset((
     # reads
     "query", "state", "graph", "entities_related", "entity_query",
@@ -2843,6 +2862,8 @@ class TurnRunner:
                             # the watch hands carry their planter: the
                             # owner the attention inventory shows
                             args = stamp_watch_owner(
+                                name_l, args, (self._agents or {}).get(sid))
+                            args = stamp_card_planter(
                                 name_l, args, (self._agents or {}).get(sid))
                             # THE FIELD'S PULSE: which mind touched which
                             # entity (ids + the tool name only)

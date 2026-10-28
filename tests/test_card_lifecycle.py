@@ -27,7 +27,7 @@ def _store():
 
 def _card(est, name, **props):
     eid = est.add(cls="Decision", name=name, summary=name)["eid"]
-    assert est.edit(eid, properties={"status": "open", "var": VAR, **props})["ok"]
+    assert est.edit(eid, properties={"status": "open", "var": VAR, "planted_by": "watch", **props})["ok"]
     return eid
 
 

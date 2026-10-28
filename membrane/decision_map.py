@@ -193,6 +193,31 @@ def _one_line(s, cap: int) -> str:
     s = " ".join(str(s or "").split())
     return s if len(s) <= cap else s[: cap - 1] + "…"
 
+PLANTED_BY = "planted_by"      # stamped at creation by the lane: "watch" (a watch loop) or "chat"
+
+
+def _tell(est, p: dict, ev: dict, text: str) -> None:
+    """Where a decision event goes: the watcher pool when a watch loop planted
+    the card, else one message into the card's own chat (it starts a turn).
+    Only the operator's owner-only route answers or drops, so a turn that
+    message starts cannot fire another."""
+    pool = getattr(est, "_events_pool", None)
+    sid = str(p.get("chat") or "")
+    hook = getattr(est, "_decision_chat", None)
+    runner = getattr(getattr(est, "_srv", None), "_loop_runner", None)
+    if p.get(PLANTED_BY) == "watch" or not sid or (hook is None and runner is None):
+        # a watch card, or a chat card with no chat opened yet (or no runner
+        # wired): the pool, as before, so its watched goals still wake
+        if pool is not None:
+            pool.put(ev)
+        return
+    if hook is not None:
+        hook(sid, text)
+        return
+    from . import writes as _W
+    threading.Thread(target=_W.carry(lambda: runner.run(sid, text)),
+                     daemon=True, name="decision-event").start()
+
 
 def answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None) -> dict:
     """The operator answers a card: validate the value against its var, append
@@ -246,11 +271,10 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
             p["speculative_discarded"] = p.pop(SPECULATIVE)
     ent.properties = p
     est.upsert(ent)
-    pool = getattr(est, "_events_pool", None)   # the watcher loops' events pool (the proxy wires it)
-    if pool is not None:                        # the answer wakes a loop pass, like a fired watch
-        pool.put({"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
-                  "blocks": p.get("blocks") or [], "work_needed": work is True,
-                  "speculative_kept": spec_kept, "ts": time.time()})
+    _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
+                   "blocks": p.get("blocks") or [], "work_needed": work is True,
+                   "speculative_kept": spec_kept, "ts": time.time()},
+          f"[decision] {title} = {shown}")
     return {"ok": True, "card": _card_of(ent)}
 
 
@@ -271,11 +295,10 @@ def drop(est, spec: str) -> dict:
                   "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
         ent.properties = p
         est.upsert(ent)
-        pool = getattr(est, "_events_pool", None)
-        if pool is not None:
-            pool.put({"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
-                      "value": "dropped", "blocks": p.get("blocks") or [],
-                      "work_needed": False, "ts": time.time()})
+        _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
+                       "value": "dropped", "blocks": p.get("blocks") or [],
+                       "work_needed": False, "ts": time.time()},
+              f"[decision] {p.get('name') or ent.eid} = dropped")
         return {"ok": True, "card": _card_of(ent)}
 
 
