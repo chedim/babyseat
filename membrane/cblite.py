@@ -10,6 +10,7 @@ the database's one lock: a compiled query's parameters are shared state,
 and the field's lanes call in from many threads."""
 from __future__ import annotations
 
+import contextlib
 import ctypes as C
 import json
 import os
@@ -232,12 +233,66 @@ class Lib:
         return ok
 
 
+_BG = threading.local()                  # per thread: is this a bulk/background reader
+
+
+class TurnFirst:
+    """#541: a person's turn must not queue behind boot/night bulk reads on
+    the database's one lock. Foreground reads announce themselves with
+    lane(); a thread marked background() parks at the door of lane() until
+    no foreground read is in flight or waiting. It wakes on the event, not
+    on a clock, so there is no pacing constant."""
+
+    def __init__(self):
+        self._c = threading.Condition()
+        self._fg = 0
+
+    @staticmethod
+    def is_background() -> bool:
+        return bool(getattr(_BG, "on", False))
+
+    @contextlib.contextmanager
+    def background(self):
+        prev = self.is_background()
+        _BG.on = True
+        try:
+            yield
+        finally:
+            _BG.on = prev
+
+    @contextlib.contextmanager
+    def lane(self, holding: bool = False):
+        # holding: the caller already owns the store lock (a transaction) --
+        # parking it here would deadlock the turn waiting for that lock
+        if self.is_background() and not holding:
+            with self._c:
+                while self._fg:
+                    self._c.wait()
+            yield
+            return
+        with self._c:
+            self._fg += 1
+        try:
+            yield
+        finally:
+            with self._c:
+                self._fg -= 1
+                if not self._fg:
+                    self._c.notify_all()
+
+
+def background():
+    """Mark the calling thread's store reads as background (boot, night)."""
+    return TurnFirst().background()
+
+
 class Database:
     """One CBL database; every call under its lock."""
 
     def __init__(self, lib: Lib, name: str, directory: str, scope: str = "membrane"):
         self.lib, L = lib, lib.L
         self.lock = threading.RLock()
+        self.turns = TurnFirst()
         self.scope = scope
         os.makedirs(directory, exist_ok=True)
         cfg = L.CBLDatabaseConfiguration_Default()
@@ -290,7 +345,7 @@ class Database:
         if not key:                              # a None/'' key asked the
             return None                          # native lib for the doc ''
         L, err = self.lib.L, CBLError()          # ('Invalid document ID',
-        with self.lock:                          # issue #11) -- matches nothing
+        with self.turns.lane(self.lock._is_owned()), self.lock:       # issue #11) -- matches nothing
             d = L.CBLCollection_GetDocument(self.coll(coll), S(key), C.byref(err))
             if not d:
                 self.lib.check(False, err, "get")

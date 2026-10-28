@@ -323,6 +323,8 @@ class Forewarn:
 
     def _boot(self) -> None:
         try:
-            self.bootstrap()
+            from .cblite import background
+            with background():           # #541: a person's turn reads first
+                self.bootstrap()
         except Exception:
             self._ready = True           # degrade: forecast from what the live stream pools
