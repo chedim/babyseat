@@ -16,7 +16,9 @@ THE RUN IS AN EDGE (the chat adapter's shape: a write, then the effect):
   root -result->    result:<root>:<n> done (replaces executing; one entity per run)
 
 Re-running is re-creating the execute edge; each run keeps its own result, the
-newest RESULTS_KEEP per root. Taking an owed edge is a compare-and-set (the
+newest code_runs_keep per root (a seat option, default 30); collect() deletes
+what is older -- results, bound trees, one-off trees -- and the nodes no kept
+tree reaches. Taking an owed edge is a compare-and-set (the
 execute row's supersede), so a run happens once however many hands reach it.
 
 THE LANGUAGES. A registry: a parser into nodes (the language's tree-sitter
@@ -38,7 +40,12 @@ from typing import Callable
 
 from .entities import CLASS_COMPONENT, MEMBRANE_NS, QuantumEntity
 
-RESULTS_KEEP = 20            # results kept per root (the operator, 2026-10-27)
+
+
+def _keep(srv) -> int:
+    """How many runs are kept per thing collected (options.code_runs_keep)."""
+    from . import options as _OP
+    return _OP.code_runs_keep(srv)
 EXECUTE, EXECUTING, RESULT = "execute", "executing", "result"
 SOURCE = "code"
 
@@ -60,6 +67,10 @@ class Lang:
 
 
 LANGS: dict[str, Lang] = {}
+# the kinds a language's parser gives its ROOT (tree-sitter's bash and javascript:
+# `program`). collect() marks from these: a language whose root is another kind
+# adds it here, or its trees are swept as unreachable.
+ROOT_KINDS = {"program"}
 
 
 # ---- parsing: tree-sitter grammars (#622) ---------------------------------------------------
@@ -266,7 +277,8 @@ def _mint(srv, lang: str, n: Node, be, origin) -> str:
                  else n.text.replace(HOLE, "…"))
         est.upsert(QuantumEntity(eid=eid, cls=CLASS_COMPONENT, properties={
             "name": " ".join(str(shown or n.text or n.kind).split())[:80], "lang": lang,
-            "kind": n.kind, "text": n.text, "args": kids, "silent_birth": True}), embedder=None)
+            "kind": n.kind, "text": n.text, "args": kids, "silent_birth": True,
+            "born_ts": time.time()}), embedder=None)
     if be is not None and kids:
         from . import relations as R
         # a node minted while the relations store was off gets its edges once it is on
@@ -283,7 +295,9 @@ def mint(srv, lang: str, text: str, params: bool = False) -> str:
     if lg is None:
         raise ValueError(f"no language {lang!r} (known: {', '.join(sorted(LANGS))})")
     be, origin = _rel(srv)
-    return _mint(srv, lang, parse(lang, text, params=True) if params else lg.parse(text), be, origin)
+    tree = parse(lang, text, params=True) if params else lg.parse(text)
+    with _GC:                                 # a tree's nodes land before its root: never mid-collect
+        return _mint(srv, lang, tree, be, origin)
 
 
 def load(est, eid: str) -> Node:
@@ -311,6 +325,7 @@ def _lang_of_executor(est, ex: str) -> str:
 
 # ---- the run -------------------------------------------------------------------------------
 
+_GC = threading.RLock()        # mint and collect never interleave
 _INLINE: set = set()           # (root, executor) a caller is running itself: the listener stays out
 _LK = threading.Lock()
 
@@ -365,16 +380,17 @@ def _finish(srv, root: str, ex: str, receipt: dict, result: str | None) -> None:
             R.upsert(be, origin, root, RESULT, result, SOURCE, ts=time.time())
             live = sorted((r for r in R.of(be, origin, root, RESULT) if r.get("subj") == root),
                           key=lambda r: float(r.get("first_ts") or 0))
-            for old in live[:max(0, len(live) - RESULTS_KEEP)]:
+            for old in live[:max(0, len(live) - _keep(srv))]:
                 _supersede_edge(be, origin, root, old["obj"], rel=RESULT, receipt={"op": "trimmed"})
                 est.remove(old["obj"])
         return
     doc.properties.pop("executing_on", None)
     if result:
         rs = list(doc.properties.get("results") or []) + [result]
-        for old in rs[:max(0, len(rs) - RESULTS_KEEP)]:
+        keep = _keep(srv)
+        for old in rs[:max(0, len(rs) - keep)]:
             est.remove(old)
-        doc.properties["results"] = rs[-RESULTS_KEEP:]
+        doc.properties["results"] = rs[-keep:]
     est.upsert(doc, embedder=None)
 
 
@@ -401,6 +417,7 @@ def process(srv, root: str, ex: str, timeout_s=None) -> dict | None:
         while f"{MEMBRANE_NS}result:{root.rsplit(':', 1)[-1]}:{n}" in (est.docs or {}):
             n += 1
         doc.properties["runs"] = n
+        doc.properties["last_run_ts"], doc.properties["executor"] = time.time(), ex   # collect()'s clock
     est.upsert(doc, embedder=None)
     res = f"{MEMBRANE_NS}result:{root.rsplit(':', 1)[-1]}:{n}"
     keep = {k: run.get(k) for k in ("rc", "outcome", "head", "tail", "ms", "error") if run.get(k) is not None}
@@ -419,6 +436,21 @@ def run(srv, code: str | None = None, lang: str = "sh", node: str | None = None,
     """The model's one door (exec(action='run')): mint the code (or take a root),
     owe its run to the executor, and run it here -- the same edges anyone else's
     request makes."""
+    with _GC:                                 # minted and owed before a collect can see it
+        owed = _owe(srv, code, lang, node, on)
+    if "error" in owed:
+        return owed
+    root, ex = owed["root"], owed["executor"]
+    try:
+        out = process(srv, root, ex, timeout_s)
+    finally:
+        with _LK:
+            _INLINE.discard((root, ex))
+    return out if out is not None else {"ok": False, "root": root, "executor": ex,
+                                        "error": "already running: read the root for its result"}
+
+
+def _owe(srv, code, lang: str, node, on) -> dict:
     est = srv.entity_store
     if node:
         doc = est._resolve_spec(node)
@@ -444,14 +476,8 @@ def run(srv, code: str | None = None, lang: str = "sh", node: str | None = None,
         ex = LANGS[lang].executor
     with _LK:
         _INLINE.add((root, ex))
-    try:
-        request(srv, root, ex)
-        out = process(srv, root, ex, timeout_s)
-    finally:
-        with _LK:
-            _INLINE.discard((root, ex))
-    return out if out is not None else {"ok": False, "root": root, "executor": ex,
-                                        "error": "already running: read the root for its result"}
+    request(srv, root, ex)
+    return {"root": root, "executor": ex}
 
 
 def reap(srv, cap: int = 3, ex: str | None = None) -> list[dict]:
@@ -476,6 +502,102 @@ def reap(srv, cap: int = 3, ex: str | None = None) -> list[dict]:
         if r is not None:
             out.append(r)
     return out
+
+
+def note_bound(est, doc, root: str) -> None:
+    """A method (or a step) ran its code bound as `root`: its newest bound trees,
+    newest last -- the ones collect() keeps for it."""
+    p = doc.properties or {}
+    bound = [r for r in (p.get("bound") or []) if r != root] + [root]
+    p["bound"] = bound
+    doc.properties = p
+    est.upsert(doc, embedder=None)
+
+
+def collect(srv) -> dict:
+    """THE CODE TREES' COLLECTION (the operator, 2026-10-27: delete, keep a
+    configurable number per thing): each method keeps its newest code_runs_keep
+    bound trees, each executor its newest one-off trees; the rest are deleted with
+    their results and edges, and then every node no kept tree reaches. A method's
+    own code and a run still owed or running are never collected. -> counts."""
+    with _GC:
+        return _collect(srv)
+
+
+def _collect(srv) -> dict:
+    est = srv.entity_store
+    keep = _keep(srv)
+    be, origin = _rel(srv)
+    docs = dict(est.docs or {})
+    node_ns, res_ns = MEMBRANE_NS + "node:", MEMBRANE_NS + "result:"
+    codes, kept, doomed = set(), set(), set()
+    for d in docs.values():
+        p = d.properties or {}
+        if str(p.get("code") or "").startswith(node_ns):
+            codes.add(p["code"])
+        bound = [r for r in (p.get("bound") or []) if r in docs]
+        if bound:
+            kept.update(bound[-keep:])
+            doomed.update(bound[:-keep])
+            if bound[-keep:] != list(p.get("bound") or []):
+                p["bound"] = bound[-keep:]
+                est.upsert(d, embedder=None)
+    busy = set()
+    if be is not None:
+        for rel in (EXECUTE, EXECUTING):
+            busy.update(r["subj"] for _, r in be.scan("relations", {"origin": origin, "rel": rel, "superseded": False}))
+    else:
+        busy.update(k for k, d in docs.items()
+                    if (d.properties or {}).get("pending_run_by") or (d.properties or {}).get("executing_on"))
+    # a root from before collection kept no clocks: its newest result stands in
+    last: dict = {}
+    for k, d in docs.items():
+        if k.startswith(res_ns):
+            p = d.properties or {}
+            r, ts = str(p.get("root") or ""), float(p.get("ts") or 0)
+            if ts >= last.get(r, (0.0, ""))[0]:
+                last[r] = (ts, str(p.get("executor") or ""))
+    # one-off trees (a code_run's): the newest per executor are kept
+    by_ex: dict = {}
+    for k, d in docs.items():
+        p = d.properties or {}
+        if k.startswith(node_ns) and p.get("kind") in ROOT_KINDS and k not in codes and k not in kept and k not in doomed:
+            res_ts, res_ex = last.get(k, (0.0, ""))
+            seen = max(float(p.get("last_run_ts") or 0), float(p.get("born_ts") or 0), res_ts)
+            by_ex.setdefault(str(p.get("executor") or res_ex), []).append((seen, k))
+    for rows in by_ex.values():
+        rows.sort()
+        doomed.update(k for _, k in rows[:max(0, len(rows) - keep)])
+    doomed -= codes | kept | busy
+    # mark: what a kept tree (or a method's code, or a busy run) reaches stays
+    live, stack = set(), [k for k, d in docs.items() if k.startswith(node_ns)
+                          and (d.properties or {}).get("kind") in ROOT_KINDS and k not in doomed]
+    while stack:
+        k = stack.pop()
+        if k in live or k not in docs:
+            continue
+        live.add(k)
+        stack.extend((docs[k].properties or {}).get("args") or [])
+    from . import relations as R
+    gone_nodes = [k for k in docs if k.startswith(node_ns) and k not in live]
+    gone_results = [k for k, d in docs.items() if k.startswith(res_ns)
+                    and str((d.properties or {}).get("root") or "") in doomed]
+    if be is not None:
+        for k in gone_nodes:
+            p = docs[k].properties or {}
+            for i, kid in enumerate(p.get("args") or [], 1):
+                be.delete("relations", R.relation_key(origin, k, f"arg:{i}", kid))
+            if k in doomed:
+                ex = str(p.get("executor") or "")
+                for rel in (EXECUTE, EXECUTING):
+                    if ex:
+                        be.delete("relations", R.relation_key(origin, k, rel, ex))
+        for k in gone_results:
+            be.delete("relations", R.relation_key(origin, str(docs[k].properties.get("root")), RESULT, k))
+    gone = gone_nodes + gone_results
+    if gone:
+        est.remove_many(gone) if hasattr(est, "remove_many") else [est.remove(k) for k in gone]
+    return {"trees": len(doomed), "nodes": len(gone_nodes), "results": len(gone_results), "keep": keep}
 
 
 def state(srv, root: str) -> dict:

@@ -1519,6 +1519,11 @@ def main() -> None:
                     from .night import expire_stale_edges as _exp
                     _exp(srv, getattr(srv, "entity_store", None), fld,
                          getattr(srv, "membrane", None))
+                    # the code trees past code_runs_keep are deleted (lang.collect)
+                    from . import lang as _LGC
+                    _gc = _LGC.collect(srv)
+                    if _gc.get("nodes") or _gc.get("results"):
+                        print(f"[night] code trees collected: {_gc}", file=sys.stderr)
                     b = srv.night_stats.get("births")
                     if b:
                         print(f"[night] born: {', '.join(b)}", file=sys.stderr)

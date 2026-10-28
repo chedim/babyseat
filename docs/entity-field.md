@@ -296,8 +296,15 @@ give their shell tool: the MCP list carries it, and a local model's
   `exec` adapter branch reacts at once, and the thinker's reaper takes
   what is still owed each minute.
 - **Re-running** is re-creating the execute edge
-  (`exec(action='run', node=<root>)`): each run keeps its own result,
-  the newest 20 per root (`lang.RESULTS_KEEP`).
+  (`exec(action='run', node=<root>)`): each run keeps its own result.
+- **Collection** (`lang.collect`, every night pass): one seat option,
+  `code_runs_keep` (default 30, the ⚙ options window), bounds every
+  history: each root keeps its newest results, each method its newest
+  bound trees (`bound` on the method), each executor its newest one-off
+  trees (by their last run, or their birth). The rest are deleted with
+  their results and edges, then every node no kept tree reaches. Shared
+  nodes stay while any kept tree uses them. A method's own code and a
+  run still owed or running are never collected.
 - **Languages** are a registry (`lang.LANGS`): a parser into nodes, a
   printer out of them, and a runner. An executor names its language in
   `lang`; a root of another language is refused with a receipt. The
