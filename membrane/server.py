@@ -792,6 +792,7 @@ def stamp_card_planter(name: str, args, agent) -> dict:
         except ValueError:
             return args
     props = dict(props) if isinstance(props, dict) else {}
+    # "listener" = the watch loops and any other agent (subagents too)
     props.setdefault("planted_by", "watch" if _lane_of(agent) == "listener" else "chat")
     return {**args, "properties": props}
 

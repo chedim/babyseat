@@ -201,23 +201,22 @@ def _tell(est, p: dict, ev: dict, text: str) -> None:
     the card, else one message into the card's own chat (it starts a turn).
     Only the operator's owner-only route answers or drops, so a turn that
     message starts cannot fire another."""
-    if p.get(PLANTED_BY) == "watch":
-        pool = getattr(est, "_events_pool", None)
+    pool = getattr(est, "_events_pool", None)
+    sid = str(p.get("chat") or "")
+    hook = getattr(est, "_decision_chat", None)
+    runner = getattr(getattr(est, "_srv", None), "_loop_runner", None)
+    if p.get(PLANTED_BY) == "watch" or not sid or (hook is None and runner is None):
+        # a watch card, or a chat card with no chat opened yet (or no runner
+        # wired): the pool, as before, so its watched goals still wake
         if pool is not None:
             pool.put(ev)
         return
-    sid = str(p.get("chat") or "")
-    if not sid:
-        return
-    hook = getattr(est, "_decision_chat", None)
     if hook is not None:
         hook(sid, text)
         return
-    runner = getattr(getattr(est, "_srv", None), "_loop_runner", None)
-    if runner is not None:
-        from . import writes as _W
-        threading.Thread(target=_W.carry(lambda: runner.run(sid, text)),
-                         daemon=True, name="decision-event").start()
+    from . import writes as _W
+    threading.Thread(target=_W.carry(lambda: runner.run(sid, text)),
+                     daemon=True, name="decision-event").start()
 
 
 def answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None) -> dict:

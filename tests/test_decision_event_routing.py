@@ -70,3 +70,11 @@ def test_the_lane_stamps_the_planter_on_a_new_card():
     assert kept["properties"]["planted_by"] == "watch"
     other = {"class": "Goal", "name": "G"}
     assert S.stamp_card_planter("entity_add", other, None) == other
+
+
+def test_a_chat_card_with_no_chat_falls_back_to_the_pool():
+    est, led = _seat()
+    eid = _card(est, "Which one", planted_by="chat")
+    assert DM.answer(est, led, eid, "a")["ok"]
+    assert [e["kind"] for e in est._events_pool.take()] == ["decision"]
+    assert est.sent == []
