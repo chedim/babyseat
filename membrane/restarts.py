@@ -219,11 +219,12 @@ def busy(srv) -> list[str]:
     """What is still running: a chat turn mid-flight, a loop."""
     out = []
     r = getattr(srv, "_loop_runner", None)
-    try:
-        st = r.status() if r is not None and hasattr(r, "status") else {}
-        out += [f"turn {sid}" for sid, v in (st or {}).items() if (v or {}).get("type") == "busy"]
-    except Exception:
-        pass
+    store = getattr(r, "sessions", None)
+    # #655: read each session the way /session/status does; no except here,
+    # so a signature slip fails loudly instead of hiding every turn.
+    for sid in list(getattr(store, "sessions", None) or []):
+        if (r.status(sid) or {}).get("type") == "busy":
+            out.append(f"turn {sid}")
     try:
         n = srv.loops.running()
         if n:
