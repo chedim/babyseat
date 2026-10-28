@@ -1248,7 +1248,11 @@ def _due_goals(srv, est, now: float, min_age_s: float) -> list:
         if _parked(srv, props, now):
             continue
         last = float(props.get("intent_planted_ts") or 0)
-        wait = min_age_s * (2 ** min(_ignored_streak(props), 4))
+        lands = props.get("landings") or []
+        # a STEP is progress: the goal continues at the next idle beat
+        # instead of waiting out the gap (a quiet pass backs off again)
+        stepping = bool(lands) and str((lands[-1] or {}).get("op") or "") == "step"
+        wait = 0.0 if stepping else min_age_s * (2 ** min(_ignored_streak(props), 4))
         if now - last >= wait:
             due.append((last, doc, props))
     due.sort(key=lambda t: t[0])
