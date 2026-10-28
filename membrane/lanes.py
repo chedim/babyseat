@@ -1068,7 +1068,7 @@ def _injection_mode(srv) -> str:
     # restores the old state block
     m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "conversation")
     m = str(m).strip().lower()
-    return m if m in ("massage", "banner", "entities", "ids") else "conversation"
+    return m if m in ("massage", "banner", "entities", "ids", "facts") else "conversation"
 
 
 def _note_massage(srv, stats: dict) -> None:
@@ -4108,6 +4108,18 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     _st = types.SimpleNamespace(mark=mark)
     _is_tool_round = is_tool_round
     ctx = None
+    if _injection_mode(srv) == "facts":             # EXPERIMENT #649: the message's related facts (recall)
+        fld = _efield_on(srv)
+        if fld is not None and not getattr(srv, "no_banner", False):
+            try:
+                from .entity_block import recall_answers, render_past
+                from .conv_banner import BANNER_CHAR_BUDGET
+                ctx = render_past(recall_answers(fld, _last_user_text(body), vec),
+                                  budget=BANNER_CHAR_BUDGET)
+            except Exception as e:
+                print(f"[facts-block] error: {e}", file=sys.stderr)
+        mark("recall+banner")
+        return ctx, None
     if _injection_mode(srv) == "ids":               # EXPERIMENT #649: the message's entities, ids only
         fld = _efield_on(srv)
         if fld is not None and not getattr(srv, "no_banner", False):
