@@ -53,6 +53,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import threading
 import time
 import urllib.request
@@ -74,7 +75,25 @@ PRICE_TABLE: list[tuple[str, float]] = [
     ("deepseek", 1.5), ("qwen", 1.5), ("mistral", 1.5), ("llama", 1.5),
     ("gemini", 4.0), ("gpt-5", 8.0), ("gpt", 5.0), ("claude", 6.0),
     ("kimi", 2.0),
+    # OpenAI o-series: "^" anchors at the name's start or right after a "/"
+    # or ":" so a short fragment cannot hit qwen3 / llama3.1 / gpt-4o.
+    # Mini rows first (first hit wins). Values await operator approval.
+    ("^o1-mini", 4.0), ("^o3-mini", 4.0), ("^o4-mini", 4.0),
+    ("^o1", 8.0), ("^o3", 6.0), ("^o4", 6.0),
 ]
+
+
+def table_price(name: str) -> float | None:
+    """First PRICE_TABLE hit for a model name (case-insensitive), or None."""
+    low = name.lower()
+    for frag, usd in PRICE_TABLE:
+        if frag.startswith("^"):
+            f = frag[1:]
+            if re.search(r"(?:^|[/:])" + re.escape(f), low):
+                return usd
+        elif frag in low:
+            return usd
+    return None
 LAMBDA_TIME = 0.05         # score units per pressure-inflated second
 LAMBDA_COST = 1.0          # score units per money unit
 FREE_TIER_PRICE = 0.1      # the near-floor pin for zero-token-cost rungs
@@ -251,7 +270,7 @@ class ModelRecord:
 
     def price(self) -> float:
         """Relative money per turn. local -> 0; cloud -> the registration
-        pin (provider default), else the cheapest table hit, else CLOUD_PRICE.
+        pin (provider default), else the first table hit, else CLOUD_PRICE.
         The ladder IS the preference: prefer LOWER token-cost models unless
         really stuck (the pressure valve + fit margin are the "really stuck"
         conditions)."""
@@ -259,11 +278,8 @@ class ModelRecord:
             return 0.0
         if self.price_override is not None:
             return self.price_override
-        low = self.name.lower()
-        for frag, usd in PRICE_TABLE:
-            if frag in low:
-                return usd
-        return CLOUD_PRICE
+        hit = table_price(self.name)
+        return CLOUD_PRICE if hit is None else hit
 
     def delay(self, resident: bool, pressure: float,
               calibrated_threshold: float) -> float:
@@ -527,11 +543,8 @@ class Registry:
                 return 0.0, False
             return rec.price(), True
         if ":cloud" in ceiling.lower() or ceiling.lower().endswith("cloud"):
-            low = ceiling.lower()
-            for frag, usd in PRICE_TABLE:
-                if frag in low:
-                    return usd, True
-            return CLOUD_PRICE, True
+            hit = table_price(ceiling)
+            return (CLOUD_PRICE if hit is None else hit), True
         return None, True
 
     # ---- routing ---------------------------------------------------------------
