@@ -57,5 +57,30 @@ class TestQuietReadout(unittest.TestCase):
         self.assertIn("BLOCKED on <entity-id>", src)
 
 
+class TestPerGoalLineAndEdge(unittest.TestCase):
+    def test_open_goals_list_says_why_a_goal_is_quiet(self):
+        import tempfile
+        from membrane import conv_banner as CB
+        from tests.test_conversation_banner_429 import _goal as bgoal, _seat
+        with tempfile.TemporaryDirectory() as tmp:
+            srv, _f = _seat(tmp)
+            now = time.time()
+            bgoal(srv.entity_store, "q", "wait for the signature", convs=["c1"],
+                  born=now - 60, blocked_ts=now - 10, blocked_on="signature")
+            got = {i.text: i.src for i in CB.open_items(srv, "c1")}
+            self.assertIn("blocked on the operator", got["wait for the signature"])
+
+    def test_goal_to_loop_edges(self):
+        from tests.test_blocked_wake import _goal as wgoal
+        est = _store()
+        wgoal(est, "w", picked_up_by="loop-1", picked_up_ts=5.0)
+        wgoal(est, "n")
+        edges = WA.goal_loop_edges(list(est.docs.values()))
+        self.assertEqual(len(edges), 1)
+        self.assertEqual(edges[0]["kind"], "worked_by")
+        self.assertEqual(edges[0]["t"], "loop-1")
+        self.assertTrue(edges[0]["s"].endswith("goal:w"))
+
+
 if __name__ == "__main__":
     unittest.main()

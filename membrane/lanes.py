@@ -4980,6 +4980,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                               "t": e.properties["merged_into"]})
             for l in (e.links or [])[:8]:
                 edges.append({"s": e.eid, "kind": "link", "cell": l})
+        from .watch_agents import goal_loop_edges
+        edges += goal_loop_edges([e for e, _v in pairs])
         self._json_out({"nodes": nodes, "edges": edges, "radius": 50.0})
 
     def _map_axes(self):

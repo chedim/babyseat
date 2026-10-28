@@ -1245,6 +1245,17 @@ def dormant_line(srv, now: float | None = None,
     return f"asleep: {total} goal(s) -- " + ", ".join(bits)
 
 
+def goal_loop_edges(docs) -> list[dict]:
+    """The loop-to-goal link for the map (#633): one `worked_by` edge per
+    goal a loop has picked up (picked_up_by is a property, not an edge)."""
+    from .entities import CLASS_GOAL
+    return [{"s": d.eid, "t": str((d.properties or {})["picked_up_by"]),
+             "kind": "worked_by"}
+            for d in docs
+            if d is not None and d.cls == CLASS_GOAL
+            and (d.properties or {}).get("picked_up_by")]
+
+
 def quiet_goals(srv, now: float | None = None,
                 min_age_s: float | None = None) -> list[dict]:
     """WHY IS THIS GOAL QUIET (#633): one row per open goal that is not due

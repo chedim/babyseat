@@ -483,6 +483,11 @@ def open_items(srv, conv: str) -> list[Item]:
         return []
     rows: list[tuple[int, Item]] = []
     now = time.time()
+    try:
+        from .watch_agents import quiet_goals
+        quiet = {q["eid"]: q["why"] for q in quiet_goals(srv, now=now)}
+    except Exception:
+        quiet = {}
 
     def origin(planted) -> tuple[int, str]:
         planted = [c for c in ([planted] if isinstance(planted, str) else (planted or [])) if c]
@@ -500,6 +505,8 @@ def open_items(srv, conv: str) -> list[Item]:
             r, src = origin(p.get("convs"))
             if p.get("picked_up_by") and p.get("picked_up_ts"):
                 src += " \u00b7 " + _picked_up(srv, g.eid, p)
+            if g.eid in quiet:
+                src += " \u00b7 " + quiet[g.eid]
             rows.append((r, Item(str(p.get("name") or g.eid), src, p.get("born"))))
     rows.sort(key=lambda ri: (ri[0], -(float(ri[1].ts) if ri[1].ts is not None else 0.0)))
     return [it for _r, it in rows][:OPEN_MAX]
