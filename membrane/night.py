@@ -210,13 +210,15 @@ def _cell_points(fld, eid: str, limit: int = 64) -> list:
     """The field cells that moved this entity: its mention deltas' text
     sentences as (vec, ts), newest first (consolidate_position weights
     by recency)."""
+    from .cblite import background
     out = []
-    for d in fld.deltas_of(eid)[:limit]:
-        sid = d.get("sid")
-        sv = fld.b.get("sentences", sid) if sid else None
-        if sv and sv.get("vec"):
-            out.append((unpack_f16(sv["vec"]),
-                        float(d.get("ts") or 0.0)))
+    with background():                   # #541: a person's turn reads first
+        for d in fld.deltas_of(eid)[:limit]:
+            sid = d.get("sid")
+            sv = fld.b.get("sentences", sid) if sid else None
+            if sv and sv.get("vec"):
+                out.append((unpack_f16(sv["vec"]),
+                            float(d.get("ts") or 0.0)))
     return out
 
 
