@@ -455,6 +455,19 @@ def restart_line() -> str | None:
     return "[seat] restarting (re-exec)" if RESTART["requested"] else None
 
 
+def pin_ports(argv: list[str], listen: int | None, serve: int | None) -> list[str]:
+    """#648: argv plus the ports this seat holds, for each the argv did not pin
+    -- a restart keeps its ports instead of racing for the first free ones."""
+    def pinned(flag):
+        return any(a == flag or a.startswith(flag + "=") for a in argv)
+    out = list(argv)
+    if listen and not pinned("--listen"):
+        out += ["--listen", str(listen)]
+    if serve and not pinned("--serve-port"):
+        out += ["--serve-port", str(serve)]
+    return out
+
+
 def reexec_if_requested(srv=None) -> None:
     """The last line of the seat's teardown: a requested restart re-execs the
     same command (same pid, same terminal -- ctrl+c still stops it; a
@@ -475,7 +488,8 @@ def reexec_if_requested(srv=None) -> None:
     else:
         os.environ.pop(PAUSE_ENV, None)
     os.execv(sys.executable,
-             [sys.executable, "-m", "membrane.opencode"] + sys.argv[1:])
+             [sys.executable, "-m", "membrane.opencode"]
+             + pin_ports(sys.argv[1:], *(RESTART.get("ports") or (None, None))))
 
 
 def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:

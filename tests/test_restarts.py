@@ -167,3 +167,32 @@ class TestARestartRestarts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRestartKeepsPorts648(unittest.TestCase):
+    """#648: a re-exec with the original argv raced for ports again and two seats
+    swapped. The re-exec now pins the ports the seat holds, unless argv did."""
+
+    def tearDown(self):
+        RS.RESTART["requested"] = False
+        RS.RESTART.pop("ports", None)
+
+    def test_unpinned_argv_gets_the_bound_ports(self):
+        out = RS.pin_ports(["--standalone", "--field", "f.json"], listen=11501, serve=4097)
+        self.assertEqual(out, ["--standalone", "--field", "f.json",
+                               "--listen", "11501", "--serve-port", "4097"])
+
+    def test_pinned_argv_is_unchanged(self):
+        argv = ["--listen", "11500", "--serve-port=4096"]
+        self.assertEqual(RS.pin_ports(argv, listen=11501, serve=4097), argv)
+
+    def test_a_seat_with_no_serve_pins_only_the_proxy(self):
+        self.assertEqual(RS.pin_ports(["--x"], listen=11501, serve=None), ["--x", "--listen", "11501"])
+
+    def test_the_reexec_carries_the_ports(self):
+        RS.RESTART["requested"] = True
+        RS.RESTART["ports"] = (11501, 4097)
+        with mock.patch.object(RS.os, "execv") as ex, mock.patch.object(RS.sys, "argv", ["m", "--standalone"]):
+            RS.reexec_if_requested()
+        self.assertEqual(ex.call_args[0][1][-5:],
+                         ["--standalone", "--listen", "11501", "--serve-port", "4097"][-5:])
