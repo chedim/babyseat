@@ -1152,27 +1152,52 @@ def ask_operator(est, goal_eid: str, props: dict, question: str) -> str:
     """A GOAL BLOCKED ON THE OPERATOR ASKS (#643): plant a Decision card (the
     loop's line, a free answer, planted by the watch, blocking the goal) and
     return its eid; the goal's still-open card is reused. '' when no card
-    could be planted (the goal parks on the operator as before)."""
+    could be planted (the goal parks on the operator as before).
+
+    A question the operator already answered or dropped (#650) is not asked
+    again: its answer is fed to the watcher pool once as a ``decision`` event
+    (the shape decision_map._tell sends) and stamped ``answer_fed`` on the
+    goal. Still BLOCKED after that, a fresh card with a new name is planted."""
     if est is None or not goal_eid:
         return ""
     from .decision_map import STATUS_OPEN, _one_line, _status
     from .eids import _BAD_CHARS, NAME_MAX
     from .entities import CLASS_DECISION
-    old = (est.docs or {}).get(str((props or {}).get("blocked_card") or ""))
+    props = props if props is not None else {}
+    old = (est.docs or {}).get(str(props.get("blocked_card") or ""))
     if old is not None and _status(old.properties or {}) == STATUS_OPEN:
         return old.eid
     q = _ON_OPERATOR_RE.sub("", str(question or "")) or str(question or "")
-    name = _one_line("".join(ch for ch in q if ch not in _BAD_CHARS), NAME_MAX)
-    if not name:
+    base = _one_line("".join(ch for ch in q if ch not in _BAD_CHARS), NAME_MAX)
+    if not base:
         return ""
+    fed = set(props.get("answer_fed") or [])
     try:
-        r = est.add(cls=CLASS_DECISION, name=name, summary=str(question or "")[:500])
-        if not r.get("ok"):
+        for n in range(1, 20):
+            sfx = "" if n == 1 else (" (again)" if n == 2 else f" (again {n - 1})")
+            name = _one_line(base, NAME_MAX - len(sfx)) + sfx
+            r = est.add(cls=CLASS_DECISION, name=name, summary=str(question or "")[:500])
+            if not r.get("ok"):
+                return ""
+            card = est.docs.get(r["eid"])
+            if not (r.get("merged") and card is not None
+                    and _status(card.properties or {}) != STATUS_OPEN):
+                break                               # a new card, or an open one
+            if r["eid"] not in fed:                 # an old answer: feed it once
+                cp = card.properties or {}
+                pool = getattr(est, "_events_pool", None)
+                if pool is not None:
+                    pool.put({"kind": "decision", "entity": card.eid,
+                              "title": cp.get("name") or name,
+                              "value": "dropped" if _status(cp) == "dropped"
+                              else cp.get("value"),
+                              "blocks": [goal_eid], "work_needed": False,
+                              "ts": time.time()})
+                    props["answer_fed"] = sorted(fed | {r["eid"]})
+                    return ""
+            # fed already (or no pool to feed): ask again under a new name
+        else:
             return ""
-        card = est.docs.get(r["eid"])
-        if r.get("merged") and card is not None and \
-                _status(card.properties or {}) != STATUS_OPEN:
-            return ""                               # an old card keeps its answer
         if not est.edit(r["eid"], properties={
                 "status": STATUS_OPEN, "var": {"type": "string"},
                 "planted_by": "watch", "blocks": [goal_eid]}).get("ok"):
