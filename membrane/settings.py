@@ -25,6 +25,7 @@ DEFAULTS = {
     "language": "en",
     "ui_lan_open": True,      # the UI without a password from private / loopback / tailnet addresses
     "self_cpu_share": 0.5,    # #343/#344: Blurp's CPU share, 0 < share <= 1 (options.py validates, the ⚙ window sets it)
+    "code_runs_keep": 30,     # the code tree keeps this many runs per thing it collects (options.py, lang.collect)
 }
 _lock = threading.Lock()
 

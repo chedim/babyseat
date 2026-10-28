@@ -2119,6 +2119,8 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
             doc.properties["last_fed"] = fed
         # #614 C: the bound code runs as code -- its own tree, the executor's edges, a result
         out = _LG.run(_code_srv(est, fld, mem), code=fed, timeout_s=_call_timeout(args))
+        if out.get("root"):
+            _LG.note_bound(est, doc, out["root"])     # its newest bound trees: what collect() keeps
         out.pop("doc", None)
         # THE RESIDUE lands on the asking doc (the canon doc carries its
         # own; the copy covers a differing key)
@@ -2219,10 +2221,11 @@ def _code_root(srv, est, fld, mem, doc) -> str:
     root = str(p.get("code") or "")
     if root and root in (est.docs or {}) and _LG.text(est, root) == command:
         return root
-    root = _LG.mint(_code_srv(est, fld, mem), "sh", command, params=True)
-    p["code"] = root
-    doc.properties = p
-    est.upsert(doc, embedder=None)
+    with _LG._GC:                                 # minted and recorded before a collect can see it
+        root = _LG.mint(_code_srv(est, fld, mem), "sh", command, params=True)
+        p["code"] = root
+        doc.properties = p
+        est.upsert(doc, embedder=None)
     return root
 
 

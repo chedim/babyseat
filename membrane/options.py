@@ -13,6 +13,10 @@ Per-device state (the last open chat tab, the camera) stays in the browser.
                    self loop and the record cap read it with cpu_share(srv)
                    -- the one reader: the file, validated on read -- so a
                    write applies without a restart.
+  code_runs_keep   how many runs the code tree keeps per thing it collects
+                   (the operator, 2026-10-27): results per root, bound trees
+                   per method, one-off trees per executor. A whole number
+                   >= 1, default 30; lang.collect deletes the older ones.
   current_tau_s    the field current's fade (efield.CURRENT_TAU_S, seconds):
                    READ-ONLY here. It is a threshold; changing it needs the
                    operator's approval (a code change, not an option).
@@ -37,7 +41,9 @@ from . import settings as S
 
 CPU_SHARE_KEY = "self_cpu_share"
 CPU_SHARE_DEFAULT = 0.5
-WRITABLE = (CPU_SHARE_KEY,)
+RUNS_KEEP_KEY = "code_runs_keep"
+RUNS_KEEP_DEFAULT = 30          # the operator, 2026-10-27
+WRITABLE = (CPU_SHARE_KEY, RUNS_KEEP_KEY)
 READ_ONLY = {
     "current_tau_s": "current_tau_s is read-only: changing the current's fade needs the operator's approval",
     "energy": "energy is read-only: it is Blurp's to report (#345), not a setting",
@@ -49,6 +55,10 @@ MIND_KEYS = ("loops", "cortex", "loops_auth", "cortex_auth")   # -> minds_models
 def _share_ok(v) -> bool:
     return (isinstance(v, (int, float)) and not isinstance(v, bool)
             and math.isfinite(v) and 0 < v <= 1)
+
+
+def _keep_ok(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 1
 
 
 def _settings_path(srv=None) -> Path:
@@ -70,6 +80,17 @@ def cpu_share(srv=None) -> float:
         raw = {}
     v = raw.get(CPU_SHARE_KEY) if isinstance(raw, dict) else None
     return float(v) if _share_ok(v) else CPU_SHARE_DEFAULT
+
+
+def code_runs_keep(srv=None) -> int:
+    """How many runs the code tree keeps per thing it collects (the one reader;
+    read on every call, so a write applies without a restart)."""
+    try:
+        raw = json.loads(_settings_path(srv).read_text())
+    except (OSError, ValueError):
+        raw = {}
+    v = raw.get(RUNS_KEEP_KEY) if isinstance(raw, dict) else None
+    return int(v) if _keep_ok(v) else RUNS_KEEP_DEFAULT
 
 
 def _energy(srv):
@@ -109,8 +130,8 @@ def _background(srv):
 
 def read(srv=None) -> dict:
     from .efield import CURRENT_TAU_S
-    return {CPU_SHARE_KEY: cpu_share(),
-            "defaults": {CPU_SHARE_KEY: CPU_SHARE_DEFAULT},
+    return {CPU_SHARE_KEY: cpu_share(), RUNS_KEEP_KEY: code_runs_keep(srv),
+            "defaults": {CPU_SHARE_KEY: CPU_SHARE_DEFAULT, RUNS_KEEP_KEY: RUNS_KEEP_DEFAULT},
             "writable": list(WRITABLE) + (list(MIND_KEYS) if _background(srv) is not None else []),
             "current_tau_s": float(CURRENT_TAU_S), "current_tau_note": TAU_NOTE,
             "energy": _energy(srv), "background": _background(srv)}
@@ -137,6 +158,10 @@ def apply(body, srv=None) -> dict:
             if not _share_ok(v):
                 raise ValueError(f"self_cpu_share must be a number in (0, 1], got {v!r}")
             changes[k] = float(v)
+        if k == RUNS_KEEP_KEY:
+            if not _keep_ok(v):
+                raise ValueError(f"code_runs_keep must be a whole number >= 1, got {v!r}")
+            changes[k] = int(v)
     if minds:                            # validates every mind key before setting any
         from . import minds_models as MM
         MM.apply(srv, known=MM.pickable(srv), **minds)

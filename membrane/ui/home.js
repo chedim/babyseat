@@ -825,6 +825,7 @@ function optionsRows(o) {
   const tau = o.current_tau_s != null ? zooEsc(o.current_tau_s) + " s" : "?";
   const en = o.energy && isFinite(Number(o.energy.energy)) ? o.energy : null;     // #363: energy replaced health
   const energy = en ? Math.round(Number(en.energy) * 100) + "% · " + (en.asleep ? "asleep" : "awake") : "not running yet";
+  const keepDef = (o.defaults || {}).code_runs_keep || 30, keep = o.code_runs_keep || keepDef;
   return `<div class="orow"><label class="olab" for="opt-share">${zooEsc(SELF_NAME)}'s CPU share</label>` +
       `<output class="oval" for="opt-share">${pct}%</output>` +
       `<input id="opt-share" class="oshare" type="range" min="${OPT_SHARE_MIN}" max="${OPT_SHARE_MAX}" step="5" value="${pct}" ` +
@@ -832,6 +833,10 @@ function optionsRows(o) {
     `<div class="orow"><span class="olab">the field current's fade</span><span class="oval">${tau}</span>` +
       `<p class="ohint">read-only: ${zooEsc(o.current_tau_note || "changing it needs the operator's approval")}</p></div>` +
     `<div class="orow"><span class="olab">${zooEsc(SELF_NAME)}'s energy</span><span class="oval">${zooEsc(energy)}</span></div>` +
+    `<div class="orow"><label class="olab" for="opt-keep">Code runs kept</label>` +
+      `<input id="opt-keep" class="onum" type="number" min="1" step="1" value="${zooEsc(keep)}" data-opt="code_runs_keep" ` +
+      `aria-describedby="opt-keep-h"><p class="ohint" id="opt-keep-h">per code tree, method and executor; ` +
+      `older runs are deleted each night (default ${zooEsc(keepDef)})</p></div>` +
     backgroundRows(o.background);
 }
 
@@ -1749,7 +1754,10 @@ const HSTYLE = `
                     background:color-mix(in srgb, var(--divider-color,#888) 14%, transparent);
                     border:1px solid color-mix(in srgb, var(--divider-color,#888) 45%, transparent); }
   .optpanel .osub { font-weight:400; opacity:.85; margin-top:4px; }
-  .optpanel .osel:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
+  .optpanel .onum { width:84px; font:inherit; color:inherit; padding:5px 8px; border-radius:8px; text-align:right;
+                    font-variant-numeric:tabular-nums; background:color-mix(in srgb, var(--divider-color,#888) 14%, transparent);
+                    border:1px solid color-mix(in srgb, var(--divider-color,#888) 45%, transparent); }
+  .optpanel .osel:focus-visible, .optpanel .onum:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
   .optpanel .omsg, .optpanel .stmsg { margin:4px 2px 0; font-size:12px; opacity:.85; }
   .optpanel .omsg:empty, .optpanel .stmsg:empty { display:none; }
   /* the 📊 stats window: the options window's frame, with tables */
@@ -3423,7 +3431,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._opt.panel.addEventListener("change", (e) => {         // let go: save it
         if (e.target.classList.contains("oshare")) this._opt.setShare(e.target.value);
-        else if (e.target.dataset && e.target.dataset.opt) this._opt.setOption(e.target.dataset.opt, e.target.value);
+        else if (e.target.dataset && e.target.dataset.opt)
+          this._opt.setOption(e.target.dataset.opt, e.target.type === "number" ? Number(e.target.value) : e.target.value);
       });
       this._zooList.addEventListener("click", (e) => {
         const c = e.target.closest(".zcard");

@@ -11,7 +11,7 @@ Pinned here (PR A: the nodes, the sh language, the executor's states):
     progress), then -result-> a result entity unique to that run; re-running
     re-creates the execute edge and adds a second result;
   - a root in another language than its executor's is refused; old results
-    trim to the newest RESULTS_KEEP; the reaper runs owed edges written by
+    trim to the newest code_runs_keep (tests/test_code_gc.py); the reaper runs owed edges written by
     anyone; a seat without a relations store still runs;
   - the model's one door: exec(action='run') -> code_run, in the lanes that may
     execute, behind the pause and owner gates.
@@ -190,21 +190,6 @@ class TestTheRun(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertIn("js", out["error"])
         self.assertEqual(_rows(srv, out["root"], "result"), [])
-
-    def test_old_results_trim_to_the_newest(self):
-        srv = _seat()
-        keep = LG.RESULTS_KEEP
-        LG.RESULTS_KEEP = 2
-        try:
-            r1 = LG.run(srv, code="echo hi")
-            LG.run(srv, node=r1["root"])
-            r3 = LG.run(srv, node=r1["root"])
-        finally:
-            LG.RESULTS_KEEP = keep
-        live = [r["obj"] for r in _rows(srv, r1["root"], "result")]
-        self.assertEqual(len(live), 2)
-        self.assertIn(r3["result"], live)
-        self.assertNotIn(r1["result"], srv.entity_store.docs)
 
     def test_the_reaper_runs_an_execute_edge_anyone_wrote(self):
         srv = _seat()

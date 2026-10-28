@@ -54,7 +54,8 @@ class TestTheRead(unittest.TestCase):
         self.assertIn("approval", o["current_tau_note"])
         self.assertIsNone(o["energy"])                     # #363: no seat given, nothing to report
         self.assertNotIn("health", o)                      # energy replaced health (#345)
-        self.assertEqual(o["writable"], ["self_cpu_share"])
+        self.assertEqual(o["writable"], ["self_cpu_share", "code_runs_keep"])   # + the code tree's history (#628)
+        self.assertEqual((o["code_runs_keep"], o["defaults"]["code_runs_keep"]), (30, 30))
         json.dumps(o)
 
     def test_energy_comes_from_the_seat_363(self):
