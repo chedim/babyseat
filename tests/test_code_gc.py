@@ -129,6 +129,21 @@ class TestTheCollect(unittest.TestCase):
         for o in outs[1:]:
             self.assertIn(o["root"], est.docs)
 
+    def test_an_older_seats_roots_are_ordered_by_their_newest_result(self):
+        # roots minted before collection kept no clocks: their newest result's
+        # time and executor stand in, so the recently used ones are kept
+        srv = _seat(keep=2)
+        est = srv.entity_store
+        outs = [LG.run(srv, code=f"echo legacy-{i}") for i in range(3)]
+        LG.run(srv, node=outs[0]["root"])                    # the first is the most recently used
+        for o in outs:
+            for k in ("last_run_ts", "executor", "born_ts"):
+                est.docs[o["root"]].properties.pop(k, None)
+        LG.collect(srv)
+        self.assertIn(outs[0]["root"], est.docs)
+        self.assertIn(outs[2]["root"], est.docs)
+        self.assertNotIn(outs[1]["root"], est.docs)
+
     def test_a_run_still_owed_is_never_collected(self):
         srv = _seat(keep=1)
         est = srv.entity_store

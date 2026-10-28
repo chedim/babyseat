@@ -67,6 +67,10 @@ class Lang:
 
 
 LANGS: dict[str, Lang] = {}
+# the kinds a language's parser gives its ROOT (tree-sitter's bash and javascript:
+# `program`). collect() marks from these: a language whose root is another kind
+# adds it here, or its trees are swept as unreachable.
+ROOT_KINDS = {"program"}
 
 
 # ---- parsing: tree-sitter grammars (#622) ---------------------------------------------------
@@ -545,20 +549,29 @@ def _collect(srv) -> dict:
     else:
         busy.update(k for k, d in docs.items()
                     if (d.properties or {}).get("pending_run_by") or (d.properties or {}).get("executing_on"))
+    # a root from before collection kept no clocks: its newest result stands in
+    last: dict = {}
+    for k, d in docs.items():
+        if k.startswith(res_ns):
+            p = d.properties or {}
+            r, ts = str(p.get("root") or ""), float(p.get("ts") or 0)
+            if ts >= last.get(r, (0.0, ""))[0]:
+                last[r] = (ts, str(p.get("executor") or ""))
     # one-off trees (a code_run's): the newest per executor are kept
     by_ex: dict = {}
     for k, d in docs.items():
         p = d.properties or {}
-        if k.startswith(node_ns) and p.get("kind") == "program" and k not in codes and k not in kept and k not in doomed:
-            seen = max(float(p.get("last_run_ts") or 0), float(p.get("born_ts") or 0))
-            by_ex.setdefault(str(p.get("executor") or ""), []).append((seen, k))
+        if k.startswith(node_ns) and p.get("kind") in ROOT_KINDS and k not in codes and k not in kept and k not in doomed:
+            res_ts, res_ex = last.get(k, (0.0, ""))
+            seen = max(float(p.get("last_run_ts") or 0), float(p.get("born_ts") or 0), res_ts)
+            by_ex.setdefault(str(p.get("executor") or res_ex), []).append((seen, k))
     for rows in by_ex.values():
         rows.sort()
         doomed.update(k for _, k in rows[:max(0, len(rows) - keep)])
     doomed -= codes | kept | busy
     # mark: what a kept tree (or a method's code, or a busy run) reaches stays
     live, stack = set(), [k for k, d in docs.items() if k.startswith(node_ns)
-                          and (d.properties or {}).get("kind") == "program" and k not in doomed]
+                          and (d.properties or {}).get("kind") in ROOT_KINDS and k not in doomed]
     while stack:
         k = stack.pop()
         if k in live or k not in docs:
