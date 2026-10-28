@@ -225,9 +225,27 @@ def _audit(mem, rec: dict) -> None:
         return                  # no audit log mounted (the self loop's calls, tests): nothing to write
     try:
         from .opencode import _write_audit
-        _write_audit(mem, rec)
+        _write_audit(mem, _with_caller(rec))
     except Exception:
         pass
+
+
+def _with_caller(rec: dict) -> dict:
+    """#646: an audit row says when and who -- the time, the writer lane and
+    the chain (its id carries the session) read from the turn context, never
+    a new registry. Fields the caller already set are kept."""
+    import time as _t
+    from . import writes as _W
+    out = dict(rec)
+    out.setdefault("ts", _t.time())
+    out.setdefault("writer", _W.writer())
+    ch = _W.current()
+    if ch:
+        out.setdefault("chain", ch.get("id"))
+        out.setdefault("chain_root", ch.get("root"))
+    elif _W.caller():                  # an external MCP client: no chain, but a name + pid
+        out.setdefault("caller", _W.caller())
+    return out
 
 
 def materialized_class_for(eid: str) -> str:
@@ -4566,8 +4584,7 @@ def _apply_entity_update(srv, ent, out: dict, trigger: str,
             if trigger == "watch":
                 _WATCH_TELL_TS[ent.eid] = time.time()
     if changed and not silent:
-        from .opencode import _write_audit
-        _write_audit(getattr(srv, "membrane", None),
+        _audit(getattr(srv, "membrane", None),
                      {"event": "agent-entity-scripted", "origin": "update-script",
                       "eid": ent.eid, "trigger": trigger,
                       "applied": changed})

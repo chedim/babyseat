@@ -212,6 +212,12 @@ def carry(fn):
 
 
 HDR_CHAIN, HDR_WRITER = "X-Membrane-Chain", "X-Membrane-Writer"
+HDR_CALLER = "X-Membrane-Caller"      # #646: an MCP client's name + pid, when it has no chain
+_CALLER: contextvars.ContextVar[str] = contextvars.ContextVar("membrane_caller", default="")
+
+
+def caller() -> str:
+    return _CALLER.get()
 
 
 def headers(default_writer: str = "") -> dict:
@@ -236,8 +242,13 @@ def from_headers(hdrs):
     w = hdrs.get(HDR_WRITER) if hdrs is not None else None
     if isinstance(ch, dict):                  # a caller cannot claim it passed through self (#578 review)
         ch = dict(ch, via=[v for v in (ch.get("via") or []) if v != "self"])
-    with resume(ch if isinstance(ch, dict) else None), as_writer(w or _WRITER.get()):
-        yield
+    c = str(hdrs.get(HDR_CALLER) or "")[:200] if hdrs is not None else ""
+    tok = _CALLER.set(c or _CALLER.get())
+    try:
+        with resume(ch if isinstance(ch, dict) else None), as_writer(w or _WRITER.get()):
+            yield
+    finally:
+        _CALLER.reset(tok)
 
 
 @contextlib.contextmanager
