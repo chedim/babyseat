@@ -3848,11 +3848,9 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     return self._json_err(503, "no seat")
                 from . import self_api as _SAPI
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
-                _rep = {k[2:]: (v[0] == "1" if v[0] in ("0", "1") else v[0])
-                        for k, v in _q.items() if k.startswith("r_") and v}      # #576 D2: the learn exchange
+                # a pure read (#586): the learn exchange spends the purse, so it is the POST's
                 self._json_out(_SAPI.context(psrv, only=(_q.get("only") or [None])[0],
-                                             own=(_q.get("own") or [""])[0] in ("1", "true"),
-                                             report=_rep or None))
+                                             own=(_q.get("own") or [""])[0] in ("1", "true")))
             elif path == "/membrane/toybox/state":
                 # #249: the toy dock's live source -- the toys alone, cheap
                 # enough to poll every few seconds (read-only, gated)
@@ -3927,6 +3925,21 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     from . import self_sheet as _SHEET           # #249: the dock shows the poke at once
                     _SHEET.forget_dock(getattr(runner, "srv", None) if runner is not None else None)
                 return self._json_out(out, code=200 if out.get("ok") else 400)
+            if path == "/membrane/self/context":
+                # #586: the context WITH the learn exchange (#576 D2): the report
+                # settles the purse, so it is a POST (a retried GET would double it)
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if self._jwt_person() is not None:
+                    return self._json_err(403, "for the seat's own token")
+                if psrv is None:
+                    return self._json_err(503, "no seat")
+                from . import self_api as _SAPI
+                b = self._read_body()
+                b = b if isinstance(b, dict) else {}
+                _rep = b.get("report")
+                return self._json_out(_SAPI.context(
+                    psrv, only=b.get("only") or None, own=bool(b.get("own")),
+                    report=_rep if isinstance(_rep, dict) and _rep else None))
             if path == "/membrane/self/effects":
                 # #440 part 2: Blurp's acts, run in the seat in order
                 # (self_api.effects; the in-process loop calls the same code):
