@@ -101,6 +101,7 @@ def test_agent_list_reports_the_loop_pool_and_minds(seat):
     dr = next(a for a in agents if a["name"] == "dreamer")
     assert "branch" in dr["description"]
 
+
 def test_a_seat_that_never_boots_is_still_stopped(tmp_path, monkeypatch):
     """The fixture stops its seat even when the boot wait fails (an orphan
     seat outlived its pytest run on 2026-10-27)."""
