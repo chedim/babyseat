@@ -474,8 +474,11 @@ def loop_task_text(ev: dict) -> str:
                    "(a command's rc=0 output, the entity state read "
                    f"back), close it: `fulfill` with spec {ev.get('entity', '?')} "
                    "+ the evidence. Not done: take its NEXT concrete step. "
-                   "Waiting on a person: say BLOCKED and it parks until "
-                   "the operator speaks.")
+                   "Blocked: NAME what you wait on so the goal wakes "
+                   "itself -- `BLOCKED retry after 2h` (a timer), "
+                   "`BLOCKED on <entity-id>` (wakes when that entity "
+                   "moves), or plain BLOCKED + who (parks until the "
+                   "operator speaks).")
     elif kind == "boundary":
         head = (f"boundary crossed: '{ev.get('entity', '?')}' "
                 f"{'entered' if ev.get('entered') else 'exited'} "
@@ -957,8 +960,14 @@ def loops_banner_line(srv) -> str | None:
             wake = f"next wake {_LLM._hm(float(nw['at']), time.time())} on {str(nw.get('about') or '?').replace('membrane::', '')}"
     except Exception:
         pass
+    asleep = ""
+    try:                                       # #633: why the quiet goals are quiet
+        asleep = dormant_line(srv)
+    except Exception:
+        pass
     if not run and not queued:
-        return ("loops: idle, " + wake) if wake else None
+        idle = ", ".join(x for x in (wake, asleep) if x)
+        return ("loops: idle, " + idle) if idle else None
     titles = []
     try:
         titles = (_loop_titles(srv) or [])[:3]
@@ -971,6 +980,8 @@ def loops_banner_line(srv) -> str | None:
         bits.append(f"{queued} queued")
     if wake:
         bits.append(wake)
+    if asleep:
+        bits.append(asleep)
     return "loops: " + ", ".join(bits)
 
 
@@ -1234,6 +1245,73 @@ def dormant_line(srv, now: float | None = None,
     return f"asleep: {total} goal(s) -- " + ", ".join(bits)
 
 
+_STEP_STREAK_CAP = 6  # consecutive STEPs at the idle beat, then the gap applies (~the old 30 min)
+
+
+def _step_streak(props: dict) -> int:
+    n = 0
+    for land in reversed(list(props.get("landings") or [])):
+        if str((land or {}).get("op") or "") != "step":
+            break
+        n += 1
+    return n
+
+
+def _wait(props: dict, min_age_s: float) -> float:
+    """Seconds a goal waits before its next pass: 0 while it is stepping
+    (capped), else the gap doubled per trailing quiet pass."""
+    streak = _ignored_streak(props)
+    if not streak and 0 < _step_streak(props) < _STEP_STREAK_CAP:
+        return 0.0
+    return min_age_s * (2 ** min(streak, 4))
+
+
+def quiet_goals(srv, now: float | None = None,
+                min_age_s: float | None = None) -> list[dict]:
+    """WHY IS THIS GOAL QUIET (#633): one row per open goal that is not due
+    -- {name, eid, state: parked|backoff, kind, why, next_ts (0 = when the
+    operator speaks or the entity moves)} -- read-only, wakes nothing."""
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return []
+    from .entities import CLASS_GOAL
+    now = time.time() if now is None else now
+    min_age_s = GOAL_REWAKE_S if min_age_s is None else min_age_s
+    rows: list[dict] = []
+    for doc in list((getattr(est, "docs", None) or {}).values()):
+        if doc is None or doc.cls != CLASS_GOAL:
+            continue
+        props = doc.properties or {}
+        if (props.get("status") or "open") != "open":
+            continue
+        name = str(props.get("name") or doc.eid)
+        if _parked(srv, props, now):
+            kind = _park_kind(props)
+            on = str(props.get("blocked_on") or "").strip()
+            why = {"timer": "on a timer", "entity": "waiting on "
+                   + str(props.get("blocked_entity") or "an entity"),
+                   "operator": "blocked on the operator"}[kind]
+            if on:
+                why += f" ({on[:80]})"
+            rows.append({"name": name, "eid": doc.eid, "state": "parked",
+                         "kind": kind, "why": why,
+                         "next_ts": float(props.get("blocked_until") or 0)})
+            continue
+        streak = _ignored_streak(props)
+        last = float(props.get("intent_planted_ts") or 0)
+        due_at = last + _wait(props, min_age_s)
+        if now >= due_at or not (streak or _step_streak(props)):
+            continue
+        if streak:
+            why = (f"backoff x{2 ** min(streak, 4)} after {streak} "
+                   f"quiet pass(es)")
+        else:
+            why = f"{_step_streak(props)} steps in a row; back to the normal gap"
+        rows.append({"name": name, "eid": doc.eid, "state": "backoff",
+                     "kind": "backoff", "why": why, "next_ts": due_at})
+    return rows
+
+
 def _due_goals(srv, est, now: float, min_age_s: float) -> list:
     from .entities import CLASS_GOAL
     loops = getattr(srv, "loops", None)
@@ -1248,8 +1326,9 @@ def _due_goals(srv, est, now: float, min_age_s: float) -> list:
         if _parked(srv, props, now):
             continue
         last = float(props.get("intent_planted_ts") or 0)
-        wait = min_age_s * (2 ** min(_ignored_streak(props), 4))
-        if now - last >= wait:
+        # a STEP is progress: the goal continues at the next idle beat
+        # instead of waiting out the gap (a quiet pass backs off again)
+        if now - last >= _wait(props, min_age_s):
             due.append((last, doc, props))
     due.sort(key=lambda t: t[0])
     return due

@@ -218,6 +218,31 @@ class TestBoardPulse(unittest.TestCase):
             "intent_planted_ts"], self.now - 5)
         self.assertEqual(WA.rewake_open_goals(self.srv, min_age_s=1800), 0)
 
+    def test_step_continues_at_the_next_beat(self):
+        # a STEP is progress: the goal does not wait out the 30-min gap
+        _goal(self.est, "going", "going", landings=[{"op": "step"}],
+              intent_planted_ts=self.now - 60)
+        self.assertEqual(WA.rewake_open_goals(self.srv, now=self.now,
+                                              min_age_s=1800), 1)
+
+    def test_step_streak_cap_restores_the_gap(self):
+        n = WA._STEP_STREAK_CAP
+        _goal(self.est, "runaway", "runaway", landings=[{"op": "step"}] * n,
+              intent_planted_ts=self.now - 60)
+        self.assertEqual(WA.rewake_open_goals(self.srv, now=self.now,
+                                              min_age_s=1800), 0)
+        _goal(self.est, "ok", "ok", landings=[{"op": "step"}] * (n - 1),
+              intent_planted_ts=self.now - 60)
+        self.assertEqual(WA.rewake_open_goals(self.srv, now=self.now,
+                                              min_age_s=1800), 1)
+
+    def test_quiet_pass_after_a_step_backs_off_again(self):
+        _goal(self.est, "stuck", "stuck",
+              landings=[{"op": "step"}, {"op": "ignored"}],
+              intent_planted_ts=self.now - 60)
+        self.assertEqual(WA.rewake_open_goals(self.srv, now=self.now,
+                                              min_age_s=1800), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
