@@ -1,0 +1,50 @@
+[
+ {"id": "backup",
+  "setup": ["Let's work on tools/backup.py today. The backup job there should skip any file bigger than 2 GB. Just acknowledge in one line, no tools.",
+            "membrane: learn that the backup size limit lives in config/backup.toml, not in a command-line flag",
+            "membrane: intend that the morning digest lists the files tools/backup.py skipped"],
+  "questions": [
+   {"id": "backup-same", "where": "same", "q": "One line, no tools: what is still open for the backup job?", "expect": [["digest"]]},
+   {"id": "backup-new1", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): what size of file does tools/backup.py skip?", "expect": [["2 gb", "2gb", "2 gigabyte"]]},
+   {"id": "backup-new2", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): where is the backup size limit for tools/backup.py configured?", "expect": [["config/backup.toml", "backup.toml"]]}]},
+ {"id": "logs",
+  "setup": ["Next: scripts/rotate_logs.sh. It must keep 14 days of logs. Just acknowledge in one line, no tools.",
+            "membrane: learn that scripts/rotate_logs.sh runs every night at 03:30",
+            "membrane: intend that scripts/rotate_logs.sh compresses old logs with zstd"],
+  "questions": [
+   {"id": "logs-same", "where": "same", "q": "One line, no tools: what is still open for the log rotation?", "expect": [["zstd"]]},
+   {"id": "logs-new1", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): how many days of logs does scripts/rotate_logs.sh keep?", "expect": [["14"]]},
+   {"id": "logs-new2", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): at what time does scripts/rotate_logs.sh run?", "expect": [["03:30", "3:30"]]}]},
+ {"id": "bilge",
+  "setup": ["Let's do src/pump_ctl.py, the bilge pump controller. The pump starts when the water reaches 12 cm. Just acknowledge in one line, no tools.",
+            "membrane: learn that the bilge pump relay in src/pump_ctl.py is on GPIO 17",
+            "membrane: intend that src/pump_ctl.py publishes an alarm on the MQTT topic boat/bilge/alarm"],
+  "questions": [
+   {"id": "bilge-same", "where": "same", "q": "One line, no tools: what is still open for the pump controller?", "expect": [["boat/bilge/alarm", "mqtt"]]},
+   {"id": "bilge-new1", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): at what water level does src/pump_ctl.py start the bilge pump?", "expect": [["12 cm", "12cm"]]},
+   {"id": "bilge-new2", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): which GPIO pin drives the bilge pump relay in src/pump_ctl.py?", "expect": [["17"]]}]},
+ {"id": "energy",
+  "setup": ["Now dashboards/energy.yaml. The battery bank there is 560 Ah. Just acknowledge in one line, no tools.",
+            "membrane: learn that the low-voltage cutoff shown in dashboards/energy.yaml is 11.8 V",
+            "membrane: intend that dashboards/energy.yaml gets a solar panel card"],
+  "questions": [
+   {"id": "energy-same", "where": "same", "q": "One line, no tools: what is still open for the energy dashboard?", "expect": [["solar"]]},
+   {"id": "energy-new1", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): how big is the battery bank in dashboards/energy.yaml?", "expect": [["560"]]},
+   {"id": "energy-new2", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): what low-voltage cutoff does dashboards/energy.yaml show?", "expect": [["11.8"]]}]},
+ {"id": "anchor",
+  "setup": ["Let's look at services/anchor_watch.py. Its alarm radius is 35 m. Just acknowledge in one line, no tools.",
+            "membrane: learn that services/anchor_watch.py polls the GPS every 10 seconds",
+            "membrane: intend that services/anchor_watch.py sends its alarm to the phone"],
+  "questions": [
+   {"id": "anchor-same", "where": "same", "q": "One line, no tools: what is still open for the anchor watch?", "expect": [["phone"]]},
+   {"id": "anchor-new1", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): what alarm radius does services/anchor_watch.py use?", "expect": [["35"]]},
+   {"id": "anchor-new2", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): how often does services/anchor_watch.py poll the GPS?", "expect": [["10 s", "10s", "10 sec", "ten sec"]]}]},
+ {"id": "tide",
+  "setup": ["Last one: lib/tide_cache.py. It caches tide predictions for 6 hours. Just acknowledge in one line, no tools.",
+            "membrane: learn that lib/tide_cache.py reads NOAA station 8443970",
+            "membrane: intend that lib/tide_cache.py falls back to the last cached table when offline"],
+  "questions": [
+   {"id": "tide-same", "where": "same", "q": "One line, no tools: what is still open for the tide cache?", "expect": [["offline", "fall back", "fallback"]]},
+   {"id": "tide-new1", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): how long does lib/tide_cache.py cache tide predictions?", "expect": [["6 h", "6h", "six h", "6 hour"]]},
+   {"id": "tide-new2", "where": "new", "q": "One line, answer from what you know without tools (say unknown if you don't know): which NOAA station does lib/tide_cache.py read?", "expect": [["8443970"]]}]}
+]

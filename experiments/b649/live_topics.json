@@ -1,0 +1,118 @@
+[
+ {
+  "id": "live",
+  "setup": [],
+  "questions": [
+   {
+    "id": "blurp",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): what display name did the operator give the seat's self?",
+    "expect": [
+     [
+      "blurp"
+     ]
+    ]
+   },
+   {
+    "id": "gc-keep",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): what is the default of the code_runs_keep option?",
+    "expect": [
+     [
+      "30"
+     ]
+    ]
+   },
+   {
+    "id": "budget",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): how many characters is the conversation block's BANNER_CHAR_BUDGET?",
+    "expect": [
+     [
+      "900"
+     ]
+    ]
+   },
+   {
+    "id": "halloween",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): which issue number should the Halloween ticket land on?",
+    "expect": [
+     [
+      "666"
+     ]
+    ]
+   },
+   {
+    "id": "rename",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): what is the brand name membrane was renamed to?",
+    "expect": [
+     [
+      "babyseat"
+     ]
+    ]
+   },
+   {
+    "id": "locomo",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): which benchmark dataset has no license and must never be committed?",
+    "expect": [
+     [
+      "locomo"
+     ]
+    ]
+   },
+   {
+    "id": "link581",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): which MCP tools did #581 remove as the direct execution surface?",
+    "expect": [
+     [
+      "entity_link"
+     ]
+    ]
+   },
+   {
+    "id": "venv",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): which virtualenv does install.sh create for the live seat?",
+    "expect": [
+     [
+      ".membrane/venv"
+     ]
+    ]
+   },
+   {
+    "id": "sigabrt",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): which CPython version's buffered-I/O guard made the seat SIGABRT on shared stderr?",
+    "expect": [
+     [
+      "3.14"
+     ]
+    ]
+   },
+   {
+    "id": "loops-model",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): which model do the operator's watch loops run on?",
+    "expect": [
+     [
+      "sonnet"
+     ]
+    ]
+   },
+   {
+    "id": "repo-split",
+    "where": "new",
+    "q": "One line, answer from what you know without tools (say unknown if you don't know): what is the status of the membrane/babyseat repo split?",
+    "expect": [
+     [
+      "hold"
+     ]
+    ]
+   }
+  ]
+ }
+]

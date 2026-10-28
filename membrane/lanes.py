@@ -1059,6 +1059,12 @@ def _digest_lines(srv, drain: bool = True) -> list[str]:
     return [head] + [f"  {r}" for r in rows]
 
 
+def _exp_recon_on() -> bool:
+    """EXPERIMENT (#649 follow-up): MEMBRANE_EXP_NORECON=1 drops the
+    --no-context reconstruction, so the model sees recall + the current turn only."""
+    return os.environ.get("MEMBRANE_EXP_NORECON", "").strip() not in ("1", "true", "yes")
+
+
 def _injection_mode(srv) -> str:
     """'massage' (the field's words, picked), 'conversation' (THIS
     CONVERSATION, #429: the chat's own state, conv_banner.py) or 'banner'
@@ -1068,7 +1074,7 @@ def _injection_mode(srv) -> str:
     # restores the old state block
     m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "conversation")
     m = str(m).strip().lower()
-    return m if m in ("massage", "banner") else "conversation"
+    return m if m in ("massage", "banner", "entities", "ids", "facts") else "conversation"
 
 
 def _note_massage(srv, stats: dict) -> None:
@@ -4108,6 +4114,43 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     _st = types.SimpleNamespace(mark=mark)
     _is_tool_round = is_tool_round
     ctx = None
+    if _injection_mode(srv) == "facts":             # EXPERIMENT #649: the message's related facts (recall)
+        fld = _efield_on(srv)
+        if fld is not None and not getattr(srv, "no_banner", False):
+            try:
+                from .entity_block import recall_answers, render_past
+                from .conv_banner import BANNER_CHAR_BUDGET
+                ctx = render_past(recall_answers(fld, _last_user_text(body), vec),
+                                  budget=int(os.environ.get("MEMBRANE_EXP_BUDGET") or BANNER_CHAR_BUDGET))
+            except Exception as e:
+                print(f"[facts-block] error: {e}", file=sys.stderr)
+        mark("recall+banner")
+        return ctx, None
+    if _injection_mode(srv) == "ids":               # EXPERIMENT #649: the message's entities, ids only
+        fld = _efield_on(srv)
+        if fld is not None and not getattr(srv, "no_banner", False):
+            try:
+                from .entity_block import question_entities
+                ids = question_entities(fld, _last_user_text(body), vec)
+                if ids:
+                    ctx = ("RELATED ENTITIES (ids only; read one with entity_read when you need it): "
+                           + " · ".join(ids))
+            except Exception as e:
+                print(f"[ids-block] error: {e}", file=sys.stderr)
+        mark("recall+banner")
+        return ctx, None
+    if _injection_mode(srv) == "entities":          # EXPERIMENT #649: the message's entities only
+        fld = _efield_on(srv)
+        if fld is not None and not getattr(srv, "no_banner", False):
+            try:
+                from .entity_block import entities_for, render
+                from .conv_banner import BANNER_CHAR_BUDGET
+                ctx = render(entities_for(fld, _last_user_text(body), vec),
+                             budget=int(os.environ.get("MEMBRANE_EXP_BUDGET") or BANNER_CHAR_BUDGET))
+            except Exception as e:
+                print(f"[entities-block] error: {e}", file=sys.stderr)
+        mark("recall+banner")
+        return ctx, None
     if _injection_mode(srv) == "conversation":
         fld = _efield_on(srv)
         efield_mark = None
@@ -5560,6 +5603,14 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # MEMBRANE_INJECTION=banner restores the old block (the A/B arm).
         ctx, efield_mark = _state_ctx(srv, body, vec, _is_tool_round, _st.mark)
         fld = _efield_on(srv)
+        if os.environ.get("MEMBRANE_EXP_DUMP"):          # EXPERIMENT #649: the injected block, per turn
+            try:
+                with open(os.environ["MEMBRANE_EXP_DUMP"], "a") as _df:
+                    _df.write(json.dumps({"ts": time.time(), "mode": _injection_mode(srv),
+                                          "q": _last_user_text(body)[:300], "tool_round": _is_tool_round,
+                                          "ctx": ctx or ""}) + "\n")
+            except Exception:
+                pass
         # THE SPEECH RELAY: membrane's held messages ride the next
         # model-bound request as a marked block -- the model relays them
         # into the conversation verbatim (the mouth), where they enter the
@@ -5632,7 +5683,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             if fld is not None:
                 try:
                     from .entity_block import reconstruct, render_for
-                    recon = reconstruct(fld, _own_session_prefix(srv))
+                    recon = reconstruct(fld, _own_session_prefix(srv)) if _exp_recon_on() else None
                     eblock = render_for(fld, query, vec)
                     if eblock:
                         recon = (recon + "\n\n" + eblock) if recon else eblock
