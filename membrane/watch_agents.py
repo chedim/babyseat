@@ -901,8 +901,14 @@ class _LoopDrainer:
                 props.pop("blocked_entity", None)
                 props.update(blocked_condition(decision))
                 if not props.get("blocked_until") and not props.get("blocked_entity"):
+                    fed = len(props.get("answer_fed") or [])
                     card = ask_operator(est, goal.eid, props, decision)   # #643: plain BLOCKED asks
-                    if card:
+                    if len(props.get("answer_fed") or []) > fed:
+                        # #650: an old answer was fed to the pool; the goal stays DUE
+                        # (not parked on the operator), so its next pass moves on from
+                        # the answer or BLOCKs again and gets a fresh card
+                        props.pop("blocked_ts", None)
+                    elif card:
                         props["blocked_card"] = card
                         props["blocked_entity"] = card     # the answer moves it: the goal wakes
             elif verdict in ("step", "done"):
@@ -1198,9 +1204,12 @@ def ask_operator(est, goal_eid: str, props: dict, question: str) -> str:
             # fed already (or no pool to feed): ask again under a new name
         else:
             return ""
+        blocks = [str(x) for x in ((card.properties or {}).get("blocks") or [])
+                  if x] if card is not None else []
         if not est.edit(r["eid"], properties={
                 "status": STATUS_OPEN, "var": {"type": "string"},
-                "planted_by": "watch", "blocks": [goal_eid]}).get("ok"):
+                "planted_by": "watch",
+                "blocks": blocks + ([goal_eid] if goal_eid not in blocks else [])}).get("ok"):
             return ""
     except Exception:
         return ""
