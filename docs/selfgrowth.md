@@ -640,7 +640,8 @@ later be owned by Blurp's own process (#440).
 
 The cycle crosses the seat through two routes (#440 part 2,
 `membrane/self_api.py`), already in-process: `GET /membrane/self/context`
-(once a cycle: the current, its own position, the things in its world, the
+(a pure read; a cycle that carries a learn report POSTs to the same path, so a
+retried request never spends the purse twice, #586) (once a cycle: the current, its own position, the things in its world, the
 pause and the CPU share; on request the spots it can reach and the vectors it
 asks for; at most 256 KB of JSON, cut to fit with a `dropped` note) and
 `POST /membrane/self/effects` (its acts, run in the seat in order: its

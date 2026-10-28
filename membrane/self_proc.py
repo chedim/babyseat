@@ -10,7 +10,8 @@ process of its own (its own GIL, its own CPU, a lower priority):
   srv-shaped object (FACADE_ATTRS, nothing else) whose entity store is a
   local mirror of Blurp's own entities (itself and anything its own, seeded from
   the context's `own` part), whose reads of the seat are
-  GET /membrane/self/context and whose acts are POST /membrane/self/effects
+  GET /membrane/self/context (a POST when a step carries a learn report, #586)
+  and whose acts are POST /membrane/self/effects
   (self_api: a facade carries `self_remote`, and both calls go over HTTP).
   Blurp's own properties go back as `own` effects (flush, after each step). The pause and the CPU share are read from the context.
 - It owns self/ (the record and Blurp's own files) through self_writer.

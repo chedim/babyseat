@@ -4,7 +4,8 @@ Blurp runs in its own process (#440). The child reaches the seat through two
 routes, and the in-process loop crosses the same boundary through these two
 functions (the routes in server.py run them):
 
-- `context(srv)` -- GET /membrane/self/context: the small snapshot of the
+- `context(srv)` -- GET /membrane/self/context (a pure read; a step's learn
+  report rides a POST to the same path, #586): the small snapshot of the
   seat state a step reads. Plain JSON: Blurp's own entity (its position),
   `paused`, `nerve_paused` and `cpu_share`; on request (`own=True`) Blurp's
   own entities (itself and anything that is its own) to seed the child's
