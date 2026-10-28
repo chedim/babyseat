@@ -225,6 +225,17 @@ class TestBoardPulse(unittest.TestCase):
         self.assertEqual(WA.rewake_open_goals(self.srv, now=self.now,
                                               min_age_s=1800), 1)
 
+    def test_step_streak_cap_restores_the_gap(self):
+        n = WA._STEP_STREAK_CAP
+        _goal(self.est, "runaway", "runaway", landings=[{"op": "step"}] * n,
+              intent_planted_ts=self.now - 60)
+        self.assertEqual(WA.rewake_open_goals(self.srv, now=self.now,
+                                              min_age_s=1800), 0)
+        _goal(self.est, "ok", "ok", landings=[{"op": "step"}] * (n - 1),
+              intent_planted_ts=self.now - 60)
+        self.assertEqual(WA.rewake_open_goals(self.srv, now=self.now,
+                                              min_age_s=1800), 1)
+
     def test_quiet_pass_after_a_step_backs_off_again(self):
         _goal(self.est, "stuck", "stuck",
               landings=[{"op": "step"}, {"op": "ignored"}],

@@ -1245,15 +1245,25 @@ def dormant_line(srv, now: float | None = None,
     return f"asleep: {total} goal(s) -- " + ", ".join(bits)
 
 
-def goal_loop_edges(docs) -> list[dict]:
-    """The loop-to-goal link for the map (#633): one `worked_by` edge per
-    goal a loop has picked up (picked_up_by is a property, not an edge)."""
-    from .entities import CLASS_GOAL
-    return [{"s": d.eid, "t": str((d.properties or {})["picked_up_by"]),
-             "kind": "worked_by"}
-            for d in docs
-            if d is not None and d.cls == CLASS_GOAL
-            and (d.properties or {}).get("picked_up_by")]
+_STEP_STREAK_CAP = 6  # consecutive STEPs at the idle beat, then the gap applies (~the old 30 min)
+
+
+def _step_streak(props: dict) -> int:
+    n = 0
+    for land in reversed(list(props.get("landings") or [])):
+        if str((land or {}).get("op") or "") != "step":
+            break
+        n += 1
+    return n
+
+
+def _wait(props: dict, min_age_s: float) -> float:
+    """Seconds a goal waits before its next pass: 0 while it is stepping
+    (capped), else the gap doubled per trailing quiet pass."""
+    streak = _ignored_streak(props)
+    if not streak and 0 < _step_streak(props) < _STEP_STREAK_CAP:
+        return 0.0
+    return min_age_s * (2 ** min(streak, 4))
 
 
 def quiet_goals(srv, now: float | None = None,
@@ -1289,13 +1299,16 @@ def quiet_goals(srv, now: float | None = None,
             continue
         streak = _ignored_streak(props)
         last = float(props.get("intent_planted_ts") or 0)
-        mult = 2 ** min(streak, 4)
-        due_at = last + min_age_s * mult
-        if streak and now < due_at:
-            rows.append({"name": name, "eid": doc.eid, "state": "backoff",
-                         "kind": "backoff",
-                         "why": f"backoff x{mult} after {streak} quiet pass(es)",
-                         "next_ts": due_at})
+        due_at = last + _wait(props, min_age_s)
+        if now >= due_at or not (streak or _step_streak(props)):
+            continue
+        if streak:
+            why = (f"backoff x{2 ** min(streak, 4)} after {streak} "
+                   f"quiet pass(es)")
+        else:
+            why = f"{_step_streak(props)} steps in a row; back to the normal gap"
+        rows.append({"name": name, "eid": doc.eid, "state": "backoff",
+                     "kind": "backoff", "why": why, "next_ts": due_at})
     return rows
 
 
@@ -1313,12 +1326,9 @@ def _due_goals(srv, est, now: float, min_age_s: float) -> list:
         if _parked(srv, props, now):
             continue
         last = float(props.get("intent_planted_ts") or 0)
-        lands = props.get("landings") or []
         # a STEP is progress: the goal continues at the next idle beat
         # instead of waiting out the gap (a quiet pass backs off again)
-        stepping = bool(lands) and str((lands[-1] or {}).get("op") or "") == "step"
-        wait = 0.0 if stepping else min_age_s * (2 ** min(_ignored_streak(props), 4))
-        if now - last >= wait:
+        if now - last >= _wait(props, min_age_s):
             due.append((last, doc, props))
     due.sort(key=lambda t: t[0])
     return due
