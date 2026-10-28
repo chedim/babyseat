@@ -141,7 +141,7 @@ of speech models.
 - **Ollama**: any chat model it serves, local or cloud (`glm-5.3-flash:cloud`,
   `gpt-oss:20b-cloud`, …). Embeddings always come from Ollama.
 - **OpenAI-compatible cloud APIs**: `membrane auth <provider>` stores a key
-  (`anthropic`, `openrouter`, `gemini`, `groq`, `github`, `mistral`, `zen`), and
+  (`anthropic`, `openrouter`, `gemini`, `groq`, `github`, `mistral`, `zen`, `openai`), and
   that provider's models become routable rungs beside Ollama's.
 - **Claude, through the Claude Code engine**: `membrane auth claude-agent` adds
   Claude rungs (`claude-agent:sonnet`, `:opus`, `:haiku`) that run the Claude
