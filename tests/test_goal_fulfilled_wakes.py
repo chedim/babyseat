@@ -61,3 +61,42 @@ def test_the_drainer_wakes_a_loop_pass_on_it():
     srv.run_loop_turn = lambda sid, text, agent: turns.append((agent, text)) or {"text": "ignored: noted"}
     WA._LoopDrainer(srv).handle(ev)
     assert len(turns) == 1 and "fulfilled" in turns[0][1]
+
+
+def _chat_seat():
+    est = _seat()
+    est.sent = []
+    est._decision_chat = lambda sid, text: est.sent.append((sid, text))
+    return est
+
+
+def test_a_chat_goal_tells_its_chat_not_the_pool():
+    est = _chat_seat()
+    eid = _goal(est)
+    est.edit(eid, properties={"convs": ["ses_1", "ses_2"]})
+    WA.notify_goal_fulfilled(est, est._events_pool, eid, by="listener")
+    assert est._events_pool.take() == []
+    [(sid, text)] = est.sent
+    assert sid == "ses_1" and text.startswith("[goal]") and "ship the suite" in text \
+        and "fulfilled" in text
+
+
+def test_a_chatless_goal_goes_to_the_pool():
+    est = _chat_seat()
+    eid = _goal(est)
+    WA.notify_goal_fulfilled(est, est._events_pool, eid, by="listener")
+    assert est.sent == []
+    assert [e["kind"] for e in est._events_pool.take()] == ["goal-fulfilled"]
+
+
+def test_a_reopened_goal_closed_again_is_announced_twice():
+    est = _chat_seat()
+    eid = _goal(est)
+    est.edit(eid, properties={"convs": ["ses_1"], "fulfilled_ts": 100.0})
+    WA.notify_goal_fulfilled(est, est._events_pool, eid, by="operator")
+    WA.notify_goal_fulfilled(est, est._events_pool, eid, by="operator")   # same close
+    assert len(est.sent) == 1
+    est.edit(eid, properties={"status": "open"})                            # reopened
+    est.edit(eid, properties={"status": "fulfilled", "fulfilled_ts": 200.0})
+    WA.notify_goal_fulfilled(est, est._events_pool, eid, by="operator")
+    assert len(est.sent) == 2
