@@ -56,27 +56,29 @@ def seat(tmp_path):
          "--field", str(tmp_path / "rag-field.json")],
         env=env, cwd=str(tmp_path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
-    deadline = time.time() + 40
-    ready = False
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(base + "/agent", timeout=3) as r:
-                json.loads(r.read())
-            ready = True
-            break
-        except Exception:
-            time.sleep(0.3)
-    assert ready, "seat never became ready"
-
-    def _get(url: str):
-        with urllib.request.urlopen(url, timeout=5) as r:
-            return json.loads(r.read())
-    yield base, _get
-    proc.terminate()
     try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        deadline = time.time() + 40
+        ready = False
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(base + "/agent", timeout=3) as r:
+                    json.loads(r.read())
+                ready = True
+                break
+            except Exception:
+                time.sleep(0.3)
+        assert ready, "seat never became ready"
+
+        def _get(url: str):
+            with urllib.request.urlopen(url, timeout=5) as r:
+                return json.loads(r.read())
+        yield base, _get
+    finally:                                 # a failed boot stops its seat too
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def test_agent_list_reports_the_loop_pool_and_minds(seat):
@@ -98,3 +100,29 @@ def test_agent_list_reports_the_loop_pool_and_minds(seat):
     assert "beats" in th["description"]
     dr = next(a for a in agents if a["name"] == "dreamer")
     assert "branch" in dr["description"]
+
+
+def test_a_seat_that_never_boots_is_still_stopped(tmp_path, monkeypatch):
+    """The fixture stops its seat even when the boot wait fails (an orphan
+    seat outlived its pytest run on 2026-10-27)."""
+    import time
+    stopped = []
+
+    class _Proc:
+        def terminate(self):
+            stopped.append("terminate")
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            stopped.append("kill")
+
+    clock = iter(range(0, 1000, 50))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _Proc())
+    monkeypatch.setattr(time, "time", lambda: next(clock))
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    gen = seat.__wrapped__(tmp_path)
+    with pytest.raises(AssertionError):
+        next(gen)
+    assert stopped == ["terminate"]
