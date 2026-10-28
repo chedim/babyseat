@@ -106,7 +106,8 @@ def sheet(srv, now: float | None = None, fresh: bool = False) -> dict:
     if not fresh and hit is not None and 0 <= now - hit[0] < CACHE_S and hit[2] == name:
         return hit[1]
     out = SN.say_all(compute(srv, now), name)          # #283: the seat's name, in the prose too
-    rt["sheet"] = (now, out, name)
+    if rt.get("bound"):                                # #309: never cache a sheet built before the mode loaded
+        rt["sheet"] = (now, out, name)
     return out
 
 
