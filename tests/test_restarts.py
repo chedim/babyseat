@@ -196,3 +196,38 @@ class TestRestartKeepsPorts648(unittest.TestCase):
             RS.reexec_if_requested()
         self.assertEqual(ex.call_args[0][1][-5:],
                          ["--standalone", "--listen", "11501", "--serve-port", "4097"][-5:])
+
+class TestRestartHoldsWhileBusy647(unittest.TestCase):
+    """#647: presence.restart waited 2 s whatever ran, and a person's reply was
+    lost. The signal now waits on busy(), up to the same cap as a planned one."""
+
+    def test_the_hold_returns_when_the_seat_goes_idle(self):
+        seq = [["turn s1"], ["turn s1"], []]
+        with mock.patch.object(RS, "busy", side_effect=lambda s: seq.pop(0)) as b, \
+             mock.patch.object(RS.time, "sleep") as sl:
+            held = RS.hold_until_idle(_Srv())
+        self.assertEqual(held, ["turn s1"])
+        self.assertEqual(b.call_count, 3)
+        self.assertEqual(sl.call_count, 2)
+
+    def test_the_hold_is_capped(self):
+        clock = iter([0, 1, RS.MAX_DELAY_MIN * 60 + 5, RS.MAX_DELAY_MIN * 60 + 6])
+        with mock.patch.object(RS, "busy", return_value=["1 loop(s)"]), \
+             mock.patch.object(RS.time, "sleep"), \
+             mock.patch.object(RS.time, "time", side_effect=lambda: next(clock)):
+            held = RS.hold_until_idle(_Srv())
+        self.assertEqual(held, ["1 loop(s)"])
+
+    def test_do_restart_signals_only_after_the_hold(self):
+        order = []
+        with mock.patch.object(RS, "hold_until_idle", side_effect=lambda s: order.append("hold") or []), \
+             mock.patch.object(RS.os, "kill", side_effect=lambda *a: order.append("kill")), \
+             mock.patch.object(RS.time, "sleep"), \
+             mock.patch("membrane.seat_panel.note"):
+            RS.RESTART["requested"] = False
+            RS.do_restart(_Srv(), "x", delay_s=0)
+            for t in RS.threading.enumerate():
+                if t.name == "restart":
+                    t.join(2)
+        RS.RESTART["requested"] = False
+        self.assertEqual(order, ["hold", "kill"])
