@@ -514,7 +514,7 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
     import signal
     for t in threading.enumerate():             # #647 review: one restart waits at a time
         if t.name == "restart" and t.is_alive():
-            return {"text": f"a restart is already waiting on {', '.join(busy(srv)) or 'the seat'} -- "
+            return {"rc": 0, "text": f"a restart is already waiting on {', '.join(busy(srv)) or 'the seat'} -- "
                             "you'll get a notice when the seat is back"}
     pend = _pending(srv) or {}
     files = ", ".join(pend.get("files") or [])
