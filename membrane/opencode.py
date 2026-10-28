@@ -829,6 +829,11 @@ def main() -> None:
             _serve_socket.setsockopt(_sk.SOL_SOCKET, _sk.SO_REUSEADDR, 1)
             _serve_socket.bind((_serve_bind, serve_port))
             _serve_socket.listen(128)
+    try:                               # #648: a restart keeps the ports this boot holds
+        from . import restarts as _RS648
+        _RS648.RESTART["ports"] = (listen, serve_port)
+    except Exception:
+        pass
     srv = ThreadingHTTPServer((proxy_bind_host(args), listen), MembraneOpenAIHandler)
     srv.membrane = mem
     srv.paused = False                 # a cold start runs; a restart's re-exec keeps the person's pause (#395)
