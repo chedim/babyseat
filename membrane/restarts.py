@@ -512,15 +512,13 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
     """presence.restart: the reason for the next boot, then a clean SIGTERM
     (the drain runs as on any stop; the teardown's end re-execs, #151)."""
     import signal
-    RESTART["requested"] = True
+    for t in threading.enumerate():             # #647 review: one restart waits at a time
+        if t.name == "restart" and t.is_alive():
+            return {"text": f"a restart is already waiting on {', '.join(busy(srv)) or 'the seat'} -- "
+                            "you'll get a notice when the seat is back"}
     pend = _pending(srv) or {}
     files = ", ".join(pend.get("files") or [])
     why = " ".join(str(why or "").split())[:200] or "no reason given"
-    try:
-        with open(os.path.join(_dir(srv), REASON_FILE), "w") as f:
-            f.write(f"the seat restarted it ({why})" + (f"; it loads the staged {files}" if files else ""))
-    except Exception:
-        pass
     try:
         from . import seat_panel as SP
         SP.note(srv, "restart", by="seat", why=why)
@@ -530,6 +528,13 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
     def bye():
         time.sleep(delay_s)
         hold_until_idle(srv)                    # #647: never cut a person's turn off
+        # only now is it a restart: a plain stop during the hold must stay a stop
+        RESTART["requested"] = True
+        try:
+            with open(os.path.join(_dir(srv), REASON_FILE), "w") as f:
+                f.write(f"the seat restarted it ({why})" + (f"; it loads the staged {files}" if files else ""))
+        except Exception:
+            pass
         os.kill(os.getpid(), signal.SIGTERM)
     threading.Thread(target=bye, daemon=True, name="restart").start()
     waiting = busy(srv)
