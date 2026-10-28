@@ -300,3 +300,15 @@ def test_a_serve_loop_turn_counts_once_not_in_both_the_rows_and_the_watch_tally(
     assert out["hour"]["minds"]["loops"] == {"calls": 2, "input": 305, "output": 31}
     assert out["hour"]["total"] == {"calls": 2, "input": 305, "output": 31}
     assert "other" not in out["hour"]["minds"]
+
+
+def test_the_serve_loop_turn_go_does_not_tally_into_bgusage():
+    """#561: go() (the serve loop turn) must not touch bgusage: the stored row is the one count. Fails on a tree where go() tallies the turn."""
+    import ast, pathlib
+    src = pathlib.Path(TK.__file__).with_name("opencode.py").read_text()
+    go = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "go"]
+    assert go, "go() not found in opencode.py"
+    for fn in go:
+        names = {x.id for x in ast.walk(fn) if isinstance(x, ast.Name)} | {x.attr for x in ast.walk(fn) if isinstance(x, ast.Attribute)}
+        mods = {a.name for x in ast.walk(fn) if isinstance(x, ast.ImportFrom) for a in x.names}
+        assert "bgusage" not in names | mods and "from_turn" not in names
