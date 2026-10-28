@@ -22,13 +22,24 @@ TOOLS_Q = ("answer from what you know without tools (say unknown if you don't kn
            "but do not read or search files (say unknown if you don't know)")
 
 
-def base_arm(arm):
+def _core(arm):
     a = arm[:-2] if arm.endswith("-t") else arm
-    return a.split("@")[0]                                      # entities@1800 -> entities
+    return a.split("+")[0]                                      # facts@4000+ncp -> facts@4000
+
+
+def hist_of(arm):
+    """'' (full history), 'nc' (--no-context: the field's reconstruction
+    rides), 'ncp' (--no-context, no reconstruction: recall + the message)."""
+    a = arm[:-2] if arm.endswith("-t") else arm
+    return a.split("+")[1] if "+" in a else ""
+
+
+def base_arm(arm):
+    return _core(arm).split("@")[0]                             # entities@1800 -> entities
 
 
 def budget_of(arm):
-    a = arm[:-2] if arm.endswith("-t") else arm
+    a = _core(arm)
     return a.split("@")[1] if "@" in a else ""
 
 
@@ -38,7 +49,8 @@ def boot(d, arm):
                 "PYTHONPATH": WT, "MEMBRANE_WATCH_LOOPS": "0",
                 "MEMBRANE_INJECTION": "conversation" if base_arm(arm) == "none" else base_arm(arm),
                 "MEMBRANE_EXP_DUMP": os.path.join(d, "dump.jsonl"),
-                "MEMBRANE_EXP_BUDGET": budget_of(arm)})
+                "MEMBRANE_EXP_BUDGET": budget_of(arm),
+                "MEMBRANE_EXP_NORECON": "1" if hist_of(arm) == "ncp" else ""})
     args = [PY, "-m", "membrane.opencode", "--serve", "--serve-port", str(SERVE),
             "--serve-host", "127.0.0.1", "--listen", str(LISTEN), "--standalone",
             "--no-launch", "--no-thinker", "--no-dreamer", "--no-autonode", "--no-night",
@@ -46,6 +58,8 @@ def boot(d, arm):
             "--field", os.path.join(d, "field.json"), "--audit", os.path.join(d, "audit.jsonl")]
     if base_arm(arm) == "none":
         args.append("--no-banner")
+    if hist_of(arm) in ("nc", "ncp"):
+        args.append("--no-context")
     log = open(os.path.join(d, "seat.log"), "ab")
     p = subprocess.Popen(args, env=env, cwd=d, stdout=log, stderr=log)
     t0 = time.time()

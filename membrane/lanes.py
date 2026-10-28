@@ -1059,6 +1059,12 @@ def _digest_lines(srv, drain: bool = True) -> list[str]:
     return [head] + [f"  {r}" for r in rows]
 
 
+def _exp_recon_on() -> bool:
+    """EXPERIMENT (#649 follow-up): MEMBRANE_EXP_NORECON=1 drops the
+    --no-context reconstruction, so the model sees recall + the current turn only."""
+    return os.environ.get("MEMBRANE_EXP_NORECON", "").strip() not in ("1", "true", "yes")
+
+
 def _injection_mode(srv) -> str:
     """'massage' (the field's words, picked), 'conversation' (THIS
     CONVERSATION, #429: the chat's own state, conv_banner.py) or 'banner'
@@ -5677,7 +5683,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             if fld is not None:
                 try:
                     from .entity_block import reconstruct, render_for
-                    recon = reconstruct(fld, _own_session_prefix(srv))
+                    recon = reconstruct(fld, _own_session_prefix(srv)) if _exp_recon_on() else None
                     eblock = render_for(fld, query, vec)
                     if eblock:
                         recon = (recon + "\n\n" + eblock) if recon else eblock
