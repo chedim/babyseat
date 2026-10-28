@@ -1573,8 +1573,7 @@ def main() -> None:
                 runner = getattr(srv, "_loop_runner", None)
                 if runner is not None:
                     out = runner.run(session_id, text)
-                    from . import bgusage
-                    bgusage.from_turn("watch", out)   # #550: the turn's tokens
+                    # #561: no bgusage tally here: the serve turn is a stored row, the stats count it from there
                     parts = (out or {}).get("parts") or []
                     txt = "\n".join(str(p.get("text") or "")
                                     for p in parts if p.get("type") == "text")
