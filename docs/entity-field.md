@@ -316,8 +316,15 @@ give their shell tool: the MCP list carries it, and a local model's
   keep the literal code, so a token typed into a command stays in the
   field. Pass secrets through the environment, never in the code.
 
-Methods still run their commands through the same `run_command_entity`
-(a method call straight at the executor is refused); their composition:
+Methods run their commands as code too (#614 part C). Defining a method
+mints its command as a tree (`code` on the method), each `{{name}}` (or
+a quoted `'{{name}}'` / `"{{name}}"`) a `param` node. A call binds the
+params (each value shell-quoted once; a `{{parent...}}` feed goes in as
+the parent printed it) and runs the bound code through the same
+execute → executing → result edges, so every call leaves a result
+entity. A method from an older seat gets its tree on its first call. The
+text templates (`_fill`, `substitute_args`) are retired. A method call
+straight at the executor is refused. Their composition:
 
 - **Composition IS inheritance**: a command entity's ISA parents
   (`entity_inherit`) are its pipeline. A run runs the node's

@@ -421,13 +421,6 @@ def graph_of(doc, est=None) -> dict:
     return g
 
 
-def run_text(doc, est=None) -> str:
-    """What runs: the bash the entity's graph compiles to -- parsed from its
-    command, never from the kept copy (the disk screen may have cut it)."""
-    graph_of(doc, est)
-    return compile(parse(str((doc.properties or {}).get("command") or "").strip()))
-
-
 MIGRATED_FILE = ".ch-commands-migrated"     # beside the store: the migration ran (it runs once)
 VARIANT = re.compile(r"-[0-9a-f]{4}$")      # a generated link-command name: shell:<prog>-<label>-<4 hex>
 

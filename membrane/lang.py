@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import secrets
 import threading
 import time
 from dataclasses import dataclass, field as dfield
@@ -110,8 +112,52 @@ def _ts_node(n, src: bytes, a: int, b: int) -> Node:
     return Node(n.type, "".join(tpl), out)
 
 
-def parse(lang: str, text: str) -> Node:
-    """Code -> its Node tree; ValueError for what the grammar cannot read."""
+# A METHOD'S PARAMETERS (#614 part C): {{name}}, or a placeholder already wrapped in
+# quotes ('{{x}}' / "{{x}}") -- the value replaces the pair, quoted once (#128)
+PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}")   # entity specs carry ':' and '-'
+QUOTED_PARAM = re.compile(r"(['\"]?)\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}\1")
+QUOTE = {"sh": lambda v: __import__("shlex").quote(v), "js": json.dumps}
+
+
+def _feed(name: str) -> bool:
+    """A pipeline feed ({{parent.head}}): its value goes in as the parent printed it."""
+    return name == "parent" or name.startswith(("parent.", "parent:"))
+
+
+def _params_in(n: Node, tok: re.Pattern, raws: list) -> Node:
+    """Placeholder words back to `param` nodes (their text: the placeholder as written)."""
+    def split(text):
+        kids = [Node("param", raws[int(m.group(1))]) for m in tok.finditer(text)]
+        return tok.sub(HOLE, text), kids
+    if not n.args:
+        m = tok.fullmatch(n.text)
+        if m:
+            return Node("param", raws[int(m.group(1))])
+        t, kids = split(n.text)
+        return Node(n.kind, t, kids) if kids else n
+    parts, tpl, kids = n.text.split(HOLE), [], []
+    for i, part in enumerate(parts):
+        t, ks = split(part)
+        tpl.append(t)
+        kids += ks
+        if i < len(n.args):
+            tpl.append(HOLE)
+            kids.append(_params_in(n.args[i], tok, raws))
+    return Node(n.kind, "".join(tpl), kids)
+
+
+def parse(lang: str, text: str, params: bool = False) -> Node:
+    """Code -> its Node tree; ValueError for what the grammar cannot read.
+    `params` (a method's code): each {{name}} becomes a `param` node."""
+    if params and PARAM.search(text or ""):
+        tag = secrets.token_hex(3)
+        raws: list = []
+
+        def word(m):
+            raws.append(m.group(0))
+            return f"__mp{tag}_{len(raws) - 1}__"
+        n = parse(lang, QUOTED_PARAM.sub(word, text))
+        return _params_in(n, re.compile(rf"__mp{tag}_(\d+)__"), raws)
     if HOLE in text:
         raise ValueError("a NUL byte is not code")
     if not text.strip():
@@ -129,6 +175,33 @@ def parse(lang: str, text: str) -> Node:
         return _ts_node(root, src, 0, len(src))     # the root spans all of it (edge space too)
     except RecursionError:
         raise ValueError("the code nests too deep to keep as a tree")
+
+
+def bind(n: Node, lookup: Callable, quote: Callable) -> tuple[str, list]:
+    """A method's tree printed with its params filled: lookup(name) -> value or
+    None; each value quoted once (a feed goes in as printed). -> (code, the
+    params with no value -- no silent empties)."""
+    missing: list = []
+
+    def walk(n):
+        if n.kind == "param":
+            m = PARAM.search(n.text)
+            name = m.group(1)
+            v = lookup(name)
+            if _feed(name):
+                return n.text if v is None else n.text.replace(m.group(0), str(v))
+            if v is None or str(v).strip() == "":
+                missing.append(name)
+                return n.text
+            return quote(json.dumps(v) if isinstance(v, (dict, list)) else str(v))
+        if not n.args:
+            return n.text
+        parts = n.text.split(HOLE)
+        out = [parts[0]]
+        for kid, rest in zip(n.args, parts[1:]):
+            out += [walk(kid), rest]
+        return "".join(out)
+    return walk(n), missing
 
 
 def print_(n: Node) -> str:
@@ -203,13 +276,14 @@ def _mint(srv, lang: str, n: Node, be, origin) -> str:
     return eid
 
 
-def mint(srv, lang: str, text: str) -> str:
-    """Code -> its root node's eid (the nodes and their arg edges, made once)."""
+def mint(srv, lang: str, text: str, params: bool = False) -> str:
+    """Code -> its root node's eid (the nodes and their arg edges, made once).
+    `params`: a method's code, its {{name}}s as `param` nodes."""
     lg = LANGS.get(lang)
     if lg is None:
         raise ValueError(f"no language {lang!r} (known: {', '.join(sorted(LANGS))})")
     be, origin = _rel(srv)
-    return _mint(srv, lang, lg.parse(text), be, origin)
+    return _mint(srv, lang, parse(lang, text, params=True) if params else lg.parse(text), be, origin)
 
 
 def load(est, eid: str) -> Node:

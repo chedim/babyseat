@@ -35,6 +35,7 @@ import time
 import numpy as np
 
 from . import eids as E
+from . import lang as _LG
 from . import streams as ST
 from .efstore import unpack_f16
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
@@ -1918,26 +1919,6 @@ def _fill_raw(value: str, ctx: dict) -> tuple:
     return _PARAM.sub(rep, value or ""), missing
 
 
-def _fill(template: str, ctx: dict) -> tuple[str, list]:
-    """Every {{ref}} filled shell-quoted; (text, the refs that did not resolve
-    or were empty -- no silent empties)."""
-    import shlex
-    missing = []
-
-    def rep(m):
-        k = m.group(2)
-        if k == "parent" or k.startswith("parent"):
-            return m.group(0)                          # the pipeline feed fills these
-        v = _ref(ctx, k)
-        if v is None or str(v).strip() == "":
-            missing.append(k)
-            return m.group(0)
-        if isinstance(v, (dict, list)):
-            v = json.dumps(v)
-        return shlex.quote(str(v))
-    return _QUOTED_PARAM.sub(rep, template or ""), missing
-
-
 def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
                depth: int = 0, args: dict | None = None, ctx: dict | None = None) -> dict:
     """One node of the ancestry walk (post-order: parents, then self).
@@ -2112,10 +2093,9 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
         memo[eid] = res
         return res
     if cmd:
-        from . import scripts as _SC              # #576 G: nothing runs that is not a graph first
         try:
-            cmd = _SC.run_text(doc, est)
-        except _SC.NotAScript as e:
+            root = _code_root(srv, est, fld, mem, doc)
+        except ValueError as e:                   # #614 C: nothing runs that is not a tree first
             res.update({"ok": False, "status": "blocked", "error": f"not a script: {e}"})
             memo[eid] = res
             return res
@@ -2125,22 +2105,20 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
             memo[eid] = res
             return res
         budget[0] += 1
-        fed = _substitute_parents(cmd, parent_residues, order)
-        if ctx is not None:
-            fed, missing = _fill(fed, ctx)
-            if missing:
-                res.update({"ok": False, "status": "blocked",
-                            "error": f"unresolved {', '.join(missing)}"})
-                memo[eid] = res
-                return res
-        else:
-            fed = substitute_args(fed, args)
+        fed, missing = _bind(est, root, ctx, args, parent_residues, order)
+        if missing and ctx is not None:
+            res.update({"ok": False, "status": "blocked",
+                        "error": f"unresolved {', '.join(missing)}"})
+            memo[eid] = res
+            return res
+        cmd = _LG.text(est, root)
         # THE TEMPLATE STAYS (2026-10-09): the fed line used to overwrite
         # the command -- a {{parent.head}} pipeline worked exactly once,
         # then ran its first output forever; the fed line is the residue
         if fed != cmd:
             doc.properties["last_fed"] = fed
-        out = run_command_entity(fld, est, mem, fed, timeout_s=_call_timeout(args))
+        # #614 C: the bound code runs as code -- its own tree, the executor's edges, a result
+        out = _LG.run(_code_srv(est, fld, mem), code=fed, timeout_s=_call_timeout(args))
         out.pop("doc", None)
         # THE RESIDUE lands on the asking doc (the canon doc carries its
         # own; the copy covers a differing key)
@@ -2157,7 +2135,7 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
                 est.upsert(doc, embedder=None)
         res.update({k: out.get(k) for k in ("ok", "rc", "outcome", "head",
                                             "tail", "ms", "error",
-                                            "output", "output_len")})
+                                            "output", "output_len", "root", "result")})
         res["fed"] = fed if fed != cmd else None
         if ctx is not None:
             ctx.setdefault("steps", {})[_step_name(doc)] = {
@@ -2200,16 +2178,12 @@ def _parent_residue_maps(est, doc) -> dict:
     return out
 
 
-def _substitute_parents(cmd: str, residues: dict, order: list[str]) -> str:
+def _feed_value(tok: str, residues: dict, order: list[str]):
     """The output feed: {{parent.head}} / {{parent.tail}} / {{parent.rc}}
     = the NEAREST parent's residue (order[0]); {{parent:<eid>.field}} =
-    the named parent's. Unmatched tokens SUBSTRIP (left verbatim, the
-    command's own text survives -- a visible '' substitution is never a
-    silent shell corruption)."""
-    import re as _re
-    if "{{" not in cmd or not (residues or order):
-        return cmd
-
+    the named parent's. None when it does not resolve (the placeholder then
+    stays verbatim -- a visible '' substitution is never a silent shell
+    corruption)."""
     def _field(parents_eid: str, field: str):
         r = residues.get(parents_eid)
         if r is None:
@@ -2217,29 +2191,53 @@ def _substitute_parents(cmd: str, residues: dict, order: list[str]) -> str:
         return str(r.get(field) if field in ("head", "tail")
                    else (f"{r.get('rc')}" if field == "rc"
                          else r.get(field) or ""))
+    if tok.startswith("parent:"):
+        peid, _, field = tok[len("parent:"):].rpartition(".")
+        for candidate in residues:
+            if candidate.endswith(peid) or peid in candidate:
+                return _field(candidate, field or "head")
+        return None
+    field = tok.rpartition(".")[-1] if tok == "parent" else tok.replace("parent.", "", 1)
+    if not order:
+        return None
+    return _field(order[0], field if field in ("head", "tail", "rc", "outcome") else "head")
 
-    def _sub(m):
-        tok = m.group(1).strip()
-        if not (tok == "parent" or tok.startswith(("parent.", "parent:"))):
-            return m.group(0)          # not a feed token ({{self.x}}, {{param}}, {{steps..}}): left for the call
-        if tok.startswith("parent:"):
-            rest = tok[len("parent:"):]
-            peid, _, field = rest.rpartition(".")
-            for candidate, _r in residues.items():
-                if candidate.endswith(peid) or peid in candidate:
-                    v = _field(candidate, field or "head")
-                    return v if v is not None else m.group(0)
-            return m.group(0)          # no such parent: verbatim
-        field = tok.rpartition(".")[-1] if tok == "parent" else tok \
-            .replace("parent.", "", 1)
-        if not order:
-            return m.group(0)
-        first = order[0]
-        v = _field(first, field if field in ("head", "tail", "rc",
-                                             "outcome")
-                   else "head")
-        return v if v is not None else m.group(0)
-    return _re.sub(r"\{\{([^}]+)\}\}", _sub, cmd)
+
+def _code_srv(est, fld, mem):
+    """The seat as the code tree sees it, with this call's own field."""
+    import types
+    return types.SimpleNamespace(entity_store=est, efield=fld, membrane=mem,
+                                 capturer=types.SimpleNamespace(mode="on" if fld is not None else "off"))
+
+
+def _code_root(srv, est, fld, mem, doc) -> str:
+    """A command doc's code tree (#614 C): its `code` root, its {{name}}s as param
+    nodes; minted from its command when there is none yet (an older seat) or
+    when the command changed since. ValueError: not code."""
+    p = doc.properties or {}
+    command = str(p.get("command") or "").strip()
+    root = str(p.get("code") or "")
+    if root and root in (est.docs or {}) and _LG.text(est, root) == command:
+        return root
+    root = _LG.mint(_code_srv(est, fld, mem), "sh", command, params=True)
+    p["code"] = root
+    doc.properties = p
+    est.upsert(doc, embedder=None)
+    return root
+
+
+def _bind(est, root: str, ctx: dict | None, args: dict | None,
+          residues: dict | None = None, order: list | None = None) -> tuple[str, list]:
+    """A method's tree with its params filled (#614 C): the feeds from the
+    parents' residues, the rest from the call's context or its args; each
+    value shell-quoted once. -> (code, the params with no value)."""
+    def lookup(name):
+        if name == "parent" or name.startswith(("parent.", "parent:")):
+            return _feed_value(name, residues or {}, order or [])
+        if ctx is not None:
+            return _ref(ctx, name)
+        return (args or {}).get(name)
+    return _LG.bind(_LG.load(est, root), lookup, _LG.QUOTE["sh"])
 
 
 def lint_command(spec: str) -> str | None:
@@ -2272,10 +2270,7 @@ def split_label(spec: str) -> tuple[str, str]:
 # exhibit, 2026-10-09: every '. ~/.config/x.env; curl ...' was named '.')
 _SETUP = re.compile(r"^\s*(?:(?:\.|source)\s+\S+(?:\s+\d*>\S*)*|set\s+-[a-z]+|export\s+[^;&]+|cd\s+\S+|"
                     r"[A-Z_][A-Z0-9_]*=\S+)\s*(?:;|&&|\|\|)\s*")
-_PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}")   # entity specs carry ':' and '-'
-# a placeholder the model already wrapped in quotes ("{{x}}" / '{{x}}'):
-# strip that pair so the value below is shell-quoted ONCE, not twice (#128)
-_QUOTED_PARAM = re.compile(r"(['\"]?)\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}\1")
+_PARAM, _QUOTED_PARAM = _LG.PARAM, _LG.QUOTED_PARAM   # a method's {{name}}s (#614 C: lang.py owns them)
 
 
 def command_params(cmd: str) -> list[str]:
@@ -2283,19 +2278,6 @@ def command_params(cmd: str) -> list[str]:
     pipeline's {{parent...}} feeds)."""
     return [p for p in dict.fromkeys(_PARAM.findall(cmd or ""))
             if p != "parent" and not p.startswith(("parent", "self.", "steps.", "entities."))]
-
-
-def substitute_args(cmd: str, args: dict | None) -> str:
-    """Fill {{name}} from args, each value shell-quoted (an argument is
-    data, never shell)."""
-    import shlex
-    if not args:
-        return cmd
-
-    def rep(m):
-        k = m.group(2)
-        return shlex.quote(str(args[k])) if k in args else m.group(0)
-    return _QUOTED_PARAM.sub(rep, cmd)
 
 
 def _action_of(cmd: str) -> str:
@@ -2378,8 +2360,8 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
         if bad:
             return {"ok": False, "error": f"refused {command[:60]!r}: {bad}"}
         try:
-            _SC.parse(command)                    # #576 G: a command is a graph, or it is refused
-        except _SC.NotAScript as e:
+            _LG.parse("sh", command, params=True)  # #614 C: a command is a tree, or it is refused
+        except ValueError as e:
             return {"ok": False, "error": f"not a script: {e} -- {command[:60]!r}"}
     for st in steps:
         if not isinstance(st, dict) or not (st.get("call") or st.get("command") or st.get("write")):
@@ -2393,8 +2375,8 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
             return {"ok": False, "error": f"step refused: {lint_command(str(st['command']))}"}
         if st.get("command"):
             try:
-                _SC.parse(str(st["command"]))
-            except _SC.NotAScript as e:
+                _LG.parse("sh", str(st["command"]), params=True)
+            except ValueError as e:
                 return {"ok": False, "error": f"step {st.get('name') or ''}: not a script: {e}"}
     owner = est._resolve_spec(on) if on else None
     if on and owner is None:
@@ -2452,10 +2434,12 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
     doc.properties = p
     if p.get("command"):
         _SC.graph_of(doc, est)                    # #576 G: its graph, linked to the field's programs and files
+        _code_root(srv, est, fld, mem, doc)       # #614 C: its code, a tree with its params as nodes
     for ne in nodes:
         nd = (est.docs or {}).get(ne)
         if nd is not None and (nd.properties or {}).get("command"):
             _SC.graph_of(nd, est)
+            _code_root(srv, est, fld, mem, nd)
     est.upsert(doc, embedder=None)
     _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
                  "on": owner.eid if owner else "", "method": method, "ok": True})
@@ -2767,7 +2751,10 @@ def method_inspect(est, obj_spec: str, method: str, args=None) -> dict:
     if "blocked" in prep:
         out["would_refuse"] = prep["blocked"]["error"]
     elif out["command"]:
-        out["would_run"] = _fill(out["command"], prep["ctx"])[0]
+        try:
+            out["would_run"] = _bind(est, _code_root(None, est, None, None, m), prep["ctx"], None)[0]
+        except ValueError as e:
+            out["would_refuse"] = f"not a script: {e}"
     return out
 
 
@@ -2828,7 +2815,8 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
     # runs directly (its id would read as a 'label :: command' line to the
     # link parser); the run count and success rate land on the method
     run = _exec_command_doc(srv, est, fld, mem, m, args=full, ctx=ctx)
-    fed = run.get("fed") or (_fill(template, ctx)[0] if template else "")
+    fed = run.get("fed") or (_LG.text(est, m.properties["code"]) if template and (m.properties or {}).get("code")
+                             else template or "")
     rc = run.get("rc")
     if run.get("status") in ("blocked", "partial"):
         status = run["status"]
@@ -2883,6 +2871,7 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
             "head": run.get("head"), "tail": run.get("tail"), "error": run.get("error"),
             # the caller's copy (cut to mcp_server.LINK_OUTPUT_CAP), never stored
             "output": run.get("output"), "output_len": run.get("output_len"),
+            **({"root": run["root"], "result": run.get("result")} if run.get("root") else {}),   # #614 C
             "read_only": read_only, "params": command_params(template),
             "steps": {k: {kk: vv for kk, vv in v.items() if kk != "tail"} for k, v in ctx["steps"].items()}}
 
@@ -4399,17 +4388,13 @@ def _apply_entity_update(srv, ent, out: dict, trigger: str,
     if out.get("run"):
         cmd = str(props.get("command") or "").strip()
         if cmd:
-            from . import scripts as _SC          # #576 G: the entity's command runs as its graph, or not at all
-            try:
-                cmd = _SC.run_text(ent, est)
-            except _SC.NotAScript as e:
+            # #614 C: the entity's command runs as code -- its tree, the executor's edges, a result
+            run_out = _LG.run(_code_srv(est, getattr(srv, "efield", None), getattr(srv, "membrane", None)),
+                              code=cmd)
+            if run_out.get("rc") is None and not run_out.get("root"):        # not code: nothing ran
+                out["run_result"] = {"rc": None, "status": "blocked", "error": f"not a script: {run_out.get('error')}"}
                 cmd = ""
-                out["run_result"] = {"rc": None, "status": "blocked", "error": f"not a script: {e}"}
         if cmd:
-            run_out = run_command_entity(getattr(srv, "efield", None),
-                                         est,
-                                         getattr(srv, "membrane", None),
-                                         cmd)
             run_out.pop("doc", None)
             # the getter's result rides events: the short residue only
             run_out.pop("output", None)
