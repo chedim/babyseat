@@ -100,6 +100,16 @@ class TestHeaderAndCache(unittest.TestCase):
         self.assertIsNot(b, a)
         self.assertEqual(b["header"]["born"], SH.iso(T0 + 11))
 
+    def test_a_sheet_built_before_self_is_bound_is_not_cached(self):   # #309
+        srv = types.SimpleNamespace(entity_store=EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False),
+                                    paused=False, efield=None)
+        srv._models_path = str(Path(tempfile.mkdtemp()) / "models.json")
+        a = SH.sheet(srv, now=T0 + 10)
+        self.assertIsNot(SH.sheet(srv, now=T0 + 11), a)          # mode not loaded yet: never served from cache
+        SL.bind(srv)
+        b = SH.sheet(srv, now=T0 + 12)
+        self.assertIs(SH.sheet(srv, now=T0 + 13), b)             # once bound it caches again
+
 
 # ---- the route: read-only, behind the JWT gate -------------------------------------
 
