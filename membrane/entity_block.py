@@ -794,10 +794,20 @@ def recall_answers(field, text: str, qvec=None, k: int = 3,
     # the embedding rows stay ONE list in #435's approved order (raw
     # similarity, no weight): fused list by list, a lower earlier-ask row
     # interleaved past a better direct row (probe: 21 -> 19/53)
-    emb = sorted(asks + [r for r in direct + tools if key(r)[0] == "e"], key=lambda r: -r["sim"])
-    lists = [words, named, emb]
+    # #539: the entity lane's rows join that same list. They rank by their
+    # own sentences' similarity to the ask like every other row, so the lane
+    # holds no slot of its own (a question naming a speaker filled the top k
+    # with that speaker's lines whatever they said). One event, one entry:
+    # the best similarity among the lanes that found it.
+    emb: dict = {}
+    for r in asks + [r for r in direct + tools + named if key(r)[0] == "e"]:
+        kk = key(r)
+        if kk not in emb or r["sim"] > emb[kk]["sim"]:
+            emb[kk] = r
+    emb = sorted(emb.values(), key=lambda r: -r["sim"])
+    lists = [words, emb]
     rows: dict = {}
-    for lst in lists + [direct, tools]:
+    for lst in lists + [direct, tools, named]:
         for r in lst:
             rows.setdefault(key(r), []).append(r)
     # the row that speaks for an event: an earlier ask's, else a word or
