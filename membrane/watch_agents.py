@@ -474,8 +474,11 @@ def loop_task_text(ev: dict) -> str:
                    "(a command's rc=0 output, the entity state read "
                    f"back), close it: `fulfill` with spec {ev.get('entity', '?')} "
                    "+ the evidence. Not done: take its NEXT concrete step. "
-                   "Waiting on a person: say BLOCKED and it parks until "
-                   "the operator speaks.")
+                   "Blocked: NAME what you wait on so the goal wakes "
+                   "itself -- `BLOCKED retry after 2h` (a timer), "
+                   "`BLOCKED on <entity-id>` (wakes when that entity "
+                   "moves), or plain BLOCKED + who (parks until the "
+                   "operator speaks).")
     elif kind == "boundary":
         head = (f"boundary crossed: '{ev.get('entity', '?')}' "
                 f"{'entered' if ev.get('entered') else 'exited'} "
@@ -957,8 +960,14 @@ def loops_banner_line(srv) -> str | None:
             wake = f"next wake {_LLM._hm(float(nw['at']), time.time())} on {str(nw.get('about') or '?').replace('membrane::', '')}"
     except Exception:
         pass
+    asleep = ""
+    try:                                       # #633: why the quiet goals are quiet
+        asleep = dormant_line(srv)
+    except Exception:
+        pass
     if not run and not queued:
-        return ("loops: idle, " + wake) if wake else None
+        idle = ", ".join(x for x in (wake, asleep) if x)
+        return ("loops: idle, " + idle) if idle else None
     titles = []
     try:
         titles = (_loop_titles(srv) or [])[:3]
@@ -971,6 +980,8 @@ def loops_banner_line(srv) -> str | None:
         bits.append(f"{queued} queued")
     if wake:
         bits.append(wake)
+    if asleep:
+        bits.append(asleep)
     return "loops: " + ", ".join(bits)
 
 
@@ -1232,6 +1243,49 @@ def dormant_line(srv, now: float | None = None,
         when = time.strftime("%H:%M", time.localtime(soonest)) if soonest else "?"
         bits.append(f"{parked['timer']} on a timer (next {when})")
     return f"asleep: {total} goal(s) -- " + ", ".join(bits)
+
+
+def quiet_goals(srv, now: float | None = None,
+                min_age_s: float | None = None) -> list[dict]:
+    """WHY IS THIS GOAL QUIET (#633): one row per open goal that is not due
+    -- {name, eid, state: parked|backoff, kind, why, next_ts (0 = when the
+    operator speaks or the entity moves)} -- read-only, wakes nothing."""
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return []
+    from .entities import CLASS_GOAL
+    now = time.time() if now is None else now
+    min_age_s = GOAL_REWAKE_S if min_age_s is None else min_age_s
+    rows: list[dict] = []
+    for doc in list((getattr(est, "docs", None) or {}).values()):
+        if doc is None or doc.cls != CLASS_GOAL:
+            continue
+        props = doc.properties or {}
+        if (props.get("status") or "open") != "open":
+            continue
+        name = str(props.get("name") or doc.eid)
+        if _parked(srv, props, now):
+            kind = _park_kind(props)
+            on = str(props.get("blocked_on") or "").strip()
+            why = {"timer": "on a timer", "entity": "waiting on "
+                   + str(props.get("blocked_entity") or "an entity"),
+                   "operator": "blocked on the operator"}[kind]
+            if on:
+                why += f" ({on[:80]})"
+            rows.append({"name": name, "eid": doc.eid, "state": "parked",
+                         "kind": kind, "why": why,
+                         "next_ts": float(props.get("blocked_until") or 0)})
+            continue
+        streak = _ignored_streak(props)
+        last = float(props.get("intent_planted_ts") or 0)
+        mult = 2 ** min(streak, 4)
+        due_at = last + min_age_s * mult
+        if streak and now < due_at:
+            rows.append({"name": name, "eid": doc.eid, "state": "backoff",
+                         "kind": "backoff",
+                         "why": f"backoff x{mult} after {streak} quiet pass(es)",
+                         "next_ts": due_at})
+    return rows
 
 
 def _due_goals(srv, est, now: float, min_age_s: float) -> list:
