@@ -74,6 +74,45 @@ class TestJournal(unittest.TestCase):
             self.assertLessEqual(jn, os.path.getsize(p))
             self.assertEqual(len(MessageStore(p).list("s1")), 40)
 
+    def test_compaction_between_the_two_reads_loses_nothing(self):
+        # review of #660: a reader that read the old snapshot and then the
+        # emptied journal saw neither the folded rows nor the journal's.
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "serve-msgs.json")
+            s = MessageStore(p)
+            s.append("s1", *_row("a", 1, "z" * 4000))
+            with s._file_lock():
+                s._compact_locked()          # a is in the snapshot (big)
+            s.append("s1", *_row("b", 2))    # b is only in the journal
+            real, calls = Path.read_text, []
+
+            def hooked(self_, *a, **k):
+                out = real(self_, *a, **k)
+                if not calls:                # after the FIRST file is read
+                    calls.append(1)
+                    with s._file_lock():
+                        s._compact_locked()  # fold + empty the journal
+                return out
+            Path.read_text = hooked
+            try:
+                got = stats.read_raw(p)
+            finally:
+                Path.read_text = real
+            self.assertEqual(sorted(r["info"]["id"] for r in got["s1"]),
+                             ["a", "b"])
+
+    def test_flush_with_nothing_dirty_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "serve-msgs.json")
+            s = MessageStore(p)
+            s.append("s1", *_row("a", 1))
+            before = os.path.getsize(p + ".jnl") if os.path.exists(p + ".jnl") else 0
+            snap = os.path.getmtime(p) if os.path.exists(p) else 0
+            s.flush()
+            after = os.path.getsize(p + ".jnl") if os.path.exists(p + ".jnl") else 0
+            self.assertEqual(before, after)
+            self.assertEqual(snap, os.path.getmtime(p) if os.path.exists(p) else 0)
+
     def test_delete_survives_journal(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "serve-msgs.json")

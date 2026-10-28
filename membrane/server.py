@@ -421,22 +421,22 @@ class MessageStore:
         readers now: two seats serving out of one cwd both append, and
         `stats.read_raw` unions rows by message id, the newer
         completed/created ts winning -- a stale empty row never displaces
-        a finished one. With no dirty set, every RAM row is journaled."""
+        a finished one. With no dirty set a flush is a no-op.
+        A row is journaled whole on each change, so the journal can reach
+        the snapshot's size before it compacts (a boot reads up to ~2x)."""
         if self.path is None:
             return
         try:
             dirty = self._dirty_rows
             self._dirty_rows = None
-            if dirty:
-                rows = []
-                for sid, mid in dirty:
-                    r = next((r for r in self.msgs.get(sid) or []
-                              if str(r["info"].get("id") or "") == mid), None)
-                    if r is not None:
-                        rows.append((sid, r))
-            else:
-                rows = [(sid, r) for sid, rs in self.msgs.items()
-                        for r in rs if r["info"].get("id")]
+            if not dirty:
+                return                      # nothing changed: nothing to write
+            rows = []
+            for sid, mid in dirty:
+                r = next((r for r in self.msgs.get(sid) or []
+                          if str(r["info"].get("id") or "") == mid), None)
+                if r is not None:
+                    rows.append((sid, r))
             if not rows:
                 return
             data = "".join(json.dumps({"sid": sid, "row": r}) + "\n"

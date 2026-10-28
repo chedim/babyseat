@@ -50,15 +50,21 @@ def read_raw(path: str) -> dict[str, list[dict]]:
     changed row, {"sid", "row"}. Rows union by message id, the newer
     completed/created ts wins (a tie goes to the later line), first
     positions stay. A torn last line (a crash mid-append) is skipped."""
+    # THE JOURNAL IS READ FIRST: a compaction replaces the snapshot, then
+    # empties the journal, so journal-then-snapshot always sees either the
+    # old journal + a snapshot that holds it, or both old files. The reverse
+    # order could pair the old snapshot with the emptied journal (#542).
+    try:
+        text = Path(path + ".jnl").read_text()
+    except FileNotFoundError:
+        text = ""
     try:
         base = json.loads(Path(path).read_text())
     except FileNotFoundError:
         base = {}
     if not isinstance(base, dict):
         base = {}
-    try:
-        text = Path(path + ".jnl").read_text()
-    except FileNotFoundError:
+    if not text:
         return base
     pos: dict = {}                      # (sid, mid) -> index in its list
     for sid, rows in base.items():
