@@ -66,7 +66,7 @@ def _SL():
 # ---- the child's way to the seat ----------------------------------------------------------
 
 class SeatClient:
-    """GET /membrane/self/context and POST /membrane/self/effects on the seat,
+    """GET /membrane/self/context (POST when it carries a report) and POST /membrane/self/effects on the seat,
     with the seat's own token (jwtauth.client_headers: MEMBRANE_JWT_TOKEN, or
     one minted from the inherited secret; nothing in open mode)."""
 
@@ -87,14 +87,16 @@ class SeatClient:
         return out
 
     def context(self, only: str | None = None, own: bool = False, report: dict | None = None) -> dict:
-        q = []
-        if own:
-            q.append(("own", "1"))
-        if only:
-            q.append(("only", str(only)))
-        for k, v in (report or {}).items():          # #576 D2: Blurp's step reports (learn exchange)
-            q.append((f"r_{k}", "1" if v is True else "0" if v is False else str(v)))
-        doc = self._call("/membrane/self/context" + ("?" + urllib.parse.urlencode(q) if q else ""))
+        if report:                       # #576 D2 + #586: the learn exchange spends the purse -> POST
+            doc = self._call("/membrane/self/context",
+                             {"report": dict(report), "only": only, "own": bool(own)})
+        else:
+            q = []
+            if own:
+                q.append(("own", "1"))
+            if only:
+                q.append(("only", str(only)))
+            doc = self._call("/membrane/self/context" + ("?" + urllib.parse.urlencode(q) if q else ""))
         if only is None:
             self.last = doc
         return doc

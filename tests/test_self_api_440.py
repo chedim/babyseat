@@ -180,3 +180,20 @@ def test_a_persons_token_gets_neither(route):
         alice = J.mint(SECRET, "alice")
         assert call("/membrane/self/context", tok=alice)[0] == 403
         assert call("/membrane/self/effects", {"effects": []}, tok=alice)[0] == 403
+
+
+def test_get_context_never_spends_the_report(route):
+    """#586: the learn exchange mutates the purse, so it rides a POST; a GET
+    carrying r_* params is a pure read and applies nothing."""
+    srv, call = route
+    seen = []
+    from membrane import self_api as SA
+    orig = SA.context
+    SA.context = lambda s, **kw: (seen.append(kw.get("report")) or orig(s, **kw))
+    try:
+        with _jwt_env():
+            assert call("/membrane/self/context?r_awake=1")[0] == 200
+            assert call("/membrane/self/context", {"report": {"awake": True}})[0] == 200
+    finally:
+        SA.context = orig
+    assert seen == [None, {"awake": True}]
