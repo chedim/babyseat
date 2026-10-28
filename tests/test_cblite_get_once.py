@@ -56,6 +56,7 @@ def fake_db(docs):
     db = cblite.Database.__new__(cblite.Database)
     db.lib = FakeLib(FakeL(docs))
     db.lock = threading.RLock()
+    db.turns = cblite.TurnFirst()
     db.scope = "membrane"
     db.colls = {"c": 1}
     db._q = {}
