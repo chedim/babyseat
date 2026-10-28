@@ -497,6 +497,13 @@ def loop_task_text(ev: dict) -> str:
             head += (" -- it needs work: set its status to in_flight, do the work, then set its "
                      "receipt and status closed")
         detail = f"It blocks: {', '.join(map(str, ev['blocks']))}" if ev.get("blocks") else ""
+    elif kind == "goal-fulfilled":
+        # notify_goal_fulfilled: a goal was closed with a receipt
+        head = f"goal fulfilled: {ev.get('title') or ent} (goal '{ent}'" + \
+               (f", closed by {ev['by']}" if ev.get("by") else "") + ")"
+        detail = (f"Its receipt: {ev['evidence']}\n" if ev.get("evidence") else "") + \
+                 ("If the person is waiting on it, tell them in one short line; "
+                  "if a goal or card was blocked on it, unblock it; otherwise ignore.")
     elif kind == "field:changed":
         head = (f"the field moved '{ent}': your watch_fields filter '{ev.get('verb', '?')}' crossed"
                 + (" (it was frozen hot; this is the burst after the melt)" if ev.get("frozen") else ""))
@@ -1529,6 +1536,38 @@ def notify_intent_landed(est, pool, goal_eid: str, receipt: dict) -> dict:
     except Exception:
         pass
     return {"kind": "intent-landed", "entity": str(goal_eid or "")}
+
+
+def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
+                          evidence: str = "") -> dict:
+    """A GOAL CLOSED IS TOLD (2026-10-28, #641): routed like a decided or dropped
+    Decision card (decision_map._tell): a goal planted in a chat gets one
+    `[goal] <title> fulfilled` message into that chat (the first of its
+    `convs`; it starts a turn there), a chatless goal (or no runner wired) puts
+    ONE `goal-fulfilled` event into the loops' pool. Announced once per close:
+    the stamp is the close's `fulfilled_ts`, so a goal that is reopened and
+    closed again is announced again."""
+    from . import decision_map as _DM
+    ent = (est.docs or {}).get(goal_eid) if est is not None else None
+    props = (ent.properties if ent is not None else None) or {}
+    ev = {"kind": "goal-fulfilled", "entity": str(goal_eid or ""),
+          "title": str(props.get("name") or goal_eid or "")[:160],
+          "by": str(by or props.get("fulfilled_by") or "")[:40],
+          "evidence": " ".join(str(evidence or props.get("fulfilled_evidence") or "").split())[:300],
+          "ts": time.time()}
+    if ent is not None:
+        close = props.get("fulfilled_ts") or 0.0
+        if "fulfilled_announced" in props and props["fulfilled_announced"] == close:
+            return {"kind": "goal-fulfilled", "entity": ev["entity"], "skipped": "announced"}
+        props["fulfilled_announced"] = close
+        ent.properties = props
+        try:
+            est.upsert(ent, embedder=None)
+        except Exception:
+            pass
+    chat = str(((props.get("convs") or [""])[0]) or "")
+    _DM._tell(est, {"chat": chat}, ev, f"[goal] {ev['title']} fulfilled", pool=pool)
+    return ev
 
 
 def notify_watch_attached(est, pool, entity_key: str, lane: str,

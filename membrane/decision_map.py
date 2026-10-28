@@ -196,12 +196,12 @@ def _one_line(s, cap: int) -> str:
 PLANTED_BY = "planted_by"      # stamped at creation by the lane: "watch" (a watch loop) or "chat"
 
 
-def _tell(est, p: dict, ev: dict, text: str) -> None:
+def _tell(est, p: dict, ev: dict, text: str, pool=None) -> None:
     """Where a decision event goes: the watcher pool when a watch loop planted
     the card, else one message into the card's own chat (it starts a turn).
     Only the operator's owner-only route answers or drops, so a turn that
     message starts cannot fire another."""
-    pool = getattr(est, "_events_pool", None)
+    pool = pool if pool is not None else getattr(est, "_events_pool", None)
     sid = str(p.get("chat") or "")
     hook = getattr(est, "_decision_chat", None)
     runner = getattr(getattr(est, "_srv", None), "_loop_runner", None)
