@@ -497,6 +497,13 @@ def loop_task_text(ev: dict) -> str:
             head += (" -- it needs work: set its status to in_flight, do the work, then set its "
                      "receipt and status closed")
         detail = f"It blocks: {', '.join(map(str, ev['blocks']))}" if ev.get("blocks") else ""
+    elif kind == "goal-fulfilled":
+        # notify_goal_fulfilled: a goal was closed with a receipt
+        head = f"goal fulfilled: {ev.get('title') or ent} (goal '{ent}'" + \
+               (f", closed by {ev['by']}" if ev.get("by") else "") + ")"
+        detail = (f"Its receipt: {ev['evidence']}\n" if ev.get("evidence") else "") + \
+                 ("If the person is waiting on it, tell them in one short line; "
+                  "if a goal or card was blocked on it, unblock it; otherwise ignore.")
     elif kind == "field:changed":
         head = (f"the field moved '{ent}': your watch_fields filter '{ev.get('verb', '?')}' crossed"
                 + (" (it was frozen hot; this is the burst after the melt)" if ev.get("frozen") else ""))
@@ -1495,6 +1502,34 @@ def notify_intent_landed(est, pool, goal_eid: str, receipt: dict) -> dict:
     except Exception:
         pass
     return {"kind": "intent-landed", "entity": str(goal_eid or "")}
+
+
+def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
+                          evidence: str = "") -> dict:
+    """A GOAL CLOSED WAKES THE LOOPS (2026-10-28): like an answered or dropped
+    Decision card (decision_map), a goal reaching fulfilled puts ONE
+    `goal-fulfilled` event into the loops' pool, so a loop pass sees it and
+    may tell the person. Announced once per goal (the stamp rides the goal);
+    the landing ledger stays quiet (see notify_intent_landed's storm guard)."""
+    ent = (est.docs or {}).get(goal_eid) if est is not None else None
+    props = (ent.properties if ent is not None else None) or {}
+    ev = {"kind": "goal-fulfilled", "entity": str(goal_eid or ""),
+          "title": str(props.get("name") or goal_eid or "")[:160],
+          "by": str(by or props.get("fulfilled_by") or "")[:40],
+          "evidence": " ".join(str(evidence or props.get("fulfilled_evidence") or "").split())[:300],
+          "ts": time.time()}
+    if ent is not None:
+        if props.get("fulfilled_announced"):
+            return {"kind": "goal-fulfilled", "entity": ev["entity"], "skipped": "announced"}
+        props["fulfilled_announced"] = ev["ts"]
+        ent.properties = props
+        try:
+            est.upsert(ent, embedder=None)
+        except Exception:
+            pass
+    if pool is not None:
+        pool.put(ev)
+    return ev
 
 
 def notify_watch_attached(est, pool, entity_key: str, lane: str,

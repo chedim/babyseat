@@ -1766,6 +1766,7 @@ def _intent_cmd(srv, q: str) -> str:
                     est.upsert(goal)
                 except Exception:
                     pass
+                _announce_fulfilled(srv, goal.eid, "operator")
                 what = (f"fulfilled (shared): {goal.describe()[:100]}")
                 _write_audit(srv.membrane, {"event": "intent", "op": "fulfill",
                                             "spec": _clip(spec, 120),
@@ -7364,6 +7365,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_err_raw(500, f"the close did not persist ({e})")
             return
         name = str(props.get("name") or "")
+        _announce_fulfilled(srv, goal.eid, props["fulfilled_by"], evidence)
         _write_audit(srv.membrane, {"event": "intent", "op": "fulfill",
                                     "origin": "mcp", "eid": goal.eid,
                                     "spec": _clip(spec, 120),
@@ -7807,6 +7809,16 @@ def _install_inject(runner) -> None:
 
 _SPEAK_CAP = 6          # the speech budget: max queued messages (anti-flood)
 _SPEAK_TTL_S = 6 * 3600 # held messages expire (stale observations are noise)
+
+
+def _announce_fulfilled(srv, eid: str, by: str, evidence: str = "") -> None:
+    """A goal closed: one `goal-fulfilled` event to the watcher loops."""
+    try:
+        from .watch_agents import notify_goal_fulfilled
+        notify_goal_fulfilled(getattr(srv, "entity_store", None),
+                              getattr(srv, "events_pool", None), eid, by, evidence)
+    except Exception:
+        pass
 
 
 def speak(srv, text: str, kind: str = "note") -> bool:
