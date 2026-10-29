@@ -5640,7 +5640,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             if fld is not None:
                 try:
                     from .entity_block import reconstruct, render_for
-                    recon = reconstruct(fld, _own_session_prefix(srv))
+                    # this chat's own history (#668): the boot prefix mixed every chat
+                    recon = reconstruct(fld, _own_session_prefix(srv), conv=_CAPMOD.current_conversation())
                     eblock = render_for(fld, query, vec)
                     if eblock:
                         recon = (recon + "\n\n" + eblock) if recon else eblock

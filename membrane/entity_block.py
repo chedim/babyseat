@@ -1183,16 +1183,24 @@ def state_diff(field, mark: dict, own_session_prefix: str = "", budget: int = 16
 
 # ---- the --no-context reconstruction: the conversation as events -----------------
 def reconstruct(field, session_prefix: str = "", n: int = 8, budget: int = 3000,
-                window_s: float = 6 * 3600, now: float | None = None) -> str | None:
-    """The recent conversation from the event log (this seat's live sessions,
-    last window_s): user and model messages verbatim (clipped), each tool
-    observation as its one-line fact. Newest kept when the budget binds."""
-    now = now or time.time()
-    since = now - window_s
-    rows = [d for _, d in field.b.scan("events", {"origin": field.origin, "ts": {"gte": since}})
-            if str(d.get("session") or "").startswith(session_prefix)
-            and d.get("stream") in ("discourse", "observation")
-            and d.get("role") != "reasoning"]
+                window_s: float = 6 * 3600, now: float | None = None, conv: str = "") -> str | None:
+    """The recent conversation from the event log: user and model messages
+    verbatim (clipped), each tool observation as its one-line fact. Newest
+    kept when the budget binds. With `conv` (the chat's key), this chat's own
+    events across restarts, read through the events' `conv` index; without
+    it, this seat's live sessions (session_prefix) in the last window_s.
+    The prefix path mixed every chat of the boot (watcher loops, seat
+    notices, other chats) and forgot the chat at each restart (#668)."""
+    if conv:
+        rows = [d for _, d in field.b.scan("events", {"origin": field.origin, "conv": conv})
+                if d.get("stream") in ("discourse", "observation") and d.get("role") != "reasoning"]
+    else:
+        now = now or time.time()
+        since = now - window_s
+        rows = [d for _, d in field.b.scan("events", {"origin": field.origin, "ts": {"gte": since}})
+                if str(d.get("session") or "").startswith(session_prefix)
+                and d.get("stream") in ("discourse", "observation")
+                and d.get("role") != "reasoning"]
     rows.sort(key=lambda d: d.get("seq") or 0)
     lines = []
     for d in rows:
