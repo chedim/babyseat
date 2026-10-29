@@ -373,9 +373,10 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
     # event as a whole (the sum of its sentence vectors, as message_vec
     # makes it): a short sentence naming the person ("Yep, Caroline.") is
     # near any ask naming her and outranked the turn that held the answer.
+    machine_cache: dict = {}
     live = [(key, d) for key, d in evs.items()
             if d.get("role") in DIRECT_ROLES and d.get("status") == "applied"
-            and not _title_like(d) and not _to_a_machine(field, d)]
+            and not _title_like(d) and not _to_a_machine(field, d, machine_cache)]
     svecs = field.b.get_multi("sentences", list({s for _k, d in live for s in d.get("sids") or []}))
     for _key, d in live:
         best = max((hits[s] for s in d.get("sids") or [] if s in hits), default=None)

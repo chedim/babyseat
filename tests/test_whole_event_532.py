@@ -49,3 +49,36 @@ class TestWholeEvent(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDirectScansASessionOnce(unittest.TestCase):
+    """direct_answers tests every candidate reply for 'answers the machine'
+    from one scan of its session, not one scan per candidate (#668)."""
+
+    def test_one_session_scan_per_call(self):
+        from membrane import efield as EF
+        from membrane import entity_block as EB
+        from membrane import streams as ST
+        from membrane.efstore import MemBackend
+        from _ef_fakes import FakeEmbedder
+        f = EF.EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+        texts = []
+        for i in range(6):
+            texts += [f"where is the bilge pump alarm number {i} published?",
+                      f"the bilge pump alarm number {i} is published on the boat topic."]
+        f.write_events([ST.Event(stream="discourse", role="user" if i % 2 == 0 else "model",
+                                 ts=1_800_000_000.0 + i, text=t) for i, t in enumerate(texts)],
+                       session="s:1:a")
+        f.process()
+        calls = []
+        real = f.b.scan
+
+        def spy(coll, where=None, *a, **kw):
+            if coll == "events" and (where or {}).get("role") == "user" and "session" in (where or {}):
+                calls.append(where["session"])
+            return real(coll, where, *a, **kw)
+
+        f.b.scan = spy
+        rows = EB.direct_answers(f, "where is the bilge pump alarm published?", k=50, sim_min=0.0)
+        self.assertTrue(rows)
+        self.assertLessEqual(len(calls), 1)

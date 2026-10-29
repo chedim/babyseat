@@ -227,9 +227,10 @@ field holds for the person's **latest message** (no model call, no new lane).
    `save_weights`). The starting weights are #664's arm 4 (pointwise logistic regression, fit
    on LoCoMo conversations 2-9, 1301 questions, over these exact features, on
    pools from the unmerged `recall-fuse` lane):
-   on the held-out conversations 0-1 over main's recall, hit@8 goes 106 -> 148
-   and hit@20 149 -> 171. (The 153 -> 173 first reported was measured on pools
-   from the unmerged `recall-fuse` lane.) The night refit (a later PR) moves them from what the model's
+   on the held-out conversations 0-1, hit@8 goes 153 -> 169 and hit@20
+   175 -> 187 (recall with #539's entity lane and #532's whole-event score;
+   without them 106 -> 148). The spread lane of `recall-fuse` adds +2 at twice
+   the recall time and is not merged. The night refit (a later PR) moves them from what the model's
    own searches use.
 4. **Lines:** the top 12 rows, one fact line each (the row's sentence nearest
    the message, 200 chars), skipping the current chat's own last 8 turns (the

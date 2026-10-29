@@ -28,7 +28,8 @@ CONFIG_COLL, CONFIG_KEY = "config", "recall_scorer"
 # starting weights (operator-approved: #664 arm 4, pointwise logistic): fit
 # on LoCoMo conversations 2-9 (1301 questions) over THIS module's features,
 # raw (standardising folded in), on pools from the unmerged recall-fuse lane;
-# conversations 0-1 over main's recall: hit@8 106 -> 148, hit@20 149 -> 171. No `length` feature: on a seat long rows are tool dumps
+# conversations 0-1: hit@8 153 -> 169, hit@20 175 -> 187 (106 -> 148 without
+# #539/#532's recall changes). No `length` feature: on a seat long rows are tool dumps
 # and logs, not fuller turns. The `speaker` feature was fit on LoCoMo's
 # "<speaker> (<date>):" text prefix and is served from the event's speaker
 # entity label. The night refit (PR B) replaces them on the seat's field.
