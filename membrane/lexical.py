@@ -163,6 +163,25 @@ class LexIndex:
         p = self.post.get(word)
         return [] if p is None else [p >> 4] if isinstance(p, int) else [x >> 4 for x in p]
 
+    def words_in(self, did: int, words) -> set:
+        """Which of `words` document `did` carries, from the postings alone
+        (they are appended in doc-id order, so a binary search finds it): no
+        re-read of the document's text."""
+        import bisect
+        out = set()
+        lo, hi = did << 4, (did + 1) << 4
+        with self.lock:
+            for w in words:
+                p = self.post.get(w)
+                if p is None:
+                    continue
+                if isinstance(p, int):
+                    if p >> 4 == did:
+                        out.add(w)
+                elif bisect.bisect_left(p, lo) < bisect.bisect_left(p, hi):
+                    out.add(w)
+        return out
+
     def docs_with(self, words) -> list[int]:
         """The documents that carry every one of `words`."""
         with self.lock:
