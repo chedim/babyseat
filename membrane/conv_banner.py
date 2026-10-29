@@ -677,6 +677,10 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     except Exception as e:
         print(f"[recall-banner] error: {e}", file=sys.stderr)
         return []
+    if state is not None and state is not memo.get(conv) and state.get("timing"):
+        t = state["timing"]
+        print("[recall-banner] " + " ".join(f"{k} {v:.2f}s" for k, v in t.items() if k != "rows")
+              + f" (pool {t['rows']})", file=sys.stderr)
     if state is not None:
         memo[conv] = state
         while len(memo) > _MARKS_KEPT:

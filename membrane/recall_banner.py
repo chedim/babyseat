@@ -27,8 +27,9 @@ CONFIG_COLL, CONFIG_KEY = "config", "recall_scorer"
 
 # starting weights (operator-approved: #664 arm 4, pointwise logistic): fit
 # on LoCoMo conversations 2-9 (1301 questions) over THIS module's features,
-# raw (standardising folded in); conversations 0-1: hit@8 153 -> 173,
-# hit@20 188 -> 192. No `length` feature: on a seat long rows are tool dumps
+# raw (standardising folded in), on pools from the unmerged recall-fuse lane;
+# conversations 0-1: hit@8 153 -> 169, hit@20 175 -> 187 (106 -> 148 without
+# #539/#532's recall changes). No `length` feature: on a seat long rows are tool dumps
 # and logs, not fuller turns. The `speaker` feature was fit on LoCoMo's
 # "<speaker> (<date>):" text prefix and is served from the event's speaker
 # entity label. The night refit (PR B) replaces them on the seat's field.
@@ -220,14 +221,29 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
     keeps the previous set."""
     if not has_topic(text):
         return (list(prev["lines"]) if prev else []), prev
+    import time as _t
+    from . import efgate as G
     from .entity_block import PAST_SIM_MIN, recall_answers
-    pool = recall_answers(field, text, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
-    ranked = rank(with_speakers(field, pool), text, load_weights(field))
-    rows = pick(ranked, text, n=n, skip=recent_ns(field, session), ranked=ranked)
+    t0 = _t.monotonic()
+    qv = G.message_vec(field, text)                  # once: recall reuses it
+    t1 = _t.monotonic()
+    pool = recall_answers(field, text, qvec=qv, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
+    t2 = _t.monotonic()
+    spk = with_speakers(field, pool)
+    t3 = _t.monotonic()
+    skip = recent_ns(field, session)
+    t4 = _t.monotonic()
+    ranked = rank(spk, text, load_weights(field))
+    rows = pick(ranked, text, n=n, skip=skip, ranked=ranked)
+    t5 = _t.monotonic()
     lines = [line_of(r, now) for r in rows]
+    # where a rebuild's time went (the live seat paid 15-175 s where a lone
+    # process pays ~0.6 s): conv_banner.recall_lines logs it per rebuild
+    timing = {"vec": t1 - t0, "recall": t2 - t1, "speakers": t3 - t2, "recent": t4 - t3,
+              "pick": t5 - t4, "rows": len(pool)}
     # the pool as the scorer ordered it: PR B's labels are made from it
     snap = [{"feat": r["feat"], "fact": fact_line(r, text)} for r in ranked]
-    return lines, {"lines": lines, "pool": snap, "text": text, "session": session}
+    return lines, {"lines": lines, "pool": snap, "text": text, "session": session, "timing": timing}
 
 
 def render(lines: list[str]) -> str | None:

@@ -133,7 +133,12 @@ def matches(d: dict, eq: dict | None) -> bool:
 # session, several times a round, over 20k+ events. Equality on an indexed
 # field now jumps to its rows -- in the collection's own order, built lazily
 # (after the boot load), kept by every write. Same results, by construction.
-SCAN_INDEX: dict[str, tuple[str, ...]] = {"events": ("session", "conv")}   # conv: #429
+# n: event_by_number, once per banner pool row (82 ms each over 318k rows, #668)
+# sid: events_of_sentences' IN list, inside every sentence search (~0.5 s a
+# call over 160k+ deltas, #668); an IN list unions its buckets in the
+# collection's own order (SCAN_RANGE's positions), so only those collections
+SCAN_INDEX: dict[str, tuple[str, ...]] = {"events": ("session", "conv", "n"),   # conv: #429
+                                          "entity_deltas": ("sid",)}
 _NOPE = object()
 # THE RANGE INDEX (the banner's 'tracks' 1-19 s a round): changes_since()
 # asks entity_deltas for seq > N -- a walk over 160k+ rows every round. A
@@ -456,17 +461,26 @@ class MemBackend:
             keys = None
             for fld in SCAN_INDEX.get(coll, ()):
                 want = (eq or {}).get(fld, _NOPE)
-                if want is _NOPE or isinstance(want, (dict, list, tuple, set, frozenset)):
+                many = isinstance(want, (list, tuple, set, frozenset))
+                if want is _NOPE or isinstance(want, dict) or (many and coll not in SCAN_RANGE):
                     continue
                 idx = self._idx_get(coll, fld)
                 if idx is not None:
                     try:
-                        if (coll, fld, want) in self._idx_dirty:
-                            self._idx_dirty.discard((coll, fld, want))
-                            idx[want] = {k: None for k, d in c.items() if d.get(fld) == want}
-                            if not idx[want]:
-                                idx.pop(want, None)
-                        keys = list((idx.get(want) or {}).keys())
+                        for v in (want if many else (want,)):
+                            if (coll, fld, v) in self._idx_dirty:
+                                self._idx_dirty.discard((coll, fld, v))
+                                idx[v] = {k: None for k, d in c.items() if d.get(fld) == v}
+                                if not idx[v]:
+                                    idx.pop(v, None)
+                        if many:
+                            r = self._rng_get(coll)
+                            got: dict = {}
+                            for v in want:
+                                got.update(idx.get(v) or {})
+                            keys = sorted(got, key=lambda k: r["pos"].get(k, 0))
+                        else:
+                            keys = list((idx.get(want) or {}).keys())
                     except TypeError:
                         keys = None
                     break

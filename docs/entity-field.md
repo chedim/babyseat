@@ -215,6 +215,9 @@ field holds for the person's **latest message** (no model call, no new lane).
 1. **Query:** the message. One with no topic ("ok", "1. yes", "thanks!": fewer
    than 0.3 of its tokens are content words) keeps this chat's previous set.
 2. **Candidates:** `recall_answers`' top 50 rows, from the existing lanes.
+   The earlier-asks lane stays 3 wide whatever the pool (`ASK_K`): widened to
+   50 it searched 1,800 sentences and took 16 of a live turn's 20 s for the
+   same rows.
 3. **Order:** a pointwise logistic scorer over features recall already has:
    cosine, 1/rank, BM25 and content-word overlap with the message, speaker
    (the row's event was said by a person the message names: the event's own
@@ -222,10 +225,13 @@ field holds for the person's **latest message** (no model call, no new lane).
    No length feature (on a seat long rows are tool dumps). The weights live in the field, not in code:
    collection `config`, key `recall_scorer` (`recall_banner.load_weights` /
    `save_weights`). The starting weights are #664's arm 4 (pointwise logistic regression, fit
-   on LoCoMo conversations 2-9, 1301 questions, over these exact features):
-   on the held-out conversations 0-1 hit@8 goes 153 -> 173 and hit@20
-   188 -> 192. The night refit (below) moves them from what the model's own
-   searches use.
+   on LoCoMo conversations 2-9, 1301 questions, over these exact features, on
+   pools from the unmerged `recall-fuse` lane):
+   on the held-out conversations 0-1, hit@8 goes 153 -> 169 and hit@20
+   175 -> 187 (recall with #539's entity lane and #532's whole-event score;
+   without them 106 -> 148). The spread lane of `recall-fuse` adds +2 at twice
+   the recall time and is not merged. The night refit (below) moves them from what the model's
+   own searches use.
 4. **Lines:** the top 12 rows, one fact line each (the row's sentence nearest
    the message, 200 chars), skipping the current chat's own last 8 turns (the
    echo failure of #649) and collapsing near-duplicates (word overlap >= 0.8).

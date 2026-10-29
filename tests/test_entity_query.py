@@ -158,3 +158,32 @@ class TestToolSurface(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestFindsNewCards(unittest.TestCase):
+    """The PR-B cards exhibit (2026-10-28): 58 Decisions, the 7 newest beyond
+    k, and near: never matched (no near_fn was ever passed; cards carry no
+    vectors). Lists are newest first; near: ranks by shared words."""
+
+    def _cards(self):
+        est = EntityStore(bucket="t-entq-cards", shared=False)
+        for i in range(40):
+            est.upsert(QuantumEntity(eid=f"membrane::Decision:old-{i}", cls="Decision",
+                                     properties={"name": f"old card {i}", "status": "decided",
+                                                 "summary": "an older choice about the release"}), embedder=None)
+        est.upsert(QuantumEntity(eid="membrane::Decision:pr-671:-label-half-life-in-days", cls="Decision",
+                                 properties={"name": "PR 671: label half-life in days", "status": "decided",
+                                             "summary": "HALF_LIFE_DAYS: a label weight halves every this many days"}),
+                   embedder=None)
+        return est
+
+    def test_a_listing_is_newest_first(self):
+        rows = EQ.run(self._cards(), "kind:decision", k=5)
+        self.assertEqual(rows[0]["eid"], "membrane::Decision:pr-671:-label-half-life-in-days")
+
+    def test_near_finds_by_shared_words_best_first(self):
+        rows = EQ.run(self._cards(), "near:label half-life refit", k=3)
+        self.assertTrue(rows)
+        self.assertEqual(rows[0]["eid"], "membrane::Decision:pr-671:-label-half-life-in-days")
+
+    def test_near_with_no_shared_word_matches_nothing(self):
+        self.assertEqual(EQ.run(self._cards(), "near:zebra quartz", k=3), [])

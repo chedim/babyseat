@@ -51,4 +51,5 @@ chat's own last 8 turns are skipped, and near-duplicate lines collapse. The scor
 weights are the field entity `config/recall_scorer`; see `docs/entity-field.md`. When the
 model searches after the banner and its answer uses a row the banner ranked low, that
 is a label: the night pass refits the weights from these, so the ordering adapts to
-how this seat is used.
+how this seat is used. Each rebuild logs one `[recall-banner]` line to the seat log with
+its steps' seconds (`vec`, `recall`, `speakers`, `recent`, `pick`) and the pool size.
