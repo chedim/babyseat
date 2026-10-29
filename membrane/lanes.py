@@ -318,14 +318,11 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
                  else _ENTITY_CARD_NORMAL)
         L.extend(_ENTITY_CARD_COMMON)
     ab = float(getattr(srv, "replay_ab", 0.0) or 0.0)
-    L.append(
-        f"- REPLAY A/B: replayable asks ({ab:.1%} served as pure replay) are "
-        "logged as pairs -- the stored answer next to yours, judged for "
-        "agreement; you are never bypassed."
-        if ab > 0 else
-        "- REPLAY A/B: off (shadow) -- replayable asks are logged as pairs "
-        "(stored answer next to yours; an idle judge scores the agreement) "
-        "but you answer every turn.")
+    if ab > 0:                     # off (shadow): nothing the model acts on
+        L.append(
+            f"- REPLAY A/B: replayable asks ({ab:.1%} served as pure replay) are "
+            "logged as pairs -- the stored answer next to yours, judged for "
+            "agreement; you are never bypassed.")
     L.append(
         "- YOUR WRITES: 'membrane: learn that ...' / 'membrane: forget #N' "
         "frames in your reply EXECUTE (audited as origin: agent)."
@@ -349,10 +346,13 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
                "all right now -- tell the operator to start the seat with "
                "--mcp."))
     if tools:
+        # the names only: every MCP client gets each tool's schema anyway
+        # (the per-tool prose here was ~3.8K chars of the same, 2026-10-29)
+        names = [ln.split(":", 1)[0].strip(" -") for ln in tools]
         L.append("- TOOLS: the membrane MCP server is mounted -- prefer "
                  "these typed tools over prose frames (no one-turn wait, "
-                 "same guards):")
-        L.extend(tools)
+                 "same guards; each tool's schema says what it does): "
+                 + ", ".join(names) + ".")
     else:
         L.append("- TOOLS: MCP off -- drive membrane with the prose frames "
                  "(one per reply, last line).")

@@ -68,7 +68,7 @@ class TestSeatCard(unittest.TestCase):
     def test_writes_and_replay_follow_the_switches(self):
         card = _seat_card(_Srv(agent_writes=False), True)
         self.assertIn("report-only", card)
-        self.assertIn("REPLAY A/B: off (shadow)", card)
+        self.assertNotIn("REPLAY A/B", card)          # off: nothing the model acts on
         served = _seat_card(_Srv(replay_ab=0.3), True)
         self.assertIn("REPLAY A/B: replayable asks", served)
         self.assertIn("30.0% served as pure replay", served)
@@ -156,3 +156,15 @@ class TestEntityCard(unittest.TestCase):
         nc = _seat_card(self._srv(no_context=True), mcp_on=False)
         self.assertIn("THE CONVERSATION SO FAR", nc)
         self.assertNotIn("SINCE YOUR LAST MESSAGE", nc)
+
+
+
+class TestTheCardIsLean(unittest.TestCase):
+    """2026-10-29: the card's TOOLS section re-described every MCP tool in
+    prose (~3.8K chars) next to the schemas every MCP client already gets."""
+
+    def test_tools_are_named_not_redescribed(self):
+        card = _seat_card(_Srv(), mcp_on=True)
+        line = next(l for l in card.splitlines() if l.startswith("- TOOLS:"))
+        self.assertIn("schema", line)
+        self.assertLess(sum(len(l) for l in card.splitlines() if l.startswith("  - ")), 200)
