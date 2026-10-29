@@ -125,6 +125,11 @@ def _tokens(row: dict) -> tuple[int, int, int, int]:
             t.get("reasoning", 0) or 0, read)
 
 
+def _cache_write(row: dict) -> int:
+    cache = ((row.get("info") or {}).get("tokens") or {}).get("cache")
+    return (cache.get("write") if isinstance(cache, dict) else 0) or 0
+
+
 def _row_text(row: dict) -> str:
     """The conversation text a row contributes -- the SAME skip filters the
     seat's `_prior_history` applies, so both sides of the baseline see the
@@ -158,7 +163,7 @@ def _bucket(prior: int) -> str:
 def accounting(store: dict[str, list[dict]]) -> dict:
     sessions = len(store)
     user_msgs = assistant_turns = 0
-    tin = tout = treason = tcache = 0
+    tin = tout = treason = tcache = twrite = 0
     tool_parts = 0
     turns_with_rounds = round_sum = 0
     injection_sizes: list[int] = []
@@ -176,6 +181,7 @@ def accounting(store: dict[str, list[dict]]) -> dict:
             tout += o
             treason += r
             tcache += c
+            twrite += _cache_write(row)
             if info.get("modelID"):
                 models[info.get("modelID")] += 1
             maxr = 0
@@ -198,6 +204,7 @@ def accounting(store: dict[str, list[dict]]) -> dict:
         "user_msgs": user_msgs,
         "assistant_turns": assistant_turns,
         "input": tin, "output": tout, "reasoning": treason, "cache_read": tcache,
+        "cache_write": twrite,
         "tool_parts": tool_parts,
         "turns_with_rounds": turns_with_rounds, "round_sum": round_sum,
         "injection_sizes": sorted(injection_sizes),
@@ -273,6 +280,9 @@ def render_accounting(a: dict) -> str:
         f"  output tokens:   {a['output']:,}",
         f"  reasoning:       {a['reasoning']:,}",
         f"  cache-read:      {a['cache_read']:,} ({cache_pct:.1f}% of input)",
+        f"  cache-write:     {a.get('cache_write', 0):,}",
+        f"  fresh input:     "
+        f"{max(0, a['input'] - a['cache_read'] - a.get('cache_write', 0)):,}",
         f"  in+out / turn:   {avg // turns:,}",
         f"  tool-call parts: {a['tool_parts']:,}",
         f"  tool-loop turns: {a['turns_with_rounds']:,} "

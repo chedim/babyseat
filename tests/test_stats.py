@@ -154,3 +154,32 @@ def test_render_accounting_is_not_empty():
     out = render_accounting(a)
     assert isinstance(out, str) and out.strip()
     assert "sessions" in out
+
+
+def test_claude_turn_tokens_match_the_rung_ledger_561():
+    """One Claude turn: the usage claude_agent._usage builds lands in the
+    stored row with its cache split, and Stats reports fresh/read/write/out
+    that match the rung's ledger for that turn."""
+    from membrane.claude_agent import _usage
+    from membrane.server import _tokens_fill
+    sdk_usage = {"input_tokens": 6, "cache_read_input_tokens": 900,
+                 "cache_creation_input_tokens": 94, "output_tokens": 40}
+    info: dict = {}
+    _tokens_fill(info, {"usage": _usage(sdk_usage)})
+    assert info["tokens"]["cache"] == {"read": 900, "write": 94}
+    a = accounting({"s": [{"info": {"role": "assistant", **info}, "parts": []}]})
+    assert a["cache_write"] == 94
+    assert a["cache_read"] == 900
+    assert a["input"] - a["cache_read"] - a["cache_write"] == 6   # fresh input
+    assert a["output"] == 40
+
+
+def test_render_accounting_shows_the_cache_split_561():
+    from membrane.stats import render_accounting
+    store = {"s": [_row("assistant", "x", tokens={
+        "total": 1040, "input": 1000, "output": 40, "reasoning": 0,
+        "cache": {"read": 900, "write": 94}})]}
+    out = render_accounting(accounting(store))
+    assert "fresh input:     6" in out
+    assert "cache-write:     94" in out
+    assert "cache-read:      900" in out
