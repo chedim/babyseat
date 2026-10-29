@@ -244,7 +244,8 @@ field holds for the person's **latest message** (no model call, no new lane).
    (BAAI, Apache-2.0) reads the message with each of the scorer's top 20 rows and adds
    its score as the feature `bge`; those 20 are re-ordered by `RERANK_WEIGHTS` (fit
    with it on LoCoMo conversations 2-9) and the rows below keep their place. On the
-   held-out conversations 0-1, hit@8 goes 169 -> 178. Cost: ~0.25 s per topical turn
+   held-out conversations 0-1, hit@8 goes 169 -> 178. Each pair is read up to 128 tokens (a seat's rows run long: 20 of them took 1.7 s at
+   512, 0.4 s at 128, with the same LoCoMo score). Cost: ~0.25 s per topical turn
    on the Mac's GPU and ~3.3 GB of GPU memory while loaded (fp32: fp16 and bf16 scored 173
    and saved no memory as loaded). The model loads in the background
    on first use and stays loaded; until it is ready, or without the extra, or with
