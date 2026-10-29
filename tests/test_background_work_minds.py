@@ -311,3 +311,35 @@ class TestOptionsWithoutASeat(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAFieldCall(unittest.TestCase):
+    """A field call (an entity script asking a model, the 'plan' lane) is
+    background work: it follows the loops' Minds pick, else the idle
+    thinker's local model -- never a second local LLM (the seat's 14b next
+    to the thinker's 8b made Ollama evict and reload, 60 s on a person's
+    turn, 2026-10-29)."""
+
+    FC = "field-call: membrane::Component:spec-suite-done"
+
+    def setUp(self):
+        self.srv = _Srv(tempfile.mkdtemp())
+        self.r, self.bodies = _runner(self.srv, model=CLAUDE)
+
+    def test_follows_the_loops_claude_pick(self):
+        MM.apply(self.srv, loops=CLAUDE, loops_auth="api-key")
+        sid = _session(self.r, self.FC, CLAUDE)
+        self.r.run(sid, "is the suite done?")
+        self.assertEqual(self.bodies[-1]["model"], CLAUDE)
+        self.assertEqual(self.bodies[-1][CA.AUTH_KEY], CA.MODE_KEY)
+
+    def test_without_a_pick_runs_on_the_thinkers_model(self):
+        sid = _session(self.r, self.FC, CLAUDE)
+        self.r.run(sid, "is the suite done?")
+        self.assertEqual(self.bodies[-1]["model"], "qwen3:8b")
+
+    def test_no_thinker_model_keeps_the_seat_default(self):
+        self.srv.idle_cortex_model = ""
+        sid = _session(self.r, self.FC, CLAUDE)
+        self.r.run(sid, "is the suite done?")
+        self.assertEqual(self.bodies[-1]["model"], "qwen3:14b")
