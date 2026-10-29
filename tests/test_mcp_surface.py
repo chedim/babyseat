@@ -79,3 +79,20 @@ class TestEntityEditSchemaSize(unittest.TestCase):
                   "thought_script", "dreamed_script", "tick_script",
                   "getter_script", "watch_script", "publish", "unpublish"):
             self.assertIn(k, props)
+
+
+class TestScriptsHelpKeepsTheContract(unittest.TestCase):
+    """#569: what entity_edit's description dropped lives in help('scripts'),
+    which costs tokens only when the model asks for it."""
+
+    def test_the_dropped_contract_is_in_help(self):
+        from membrane.toolset import HELP
+        h = HELP["scripts"]
+        for needle in ("intent", "Goal", "chat", "voice", "30s", "never the same line twice",
+                       "delete_script", "replaces the track's", "10s", "0.25",
+                       "publish", "keeps its edit", "membrane::presence"):
+            self.assertIn(needle, h, needle)
+
+    def test_the_description_says_which_budget_is_which(self):
+        d = next(t for t in M.TOOLS if t["name"] == "entity_edit")["description"]
+        self.assertIn("getter 10s", d)

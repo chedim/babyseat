@@ -431,7 +431,7 @@ TOOLS: list[dict] = [
             "tick_script on the ~1s heartbeat (paced by `tick_every`); "
             "nudge_script/delete_script at consolidation; mention/thought/"
             "dreamed_script at their hooks; watch_script on external "
-            "events. Budgets are narrow (0.25s-2s); 3 failures disable a "
+            "events. Budgets: getter 10s, trigger scripts 0.25s-2s; 3 failures disable a "
             "script (backoff 60s..1h); empty string clears. A script's "
             "READ-ONLY `membrane` object offers field.recall/vitals, "
             "entities.get, timeline.walk, intents.open, call_llm, wake, "
