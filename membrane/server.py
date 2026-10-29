@@ -3912,6 +3912,15 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 return self._notfound()      # JWT mode: someone else's session
             if not getattr(self, "_ui_relay", False) and not _UI.stamp(self):
                 return self._json_err(400, "body must be a JSON object")
+            if path == "/membrane/rerank":
+                # #683: one reranker per machine -- this seat's model scores for
+                # the other seats ({scores: null} when it is not ready)
+                from . import recall_rerank as _RR
+                b = self._read_body()
+                b = b if isinstance(b, dict) else {}
+                docs = b.get("docs")
+                docs = [str(d) for d in docs] if isinstance(docs, list) else []
+                return self._json_out({"scores": _RR.serve(str(b.get("text") or ""), docs)})
             if path == "/membrane/toybox/poke":
                 # PLAY WITH SELF (#244): the 👶 panel's one write, toybox
                 # actions only (toybox.poke refuses anything else, and body).

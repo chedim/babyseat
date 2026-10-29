@@ -1065,7 +1065,8 @@ def main() -> None:
             # not on the first topical turn after a restart
             try:
                 from . import recall_rerank
-                recall_rerank.warm()
+                recall_rerank.warm(peers=lambda: srv.gpeers.livelist()
+                                   if getattr(srv, "gpeers", None) else [])
             except Exception as e:
                 print(f"[seat] reranker warm skipped ({e})", file=sys.stderr)
             # the tool-output chunks (#429) are read only on question-like

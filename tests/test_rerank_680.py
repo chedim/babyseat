@@ -112,7 +112,7 @@ class TestBootWarm(unittest.TestCase):
 
     def test_the_seat_warms_it_after_the_field(self):
         src = (Path(__file__).parent.parent / "membrane" / "opencode.py").read_text()
-        self.assertLess(src.index("_LX.warm(srv.efield)"), src.index("recall_rerank.warm()"))
+        self.assertLess(src.index("_LX.warm(srv.efield)"), src.index("recall_rerank.warm("))
 
 
 class TestAskUsesTheRanking(unittest.TestCase):
