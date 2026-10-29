@@ -430,15 +430,18 @@ def _build_ap():
     # spawner that sources the seat env (a supervisor, an HA self-heal, a
     # manual launch) -- one env line instead of N launch lines to keep in
     # sync; --with-context overrides it for one run.
-    _nc_env = os.environ.get("MEMBRANE_NO_CONTEXT", "").strip().lower() \
-        not in ("", "0", "false", "no", "off")
+    # ON BY DEFAULT (operator, 2026-10-29): the field is the memory, the
+    # transcript is not replayed; MEMBRANE_NO_CONTEXT=0 or --with-context
+    # keeps opencode's history for a seat that wants it
+    _nc_env = os.environ.get("MEMBRANE_NO_CONTEXT", "1").strip().lower() \
+        not in ("0", "false", "no", "off")
     ap.add_argument("--with-context", dest="no_context", action="store_false",
                     default=_nc_env,   # shared dest: the FIRST default wins
-                    help="keep opencode's transcript even when "
-                         "MEMBRANE_NO_CONTEXT=1 is set")
+                    help="keep opencode's transcript history (the default "
+                         "is --no-context; MEMBRANE_NO_CONTEXT=0 does the same)")
     ap.add_argument("--no-context", dest="no_context", action="store_true",
                     default=_nc_env,
-                    help="THE STATELESS LLM (the field is the only "
+                    help="the default: THE STATELESS LLM (the field is the only "
                          "memory): strip opencode's transcript history per "
                          "turn -- keep the system prompts + the current "
                          "turn's exchanges (the turn boundary), drop "

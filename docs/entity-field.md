@@ -116,7 +116,7 @@ instructions":
   `▸ f:x [file · said 41 · observed 17 · code 12 · 2h ago]`, the evidence
   sentences most relevant to the ask verbatim, the latest observation, the
   top relations, conflicts, what other seats said, commons claims. Served by
-  `/membrane/ask`, `query`, and in `--no-context` every turn. On a
+  `/membrane/ask`, `query`, and in `--no-context` (the default) every turn. On a
   question-like ask (it ends with `?` or opens with a question word), tool
   observations and lines the seat or the client wrote (receipts,
   notifications, watch blocks) rank 0.10 below what was said and decided.
@@ -167,7 +167,7 @@ instructions":
   *outside* the conversation (code edits, entity scripts, other sessions)
   are quoted; the conversation's own turns only count. New conflicts come
   last. No block means nothing changed.
-- **THE CONVERSATION SO FAR** (`--no-context`): the session rebuilt from
+- **THE CONVERSATION SO FAR** (`--no-context`, the default since 2026-10-29): the session rebuilt from
   the event log, with messages verbatim (clipped) and tool calls as one-line
   facts.
 
