@@ -369,12 +369,21 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
         return []
     hits, evs = G.sentence_events(field, qv, k * 12)
     cands = []
+    # #532: an event scores by the better of its nearest sentence and the
+    # event as a whole (the sum of its sentence vectors, as message_vec
+    # makes it): a short sentence naming the person ("Yep, Caroline.") is
+    # near any ask naming her and outranked the turn that held the answer.
     machine_cache: dict = {}
-    for _key, d in evs.items():
-        if (d.get("role") not in DIRECT_ROLES or d.get("status") != "applied"
-                or _title_like(d) or _to_a_machine(field, d, machine_cache)):
-            continue
+    live = [(key, d) for key, d in evs.items()
+            if d.get("role") in DIRECT_ROLES and d.get("status") == "applied"
+            and not _title_like(d) and not _to_a_machine(field, d, machine_cache)]
+    svecs = field.b.get_multi("sentences", list({s for _k, d in live for s in d.get("sids") or []}))
+    for _key, d in live:
         best = max((hits[s] for s in d.get("sids") or [] if s in hits), default=None)
+        vs = [unit(svecs[s]["vec"]) for s in dict.fromkeys(d.get("sids") or []) if s in svecs]
+        if vs:
+            whole = float(unit(sum(vs)) @ qv)
+            best = whole if best is None else max(best, whole)
         if best is not None and best >= sim_min:
             cands.append((best, d))
     cands.sort(key=lambda t: -t[0])
@@ -395,13 +404,13 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
                 continue                        # the ask restated, not answered
             scored.append((sc, order, x))
         top = sorted(sorted(scored, key=lambda t: -t[0])[:n_sent], key=lambda t: t[1])
-        if not top or max(t[0] for t in top) < sim_min:
+        if not top or max(_best, max(t[0] for t in top)) < sim_min:
             continue
         sig = " ".join(" ".join(x for _, _, x in top).lower().split())
         if sig in seen:
             continue                            # the same words in another event
         seen.add(sig)
-        out.append({"sim": round(max(t[0] for t in top), 3), "q": "", "q_n": None,
+        out.append({"sim": round(max(_best, max(t[0] for t in top)), 3), "q": "", "q_n": None,
                     "a_n": [d.get("n")], "ts": d.get("ts"), "answer": [x for _, _, x in top],
                     "via": "direct", "role": d.get("role")})
     return out
@@ -808,10 +817,20 @@ def recall_answers(field, text: str, qvec=None, k: int = 3,
     # the embedding rows stay ONE list in #435's approved order (raw
     # similarity, no weight): fused list by list, a lower earlier-ask row
     # interleaved past a better direct row (probe: 21 -> 19/53)
-    emb = sorted(asks + [r for r in direct + tools if key(r)[0] == "e"], key=lambda r: -r["sim"])
-    lists = [words, named, emb]
+    # #539: the entity lane's rows join that same list. They rank by their
+    # own sentences' similarity to the ask like every other row, so the lane
+    # holds no slot of its own (a question naming a speaker filled the top k
+    # with that speaker's lines whatever they said). One event, one entry:
+    # the best similarity among the lanes that found it.
+    emb: dict = {}
+    for r in asks + [r for r in direct + tools + named if key(r)[0] == "e"]:
+        kk = key(r)
+        if kk not in emb or r["sim"] > emb[kk]["sim"]:
+            emb[kk] = r
+    emb = sorted(emb.values(), key=lambda r: -r["sim"])
+    lists = [words, emb]
     rows: dict = {}
-    for lst in lists + [direct, tools]:
+    for lst in lists + [direct, tools, named]:
         for r in lst:
             rows.setdefault(key(r), []).append(r)
     # the row that speaks for an event: an earlier ask's, else a word or
