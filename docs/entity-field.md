@@ -212,7 +212,11 @@ most this session.
 After the chat block, the banner carries a `RECALL` block: the best rows the
 field holds for the person's **latest message** (no model call, no new lane).
 
-1. **Query:** the message. One with no topic ("ok", "1. yes", "thanks!": fewer
+1. **Query:** the message, with the chat's previous turn (the person's or the
+   model's) added to its vector (`HISTORY_TURNS = 1`): a follow-up leans on it. On
+   the live field the banner held the model's own next search finds in 26 of 63
+   cases with one turn, 16 without; three turns were no better, seven worse. The word
+   lanes still read the message alone. One with no topic ("ok", "1. yes", "thanks!": fewer
    than 0.3 of its tokens are content words) keeps this chat's previous set.
 2. **Candidates:** `recall_answers`' top 50 rows, from the existing lanes.
    The earlier-asks lane stays 3 wide whatever the pool (`ASK_K`): widened to
