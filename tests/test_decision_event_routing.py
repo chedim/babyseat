@@ -78,3 +78,26 @@ def test_a_chat_card_with_no_chat_falls_back_to_the_pool():
     assert DM.answer(est, led, eid, "a")["ok"]
     assert [e["kind"] for e in est._events_pool.take()] == ["decision"]
     assert est.sent == []
+
+
+def test_a_chat_planted_card_records_the_chat_that_planted_it():
+    args = {"class": "Decision", "name": "Q", "properties": {"status": "open"}}
+    out = S.stamp_card_planter("entity_add", args, None, "ses_9")
+    assert out["properties"]["planted_by"] == "chat" and out["properties"]["chat"] == "ses_9"
+    kept = S.stamp_card_planter("entity_add", {"class": "Decision", "name": "Q",
+                                               "properties": {"chat": "ses_1"}}, None, "ses_9")
+    assert kept["properties"]["chat"] == "ses_1"
+    watch = S.stamp_card_planter("entity_add", args, "watch: goal:abc", "ses_9")
+    assert "chat" not in watch["properties"]
+
+
+def test_answering_a_chat_planted_card_wakes_its_planting_chat():
+    est, led = _seat()
+    props = S.stamp_card_planter("entity_add", {"class": "Decision", "name": "Q",
+            "properties": {"status": "open", "var": {"type": "option", "options": ["a", "b"]}}},
+            None, "ses_9")["properties"]
+    eid = est.add(cls="Decision", name="Q", summary="x")["eid"]
+    assert est.edit(eid, properties=props)["ok"]
+    assert DM.answer(est, led, eid, "a")["ok"]      # the board answers with no conv
+    assert est._events_pool.take() == []
+    assert [s for s, _ in est.sent] == ["ses_9"]

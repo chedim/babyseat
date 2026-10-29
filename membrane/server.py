@@ -794,10 +794,11 @@ def stamp_watch_owner(name: str, args, agent) -> dict:
     return out
 
 
-def stamp_card_planter(name: str, args, agent) -> dict:
+def stamp_card_planter(name: str, args, agent, sid: str = "") -> dict:
     """A new Decision card carries who planted it (`planted_by`): "watch" from a
     watch loop's lane, "chat" otherwise; an explicit value is kept. The answer's
-    decision event routes by it (decision_map._tell)."""
+    decision event routes by it (decision_map._tell). A chat-planted card also
+    records the chat (`sid`) it was planted from, so its answer comes back there."""
     if not str(name).endswith("entity_add") or not isinstance(args, dict) \
             or str(args.get("class") or "").lower() != "decision":
         return args
@@ -810,6 +811,8 @@ def stamp_card_planter(name: str, args, agent) -> dict:
     props = dict(props) if isinstance(props, dict) else {}
     # "listener" = the watch loops and any other agent (subagents too)
     props.setdefault("planted_by", "watch" if _lane_of(agent) == "listener" else "chat")
+    if props["planted_by"] == "chat" and sid:
+        props.setdefault("chat", str(sid))
     return {**args, "properties": props}
 
 
@@ -2891,7 +2894,7 @@ class TurnRunner:
                             args = stamp_watch_owner(
                                 name_l, args, (self._agents or {}).get(sid))
                             args = stamp_card_planter(
-                                name_l, args, (self._agents or {}).get(sid))
+                                name_l, args, (self._agents or {}).get(sid), sid)
                             # THE FIELD'S PULSE: which mind touched which
                             # entity (ids + the tool name only)
                             try:
