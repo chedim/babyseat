@@ -777,9 +777,11 @@ TOOLS: list[dict] = [
     {
         "name": "bash",
         "description": (
-            "Run a shell command: code_run under the name you know (the command "
-            "becomes a tree in the field, the run a result entity; re-run with "
-            "code_run node=<root>)."),
+            "Run a shell command once: code_run under the name you know (the "
+            "command becomes a tree in the field, the run a result entity; re-run "
+            "with code_run node=<root>). What you will run again is a METHOD: "
+            "method_define it on the entity it belongs to (its args as {{params}}), "
+            "then method_call it -- program the field first."),
         "inputSchema": {
             "type": "object",
             "properties": {

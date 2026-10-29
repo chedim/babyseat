@@ -96,3 +96,14 @@ class TestScriptsHelpKeepsTheContract(unittest.TestCase):
     def test_the_description_says_which_budget_is_which(self):
         d = next(t for t in M.TOOLS if t["name"] == "entity_edit")["description"]
         self.assertIn("getter 10s", d)
+
+
+class TestBashSteersToMethods(unittest.TestCase):
+    """2026-10-29: since the `bash` alias (#619) ~80% of the model's calls
+    were one-shot shell and it defined no methods in two days; the doctrine
+    says program the field first. The tool's own description says so."""
+
+    def test_bash_says_one_shot_and_points_at_methods(self):
+        d = next(t for t in M.TOOLS if t["name"] == "bash")["description"]
+        for needle in ("once", "method_define", "method_call"):
+            self.assertIn(needle, d, needle)
