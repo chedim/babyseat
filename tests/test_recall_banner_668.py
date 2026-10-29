@@ -178,3 +178,26 @@ class TestInTheBanner(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAskLaneWidth(unittest.TestCase):
+    """The pool (POOL rows) never widens the earlier-asks lane: at k=50 it
+    searched 1800 sentences and re-read each hit's vectors, 16 of 20 s a
+    live turn (#668)."""
+
+    def test_pool_k_does_not_widen_the_ask_lane(self):
+        from unittest import mock
+        from membrane import entity_block as EB
+        f = field_with(["how do we deploy the seat after a merge?",
+                        "run the deploy script, then restart the seat once idle."])
+        seen = []
+        real = EB.past_answers
+
+        def spy(*a, k=3, **kw):
+            seen.append(k)
+            return real(*a, k=k, **kw)
+
+        with mock.patch.object(EB, "past_answers", spy):
+            EB.recall_answers(f, "how do we deploy the seat?", k=RB.POOL)
+        self.assertEqual(seen, [EB.ASK_K])
+        self.assertEqual(EB.ASK_K, 3)
