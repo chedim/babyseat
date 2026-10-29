@@ -2109,6 +2109,18 @@ def main() -> None:
                 from . import restarts as _RS     # restarts: told to the seat; a staged one is his to do
                 _RS.bind(srv)
                 _RS.on_boot(srv)
+                # #690: older events get their whole vector stored once, in the
+                # background now that the seat has booted (the vector index's
+                # catch-up pace: 500 a batch, the readers' turn between)
+                if getattr(srv, "efield", None) is not None:
+                    def _wvec_backfill(_f=srv.efield):
+                        try:
+                            n = _f.backfill_wvec()
+                            if n:
+                                print(f"[efield] whole vectors stored on {n} older events", file=sys.stderr)
+                        except Exception as e:
+                            print(f"[efield] whole-vector backfill stopped ({e})", file=sys.stderr)
+                    threading.Thread(target=_wvec_backfill, daemon=True, name="wvec-backfill").start()
                 _serve_hub.on_lost = lambda: _SP.note(srv, "stream-cut")
                 from . import jsexec as _JS      # the seat is a remote_executor: JS in an opted-in tab
                 _JS.bind(srv)

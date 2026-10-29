@@ -1879,6 +1879,40 @@ class EntityField:
         return self.write_events([ev], session=session)[0]
 
     @_locked
+    def backfill_wvec(self, batch: int = 500, pause: float = 0.01, stop=None) -> int:
+        """Store the whole vector on every older event that has none (#690):
+        ONE sentence batch per `batch` events, each event written atomically
+        (cas_update: only while its sids are the ones read and it still has
+        no vector), a pause between batches for the readers. The seat runs it
+        once in the background after it has booted, never in a turn. Returns
+        how many events it wrote."""
+        todo = [(k, list(dict.fromkeys(d.get("sids") or []))) for k, d in self.b.scan("events", {})
+                if d.get("sids") and not d.get("wvec")]
+        done = 0
+        for i in range(0, len(todo), max(1, batch)):
+            if stop is not None and stop():
+                break
+            part = todo[i:i + batch]
+            rows = self.b.get_multi("sentences", list({s for _k, ss in part for s in ss}))
+            for key, sids in part:
+                w = whole_vec(rows, sids)
+                if w is None:
+                    continue
+                wrote = []
+
+                def put(d, sids=sids, w=w, wrote=wrote):
+                    if d is None:
+                        return None
+                    if list(dict.fromkeys(d.get("sids") or [])) == sids and not d.get("wvec"):
+                        wrote.append(1)
+                        return {**d, "wvec": w}
+                    return d
+                self.b.cas_update("events", key, put)
+                done += len(wrote)
+            if pause:
+                time.sleep(pause)
+        return done
+
     def forget(self, n: int) -> dict | None:
         """'forget #N': tombstone the event (its text and results cleared, its
         key kept so a re-capture stays idempotent), drop its deltas and
