@@ -5775,6 +5775,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         print(f"[proxy] turn staged: gate {_gate_s}s "
               f"(model {str(up.get('model'))[:30]}) -- {_st.summary()}", file=sys.stderr)
         _st.keep(srv, _gate_s, tool_round=_is_tool_round)
+        self._gate_s = _gate_s      # the injection card's time (#693)
         try:
             _t_del = time.time()
             self._v1_deliver(up, raw, query, vec, verdict, ctx)
@@ -6026,7 +6027,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             if getattr(self, "_membrane_ext", False) and ctx:
                 # the card's data FIRST (the serve shows it before the words)
                 self.wfile.write(_sse_line({"membrane": {"injection": ctx,
-                                                         "massage": getattr(srv, "_massage_last", None)}}))
+                                                         "massage": getattr(srv, "_massage_last", None),
+                                                         "gate_s": getattr(self, "_gate_s", None)}}))
             elif getattr(srv, "gate_monologue", True) and ctx:
                 for chunk in _openai_sse_chunks(
                         up.get("model", "membrane"),
@@ -6224,7 +6226,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             # the response so the serve can show it like a tool call
             if resp_obj is not None and ctx:
                 resp_obj["membrane"] = {"injection": ctx,
-                                        "massage": getattr(srv, "_massage_last", None)}
+                                        "massage": getattr(srv, "_massage_last", None),
+                                        "gate_s": getattr(self, "_gate_s", None)}
                 resp_bytes = json.dumps(resp_obj).encode()
             if resp_obj is not None and not (resp_obj.get("usage") or {}):
                 est_in = Registry.estimate_tokens(up.get("messages"))

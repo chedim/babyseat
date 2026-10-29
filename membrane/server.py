@@ -1206,6 +1206,10 @@ class TurnRunner:
             self._last_inj = {}
         self._last_inj[sid] = _inj
         _now = int(time.time() * 1000)
+        # the time membrane spent preparing this round (the proxy's gate), so
+        # the card reads e.g. 57.7s, not the 0s of a start == end stamp (#693)
+        _g = ext.get("gate_s")
+        _start = _now - int(round(float(_g) * 1000)) if isinstance(_g, (int, float)) and _g > 0 else _now
         _ms = ext.get("massage") or {}
         _title = f"membrane injection · ~{len(_inj) // 4} tokens" + (
             f" · alignment {_ms.get('alignment')}" if _ms.get("alignment") else "")
@@ -1213,8 +1217,8 @@ class TurnRunner:
                       "state": {"status": "completed",
                                 "input": {"round": rounds, **({k: _ms[k] for k in ("alignment", "tokens", "picked") if k in _ms})},
                                 "output": _inj, "title": _title,
-                                "time": {"start": _now, "end": _now}},
-                      "time": {"start": _now, "end": _now}})
+                                "time": {"start": _start, "end": _now}},
+                      "time": {"start": _start, "end": _now}})
         self.hub.publish({"type": "message.part.updated", "part": dict(_ip),
                           "time": _now, "sessionID": sid})
 
