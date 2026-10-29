@@ -328,19 +328,28 @@ DIRECT_LABEL = {"model": "reply", "note": "note", "doc": "doc", "code": "code", 
 TOOL_HITS_MAX = 4
 
 
-def _to_a_machine(field, ev: dict) -> bool:
+def _to_a_machine(field, ev: dict, cache: dict | None = None) -> bool:
     """A model reply whose preceding user turn in its session was the
     seat's (a job receipt, a watch reading, a restart notice): it answers
     the machine, not a question (#429). A reply to a task notification
     stays: the client's background task finished and the reply reports its
-    result to the person (measured: such a reply held a pinned answer)."""
+    result to the person (measured: such a reply held a pinned answer).
+    `cache` (one per call) holds each session's user turns by seq, so a
+    pool of candidates scans a session once, not once each (#668)."""
     if ev.get("role") != "model":
         return False
-    prev = None
-    for _, d in field.b.scan("events", {"origin": field.origin, "session": ev.get("session"),
-                                        "role": "user", "seq": {"lt": int(ev.get("seq") or 0)}},
-                             order=("seq",)):
-        prev = d
+    sess = ev.get("session")
+    if cache is None:
+        cache = {}
+    if sess not in cache:
+        rows = sorted(((int(d.get("seq") or 0), d) for _, d in field.b.scan(
+            "events", {"origin": field.origin, "session": sess, "role": "user"}, order=("seq",))),
+            key=lambda t: t[0])
+        cache[sess] = ([t[0] for t in rows], [t[1] for t in rows])
+    seqs, docs = cache[sess]
+    import bisect
+    i = bisect.bisect_left(seqs, int(ev.get("seq") or 0))
+    prev = docs[i - 1] if i else None
     return prev is not None and ST.event_author(prev) not in ("person", "notification")
 
 
@@ -356,9 +365,10 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
         return []
     hits, evs = G.sentence_events(field, qv, k * 12)
     cands = []
+    machine_cache: dict = {}
     for _key, d in evs.items():
         if (d.get("role") not in DIRECT_ROLES or d.get("status") != "applied"
-                or _title_like(d) or _to_a_machine(field, d)):
+                or _title_like(d) or _to_a_machine(field, d, machine_cache)):
             continue
         best = max((hits[s] for s in d.get("sids") or [] if s in hits), default=None)
         if best is not None and best >= sim_min:

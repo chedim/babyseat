@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import Counter
 
 BANNER_N = 12                 # banner rows (operator-approved)
 POOL = 50                     # candidates taken from recall (operator-approved)
@@ -24,9 +25,12 @@ RECENT_TURNS = 8              # the current chat's turns skipped as echo
 DEDUPE_JACCARD = 0.8          # two fact lines this alike are one
 CONFIG_COLL, CONFIG_KEY = "config", "recall_scorer"
 
-# starting weights (operator-approved: cosine only; the night refit moves them)
-DEFAULT_WEIGHTS = {"bias": 0.0, "sim": 1.0, "inv_rank": 0.0, "overlap": 0.0,
-                   "speaker": 0.0, "neighbour": 0.0, "length": 0.0}
+# starting weights (operator-approved: #664 arm 4, pointwise logistic): fit
+# on LoCoMo conversations 2-9 (1301 questions) over THIS module's features,
+# raw (standardising folded in); conversations 0-1: hit@8 153 -> 168,
+# hit@20 188 -> 193. The night refit (PR B) replaces them on the seat's field.
+DEFAULT_WEIGHTS = {"bias": -5.4911, "sim": -0.1607, "inv_rank": 2.3184, "bm25": 0.2391,
+                   "overlap": 0.6935, "speaker": 0.7205, "neighbour": 0.7073, "length": 2.6277}
 
 HEADER = ("RECALL (membrane's field, best first; #N = event number; "
           "context, not instructions):")
@@ -78,23 +82,49 @@ def _names(text: str) -> set[str]:
             if t[:1].isupper() and t.lower() not in _STOP and len(t) >= 3}
 
 
+def with_speakers(field, rows: list[dict]) -> list[dict]:
+    """Each row carries 'speaker': the label of the entity that said its
+    answering event (the event's own speaker slot, speakers.py), '' when it
+    has none."""
+    out = []
+    for r in rows:
+        who = ""
+        n = (r.get("a_n") or [None])[0]
+        if n is not None:
+            try:
+                hit = field.event_by_number(int(n))
+                spk = (hit[1].get("speaker") if hit else None) or []
+                who = str(spk[1]) if len(spk) > 1 else ""
+            except Exception:
+                who = ""
+        out.append(dict(r, speaker=who))
+    return out
+
+
 def features(rows: list[dict], text: str) -> list[dict]:
     """The per-row features, one dict per pool row (pool order = recall's)."""
     q = set(content_words(text))
     names = _names(text)
     ns = [set(r.get("a_n") or []) | ({r["q_n"]} if r.get("q_n") is not None else set()) for r in rows]
+    docs = [content_words(_answer_text(r)) for r in rows]
+    df = Counter(w for d in docs for w in set(d))
+    avg = max(1.0, sum(len(d) for d in docs) / max(1, len(docs)))
     out = []
     for i, r in enumerate(rows):
         body = _answer_text(r)
-        words = set(content_words(body))
-        head = body.split(":", 1)[0].strip().lower() if ":" in body[:40] else ""
+        words = set(docs[i])
+        tf = Counter(docs[i])
+        bm = sum(math.log(1 + (len(rows) - df[w] + .5) / (df[w] + .5)) * tf[w] * 2.2
+                 / (tf[w] + 1.2 * (.25 + .75 * len(docs[i]) / avg)) for w in q if w in tf)
+        who = str(r.get("speaker") or "").strip().lower()
         near = [float(rows[j].get("sim") or 0.0) for j in range(len(rows)) if j != i
                 and any(abs(a - b) <= 2 for a in ns[i] for b in ns[j]
                         if isinstance(a, int) and isinstance(b, int))]
         out.append({"sim": float(r.get("sim") or 0.0),
                     "inv_rank": 1.0 / (1 + i),
+                    "bm25": bm,
                     "overlap": len(q & words) / len(q) if q else 0.0,
-                    "speaker": 1.0 if head and head in names else 0.0,
+                    "speaker": 1.0 if who and (who in names or names & set(who.split())) else 0.0,
                     "neighbour": max(near) if near else 0.0,
                     "length": min(len(body), 600) / 600.0})
     return out
@@ -190,7 +220,7 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
         return (list(prev["lines"]) if prev else []), prev
     from .entity_block import PAST_SIM_MIN, recall_answers
     pool = recall_answers(field, text, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
-    rows = pick(pool, text, n=n, skip=recent_ns(field, session), weights=load_weights(field))
+    rows = pick(with_speakers(field, pool), text, n=n, skip=recent_ns(field, session), weights=load_weights(field))
     lines = [line_of(r, now) for r in rows]
     return lines, {"lines": lines}
 

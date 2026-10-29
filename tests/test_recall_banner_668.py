@@ -41,11 +41,14 @@ class TestScorer(unittest.TestCase):
         return [{"sim": 0.9, "answer": ["The sky is blue."], "a_n": [1], "q_n": 1},
                 {"sim": 0.8, "answer": ["Caroline adopted a dog named Max."], "a_n": [5], "q_n": 5}]
 
-    def test_starting_weights_are_cosine_only(self):
-        self.assertEqual(RB.DEFAULT_WEIGHTS["sim"], 1.0)
-        self.assertTrue(all(v == 0.0 for k, v in RB.DEFAULT_WEIGHTS.items() if k not in ("sim", "bias")))
-        got = RB.rank(self.rows(), "what did Caroline adopt?")
-        self.assertEqual([r["a_n"][0] for r in got], [1, 5])
+    def test_starting_weights_are_arm_4_not_cosine_only(self):
+        w = RB.DEFAULT_WEIGHTS
+        self.assertTrue(w["inv_rank"] > 0 and w["bm25"] > 0 and w["speaker"] > 0 and w["neighbour"] > 0)
+        # not a no-op: a row with the words and the speaker beats a higher-cosine, wordless one
+        rows = [{"sim": 0.62, "answer": ["The sky is blue today."], "a_n": [1], "q_n": 1, "speaker": "Melanie"},
+                {"sim": 0.60, "answer": ["Caroline adopted a dog named Max, a rescue dog."],
+                 "a_n": [50], "q_n": 50, "speaker": "Caroline"}]
+        self.assertEqual(RB.rank(rows, "what dog did Caroline adopt?")[0]["a_n"][0], 50)
 
     def test_weights_come_from_the_field_entity(self):
         f = field_with(["hello there friend"])
@@ -56,10 +59,17 @@ class TestScorer(unittest.TestCase):
         self.assertEqual(got[0]["a_n"][0], 5)       # word overlap now outweighs raw cosine
 
     def test_speaker_match_feature(self):
-        rows = [{"sim": 0.8, "answer": ["Melanie: I painted a lake."], "a_n": [1], "q_n": 1},
-                {"sim": 0.8, "answer": ["Caroline: I painted a lake."], "a_n": [2], "q_n": 2}]
+        rows = [{"sim": 0.8, "answer": ["I painted a lake."], "a_n": [1], "q_n": 1, "speaker": "Melanie"},
+                {"sim": 0.8, "answer": ["I painted a lake."], "a_n": [2], "q_n": 2, "speaker": "Caroline"}]
         w = {**RB.DEFAULT_WEIGHTS, "speaker": 2.0}
         self.assertEqual(RB.rank(rows, "what did Caroline paint?", w)[0]["a_n"][0], 2)
+
+    def test_speaker_comes_from_the_events_own_speaker_slot(self):
+        f = field_with(["[user: Caroline]\nI adopted a dog named Max.", "Nice."])
+        n = next(d["n"] for _k, d in f.b.scan("events", {}) if "Max" in (d.get("text") or ""))
+        got = RB.with_speakers(f, [{"a_n": [n], "answer": ["x"], "sim": 0.5}, {"a_n": [], "answer": ["y"]}])
+        self.assertEqual(got[0]["speaker"].lower(), "caroline")
+        self.assertEqual(got[1]["speaker"], "")
 
 
 class TestFactLine(unittest.TestCase):
@@ -111,6 +121,16 @@ class TestBanner(unittest.TestCase):
         txt = RB.render(["▸ #1 (1h ago) user: a fact."])
         self.assertTrue(txt.startswith(RB.HEADER))
         self.assertIsNone(RB.render([]))
+
+
+class TestCost(unittest.TestCase):
+    def test_a_new_message_is_embedded_once_for_the_banner(self):
+        f = field_with(["Caroline adopted a dog named Max.", "Lovely.", "Melanie paints lakes."])
+        calls = []
+        real = f.emb.embed
+        f.emb.embed = lambda xs: (calls.append(len(xs)), real(xs))[1]
+        RB.build(f, "which dog did Caroline adopt last spring?", session="s:1:a")
+        self.assertLessEqual(sum(calls), 1)
 
 
 class TestInTheBanner(unittest.TestCase):
