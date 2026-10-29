@@ -885,7 +885,7 @@ def _missing_binary(cmd: str) -> str | None:
     return None
 
 
-RETIRED_DIALECT = re.compile(r"^\s*(llm::|llm\.(wake|unwake|call)\b|toybox::|seat::|js::|self::)")
+RETIRED_DIALECT = re.compile(r"^\s*(?:[\w.-]+:\s*)?(?:(?:llm|toybox|seat|js|self)\s*::|llm\.(?:wake|unwake|call)\b)")
 
 
 def run_command_entity(fld, est, mem, command: str,
@@ -909,7 +909,7 @@ def run_command_entity(fld, est, mem, command: str,
     # no-shell dialects that shared its 'word ::' shape are RETIRED (#576 G2): such
     # a line is refused here, before split_label could read `js::rm x` as label +
     # shell (#585 review)
-    if RETIRED_DIALECT.match(cmd):
+    if RETIRED_DIALECT.match(cmd) or RETIRED_DIALECT.match(split_label(cmd)[1]):
         return {"rc": 2, "outcome": "refused", "status": "blocked",
                 "error": "a retired dialect (llm:: / toybox:: / seat:: / js:: / self::): call the method instead "
                          "(llm.call / llm.wake, toybox.*, presence.restart; JS runs by exec(action='run', lang='js'))",
@@ -1842,7 +1842,9 @@ def ensure_write_method(srv, est, owner_eid: str, method: str, target: str, expr
         changed = bool(r.get("ok"))
         extra = [e for e in extra if e != r.get("eid")]
     if extra:                                    # an older seat's duplicate definitions resolve no more
-        est.remove_many(extra) if hasattr(est, "remove_many") else [est.remove(e) for e in extra]
+        # a duplicate goes with its step nodes (`<method eid>:<step>`), none orphaned
+        gone = extra + [e for e in list(est.docs or {}) if any(e.startswith(x + ":") for x in extra)]
+        est.remove_many(gone) if hasattr(est, "remove_many") else [est.remove(e) for e in gone]
         changed = True
     if changed:
         import sys
@@ -3048,7 +3050,10 @@ def remove_entity(est, spec: str, force: bool = False) -> dict:
                         for e in owned if (est.docs[e].properties or {}).get("method_name")})
         return {"removed": 0, "refused": f"{ent.eid} owns {len(names)} methods ({', '.join(names)}) -- "
                                          "force=true removes them with it"}
-    return {"removed": est.remove_many([ent.eid] + owned)}
+    # a forced single method takes its own step nodes too (an owner's already ride `owned`)
+    own_steps = ([e for e in list(est.docs or {}) if e.startswith(ent.eid + ":")]
+                 if (ent.properties or {}).get("method_of") else [])
+    return {"removed": est.remove_many([ent.eid] + owned + own_steps)}
 
 
 def short_name_of(obj) -> str:
