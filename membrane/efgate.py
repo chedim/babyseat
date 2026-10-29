@@ -68,28 +68,48 @@ def message_vec(field, text: str, embed_missing: bool = True):
     return unit(np.sum(vs, axis=0)) if vs else None
 
 
-def event_vec(field, key: str, ev: dict):
-    """The event as a whole, unit(sum of its sentence vectors): the vector
-    stored on the event when it was embedded (`wvec`, #690), else computed
-    from its sentences and written back when the store allows (an older
-    event). None when it has no sentences."""
+def event_vecs(field, items) -> dict:
+    """{event key: its whole vector} for (key, event) items: the vector
+    stored on the event (`wvec`, #690), else computed from its sentences --
+    ONE sentence batch for all the missing ones, kept in RAM for the run.
+    Recall never writes: back-filling an older event's vector one at a time
+    with a write each, during the person's turn, cost minutes on the live
+    seat after a restart (hotfix)."""
+    from collections import OrderedDict
+    from .cblstore import CACHE_N
     from .efield import whole_vec
-    w = ev.get("wvec")
-    if w:
-        return unpack_f16(w)
-    sids = list(dict.fromkeys(ev.get("sids") or []))
-    if not sids:
-        return None
-    w = whole_vec(field.b.get_multi("sentences", sids), sids)
-    if w is None:
-        return None
-    try:
-        cur = field.b.get("events", key)
-        if cur is not None and cur.get("sids") == ev.get("sids") and not cur.get("wvec"):
-            field.b.upsert("events", key, {**cur, "wvec": w})
-    except Exception:
-        pass                                  # read-only store: computed each time
-    return unpack_f16(w)
+    cache = field.__dict__.setdefault("_wvec_cache", OrderedDict())
+    out, missing = {}, []
+    for key, ev in items:
+        w = ev.get("wvec")
+        if w:
+            out[key] = unpack_f16(w)
+            continue
+        sids = list(dict.fromkeys(ev.get("sids") or []))
+        if not sids:
+            continue
+        ck = (key, len(sids), sids[0], sids[-1])
+        if ck in cache:
+            cache.move_to_end(ck)
+            out[key] = cache[ck]
+        else:
+            missing.append((key, sids, ck))
+    if missing:
+        rows = field.b.get_multi("sentences", list({s for _k, ss, _c in missing for s in ss}))
+        for key, sids, ck in missing:
+            w = whole_vec(rows, sids)
+            if w is None:
+                continue
+            v = unpack_f16(w)
+            out[key] = cache[ck] = v
+            while len(cache) > CACHE_N:
+                cache.popitem(last=False)
+    return out
+
+
+def event_vec(field, key: str, ev: dict):
+    """One event's whole vector (event_vecs for one), or None."""
+    return event_vecs(field, [(key, ev)]).get(key)
 
 
 def specifics(field, text: str) -> set:
@@ -157,8 +177,10 @@ def _user_events_near(field, qvec, k: int):
 def near_asks(field, qv, k: int = TOP_K) -> list[tuple[float, str, dict]]:
     """Earlier user asks by message similarity to qv, best first."""
     out = []
-    for key, d in _user_events_near(field, qv, k):
-        v = event_vec(field, key, d)
+    near = _user_events_near(field, qv, k)
+    vecs = event_vecs(field, near)                # one batch (hotfix)
+    for key, d in near:
+        v = vecs.get(key)
         if v is None:
             v = message_vec(field, d.get("text") or "", embed_missing=False)
         if v is not None:
