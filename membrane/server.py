@@ -1102,6 +1102,13 @@ def _tokens_estimate(history: list, parts: list) -> dict:
             "reasoning": rsn, "cache": {"read": 0, "write": 0}}
 
 
+def _step_tokens(a_info: dict, history: list, parts: list) -> dict:
+    """A step's tokens (#693): the ladder's usage when it gave any, else the
+    running estimate -- never the zeros the message opened with."""
+    tk = a_info.get("tokens") or {}
+    return dict(tk) if tk.get("total") else _tokens_estimate(history, parts)
+
+
 BUSY_WAIT_S = 300.0   # a queued second POST waits this long, then gets a visible busy stub
 DELTA_COALESCE_S = 0.25   # a streaming part's text goes out at most this often (was: every token)
 HEARTBEAT_S = 15.0    # busy-heartbeat cadence while a turn runs
@@ -2960,7 +2967,7 @@ class TurnRunner:
                                      part["state"].get("error") or "")[:8000],
                                     "name": name})
                 mkpart({"type": "step-finish", "reason": "tool-calls",
-                        "cost": 0, "tokens": dict(a_info["tokens"])})
+                        "cost": 0, "tokens": _step_tokens(a_info, history, parts)})
                 continue
             # the words after the last closed part (#467; all of them when no
             # call split the reply)
@@ -2989,7 +2996,7 @@ class TurnRunner:
                                   "sessionID": sid})
             a_info["finish"] = "stop"
             mkpart({"type": "step-finish", "reason": "stop", "cost": 0,
-                    "tokens": dict(a_info["tokens"])})
+                    "tokens": _step_tokens(a_info, history, parts)})
             break
         if "error" in a_info:
             a_info.pop("finish", None)

@@ -287,6 +287,17 @@ class TestTurnLoop(unittest.TestCase):
         st.patch(s["id"], "renamed")
         self.assertGreater(s["time"]["updated"], 10**12)
 
+    def test_step_finish_tokens_not_zero(self):
+        # #693: every step-finish carried zeros (the estimate only landed after the loop)
+        w = self._world([_resp(calls=[TOOLCALL]), _resp(content="done")])
+        w["t"].run(w["s"]["id"], "run it")
+        last = w["msgs"].list(w["s"]["id"])[-1]
+        fins = [p for p in last["parts"] if p["type"] == "step-finish"]
+        self.assertEqual(len(fins), 2)
+        for f in fins:
+            self.assertGreater(f["tokens"]["total"], 0)
+            self.assertGreater(f["tokens"]["input"], 0)
+
     def test_tool_round_trip(self):
         w = self._world([_resp(calls=[TOOLCALL]), _resp(content="done")])
         w["t"].run(w["s"]["id"], "run it")
