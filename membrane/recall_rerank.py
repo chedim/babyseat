@@ -8,10 +8,11 @@ on the Mac's GPU, ~3.3 GB of GPU memory while loaded (fp32; fp16 and bf16
 scored 173 and saved no memory as loaded).
 
 Optional: on where `sentence-transformers` is installed (the `rerank` extra),
-off with MEMBRANE_RERANK=0. The first call starts the load in the background
-and returns None; until the model is ready, or without it, the banner keeps
-the scorer's order. Once loaded it stays loaded (operator, 2026-10-29: no
-release). Calls are serialized: one model, one device."""
+off with MEMBRANE_RERANK=0. The seat starts the load in the background at
+boot, right after the field is up (warm()); until the model is ready, or
+without it, a call returns None and the banner keeps the scorer's order.
+Once loaded it stays loaded (operator, 2026-10-29: no release). Calls are
+serialized: one model, one device."""
 
 from __future__ import annotations
 
@@ -66,18 +67,36 @@ def _start() -> None:
     threading.Thread(target=_load, name="rerank-load", daemon=True).start()
 
 
-def scores(text: str, docs: list[str]) -> list[float] | None:
-    """One score per doc, or None (off, not installed, still loading, failed)."""
-    global _state
-    if not docs or os.environ.get("MEMBRANE_RERANK", "1") == "0":
-        return None
+def _wanted() -> bool:
+    if os.environ.get("MEMBRANE_RERANK", "1") == "0":
+        return False
     if not _installed():
         _say("off: sentence-transformers is not installed (pip install 'babyseat[rerank]')")
-        return None
+        return False
+    return True
+
+
+def _kick() -> None:
+    global _state
     with _lock:
         if _state == "idle":
             _state = "loading"
             _start()
+
+
+def warm() -> None:
+    """Start the load now (the seat calls it at boot, right after the field
+    is up), so the first topical turn after a restart does not pay for it."""
+    if _wanted():
+        _kick()
+
+
+def scores(text: str, docs: list[str]) -> list[float] | None:
+    """One score per doc, or None (off, not installed, still loading, failed)."""
+    if not docs or not _wanted():
+        return None
+    _kick()
+    with _lock:
         if _state != "ready":
             return None
         m = _model
