@@ -326,6 +326,10 @@ DIRECT_LABEL = {"model": "reply", "note": "note", "doc": "doc", "code": "code", 
 # top k, so a pile of near-identical log reads cannot push out what was
 # said, noted or coded (awaiting the operator's approval).
 TOOL_HITS_MAX = 4
+# the earlier-asks lane's width whatever the pool: it searches k*36 sentences
+# and re-reads each hit's vectors, so the banner's pool of 50 made it 16 of
+# a live turn's 20 s, for the same rows (#668; operator-approved)
+ASK_K = 3
 
 
 def _to_a_machine(field, ev: dict, cache: dict | None = None) -> bool:
@@ -770,7 +774,7 @@ def recall_answers(field, text: str, qvec=None, k: int = 3,
     qv = G.message_vec(field, text) if qvec is None else unit(qvec)
     question = ST.is_question_like(text)
     if qv is not None:
-        asks = past_answers(field, text, qv, k=k, sim_min=sim_min)
+        asks = past_answers(field, text, qv, k=min(k, ASK_K), sim_min=sim_min)
         direct = direct_answers(field, text, qv, k=k, sim_min=sim_min)
         tool_fn = globals().get("tool_answers")
         tools = (tool_fn(field, text, qv, k=min(k, globals().get("TOOL_HITS_MAX", k)),
