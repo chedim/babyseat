@@ -250,6 +250,11 @@ field holds for the person's **latest message** (no model call, no new lane).
    and saved no memory as loaded). The model loads in the background
    at boot, right after the field is up, and stays loaded; until it is ready, or without the extra, or with
    `MEMBRANE_RERANK=0`, the order is the scorer's (`recall_rerank.py`).
+   One copy per machine (#683): the seat that has the model loaded serves it to the other
+   seats on the machine (`POST /membrane/rerank`); a seat that needs it asks the same-host
+   seats first and calls the one serving instead of loading its own, and loads it itself
+   (and then serves) only when none is. If the serving seat is down, that call keeps the
+   scorer's order and the next call asks again.
 6. **One ranking for both readers:** `/membrane/ask`, the model's `query` tool, ranks
    with the same path (pool of 50 -> scorer -> reranker -> top k), not recall's raw order.
 
