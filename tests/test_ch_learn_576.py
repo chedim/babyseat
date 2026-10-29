@@ -245,3 +245,30 @@ def test_a_coincidence_of_types_is_not_a_copy_and_names_are_identifiers(world):
     assert all(t.properties["write"][1] != "x.a" for t in _cands(vm))
     _turn(est, vm, (x, "a", 2, "person:op"), (x, "odd-name", 3))
     assert all("odd-name" not in t.properties["write"][0] for t in _cands(vm))
+
+
+# ---- the learner's counts (a diagnostic: why Blurp earns nothing) ----
+
+def test_the_learner_counts_what_it_saw_and_why_it_passed(world):
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))                    # an LLM chain: seen, taught, one defined
+    _turn(est, vm, (x, "c", 3), writer="adapter:chat")          # Blurp's/an adapter's own write: passed
+    purse.awake = False
+    _turn(est, vm, (x, "d", 4), (x, "e", 5))                    # asleep: no guess
+    s = vm.learner.counts
+    assert s["seen"] >= 5
+    assert s["by_llm"] >= 4
+    assert s["pass:own_write"] >= 1
+    assert s["defined"] == 1
+    assert s["guess:asleep"] >= 1
+
+
+def test_no_chain_is_counted(world):
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    with W.as_writer("llm"):                                   # no W.source: the write has no chain
+        x.properties["a"] = 1
+        est.upsert(x)
+    vm.drain()
+    assert vm.learner.counts["pass:no_chain"] >= 1

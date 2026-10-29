@@ -223,6 +223,7 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
     - Unaccepted branches and shadow guesses stay silent.
     - `TurnRunner.run` records which conversation each turn's chain belongs to (`ch_blurp.note_turn`).
 - **The sheet.** The seat adds the branches as the skill tree, the **level** as the number of branches granted (the card too), and the **Code tab** as Blurp's triggers: their line, state (shadow / proposal), balance (in write costs), hits and firings.
+- **The learner's counts.** The card and the sheet carry `learner`: the writes it saw (`seen`, `by_llm`), why it passed the rest (`pass:own_write`, `pass:no_chain`, `pass:rel`, `pass:no_prop`), why a guess stopped (`guess:asleep`, `guess:chain_full`, `guess:no_entity`, `guess:trigger`, `guess:position`, `guess:odd_name`), what it defined or the VM refused, its firings (`fire`, `fire:skip`), its hits, and its live `candidates`. Counts are since the seat started (RAM). A Blurp that earns nothing can be read there.
 
 ## Scripts are graphs (#576, part G)
 

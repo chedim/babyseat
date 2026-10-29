@@ -226,3 +226,16 @@ def test_accept_keeps_a_branch_ids_case(tmp_path):
                                 _models_path=str(tmp_path / "m.json"), paused=False, efield=None)
     SL.bind(srv)
     assert SL.accept(srv, "branch:Component:toy")["id"] == "branch:Component:toy"
+
+
+def test_the_card_carries_the_learners_counts(seat):
+    """A diagnostic: the card says what the learner saw and why it passed, so a
+    Blurp that earns nothing can be read, not guessed."""
+    est = seat.entity_store
+    B.exchange(seat, {"awake": True, "mode": "on"})
+    e = _toy(est, "e")
+    _turn(seat, (e, "a", 1, "person:op"), (e, "b", 2, "llm"))
+    card = B.augment(seat, {"name": "Blurp", "level": 0})
+    assert card["level"] == 0
+    assert card["learner"]["seen"] >= 2 and card["learner"]["defined"] >= 1
+    assert card["learner"]["candidates"] >= 1

@@ -369,6 +369,9 @@ def augment(srv, sheet: dict) -> dict:
     out = dict(sheet)
     level = len(grants(srv))
     out["level"] = level
+    lr = srv.ch_vm.learner                             # what it saw and why it passed: a Blurp earning nothing is read, not guessed
+    out["learner"] = {**dict(lr.counts),
+                      "candidates": sum(1 for t in srv.ch_vm.triggers() if (t.properties or {}).get("owner") == CH.SELF)}
     if isinstance(out.get("header"), dict):
         out["header"] = {**out["header"], "level": level, "title": f"Lv {level}"}
     if "tree" in out or "header" in out:
