@@ -6,12 +6,12 @@ entity graph:
     name~:<prefix>           the eid/name's case-insensitive prefix
     parent:<spec>            rows whose PARENT CHAIN includes spec
     children:<spec>          the inverse (the ISA walk reversed)
-    near:<free text>         semantic nearness (the related lane's read)
+    near:<free text>         shares the text's words (name, summary, id), best first
     status:<s>               the properties.status filter
     <op>&<op>                conjunction; '|' disjunction (OR of filters)
     count: true (the param)  render 'N entity(ies)' instead of rows
 
-$0 (the RAM graph scan; no embedder without 'near:'). Rows carry
+$0 (the RAM graph scan; no embedder). Lists run newest first. Rows carry
 {eid, class, name, summary, count, parent}; the tool caps k (default
 20). Unknown verbs raise ValueError (the honest refusal).
 """
@@ -183,10 +183,26 @@ def _matches(est, ent, verb: str, val: str, near_fn=None) -> bool:
     if verb == "status":
         return (props.get("status") or "open").lower() == val.strip().lower()
     if verb == "near":
-        if near_fn is None:
-            return False
-        return near_fn(ent)
+        if near_fn is not None:
+            return near_fn(ent)
+        return near_score(ent, val) > 0
     raise ValueError(f"unknown query verb: {verb!r}; the grammar: {GRAMMAR}")
+
+
+# ---- near: the words it shares -------------------------------------------------
+def near_score(ent, text: str) -> int:
+    """How many of the text's content words the entity's name, summary and id
+    carry (stemmed, stopwords out: recall_banner.content_words). The cards
+    and most store entities carry no vector, so this is the nearness every
+    entity has; a near: query lists best first."""
+    from .recall_banner import content_words
+    q = set(content_words(text))
+    if not q:
+        return 0
+    props = ent.properties or {}
+    own = set(content_words(" ".join((str(props.get("name") or ""), str(props.get("summary") or ""),
+                                      ent.eid.replace("-", " ").replace(":", " ")))))
+    return len(q & own)
 
 
 # ---- the engine ---------------------------------------------------------------
@@ -199,9 +215,12 @@ def run(est, q: str, k: int = 20, count: bool = False,
     surfaces stop disagreeing because each query's universe is named."""
     blocks = parse(q)
     asks_guests = any(v == "guest" for terms in blocks for v, _ in terms)
+    near_text = " ".join(val for terms in blocks for v, val in terms if v == "near")
     rows: list[dict] = []
     total = 0
-    for ent in list(est.docs.values()):
+    # newest first (the store keeps insertion order): a fresh card is never
+    # past k behind older ones; a near: query re-sorts best first below
+    for ent in reversed(list(est.docs.values())):
         props = ent.properties or {}
         if not asks_guests and _is_guest(ent.eid, props):
             continue
@@ -213,8 +232,9 @@ def run(est, q: str, k: int = 20, count: bool = False,
         if not hit:
             continue
         total += 1
-        if not count and len(rows) < k:
-            rows.append({"eid": ent.eid, "class": ent.cls,
+        if not count and (near_text or len(rows) < k):
+            rows.append({"_near": near_score(ent, near_text) if near_text else 0,
+                         "eid": ent.eid, "class": ent.cls,
                          "name": str(props.get("name")
                                      or ent.eid[len(MEMBRANE_NS):]),
                          "summary": str(props.get("summary") or "")[:120],
@@ -223,6 +243,11 @@ def run(est, q: str, k: int = 20, count: bool = False,
                          "status": str(props.get("status") or "open")})
     if count:
         return f"{total} entity(ies)"
+    if near_text:
+        rows.sort(key=lambda r: -r["_near"])          # stable: newest first among equals
+    rows = rows[:k]
+    for r in rows:
+        r.pop("_near", None)
     return rows
 
 
