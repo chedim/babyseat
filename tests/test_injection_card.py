@@ -42,5 +42,23 @@ class TestInjectionCard(unittest.TestCase):
             self.assertFalse(any("battery sits near 92%" in str(m.get("content")) for m in msgs))
 
 
+    def test_the_card_shows_the_gate_time_not_0s(self):
+        # #693: the card was stamped start == end, so every step read "0s";
+        # it carries the time membrane spent preparing the round (the gate)
+        replies = [{"membrane": {"injection": "[membrane] from the field: the port is 11500", "gate_s": 57.65},
+                    "choices": [{"message": {"content": "done"}}]}]
+        r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(), lambda body: replies.pop(0),
+                          lambda *a: "ok", system="", model="m", tools=[])
+        sid = r.sessions.create(title="t")["id"]
+        out = r.run(sid, "which port?")
+        card = next(p for p in out["parts"] if p.get("type") == "tool" and p.get("tool") == "membrane")
+        for t in (card["time"], card["state"]["time"]):
+            self.assertEqual(t["end"] - t["start"], 57650)
+
+    def test_the_proxy_sends_the_gate_time_with_the_injection(self):
+        src = (Path(__file__).resolve().parent.parent / "membrane" / "lanes.py").read_text()
+        self.assertEqual(src.count('"gate_s": getattr(self, "_gate_s", None)'), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
