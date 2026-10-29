@@ -77,6 +77,66 @@ class TestCheck(unittest.TestCase):
                 {"mode": "git", "repo": dirty or pathlib.Path("."),
                  "branch": "main"}))
 
+    def _perform_with_ff(self, changed):
+        """Run perform() with a fake ff that changes `changed` files."""
+        calls = []
+
+        def fake_git(repo, *a, **k):
+            if a[:1] == ("status",):
+                return ""
+            if a[:1] == ("rev-parse",):
+                return "old" if not calls else "new"
+            if a[:1] == ("diff",):
+                return "\n".join(changed) + "\n"
+            return ""
+
+        def fake_run(cmd, *a, **k):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(update, "_git", side_effect=fake_git), \
+                mock.patch.object(update.subprocess, "run", side_effect=fake_run):
+            ok = update.perform({"mode": "git", "repo": pathlib.Path("/r"),
+                                 "branch": "main"})
+        return ok, calls
+
+    def test_ff_that_changes_pyproject_reinstalls_once(self):
+        ok, calls = self._perform_with_ff(["pyproject.toml", "a.py"])
+        self.assertTrue(ok)
+        pips = [c for c in calls if "pip" in c]
+        self.assertEqual(len(pips), 1)
+        self.assertEqual(pips[0][:4], [update.sys.executable, "-m", "pip", "install"])
+        self.assertIn("-e", pips[0])
+
+    def test_ff_without_pyproject_change_skips_install(self):
+        ok, calls = self._perform_with_ff(["a.py"])
+        self.assertTrue(ok)
+        self.assertFalse([c for c in calls if "pip" in c])
+
+    def test_failed_install_still_launches_and_says_why(self):
+        err = io.StringIO()
+
+        heads = iter(["old", "new"])
+
+        def fake_git(repo, *a, **k):
+            if a[:1] == ("status",):
+                return ""
+            if a[:1] == ("rev-parse",):
+                return next(heads)
+            return "pyproject.toml\n"
+
+        def fake_run(cmd, *a, **k):
+            return mock.Mock(returncode=1 if "pip" in cmd else 0,
+                             stdout="", stderr="boom")
+
+        with mock.patch.object(update, "_git", side_effect=fake_git), \
+                mock.patch.object(update.subprocess, "run", side_effect=fake_run), \
+                contextlib.redirect_stderr(err):
+            ok = update.perform({"mode": "git", "repo": pathlib.Path("/r"),
+                                 "branch": "main"})
+        self.assertTrue(ok)
+        self.assertIn("pip install", err.getvalue())
+
     def test_perform_ignores_non_git_modes(self):
         self.assertFalse(update.perform({"mode": "direct", "url": "x"}))
         self.assertFalse(update.perform({}))

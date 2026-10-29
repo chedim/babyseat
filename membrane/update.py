@@ -190,6 +190,7 @@ def perform(info: dict) -> bool:
         print(f"[membrane] update skipped: {repo} has uncommitted changes; "
               f"commit or stash, then `membrane update`", file=sys.stderr)
         return False
+    before = _git(repo, "rev-parse", "HEAD").strip()
     try:
         r = subprocess.run(
             ["git", "-C", str(repo), "pull", "--ff-only", branch],
@@ -201,7 +202,30 @@ def perform(info: dict) -> bool:
         print(f"[membrane] update failed (git pull --ff-only):\n{r.stderr}",
               file=sys.stderr)
         return False
+    _reinstall_if_deps_changed(repo, before)
     return True
+
+
+def _reinstall_if_deps_changed(repo: Path, before: str) -> None:
+    """A fast-forward that touched pyproject.toml may have added a
+    dependency: reinstall into THIS interpreter before the relaunch (#624).
+    A failed install never blocks the launch -- it says why on stderr."""
+    after = _git(repo, "rev-parse", "HEAD").strip()
+    if not before or before == after:
+        return
+    changed = _git(repo, "diff", "--name-only", before, after).split()
+    if "pyproject.toml" not in changed:
+        return
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "-e",
+                            str(repo)], capture_output=True, text=True,
+                           timeout=600)
+        err = r.stderr if r.returncode != 0 else ""
+    except Exception as e:
+        err = str(e)
+    if err:
+        print(f"[membrane] dependency reinstall failed (pip install -e "
+              f"{repo}); run it by hand:\n{err[-500:]}", file=sys.stderr)
 
 
 def _reexec() -> None:
