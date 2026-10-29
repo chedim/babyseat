@@ -976,6 +976,11 @@ def main() -> None:
         from .attention import AlertGate
         srv._attention_path = str(_wdir / "attention.json")
         srv._models_path = str(_wdir / "models.json")      # the minds' models
+        try:                                                # the saved picks, before any mind runs
+            from .minds_models import prime as _mm_prime
+            _mm_prime(srv)
+        except Exception as e:
+            print(f"[seat] minds' models not primed ({e})", file=sys.stderr)
         _saved = None
         if os.path.exists(srv._attention_path):
             _saved = _json.loads(open(srv._attention_path).read() or "{}")

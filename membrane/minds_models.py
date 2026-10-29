@@ -155,6 +155,23 @@ def apply(srv, loops: str | None = None, cortex: str | None = None,
     return read(srv)
 
 
+def prime(srv) -> None:
+    """Boot, as soon as the models path is known: the saved picks take effect
+    before any mind runs (no mirroring, no validation -- load() does both
+    later). Between the launch default and load(), a watch-loop fallback,
+    the thinker or the judges ran on the seat's 14b next to the saved 8b,
+    and Ollama evicted the embedder (2026-10-29)."""
+    path = getattr(srv, "_models_path", None)
+    try:
+        saved = json.load(open(path)) if path else {}
+    except (OSError, ValueError):
+        return
+    for mind in MINDS:
+        model = saved.get(mind)
+        if isinstance(model, str) and _NAME.match(model):
+            _set(srv, mind, model)
+
+
 def load(srv, cli_think: str | None = None) -> dict:
     """Boot: reapply the saved picks (nothing saved -> the boot's own). An
     explicit CLI think (on/off) beats the file; auto (the default) defers."""
