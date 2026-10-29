@@ -3758,6 +3758,14 @@ def _capture_tool_results(srv, body: dict) -> None:
         if cap is not None:               # the UNCLIPPED result, by call id
             cap.on_tool_result(cid, rec["name"], rec["args"], result, rec["query"])
         rec["result"] = result            # the receipt lane reads THIS
+        try:                              # #668: a memory search keeps the banner's pool for the labels
+            from . import recall_labels as _RL
+            if _RL.is_search(rec["name"], rec["args"]):
+                _conv = _CAPMOD.current_conversation()
+                _RL.note_search(_efield_on(srv), (getattr(srv, "_recall_prev", None) or {}).get(_conv),
+                                cid, _conv, result, time.time())
+        except Exception as e:
+            print(f"[recall-labels] note error: {e}", file=sys.stderr)
         srv._tool_results[cid] = rec      # result-side cache (bounded)
         if len(srv._tool_results) > 64:   # the bound: drop the oldest
             srv._tool_results.pop(next(iter(srv._tool_results)))

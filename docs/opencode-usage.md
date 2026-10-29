@@ -48,4 +48,7 @@ loopback serve server; other machines use the LAN address (`--listen-host 0.0.0.
 Each turn the banner ends with up to 12 `▸ #N (age, source) fact` lines: what the
 field holds for your latest message. `ok` or `1. yes` keeps the previous set. The
 chat's own last 8 turns are skipped, and near-duplicate lines collapse. The scorer's
-weights are the field entity `config/recall_scorer`; see `docs/entity-field.md`.
+weights are the field entity `config/recall_scorer`; see `docs/entity-field.md`. When the
+model searches after the banner and its answer uses a row the banner ranked low, that
+is a label: the night pass refits the weights from these, so the ordering adapts to
+how this seat is used.

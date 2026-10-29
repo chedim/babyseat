@@ -140,9 +140,9 @@ def score(feat: dict, weights: dict) -> float:
 def rank(rows: list[dict], text: str, weights: dict | None = None) -> list[dict]:
     """The pool, best first by the scorer (ties keep recall's order)."""
     w = weights or DEFAULT_WEIGHTS
-    scored = [(score(f, w), i, r) for i, (f, r) in enumerate(zip(features(rows, text), rows))]
+    scored = [(score(f, w), i, r, f) for i, (f, r) in enumerate(zip(features(rows, text), rows))]
     scored.sort(key=lambda t: (-t[0], t[1]))
-    return [dict(r, score=s) for s, _i, r in scored]
+    return [dict(r, score=s, feat=f) for s, _i, r, f in scored]
 
 
 def load_weights(field) -> dict:
@@ -154,8 +154,8 @@ def load_weights(field) -> dict:
     return {**DEFAULT_WEIGHTS, **{k: float(v) for k, v in ((doc or {}).get("weights") or {}).items()}}
 
 
-def save_weights(field, weights: dict) -> None:
-    field.b.upsert(CONFIG_COLL, CONFIG_KEY, {"weights": {k: float(v) for k, v in weights.items()}})
+def save_weights(field, weights: dict, meta: dict | None = None) -> None:
+    field.b.upsert(CONFIG_COLL, CONFIG_KEY, {**(meta or {}), "weights": {k: float(v) for k, v in weights.items()}})
 
 
 def fact_line(row: dict, text: str) -> str:
@@ -187,12 +187,13 @@ def recent_ns(field, session: str, n: int = RECENT_TURNS) -> set:
     return {d["n"] for d in rows[-n:]}
 
 
-def pick(rows: list[dict], text: str, n: int = BANNER_N, skip=(), weights: dict | None = None) -> list[dict]:
+def pick(rows: list[dict], text: str, n: int = BANNER_N, skip=(), weights: dict | None = None,
+         ranked: list[dict] | None = None) -> list[dict]:
     """The banner rows: ranked, the chat's own recent turns skipped,
     near-duplicate fact lines collapsed, at most n; each carries its 'fact'."""
     skip = set(skip)
     out, seen = [], []
-    for r in rank(rows, text, weights):
+    for r in (ranked if ranked is not None else rank(rows, text, weights)):
         if skip & (set(r.get("a_n") or []) | ({r["q_n"]} if r.get("q_n") is not None else set())):
             continue
         fact = fact_line(r, text)
@@ -221,9 +222,12 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
         return (list(prev["lines"]) if prev else []), prev
     from .entity_block import PAST_SIM_MIN, recall_answers
     pool = recall_answers(field, text, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
-    rows = pick(with_speakers(field, pool), text, n=n, skip=recent_ns(field, session), weights=load_weights(field))
+    ranked = rank(with_speakers(field, pool), text, load_weights(field))
+    rows = pick(ranked, text, n=n, skip=recent_ns(field, session), ranked=ranked)
     lines = [line_of(r, now) for r in rows]
-    return lines, {"lines": lines}
+    # the pool as the scorer ordered it: PR B's labels are made from it
+    snap = [{"feat": r["feat"], "fact": fact_line(r, text)} for r in ranked]
+    return lines, {"lines": lines, "pool": snap, "text": text, "session": session}
 
 
 def render(lines: list[str]) -> str | None:

@@ -152,12 +152,14 @@ def night(srv, fld, est, now: float | None = None) -> dict:
     except Exception as e:
         out["overlay"] = {"error": str(e)[:120]}
     from . import claims as CL
+    from . import recall_labels as RL
 
     def commons():
         return CL.promote_commons(fld.b)
     for name, step in (("births", lambda: [a["eid"] for a in births(fld, est)]),
                        ("junk", lambda: len(junk(fld))),
-                       ("commons", commons)):
+                       ("commons", commons),
+                       ("recall", lambda: RL.night(fld, now))):
         try:
             out[name] = step()
         except Exception as e:
