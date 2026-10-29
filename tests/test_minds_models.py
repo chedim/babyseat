@@ -85,3 +85,34 @@ class TestMindsModels(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPrimeAtBoot(unittest.TestCase):
+    """The saved picks apply the moment the models path is known, not a
+    minute later: a watch-loop fallback, the thinker or the judges that ran
+    in between used the launch default (qwen3:14b next to the saved 8b), and
+    Ollama evicted the embedder (2026-10-29)."""
+
+    def test_prime_applies_the_saved_cortex_and_loops(self):
+        import json as _j
+        import tempfile as _t
+        from types import SimpleNamespace
+        d = _t.mkdtemp()
+        p = os.path.join(d, "models.json")
+        open(p, "w").write(_j.dumps({"cortex": "qwen3:8b", "loops": "claude-agent:sonnet"}))
+        srv = SimpleNamespace(idle_cortex_model="qwen3:14b", _models_path=p)
+        MM.prime(srv)
+        self.assertEqual(srv.idle_cortex_model, "qwen3:8b")
+        self.assertEqual(srv._minds_picked["loops"], "claude-agent:sonnet")
+
+    def test_prime_with_no_file_changes_nothing(self):
+        from types import SimpleNamespace
+        srv = SimpleNamespace(idle_cortex_model="qwen3:14b", _models_path="/nonexistent/models.json")
+        MM.prime(srv)
+        self.assertEqual(srv.idle_cortex_model, "qwen3:14b")
+
+    def test_the_seat_primes_right_after_the_models_path(self):
+        src = (Path(__file__).resolve().parent.parent / "membrane" / "opencode.py").read_text()
+        i = src.index('srv._models_path = str(_wdir / "models.json")')
+        self.assertLess(i, src.index("prime(srv)"))
+        self.assertLess(src.index("prime(srv)"), src.index("Thinker(srv)"))
