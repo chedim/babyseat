@@ -3116,6 +3116,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
     `cell` = the late-bound runner (the boot wires it after TurnRunner
     exists -- the ladder's construction precedes the runner)."""
     import json as _json
+    from . import writes as _W
 
     def call(body: dict) -> dict:
         sid = None
@@ -3129,7 +3130,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
         data = _json.dumps(body).encode()
         req = urllib.request.Request(
             url, data=data, method="POST",
-            headers={"Content-Type": "application/json", **_JWT.internal_headers()})
+            headers={"Content-Type": "application/json", **_JWT.internal_headers(),
+                     **_W.headers()})          # the turn's chain + writer: the handler resumes them (Blurp's learner links writes by chain)
         try:
             with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
                 return _json.loads(resp.read())
@@ -3175,7 +3177,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
     def _stream_once(body: dict, on_event):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/chat/completions", data=_json.dumps(body).encode(),
-            method="POST", headers={"Content-Type": "application/json", **_JWT.internal_headers()})
+            method="POST", headers={"Content-Type": "application/json", **_JWT.internal_headers(),
+                                    **_W.headers()})       # as the buffered call: the turn's chain + writer
         seen: dict = {}                      # this round's last usage (#472)
         try:
             return _read_stream(req, on_event, seen)
