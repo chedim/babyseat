@@ -1757,11 +1757,7 @@ your side is refused and costs Blurp energy. Rolling it back works as below.
   counts: a reply is a person's roll within 30 seconds of self's (#278). Self
   checks the cycle it sees the ball back (or after 30 s), and never rolls
   again before that check.
-- **Turns in seconds** (#278). The ball has its own clock: roll it back and
-  self's next roll comes in seconds (it may also wait up to a few minutes for
-  the moment it has learned gets the ball back; 20 s at the earliest, 5 min
-  at the latest). It never rolls while the ball is on your side, except to
-  fetch it once 5 minutes have passed.
+
 - **Chat goes quiet.** From rung 7 until rung 11 (speak) opens, self sends no
   more "self is here" lines. Once speak opens its turns come back to chat,
   some of them with words (#311, [the ladder](#the-ladder)). Rung 6 (meet an other) was met in chat and stays

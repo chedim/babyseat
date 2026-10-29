@@ -19,8 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-PANELS = [ROOT / "membrane" / "ui" / "panel.js",
-          ROOT / "integrations" / "homeassistant" / "custom_components" / "ai_terminal" / "www" / "panel.js"]
+PANELS = [ROOT / "membrane" / "ui" / "panel.js"]
 
 
 def _tab(panel: Path, code: str):
