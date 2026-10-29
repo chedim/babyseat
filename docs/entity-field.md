@@ -219,6 +219,11 @@ field holds for the person's **latest message** (no model call, no new lane).
    lanes still read the message alone. One with no topic ("ok", "1. yes", "thanks!": fewer
    than 0.3 of its tokens are content words) keeps this chat's previous set.
 2. **Candidates:** `recall_answers`' top 50 rows, from the existing lanes.
+   Each event keeps its whole vector (`wvec`, the sum of its sentence vectors,
+   #690): written when its sentences are embedded, and stored once on older
+   events by a background pass after the seat boots (`backfill_wvec`, 500 a
+   batch, atomic per event). Recall never writes; an event without one yet is
+   computed in one batch per lane and kept in RAM for the run.
    The earlier-asks lane stays 3 wide whatever the pool (`ASK_K`): widened to
    50 it searched 1,800 sentences and took 16 of a live turn's 20 s for the
    same rows.
