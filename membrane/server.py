@@ -2206,7 +2206,7 @@ class TurnRunner:
         except Exception:
             pass
 
-        # MEMBRANE ONLY (membrane_only: the legacy ai_terminal panel's LLM switch
+        # MEMBRANE ONLY (membrane_only: the old HA panel's LLM switch
         # off -- the seat's own chat has no such switch since #318): the voice
         # answers, the model is never called; the voice still hears the operator
         if user_info.get("membraneOnly"):
@@ -4377,7 +4377,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     "agent": body.get("agent") or "build",
                     "model": model,
                     "time": {"created": now}, "summary": {"diffs": []}}
-            # "membrane only" (the legacy ai_terminal panel's LLM switch): the voice answers alone
+            # "membrane only" (the old HA panel's LLM switch): the voice answers alone
             if body.get("membrane_only") is True:
                 info["membraneOnly"] = True
             # VOICE IN (voice_io.py): a spoken message -- it starts the turn like

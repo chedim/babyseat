@@ -29,7 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CC = ROOT / "custom_components" / "membrane"
 PKG = ROOT / "membrane"
-WWW = ROOT / "integrations" / "homeassistant" / "custom_components" / "ai_terminal" / "www"
+WWW = ROOT / "assets"      # git-ignored; built by scripts/build-voice-ml.sh + fetch-voice-model.sh
 DIST = ROOT / "dist"
 sys.path.insert(0, str(ROOT))
 from membrane.assets import MANIFEST  # noqa: E402

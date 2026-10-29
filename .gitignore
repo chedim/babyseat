@@ -76,3 +76,6 @@ recon.txt
 # Couchbase Lite libraries (scripts/fetch-cbl.sh)
 vendor/cbl/
 dist/
+
+# voice assets built by scripts/build-voice-ml.sh + fetch-voice-model.sh (not committed)
+/assets/

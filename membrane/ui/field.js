@@ -1,7 +1,7 @@
 /**
  * <membrane-field-panel>: the brain's field as a 2D map (2026-10-08).
  *
- * Data (through the ai_terminal proxy, GET only): serve/membrane/map/field
+ * Data (from the seat, GET only): serve/membrane/map/field
  * (the field's live entities + their relations + every node's value on
  * every axis: PC1..8, kind directions, mass/recency/age/activity/
  * coherence/degree), serve/membrane/state + serve/agent (the HUD).

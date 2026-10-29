@@ -53,9 +53,8 @@ from . import settings as S
 from .speakers import STANDALONE_PREFIX, id_line, strip_speaker_lines
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
-# a checkout's HA integration: the big models live there (git-ignored, not packaged)
-DEV_WWW = (Path(__file__).resolve().parent.parent / "integrations" / "homeassistant"
-           / "custom_components" / "ai_terminal" / "www")
+# a checkout's assets/: the big voice models live there (git-ignored, not packaged)
+DEV_WWW = Path(__file__).resolve().parent.parent / "assets"
 TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
          ".mjs": "application/javascript; charset=utf-8", ".wasm": "application/wasm",
          ".gz": "application/gzip", ".json": "application/json", ".css": "text/css; charset=utf-8",
