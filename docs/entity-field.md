@@ -207,6 +207,36 @@ last 2h ago; latest: <the newest sentence that moved it>`, with boundary
 alerts on the mention count, and the now-line listing the entities moved
 most this session.
 
+### The banner is recall (#668)
+
+After the chat block, the banner carries a `RECALL` block: the best rows the
+field holds for the person's **latest message** (no model call, no new lane).
+
+1. **Query:** the message. One with no topic ("ok", "1. yes", "thanks!": fewer
+   than 0.3 of its tokens are content words) keeps this chat's previous set.
+2. **Candidates:** `recall_answers`' top 50 rows, from the existing lanes.
+3. **Order:** a pointwise logistic scorer over features recall already has:
+   cosine, 1/rank, BM25 and content-word overlap with the message, speaker
+   (the row's event was said by a person the message names: the event's own
+   speaker entity), the best similarity among neighbouring turns in the pool.
+   No length feature (on a seat long rows are tool dumps). The weights live in the field, not in code:
+   collection `config`, key `recall_scorer` (`recall_banner.load_weights` /
+   `save_weights`). The starting weights are #664's arm 4 (pointwise logistic regression, fit
+   on LoCoMo conversations 2-9, 1301 questions, over these exact features):
+   on the held-out conversations 0-1 hit@8 goes 153 -> 173 and hit@20
+   188 -> 192. The night refit (a later PR) moves them from what the model's
+   own searches use.
+4. **Lines:** the top 12 rows, one fact line each (the row's sentence nearest
+   the message, 200 chars), skipping the current chat's own last 8 turns (the
+   echo failure of #649) and collapsing near-duplicates (word overlap >= 0.8).
+
+`recall_banner.py` holds the constants (12 / 50 / 0.3 and arm 4's weights on
+#668; echo window 8, dedupe 0.8, clip 200 on the PR 669 review: all
+operator-approved). The block sits outside the 900-char chat budget: at most
+12 lines, about 2.8k characters (~700 tokens) at the clip, less in practice.
+Cost: the warm build is ~60-90 ms on a 4,500-event field (recall's pool scan
+indexes each session once and tests IN lists as sets).
+
 ## The division of hands (2026-10-06)
 
 The native serve's turn lane carries the session's **agent**, and the

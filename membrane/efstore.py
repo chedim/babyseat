@@ -439,6 +439,18 @@ class MemBackend:
         THE SNAPSHOT (the 'Set changed size during iteration' flood):
         the matches+sort run on a COPY taken under the RAM lock --
         another thread's upsert mid-scan never tears the iteration."""
+        if eq:
+            # an IN list is tested once per row: a set makes that O(1), not
+            # O(len) (a 600-sentence IN made recall's pool scan 0.4 s, #668)
+            fixed = {}
+            for f, w in eq.items():
+                if isinstance(w, (list, tuple)):
+                    try:
+                        w = frozenset(w)
+                    except TypeError:
+                        pass
+                fixed[f] = w
+            eq = fixed
         with self._ram_lock:
             c = self._c(coll)
             keys = None

@@ -237,6 +237,8 @@ it), `STABLE` (facts seen in 3 chats over 2 days, never contradicted),
 `SINCE YOUR LAST MESSAGE` (focus entities moved from outside the chat),
 alerts and a pointer to `state(section=...)`. Each record line says its
 source and age, e.g. `(person · 2h ago)` ([details](docs/entity-field.md#this-conversation)).
+After it, a `RECALL` block (#668): the 12 best rows the field holds for your latest
+message, one fact line each, ordered by a scorer whose weights live in the field.
 
 **With tools,** the model gets membrane's MCP surface: `query` and `state` to
 read the field (`state(section=...)` pulls one part of the seat's WHERE WE ARE:
