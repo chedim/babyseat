@@ -163,7 +163,20 @@ HELP = {
         "target's getter -- a tick that reads an entity keeps it live; run=True runs it now), "
         "membrane.timeline.walk(n), membrane.field.recall/vitals, membrane.me, membrane.intents.open, "
         "membrane.speak(text), membrane.call_llm(prompt), membrane.wake(at, prompt). "
-        "Rewriting a script clears its cooldowns. A real cooldown says 'retry in Ns'."),
+        "Rewriting a script clears its cooldowns. A real cooldown says 'retry in Ns'. "
+        "Budgets: the getter 10s; the trigger scripts are narrow (tick 0.25s, mention/thought/dreamed "
+        "0.25s/1s/2s). The rest of `result`: run=true (the engine runs the entity's own command), "
+        "delete (a delete_script only: retires the entity, tombstoned and announced), intent (a goal "
+        "text your script plants when it sees the shape of ongoing work: the engine creates or pins a "
+        "shared Goal and pins the seat's active set -- the dream loop's steering; plant sparingly), "
+        "chat / voice (a message to a person, to: '<person>', default whoever chatted last: posted "
+        "into their latest chat or spoken on their voice:out; at most once per 30s per entity, never "
+        "the same line twice). A nudge's render replaces the track's default banner line. "
+        "Publishing: your entity store is LOCAL (authoritative, never auto-synced); publish=True "
+        "exports the entity under pub:<origin>:<eid> with a version line (republishing bumps it); "
+        "seats that imported it take each newer STATE within a minute (a seat that edited its copy "
+        "keeps its edit), never your code; unpublish=True retracts your export (imports freeze at "
+        "their last version). membrane::presence is published for you once a minute."),
     "exec": (
         "RUN CODE: exec(action='run', code='ls -la ..') -- the code becomes a tree of entities in "
         "the field (one per node, shared wherever the same code appears) and its root is linked "
