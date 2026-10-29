@@ -39,6 +39,7 @@ STATUS_IN_FLIGHT = "in_flight"
 STATUS_DECIDED = "decided"
 STATUS_CLOSED = "closed"
 STATUS_DROPPED = "dropped"
+PLANTED_BY_LOOP = "loop"          # card.planted_by: a watch loop asked it
 STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_DECIDED, STATUS_CLOSED, STATUS_DROPPED)
 AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_CLOSED)    # what entity_edit may set
 LOCKED = (STATUS_CLOSED, STATUS_DROPPED)
@@ -172,6 +173,47 @@ def _shown(value, var: dict) -> str:
     return f"{s} {unit}" if unit else s
 
 
+def _announce(est, props: dict, ev: dict) -> None:
+    """Tell someone a card was decided or dropped. A card a WATCH LOOP planted
+    reports to the loops' events pool (the loop that asked picks it up); every
+    other card tells the CHAT: ``est._decision_chat(text, ev)`` posts one
+    message and starts one turn (the proxy wires it). With no chat wired the
+    pool is the fallback, so the answer is never lost."""
+    sink = getattr(est, "_decision_chat", None)
+    if sink is not None and props.get("planted_by") != PLANTED_BY_LOOP:
+        title, value = ev.get("title") or ev.get("entity"), ev.get("value", "?")
+        text = f"decided: {title} = {value} (card '{ev.get('entity')}')"
+        if value == "dropped":
+            text = f"dropped: {title} (card '{ev.get('entity')}')"
+        if ev.get("work_needed"):
+            text += " -- it needs work: set its status to in_flight, do the work, then set its receipt and status closed"
+        if ev.get("blocks"):
+            text += f". It blocks: {', '.join(map(str, ev['blocks']))}"
+        try:
+            sink(text, ev)
+            return
+        except Exception:
+            pass
+    pool = getattr(est, "_events_pool", None)
+    if pool is not None:
+        pool.put(ev)
+
+
+def stamp_planter(est, res: dict) -> None:
+    """A new Decision card records who planted it: ``loop`` when the writer is a
+    watch loop's turn, else ``chat``. A card that already has a planter keeps it."""
+    from . import writes as _W
+    from .entities import CLASS_DECISION
+    if est is None or not res.get("ok"):
+        return
+    ent = est.resolve(str(res.get("eid") or ""), exact=True)
+    if ent is None or ent.cls != CLASS_DECISION or (ent.properties or {}).get("planted_by"):
+        return
+    p = dict(ent.properties or {})
+    p["planted_by"] = PLANTED_BY_LOOP if _W.writer() == "llm:loop" else "chat"
+    est.edit(ent.eid, properties={"planted_by": p["planted_by"]})
+
+
 def set_chat(est, spec: str, chat: str) -> dict:
     """Record the chat a card opened (the board's click): only the `chat`
     property changes, and a card keeps the chat it already has."""
@@ -246,11 +288,9 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
             p["speculative_discarded"] = p.pop(SPECULATIVE)
     ent.properties = p
     est.upsert(ent)
-    pool = getattr(est, "_events_pool", None)   # the watcher loops' events pool (the proxy wires it)
-    if pool is not None:                        # the answer wakes a loop pass, like a fired watch
-        pool.put({"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
-                  "blocks": p.get("blocks") or [], "work_needed": work is True,
-                  "speculative_kept": spec_kept, "ts": time.time()})
+    _announce(est, p, {"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
+                       "blocks": p.get("blocks") or [], "work_needed": work is True,
+                       "speculative_kept": spec_kept, "ts": time.time()})
     return {"ok": True, "card": _card_of(ent)}
 
 
@@ -271,11 +311,9 @@ def drop(est, spec: str) -> dict:
                   "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
         ent.properties = p
         est.upsert(ent)
-        pool = getattr(est, "_events_pool", None)
-        if pool is not None:
-            pool.put({"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
-                      "value": "dropped", "blocks": p.get("blocks") or [],
-                      "work_needed": False, "ts": time.time()})
+        _announce(est, p, {"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
+                           "value": "dropped", "blocks": p.get("blocks") or [],
+                           "work_needed": False, "ts": time.time()})
         return {"ok": True, "card": _card_of(ent)}
 
 

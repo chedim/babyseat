@@ -337,6 +337,24 @@ def recent_person(srv) -> str:
     return str(own[-1]["owner"]) if own else ""
 
 
+def wake_chat(srv, text: str) -> str:
+    """Post a user-role line into the chat that is ACTIVE in this seat (the one
+    last updated, whoever owns it -- the person who answered is there) and
+    start ONE turn on it (a card was decided or dropped). Returns the session
+    id ('' = no chat to tell). The turn it starts can answer or drop nothing
+    (only the owner does), so it cannot start another."""
+    r = _runner(srv)
+    rows = [s for s in _chats(srv) if not s.get("blurp")]
+    sid = rows[-1]["id"] if rows and r is not None else ""
+    if not sid:
+        return ""
+    info, parts = r._mint_user_row(sid, text)
+    from . import writes as _W
+    threading.Thread(target=_W.carry(lambda: r.run(sid, text, user_info=info, user_parts=parts)),
+                     daemon=True, name="decision-chat-turn").start()
+    return sid
+
+
 SELF_MARK = "\U0001F331"           # a sprout: a line self pushed (#208), not the seat's own
 BLURP_TAG = "blurp:"               # #337: the field's session tag for Blurp's private chat
 

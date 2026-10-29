@@ -2013,6 +2013,11 @@ def main() -> None:
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
+            def _decision_to_chat(text, ev, _srv=srv):
+                from . import chat_io as _CIO
+                if not _CIO.wake_chat(_srv, text):       # no chat to tell: the loops' pool hears it
+                    raise RuntimeError("no chat")
+            srv.entity_store._decision_chat = _decision_to_chat
             try:                                   # #570: an older seat's session per wake, collapsed
                 _gone = collapse_loop_sessions(runner)
                 if _gone:

@@ -6957,6 +6957,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         self._entity_audit("add", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
+        from . import decision_map as _DM
+        _DM.stamp_planter(est, res)
         _entity_post_process(srv, res)
         self._json_out(res)
 

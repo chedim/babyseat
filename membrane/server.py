@@ -1453,7 +1453,8 @@ class TurnRunner:
         """#576: the turn writes as the model, in the chain that woke it (a
         loop's event) or a new one a person's message starts."""
         from . import writes as _W
-        with _W.turn(sid):
+        from .jobs import _is_loop as _loop_sid
+        with _W.turn(sid, "llm:loop" if _loop_sid(self, sid) else "llm"):    # a loop's card says so
             from . import ch_blurp as _CHB             # #576 H: this turn's chain is this conversation's
             _CHB.note_turn((_W.current() or {}).get("id"), "sid:" + str(sid))
             return self._run(sid, text, user_info=user_info, user_parts=user_parts, _drained=_drained)
