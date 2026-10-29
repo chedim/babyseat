@@ -230,7 +230,7 @@ field holds for the person's **latest message** (no model call, no new lane).
    on the held-out conversations 0-1, hit@8 goes 153 -> 169 and hit@20
    175 -> 187 (recall with #539's entity lane and #532's whole-event score;
    without them 106 -> 148). The spread lane of `recall-fuse` adds +2 at twice
-   the recall time and is not merged. The night refit (a later PR) moves them from what the model's
+   the recall time and is not merged. The night refit (below) moves them from what the model's
    own searches use.
 4. **Lines:** the top 12 rows, one fact line each (the row's sentence nearest
    the message, 200 chars), skipping the current chat's own last 8 turns (the
@@ -242,6 +242,34 @@ operator-approved). The block sits outside the 900-char chat budget: at most
 12 lines, about 2.8k characters (~700 tokens) at the clip, less in practice.
 Cost: the warm build is ~60-90 ms on a 4,500-event field (recall's pool scan
 indexes each session once and tests IN lists as sets).
+
+### The banner learns from use (#668, step 6)
+
+When the model **searches** (`query`, or `find` on memory) after the banner, the
+banner missed or ranked too low. `recall_labels.py` keeps what is needed to learn
+from it:
+
+1. **At the search:** the banner's pool (each row's features and fact line, in the
+   scorer's order) and the search result go to the field, collection
+   `recall_labels`, as an open record.
+2. **When the reply lands:** the pool row whose words are in BOTH the search result
+   and the model's reply (at least 60% of its content words) is the positive; the
+   rows the scorer ranked above it are negatives (near copies of the positive
+   excluded). Found AND used, not every read. A positive that is not in the pool is a
+   recall miss: nothing for the scorer to learn, but the record is kept as a `miss`
+   (the ask and the result sentences the reply used, by the same 60% rule;
+   `recall_labels.misses`), so a learned query map can read them later (operator,
+   2026-10-29). A reply that uses neither, or no reply within a day, drops the record.
+3. **The night pass** (`efmind.night`, step `recall`) resolves open records, deletes
+   labels older than 90 days, and, once there are 20 positives and labels the last
+   fit had not seen, refits: a weighted logistic fit (damped Newton) pulled toward
+   the current weights by one pseudo-label, a label's weight halving every 14 days.
+   The result is written to `config/recall_scorer` (with `fit_n`, `fit_ts`,
+   `fit_pos`), so the seat's own use replaces the starting weights.
+
+The constants (wait 1 day, 60% use share, 14-day half-life, 90-day keep, 20
+positives, 1 pseudo-label) are in `recall_labels.py` and wait for the operator's
+approval on the PR.
 
 ## The division of hands (2026-10-06)
 
