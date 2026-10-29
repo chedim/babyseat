@@ -95,12 +95,14 @@ class TestReads(unittest.TestCase):
         EB.direct_answers(f, Q, qvec=qv, sim_min=0)
         self.assertLess(with_w, f.b.rows)
 
-    def test_older_event_scores_and_is_backfilled(self):
+    def test_older_event_scores_without_a_write(self):
+        # the hotfix: recall computes an older event's vector (one batch, kept
+        # in RAM) and never writes it back during a turn
         f = _field()
         self._strip(f)
-        EB.direct_answers(f, Q, sim_min=0)
+        self.assertTrue(EB.direct_answers(f, Q, sim_min=0))
         got = [d for _k, d in _events(f) if d.get("role") == "model"]
-        self.assertTrue(got and all(d.get("wvec") for d in got))
+        self.assertTrue(got and not any(d.get("wvec") for d in got))
 
     def test_readonly_store_just_computes(self):
         f = _field()

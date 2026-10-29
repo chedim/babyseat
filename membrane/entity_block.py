@@ -377,9 +377,10 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
     live = [(key, d) for key, d in evs.items()
             if d.get("role") in DIRECT_ROLES and d.get("status") == "applied"
             and not _title_like(d) and not _to_a_machine(field, d, machine_cache)]
+    vecs = G.event_vecs(field, live)            # stored (#690), else one batch (hotfix)
     for key, d in live:
         best = max((hits[s] for s in d.get("sids") or [] if s in hits), default=None)
-        wv = G.event_vec(field, key, d)         # stored on the event (#690)
+        wv = vecs.get(key)
         if wv is not None:
             whole = float(wv @ qv)
             best = whole if best is None else max(best, whole)
