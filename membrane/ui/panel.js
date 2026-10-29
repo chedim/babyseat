@@ -2617,7 +2617,7 @@ function definePanel() {
       try {
         const conf = await this._api("/ui/conf");
         if (!conf.ok || !conf.data || !conf.data.serve_ok) {
-          this._err("brain lane off: set ai_terminal serve_url + serve_pass in configuration.yaml");
+          this._err("brain lane off: the seat is unreachable (check its address and password)");
           return;
         }
         this._foot.textContent = conf.data.serve_url;

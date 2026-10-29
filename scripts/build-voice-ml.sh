@@ -2,9 +2,9 @@
 # The in-browser ML bundle for membrane home (2026-10-10): transformers.js
 # (Apache-2.0; whisper speech-to-text on the device) + kokoro-js (Apache-2.0)
 # and ONE onnxruntime-web (MIT) runtime. Built, not committed (28 MB of wasm);
-# deploy.sh ships whatever is in www/.
+# build_release.py packs whatever is in assets/.
 set -e
-HERE="$(cd "$(dirname "$0")/.." && pwd)"; W="$HERE/custom_components/ai_terminal/www"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"; W="$HERE/assets"; mkdir -p "$W"
 T=$(mktemp -d); cd "$T"
 npm init -y >/dev/null
 npm install --silent @huggingface/transformers@3 kokoro-js esbuild

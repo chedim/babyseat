@@ -72,11 +72,10 @@ recon.txt
 :memory:
 :memory:.*
 *.migrated
-integrations/homeassistant/custom_components/ai_terminal/www/vosk-model-en.tar.gz
-integrations/homeassistant/custom_components/ai_terminal/www/ort-wasm-simd-threaded.jsep.wasm
-integrations/homeassistant/custom_components/ai_terminal/www/ort-wasm-simd-threaded.jsep.mjs
-integrations/homeassistant/custom_components/ai_terminal/www/voice-ml.mjs
 
 # Couchbase Lite libraries (scripts/fetch-cbl.sh)
 vendor/cbl/
 dist/
+
+# voice assets built by scripts/build-voice-ml.sh + fetch-voice-model.sh (not committed)
+/assets/

@@ -1,7 +1,7 @@
 /**
  * The Membrane Field in 3D (2026-10-08, viewer v3): the WHOLE field, live.
  *
- * Data (ai_terminal proxy, GET only):
+ * Data (the seat, GET only):
  *   serve/membrane/map/field3d?axes=...   the projection: pid, n_total, kinds
  *   serve/membrane/map/tile?pid&l&x&y&z   one octree cell's entities + edges
  *   serve/membrane/map/locate?pid&eid     where an entity sits
