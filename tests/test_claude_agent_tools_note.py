@@ -188,3 +188,15 @@ def test_the_note_maps_the_doctrine_families_to_the_tools():
         assert fam in T.FAMILIES, fam
         legs = T.FAMILIES[fam]["actions"]
         assert (legs[act] == name) if act else (name in legs.values()), (fam, act, name)
+
+
+def test_the_note_names_the_real_tools():
+    """2026-10-29: 112 of Memo's 1,621 tool calls (7%) failed as "No such
+    tool available" -- mostly a bare `bash` (Claude Code's own Bash is off;
+    membrane's is mcp__membrane__bash). The Claude-only note says the real
+    names, near its start."""
+
+    from membrane import claude_agent as CA
+    head = CA.TOOLS_NOTE[:600]
+    assert CA.TOOL_PREFIX + "<name>" in head
+    assert "no plain bash or query" in head

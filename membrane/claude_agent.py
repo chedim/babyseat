@@ -697,9 +697,9 @@ def build_mcp_server(sdk, port, answer=None):
 # only tool names to go on Claude told the operator it had "no tools to work".
 # Fixed text, after the stable system prompt, so the prompt cache still holds.
 TOOLS_NOTE = (
-    "Your tools: Claude Code's own tools (Read, Edit, Bash...) are off; "
-    "membrane's tools are your hands, and your work is programming the field "
-    "(the doctrine: a library, not one-shots). There are no one-shot "
+    "Your tools: Claude Code's own (Read, Edit, Bash...) are off; membrane's, "
+    "named " + TOOL_PREFIX + "<name> (no plain bash or query), are your hands, "
+    "and your work is programming the field. There are no one-shot "
     "commands: program the field first, then use it. Before anything new, "
     "find what you have (entity_query, graph, method_inspect) and call it. "
     "To run code, code_run (or bash) it: it becomes a tree of entities in the field, "
