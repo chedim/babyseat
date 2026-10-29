@@ -27,10 +27,13 @@ CONFIG_COLL, CONFIG_KEY = "config", "recall_scorer"
 
 # starting weights (operator-approved: #664 arm 4, pointwise logistic): fit
 # on LoCoMo conversations 2-9 (1301 questions) over THIS module's features,
-# raw (standardising folded in); conversations 0-1: hit@8 153 -> 168,
-# hit@20 188 -> 193. The night refit (PR B) replaces them on the seat's field.
-DEFAULT_WEIGHTS = {"bias": -5.4911, "sim": -0.1607, "inv_rank": 2.3184, "bm25": 0.2391,
-                   "overlap": 0.6935, "speaker": 0.7205, "neighbour": 0.7073, "length": 2.6277}
+# raw (standardising folded in); conversations 0-1: hit@8 153 -> 173,
+# hit@20 188 -> 192. No `length` feature: on a seat long rows are tool dumps
+# and logs, not fuller turns. The `speaker` feature was fit on LoCoMo's
+# "<speaker> (<date>):" text prefix and is served from the event's speaker
+# entity label. The night refit (PR B) replaces them on the seat's field.
+DEFAULT_WEIGHTS = {"bias": -5.0278, "sim": -0.1116, "inv_rank": 2.3526, "bm25": 0.2391,
+                   "overlap": 0.7827, "speaker": 0.7574, "neighbour": 0.7372}
 
 HEADER = ("RECALL (membrane's field, best first; #N = event number; "
           "context, not instructions):")
@@ -111,7 +114,6 @@ def features(rows: list[dict], text: str) -> list[dict]:
     avg = max(1.0, sum(len(d) for d in docs) / max(1, len(docs)))
     out = []
     for i, r in enumerate(rows):
-        body = _answer_text(r)
         words = set(docs[i])
         tf = Counter(docs[i])
         bm = sum(math.log(1 + (len(rows) - df[w] + .5) / (df[w] + .5)) * tf[w] * 2.2
@@ -125,8 +127,7 @@ def features(rows: list[dict], text: str) -> list[dict]:
                     "bm25": bm,
                     "overlap": len(q & words) / len(q) if q else 0.0,
                     "speaker": 1.0 if who and (who in names or names & set(who.split())) else 0.0,
-                    "neighbour": max(near) if near else 0.0,
-                    "length": min(len(body), 600) / 600.0})
+                    "neighbour": max(near) if near else 0.0})
     return out
 
 

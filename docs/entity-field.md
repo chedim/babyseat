@@ -218,13 +218,13 @@ field holds for the person's **latest message** (no model call, no new lane).
 3. **Order:** a pointwise logistic scorer over features recall already has:
    cosine, 1/rank, BM25 and content-word overlap with the message, speaker
    (the row's event was said by a person the message names: the event's own
-   speaker entity), the best similarity among neighbouring turns in the pool,
-   and length. The weights live in the field, not in code:
+   speaker entity), the best similarity among neighbouring turns in the pool.
+   No length feature (on a seat long rows are tool dumps). The weights live in the field, not in code:
    collection `config`, key `recall_scorer` (`recall_banner.load_weights` /
    `save_weights`). The starting weights are #664's arm 4 (pointwise logistic regression, fit
    on LoCoMo conversations 2-9, 1301 questions, over these exact features):
-   on the held-out conversations 0-1 hit@8 goes 153 -> 168 and hit@20
-   188 -> 193. The night refit (a later PR) moves them from what the model's
+   on the held-out conversations 0-1 hit@8 goes 153 -> 173 and hit@20
+   188 -> 192. The night refit (a later PR) moves them from what the model's
    own searches use.
 4. **Lines:** the top 12 rows, one fact line each (the row's sentence nearest
    the message, 200 chars), skipping the current chat's own last 8 turns (the
