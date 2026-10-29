@@ -621,10 +621,21 @@ def _blocks_prompt(blocks):
 
 # ---- membrane's tools, served to the SDK in-process (#389) ----------------------
 
+# #569: a watch/goal loop pass needs the look/act core, not the watch-planting,
+# tracking and tuning tools; their schemas ride every step of a pass.
+_LOOP_HIDDEN = frozenset({
+    "attention", "junk_cut", "field_watch", "entity_watch", "entity_unwatch",
+    "entity_tracks", "graph", "entities_related", "entity_inherit",
+    "method_each", "peer_post"})
+
+
 def tool_names() -> list[str]:
     """allowed_tools: exactly membrane's MCP tools, as the SDK names them."""
     from . import mcp_server as _mcp
     hide = _coproc_hidden()
+    from . import diag_requests as _dr
+    if _dr.current().get("lane") == "loop":
+        hide = hide | _LOOP_HIDDEN
     return [TOOL_PREFIX + t["name"] for t in _mcp.TOOLS if t["name"] not in hide]
 
 
