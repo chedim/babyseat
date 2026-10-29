@@ -45,6 +45,7 @@ class TestRank(unittest.TestCase):
 
     def test_constants(self):
         self.assertEqual(RR.RERANK_TOP, 20)
+        self.assertEqual(RR.MAX_LEN, 128)
         self.assertIn("bge", RB.RERANK_WEIGHTS)
 
 

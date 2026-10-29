@@ -21,7 +21,8 @@ import threading
 
 MODEL = "BAAI/bge-reranker-v2-m3"
 RERANK_TOP = 20           # rows reranked: the scorer's top 20 (operator-approved)
-MAX_LEN = 512             # tokens per (message, answer) pair, the model card's
+MAX_LEN = 128             # tokens per (message, answer) pair (operator-approved): LoCoMo
+                          # 179 at 128, 256 and 512; 20 long seat rows 0.42 s at 128, 1.72 s at 512
 
 _lock = threading.Lock()  # the state
 _run = threading.Lock()   # one predict at a time
