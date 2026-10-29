@@ -893,13 +893,14 @@ def render_past(rows: list[dict], budget: int = 1600, now: float | None = None) 
 
 
 def render_for(field, text: str, qvec=None, budget: int = 2400, k: int = 5,
-               rows: list[dict] | None = None) -> str | None:
+               rows: list[dict] | None = None, entities: bool = True) -> str | None:
     """The full ask-time block: past answers first (they answer), then the
     entities (they ground and correct). `rows`: the banner's top rows for
     this same message (recall_banner.build's state), so recall runs once a
     turn, not twice (#668); without them, recall runs here."""
     past = render_past(rows if rows is not None else recall_answers(field, text, qvec), budget=budget // 2)
-    ents = render(entities_for(field, text, qvec, k), budget - (len(past) + 2 if past else 0))
+    ents = (render(entities_for(field, text, qvec, k), budget - (len(past) + 2 if past else 0))
+            if entities else None)
     return "\n\n".join(x for x in (past, ents) if x) or None
 
 
