@@ -255,9 +255,11 @@ from it:
 2. **When the reply lands:** the pool row whose words are in BOTH the search result
    and the model's reply (at least 60% of its content words) is the positive; the
    rows the scorer ranked above it are negatives (near copies of the positive
-   excluded). Found AND used, not every read. A reply that uses no pool row, or no
-   reply within a day, drops the record. A positive that is not in the pool is a
-   recall miss: nothing for the scorer to learn.
+   excluded). Found AND used, not every read. A positive that is not in the pool is a
+   recall miss: nothing for the scorer to learn, but the record is kept as a `miss`
+   (the ask and the result sentences the reply used, by the same 60% rule;
+   `recall_labels.misses`), so a learned query map can read them later (operator,
+   2026-10-29). A reply that uses neither, or no reply within a day, drops the record.
 3. **The night pass** (`efmind.night`, step `recall`) resolves open records, deletes
    labels older than 90 days, and, once there are 20 positives and labels the last
    fit had not seen, refits: a weighted logistic fit (damped Newton) pulled toward

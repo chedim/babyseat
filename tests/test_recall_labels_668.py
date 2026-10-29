@@ -88,9 +88,9 @@ class TestNoteAndResolve(unittest.TestCase):
         f = mk_field()
         key = RL.note_search(f, self.state(), "c1", "conv", "Caroline adopted a rescue dog named Max", T0)
         self.assertTrue(key)
-        self.assertEqual(RL.resolve(f, T0 + 10), {"done": 0, "dropped": 0, "open": 1})
+        self.assertEqual(RL.resolve(f, T0 + 10), {"done": 0, "dropped": 0, "open": 1, "miss": 0})
         reply_in(f, "s:1:a", T0 + 5, "Caroline adopted a rescue dog named Max.")
-        self.assertEqual(RL.resolve(f, T0 + 10), {"done": 1, "dropped": 0, "open": 0})
+        self.assertEqual(RL.resolve(f, T0 + 10), {"done": 1, "dropped": 0, "open": 0, "miss": 0})
         self.assertEqual(RL.examples(f, T0 + 10)[-1]["y"], 1)
         self.assertEqual(len(RL.examples(f, T0 + 10)), 2)
 
@@ -103,8 +103,25 @@ class TestNoteAndResolve(unittest.TestCase):
         f = mk_field()
         RL.note_search(f, self.state(), "c1", "conv", "Caroline adopted a rescue dog named Max", T0)
         reply_in(f, "s:1:a", T0 + 5, "Nothing relevant came back.")
-        self.assertEqual(RL.resolve(f, T0 + 10), {"done": 0, "dropped": 1, "open": 0})
+        self.assertEqual(RL.resolve(f, T0 + 10), {"done": 0, "dropped": 1, "open": 0, "miss": 0})
         self.assertEqual(RL.examples(f, T0 + 10), [])
+
+    def test_a_used_result_outside_the_pool_is_kept_as_a_miss(self):
+        # operator, 2026-10-29: the search found and the reply used something
+        # the banner's pool never had -- a recall miss, kept (for a learned
+        # query map later), never a scorer label
+        f = mk_field()
+        key = RL.note_search(f, self.state(), "c1", "conv",
+                             "#41 Melanie painted a sunset over the lake last week.", T0)
+        reply_in(f, "s:1:a", T0 + 5, "She said Melanie painted a sunset over the lake last week.")
+        self.assertEqual(RL.resolve(f, T0 + 10), {"done": 0, "dropped": 0, "open": 0, "miss": 1})
+        rec = f.b.get(RL.COLL, key)
+        self.assertEqual(rec["status"], "miss")
+        self.assertEqual(rec["text"], "what dog did Caroline adopt?")
+        self.assertIn("Melanie painted a sunset", rec["used"])
+        self.assertNotIn("pool", rec)
+        self.assertEqual(RL.examples(f, T0 + 10), [])
+        self.assertEqual(RL.misses(f), [rec])
 
 
 def fake_examples(n_pos, good="overlap"):

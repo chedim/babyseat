@@ -83,10 +83,25 @@ def _reply(field, session: str, after: float) -> str | None:
     return " ".join(d["text"] for d in rows[:REPLY_EVENTS]) or None
 
 
+def used_outside(found: str, reply: str) -> list[str]:
+    """The search result's sentences the reply uses (the USED_MIN rule a pool
+    row faces; sentences under 5 words skipped, as past_answers skips them)."""
+    rw = set(RB.content_words(reply))
+    out = []
+    for x in RB._SENT.split(found or ""):
+        x = x.strip()
+        if len(x.split()) >= 5 and _cov(set(RB.content_words(x)), rw) >= USED_MIN:
+            out.append(x)
+    return out
+
+
 def resolve(field, now: float) -> dict:
     """Label the open records whose reply has landed; drop the unanswered ones
-    past WAIT_S and the ones whose reply used no pool row."""
-    out = {"done": 0, "dropped": 0, "open": 0}
+    past WAIT_S. A reply that used no pool row but used the search's result is
+    a recall MISS (operator, 2026-10-29): kept with the ask and the used
+    sentences, for a learned query map later, never a scorer label. A reply
+    that used neither is dropped."""
+    out = {"done": 0, "dropped": 0, "open": 0, "miss": 0}
     for key, rec in list(field.b.scan(COLL, {"status": "open"})):
         reply = _reply(field, rec.get("session") or "", float(rec.get("ts") or 0)) if rec.get("session") else None
         if reply is None:
@@ -98,8 +113,15 @@ def resolve(field, now: float) -> dict:
             continue
         ex = label(rec.get("pool") or [], rec.get("found") or "", reply)
         if ex is None:
-            field.b.upsert(COLL, key, {"status": "dropped", "ts": rec.get("ts"), "done_ts": now})
-            out["dropped"] += 1
+            used = used_outside(rec.get("found") or "", reply)
+            if used:
+                field.b.upsert(COLL, key, {"status": "miss", "ts": rec.get("ts"), "done_ts": now,
+                                           "conv": rec.get("conv"), "session": rec.get("session"),
+                                           "text": rec.get("text") or "", "used": " ".join(used)[:FOUND_CHARS]})
+                out["miss"] += 1
+            else:
+                field.b.upsert(COLL, key, {"status": "dropped", "ts": rec.get("ts"), "done_ts": now})
+                out["dropped"] += 1
         else:
             field.b.upsert(COLL, key, {"status": "done", "ts": rec.get("ts"), "done_ts": now, "examples": ex})
             out["done"] += 1
@@ -115,6 +137,11 @@ def labelled(field) -> tuple[list[dict], list[float]]:
             ex.append(e)
             stamp.append(float(d.get("done_ts") or d.get("ts") or 0))
     return ex, stamp
+
+
+def misses(field) -> list[dict]:
+    """The kept recall misses (the ask, the result sentences the reply used), oldest first."""
+    return sorted((d for _k, d in field.b.scan(COLL, {"status": "miss"})), key=lambda d: float(d.get("done_ts") or 0))
 
 
 def examples(field, now: float | None = None) -> list[dict]:
