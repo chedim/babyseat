@@ -54,3 +54,28 @@ class TestSurfaceNames(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEntityEditSchemaSize(unittest.TestCase):
+    """#569: entity_edit's description rides every Claude first step
+    (~1.5K tokens); keep it short and point at help('scripts')."""
+
+    def _tool(self):
+        return next(t for t in M.TOOLS if t["name"] == "entity_edit")
+
+    def test_description_is_short(self):
+        self.assertLess(len(self._tool()["description"]), 2000)
+
+    def test_description_keeps_essentials(self):
+        d = self._tool()["description"]
+        for word in ("nudge_script", "tick_script", "getter_script",
+                     "publish", "merged_into", "scripts"):
+            self.assertIn(word, d)
+
+    def test_every_property_is_still_advertised(self):
+        props = self._tool()["inputSchema"]["properties"]
+        for k in ("spec", "summary", "links", "class", "merged_into",
+                  "nudge_script", "delete_script", "mention_script",
+                  "thought_script", "dreamed_script", "tick_script",
+                  "getter_script", "watch_script", "publish", "unpublish"):
+            self.assertIn(k, props)
