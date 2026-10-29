@@ -82,6 +82,39 @@ class TestLoader(unittest.TestCase):
             self.assertEqual(RR.scores("q", ["ab", "abcd"]), [2.0, 4.0])
 
 
+class TestBootWarm(unittest.TestCase):
+    """The seat starts the load at boot, right after the field is up, not on
+    the first topical turn (operator, 2026-10-29): the first turns after a
+    restart paid for it on top of the cold field."""
+
+    def setUp(self):
+        self._state = (RR._state, RR._model)
+        RR._state, RR._model = "idle", None
+
+    def tearDown(self):
+        RR._state, RR._model = self._state
+
+    def test_warm_starts_the_load_once(self):
+        with mock.patch.object(RR, "_installed", return_value=True), mock.patch.object(RR, "_start") as st:
+            RR.warm()
+            RR.warm()
+            self.assertIsNone(RR.scores("q", ["d"]))
+        st.assert_called_once()
+
+    def test_warm_is_a_no_op_when_off_or_missing(self):
+        with mock.patch.dict("os.environ", {"MEMBRANE_RERANK": "0"}), \
+                mock.patch.object(RR, "_installed", return_value=True), mock.patch.object(RR, "_start") as st:
+            RR.warm()
+        st.assert_not_called()
+        with mock.patch.object(RR, "_installed", return_value=False), mock.patch.object(RR, "_start") as st:
+            RR.warm()
+        st.assert_not_called()
+
+    def test_the_seat_warms_it_after_the_field(self):
+        src = (Path(__file__).parent.parent / "membrane" / "opencode.py").read_text()
+        self.assertLess(src.index("_LX.warm(srv.efield)"), src.index("recall_rerank.warm()"))
+
+
 class TestAskUsesTheRanking(unittest.TestCase):
     def test_membrane_ask_reads_the_banner_ranking(self):
         from membrane import opencode as oc

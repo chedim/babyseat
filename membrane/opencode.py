@@ -1061,6 +1061,13 @@ def main() -> None:
                 _LX.warm(srv.efield)
             except Exception as e:
                 print(f"[seat] word index off ({e})", file=sys.stderr)
+            # THE RERANKER (#680): its model loads in the background now,
+            # not on the first topical turn after a restart
+            try:
+                from . import recall_rerank
+                recall_rerank.warm()
+            except Exception as e:
+                print(f"[seat] reranker warm skipped ({e})", file=sys.stderr)
             # the tool-output chunks (#429) are read only on question-like
             # asks: build their vector matrix now, not on the first question
             _wv = getattr(srv.efield.b, "warm_vectors", None)
