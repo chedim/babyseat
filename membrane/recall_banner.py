@@ -285,7 +285,10 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
               "pick": t5 - t4, "rows": len(pool)}
     # the pool as the scorer ordered it: PR B's labels are made from it
     snap = [{"feat": r["feat"], "fact": fact_line(r, text)} for r in ranked]
-    return lines, {"lines": lines, "pool": snap, "text": text, "session": session, "timing": timing}
+    # the top rows (recall_answers' own default count) for the ask-time
+    # block's past answers: entity_block.render_for reuses them (#668)
+    top = [r for r in ranked[:3]]
+    return lines, {"lines": lines, "pool": snap, "text": text, "session": session, "timing": timing, "top": top}
 
 
 def render(lines: list[str]) -> str | None:

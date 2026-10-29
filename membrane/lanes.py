@@ -386,6 +386,15 @@ def _efield_on(srv):
     return fld if fld is not None and getattr(cap, "mode", "off") == "on" else None
 
 
+def _banner_top(srv, query: str):
+    """The banner's top rows for this chat when they were built for this same
+    message (render_for reuses them, #668); None otherwise (recall runs)."""
+    st = (getattr(srv, "_recall_prev", None) or {}).get(_CAPMOD.current_conversation())
+    if st and st.get("top") is not None and " ".join((st.get("text") or "").split()) == " ".join((query or "").split()):
+        return st["top"]
+    return None
+
+
 def _own_session_prefix(srv) -> str:
     """The session ids this seat's live capture writes ('s:<boot>:')."""
     cap = getattr(srv, "capturer", None)
@@ -5642,7 +5651,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                     from .entity_block import reconstruct, render_for
                     # this chat's own history (#668): the boot prefix mixed every chat
                     recon = reconstruct(fld, _own_session_prefix(srv), conv=_CAPMOD.current_conversation())
-                    eblock = render_for(fld, query, vec)
+                    eblock = render_for(fld, query, vec, rows=_banner_top(srv, query))
                     if eblock:
                         recon = (recon + "\n\n" + eblock) if recon else eblock
                 except Exception as e:

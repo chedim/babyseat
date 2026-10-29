@@ -252,3 +252,28 @@ class TestHistoryTurn(unittest.TestCase):
                         "and which port does that broker listen on?"])
         got = RB.history_texts(f, "s:1:a", "and which port does that broker listen on?")
         self.assertEqual(got, ["It goes to the boat/bilge MQTT topic on the phone seat."])
+
+
+class TestRenderForReusesTheBanner(unittest.TestCase):
+    """The ask-time block's past answers are the banner's own top rows for
+    the same message, not a second recall (~1.6 s a turn, #668)."""
+
+    def test_build_keeps_its_top_rows(self):
+        f = field_with(["where is the bilge pump alarm published?",
+                        "It goes to the boat/bilge MQTT topic on the phone seat."])
+        _lines, state = RB.build(f, "which topic carries the bilge pump alarm?", session="s:1:a")
+        self.assertIn("top", state)
+        self.assertLessEqual(len(state["top"]), 3)
+
+    def test_render_for_takes_given_rows_without_recall(self):
+        from unittest import mock
+        from membrane import entity_block as EB
+        f = field_with(["where is the bilge pump alarm published?",
+                        "It goes to the boat/bilge MQTT topic on the phone seat."])
+        _lines, state = RB.build(f, "which topic carries the bilge pump alarm?", session="s:1:a")
+        with mock.patch.object(EB, "recall_answers", side_effect=AssertionError("recall ran twice")):
+            EB.render_for(f, "which topic carries the bilge pump alarm?", rows=state["top"])
+
+    def test_the_proxy_passes_the_banner_rows(self):
+        src = (Path(__file__).parent.parent / "membrane" / "lanes.py").read_text()
+        self.assertIn("render_for(fld, query, vec, rows=_banner_top(srv, query))", src)
