@@ -219,11 +219,26 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
     keeps the previous set."""
     if not has_topic(text):
         return (list(prev["lines"]) if prev else []), prev
+    import time as _t
+    from . import efgate as G
     from .entity_block import PAST_SIM_MIN, recall_answers
-    pool = recall_answers(field, text, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
-    rows = pick(with_speakers(field, pool), text, n=n, skip=recent_ns(field, session), weights=load_weights(field))
+    t0 = _t.monotonic()
+    qv = G.message_vec(field, text)                  # once: recall reuses it
+    t1 = _t.monotonic()
+    pool = recall_answers(field, text, qvec=qv, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
+    t2 = _t.monotonic()
+    spk = with_speakers(field, pool)
+    t3 = _t.monotonic()
+    skip = recent_ns(field, session)
+    t4 = _t.monotonic()
+    rows = pick(spk, text, n=n, skip=skip, weights=load_weights(field))
+    t5 = _t.monotonic()
     lines = [line_of(r, now) for r in rows]
-    return lines, {"lines": lines}
+    # where a rebuild's time went (the live seat paid 15-175 s where a lone
+    # process pays ~0.6 s): conv_banner.recall_lines logs it per rebuild
+    timing = {"vec": t1 - t0, "recall": t2 - t1, "speakers": t3 - t2, "recent": t4 - t3,
+              "pick": t5 - t4, "rows": len(pool)}
+    return lines, {"lines": lines, "timing": timing}
 
 
 def render(lines: list[str]) -> str | None:
