@@ -276,4 +276,38 @@ class TestRenderForReusesTheBanner(unittest.TestCase):
 
     def test_the_proxy_passes_the_banner_rows(self):
         src = (Path(__file__).parent.parent / "membrane" / "lanes.py").read_text()
-        self.assertIn("render_for(fld, query, vec, rows=_banner_top(srv, query))", src)
+        self.assertIn("render_for(fld, query, vec, rows=_banner_top(srv, query), entities=False)", src)
+
+
+class TestReuseMatchesAcrossTheSpeakerLine(unittest.TestCase):
+    """The banner builds from the raw message ('[user: Dima] ...'); the gate's
+    query has the speaker line cut -- the reuse never matched and recall ran
+    twice every turn (2026-10-29 profile)."""
+
+    def test_banner_top_matches_with_or_without_the_speaker_line(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from membrane import lanes as L
+        srv = SimpleNamespace(_recall_prev={"sid:x": {"text": "[user: Dima] which port does the proxy use?",
+                                                      "top": [{"a_n": [1]}]}})
+        with mock.patch.object(L._CAPMOD, "current_conversation", return_value="sid:x"):
+            self.assertEqual(L._banner_top(srv, "which port does the proxy use?"), [{"a_n": [1]}])
+            self.assertIsNone(L._banner_top(srv, "something else entirely?"))
+
+
+class TestNoContextDropsTheEntitiesSection(unittest.TestCase):
+    """No-context mode: the ask-time block keeps its past answers and drops
+    the ENTITIES section -- the banner's RECALL and the conversation block
+    cover it (operator, 2026-10-29); ~1 s and ~600 tokens a turn."""
+
+    def test_render_for_without_entities_runs_no_entity_view(self):
+        from unittest import mock
+        from membrane import entity_block as EB
+        f = field_with(["where is the bilge pump alarm published?",
+                        "It goes to the boat/bilge MQTT topic on the phone seat."])
+        with mock.patch.object(EB, "entities_for", side_effect=AssertionError("entity views ran")):
+            EB.render_for(f, "where is the bilge pump alarm published?", entities=False)
+
+    def test_the_no_context_path_asks_for_no_entities(self):
+        src = (Path(__file__).parent.parent / "membrane" / "lanes.py").read_text()
+        self.assertIn("render_for(fld, query, vec, rows=_banner_top(srv, query), entities=False)", src)
