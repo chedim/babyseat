@@ -30,7 +30,7 @@ for remote clients — attach a TUI only where you want a display.
 | `--tool-keep N` | `3` | most recent tool results kept |
 | `--compact-model MODEL` | — | model used for compacting context |
 | `--idle-cortex-model MODEL` | — | model for idle background mind |
-| `--with-context` / `--no-context` | on | pass membrane context to model turns |
+| `--no-context` / `--with-context` | `--no-context` | the transcript before the current turn is not replayed to the model: continuity comes from the field (the conversation block + recall). `--with-context` or `MEMBRANE_NO_CONTEXT=0` keeps the client's history |
 | `--no-viewer` | off | don't serve the universe map viewer |
 | `--no-banner` | off | suppress startup banner |
 | `--open` | off | open the universe map in the browser on start |

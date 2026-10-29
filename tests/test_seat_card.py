@@ -113,24 +113,25 @@ def _parse(argv, env):
 
 
 class TestNoContextEnvDefault(unittest.TestCase):
-    """MEMBRANE_NO_CONTEXT=1 makes the stateless seat the default for any
-    spawner; the flags still win both ways."""
+    """The stateless seat is the default (operator, 2026-10-29: the field is
+    the memory, the transcript is not replayed); MEMBRANE_NO_CONTEXT=0 or
+    --with-context keeps it; the flags still win both ways."""
 
-    def test_off_by_default(self):
-        self.assertFalse(_parse([], {}).no_context)
+    def test_on_by_default(self):
+        self.assertTrue(_parse([], {}).no_context)
 
-    def test_flag_turns_it_on(self):
-        self.assertTrue(_parse(["--no-context"], {}).no_context)
+    def test_with_context_turns_it_off(self):
+        self.assertFalse(_parse(["--with-context"], {}).no_context)
 
-    def test_env_turns_it_on(self):
-        self.assertTrue(_parse([], {"MEMBRANE_NO_CONTEXT": "1"}).no_context)
-
-    def test_env_zero_stays_off(self):
+    def test_env_zero_turns_it_off(self):
         self.assertFalse(_parse([], {"MEMBRANE_NO_CONTEXT": "0"}).no_context)
 
-    def test_with_context_overrides_env(self):
-        self.assertFalse(_parse(["--with-context"],
-                                {"MEMBRANE_NO_CONTEXT": "1"}).no_context)
+    def test_env_one_stays_on(self):
+        self.assertTrue(_parse([], {"MEMBRANE_NO_CONTEXT": "1"}).no_context)
+
+    def test_no_context_overrides_env_zero(self):
+        self.assertTrue(_parse(["--no-context"],
+                               {"MEMBRANE_NO_CONTEXT": "0"}).no_context)
 
 
 if __name__ == "__main__":
