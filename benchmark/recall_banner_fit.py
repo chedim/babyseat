@@ -39,14 +39,15 @@ if __name__=='__main__':
     w,b=fit(np.vstack(Xs),np.concatenate(ys))
     W={'bias':float(b),**{k:float(v) for k,v in zip(KEYS,w)}}
     h8=b8=h20=b20=0; perq=[]
-    for q,ev,hs in te:
+    for n,(q,ev,hs) in enumerate(te):
         r=RB.rank(rows_of(hs),q,W); 
         hit=lambda ords,k: any(set(hs[i]['events'])&ev for i in ords[:k])
         idx={tuple(x['a_n']):i for i,x in enumerate(rows_of(hs))}
         order=[ [i for i,x in enumerate(hs) if sorted(x['events'])==rr['a_n']][0] for rr in r]
-        perq.append({'q':q,'base8':bool(hit(range(N),8)),'scorer8':bool(hit(order,8))})
+        perq.append({'i':n,'base8':bool(hit(range(N),8)),'scorer8':bool(hit(order,8))})
         h8+=hit(order,8); h20+=hit(order,20); b8+=hit(range(N),8); b20+=hit(range(N),20)
     print('train q',len(tr),'test q',len(te),'baseline',b8,b20,'scorer',h8,h20)
     print(json.dumps(W))
 
-    json.dump(perq,open(os.environ.get('PERQ','benchmark/recall_banner_perq.json'),'w'))
+    if os.environ.get('PERQ'):        # outside the repo: LoCoMo has no license, its text is never committed
+        json.dump(perq,open(os.environ['PERQ'],'w'))
