@@ -236,6 +236,18 @@ field holds for the person's **latest message** (no model call, no new lane).
    the message, 200 chars), skipping the current chat's own last 8 turns (the
    echo failure of #649) and collapsing near-duplicates (word overlap >= 0.8).
 
+5. **Reranker (#680, optional):** with the `rerank` extra installed, bge-reranker-v2-m3
+   (BAAI, Apache-2.0) reads the message with each of the scorer's top 20 rows and adds
+   its score as the feature `bge`; those 20 are re-ordered by `RERANK_WEIGHTS` (fit
+   with it on LoCoMo conversations 2-9) and the rows below keep their place. On the
+   held-out conversations 0-1, hit@8 goes 169 -> 178. Cost: ~0.25 s per topical turn
+   on the Mac's GPU and ~3.3 GB of GPU memory while loaded (fp32: fp16 and bf16 scored 173
+   and saved no memory as loaded). The model loads in the background
+   on first use and stays loaded; until it is ready, or without the extra, or with
+   `MEMBRANE_RERANK=0`, the order is the scorer's (`recall_rerank.py`).
+6. **One ranking for both readers:** `/membrane/ask`, the model's `query` tool, ranks
+   with the same path (pool of 50 -> scorer -> reranker -> top k), not recall's raw order.
+
 `recall_banner.py` holds the constants (12 / 50 / 0.3 and arm 4's weights on
 #668; echo window 8, dedupe 0.8, clip 200 on the PR 669 review: all
 operator-approved). The block sits outside the 900-char chat budget: at most

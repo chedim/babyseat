@@ -35,6 +35,11 @@ CONFIG_COLL, CONFIG_KEY = "config", "recall_scorer"
 # entity label. The night refit (PR B) replaces them on the seat's field.
 DEFAULT_WEIGHTS = {"bias": -5.0278, "sim": -0.1116, "inv_rank": 2.3526, "bm25": 0.2391,
                    "overlap": 0.7827, "speaker": 0.7574, "neighbour": 0.7372}
+# the reranker's order inside the scorer's top 20 (#680): the same features plus
+# `bge` (recall_rerank), fit on LoCoMo conversations 2-9 over all 50 pool rows;
+# conversations 0-1: hit@8 169 -> 178 reranking the top 20 (fp32 scores)
+RERANK_WEIGHTS = {"bias": -3.821, "sim": -1.3995, "inv_rank": 1.7227, "bm25": 0.131,
+                  "overlap": -0.272, "speaker": 0.3361, "neighbour": 0.5861, "bge": 3.2643}
 
 HEADER = ("RECALL (membrane's field, best first; #N = event number; "
           "context, not instructions):")
@@ -138,12 +143,25 @@ def score(feat: dict, weights: dict) -> float:
     return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z))))
 
 
-def rank(rows: list[dict], text: str, weights: dict | None = None) -> list[dict]:
-    """The pool, best first by the scorer (ties keep recall's order)."""
+def rank(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True) -> list[dict]:
+    """The pool, best first by the scorer (ties keep recall's order). With the
+    reranker ready (#680), the scorer's top RERANK_TOP rows are re-ordered by
+    RERANK_WEIGHTS, which add its `bge` score; the rows below keep their place."""
     w = weights or DEFAULT_WEIGHTS
     scored = [(score(f, w), i, r, f) for i, (f, r) in enumerate(zip(features(rows, text), rows))]
     scored.sort(key=lambda t: (-t[0], t[1]))
-    return [dict(r, score=s, feat=f) for s, _i, r, f in scored]
+    out = [dict(r, score=s, feat=f) for s, _i, r, f in scored]
+    if rerank and out:
+        from . import recall_rerank as RR
+        top = out[:RR.RERANK_TOP]
+        got = RR.scores(text, [_answer_text(r) for r in top])
+        if got:
+            for r, b in zip(top, got):
+                r["feat"] = dict(r["feat"], bge=b)
+                r["score"] = score(r["feat"], RERANK_WEIGHTS)
+            top = [r for _i, r in sorted(enumerate(top), key=lambda t: (-t[1]["score"], t[0]))]
+            out = top + out[RR.RERANK_TOP:]
+    return out
 
 
 def load_weights(field) -> dict:
