@@ -561,7 +561,9 @@ def _rows_from_hits(field, ix, hits, text: str, qv, k: int, tools_ok: bool, how:
         d = field.b.get("events", ek)
         if _machine(field, d):
             continue                            # a reply to a receipt or a notice
-        matched = sorted({w for i in dids for w in LX.tokens(_doc_text(field, ix, i))} & qwords)
+        # from the index's postings: re-reading each hit's text cost ~600
+        # cold reads a turn on the banner's pool of 50 (#668)
+        matched = sorted(set().union(*(ix.words_in(i, qwords) for i in dids)))
         row = _word_row(field, ek, d, roles[ek], [ix.ref[i] for i in dids], qv, n_sent, how,
                         matched)
         if row is None:
