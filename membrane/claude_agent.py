@@ -747,8 +747,16 @@ TOOLS_NOTE = (
     "or as an entity script, and its result checked afterwards.")
 
 
+# the seat card's lines this note replaces on the Claude rung: EXEC (the note
+# covers it) and ROUTING (the router's "free-tier only" is wrong for a Claude turn)
+_CARD_LINES_REPLACED = ("- EXEC:", "- ROUTING:")
+
+
 def _with_tools_note(system: str) -> str:
-    return (system.rstrip() + "\n\n" + TOOLS_NOTE) if system else TOOLS_NOTE
+    if not system:
+        return TOOLS_NOTE
+    kept = "\n".join(ln for ln in system.splitlines() if not ln.startswith(_CARD_LINES_REPLACED))
+    return kept.rstrip() + "\n\n" + TOOLS_NOTE
 
 
 def build_options(sdk, system: str, model: str, stream: bool, port=None,

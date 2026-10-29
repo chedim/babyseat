@@ -207,7 +207,7 @@ def card_line() -> str:
             "them why and ask again. Never pick one alone.\n")
 
 
-ISSUES = "https://github.com/chedim/membrane/issues"
+ISSUES = "https://github.com/chedim/babyseat/issues"
 
 
 def feedback_line() -> str:

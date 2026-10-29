@@ -200,3 +200,14 @@ def test_the_note_names_the_real_tools():
     head = CA.TOOLS_NOTE[:600]
     assert CA.TOOL_PREFIX + "<name>" in head
     assert "no plain bash or query" in head
+
+
+
+def test_claude_drops_the_card_lines_its_note_replaces():
+    """On the Claude rung TOOLS_NOTE covers exec, and the router's
+    'free-tier only' line is wrong for a Claude turn."""
+    from membrane import claude_agent as CA
+    system = "doctrine\n- EXEC: you have NO built-in tools ...\n- ROUTING: membrane picks the model per turn (free-tier only)\n- COMMONS: kept"
+    out = CA._with_tools_note(system)
+    assert "- EXEC:" not in out and "- ROUTING:" not in out
+    assert "- COMMONS: kept" in out and CA.TOOLS_NOTE in out
