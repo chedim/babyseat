@@ -3834,8 +3834,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 from . import ch_blurp as _CHB         # #576 D2: its level is the branches granted
                 _psrv = getattr(runner, "srv", None) if runner is not None else None
                 _card = _sup.view("/card") if _sup is not None else _SHEET.card(_psrv)
-                if isinstance(_card, dict) and getattr(getattr(_psrv, "ch_vm", None), "learner", None) is not None:
-                    _card = {**_card, "level": len(_CHB.grants(_psrv))}
+                _card = _CHB.augment(_psrv, _card)     # the level and the learner's counts (no-op without a learner)
                 self._json_out(_card)
             elif path == "/membrane/self/context":
                 # #440 part 2: the snapshot Blurp's own process reads

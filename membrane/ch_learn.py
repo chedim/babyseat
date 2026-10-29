@@ -86,12 +86,14 @@ class Learner:
         self._hits: dict[str, int] = {}
         self._guessed: collections.OrderedDict = collections.OrderedDict()  # chain -> new guesses defined
         self._refused: collections.OrderedDict = collections.OrderedDict()  # guess eids the VM refused
+        self.counts: collections.Counter = collections.Counter()   # what it saw and why it passed (the card shows it)
 
     # -- the account ------------------------------------------------------------------------
     def balance(self, cand: str) -> float:
         return self._bal.get(cand, 0.0)
 
     def _hit(self, cand: str) -> None:
+        self.counts["hit"] += 1
         back = REFUND * WRITE_COST
         self.purse.refund(back, "hit")
         self._bal[cand] = self.balance(cand) + back
@@ -125,7 +127,9 @@ class Learner:
                       else target_path)                  # a call acts on its object's branch
         suggests = self.state(tr.eid) == "proposal" and self.granted(grant_path)   # as it stood before this write
         if not self._spend(tr.eid, "fire"):
+            self.counts["fire:skip"] += 1
             return "skip"
+        self.counts["fire"] += 1
         ch = (CH.W.current() or {}).get("id")
         if ch:                                  # no chain, nothing can confirm it: no prediction kept
             self._remember(self._pending, ch, list).append((tr.eid, self._expected(target_path), value))
@@ -153,9 +157,15 @@ class Learner:
         writer = str(w.get("writer") or "")
         path = str(w.get("path") or "")
         ch = (w.get("chain") or {}).get("id") or ""
-        if writer.startswith(("trigger:", "adapter:")) or not w.get("prop") or path.startswith("rel:") or not ch:
+        n = self.counts
+        n["seen"] += 1
+        why = ("own_write" if writer.startswith(("trigger:", "adapter:")) else "no_prop" if not w.get("prop")
+               else "rel" if path.startswith("rel:") else "no_chain" if not ch else "")
+        if why:
+            n["pass:" + why] += 1
             return                                      # Blurp's own acts never confirm or teach themselves
         by_llm = writer == "llm" or writer.startswith("llm:")   # the LLM's actions: taught, and confirming
+        n["by_llm" if by_llm else "by_other"] += 1
         paid = set()
         if by_llm and ch in self._pending:
             keep = []
@@ -184,18 +194,30 @@ class Learner:
 
     # -- guessing ---------------------------------------------------------------------------
     def _guess(self, c: dict, w: dict, ch: str) -> None:
-        if not self.purse.can_spend() or self._guessed.get(ch, 0) >= GUESS_PER_CHAIN:
+        n = self.counts
+        if not self.purse.can_spend():
+            n["guess:asleep"] += 1
+            return
+        if self._guessed.get(ch, 0) >= GUESS_PER_CHAIN:
+            n["guess:chain_full"] += 1
             return
         est = self.vm.est
         c_eid, c_prop = str(c.get("eid") or ""), str(c.get("prop") or "")
         w_eid, w_prop = str(w.get("eid") or ""), str(w.get("prop") or "")
         ce, we = (est.docs or {}).get(c_eid), (est.docs or {}).get(w_eid)
-        if ce is None or we is None or not c_prop or not w_prop or ce.cls == CH.CLASS or we.cls == CH.CLASS:
+        if ce is None or we is None or not c_prop or not w_prop:
+            n["guess:no_entity"] += 1
+            return
+        if ce.cls == CH.CLASS or we.cls == CH.CLASS:
+            n["guess:trigger"] += 1
             return
         if c_prop == "position" or w_prop == "position":
+            n["guess:position"] += 1
             return                                     # vectors: the geometric watchers' business
         if not c_prop.isidentifier() or not w_prop.isidentifier():
+            n["guess:odd_name"] += 1
             return                                     # x.odd-name would read as subtraction
+        n["guess"] += 1
         same = c_eid == w_eid
         where = [["isa", "?x", ce.cls]] + ([] if same else [["is", "?y", w_eid]])
         if w_prop == "last_call" and isinstance(w.get("new"), dict):
@@ -223,11 +245,13 @@ class Learner:
             try:
                 self.vm.define(name, owner=CH.SELF, **spec)
             except CH.Refused:
+                n["refused"] += 1
                 self._remember(self._refused, eid, lambda: True)     # never retried, never charged
                 while len(self._refused) > REFUSED_KEPT:
                     self._refused.popitem(last=False)
                 continue
             self._spend(eid, "define")                  # charged only for what was defined
+            n["defined"] += 1
             self._guessed[ch] = self._guessed.get(ch, 0) + 1
             while len(self._guessed) > CHAINS_KEPT:
                 self._guessed.popitem(last=False)
