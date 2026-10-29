@@ -363,7 +363,7 @@ TOOLS: list[dict] = [
             "kind: f/s/m/c/tool/...), 'name~:<prefix>', "
             "'parent:<spec>' (the ISA ancestor chain includes spec), "
             "'children:<spec>' (the reverse walk), 'status:<s>', "
-            "'near:<text>' (semantic). '&' conjoins, '|' disjoins. "
+            "'near:<text>' (shares its words, best first; lists run newest first). '&' conjoins, '|' disjoins. "
             "count=true renders 'N entity(ies)'. Examples: "
             "'kind:tool:* & status:open', 'children:membrane::c:deploy'"),
         "inputSchema": {
