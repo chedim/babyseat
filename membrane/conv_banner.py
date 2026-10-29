@@ -29,6 +29,7 @@ sent every turn while it has content: it is small and moves with the chat.
 """
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -136,7 +137,8 @@ def render(sec: dict, now: float | None = None, tz=None,
               "OPEN:": list(sec.get("open") or [])[:OPEN_MAX],
               "STABLE:": list(sec.get("stable") or [])[:STABLE_MAX],
               "SINCE YOUR LAST MESSAGE:": list(sec.get("since") or [])[:NEWS_MAX]}
-    if not (paused or alerts or working or suggest or any(groups.values())):
+    recall = [str(x) for x in (sec.get("recall") or [])]
+    if not (paused or alerts or working or suggest or recall or any(groups.values())):
         return None
     # (priority, slot, line): a lower priority number is kept first; the
     # slot is the line's place on the page
@@ -177,6 +179,9 @@ def render(sec: dict, now: float | None = None, tz=None,
         if h is not None:
             kept[(slot[0], 0)] = h
     out = [now_line(now, tz), HEADER] + [kept[s] for s in sorted(kept)]
+    if recall:                  # #668: the banner is recall -- its own block, N lines (not the 900-char budget)
+        from .recall_banner import HEADER as RECALL_HEADER
+        out += [RECALL_HEADER] + recall
     return "\n".join(out)
 
 
@@ -659,6 +664,26 @@ def _blurp(srv) -> str | None:
         return None
 
 
+def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = None) -> list[str]:
+    """#668: the banner is recall -- the top rows for the person's message
+    (a no-topic message keeps this chat's previous set). Never breaks the banner."""
+    if fld is None or not latest:
+        return []
+    from . import recall_banner as RB
+    memo = srv.__dict__.setdefault("_recall_prev", {})
+    session = next((d.get("session") for _k, d in reversed(events or []) if d.get("session")), "")
+    try:
+        lines, state = RB.build(fld, latest, session=session or "", prev=memo.get(conv), now=now)
+    except Exception as e:
+        print(f"[recall-banner] error: {e}", file=sys.stderr)
+        return []
+    if state is not None:
+        memo[conv] = state
+        while len(memo) > _MARKS_KEPT:
+            memo.pop(next(iter(memo)))
+    return lines
+
+
 def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
           on_alert=None) -> str | None:
     """The block for this turn (None when it holds nothing of this chat)."""
@@ -682,5 +707,6 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
         "blurp": _blurp(srv),
         "suggest": _suggestions(srv, conv),
         "more": bool((body or {}).get("tools")),
+        "recall": recall_lines(srv, fld, conv, events, latest, now),
     }
     return render(sec, now, tz)

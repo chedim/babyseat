@@ -207,6 +207,28 @@ last 2h ago; latest: <the newest sentence that moved it>`, with boundary
 alerts on the mention count, and the now-line listing the entities moved
 most this session.
 
+### The banner is recall (#668)
+
+After the chat block, the banner carries a `RECALL` block: the best rows the
+field holds for the person's **latest message** (no model call, no new lane).
+
+1. **Query:** the message. One with no topic ("ok", "1. yes", "thanks!": fewer
+   than 0.3 of its tokens are content words) keeps this chat's previous set.
+2. **Candidates:** `recall_answers`' top 50 rows, from the existing lanes.
+3. **Order:** a pointwise logistic scorer over features recall already has:
+   cosine, 1/rank, content-word overlap with the message, speaker (a person
+   named in the message opens the row), the best similarity among neighbouring
+   turns in the pool, and length. The weights live in the field, not in code:
+   collection `config`, key `recall_scorer` (`recall_banner.load_weights` /
+   `save_weights`). The starting weights are cosine only; the night refit (a
+   later PR) moves them from what the model's own searches use.
+4. **Lines:** the top 12 rows, one fact line each (the row's sentence nearest
+   the message, 200 chars), skipping the current chat's own last 8 turns (the
+   echo failure of #649) and collapsing near-duplicates (word overlap >= 0.8).
+
+`recall_banner.py` holds the constants (12 / 50 / 0.3, operator-approved on
+#668). The block sits outside the 900-char chat budget: it is N lines.
+
 ## The division of hands (2026-10-06)
 
 The native serve's turn lane carries the session's **agent**, and the
