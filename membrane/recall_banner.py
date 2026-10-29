@@ -22,6 +22,7 @@ POOL = 50                     # candidates taken from recall (operator-approved)
 NO_TOPIC_MIN = 0.3            # content-word share below which a message has no topic (operator-approved)
 FACT_CHARS = 200              # a fact line's clip
 RECENT_TURNS = 8              # the current chat's turns skipped as echo
+HISTORY_TURNS = 1             # the chat's previous turns added to the query (operator-approved)
 DEDUPE_JACCARD = 0.8          # two fact lines this alike are one
 CONFIG_COLL, CONFIG_KEY = "config", "recall_scorer"
 
@@ -206,6 +207,20 @@ def recent_ns(field, session: str, n: int = RECENT_TURNS) -> set:
     return {d["n"] for d in rows[-n:]}
 
 
+def history_texts(field, session: str, text: str, n: int = HISTORY_TURNS) -> list[str]:
+    """The chat's last n turns before the message (the person's or the
+    model's), oldest first; the message itself, if already captured, is not
+    its own history."""
+    if not session or n <= 0:
+        return []
+    rows = [d for _k, d in field.b.scan("events", {"origin": field.origin, "session": session})
+            if d.get("stream") == "discourse" and d.get("role") in ("user", "model") and d.get("text")]
+    rows.sort(key=lambda d: d.get("seq") or 0)
+    if rows and " ".join(rows[-1]["text"].split()) == " ".join((text or "").split()):
+        rows = rows[:-1]
+    return [d["text"] for d in rows[-n:]]
+
+
 def pick(rows: list[dict], text: str, n: int = BANNER_N, skip=(), weights: dict | None = None,
          ranked: list[dict] | None = None) -> list[dict]:
     """The banner rows: ranked, the chat's own recent turns skipped,
@@ -244,6 +259,15 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
     from .entity_block import PAST_SIM_MIN, recall_answers
     t0 = _t.monotonic()
     qv = G.message_vec(field, text)                  # once: recall reuses it
+    if qv is not None:
+        # the previous turn joins the query: a follow-up leans on it (on the
+        # live field the banner held the model's next search finds 26/63 times
+        # with one turn, 16/63 without; three were no better, seven worse)
+        from .efield import unit
+        hv = [v for v in (G.message_vec(field, h, embed_missing=False)
+                          for h in history_texts(field, session, text)) if v is not None]
+        if hv:
+            qv = unit(qv + sum(hv))
     t1 = _t.monotonic()
     pool = recall_answers(field, text, qvec=qv, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
     t2 = _t.monotonic()

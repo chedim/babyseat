@@ -201,3 +201,54 @@ class TestAskLaneWidth(unittest.TestCase):
             EB.recall_answers(f, "how do we deploy the seat?", k=RB.POOL)
         self.assertEqual(seen, [EB.ASK_K])
         self.assertEqual(EB.ASK_K, 3)
+
+
+class TestHistoryTurn(unittest.TestCase):
+    """The banner's query is the message plus the chat's previous turn (either
+    side): on the live field it held the model's own next search finds in 26
+    of 63 cases against 16 without (2026-10-29; operator-approved window 1)."""
+
+    def test_the_query_adds_the_previous_turn(self):
+        from unittest import mock
+        from membrane import efgate as G
+        from membrane import entity_block as EB
+        f = field_with(["where is the bilge pump alarm published?",
+                        "It goes to the boat/bilge MQTT topic on the phone seat."])
+        seen = {}
+        real = EB.recall_answers
+
+        def spy(*a, qvec=None, **kw):
+            seen["qvec"] = qvec
+            return real(*a, qvec=qvec, **kw)
+
+        with mock.patch.object(EB, "recall_answers", spy):
+            RB.build(f, "and which port does that broker listen on?", session="s:1:a")
+        v_msg = G.message_vec(f, "and which port does that broker listen on?")
+        v_prev = G.message_vec(f, "It goes to the boat/bilge MQTT topic on the phone seat.")
+        want = EF.unit(v_msg + v_prev)
+        self.assertAlmostEqual(float(seen["qvec"] @ want), 1.0, places=5)
+        self.assertEqual(RB.HISTORY_TURNS, 1)
+
+    def test_a_new_chat_queries_the_message_alone(self):
+        from unittest import mock
+        from membrane import efgate as G
+        from membrane import entity_block as EB
+        f = field_with(["where is the bilge pump alarm published?"], session="s:9:z")
+        seen = {}
+        real = EB.recall_answers
+
+        def spy(*a, qvec=None, **kw):
+            seen["qvec"] = qvec
+            return real(*a, qvec=qvec, **kw)
+
+        with mock.patch.object(EB, "recall_answers", spy):
+            RB.build(f, "which port does the broker listen on?", session="s:new:chat")
+        v = G.message_vec(f, "which port does the broker listen on?")
+        self.assertAlmostEqual(float(seen["qvec"] @ v), 1.0, places=5)
+
+    def test_the_message_itself_already_captured_is_not_its_own_history(self):
+        f = field_with(["where is the bilge pump alarm published?",
+                        "It goes to the boat/bilge MQTT topic on the phone seat.",
+                        "and which port does that broker listen on?"])
+        got = RB.history_texts(f, "s:1:a", "and which port does that broker listen on?")
+        self.assertEqual(got, ["It goes to the boat/bilge MQTT topic on the phone seat."])
