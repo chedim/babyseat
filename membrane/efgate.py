@@ -68,6 +68,30 @@ def message_vec(field, text: str, embed_missing: bool = True):
     return unit(np.sum(vs, axis=0)) if vs else None
 
 
+def event_vec(field, key: str, ev: dict):
+    """The event as a whole, unit(sum of its sentence vectors): the vector
+    stored on the event when it was embedded (`wvec`, #690), else computed
+    from its sentences and written back when the store allows (an older
+    event). None when it has no sentences."""
+    from .efield import whole_vec
+    w = ev.get("wvec")
+    if w:
+        return unpack_f16(w)
+    sids = list(dict.fromkeys(ev.get("sids") or []))
+    if not sids:
+        return None
+    w = whole_vec(field.b.get_multi("sentences", sids), sids)
+    if w is None:
+        return None
+    try:
+        cur = field.b.get("events", key)
+        if cur is not None and cur.get("sids") == ev.get("sids") and not cur.get("wvec"):
+            field.b.upsert("events", key, {**cur, "wvec": w})
+    except Exception:
+        pass                                  # read-only store: computed each time
+    return unpack_f16(w)
+
+
 def specifics(field, text: str) -> set:
     return {e for e, _ in E.mentions_of(text or "", field.graph_fn(), field.phrases)
             if E.is_specific(e)}
@@ -134,9 +158,11 @@ def near_asks(field, qv, k: int = TOP_K) -> list[tuple[float, str, dict]]:
     """Earlier user asks by message similarity to qv, best first."""
     out = []
     for key, d in _user_events_near(field, qv, k):
-        v = message_vec(field, d.get("text") or "", embed_missing=False)
+        v = event_vec(field, key, d)
+        if v is None:
+            v = message_vec(field, d.get("text") or "", embed_missing=False)
         if v is not None:
-            out.append((float(v @ qv), key, d))
+            out.append((float(unit(v) @ qv), key, d))
     out.sort(key=lambda t: -t[0])
     return out
 

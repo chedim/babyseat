@@ -377,12 +377,11 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
     live = [(key, d) for key, d in evs.items()
             if d.get("role") in DIRECT_ROLES and d.get("status") == "applied"
             and not _title_like(d) and not _to_a_machine(field, d, machine_cache)]
-    svecs = field.b.get_multi("sentences", list({s for _k, d in live for s in d.get("sids") or []}))
-    for _key, d in live:
+    for key, d in live:
         best = max((hits[s] for s in d.get("sids") or [] if s in hits), default=None)
-        vs = [unit(svecs[s]["vec"]) for s in dict.fromkeys(d.get("sids") or []) if s in svecs]
-        if vs:
-            whole = float(unit(sum(vs)) @ qv)
+        wv = G.event_vec(field, key, d)         # stored on the event (#690)
+        if wv is not None:
+            whole = float(wv @ qv)
             best = whole if best is None else max(best, whole)
         if best is not None and best >= sim_min:
             cands.append((best, d))

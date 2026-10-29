@@ -467,6 +467,15 @@ def _link_sids(m: dict, sids, key: str) -> None:
             m[sid] = got + (key,)
 
 
+def whole_vec(rows: dict, sids) -> "str | None":
+    """The event as a whole, packed: unit(sum of its distinct sentences'
+    unit vectors) (#690); None when it has none or a row is missing."""
+    ids = list(dict.fromkeys(sids or []))
+    if not ids or any(s not in rows for s in ids):
+        return None
+    return pack_f16(unit(sum(unit(rows[s]["vec"]) for s in ids)))
+
+
 class EntityField:
     """The facade: write events, embed them, apply them, read the field."""
 
@@ -825,6 +834,7 @@ class EntityField:
                 self.b.insert_if_absent("sentences", sid, {
                     "_k": "sent", "text": texts[sid][:400], "model": self.model,
                     "vec": pack_f16(unit(v)), "first_ts": time.time()})
+        svec = self.b.get_multi("sentences", list(texts))
         surfaces: set = set()
         for key, ev, sents, sids in plan:
             mentions = []
@@ -862,6 +872,10 @@ class EntityField:
                 if spk is not None:
                     ev["speaker"] = [spk[0], spk[1]]
             ev["sids"] = sids
+            # #690: the event's whole vector, written with its sentences; it
+            # changes only here (sids are set here, and cleared with wvec by
+            # forget / rebuild)
+            ev["wvec"] = whole_vec(svec, sids)
             ev["mentions"] = mentions
             if ev.get("stream") == "observation" and ev.get("outcome") != "call-only":
                 ev["chunks"] = self._chunk(key, ev, batch)
@@ -1897,7 +1911,7 @@ class EntityField:
             if ev.get(f):
                 ev[f] = ""
         self._drop_chunks(ev)
-        ev.update({"status": "forgotten", "sids": [], "mentions": [], "forgotten_ts": time.time()})
+        ev.update({"status": "forgotten", "sids": [], "wvec": None, "mentions": [], "forgotten_ts": time.time()})
         self.b.upsert("events", key, ev)
         for eid in touched:
             self.recompute(eid)
@@ -1927,7 +1941,7 @@ class EntityField:
         n = 0
         for k, ev in list(self.b.scan("events", {"origin": self.origin,
                                                  "status": ["applied", "embedded", "empty"]})):
-            ev.update({"status": "pending", "sids": [], "mentions": []})
+            ev.update({"status": "pending", "sids": [], "wvec": None, "mentions": []})
             self.b.upsert("events", k, ev)
             n += 1
         while self.embed_pending(512) or self.apply_pending(1000):
@@ -1961,7 +1975,7 @@ class EntityField:
             ev = self.b.get("events", key)
             if ev is None:
                 continue
-            ev.update({"status": "pending", "sids": [], "mentions": []})
+            ev.update({"status": "pending", "sids": [], "wvec": None, "mentions": []})
             self.b.upsert("events", key, ev)
         while recov and (self.embed_pending(limit) or self.apply_pending(limit)):
             pass
@@ -1990,7 +2004,7 @@ class EntityField:
                     if ev.get(f):
                         ev[f] = ""
                 self._drop_chunks(ev)
-                ev.update({"status": "forgotten", "sids": [], "mentions": [],
+                ev.update({"status": "forgotten", "sids": [], "wvec": None, "mentions": [],
                            "forgotten_ts": time.time()})
                 self.b.upsert("events", key, ev)
                 out.append({"n": n, "key": key, "entities": [], "already": False})
