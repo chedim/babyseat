@@ -81,6 +81,12 @@ def branch(est, path: str, value=None) -> str:
     return branch_of(path, value)
 
 
+def kind_of(cause: dict) -> str:
+    """The kind of guess (the child skill it practises, Dima 2026-10-30), read from
+    who made its cause: Blurp's own move is first reach, anyone else's meet an other."""
+    return "nudge" if str(cause.get("writer") or "") == "self" else "meet"
+
+
 def _same(a, b) -> bool:
     """A copy, not a coincidence: equal AND the same type (True is not 1)."""
     return _scalar(a) and type(a) is type(b) and a == b
@@ -291,6 +297,7 @@ class Learner:
             doc.properties["branch"] = branch(est, w_eid, w.get("new") if w_prop == "last_call" else None)
             if toy_of(est, w_eid):
                 doc.properties["toy"] = True             # #727: fires while toys are the world
+                doc.properties["kind"] = kind_of(c)      # the child skill it practises (Dima, 2026-10-30)
             est.upsert(doc)
 
     def _room(self) -> bool:
