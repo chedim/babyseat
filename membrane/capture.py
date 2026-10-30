@@ -279,7 +279,9 @@ class Capturer:
                 self._idle()
                 continue
             try:
-                self._step(build, session, conv)
+                from .cblite import background
+                with background():                 # #755: a person's turn reads first
+                    self._step(build, session, conv)
             except Exception as e:                 # never into the chat path
                 self.errors += 1
                 if self.errors <= 3 or self.errors % 100 == 0:
