@@ -1,4 +1,4 @@
-"""BLURP'S BODY FOLLOWING THE CURRENT (card 1, C -- Dima, 2026-10-30): where the
+"""BLURP'S BODY FOLLOWING THE CURRENT (card 1, C -- operator, 2026-10-30): where the
 three root skills are earned.
 
 The body sits where Blurp's newest firing put it (ch_blurp._show_body: its own

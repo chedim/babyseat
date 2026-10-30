@@ -90,7 +90,7 @@ def branch(est, path: str, value=None) -> str:
 
 
 def kind_of(est, cause: dict, w: dict) -> str | None:
-    """The kind of guess -- the child skill it practises (Dima's cards, 2026-10-30) --
+    """The kind of guess -- the child skill it practises (operator, 2026-10-30) --
     from what it predicts and what its cause was:
       on Blurp's body (card 1, C): where the current is (`at`) is look; whether the body
         ended closer is feel itself after its own move (`nudged`), tell things apart
@@ -326,7 +326,7 @@ class Learner:
             doc.properties["branch"] = branch(est, w_eid, w.get("new") if w_prop == "last_call" else None)
             if toy_of(est, w_eid):
                 doc.properties["toy"] = True             # #727: fires while toys are the world
-                doc.properties["kind"] = kind_of(est, c, w)   # the child skill it practises (Dima, 2026-10-30)
+                doc.properties["kind"] = kind_of(est, c, w)   # the child skill it practises (operator, 2026-10-30)
             est.upsert(doc)
 
     def _room(self) -> bool:

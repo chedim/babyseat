@@ -1,5 +1,5 @@
 """The child skill tree on the toys: a skill is a kind of guess that keeps coming
-true on any toy (Dima, 2026-10-30). Each guess carries its kind, read from who
+true on any toy (operator, 2026-10-30). Each guess carries its kind, read from who
 made its cause: Blurp's own move is first reach, someone else's is meet an other."""
 import os
 import sys

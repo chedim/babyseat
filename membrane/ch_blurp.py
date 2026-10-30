@@ -138,7 +138,7 @@ def grant_times(srv) -> dict:
 
 # ---- the toys, in order (#727) ---------------------------------------------------------------
 
-# THE CHILD SKILL TREE (Dima's cards, 2026-10-30): the old ladder's 13 skills (02ffab9^
+# THE CHILD SKILL TREE (operator, 2026-10-30): the old ladder's 13 skills (02ffab9^
 # self_loop.ACHIEVEMENTS: ids, names, branches, prerequisites, the child analogies), each
 # EARNED by its kind of guess paying for itself on any toy (ch_learn.kind_of) over earned
 # prerequisites, and ACCEPTED by the operator (`branch:skill:<id>`). `kind` None: no kind of
@@ -284,7 +284,7 @@ ANEW_FILE = "ch-anew.json"
 
 
 def anew(srv) -> dict:
-    """Boot: the first time this generation runs on the seat, Blurp starts anew (Dima,
+    """Boot: the first time this generation runs on the seat, Blurp starts anew (operator,
     2026-10-30) -- the grants archived beside the store (never deleted), Blurp's own
     triggers removed, the toys back to their start (toybox archives each run); the
     record, energy and mode stay. Later boots change nothing. -> {anew, ...}"""
@@ -483,11 +483,18 @@ def _read_body(srv, fld, at) -> None:
     cur = fld.current() if hasattr(fld, "current") else None
     if cur is None:
         return                                         # nobody spoke lately: no current to follow
-    try:
-        hits = fld.recall(cur, k=1, by="state") or []
-    except Exception:
-        hits = []
-    BODY.read(srv, at, cur, hits[0][0] if hits else "")
+    import numpy as np
+    seen = getattr(srv, "_ch_body_near", None)         # (the current, its nearest): an unchanged
+    if seen is not None and np.array_equal(seen[0], cur):   # current costs no field search
+        near = seen[1]
+    else:
+        try:
+            hits = fld.recall(cur, k=1, by="state") or []
+        except Exception:
+            hits = []
+        near = hits[0][0] if hits else ""
+        srv._ch_body_near = (np.array(cur, dtype=float, copy=True), near)
+    BODY.read(srv, at, cur, near)
 
 
 # ---- the sheet -------------------------------------------------------------------------------
