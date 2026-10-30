@@ -343,3 +343,25 @@ class TestAFieldCall(unittest.TestCase):
         sid = _session(self.r, self.FC, CLAUDE)
         self.r.run(sid, "is the suite done?")
         self.assertEqual(self.bodies[-1]["model"], "qwen3:14b")
+
+
+class TestATriagePass(unittest.TestCase):
+    """#729: a watch triage pass runs on the seat's local idle model -- never
+    on Claude, even when the loops are picked onto a Claude rung."""
+
+    TR = "triage: membrane::Component:bilge-pump"
+
+    def setUp(self):
+        self.srv = _Srv(tempfile.mkdtemp())
+        self.r, self.bodies = _runner(self.srv, model=CLAUDE)
+
+    def test_runs_on_the_thinkers_model_despite_a_claude_loops_pick(self):
+        MM.apply(self.srv, loops=CLAUDE, loops_auth="api-key")
+        sid = _session(self.r, self.TR, CLAUDE)
+        self.r.run(sid, "a watch event")
+        self.assertEqual(self.bodies[-1]["model"], "qwen3:8b")
+
+    def test_without_a_pick_runs_on_the_thinkers_model(self):
+        sid = _session(self.r, self.TR, CLAUDE)
+        self.r.run(sid, "a watch event")
+        self.assertEqual(self.bodies[-1]["model"], "qwen3:8b")

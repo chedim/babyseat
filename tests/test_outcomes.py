@@ -44,7 +44,8 @@ class _Srv:
         self._models_path = str(d / "models.json")
         self.entity_store = EntityStore(path=str(d / "e.json"), shared=False)
         self.entity_store._srv = self
-        e = QuantumEntity(eid=LIGHT, cls="Component", properties={"name": "aft head light"})
+        e = QuantumEntity(eid=LIGHT, cls="Component", properties={"name": "aft head light",
+                                                                     "escalate_when": "it stays off"})   # #729: a triage pass
         self.entity_store.docs[e.eid] = e
         self.loops = WA.LoopRunner(max_loops=3)
         self.events_pool = _Pool()

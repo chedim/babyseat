@@ -253,7 +253,7 @@ class FieldPulse:
         a = str(session_agent or "").strip()
         if a == "phone":
             return "phone"
-        return (self._slots.get(a) or "loop") if a.startswith(("watch", "field-call")) else "chat"
+        return (self._slots.get(a) or "loop") if a.startswith(("watch", "field-call", "triage")) else "chat"
 
     def thinking(self, session_agent, phase: str) -> None:
         self.mind("think", agent=self._agent_of(session_agent), phase="start" if phase == "start" else "end")
@@ -263,7 +263,7 @@ class FieldPulse:
         if not eid:
             return
         a = str(session_agent or "").strip()
-        agent = (self._slots.get(a) or "loop") if a.startswith(("watch", "field-call")) else "chat"
+        agent = (self._slots.get(a) or "loop") if a.startswith(("watch", "field-call", "triage")) else "chat"
         if a == "phone":
             agent = "phone"
         self.mind("touch", agent=agent, eid=eid, tool=str(tool or ""))

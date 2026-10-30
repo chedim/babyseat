@@ -908,8 +908,8 @@ def _lane_of(agent: str | None) -> str:
         return "plan" if a == "plan" else "operator"
     if a == "phone":
         return "phone"
-    if a.startswith("field-call"):
-        return "plan"                   # llm.py: the field asked -- read-only, no second call
+    if a.startswith(("field-call", "triage")):
+        return "plan"                   # llm.py: the field asked; #729: a watch triage pass -- read-only
     if a == "speaker":
         return "operator"               # speaker.py: a person talking -- the chat's hands
     return "listener"
@@ -1460,14 +1460,16 @@ class TurnRunner:
             # a field call (an entity script asking a model) is background
             # work like a loop pass: it follows the loops' pick (2026-10-29)
             field_call = str(agent or "").strip().lower().startswith("field-call")
-            if (lane == "listener" or field_call) and _CA.is_claude_rung(srv, turn_model) \
+            # #729: a watch triage pass runs on the local idle model, never on Claude
+            triage = str(agent or "").strip().lower().startswith("triage")
+            if (lane == "listener" or field_call) and not triage and _CA.is_claude_rung(srv, turn_model) \
                     and _MM.claude_allowed(srv, "loops", turn_model):
                 auth = _MM.credential_mode(srv, "loops")
             else:
                 # THE CLAUDE-AGENT RUNG IS A PERSON'S (issue #384): a loop
                 # or a mind not picked onto it falls back to the seat's model
                 fb = str(getattr(srv, "default_seat_model", "") or "")
-                if field_call:
+                if field_call or triage:
                     # the idle thinker's local model: one local LLM stays
                     # loaded (the seat's 14b next to the thinker's 8b made
                     # Ollama evict the embedder -- 60 s on a person's turn)
@@ -1476,7 +1478,8 @@ class TurnRunner:
                         fb = idle
                 if not fb or _CA.is_claude_rung(srv, fb):
                     fb = self.model if not _CA.is_claude_rung(srv, self.model) else "membrane"
-                turn_model = _CA.guard_turn_model(srv, turn_model, agent, fb)
+                # #729: triage always takes the local pick (a session's own model never holds)
+                turn_model = fb if triage else _CA.guard_turn_model(srv, turn_model, agent, fb)
         except Exception:
             pass
         return turn_model, auth

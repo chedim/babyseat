@@ -159,7 +159,7 @@ class TestLoopTitles(unittest.TestCase):
         srv.create_loop_session = lambda agent, title=None: "ses"
         srv.run_loop_turn = lambda sid, text, agent: (seen.append(list(srv.loops.titles)) or {"text": "ignored: x"})
         srv._field_pulse = FP.FieldPulse(srv, hub=_Hub())
-        WA._LoopDrainer(srv).handle({"kind": "around", "entity": "c:x"})
+        WA._LoopDrainer(srv).handle({"kind": "job-done", "entity": "c:x"})   # #729: a kind that still works
         self.assertEqual(seen, [["watch: c:x"]])
         self.assertEqual(srv.loops.titles, [])
 
