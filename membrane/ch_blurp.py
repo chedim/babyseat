@@ -167,13 +167,13 @@ SKILLS = {
              "child_age": "~3-5 mo",
              "child_ability": "tells perfect self-contingency from imperfect social contingency (Bahrick & Watson)",
              "test": "it guesses what someone else's poke does to a toy"},
-    "turns": {"name": "time its turn", "branch": "others", "prereqs": ("meet",), "kind": None, "child_age": "~3-5 mo",
+    "turns": {"name": "time its turn", "branch": "others", "prereqs": ("meet",), "kind": "turns", "child_age": "~3-5 mo",
               "child_ability": ("times its turn in a proto-conversation: serve and return "
                                 "(Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)"),
-              "test": "not built yet"},
-    "expect": {"name": "expect a reply", "branch": "others", "prereqs": ("meet",), "kind": None, "child_age": "~2-3 mo",
+              "test": "it guesses its own move after someone else's on a toy"},
+    "expect": {"name": "expect a reply", "branch": "others", "prereqs": ("meet",), "kind": "expect", "child_age": "~2-3 mo",
                "child_ability": "expects a caregiver's response: the still-face upset (Tronick et al. 1978)",
-               "test": "not built yet"},
+               "test": "it guesses someone else's reply to its own move on a toy"},
     "mirror": {"name": "recognize itself", "branch": "self", "prereqs": ("feel", "nudge"), "kind": "mirror",
                "child_age": "~18 mo", "child_ability": "passes the mirror test (Amsterdam 1972)",
                "test": "it guesses what the mirror shows"},
@@ -182,10 +182,10 @@ SKILLS = {
                "child_ability": ("picks the way it learns by its own track record, and keeps a change only "
                                  "when it works better: adaptive strategy choice (Siegler & Shrager 1984)"),
                "test": "not built yet"},
-    "speak": {"name": "speak", "branch": "others", "prereqs": ("turns", "expect"), "kind": None, "child_age": "~12 mo",
+    "speak": {"name": "speak", "branch": "others", "prereqs": ("turns", "expect"), "kind": "speak", "child_age": "~12 mo",
               "child_ability": ("names a thing to an other and gets a response: first referential words "
                                 "and pointing to share (Bates, Camaioni & Volterra 1975)"),
-              "test": "not built yet"},
+              "test": "the LLM adopts a suggestion of its"},   # #751: any guess, earned by an adoption
     "invent": {"name": "invent", "branch": "self", "prereqs": ("change", "speak"), "kind": None, "child_age": "~5 y",
                "child_ability": "makes up games with its own rules", "test": "not built yet"},
 }
@@ -556,6 +556,7 @@ def code(srv) -> list[dict]:
                     "state": lr.state(t.eid) if lr is not None else "shadow",
                     "balance": round(lr.balance(t.eid) / L.WRITE_COST, 2) if lr is not None else 0.0,
                     "hits": lr.hits(t.eid) if lr is not None else 0,
+                    "adopted": lr.adoptions(t.eid) if lr is not None else 0,
                     "fired": vm.fired.get(t.eid, 0)})
     out.sort(key=lambda c: (-c["balance"], c["line"]))
     return out
@@ -574,8 +575,12 @@ def tree(srv) -> list[dict]:
         by.setdefault(c.get("kind") or "", []).append(c)
     nodes, earned = [], set()
     for i, sk in SKILLS.items():                       # prerequisites come first
-        cs = by.get(sk["kind"], []) if sk["kind"] else []
-        n_pos = sum(1 for c in cs if c["state"] == "proposal")
+        if i == "speak":                               # #751: a suggestion of any kind the LLM adopted
+            cs = [c for v in by.values() for c in v if c.get("adopted")]
+            n_pos = len(cs)
+        else:
+            cs = by.get(sk["kind"], []) if sk["kind"] else []
+            n_pos = sum(1 for c in cs if c["state"] == "proposal")
         accepted = f"skill:{i}" in g
         ready = all(p in earned for p in sk["prereqs"])
         state = "earned" if accepted or (n_pos and ready) else "open" if ready else "locked"
