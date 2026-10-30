@@ -26,8 +26,8 @@ A card is a `Decision` entity, reusing the existing class. Nothing is stored bes
 | `var` | the ONE variable the card asks for: `{"type": "int"\|"float"\|"bool"\|"string"\|"option", "options": [...], "unit": "s"}` |
 | `pick` | the agent's recommended value, pre-filled so accepting is one click |
 | `value`, `set_by`, `set_at` | written **only** by the operator's answer |
-| `chat` | the chat about this decision (clicking the card loads the question into it) |
-| `message` | the message in `chat` where the card was decided: the chat's newest message when ✓ was pressed while the card's chat was open (set only by the answer, and only with its chat) |
+| `chat` | the chat about this decision (its panel's Chat about it loads the question into it) |
+| `message` | the message in `chat` where the card was decided: the chat's newest message when Decide was pressed while the card's chat was open (set only by the answer, and only with its chat) |
 | `blocks`, `led_to`, `carried_by` | eid lists, the graph's edges: future → future, past → what it led to, in flight → the work carrying it |
 
 ## Agents ask, the operator decides
