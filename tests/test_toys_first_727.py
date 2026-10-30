@@ -225,3 +225,16 @@ def test_a_seat_with_old_toy_names_maps_them_by_kind(seat):
     toys = {t["kind"]: t for t in s["toys"]}
     assert toys["slow"]["name"] == "w:slow" and toys["slow"]["state"] == "current"
     assert TB.peek("toy:slow") is None                 # the seat had one: none added
+
+
+def test_only_what_the_toy_tells_teaches(seat):
+    TB.add(seat, "tower", params={"n": 3})
+    ent = seat.entity_store.docs[MEMBRANE_NS + "Component:toy:tower"]
+    with W.source("person", "t"), W.as_writer("llm"):
+        ent.properties["_last_reading"] = {"standing": 3}
+        seat.entity_store.upsert(ent)
+        ent.properties["readings"] = [1, 2]
+        seat.entity_store.upsert(ent)
+    seat.ch_vm.drain()
+    assert not _cands(seat)
+    assert seat.ch_vm.learner.counts["pass:not_toy"] >= 2

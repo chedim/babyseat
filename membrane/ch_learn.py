@@ -186,7 +186,8 @@ class Learner:
         why = ("own_write" if writer.startswith(("trigger:", "adapter:")) else "no_prop" if not w.get("prop")
                else "rel" if path.startswith("rel:") else "no_chain" if not ch else "")
         if not why and WORLD == "toys":                # #727: toys are the learner's world
-            toy = toy_of(self.vm.est, w.get("eid"))
+            from .toybox import TOLD                   # only what the toy tells (never a getter's readings ring)
+            toy = toy_of(self.vm.est, w.get("eid")) if w.get("prop") in TOLD else None
             why = "not_toy" if not toy else "" if self.toy_open(toy) else "locked_toy"
         if why:
             n["pass:" + why] += 1

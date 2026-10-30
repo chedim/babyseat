@@ -208,6 +208,7 @@ def _save(st: dict) -> None:
 # ---- #727: a toy's change is a field write chain --------------------------------
 
 CAUSE = {"self": "nudged", "world": "ticked"}     # who moved it -> the counter it bumps (anyone else: poked)
+TOLD = frozenset(set(CAUSE.values()) | {"poked", "side", "face", "value", "standing", "glass", "stranger"})
 _told = threading.local()                         # the changes _note saw, written when _save lands them
 
 
