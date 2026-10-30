@@ -140,9 +140,16 @@ TOY_ORDER = ("tower", "ball", "mirror")   # #337's order; no self-moving toys (s
 TOYS_OPEN = 1        # #727: toys open beyond the granted ones (awaiting the operator's approval)
 
 
+_SEAT_TOYS: dict = {"key": None, "have": {}}
+
+
 def _seat_toys() -> dict:
-    """kind -> the toy the seat has of it (`toy:<kind>` first; an older name, e.g. w:ball, else)."""
+    """kind -> the toy the seat has of it (`toy:<kind>` first; an older name, e.g. w:ball, else).
+    Read from the toybox files only when its roster moved (#728: never per toy write)."""
     from . import toybox as TB
+    key = (TB.roster(), str(TB.root()))
+    if _SEAT_TOYS["key"] == key:
+        return _SEAT_TOYS["have"]
     try:
         rows = TB.list_toys()
     except Exception:
@@ -150,6 +157,7 @@ def _seat_toys() -> dict:
     out: dict = {}
     for r in sorted(rows, key=lambda r: (str(r.get("name")) != f"toy:{r.get('kind')}", str(r.get("name")))):
         out.setdefault(str(r.get("kind") or ""), str(r.get("name") or ""))
+    _SEAT_TOYS.update(key=key, have=out)
     return out
 
 
@@ -157,6 +165,10 @@ def toys(srv) -> list[dict]:
     """The toys in #337's order, each {kind, name, branch, state}: granted (its branch
     accepted), current (open: Blurp learns on it), next (the one after), locked."""
     have, g = _seat_toys(), grants(srv)
+    key = (id(have), frozenset(g))
+    hit = getattr(srv, "_ch_toys", None)
+    if hit is not None and hit[0] == key:
+        return hit[1]                                  # #728: the open set moves only on a grant or a new toy
     out, opened, nxt = [], 0, False
     for kind in TOY_ORDER:
         name = have.get(kind) or f"toy:{kind}"
@@ -169,7 +181,16 @@ def toys(srv) -> list[dict]:
         else:
             state = "locked"
         out.append({"kind": kind, "name": name, "branch": name, "state": state, "on_seat": kind in have})
+    srv._ch_toys = (key, out)
     return out
+
+
+def level(srv) -> int:
+    """Blurp's level: its granted toys while it learns toys (#728: a command grant
+    stays on file for later, it does not count), every grant once commands are back."""
+    if L.WORLD == "toys":
+        return sum(1 for t in toys(srv) if t["state"] == "granted")
+    return len(grants(srv))
 
 
 def toy_open(srv, name: str) -> bool:
@@ -357,7 +378,7 @@ def _show_body(srv, vm) -> None:
     look = vec(field_id(last["to"])) if last and last["to"] != last["from"] else None
     prev = getattr(srv, "_ch_body_at", None) or at
     srv._ch_body_at = at
-    fp.self_cycle({"from": prev, "at": at, "aim": look}, {"mode": "on", "rung": len(grants(srv))})   # the tag reads its level
+    fp.self_cycle({"from": prev, "at": at, "aim": look}, {"mode": "on", "rung": level(srv)})   # the tag reads its level
 
 
 # ---- the sheet -------------------------------------------------------------------------------
@@ -441,13 +462,13 @@ def augment(srv, sheet: dict) -> dict:
     if not isinstance(sheet, dict) or getattr(getattr(srv, "ch_vm", None), "learner", None) is None:
         return sheet                                   # no learner on this seat: the sheet as Blurp made it
     out = dict(sheet)
-    level = len(grants(srv))
-    out["level"] = level
+    lv = level(srv)
+    out["level"] = lv
     lr = srv.ch_vm.learner                             # what it saw and why it passed: a Blurp earning nothing is read, not guessed
     out["learner"] = {**dict(lr.counts),
                       "candidates": sum(1 for t in srv.ch_vm.triggers() if (t.properties or {}).get("owner") == CH.SELF)}
     if isinstance(out.get("header"), dict):
-        out["header"] = {**out["header"], "level": level, "title": f"Lv {level}"}
+        out["header"] = {**out["header"], "level": lv, "title": f"Lv {lv}"}
     if "tree" in out or "header" in out:
         nodes = tree(srv)
         out["tree"] = nodes

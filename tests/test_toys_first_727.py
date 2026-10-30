@@ -248,3 +248,50 @@ def test_only_what_the_toy_tells_teaches(seat):
     seat.ch_vm.drain()
     assert not _cands(seat)
     assert seat.ch_vm.learner.counts["pass:not_toy"] >= 2
+
+
+# ---- the review on #728 --------------------------------------------------------------------------
+
+def test_the_open_toys_are_read_once_not_per_write(seat, monkeypatch):
+    # the learner asks toy_open on every toy write: the toybox files are read only
+    # when the roster or the grants change, never per ask
+    TB.add(seat, "tower", params={"n": 3})
+    calls = []
+    real = TB.list_toys
+    monkeypatch.setattr(TB, "list_toys", lambda: calls.append(1) or real())
+    lr = seat.ch_vm.learner
+    for _ in range(20):
+        assert lr.toy_open("toy:tower")
+    B.augment(seat, {"header": {}, "tree": []})
+    assert len(calls) <= 1
+    TB.add(seat, "ball")                               # the roster changed: read again
+    assert lr.toy_open("toy:tower")
+    assert len(calls) == 2
+    B.grant(seat, "toy:tower")                         # a grant changes what is open
+    assert lr.toy_open("toy:ball")
+
+
+def test_the_level_counts_toy_grants_only(seat):
+    TB.add(seat, "tower", params={"n": 3})
+    B.grant(seat, "shell:gh")
+    B.grant(seat, "shell:ls")
+    s = B.augment(seat, {"header": {}, "tree": []})
+    assert s["level"] == 0 and s["header"]["title"] == "Lv 0"
+    assert B.grants(seat) >= {"shell:gh", "shell:ls"}  # kept on file for later
+    B.grant(seat, "toy:tower")
+    assert B.augment(seat, {"header": {}, "tree": []})["level"] == 1
+
+
+def test_a_change_survives_another_toys_load_in_the_same_thread(seat):
+    TB.add(seat, "ball")
+    TB.add(seat, "tower", params={"n": 3})
+    a = TB._load("toy:ball")
+    TB._note(a, 1.0, "Dima", "roll")
+    TB._load("toy:tower")                              # another toy loaded before A saves
+    TB._load("toy:ball")                               # or A itself reloaded
+    seat.seen.clear()
+    TB._save(a)
+    assert _toy_writes(seat, BALL)                     # A's change was still told
+    seat.seen.clear()
+    TB._save(TB._load("toy:tower"))                    # and never told against the tower
+    assert not [w for w in seat.seen if w.get("eid") == BALL]

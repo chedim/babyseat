@@ -186,10 +186,12 @@ def _locked(name: str):
             yield
         finally:
             fh.close()
+            q = getattr(_told, "q", None)
+            if q:
+                q.pop(name, None)                  # #727: a change noted but never saved is not told
 
 
 def _load(name: str) -> dict:
-    _told.q = []                                   # #727: a change noted but never saved is not told
     try:
         return json.loads(_path(name).read_text())
     except FileNotFoundError:
@@ -210,6 +212,12 @@ def _save(st: dict) -> None:
 CAUSE = {"self": "nudged", "world": "ticked"}     # who moved it -> the counter it bumps (anyone else: poked)
 TOLD = frozenset(set(CAUSE.values()) | {"poked", "side", "face", "value", "standing", "glass", "stranger"})
 _told = threading.local()                         # the changes _note saw, written when _save lands them
+_ROSTER = [0]                                     # bumped when a toy is made or archived (#728: readers cache on it)
+
+
+def roster() -> int:
+    """The toy roster's generation: it moves when a toy is created, reset or removed."""
+    return _ROSTER[0]
 
 
 def _cause(by: str) -> str:
@@ -229,7 +237,7 @@ def _tell(st: dict) -> None:
     the toy's count of that mover's changes) and then WHAT IT SHOWS (its reading's
     keys, the one a look returns). No seat, no entity layer: nothing is written;
     the toy itself never depends on it."""
-    q, _told.q = getattr(_told, "q", None) or [], []
+    q = (getattr(_told, "q", None) or {}).pop(st["name"], [])   # this toy's changes only
     est = getattr(_SEAT["srv"], "entity_store", None)
     if not q or est is None:
         return
@@ -266,8 +274,8 @@ def _note(st: dict, ts: float, by: str, what: str, **kw) -> None:
         _mark_person(ts, by, st["name"])
     q = getattr(_told, "q", None)
     if q is None:
-        q = _told.q = []
-    q.append((by, [int(b) for b in (kw.get("blocks") or ([kw["block"]] if kw.get("block") else []))]))
+        q = _told.q = {}                           # toy -> its changes, until its _save tells them
+    q.setdefault(st["name"], []).append((by, [int(b) for b in (kw.get("blocks") or ([kw["block"]] if kw.get("block") else []))]))
 
 
 def is_person(by) -> bool:
@@ -405,6 +413,7 @@ def create(kind: str, name: str, params: dict | None = None, now: float | None =
         lp = _log_path(name)
         if lp.exists():
             lp.unlink()                  # a fresh toy starts a fresh log (reset archived the old one)
+    _ROSTER[0] += 1
     return st
 
 
@@ -925,6 +934,7 @@ def _archive(name: str, why: str) -> None:
     for p, ext in ((_path(name), ".json"), (_log_path(name), ".log.jsonl")):
         if p.exists():
             os.replace(p, d / f"{_safe(name)}-{stamp}{ext}")
+    _ROSTER[0] += 1
 
 
 def remove(srv, name: str) -> dict:
