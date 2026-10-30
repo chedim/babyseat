@@ -511,6 +511,10 @@ class EntityField:
         self._thing_ctx: dict[str, np.ndarray] = {}
         self._thing_w: dict[str, float] = {}
         self._thing_ts: dict[str, float] = {}
+        # #731: the current's generation -- it moves only when an input does (a pull, or a session
+        # falling under CURRENT_MIN_PULL); the summed vector itself drifts in its last bits as time passes
+        self._current_gen = 0
+        self._current_live: frozenset = frozenset()
         self._ostats = self.b.get("origin_stats", self._okey) or self._fresh_ostats()
 
     @property
@@ -2452,6 +2456,7 @@ class EntityField:
         event's residual comes here (_apply). The things current (a fit, a
         person's poke) is pull_things (#333 part 3g)."""
         self._pull(self._now, self._now_w, self._now_ts, session, vec, weight, now)
+        self._current_gen += 1
 
     def pull_things(self, session: str, vec, weight: float = 1.0, now: float | None = None) -> None:
         """#333 part 3g: the same pull on the THINGS current -- an event's fit
@@ -2459,6 +2464,7 @@ class EntityField:
         toward the toy's spot (#282: playing counts as speaking). One decay
         (CURRENT_TAU_S) for both currents."""
         self._pull(self._thing_ctx, self._thing_w, self._thing_ts, session, vec, weight, now)
+        self._current_gen += 1
 
     @staticmethod
     def _pull(ctx, ws, tss, session, vec, weight, now) -> None:
@@ -2489,6 +2495,20 @@ class EntityField:
         th = self._sum(self._thing_ctx, self._thing_w, self._thing_ts, t)
         nw = self._sum(self._now, self._now_w, self._now_ts, t)
         return (None if th is None else unit(th)), (None if nw is None else unit(nw))
+
+    def current_gen(self, now: float | None = None) -> int:
+        """#731: the current's generation -- an exact test of whether it moved. It counts
+        each pull and each session falling under CURRENT_MIN_PULL; time alone (the common
+        decay, which only drifts the summed vector's last bits) never moves it."""
+        t = time.time() if now is None else float(now)
+        live = frozenset(
+            (k, s) for k, ws, tss in (("things", self._thing_w, self._thing_ts), ("news", self._now_w, self._now_ts))
+            for s in list(ws)
+            if ws.get(s, 0.0) * float(np.exp(-(t - tss.get(s, t)) / CURRENT_TAU_S)) >= CURRENT_MIN_PULL)
+        if not live >= self._current_live:
+            self._current_gen += 1                     # someone dropped out of the sum
+        self._current_live = live
+        return self._current_gen
 
     def current(self, now: float | None = None) -> np.ndarray | None:
         """THE FIELD'S CURRENT (#161): every session that spoke lately pulls at
