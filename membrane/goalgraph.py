@@ -35,8 +35,8 @@ The planner and worker turns each start a NEW chain (writes.source): the loop ru
 refuses a trigger already in its chain, so a goal's second task finishing in the chain
 of its first would never re-plan.
 
-CONSTANTS for the operator (listed on the PR): WORKERS. No cap on tasks per goal or on
-depth is set."""
+CONSTANTS (approved by the operator 2026-10-30): WORKERS = 3; no cap on tasks per goal or
+on graph depth; the planner runs on the loops' model pick (#708)."""
 from __future__ import annotations
 
 import hashlib
@@ -49,10 +49,12 @@ from .entities import CLASS_COMPONENT, MEMBRANE_NS, QuantumEntity
 TASK = "Task"
 TASK_NS = MEMBRANE_NS + "task:"
 WORKERS_EID = MEMBRANE_NS + "tool:workers"
-WORKERS = 3                 # the worker pool's size (operator: 3, 2026-10-30, #738)
+WORKERS = 3                 # the worker pool's size (approved by the operator 2026-10-30, #738)
 PLANNERS = 1                # the planner lane (#738: one)
 OPEN, OWED, RUNNING, DONE, FAILED, STUCK = "open", "owed", "running", "done", "failed", "stuck"
 ENDED = (DONE, FAILED, STUCK)
+DROPPED = "dropped"
+TASK_ENDED = (DONE, DROPPED)   # no longer blocking its dependents
 CARD_ENDED = ("closed", "dropped")
 EXECUTE, EXECUTING, RESULT, BLOCKS = "execute", "executing", "result", "blocks"
 SOURCE = "goal-graph"
@@ -151,8 +153,10 @@ def _blockers_of(est, task: str) -> list:
 
 
 def _unfinished(d) -> bool:
+    """Still blocking: a task until done or dropped (a dropped task's dependents are the
+    planner's to re-plan, never stuck behind it), a card until closed or dropped."""
     st = str((d.properties or {}).get("status") or "open")
-    return st not in ((DONE,) if d.cls == TASK else CARD_ENDED)
+    return st not in (TASK_ENDED if d.cls == TASK else CARD_ENDED)
 
 
 def _cycle(edges: dict) -> list | None:
@@ -285,10 +289,24 @@ def apply_plan(srv, goal: str, plan) -> dict:
         eid = keys.get(str(k)) or task_eid(goal, str(k))
         d = (est.docs or {}).get(eid)
         if d is not None and (d.properties or {}).get("status") in (OPEN, OWED):
-            d.properties = {**(d.properties or {}), "status": "dropped"}
+            d.properties = {**(d.properties or {}), "status": DROPPED}
             est.upsert(d, embedder=None)
             dropped.append(eid)
-    # the counts, last (each write may fire `ready`)
+    recount(srv, goal)                  # the counts, last (each write may fire `ready`)
+    g = est.docs[goal]
+    g.properties = {**(g.properties or {}), "planned_ts": time.time()}
+    est.upsert(g, embedder=None)
+    for c in new_cards:
+        _escalate_card(srv, goal, c)
+    return {"ok": True, "tasks": made, "cards": new_cards, "dropped": dropped}
+
+
+def recount(srv, goal: str) -> int:
+    """Each open task of the goal: open_blockers = its blockers still unfinished. Run after
+    every plan AND every planner turn (one that writes no plan too: a card dropped under an
+    UNCHANGED planner must not leave its tasks blocked for good). -> tasks re-counted."""
+    est = srv.entity_store
+    n_changed = 0
     for d in list((est.docs or {}).values()):
         if d.cls != TASK or (d.properties or {}).get("goal") != goal or (d.properties or {}).get("status") != OPEN:
             continue
@@ -296,12 +314,8 @@ def apply_plan(srv, goal: str, plan) -> dict:
         if (d.properties or {}).get("open_blockers") != n:
             d.properties = {**(d.properties or {}), "open_blockers": n}
             est.upsert(d, embedder=None)
-    g = est.docs[goal]
-    g.properties = {**(g.properties or {}), "planned_ts": time.time()}
-    est.upsert(g, embedder=None)
-    for c in new_cards:
-        _escalate_card(srv, goal, c)
-    return {"ok": True, "tasks": made, "cards": new_cards, "dropped": dropped}
+            n_changed += 1
+    return n_changed
 
 
 def _escalate_card(srv, goal: str, card: str) -> None:

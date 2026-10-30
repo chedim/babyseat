@@ -228,6 +228,51 @@ def test_a_rewake_of_a_planned_goal_is_no_new_plan(seat):
     assert not seat.calls and not seen
 
 
+def test_a_dropped_card_with_an_unchanged_planner_still_unblocks_its_task(seat):
+    write(seat, GOAL, "plan", PLAN)
+    tasks_in_pool(seat)
+    card = [d for d in seat.entity_store.docs.values() if d.cls == "Decision"][0]
+    with W.source("person", "op"):
+        assert DM.drop(seat.entity_store, card.eid)["ok"]
+    settle(seat)
+    dr, _ = _drainer(seat, "UNCHANGED the plan still holds")          # the planner writes no plan
+    dr._handle({"kind": "llm-call", "entity": GOAL, "prompt": "plan the goal: card dropped",
+                "lane": "planner", "caller": "trigger:x", "depth": 1})
+    settle(seat)
+    assert seat.entity_store.docs[C].properties["open_blockers"] == 0 and st(seat, C) == "owed"
+
+
+def test_a_dependent_of_a_dropped_task_is_no_longer_blocked(seat):
+    write(seat, GOAL, "plan", PLAN)
+    tasks_in_pool(seat)
+    est = seat.entity_store
+    d = est.docs[A]                                                       # A not taken yet: back to open
+    d.properties = {**d.properties, "status": "open"}
+    est.upsert(d, embedder=None)
+    settle(seat)
+    write(seat, GOAL, "plan", {"drop": ["a"]})
+    assert st(seat, A) == "dropped"
+    assert est.docs[B].properties["open_blockers"] == 0 and st(seat, B) == "owed"
+    assert not GG.view(est, GOAL) or all(A not in (t.get("waits_on") or [])
+                                         for t in GG.view(est, GOAL).get("tasks") or [])
+
+
+def test_a_worker_that_raises_ends_stuck_and_replans(seat):
+    write(seat, GOAL, "plan", PLAN)
+    ev = [e for e in seat.events_pool.take() if e.get("kind") == "task"][0]
+    dr, _ = _drainer(seat, "")
+
+    def boom(sid, text, agent):
+        raise RuntimeError("model server gone")
+    seat.run_loop_turn = boom
+    seat.calls.clear()
+    assert dr._handle(ev) == "error"
+    settle(seat)
+    assert st(seat, A) == "stuck"
+    assert "model server gone" in seat.entity_store.docs[A].properties["receipt"]
+    assert [c["prompt"] for c in seat.calls] == [f"plan the goal: task {A} stuck"]
+
+
 def test_the_lanes_have_their_own_slots():
     lr = WA.LoopRunner(3)
     assert lr.admit(WA.LoopDesc("planner", eid="g1")) and not lr.admit(WA.LoopDesc("planner", eid="g2"))
@@ -263,6 +308,7 @@ def test_a_goal_its_planner_saw_is_not_re_asked_by_a_pulse(seat):
     dr, _ = _drainer(seat, "UNCHANGED nothing to do")
     dr._handle({"kind": "llm-call", "entity": GOAL, "prompt": "plan the goal: planted", "lane": "planner",
                 "caller": "trigger:x", "depth": 1})
+    settle(seat)                        # the adapter / VM threads done with the planner turn's writes
     assert seat.entity_store.docs[GOAL].properties.get("planner_ts")
     assert dr._handle({"kind": "intent-planted", "entity": GOAL, "rewake": True}) == "skip"
     assert dr._handle({"kind": "intent-planted", "entity": GOAL, "created": False,     # a person re-pins it:

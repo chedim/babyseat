@@ -949,12 +949,14 @@ class _LoopDrainer:
             titles.append(agent)
         if lane == "planner":
             _mark_picked_up(srv, ent, agent)     # who is working the goal (the banner; no second pass)
+        taken = False
         try:
             with _W.source(lane, ent):
                 sid = srv.create_loop_session(agent, agent)
                 if lane == "worker":
                     if not GG.take(srv, ent):
                         return "skip"
+                    taken = True
                     out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
                     if isinstance(out.get("quota"), dict):
                         d = est.docs.get(ent)
@@ -965,6 +967,7 @@ class _LoopDrainer:
                         self._quota_park(ev, str(out["quota"].get("model") or ""))
                         return "held"
                     verdict, detail = GG.parse_worker(str(out.get("text") or out.get("verdict_text") or ""))
+                    taken = False
                     GG.finish(srv, ent, verdict, detail, session=sid)
                     return verdict
                 from . import llm as _LLM
@@ -988,8 +991,19 @@ class _LoopDrainer:
                         est.upsert(g, embedder=None)
                 except Exception:
                     pass
+                try:
+                    with _W.as_writer("adapter:tasks"):
+                        GG.recount(srv, ent)     # with or without a plan: no task blocked for good
+                except Exception:
+                    pass
                 return "planned"
-        except Exception:
+        except Exception as e:
+            if taken:                            # never left running: the planner hears of it
+                try:
+                    with _W.source(lane, ent), _W.as_writer("adapter:tasks"):
+                        GG.finish(srv, ent, GG.STUCK, f"the worker raised: {e!r}"[:600])
+                except Exception:
+                    pass
             return "error"
         finally:
             loops.release(desc)
