@@ -48,7 +48,11 @@ def _define(srv, est, f, on, method, command):
 @pytest.mark.parametrize("cmd", ["bash -c {{cmd}}", "sh -c {{script}}", "{{cmd}}", "{{cmd}} --flag x",
                                  "python -c {{code}}", "python3 -c {{code}}", "node -e {{js}}",
                                  "eval {{x}}", "cd /tmp && bash -c {{cmd}}", "sh -c 'ls {{d}}'",
-                                 "zsh -c {{cmd}}", "perl -e {{p}}"])
+                                 "zsh -c {{cmd}}", "perl -e {{p}}",
+                                 "nohup {{cmd}}", "env {{cmd}}", "sudo bash -c {{x}}",
+                                 "nohup bash -c {{x}}", "env FOO=1 {{cmd}}", "time {{cmd}}",
+                                 "sudo -u root {{cmd}}", "exec {{x}}", "source {{f}}", ". {{f}}",
+                                 "nohup env {{cmd}}"])
 def test_a_passthrough_is_refused_at_define(cmd):
     srv, est, f = _world()
     out = _define(srv, est, f, BOX, "run", cmd)
@@ -57,7 +61,10 @@ def test_a_passthrough_is_refused_at_define(cmd):
 
 
 @pytest.mark.parametrize("cmd", ["gh pr view {{n}}", "cd {{wt}} && git log --oneline -1",
-                                 "sed -n {{a}},{{b}}p {{file}}", "bash scripts/x.sh {{arg}}"])
+                                 "sed -n {{a}},{{b}}p {{file}}", "bash scripts/x.sh {{arg}}",
+                                 "nohup pytest {{path}} > {{log}}", "time make {{target}}",
+                                 "env FOO={{x}} mycmd", "xargs -n1 rm < {{list}}",
+                                 "sudo -u {{user}} ls {{d}}", "nohup pytest {{path}} > {{log}} 2>&1 &"])
 def test_a_method_whose_params_are_data_is_allowed(cmd):
     srv, est, f = _world()
     assert _define(srv, est, f, BOX, "m", cmd).get("ok")

@@ -388,7 +388,13 @@ PASSTHROUGH = ("refused: a method fixes its program; only its data can vary (pat
 _SCRIPT_FLAGS = {"bash": "-c", "sh": "-c", "zsh": "-c", "dash": "-c", "ksh": "-c", "fish": "-c",
                  "python": "-c", "python3": "-c", "node": "-e", "perl": "-e", "ruby": "-e",
                  "php": "-r", "osascript": "-e", "deno": "eval", "bun": "-e"}
-_ALL_SCRIPT = {"eval", "exec", "source", ".", "xargs", "env", "sudo", "nohup", "time", "watch"}
+_ALL_SCRIPT = {"eval", "exec", "source", "."}      # what they take IS code: no param at all
+# WRAPPERS run the NEXT word as a command: a prefix, skipped with its own flags (and the flags'
+# values) and VAR=x assignments; the wrapped command then faces the same two tests (#743).
+_WRAPPERS = {"sudo": {"-u", "-g", "-C", "-p", "-U", "-r", "-t", "-D"}, "nohup": set(),
+             "time": {"-f", "-o"}, "watch": {"-n"},
+             "env": {"-u", "-C"}, "xargs": {"-n", "-I", "-L", "-P", "-d", "-E", "-s", "-a"}}
+_WRAPPER_SCRIPT_FLAGS = {"env": "-S"}       # a flag whose value is itself a command line
 _EXPANSIONS = {"expansion", "simple_expansion", "command_substitution", "arithmetic_expansion",
                "process_substitution"}
 
@@ -412,14 +418,36 @@ def passthrough_refusal(tree: Node) -> str | None:
             return True
         if n.kind == "command":
             name, rest = _name_of(n), [k for k in n.args if k.kind != "command_name"]
-            if name in _ALL_SCRIPT and any(_has_param(k) for k in rest):
+            if command_passes(name, rest):
                 return True
-            flag = _SCRIPT_FLAGS.get(name)
-            if flag:
-                for i, k in enumerate(rest[:-1]):
-                    if print_(k).strip() == flag and _has_param(rest[i + 1]):
-                        return True
         return any(walk(k) for k in n.args)
+
+    def command_passes(name: str, rest: list) -> bool:
+        while name in _WRAPPERS:                       # unwrap: the wrapped command is judged
+            takes, script, i = _WRAPPERS[name], _WRAPPER_SCRIPT_FLAGS.get(name), 0
+            while i < len(rest):
+                t = print_(rest[i]).strip()
+                if script and t == script:
+                    return any(_has_param(k) for k in rest[i + 1:])
+                if t in takes:
+                    i += 2
+                elif t.startswith("-") or ("=" in t and not t.startswith("=")):
+                    i += 1
+                else:
+                    break
+            if i >= len(rest):
+                return False                           # a bare wrapper: nothing wrapped
+            if _has_param(rest[i]):
+                return True                            # the param is the wrapped command's name
+            name, rest = print_(rest[i]).strip().rsplit("/", 1)[-1], rest[i + 1:]
+        if name in _ALL_SCRIPT and any(_has_param(k) for k in rest):
+            return True
+        flag = _SCRIPT_FLAGS.get(name)
+        if flag:
+            for i, k in enumerate(rest[:-1]):
+                if print_(k).strip() == flag and _has_param(rest[i + 1]):
+                    return True
+        return False
     return PASSTHROUGH if walk(tree) else None
 
 
