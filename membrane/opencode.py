@@ -801,8 +801,9 @@ def main() -> None:
     # defaults and a restart's carried ports walk
     from .restarts import was_reexec as _was_reexec
     _argv = sys.argv[1:]
-    _listen_pinned = port_pinned(_argv, "--listen", reexec=_was_reexec())
-    _serve_pinned = port_pinned(_argv, "--serve-port", reexec=_was_reexec())
+    _boot_reexec = _was_reexec()    # read once: the read clears the marker
+    _listen_pinned = port_pinned(_argv, "--listen", reexec=_boot_reexec)
+    _serve_pinned = port_pinned(_argv, "--serve-port", reexec=_boot_reexec)
     listen = _pick_listen_port(args.listen, host=proxy_bind_host(args),
                                pinned=_listen_pinned)
     if listen != args.listen:
@@ -2120,8 +2121,8 @@ def main() -> None:
                     _NM.plant(srv)
                 except Exception as e:
                     print(f"[seat] name entity not planted ({e})", file=sys.stderr)
-            from .restarts import was_reexec as _was_reexec
-            _reexec = _was_reexec()        # read + cleared on every boot (#243)
+            from .restarts import _BOOT as _RB
+            _reexec = bool(_RB.get("reexec"))   # read once at boot (#243, #760)
             try:                           # #711: a message that came in during the restart gets its turn
                 from .restarts import answer_dropped as _answer_dropped
                 _answer_dropped(srv)
