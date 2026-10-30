@@ -42,6 +42,8 @@ CHAINS_KEPT = 512                 # chains remembered for causes and predictions
 GUESS_PER_CHAIN = 3               # new guesses one chain may define (operator, #582 review)
 CANDIDATES_MAX = 256              # live candidates at most; at the cap a new guess replaces the most negative (operator)
 REFUSED_KEPT = 4096               # guesses the VM refused, remembered so they are never retried (a buffer bound)
+WORLD = "toys"                    # #727 (operator, 2026-10-30): Blurp learns on toys; "commands" brings the
+                                  # LLM's shell / tool branches back (their code kept, gated off)
 
 
 def _scalar(v) -> bool:
@@ -61,6 +63,24 @@ def branch_of(path: str, value=None) -> str:
     return f"{parts[0]}:{parts[1].split('.')[0]}"     # kind + type (operator): ha:light is not ha:lock
 
 
+def toy_of(est, eid) -> str | None:
+    """#727: the toybox toy an entity is (a tower's block: its tower), else None."""
+    d = (getattr(est, "docs", None) or {}).get(str(eid or ""))
+    tb = ((d.properties or {}).get("toybox") if d is not None else None) or {}
+    return str(tb.get("name") or "") or None if isinstance(tb, dict) else None
+
+
+def branch(est, path: str, value=None) -> str:
+    """The branch a target belongs to: a toy is its own (#727: `toy:ball`, a tower's
+    blocks fold into `toy:tower`); anything else its kind + type (branch_of)."""
+    p = str(value["object"]) if isinstance(value, dict) and value.get("object") else str(path)
+    for eid in (p, p.rsplit(".", 1)[0]):
+        t = toy_of(est, eid)
+        if t:
+            return t
+    return branch_of(path, value)
+
+
 def _same(a, b) -> bool:
     """A copy, not a coincidence: equal AND the same type (True is not 1)."""
     return _scalar(a) and type(a) is type(b) and a == b
@@ -74,8 +94,9 @@ def _literal(v) -> str | None:
 
 
 class Learner:
-    def __init__(self, vm, purse, granted=lambda path: False, suggest=None, adopted=None):
+    def __init__(self, vm, purse, granted=lambda path: False, suggest=None, adopted=None, toy_open=None):
         self.vm = vm
+        self.toy_open = toy_open or (lambda name: True)   # #727: the toys Blurp may learn on now
         self.purse = purse
         self.granted = granted
         self.suggest = suggest           # (trigger, target path, value): a proposal's suggestion to the LLM
@@ -121,7 +142,10 @@ class Learner:
 
     def on_fire(self, tr, target_path: str, value) -> str:
         """A candidate fires: 'live' (write the real path), 'shadow' (write the
-        prediction onto itself) or 'skip' (asleep)."""
+        prediction onto itself) or 'skip' (asleep, or a command's while toys are the world)."""
+        if WORLD == "toys" and not (tr.properties or {}).get("toy"):
+            self.counts["fire:gated"] += 1             # #727: commands come later -- kept, never fired
+            return "skip"
         grant_path = (str(value["object"]) + ".invoke"
                       if target_path.endswith(".invoke") and isinstance(value, dict) and value.get("object")
                       else target_path)                  # a call acts on its object's branch
@@ -161,6 +185,10 @@ class Learner:
         n["seen"] += 1
         why = ("own_write" if writer.startswith(("trigger:", "adapter:")) else "no_prop" if not w.get("prop")
                else "rel" if path.startswith("rel:") else "no_chain" if not ch else "")
+        if not why and WORLD == "toys":                # #727: toys are the learner's world
+            from .toybox import TOLD                   # only what the toy tells (never a getter's readings ring)
+            toy = toy_of(self.vm.est, w.get("eid")) if w.get("prop") in TOLD else None
+            why = "not_toy" if not toy else "" if self.toy_open(toy) else "locked_toy"
         if why:
             n["pass:" + why] += 1
             if why == "no_chain":                       # #721: who writes outside any chain (the writer's kind)
@@ -168,8 +196,9 @@ class Learner:
             return                                      # Blurp's own acts never confirm or teach themselves
         by_llm = writer == "llm" or writer.startswith("llm:")   # the LLM's actions: taught, and confirming
         n["by_llm" if by_llm else "by_other"] += 1
+        teach = by_llm or WORLD == "toys"               # #727: a toy teaches and confirms whoever moved it
         paid = set()
-        if by_llm and ch in self._pending:
+        if teach and ch in self._pending:
             keep = []
             for cand, p, v in self._pending[ch]:
                 if p != path:
@@ -190,7 +219,7 @@ class Learner:
         recent = self._remember(self._recent, ch, lambda: collections.deque(maxlen=LOOK_BACK))
         causes = list(recent)
         recent.append(w)
-        if by_llm:
+        if teach:
             for c in causes:
                 self._guess(c, w, ch)
 
@@ -259,7 +288,9 @@ class Learner:
                 self._guessed.popitem(last=False)
             doc = est.docs[eid]
             doc.properties["shadow"] = True
-            doc.properties["branch"] = branch_of(w_eid, w.get("new") if w_prop == "last_call" else None)
+            doc.properties["branch"] = branch(est, w_eid, w.get("new") if w_prop == "last_call" else None)
+            if toy_of(est, w_eid):
+                doc.properties["toy"] = True             # #727: fires while toys are the world
             est.upsert(doc)
 
     def _room(self) -> bool:
