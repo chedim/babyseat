@@ -145,7 +145,9 @@ _SEAT_TOYS: dict = {"key": None, "have": {}}
 
 def _seat_toys() -> dict:
     """kind -> the toy the seat has of it (`toy:<kind>` first; an older name, e.g. w:ball, else).
-    Read from the toybox files only when its roster moved (#728: never per toy write)."""
+    Read from the toybox files only when its roster moved (#728: never per toy write).
+    The roster generation is in-process only: a `membrane toybox add/reset` from the CLI
+    (another process) shows here after the next grant or in-process add, or a restart."""
     from . import toybox as TB
     key = (TB.roster(), str(TB.root()))
     if _SEAT_TOYS["key"] == key:
@@ -164,8 +166,9 @@ def _seat_toys() -> dict:
 def toys(srv) -> list[dict]:
     """The toys in #337's order, each {kind, name, branch, state}: granted (its branch
     accepted), current (open: Blurp learns on it), next (the one after), locked."""
+    from . import toybox as TB
     have, g = _seat_toys(), grants(srv)
-    key = (id(have), frozenset(g))
+    key = (TB.roster(), str(TB.root()), frozenset(g))  # what moved, never id(have): CPython reuses ids
     hit = getattr(srv, "_ch_toys", None)
     if hit is not None and hit[0] == key:
         return hit[1]                                  # #728: the open set moves only on a grant or a new toy

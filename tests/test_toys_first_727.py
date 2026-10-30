@@ -271,6 +271,17 @@ def test_the_open_toys_are_read_once_not_per_write(seat, monkeypatch):
     assert lr.toy_open("toy:ball")
 
 
+def test_the_toys_cache_never_keys_on_a_reused_dict_id(seat, monkeypatch):
+    # CPython reuses a freed object's id: when the roster moves, a new `have` dict can
+    # come back with the old one's id, so the cache must key on what moved (the roster)
+    have = {}
+    monkeypatch.setattr(B, "_seat_toys", lambda: have)          # the same object, same id
+    assert not B.toys(seat)[0]["on_seat"]
+    have["tower"] = "toy:tower"                                   # the roster moved
+    TB._ROSTER[0] += 1
+    assert B.toys(seat)[0]["on_seat"]
+
+
 def test_the_level_counts_toy_grants_only(seat):
     TB.add(seat, "tower", params={"n": 3})
     B.grant(seat, "shell:gh")
