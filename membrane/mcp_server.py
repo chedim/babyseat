@@ -421,161 +421,42 @@ TOOLS: list[dict] = [
     {
         "name": "entity_edit",
         "description": (
-            "Edit an entity: resolve by eid or exact name, patch summary/"
-            "links/class (only provided fields change). merged_into marks "
-            "a subsumption (source stays, pointing at its survivor). "
-            "PROGRAMMABLE ENTITIES: python scripts that read `state` and "
-            "set a top-level `result` dict ({render, patch: {script_data, "
-            "position}, run, delete, intent, chat, voice}; the engine "
-            "applies, scripts never mutate). getter_script runs on read; "
-            "tick_script on the ~1s heartbeat (paced by `tick_every`); "
-            "nudge_script/delete_script at consolidation; mention/thought/"
-            "dreamed_script at their hooks; watch_script on external "
-            "events. Budgets: getter 10s, trigger scripts 0.25s-2s; 3 failures disable a "
-            "script (backoff 60s..1h); empty string clears. A script's "
-            "READ-ONLY `membrane` object offers field.recall/vitals, "
+            "Edit an entity by eid or exact name; only provided fields "
+            "change. merged_into marks a subsumption (the source stays, "
+            "pointing at its survivor). PROGRAMMABLE ENTITIES: *_script "
+            "properties are python that reads `state` and sets a top-level "
+            "`result` dict ({render, patch: {script_data, position}, run, "
+            "delete, intent, chat, voice}; the engine applies it). "
+            "getter_script runs on read, tick_script on the heartbeat, "
+            "nudge_script at consolidation, the rest at their hooks. "
+            "Budgets: getter 10s, trigger scripts 0.25s-2s. A script's "
+            "read-only `membrane` object: field.recall/vitals, "
             "entities.get, timeline.walk, intents.open, call_llm, wake, "
-            "speak. publish=True exports the entity (per-origin key, "
-            "versioned, state only, never code); unpublish=True retracts "
-            "it. Full contract: help('scripts')."),
+            "speak. publish=True exports the entity. Full contract: "
+            "help('scripts')."),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "spec": {"type": "string",
-                         "description": "eid or exact name."},
-                "publish": {"type": "boolean",
-                            "description": "export to the global tier "
-                                           "(per-origin key, versioned; "
-                                           "your call -- the wire "
-                                           "carries state, no code)."},
-                "unpublish": {"type": "boolean",
-                              "description": "retract YOUR export "
-                                             "(imports elsewhere freeze "
-                                             "at their last version)."},
+                "spec": {"type": "string", "description": "eid or exact name."},
+                "publish": {"type": "boolean", "description": "export it (state only, never code)."},
+                "unpublish": {"type": "boolean", "description": "retract your export."},
                 "summary": {"type": "string"},
                 "links": {"type": "array"},
                 "class": {"type": "string"},
-                "merged_into": {"type": "string",
-                                "description": "eid or name of the "
-                                               "survivor entity."},
-                "nudge_script": {"type": "string",
-                                 "description": "python; runs at "
-                                                "consolidation; sets "
-                                                "'result'."},
-                "delete_script": {"type": "string",
-                                  "description": "python; runs first; "
-                                                 "set result.delete=True "
-                                                 "to retire."},
-                "mention_script": {"type": "string",
-                                   "description": "python; runs when the "
-                                                  "entity is mentioned "
-                                                  "(0.25s budget); sets "
-                                                  "'result' = {render, "
-                                                  "patch, delete}."},
-                "thought_script": {"type": "string",
-                                   "description": "python; runs when the "
-                                                  "thinker extends a "
-                                                  "branch under it (1s "
-                                                  "budget); sets 'result'."},
-                "dreamed_script": {"type": "string",
-                                   "description": "python; runs on dream "
-                                                  "commit/elect under it "
-                                                  "(2s budget); sets "
-                                                  "'result'."},
-                "tick_script": {"type": "string",
-                                "description": "python; runs on the "
-                                               "THINKER'S ~1s heartbeat, "
-                                               "paced by this entity's "
-                                               "`tick_every` property "
-                                               "(default 1 = every "
-                                               "heartbeat), cooldown-free "
-                                               "(0.25s budget); sets "
-                                               "'result'. The seat's own "
-                                               "clock (tool:clock) is "
-                                               "seeded with one."},
-                "watch_script": {"type": "string",
-                                 "description": "python; the AUTONODE's "
-                                                "watcher body -- runs when "
-                                                "an external event this "
-                                                "entity watches arrives "
-                                                "(file changes under the "
-                                                "seat dir, signals; "
-                                                "signals). May block but "
-                                                "only 4 run at once, a >"
-                                                "10s fire strikes the "
-                                                "3-strikes lane (the "
-                                                "thread can't be killed). "
-                                                "The trigger's payload "
-                                                "rides state.extra"
-                                                ".payload (path/event/"
-                                                "topic/name); the seeded "
-                                                "tool:filetree is the "
-                                                "template."},
-                "watch": {"type": "object",
-                          "description": "what external events fire the "
-                                         "watch_script: {kind: "
-                                         "'file'|'signal', "
-                                         "glob/name optional "
-                                         "narrowing -- the CHEAP "
-                                         "pre-filter; the script does "
-                                         "the real filtering}. "
-                                         "kind 'file' is the default "
-                                         "for any watcher without one."},
+                "merged_into": {"type": "string", "description": "the survivor's eid or name."},
+                "nudge_script": {"type": "string", "description": "python; at consolidation."},
+                "delete_script": {"type": "string", "description": "python; result.delete=True retires."},
+                "mention_script": {"type": "string", "description": "python; on a mention."},
+                "thought_script": {"type": "string", "description": "python; when the thinker extends under it."},
+                "dreamed_script": {"type": "string", "description": "python; on a dream under it."},
+                "tick_script": {"type": "string", "description": "python; on the ~1s heartbeat, paced by `tick_every`."},
+                "watch_script": {"type": "string", "description": "python; on a watched external event."},
+                "watch": {"type": "object", "description": "{kind: 'file'|'signal', glob/name}: what fires watch_script."},
                 "getter_script": {"type": "string",
-                                  "description": (
-                                      "python; the READ-BACK trigger -- runs "
-                                      "when the entity is READ. Set a TOP-LEVEL "
-                                      "`result` dict; the live values go under "
-                                      "'state', e.g. result = {'state': "
-                                      "{'soc': 81.2, 'amps': -14}} (also "
-                                      "'render' for the banner, 'patch' to "
-                                      "edit properties). A function's return, "
-                                      "stdout or other keys are NOT read. The "
-                                      "5s LRU paces; run=true forces. Empty "
-                                      "string clears.")},
-                "watch_ops": {"type": "array",
-                              "description": "the SPATIAL watch ops "
-                                             "(the always-watched lane): "
-                                             "op 'away' {rel, y} (the "
-                                             "entity moved from rel > "
-                                             "y), op 'near' {rel, z} "
-                                             "(closed to within z), op "
-                                             "'around' {rel: '*', z} "
-                                             "(anything within z -- the "
-                                             "sensor; bursts GROUP into "
-                                             "one event). '[]' clears; "
-                                             "cap 8. Each change fires "
-                                             "a watch-attached/detached "
-                                             "event to the pool. Counts "
-                                             "against the shared "
-                                             "attention budget (with "
-                                             "field_watch + watch_fields)"
-                                             ": at the limit the edit is "
-                                             "refused with the live "
-                                             "watches -- drop first."},
-                "watch_fields": {"type": "array",
-                                 "description": "the OWN-MOTION watch "
-                                                "filters: [{verb, arg}] "
-                                                "with verb 'pos' (the "
-                                                "entity moved > arg), "
-                                                "'align' (its coherence "
-                                                "fell below arg), 'vel' "
-                                                "(its velocity rose above "
-                                                "arg); fires on the "
-                                                "crossing, re-arms on "
-                                                "return. Cap 3 per "
-                                                "entity, inside the "
-                                                "shared attention budget"
-                                                ". '[]' clears."},
-                "properties": {"type": "object",
-                               "description": "bounded property patch "
-                                              "(the model's write path "
-                                              "for goal state: status "
-                                              "'fulfilled'/'dropped', "
-                                              "progress counters, "
-                                              "etc. -- the engine's "
-                                              "script_* keys are "
-                                              "untouchable)."},
+                                  "description": "python; on a read: set result = {'state': {...live values...}}."},
+                "watch_ops": {"type": "array", "description": "[{op: near|away|around, rel, z|y}]; help('watches')."},
+                "watch_fields": {"type": "array", "description": "[{verb: pos|align|vel, arg}]; help('watches')."},
+                "properties": {"type": "object", "description": "bounded property patch (script_* keys are the engine's)."},
             },
             "required": ["spec"],
         },

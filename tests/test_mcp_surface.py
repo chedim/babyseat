@@ -81,6 +81,26 @@ class TestEntityEditSchemaSize(unittest.TestCase):
             self.assertIn(k, props)
 
 
+class TestEntityEditPropertiesAreShort(unittest.TestCase):
+    """2026-10-29: entity_edit's whole schema (4.7K chars, the biggest of the
+    28 tools Claude carries every call) was mostly per-property essays; each
+    property keeps one line and the long form moves to help()."""
+
+    def test_the_whole_schema_is_short(self):
+        import json
+        t = next(t for t in M.TOOLS if t["name"] == "entity_edit")
+        self.assertLess(len(json.dumps(t)), 2600)
+
+    def test_what_the_properties_dropped_lives_in_help(self):
+        from membrane.toolset import HELP
+        s, w = HELP["scripts"], HELP["watches"]
+        for needle in ("tick_every", "tool:clock", "4 run at once", "state.extra.payload",
+                       "tool:filetree", "3 failures", "60s..1h", "empty string clears"):
+            self.assertIn(needle, s, needle)
+        for needle in ("cap 8", "cap 3", "re-arm", "watch-attached"):
+            self.assertIn(needle, w, needle)
+
+
 class TestScriptsHelpKeepsTheContract(unittest.TestCase):
     """#569: what entity_edit's description dropped lives in help('scripts'),
     which costs tokens only when the model asks for it."""

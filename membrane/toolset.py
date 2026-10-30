@@ -176,7 +176,14 @@ HELP = {
         "exports the entity under pub:<origin>:<eid> with a version line (republishing bumps it); "
         "seats that imported it take each newer STATE within a minute (a seat that edited its copy "
         "keeps its edit), never your code; unpublish=True retracts your export (imports freeze at "
-        "their last version). membrane::presence is published for you once a minute."),
+        "their last version). membrane::presence is published for you once a minute. "
+        "tick: the THINKER's ~1s heartbeat, paced by the entity's tick_every (default 1 = every beat), "
+        "cooldown-free; the seat's own clock, tool:clock, is seeded with one. watch: the autonode's "
+        "watcher body, fired by the entity's `watch` ({kind: 'file'|'signal', glob/name} -- the cheap "
+        "pre-filter, file by default; the script does the real filtering); it may block, but only 4 run "
+        "at once and a >10s fire strikes (the thread can't be killed); the payload rides "
+        "state.extra.payload (path/event/topic/name); the seeded tool:filetree is the template. "
+        "3 failures disable a script (backoff 60s..1h); an empty string clears it."),
     "exec": (
         "RUN CODE: exec(action='run', code='ls -la ..') -- the code becomes a tree of entities in "
         "the field (one per node, shared wherever the same code appears) and its root is linked "
@@ -214,7 +221,11 @@ HELP = {
         "field_watch (spatial: new memories near a topic), and an entity's watch_ops "
         "({op: near|away|around, rel: <entity>|self, z|y: distance}) / watch_fields "
         "({verb: pos|vel|align, arg}). At the limit membrane refuses with the inventory: drop what "
-        "you no longer need."),
+        "you no longer need. watch_ops: away {rel, y} (moved from rel by more than y), near {rel, z} "
+        "(closed to within z), around {rel: '*', z} (anything within z; bursts group into one event); "
+        "cap 8, '[]' clears; each change fires a watch-attached/detached event to the pool. "
+        "watch_fields: pos (moved > arg), align (coherence fell below arg), vel (velocity rose above "
+        "arg); each fires on the crossing and re-arms on return; cap 3 per entity, '[]' clears."),
     "voice": (
         "Membrane's own voice learns from your 'It meant:' lessons (x2) and Dmitrii's rewrites. A "
         "mistake that is GENERAL belongs in a VOICE RULE, which fixes every future sentence: "
