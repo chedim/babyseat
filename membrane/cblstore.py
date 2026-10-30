@@ -523,6 +523,26 @@ class CBLiteBackend(MemBackend):
             return {"n": self.db.count(coll)}
         return super().count(coll, eq, group)
 
+    def warm_vectors(self, coll: str, field: str, wait: bool = False) -> None:
+        """#720: an indexed collection has no RAM matrix to build; its first
+        query after an open is the slow one (1.07 s vs 0.17 s), so run one
+        now -- in the background unless `wait`."""
+        if coll not in VEC or VEC[coll][0] != field:
+            return super().warm_vectors(coll, field)
+        q = np.zeros(DIM, dtype=np.float32)
+        q[0] = 1.0
+
+        def _one():
+            try:
+                self.vector_top_k(coll, field, q, 1)
+            except Exception:
+                pass
+        if wait:
+            _one()
+        else:
+            import threading
+            threading.Thread(target=_one, name=f"warm-{coll}", daemon=True).start()
+
     def vector_top_k(self, coll, field, vec, k, eq=None):
         if coll not in VEC or VEC[coll][0] != field:
             return super().vector_top_k(coll, field, vec, k, eq)

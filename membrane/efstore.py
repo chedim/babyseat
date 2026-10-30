@@ -64,6 +64,15 @@ def pack_f32(v) -> str:
     return "f32:" + base64.b64encode(a.tobytes()).decode()
 
 
+# #720 THE WARM SNAPSHOT: a planned restart writes the vector matrices here
+# (under the field folder) after the last flush; the next boot loads each one
+# whose collection's journal is byte-for-byte the one it was built from, and
+# deletes the folder (read once). Bump the version when the matrix layout or
+# its build changes: an old snapshot is then dropped, never trusted.
+WARM_DIR = "warm"
+WARM_VERSION = 1
+
+
 def _build_matrix(snap):
     """(keys, normed f32 matrix) from (key, packed vec) pairs, filled IN
     PLACE (2026-10-08): the old build kept every row as a 64-bit array in a
@@ -181,7 +190,7 @@ class MemBackend:
         # never-built collection answered empty forever)
         self._vec_want: set[tuple[str, str]] = set()
 
-    def warm_vectors(self, coll: str, field: str) -> None:
+    def warm_vectors(self, coll: str, field: str, wait: bool = False) -> None:
         """Start the coll/field matrix build now (a big one builds in the
         background), so the first real read does not answer empty."""
         self._vec_matrix(coll, field, None)
@@ -909,6 +918,7 @@ class FileBackend(MemBackend):
         self._flushing = False
         self._last_flush = time.time()
         self._load()
+        self._load_warm()
 
     def _load(self) -> None:
         """THE MIGRATION + REPLAY: a collection's .jsonl journal
@@ -994,6 +1004,81 @@ class FileBackend(MemBackend):
                         self._journal_count[coll] = len(colls[coll])
                 except Exception:
                     pass
+
+    # ---- #720 the warm snapshot (a planned restart keeps the matrices)
+    def _journal_stat(self, coll: str):
+        """[size, mtime_ns] of the collection's journal: the snapshot's
+        proof that the rows it was built from are the rows on disk."""
+        p = self._events_log if coll == "events" else self._journal_path(coll)
+        try:
+            st = p.stat()
+        except OSError:
+            return None
+        return [int(st.st_size), int(st.st_mtime_ns)]
+
+    def save_warm(self) -> dict:
+        """Write every built or wanted vector matrix to <field>/warm/ with
+        its journal's stat. Runs at the teardown's end (nothing writes
+        after it): a dirty matrix is rebuilt here, where no turn waits on
+        the GIL, so the snapshot is current."""
+        import shutil
+        d = self.dir / WARM_DIR
+        shutil.rmtree(d, ignore_errors=True)
+        d.mkdir(parents=True, exist_ok=True)
+        man = {"version": WARM_VERSION, "mats": []}
+        for coll, field in sorted(set(self._vec_cache) | set(self._vec_want)):
+            pair = self._vec_cache.get((coll, field))
+            if pair is None or coll in self._vec_dirty:
+                with self._ram_lock:
+                    snap = [(k, doc.get(field))
+                            for k, doc in list(self.colls.get(coll, {}).items())]
+                pair = _build_matrix(snap)
+            stat = self._journal_stat(coll)
+            if pair is None or stat is None:
+                continue
+            keys, M = pair
+            name = f"{coll}.{field}.npz"
+            np.savez(d / name, keys=keys, M=M)
+            man["mats"].append({"coll": coll, "field": field, "file": name,
+                                "journal": stat, "rows": int(M.shape[0])})
+        tmp = d / "manifest.json.tmp"
+        tmp.write_text(self._json.dumps(man))
+        os.replace(tmp, d / "manifest.json")
+        return man
+
+    def _load_warm(self) -> None:
+        """The boot's half: each matrix whose journal stat, row keys and
+        format version all match goes straight into the cache; anything
+        else is dropped. The folder is deleted either way (read once)."""
+        import shutil
+        d = self.dir / WARM_DIR
+        if not d.exists():
+            return
+        loaded = []
+        try:
+            man = self._json.loads((d / "manifest.json").read_text())
+            if man.get("version") != WARM_VERSION:
+                return
+            for m in man.get("mats") or []:
+                coll, field = m["coll"], m["field"]
+                if self._journal_stat(coll) != m.get("journal"):
+                    continue
+                with np.load(d / m["file"], allow_pickle=False) as z:
+                    keys, M = z["keys"], z["M"]
+                with self._ram_lock:
+                    live = {k for k, doc in self.colls.get(coll, {}).items()
+                            if doc.get(field) is not None}
+                if len(keys) != len(live) or set(keys.tolist()) != live:
+                    continue
+                self._vec_cache[(coll, field)] = (keys, M)
+                loaded.append(f"{coll}.{field} {M.shape[0]}")
+        except Exception as e:
+            print(f"[efield] warm snapshot dropped ({e})", file=sys.stderr)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+            if loaded:
+                print(f"[efield] warm snapshot loaded: {', '.join(loaded)}",
+                      file=sys.stderr)
 
     def _journal_path(self, coll: str) -> Path:
         return self.dir / f"{coll}.jsonl"

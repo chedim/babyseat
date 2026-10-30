@@ -526,6 +526,26 @@ def pin_ports(argv: list[str], listen: int | None, serve: int | None) -> list[st
     return out
 
 
+def save_warm(srv) -> None:
+    """#720: a planned restart keeps the field's warm vector matrices for
+    the next boot (efstore.FileBackend.save_warm). Called after the
+    teardown's last store close, so nothing writes after the snapshot; a
+    plain stop saves nothing."""
+    if not RESTART["requested"]:
+        return
+    fn = getattr(getattr(getattr(srv, "efield", None), "b", None), "save_warm", None)
+    if fn is None:
+        return
+    t0 = time.time()
+    try:
+        man = fn()
+        mats = ", ".join(f"{m['coll']}.{m['field']} {m['rows']}" for m in man.get("mats") or [])
+        print(f"[seat] warm snapshot saved in {time.time() - t0:.1f}s: {mats or 'nothing built'}",
+              file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"[seat] warm snapshot skipped ({e})", file=sys.stderr, flush=True)
+
+
 def reexec_if_requested(srv=None) -> None:
     """The last line of the seat's teardown: a requested restart re-execs the
     same command (same pid, same terminal -- ctrl+c still stops it; a
