@@ -63,16 +63,17 @@ def branch_of(path: str, value=None) -> str:
     return f"{parts[0]}:{parts[1].split('.')[0]}"     # kind + type (operator): ha:light is not ha:lock
 
 
-BODY = CH.MEMBRANE_NS + "Component:self:body"   # Blurp's own body following the current (card 1, C)
-BODY_NAME = "self:body"                         # its branch: always open, Blurp's own (no toy unlocks it)
-BODY_TOLD = frozenset({"nudged", "ticked", "at", "closer"})   # who moved it, then what it shows (ch_body)
+SELF_BRANCH = "self"                            # #732: Blurp's body is CH.SELF -- its branch, always open
+SELF_MOVE = "at"                                # where Blurp is: only its own (granted) move writes it
+SELF_PUSH = "current"                           # where the current is: the world's reading, never Blurp's
+SELF_TOLD = frozenset({"nudged", "ticked", SELF_PUSH, "closer"})   # who moved it, then what it shows (ch_body)
 
 
 def toy_of(est, eid) -> str | None:
     """#727: the toybox toy an entity is (a tower's block: its tower), else None;
-    Blurp's body is a toy of its own (BODY_NAME)."""
-    if str(eid or "") == BODY:
-        return BODY_NAME
+    Blurp's body, CH.SELF, is a toy of its own (SELF_BRANCH, #732)."""
+    if str(eid or "") == CH.SELF:
+        return SELF_BRANCH
     d = (getattr(est, "docs", None) or {}).get(str(eid or ""))
     tb = ((d.properties or {}).get("toybox") if d is not None else None) or {}
     return str(tb.get("name") or "") or None if isinstance(tb, dict) else None
@@ -92,15 +93,15 @@ def branch(est, path: str, value=None) -> str:
 def kind_of(est, cause: dict, w: dict) -> str | None:
     """The kind of guess -- the child skill it practises (operator, 2026-10-30) --
     from what it predicts and what its cause was:
-      on Blurp's body (card 1, C): where the current is (`at`) is look; whether the body
+      on Blurp's body, CH.SELF (card 1, C; #732): where the current is (`current`) is look; whether the body
         ended closer is feel itself after its own move (`nudged`), tell things apart
         after the current's (`ticked`); anything else on the body practises none;
       on the mirror: recognize itself;
       on any other toy, by who moved its cause: Blurp itself is first reach, the world
         (the toy's own later move) patience, anyone else meet an other."""
     eid, prop = str(w.get("eid") or ""), str(w.get("prop") or "")
-    if eid == BODY:
-        if prop == "at":
+    if eid == CH.SELF:
+        if prop == SELF_PUSH:
             return "reach"
         if prop == "closer":
             return {"nudged": "feel", "ticked": "kinds"}.get(str(cause.get("prop") or ""))
@@ -169,7 +170,10 @@ class Learner:
     @staticmethod
     def _expected(target_path: str) -> str:
         """A learned call writes `<method>.invoke`; what it predicts is the call the LLM
-        records, `<method>.last_call`."""
+        records, `<method>.last_call`. A look on Blurp's body (#732) writes `self.at` --
+        Blurp goes there -- and predicts where the current is, `self.current`."""
+        if target_path == f"{CH.SELF}.{SELF_MOVE}":
+            return f"{CH.SELF}.{SELF_PUSH}"
         return target_path[:-len(".invoke")] + ".last_call" if target_path.endswith(".invoke") else target_path
 
     def on_fire(self, tr, target_path: str, value) -> str:
@@ -191,6 +195,9 @@ class Learner:
         ch = (CH.W.current() or {}).get("id")
         if ch:                                  # no chain, nothing can confirm it: no prediction kept
             self._remember(self._pending, ch, list).append((tr.eid, self._expected(target_path), value))
+        if suggests and target_path == f"{CH.SELF}.{SELF_MOVE}":
+            self.counts["fire:live"] += 1           # #732: Blurp's own move -- a granted look moves its body
+            return "live"
         if suggests and self.suggest is not None:
             # the operator (#576 H): Blurp never acts by itself while the LLM works -- a
             # proposal on an accepted branch is a SUGGESTION; the LLM adopting it is the hit
@@ -221,9 +228,9 @@ class Learner:
                else "rel" if path.startswith("rel:") else "no_chain" if not ch else "")
         if not why and WORLD == "toys":                # #727: toys are the learner's world
             from .toybox import TOLD                   # only what the toy tells (never a getter's readings ring)
-            told = w.get("prop") in (BODY_TOLD if w.get("eid") == BODY else TOLD)
+            told = w.get("prop") in (SELF_TOLD if w.get("eid") == CH.SELF else TOLD)
             toy = toy_of(self.vm.est, w.get("eid")) if told else None
-            why = "not_toy" if not toy else "" if toy == BODY_NAME or self.toy_open(toy) else "locked_toy"
+            why = "not_toy" if not toy else "" if toy == SELF_BRANCH or self.toy_open(toy) else "locked_toy"
         if why:
             n["pass:" + why] += 1
             if why == "no_chain":                       # #721: who writes outside any chain (the writer's kind)
@@ -292,7 +299,8 @@ class Learner:
             target = "?x.invoke" if same else "?y.invoke"
             values = [self._call_expr(w["new"], c_eid, c_prop, c.get("new"))]
         else:
-            target = f"?x.{w_prop}" if same else f"?y.{w_prop}"
+            to = SELF_MOVE if (w_eid == CH.SELF and w_prop == SELF_PUSH) else w_prop   # #732: a look goes there
+            target = f"?x.{to}" if same else f"?y.{to}"
             values = []
             if _same(w.get("new"), c.get("new")):
                 values.append(f"x.{c_prop}")

@@ -1,18 +1,19 @@
 """BLURP'S BODY FOLLOWING THE CURRENT (card 1, C -- operator, 2026-10-30): where the
 three root skills are earned.
 
-The body sits where Blurp's newest firing put it (ch_blurp._show_body: its own
-move, the trigger it fired); the field's current (efield.current, the yellow orb)
-moves as people talk. On each awake exchange the body is READ: when either moved
+The body is Blurp itself, CH.SELF (#732): it sits where `self.at` says
+(ch_blurp._show_body), and only Blurp's own move -- a granted look firing live --
+writes `at`; the field's current (efield.current, the yellow orb) moves as people talk. On each awake exchange the body is READ: when either moved
 since the last reading, the body TELLS it like a toy (toybox._tell), as field
 writes in one chain of its own --
     who moved it first: `nudged` (Blurp's own move, writer self) and/or `ticked`
                         (the current's push, writer world), each its running count;
-    then what it shows: `at`, the entity nearest the current (where the orb is),
+    then what it shows: `current`, the entity nearest the current (where the orb is;
+                        never `at`, so the push and Blurp's move never overwrite each other),
                         and `closer`, whether the body now sits closer to the
                         current than at the last reading (cosine up).
-So the learner's guesses on the body are the roots (ch_learn.kind_of): `at` is
-look, `closer` after `nudged` feel itself, `closer` after `ticked` tell things
+So the learner's guesses on the body are the roots (ch_learn.kind_of): `current` is
+look (its guess writes `at`: Blurp goes where it guesses the current is), `closer` after `nudged` feel itself, `closer` after `ticked` tell things
 apart. Closer-or-not is the score, so there is no new threshold: nothing is
 written when nothing moved, and the first reading only places the body. A reading
 that shows what the last one showed is written all the same (writes.emit): the
@@ -21,10 +22,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import ch as CH
 from . import ch_learn as L
 
-BODY = L.BODY
-NAME = L.BODY_NAME
+BODY = CH.SELF
 
 
 def _unit(v) -> np.ndarray:
@@ -43,10 +44,10 @@ def _entity(est):
         return d
     from .entities import CLASS_COMPONENT, QuantumEntity
     d = QuantumEntity(eid=BODY, cls=CLASS_COMPONENT, properties={
-        "name": NAME, "silent_birth": True,
-        "summary": ("Blurp's body following the current (card 1, C): it tells who moved it "
-                    "(nudged = its own move, ticked = the current's push), where the current is "
-                    "(at) and whether it ended closer to it (closer)")})
+        "name": "self", "silent_birth": True,
+        "summary": ("Blurp itself, its body following the current (card 1, C; #732): where it is "
+                    "(at, its own move), who moved it (nudged = its own move, ticked = the current's "
+                    "push), where the current is (current) and whether it ended closer to it (closer)")})
     est.upsert(d, embedder=None)
     return est.docs.get(BODY, d)
 
@@ -77,7 +78,7 @@ def read(srv, at, cur, near, gen) -> dict | None:
             with W.as_writer(who):                     # the count goes on across restarts
                 ent.properties[cause] = int(ent.properties.get(cause) or 0) + 1
                 est.upsert(ent, embedder=None)
-        shows = {"at": str(near or ""), "closer": closer}
+        shows = {L.SELF_PUSH: str(near or ""), "closer": closer}
         same = {k for k, v in shows.items() if k in ent.properties and ent.properties[k] == v
                 and type(ent.properties[k]) is type(v)}
         with W.as_writer(by[-1]):

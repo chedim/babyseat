@@ -170,7 +170,7 @@ def test_its_own_move_is_told_first_then_where_the_current_is_and_closer(seat):
     assert r == {"by": ["self"], "closer": True}
     ws = _body_writes(seat)
     assert ws[0] == ("nudged", "self")
-    assert {p for p, _ in ws} == {"nudged", "at", "closer"}
+    assert {p for p, _ in ws} == {"nudged", "current", "closer"}   # #732: where the current is, never `at`
     chains = {(w.get("chain") or {}).get("id") for w in seat.seen if w.get("eid") == BODY.BODY}
     assert len(chains) == 1 and None not in chains               # one chain: the cause, then the effect
 

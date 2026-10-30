@@ -222,6 +222,12 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
     - Suggestions rank above the rest of the banner, so the budget never drops one unseen.
     - Unaccepted branches and shadow guesses stay silent.
     - `TurnRunner.run` records which conversation each turn's chain belongs to (`ch_blurp.note_turn`).
+  - **One exception: Blurp's own move (#732).** Blurp's body is `Component:self` (`CH.SELF`); there is no second body entity.
+    - The world's reading of the current lands on `self`: `ticked` (the push, counted), `current` (the entity nearest the current) and `closer`.
+    - A look guess is learned from `self.current` but writes `self.at`, where Blurp is (it predicts `current`, as a learned call writes `.invoke` and predicts `.last_call`).
+    - A granted look (`skill:reach` accepted) fires **live**: Blurp moves itself. The map's body and the 👁 eye cam sit at `self.at` (the seat before any move) and look at `self.current`; the move counts as `nudged`, so feel itself can be earned.
+    - The push writes `current`, the move writes `at`: neither overwrites the other. Every other proposal still only suggests.
+    - At boot, #731's `Component:self:body` and Blurp's triggers that name it are removed once (`ch_blurp.retire_old_body`).
 - **The sheet.** The seat adds the branches as the skill tree, the **level** as the number of branches granted (the card too), and the **Code tab** as Blurp's triggers: their line, state (shadow / proposal), balance (in write costs), hits and firings.
 - **The learner's counts.** The card and the sheet carry `learner`: the writes it saw (`seen`, `by_llm`), why it passed the rest (`pass:own_write`, `pass:no_chain`, `pass:rel`, `pass:no_prop`), why a guess stopped (`guess:asleep`, `guess:chain_full`, `guess:no_entity`, `guess:trigger`, `guess:position`, `guess:odd_name`), what it defined or the VM refused, its firings (`fire`, `fire:skip`), its hits, and its live `candidates`. Counts are since the seat started (RAM). A Blurp that earns nothing can be read there.
 

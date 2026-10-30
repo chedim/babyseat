@@ -283,11 +283,35 @@ ANEW = "child-tree"                 # Blurp's generation: a seat on an older one
 ANEW_FILE = "ch-anew.json"
 
 
+OLD_BODY = CH.MEMBRANE_NS + "Component:self:body"   # #731's second body, gone in #732
+
+
+def retire_old_body(srv) -> dict:
+    """#732: Blurp's body is CH.SELF. Remove #731's `Component:self:body` and Blurp's
+    triggers that name it (they could only ever write to it). Boot; a no-op once gone."""
+    est = getattr(srv, "entity_store", None)
+    vm = getattr(srv, "ch_vm", None)
+    gone = 0
+    if vm is not None:
+        for t in [t for t in vm.triggers() if vm._is_selfs(t)]:
+            if OLD_BODY in json.dumps([(t.properties or {}).get(k) for k in ("when", "where", "write")]) and vm.est.remove(t.eid):
+                gone += 1
+    if est is not None and OLD_BODY in (est.docs or {}) and est.remove(OLD_BODY):
+        gone += 1
+    if gone:
+        print(f"[blurp] #732: the old body retired ({gone} entities: it and the triggers naming it)")
+    return {"removed": gone}
+
+
 def anew(srv) -> dict:
     """Boot: the first time this generation runs on the seat, Blurp starts anew (operator,
     2026-10-30) -- the grants archived beside the store (never deleted), Blurp's own
     triggers removed, the toys back to their start (toybox archives each run); the
     record, energy and mode stay. Later boots change nothing. -> {anew, ...}"""
+    try:
+        retire_old_body(srv)                           # #732: before anything reads the body
+    except Exception:
+        pass
     f = _grants_file(srv)
     if f is None:
         return {"anew": False, "why": "no store"}
@@ -449,9 +473,10 @@ SEAT_FID = "seat:self"      # where the body rests before its first firing (the 
 
 
 def _show_body(srv, vm) -> None:
-    """The body on the map (fieldpulse.self_cycle, the old cycle's channel): at the
-    entity its newest firing watched, looking at what it wrote; at the seat before
-    any firing. Points are field vectors; the beat places them."""
+    """The body on the map (fieldpulse.self_cycle, the old cycle's channel): Blurp is
+    where `self` is (#732) -- at the entity its own move wrote into `self.at`, at the
+    seat before any move -- looking at where the current is (`self.current`). What its
+    triggers watched never places it. Points are field vectors; the beat places them."""
     from . import fieldpulse as FP
     from .eids import field_id
     fp, fld = FP.of(srv), getattr(srv, "efield", None)
@@ -462,14 +487,13 @@ def _show_body(srv, vm) -> None:
         st = fld.get(fid)
         v = getattr(st, "state", None) if st is not None else None
         return None if v is None else [float(x) for x in v]
-    docs = vm.est.docs or {}
-    last = next((f for f in reversed(list(vm.recent))
-                 if f["trig"] in docs and vm._is_selfs(docs[f["trig"]])), None)
-    at = vec(field_id(last["from"])) if last else None
-    at = at or vec(SEAT_FID)
+    me = (vm.est.docs or {}).get(CH.SELF)
+    p = (me.properties or {}) if me is not None else {}
+    here, there = str(p.get(L.SELF_MOVE) or ""), str(p.get(L.SELF_PUSH) or "")
+    at = (vec(field_id(here)) if here else None) or vec(SEAT_FID)
     if at is None:
         return
-    look = vec(field_id(last["to"])) if last and last["to"] != last["from"] else None
+    look = vec(field_id(there)) if there and there != here else None
     prev = getattr(srv, "_ch_body_at", None) or at
     srv._ch_body_at = at
     if fp is not None:
