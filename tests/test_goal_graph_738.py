@@ -266,7 +266,7 @@ def test_a_goal_its_planner_saw_is_not_re_asked_by_a_pulse(seat):
     assert seat.entity_store.docs[GOAL].properties.get("planner_ts")
     assert dr._handle({"kind": "intent-planted", "entity": GOAL, "rewake": True}) == "skip"
     assert dr._handle({"kind": "intent-planted", "entity": GOAL, "created": False,     # a person re-pins it:
-                       "ts": time.time() + 1}) == "planned"                       # the planner is asked again
+                       "ts": time.time() + 1}) == "planned", (time.time(), dict(seat.entity_store.docs[GOAL].properties), WA.is_operator_event({"kind": "intent-planted", "entity": GOAL}))                       # the planner is asked again
 
 
 def test_the_entity_read_tool_shows_the_goal_graph(seat, monkeypatch):
