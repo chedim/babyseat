@@ -136,12 +136,12 @@ def grant_times(srv) -> dict:
 
 # ---- the toys, in order (#727) ---------------------------------------------------------------
 
-TOY_ORDER = ("tower", "slow", "fast", "burst", "die", "drift", "ball", "mirror")   # #337's order
+TOY_ORDER = ("tower", "ball", "mirror")   # #337's order; no self-moving toys (slow/fast/burst/die/drift): nothing earns them (#727)
 TOYS_OPEN = 1        # #727: toys open beyond the granted ones (awaiting the operator's approval)
 
 
 def _seat_toys() -> dict:
-    """kind -> the toy the seat has of it (`toy:<kind>` first; an older name, e.g. w:slow, else)."""
+    """kind -> the toy the seat has of it (`toy:<kind>` first; an older name, e.g. w:ball, else)."""
     from . import toybox as TB
     try:
         rows = TB.list_toys()

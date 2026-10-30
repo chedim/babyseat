@@ -190,41 +190,51 @@ def test_commands_come_back_with_the_switch(seat, monkeypatch):
 
 # ---- 2. earning a toy is how Blurp grows ---------------------------------------------------------
 
-def test_the_order_is_337s():
-    assert B.TOY_ORDER == ("tower", "slow", "fast", "burst", "die", "drift", "ball", "mirror")
+def test_the_order_is_337s_without_the_self_moving_toys():
+    # #727, the operator: no self-moving toys -- slow, fast, burst, die and drift change on
+    # their own clock, so nothing Blurp guesses or does can earn them
+    assert B.TOY_ORDER == ("tower", "ball", "mirror")
+
+
+def test_a_self_moving_toy_is_never_open(seat):
+    TB.add(seat, "slow")
+    TB.add(seat, "tower", params={"n": 3})
+    s = B.augment(seat, {"header": {}, "tree": []})
+    assert "slow" not in {t["kind"] for t in s["toys"]}
+    assert not seat.ch_vm.learner.toy_open("toy:slow")
 
 
 def test_the_sheet_shows_the_toys_current_and_next(seat):
     TB.add(seat, "tower", params={"n": 3})
     s = B.augment(seat, {"header": {}, "tree": []})
     toys = {t["kind"]: t for t in s["toys"]}
-    assert toys["tower"]["state"] == "current" and toys["slow"]["state"] == "next"
-    assert toys["ball"]["state"] == "locked"
-    assert s["toy_current"] == "tower" and s["toy_next"] == "slow"
+    assert toys["tower"]["state"] == "current" and toys["ball"]["state"] == "next"
+    assert toys["mirror"]["state"] == "locked"
+    assert s["toy_current"] == "tower" and s["toy_next"] == "ball"
     assert all(not n["id"].startswith("branch:shell") for n in s["tree"])
 
 
 def test_accepting_a_toy_opens_the_next_and_provisions_it(seat):
     TB.add(seat, "tower", params={"n": 3})
     assert B.grant(seat, "toy:tower")
-    assert TB.peek("toy:slow") is not None             # the next toy is switched on
+    assert TB.peek("toy:ball") is not None             # the next toy is switched on
     s = B.augment(seat, {"header": {}, "tree": []})
     toys = {t["kind"]: t for t in s["toys"]}
     assert toys["tower"]["state"] == "granted" and toys["tower"]["granted_at"]
-    assert toys["slow"]["state"] == "current" and toys["fast"]["state"] == "next"
+    assert toys["ball"]["state"] == "current" and toys["mirror"]["state"] == "next"
     assert s["level"] == 1
     lr = seat.ch_vm.learner
-    assert lr.toy_open("toy:slow") and lr.toy_open("toy:tower") and not lr.toy_open("toy:fast")
+    assert lr.toy_open("toy:ball") and lr.toy_open("toy:tower") and not lr.toy_open("toy:mirror")
 
 
 def test_a_seat_with_old_toy_names_maps_them_by_kind(seat):
-    TB.add(seat, "slow", name="w:slow")
+    TB.add(seat, "ball", name="w:ball")
     TB.add(seat, "tower", params={"n": 3})
     B.grant(seat, "toy:tower")
     s = B.augment(seat, {"header": {}, "tree": []})
     toys = {t["kind"]: t for t in s["toys"]}
-    assert toys["slow"]["name"] == "w:slow" and toys["slow"]["state"] == "current"
-    assert TB.peek("toy:slow") is None                 # the seat had one: none added
+    assert toys["ball"]["name"] == "w:ball" and toys["ball"]["state"] == "current"
+    assert TB.peek("toy:ball") is None                 # the seat had one: none added
 
 
 def test_only_what_the_toy_tells_teaches(seat):
