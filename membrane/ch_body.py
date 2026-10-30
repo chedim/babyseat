@@ -51,17 +51,18 @@ def _entity(est):
     return est.docs.get(BODY, d)
 
 
-def read(srv, at, cur, near) -> dict | None:
+def read(srv, at, cur, near, gen) -> dict | None:
     """One reading of the body: `at` its place (a field vector), `cur` the current's,
-    `near` the entity nearest the current. -> {by: [self|world], closer} when
-    something moved and was told, else None."""
+    `near` the entity nearest the current, `gen` the current's generation (the field's
+    current_gen: the world moved only when it did -- the vector drifts in its last bits).
+    -> {by: [self|world], closer} when something moved and was told, else None."""
     at, cur = np.asarray(at, dtype=float).ravel(), np.asarray(cur, dtype=float).ravel()
     last = getattr(srv, "_ch_body_read", None)
-    srv._ch_body_read = {"at": at, "cur": cur}
+    srv._ch_body_read = {"at": at, "cur": cur, "gen": gen}
     if last is None or last["at"].shape != at.shape or last["cur"].shape != cur.shape:
         return None                                    # the first reading places the body
     by = ([] if np.array_equal(at, last["at"]) else ["self"]) + \
-         ([] if np.array_equal(cur, last["cur"]) else ["world"])
+         ([] if gen == last.get("gen") else ["world"])
     if not by:
         return None
     closer = _cos(at, cur) > _cos(last["at"], last["cur"])

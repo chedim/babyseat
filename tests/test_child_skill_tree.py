@@ -110,8 +110,8 @@ def test_a_skill_is_earned_when_a_guess_of_its_kind_pays_over_earned_prerequisit
     _pay(seat, "nudge")
     n = _nodes(seat)
     assert n["branch:skill:nudge"]["state"] == "locked"           # paying, but feel itself is unearned
-    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a")
-    BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a"); seat.ch_vm.drain()
+    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0)
+    BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a", gen=0); seat.ch_vm.drain()
     _pay(seat, "feel")
     n = _nodes(seat)
     assert n["branch:skill:feel"]["state"] == "earned"
@@ -159,14 +159,14 @@ def test_kinds_still_read_who_moved_it(seat):
 # ---- the body following the current (card 1, C) ------------------------------------------------
 
 def test_the_first_reading_only_places_the_body(seat):
-    assert BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a") is None
+    assert BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0) is None
     assert not _body_writes(seat)
 
 
 def test_its_own_move_is_told_first_then_where_the_current_is_and_closer(seat):
-    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a")
+    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0)
     seat.seen.clear()
-    r = BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a")
+    r = BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a", gen=0)
     assert r == {"by": ["self"], "closer": True}
     ws = _body_writes(seat)
     assert ws[0] == ("nudged", "self")
@@ -176,40 +176,40 @@ def test_its_own_move_is_told_first_then_where_the_current_is_and_closer(seat):
 
 
 def test_the_current_moving_is_the_worlds_push(seat):
-    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a")
+    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0)
     seat.seen.clear()
-    r = BODY.read(seat, at=_v(1, 0, 0), cur=_v(1, 1, 0), near="w:b")
+    r = BODY.read(seat, at=_v(1, 0, 0), cur=_v(1, 1, 0), near="w:b", gen=1)
     assert r == {"by": ["world"], "closer": True}
     assert _body_writes(seat)[0] == ("ticked", "world")
 
 
 def test_moving_away_is_not_closer(seat):
-    BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a")
-    assert BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a") == {"by": ["self"], "closer": False}
+    BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a", gen=0)
+    assert BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0) == {"by": ["self"], "closer": False}
 
 
 def test_nothing_moved_nothing_told(seat):
-    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a")
+    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0)
     seat.seen.clear()
-    assert BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a") is None
+    assert BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0) is None
     assert not _body_writes(seat)
 
 
 def test_the_body_teaches_the_three_roots_with_no_toy_open(seat):
     seat.ch_vm.learner.toy_open = lambda name: False
-    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a")
-    BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a"); seat.ch_vm.drain()
+    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0)
+    BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a", gen=0); seat.ch_vm.drain()
     assert {"feel", "reach"} <= _kinds(seat)
     before = {t.eid for t in _mine(seat)}
-    BODY.read(seat, at=_v(1, 1, 0), cur=_v(1, 1, 1), near="w:b"); seat.ch_vm.drain()
+    BODY.read(seat, at=_v(1, 1, 0), cur=_v(1, 1, 1), near="w:b", gen=1); seat.ch_vm.drain()
     assert "kinds" in _kinds(seat, before)
     assert all((t.properties or {}).get("toy") for t in _mine(seat))   # they fire while toys are the world
 
 
 def test_a_body_guess_comes_true_and_pays(seat):
-    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a")
-    BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a"); seat.ch_vm.drain()
-    BODY.read(seat, at=_v(1, 2, 0), cur=_v(0, 1, 0), near="w:a"); seat.ch_vm.drain()
+    BODY.read(seat, at=_v(1, 0, 0), cur=_v(0, 1, 0), near="w:a", gen=0)
+    BODY.read(seat, at=_v(1, 1, 0), cur=_v(0, 1, 0), near="w:a", gen=0); seat.ch_vm.drain()
+    BODY.read(seat, at=_v(1, 2, 0), cur=_v(0, 1, 0), near="w:a", gen=0); seat.ch_vm.drain()
     lr = seat.ch_vm.learner
     feel = [t for t in _mine(seat) if (t.properties or {}).get("kind") == "feel"]
     assert any(lr.hits(t.eid) for t in feel)                       # closer again: the guess came true
@@ -217,7 +217,7 @@ def test_a_body_guess_comes_true_and_pays(seat):
 
 def test_the_exchange_reads_the_body_where_its_newest_firing_put_it(seat, monkeypatch):
     got = []
-    monkeypatch.setattr(BODY, "read", lambda srv, at, cur, near: got.append((list(at), list(cur), near)))
+    monkeypatch.setattr(BODY, "read", lambda srv, at, cur, near, gen: got.append((list(at), list(cur), near)))
 
     class _F:
         def get(self, fid):
@@ -225,6 +225,9 @@ def test_the_exchange_reads_the_body_where_its_newest_firing_put_it(seat, monkey
 
         def current(self):
             return np.array([0.0, 1.0, 0.0])
+
+        def current_gen(self):
+            return 1
 
         def recall(self, vec, k=1, **kw):
             return [("m:somewhere", 0.9)]

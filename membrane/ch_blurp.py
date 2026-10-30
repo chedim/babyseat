@@ -477,15 +477,15 @@ def _show_body(srv, vm) -> None:
     _read_body(srv, fld, at)
 
 
-def _read_body(srv, fld, at) -> None:
+def _read_body(srv, fld, at) -> dict | None:
     """Card 1, C: the body against the current, told to the learner (ch_body.read)."""
     from . import ch_body as BODY
     cur = fld.current() if hasattr(fld, "current") else None
     if cur is None:
-        return                                         # nobody spoke lately: no current to follow
-    import numpy as np
-    seen = getattr(srv, "_ch_body_near", None)         # (the current, its nearest): an unchanged
-    if seen is not None and np.array_equal(seen[0], cur):   # current costs no field search
+        return None                                    # nobody spoke lately: no current to follow
+    gen = fld.current_gen()                            # #731: moves only when a pull or a drop did
+    seen = getattr(srv, "_ch_body_near", None)         # (its generation, its nearest): an unchanged
+    if seen is not None and seen[0] == gen:            # current costs no field search
         near = seen[1]
     else:
         try:
@@ -493,8 +493,8 @@ def _read_body(srv, fld, at) -> None:
         except Exception:
             hits = []
         near = hits[0][0] if hits else ""
-        srv._ch_body_near = (np.array(cur, dtype=float, copy=True), near)
-    BODY.read(srv, at, cur, near)
+        srv._ch_body_near = (gen, near)
+    return BODY.read(srv, at, cur, near, gen)
 
 
 # ---- the sheet -------------------------------------------------------------------------------
