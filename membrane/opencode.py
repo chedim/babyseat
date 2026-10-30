@@ -2080,6 +2080,11 @@ def main() -> None:
                     print(f"[seat] name entity not planted ({e})", file=sys.stderr)
             from .restarts import was_reexec as _was_reexec
             _reexec = _was_reexec()        # read + cleared on every boot (#243)
+            try:                           # #711: a message that came in during the restart gets its turn
+                from .restarts import answer_dropped as _answer_dropped
+                _answer_dropped(srv)
+            except Exception as e:
+                print(f"[seat] the restart's dropped messages not answered ({e})", file=sys.stderr)
             if args.standalone:            # STANDALONE MODE: the UI on the serve port (ui_serve.py)
                 from . import ui_serve as _UIS
                 _UIS.build_id()            # the page code this boot serves, fixed now (#243)

@@ -234,14 +234,54 @@ def busy(srv) -> list[str]:
     return out
 
 
-def hold_until_idle(srv) -> list[str]:
+def _row_text(row: dict) -> str:
+    return "\n".join(str(p.get("text") or "") for p in (row.get("parts") or [])
+                     if isinstance(p, dict) and p.get("type") == "text")
+
+
+def _dropped(srv, since_ms: int) -> list[tuple]:
+    """#711: (sid, row) for each idle session whose newest row is a person's
+    message stored at or after since_ms -- it came in and no turn answers it."""
+    from .server import _from_person
+    r = getattr(srv, "_loop_runner", None)
+    store = getattr(r, "sessions", None)
+    msgs = getattr(r, "messages", None)
+    if r is None or msgs is None:
+        return []
+    out = []
+    for sid in list(getattr(store, "sessions", None) or []):
+        if (r.status(sid) or {}).get("type") == "busy":
+            continue                            # busy() holds a running turn
+        rows = msgs.list(sid)
+        if not rows:
+            continue
+        last = rows[-1]
+        info = last.get("info") or {}
+        if info.get("role") != "user" or int((info.get("time") or {}).get("created") or 0) < since_ms:
+            continue
+        if _from_person(_row_text(last), last.get("parts")):
+            out.append((sid, last))
+    return out
+
+
+def waiting_messages(srv, since_ms: int) -> list[str]:
+    """#711: the sessions holding a person's message that came after the
+    restart was scheduled and has no turn yet."""
+    return [sid for sid, _ in _dropped(srv, since_ms)]
+
+
+def hold_until_idle(srv, since_ms: int | None = None) -> list[str]:
     """#647: wait until no turn or loop runs, up to MAX_DELAY_MIN; returns what
     it last saw running (empty = idle). The caller's own turn ends once its
-    call returns, so a restart asked from inside one waits for it to finish."""
+    call returns, so a restart asked from inside one waits for it to finish.
+    #711: with since_ms (when the restart was scheduled), a person's message
+    that came after it and has no turn yet holds the restart too."""
     cap = time.time() + MAX_DELAY_MIN * 60
     held: list[str] = []
     while True:
         b = busy(srv)
+        if since_ms is not None:
+            b += [f"message {sid}" for sid in waiting_messages(srv, since_ms)]
         if not b:
             return held
         held = b
@@ -434,6 +474,7 @@ RESTART = {"requested": False}
 REEXEC_ENV = "MEMBRANE_REEXEC"
 # #395: the person's pause, handed to the re-exec'd boot (the environment, never disk)
 PAUSE_ENV = "MEMBRANE_REEXEC_PAUSED"
+SINCE_ENV = "MEMBRANE_REEXEC_SINCE_MS"   # #711: when the restart was scheduled
 _BOOT: dict = {}                           # this boot's reads of the markers
 
 
@@ -504,6 +545,10 @@ def reexec_if_requested(srv=None) -> None:
         os.environ[PAUSE_ENV] = "1"
     else:
         os.environ.pop(PAUSE_ENV, None)
+    if RESTART.get("since_ms"):            # #711: the next boot answers what came in after it
+        os.environ[SINCE_ENV] = str(int(RESTART["since_ms"]))
+    else:
+        os.environ.pop(SINCE_ENV, None)
     os.execv(sys.executable,
              [sys.executable, "-m", "membrane.opencode"]
              + pin_ports(sys.argv[1:], *(RESTART.get("ports") or (None, None))))
@@ -526,9 +571,12 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
     except Exception:
         pass
 
+    since_ms = int(time.time() * 1000)          # #711: what comes in after this holds it
+
     def bye():
         time.sleep(delay_s)
-        hold_until_idle(srv)                    # #647: never cut a person's turn off
+        hold_until_idle(srv, since_ms)          # #647: never cut a person's turn off
+        RESTART["since_ms"] = since_ms          # #711: one that came in during the teardown waits for the boot
         # only now is it a restart: a plain stop during the hold must stay a stop
         RESTART["requested"] = True
         try:
@@ -552,3 +600,33 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
         text += (" (the battery paused the seat; that pause is not carried -- "
                  "the new boot pauses again if the battery is still low)")
     return {"rc": 0, "text": text}
+
+
+def answer_dropped(srv, wait: bool = True) -> int:
+    """#711: on the boot a restart re-exec'd, each person's message that came
+    in after the restart was scheduled and got no turn (it landed during the
+    teardown) gets its turn now. A cold start answers nothing. The marker is
+    cleared on read, so no child process inherits it. Returns how many."""
+    raw = os.environ.pop(SINCE_ENV, None)
+    try:
+        since_ms = int(raw or 0)
+    except ValueError:
+        since_ms = 0
+    if not since_ms:
+        return 0
+    r = getattr(srv, "_loop_runner", None)
+    todo = _dropped(srv, since_ms)
+    for sid, row in todo:
+        print(f"[seat] {sid}: a message came in during the restart -- answering it now", file=sys.stderr)
+
+        def go(sid=sid, row=row):
+            try:
+                r.run(sid, _row_text(row), user_info=dict(row.get("info") or {}),
+                      user_parts=list(row.get("parts") or []))
+            except Exception as e:              # noqa: BLE001
+                print(f"[seat] {sid}: the dropped message's turn failed ({e})", file=sys.stderr)
+        if wait:
+            threading.Thread(target=go, daemon=True, name="restart-answer").start()
+        else:
+            go()
+    return len(todo)

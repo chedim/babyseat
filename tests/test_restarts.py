@@ -221,7 +221,7 @@ class TestRestartHoldsWhileBusy647(unittest.TestCase):
 
     def test_do_restart_signals_only_after_the_hold(self):
         order = []
-        with mock.patch.object(RS, "hold_until_idle", side_effect=lambda s: order.append("hold") or []), \
+        with mock.patch.object(RS, "hold_until_idle", side_effect=lambda s, *a: order.append("hold") or []), \
              mock.patch.object(RS.os, "kill", side_effect=lambda *a: order.append("kill")), \
              mock.patch.object(RS.time, "sleep"), \
              mock.patch("membrane.seat_panel.note"):
@@ -249,7 +249,7 @@ class TestPlainStopDuringTheHold647(unittest.TestCase):
         gate = threading.Event()
         release = threading.Event()
 
-        def hold(s):
+        def hold(s, *a):
             seen["requested"] = RS.RESTART["requested"]
             seen["reason"] = os.path.exists(os.path.join(RS._dir(srv), RS.REASON_FILE))
             gate.set()
@@ -280,7 +280,7 @@ class TestPlainStopDuringTheHold647(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             srv = _Srv()
             with mock.patch.object(RS, "_dir", return_value=d), \
-                 mock.patch.object(RS, "hold_until_idle", side_effect=lambda s: release.wait(2) or []), \
+                 mock.patch.object(RS, "hold_until_idle", side_effect=lambda s, *a: release.wait(2) or []), \
                  mock.patch.object(RS, "busy", return_value=["turn s1"]), \
                  mock.patch.object(RS.os, "kill") as kill, \
                  mock.patch("membrane.seat_panel.note"):
