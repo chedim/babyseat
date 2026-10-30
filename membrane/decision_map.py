@@ -8,7 +8,8 @@ store) with a ``status`` that moves right to left:
 
 A card tagged work_needed=False closes on the answer; one needing work stays
 decided until a watcher loop moves it to in_flight, and it closes only once a
-receipt is on it. The operator may also drop an open card. An agent may work on an
+receipt is on it. The operator may also drop an open card; an agent may drop one
+only with a non-empty ``dropped_why`` set first (#758). An agent may work on an
 undecided card without committing to it: reversible drafts go in its ``speculative``
 property; the card stays open (no in_flight, no close) until the answer, which keeps
 the drafts only if it is the pick they assumed. (Cards without a work_needed tag are
@@ -40,7 +41,7 @@ STATUS_DECIDED = "decided"
 STATUS_CLOSED = "closed"
 STATUS_DROPPED = "dropped"
 STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_DECIDED, STATUS_CLOSED, STATUS_DROPPED)
-AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_CLOSED)    # what entity_edit may set
+AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_CLOSED, STATUS_DROPPED)    # what entity_edit may set
 LOCKED = (STATUS_CLOSED, STATUS_DROPPED)
 ANSWER_OWNED = ("value", "set_by", "set_at")        # only answer() writes these
 SPECULATIVE = "speculative"     # reversible drafts an agent attaches to an undecided card
@@ -85,6 +86,11 @@ def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
             return "only a decided or in-flight card closes"
         if not str((props or {}).get("receipt") or "").strip():
             return "a card closes with a receipt: set its receipt property first"
+    if key == "status" and value == STATUS_DROPPED:     # #758: an agent drops a stale card, saying why
+        if cur not in (None, STATUS_OPEN) or (props or {}).get("value") is not None:
+            return "only an open card can be dropped"
+        if not str((props or {}).get("dropped_why") or "").strip():
+            return "a card drops with a reason: set its dropped_why property first"
     if key == "status" and value not in AGENT_STATUSES:
         return (f"a card's status is set to one of {', '.join(AGENT_STATUSES)} "
                 f"here; only the operator's answer makes it decided")
@@ -281,7 +287,7 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
 
 def drop(est, spec: str) -> dict:
     """The operator drops an open card without answering it. Owner-only at the
-    route; entity_edit refuses status dropped, so an agent never drops."""
+    route; an agent drops through entity_edit, only with a dropped_why (#758)."""
     from .entities import CLASS_DECISION
     with _ANSWER_LOCK:
         if est is None:
