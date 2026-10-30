@@ -210,7 +210,12 @@ HELP = {
         "'retry after 2h'> / ignored: <reason>. Close with goal(action='close', spec=<id>, "
         "evidence=<receipt>) -- no receipt, no close. An EMPTY board leaves membrane's dream loop and "
         "think-ahead unsteered (nothing guides the idle mind's branches): when your work has a "
-        "direction worth keeping across sessions, plant it; plant only when it serves the work."),
+        "direction worth keeping across sessions, plant it; plant only when it serves the work. "
+        "WORK GIVEN IN THE CHAT (an issue to build, a fix, a multi-step task): plant it as a goal "
+        "carrying the issue link and what done means, instead of doing it in your own turn, and "
+        "answer with the goal's id: the planner splits it, its decision cards go to the person, "
+        "and the workers run its tasks. Questions, reviews and lookups you can answer in a few "
+        "calls stay in your turn."),
     "state": (
         "state() is membrane's vitals plus the seat's whole WHERE WE ARE. state(section=...) pulls "
         "one part: tracks (the watched entities' stories), commands (your methods, most called first),"
