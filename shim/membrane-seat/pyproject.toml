@@ -18,14 +18,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "membrane-seat"
-version = "0.7.3"
+version = "0.7.4"
 description = "membrane-seat is now babyseat: installing it installs babyseat."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Dmitrii Chechetkin" }]
-dependencies = ["babyseat==0.7.3"]
+dependencies = ["babyseat==0.7.4"]
 
 [project.urls]
 Homepage = "https://github.com/chedim/membrane"
