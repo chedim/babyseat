@@ -105,6 +105,9 @@ def _load() -> None:
         from sentence_transformers import CrossEncoder
         dev = "mps" if torch.backends.mps.is_available() else "cpu"
         m = CrossEncoder(MODEL, max_length=MAX_LEN, device=dev)   # fp32: fp16/bf16 lost 5 of the 9 points
+        # #720: the first predict on a fresh model pays its kernel set-up (2.4 s on
+        # mps vs ~1 s after): one full-size batch here, so no turn pays it
+        m.predict([("warm", "warm " * (MAX_LEN // 2))] * RERANK_TOP, show_progress_bar=False)
         with _lock:
             _model, _state = m, "ready"
         print(f"[rerank] {MODEL} ready on {dev}", file=sys.stderr)

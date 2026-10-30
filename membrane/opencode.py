@@ -1080,6 +1080,7 @@ def main() -> None:
             if _wv is not None:
                 try:
                     _wv("chunks", "vec")
+                    _wv("sentences", "vec")    # #720: an indexed store's first query, off the first turn
                 except Exception:
                     pass
             # THE FIELD'S PULSE (viewer v3): field + mind frames on the
@@ -2502,6 +2503,11 @@ def main() -> None:
                 closer()
             except Exception:
                 pass
+        try:                           # #720: a planned restart keeps the warm matrices
+            from .restarts import save_warm
+            save_warm(srv)
+        except Exception:
+            pass
         for p in (cfg_path,):          # the doctrine file is stable: kept
             if not p:
                 continue
