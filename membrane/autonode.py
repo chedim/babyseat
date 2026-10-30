@@ -268,6 +268,8 @@ class Autonode:
         self.fire_timeout = float(fire_timeout)
         self.workers = max(1, int(workers))
         self.scanner = FileTreeScanner(self.root) if self.root else None
+        self.trees = None                     # #715: the fs:dir / fs:code trees (built on first pump)
+        self._last_trees = 0.0
         self.bus = bus
         self._subs: set[str] = set()
         self._active = 0                      # scripts running right now
@@ -447,6 +449,17 @@ class Autonode:
             except Exception as e:
                 print(f"[autonode] scanner tick failed ({e})",
                       file=sys.stderr)
+        try:
+            # #715: the trees entities ask for (fs:dir, fs:code), the same
+            # cadence; a directory no entity names is never walked
+            if now - getattr(self, "_last_trees", 0.0) >= getattr(self, "scan_s", 10.0):
+                self._last_trees = now
+                if getattr(self, "trees", None) is None:
+                    from . import fstree as _FT
+                    self.trees = _FT.Trees(self.srv, self.est, getattr(self, "root", None) or Path.cwd())
+                self.trees.pump()
+        except Exception as e:
+            print(f"[autonode] trees tick failed ({e})", file=sys.stderr)
         _m["scan"] = time.perf_counter() - _t0
         _t1 = time.perf_counter()
         self._reap(now)

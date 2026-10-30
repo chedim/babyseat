@@ -1,20 +1,24 @@
 """LIVE CODE TREES (#715 part A, the operator 2026-10-29: "let's make our code
-trees alive"): the project's Python source as entities, one per SYMBOL -- the
-module, each class, each function or method -- read-only for now.
+trees alive"): a file's source as entities, one per SYMBOL -- the module, each
+class, each function or method -- read-only for now. Opt-in: only a file entity
+that extends `fs:code` gets one (fstree.py, the operator's 2026-10-30 model).
 
-IDENTITY IS STABLE: `membrane::src:<path>::<qualname>` (the module itself is
-`membrane::src:<path>`), across edits; the content hash and the byte / line
-span are properties. A nested def gets a dotted qualname (`Pump.run.inner`); a
-decorated definition's span starts at its first decorator. `parent` names the
-enclosing symbol's entity.
+IDENTITY IS STABLE: `membrane::src:<file>::<qualname>` (the module itself is
+`membrane::src:<file>`; <file> is the file entity's key: repo-relative under
+the seat's root, absolute elsewhere), across edits; the content hash and the
+byte / line span are properties. A nested def gets a dotted qualname
+(`Pump.run.inner`); a decorated definition's span starts at its first
+decorator. `within` names the enclosing symbol (the module: its file entity) --
+containment, never `parent` (the legacy ISA key).
 
-FILES ARE THE SOURCE OF TRUTH: codegraph's mtime sweep (`stale_paths`) names
-the files changed outside the field (an editor, git, a checkout); each is
-re-parsed with the tree-sitter grammar (lang.GRAMMARS["py"]) and its symbols'
-entities updated. A symbol gone from its file is RETIRED (status 'retired',
-mark-don't-delete); a file that brings it back revives the same entity. A
-half-written file (a parse error) keeps its old symbols until it parses. Reading
-a symbol reads its span from disk (`source`).
+THE GRAMMAR IS PICKED BY EXTENSION from lang.GRAMMARS (py, sh, js).
+
+FILES ARE THE SOURCE OF TRUTH: the file's mtime, checked on the autonode's scan,
+re-parses a file changed outside the field (an editor, git, a checkout). A
+symbol gone from its file is RETIRED (status 'retired', mark-don't-delete); a
+file that brings it back revives the same entity. A half-written file (a parse
+error) keeps its old symbols until it parses. Reading a symbol reads its span
+from disk (`source`).
 
 Part B (the write path: entity_edit source=...) and part C (codegraph's symbols
 and call edges on these trees) build on this."""
@@ -28,53 +32,62 @@ from .entities import CLASS_COMPONENT, MEMBRANE_NS, QuantumEntity
 
 NS = MEMBRANE_NS + "src:"
 LIVE, RETIRED = "live", "retired"
-_DEFS = {"class_definition": "class", "function_definition": "function"}
+EXT = {".py": "py", ".sh": "sh", ".bash": "sh", ".js": "js", ".mjs": "js", ".cjs": "js"}
+_DEFS = {   # per grammar: definition node -> its kind
+    "py": {"class_definition": "class", "function_definition": "function"},
+    "sh": {"function_definition": "function"},
+    "js": {"class_declaration": "class", "function_declaration": "function",
+           "generator_function_declaration": "function", "method_definition": "method"},
+}
 
 
-def eid_of(rel: str, qual: str = "") -> str:
-    return NS + rel + (f"::{qual}" if qual else "")
+def eid_of(key: str, qual: str = "") -> str:
+    return NS + key + (f"::{qual}" if qual else "")
 
 
 def _hash(b: bytes) -> str:
     return hashlib.sha1(b).hexdigest()[:16]
 
 
-def symbols(src: bytes) -> list[dict] | None:
+def lang_of(path) -> str | None:
+    """The grammar a file's extension names (one lang.GRAMMARS has), else None."""
+    from . import lang as LG
+    g = EXT.get(Path(str(path)).suffix.lower())
+    return g if g in LG.GRAMMARS else None
+
+
+def symbols(src: bytes, lang: str = "py") -> list[dict] | None:
     """The module and its symbols, outermost first; None when it does not parse."""
     from . import lang as LG
     import tree_sitter as ts
-    root = ts.Parser(LG._language("py")).parse(src).root_node
+    defs = _DEFS.get(lang) or {}
+    root = ts.Parser(LG._language(lang)).parse(src).root_node
     if root.has_error:
         return None
     out = [{"qual": "", "kind": "module", "span": [0, len(src)],
-            "lines": [1, src.count(b"\n") + 1], "hash": _hash(src), "parent": None}]
+            "lines": [1, src.count(b"\n") + 1], "hash": _hash(src), "within": None}]
 
-    def walk(n, prefix: str, parent: str, parent_kind: str) -> None:
+    def walk(n, prefix: str, within: str, within_kind: str) -> None:
         for c in n.named_children:
             node = c.child_by_field_name("definition") if c.type == "decorated_definition" else c
-            if node is not None and node.type in _DEFS and node.child_by_field_name("name") is not None:
+            if node is not None and node.type in defs and node.child_by_field_name("name") is not None:
                 q = prefix + node.child_by_field_name("name").text.decode()
-                kind = _DEFS[node.type]
-                if kind == "function" and parent_kind == "class":
+                kind = defs[node.type]
+                if kind == "function" and within_kind == "class":
                     kind = "method"
                 a, b = c.start_byte, c.end_byte          # a decorator belongs to its def
                 out.append({"qual": q, "kind": kind, "span": [a, b],
                             "lines": [c.start_point[0] + 1, c.end_point[0] + 1],
-                            "hash": _hash(src[a:b]), "parent": parent})
+                            "hash": _hash(src[a:b]), "within": within})
                 walk(node, q + ".", q, kind)
             else:
-                walk(c, prefix, parent, parent_kind)
+                walk(c, prefix, within, within_kind)
     walk(root, "", "", "module")
     return out
 
 
-def default_root(srv) -> Path:
-    """The project root codegraph reads (the field's parent's parent)."""
-    return Path(srv.membrane.field_path).parent.parent
-
-
-def attach(srv, root) -> dict:
-    """The seat's sweep state: the root, and per file its mtime and symbols --
+def attach(srv) -> dict:
+    """The seat's symbol state: per file key its path, mtime and symbols --
     rebuilt from the store's live entities, so a restart re-reads nothing new."""
     est = srv.entity_store
     files: dict = {}
@@ -84,19 +97,19 @@ def attach(srv, root) -> dict:
         p = d.properties or {}
         if p.get("status") == RETIRED:
             continue
-        f = files.setdefault(str(p.get("path") or ""), {"mtime": None, "symbols": []})
+        f = files.setdefault(str(p.get("path") or ""), {"mtime": None, "symbols": [], "file": p.get("file")})
         if p.get("kind") == "module":
             f["mtime"] = p.get("mtime")
         else:
             f["symbols"].append(str(p.get("qualname") or ""))
-    g = {"root": str(Path(root)), "files": files}
+    g = {"files": files}
     srv._srctree = g
     return g
 
 
 def _graph(srv) -> dict:
     g = getattr(srv, "_srctree", None)
-    return g if g is not None else attach(srv, default_root(srv))
+    return g if g is not None else attach(srv)
 
 
 def _retire(est, eid: str) -> bool:
@@ -108,13 +121,13 @@ def _retire(est, eid: str) -> bool:
     return True
 
 
-def _put(est, rel: str, s: dict, mtime: float) -> bool:
+def _put(est, key: str, path: Path, s: dict, mtime: float, file_eid: str) -> bool:
     """Upsert one symbol's entity; False when nothing about it changed."""
-    eid = eid_of(rel, s["qual"])
-    want = {"name": f"{rel}::{s['qual']}" if s["qual"] else rel, "path": rel,
+    eid = eid_of(key, s["qual"])
+    want = {"name": f"{key}::{s['qual']}" if s["qual"] else key, "path": key, "file": str(path),
             "qualname": s["qual"], "kind": s["kind"], "span": s["span"], "lines": s["lines"],
             "hash": s["hash"], "status": LIVE,
-            "parent": eid_of(rel, s["parent"]) if s["parent"] is not None else None}
+            "within": eid_of(key, s["within"]) if s["within"] is not None else file_eid}
     if s["kind"] == "module":
         want["mtime"] = mtime
     d = (est.docs or {}).get(eid)
@@ -132,111 +145,67 @@ def _put(est, rel: str, s: dict, mtime: float) -> bool:
     return True
 
 
-def sync_file(srv, rel: str) -> dict:
-    """Re-read one repo-relative file into its symbols' entities."""
+def sync_file(srv, key: str, path, within: str) -> dict:
+    """Re-read one file into its symbols' entities (`within`: its file entity)."""
     g = _graph(srv)
     est = srv.entity_store
     files = g["files"]
-    old = files.get(rel) or {"symbols": []}
+    path = Path(path)
+    old = files.get(key) or {"symbols": []}
     out = {"upserted": 0, "retired": 0}
-    p = Path(g["root"]) / rel
-    if not p.is_file():
-        for q in old["symbols"] + [""]:
-            out["retired"] += _retire(est, eid_of(rel, q))
-        files.pop(rel, None)
+    if not path.is_file():
+        if key in files:
+            for q in old["symbols"] + [""]:
+                out["retired"] += _retire(est, eid_of(key, q))
+            files.pop(key, None)
         return out
+    lang = lang_of(path)
     try:
-        src, mtime = p.read_bytes(), p.stat().st_mtime
+        src, mtime = path.read_bytes(), path.stat().st_mtime
     except OSError:
         return out
-    syms = symbols(src) if b"\x00" not in src[:1024] else None
+    syms = symbols(src, lang) if lang and b"\x00" not in src[:1024] else None
     if syms is None:
-        return out                      # half-written or not Python: the old symbols stand
+        files[key] = {**old, "mtime": mtime, "file": str(path)}   # half-written or no grammar: the old symbols stand
+        return out
     for s in syms:
-        out["upserted"] += _put(est, rel, s, mtime)
+        out["upserted"] += _put(est, key, path, s, mtime, within)
     now = {s["qual"] for s in syms if s["qual"]}
     for q in old["symbols"]:
         if q not in now:
-            out["retired"] += _retire(est, eid_of(rel, q))
-    files[rel] = {"mtime": mtime, "symbols": sorted(now)}
+            out["retired"] += _retire(est, eid_of(key, q))
+    files[key] = {"mtime": mtime, "symbols": sorted(now), "file": str(path)}
     return out
 
 
-def _packages(root: Path) -> set:
-    """THE SCOPE (the operator's card): the project's own packages -- the ones
-    its pyproject.toml ships ([tool.setuptools] packages; this repo: membrane/),
-    else the top-level dirs with an __init__.py."""
+def sync_if_stale(srv, key: str, path, within: str) -> dict:
+    """sync_file when the file's mtime moved (or it is gone) since the last read."""
+    f = _graph(srv)["files"].get(key)
+    path = Path(path)
     try:
-        import tomllib
-        pk = ((tomllib.loads((root / "pyproject.toml").read_text()).get("tool") or {})
-              .get("setuptools") or {}).get("packages")
-        if isinstance(pk, list) and pk:
-            return {str(p).split(".")[0] for p in pk}
-    except (OSError, ValueError, ImportError):
-        pass
-    try:
-        return {d.name for d in root.iterdir() if d.is_dir() and (d / "__init__.py").is_file()}
+        mt = path.stat().st_mtime if path.is_file() else None
     except OSError:
-        return set()
-
-
-def sweep(srv) -> dict:
-    """codegraph's mtime sweep over the root's packages: every file changed,
-    added or deleted since the last sweep is re-read. -> counts."""
-    from .codegraph import stale_paths
-    g = _graph(srv)
-    pk = _packages(Path(g["root"]))
-    out = {"files": 0, "upserted": 0, "retired": 0}
-    for rel in stale_paths(g):
-        if Path(rel).parts[0] not in pk and rel not in g["files"]:
-            continue
-        r = sync_file(srv, rel)
-        out["files"] += 1
-        out["upserted"] += r["upserted"]
-        out["retired"] += r["retired"]
-    return out
-
-
-_BUSY: set = set()
-
-
-def sweep_soon(srv) -> None:
-    """The presence pulse's hook: one sweep at a time, off the thinker's beat
-    (the first one reads every package file)."""
-    if getattr(srv, "entity_store", None) is None or getattr(srv, "membrane", None) is None \
-            or id(srv) in _BUSY:
-        return
-    import threading
-    _BUSY.add(id(srv))
-
-    def go():
-        try:
-            r = sweep(srv)
-            if r["files"]:
-                import sys
-                print(f"[srctree] swept {r['files']} file(s): {r['upserted']} symbol(s) "
-                      f"updated, {r['retired']} retired", file=sys.stderr)
-        except Exception:
-            import traceback
-            traceback.print_exc()
-        finally:
-            _BUSY.discard(id(srv))
-    threading.Thread(target=go, daemon=True, name="srctree-sweep").start()
+        mt = None
+    if f is not None and mt is not None and f.get("mtime") == mt:
+        return {"upserted": 0, "retired": 0}
+    if f is None and mt is None:
+        return {"upserted": 0, "retired": 0}
+    return sync_file(srv, key, path, within)
 
 
 def source(srv, eid: str) -> str | None:
-    """A symbol's code, read from disk (a file changed since the sweep is re-read first)."""
+    """A symbol's code, read from disk (a file changed since the last read is re-read first)."""
     est = srv.entity_store
     d = (est.docs or {}).get(eid)
     if d is None:
         return None
     p = d.properties or {}
-    rel = str(p.get("path") or "")
-    path = Path(_graph(srv)["root"]) / rel
+    key, path = str(p.get("path") or ""), Path(str(p.get("file") or ""))
     try:
         b = path.read_bytes()
-        if (_graph(srv)["files"].get(rel) or {}).get("mtime") != path.stat().st_mtime:
-            sync_file(srv, rel)
+        if (_graph(srv)["files"].get(key) or {}).get("mtime") != path.stat().st_mtime:
+            mod = (est.docs.get(eid_of(key)) or d).properties or {}
+            sync_file(srv, key, path, str(mod.get("within") or ""))
             p = (est.docs[eid].properties or {})
     except OSError:
         return None
