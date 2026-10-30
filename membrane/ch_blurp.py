@@ -276,7 +276,18 @@ def attach(srv) -> None:
     srv.ch_purse = Purse()
     vm.learner = L.Learner(vm, srv.ch_purse, granted=lambda path: granted(srv, path),
                            suggest=lambda tr, path, value: _suggest(srv, tr, path, value),
-                           adopted=lambda w: adopted(srv, w), toy_open=lambda name: toy_open(srv, name))
+                           adopted=lambda w: adopted(srv, w), toy_open=lambda name: toy_open(srv, name),
+                           moved=lambda eid: _reached(srv, eid))
+
+
+def _reached(srv, eid: str) -> None:
+    """#740: Blurp's own move is a `reach` line on its record -- the shape the eye cam's
+    trail draws (home.js: kind, eid, fid, ts; fid = the field id, tried first), written
+    by the record's one writer."""
+    import time
+    from . import self_writer as SW
+    from .eids import field_id
+    SW.append(srv, {"ts": time.time(), "kind": "reach", "eid": eid, "fid": field_id(eid) or eid})
 
 
 ANEW = "child-tree"                 # Blurp's generation: a seat on an older one starts Blurp anew once
