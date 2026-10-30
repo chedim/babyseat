@@ -114,7 +114,7 @@ def kind_of(est, cause: dict, w: dict) -> str | None:
         return "mirror"
     writer, by = str(cause.get("writer") or ""), str(w.get("writer") or "")
     if writer == "self":
-        return "nudge" if by in ("self", "world") else "expect"
+        return "expect" if by and by not in ("self", "world") else "nudge"
     if writer == "world":
         return "patience"
     return "turns" if by == "self" else "meet"

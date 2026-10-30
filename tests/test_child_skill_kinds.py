@@ -48,7 +48,7 @@ def test_a_guess_from_blurps_own_nudge_is_first_reach(seat):
 
 def test_a_guess_from_a_persons_poke_is_meet_an_other(seat):
     TB.add(seat, "ball")
-    TB.nudge("toy:ball"); seat.ch_vm.drain()
+    seat.ch_vm.drain()   # no Blurp move before it (#751: Blurp then someone is expect)
     before = {t.eid for t in seat.ch_vm.triggers()}
     TB.poke("toy:ball", "roll", by="Dima"); seat.ch_vm.drain()
     new = [t for t in seat.ch_vm.triggers() if t.eid not in before
@@ -57,10 +57,11 @@ def test_a_guess_from_a_persons_poke_is_meet_an_other(seat):
 
 
 def test_the_models_poke_is_an_other_too(seat):
+    """The model answering Blurp's move is someone else replying, like a person (#751: expect)."""
     TB.add(seat, "ball")
     TB.nudge("toy:ball"); seat.ch_vm.drain()
     before = {t.eid for t in seat.ch_vm.triggers()}
     TB.poke("toy:ball", "roll", by="model"); seat.ch_vm.drain()
     new = [t for t in seat.ch_vm.triggers() if t.eid not in before
            and (t.properties or {}).get("owner") == CH.SELF]
-    assert new and {(t.properties or {}).get("kind") for t in new} == {"meet"}
+    assert new and {(t.properties or {}).get("kind") for t in new} == {"expect"}
