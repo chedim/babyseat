@@ -163,6 +163,8 @@ class Learner:
                else "rel" if path.startswith("rel:") else "no_chain" if not ch else "")
         if why:
             n["pass:" + why] += 1
+            if why == "no_chain":                       # #721: who writes outside any chain (the writer's kind)
+                n["no_chain:" + (writer.split(":", 1)[0] or "?")] += 1
             return                                      # Blurp's own acts never confirm or teach themselves
         by_llm = writer == "llm" or writer.startswith("llm:")   # the LLM's actions: taught, and confirming
         n["by_llm" if by_llm else "by_other"] += 1
