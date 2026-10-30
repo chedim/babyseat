@@ -63,8 +63,16 @@ def branch_of(path: str, value=None) -> str:
     return f"{parts[0]}:{parts[1].split('.')[0]}"     # kind + type (operator): ha:light is not ha:lock
 
 
+BODY = CH.MEMBRANE_NS + "Component:self:body"   # Blurp's own body following the current (card 1, C)
+BODY_NAME = "self:body"                         # its branch: always open, Blurp's own (no toy unlocks it)
+BODY_TOLD = frozenset({"nudged", "ticked", "at", "closer"})   # who moved it, then what it shows (ch_body)
+
+
 def toy_of(est, eid) -> str | None:
-    """#727: the toybox toy an entity is (a tower's block: its tower), else None."""
+    """#727: the toybox toy an entity is (a tower's block: its tower), else None;
+    Blurp's body is a toy of its own (BODY_NAME)."""
+    if str(eid or "") == BODY:
+        return BODY_NAME
     d = (getattr(est, "docs", None) or {}).get(str(eid or ""))
     tb = ((d.properties or {}).get("toybox") if d is not None else None) or {}
     return str(tb.get("name") or "") or None if isinstance(tb, dict) else None
@@ -81,10 +89,28 @@ def branch(est, path: str, value=None) -> str:
     return branch_of(path, value)
 
 
-def kind_of(cause: dict) -> str:
-    """The kind of guess (the child skill it practises, Dima 2026-10-30), read from
-    who made its cause: Blurp's own move is first reach, anyone else's meet an other."""
-    return "nudge" if str(cause.get("writer") or "") == "self" else "meet"
+def kind_of(est, cause: dict, w: dict) -> str | None:
+    """The kind of guess -- the child skill it practises (Dima's cards, 2026-10-30) --
+    from what it predicts and what its cause was:
+      on Blurp's body (card 1, C): where the current is (`at`) is look; whether the body
+        ended closer is feel itself after its own move (`nudged`), tell things apart
+        after the current's (`ticked`); anything else on the body practises none;
+      on the mirror: recognize itself;
+      on any other toy, by who moved its cause: Blurp itself is first reach, the world
+        (the toy's own later move) patience, anyone else meet an other."""
+    eid, prop = str(w.get("eid") or ""), str(w.get("prop") or "")
+    if eid == BODY:
+        if prop == "at":
+            return "reach"
+        if prop == "closer":
+            return {"nudged": "feel", "ticked": "kinds"}.get(str(cause.get("prop") or ""))
+        return None
+    d = (getattr(est, "docs", None) or {}).get(eid)
+    tb = ((d.properties or {}).get("toybox") if d is not None else None) or {}
+    if isinstance(tb, dict) and tb.get("kind") == "mirror":
+        return "mirror"
+    writer = str(cause.get("writer") or "")
+    return "nudge" if writer == "self" else "patience" if writer == "world" else "meet"
 
 
 def _same(a, b) -> bool:
@@ -155,7 +181,9 @@ class Learner:
         grant_path = (str(value["object"]) + ".invoke"
                       if target_path.endswith(".invoke") and isinstance(value, dict) and value.get("object")
                       else target_path)                  # a call acts on its object's branch
-        suggests = self.state(tr.eid) == "proposal" and self.granted(grant_path)   # as it stood before this write
+        kind = (tr.properties or {}).get("kind")         # its skill's Accept grants it too (the child tree)
+        suggests = self.state(tr.eid) == "proposal" and (
+            self.granted(grant_path) or bool(kind and self.granted(f"skill:{kind}")))   # as it stood before this write
         if not self._spend(tr.eid, "fire"):
             self.counts["fire:skip"] += 1
             return "skip"
@@ -193,8 +221,9 @@ class Learner:
                else "rel" if path.startswith("rel:") else "no_chain" if not ch else "")
         if not why and WORLD == "toys":                # #727: toys are the learner's world
             from .toybox import TOLD                   # only what the toy tells (never a getter's readings ring)
-            toy = toy_of(self.vm.est, w.get("eid")) if w.get("prop") in TOLD else None
-            why = "not_toy" if not toy else "" if self.toy_open(toy) else "locked_toy"
+            told = w.get("prop") in (BODY_TOLD if w.get("eid") == BODY else TOLD)
+            toy = toy_of(self.vm.est, w.get("eid")) if told else None
+            why = "not_toy" if not toy else "" if toy == BODY_NAME or self.toy_open(toy) else "locked_toy"
         if why:
             n["pass:" + why] += 1
             if why == "no_chain":                       # #721: who writes outside any chain (the writer's kind)
@@ -297,7 +326,7 @@ class Learner:
             doc.properties["branch"] = branch(est, w_eid, w.get("new") if w_prop == "last_call" else None)
             if toy_of(est, w_eid):
                 doc.properties["toy"] = True             # #727: fires while toys are the world
-                doc.properties["kind"] = kind_of(c)      # the child skill it practises (Dima, 2026-10-30)
+                doc.properties["kind"] = kind_of(est, c, w)   # the child skill it practises (Dima, 2026-10-30)
             est.upsert(doc)
 
     def _room(self) -> bool:

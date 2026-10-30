@@ -208,29 +208,29 @@ def test_the_sheet_shows_the_toys_current_and_next(seat):
     TB.add(seat, "tower", params={"n": 3})
     s = B.augment(seat, {"header": {}, "tree": []})
     toys = {t["kind"]: t for t in s["toys"]}
-    assert toys["tower"]["state"] == "current" and toys["ball"]["state"] == "next"
-    assert toys["mirror"]["state"] == "locked"
+    assert toys["tower"]["state"] == "current" and toys["ball"]["state"] == "locked"
+    assert toys["mirror"]["state"] == "locked"         # the ball and the mirror open under first reach
     assert s["toy_current"] == "tower" and s["toy_next"] == "ball"
     assert all(not n["id"].startswith("branch:shell") for n in s["tree"])
 
 
-def test_accepting_a_toy_opens_the_next_and_provisions_it(seat):
+def test_accepting_first_reach_opens_the_ball_and_the_mirror_and_provisions_them(seat):
     TB.add(seat, "tower", params={"n": 3})
-    assert B.grant(seat, "toy:tower")
-    assert TB.peek("toy:ball") is not None             # the next toy is switched on
+    assert B.grant(seat, "skill:nudge")
+    assert TB.peek("toy:ball") is not None             # the toys under it are switched on
     s = B.augment(seat, {"header": {}, "tree": []})
     toys = {t["kind"]: t for t in s["toys"]}
-    assert toys["tower"]["state"] == "granted" and toys["tower"]["granted_at"]
-    assert toys["ball"]["state"] == "current" and toys["mirror"]["state"] == "next"
+    assert toys["tower"]["state"] == "current"
+    assert toys["ball"]["state"] == "current" and toys["mirror"]["state"] == "current"
     assert s["level"] == 1
     lr = seat.ch_vm.learner
-    assert lr.toy_open("toy:ball") and lr.toy_open("toy:tower") and not lr.toy_open("toy:mirror")
+    assert lr.toy_open("toy:ball") and lr.toy_open("toy:tower") and lr.toy_open("toy:mirror")
 
 
 def test_a_seat_with_old_toy_names_maps_them_by_kind(seat):
     TB.add(seat, "ball", name="w:ball")
     TB.add(seat, "tower", params={"n": 3})
-    B.grant(seat, "toy:tower")
+    B.grant(seat, "skill:nudge")
     s = B.augment(seat, {"header": {}, "tree": []})
     toys = {t["kind"]: t for t in s["toys"]}
     assert toys["ball"]["name"] == "w:ball" and toys["ball"]["state"] == "current"
@@ -267,7 +267,7 @@ def test_the_open_toys_are_read_once_not_per_write(seat, monkeypatch):
     TB.add(seat, "ball")                               # the roster changed: read again
     assert lr.toy_open("toy:tower")
     assert len(calls) == 2
-    B.grant(seat, "toy:tower")                         # a grant changes what is open
+    B.grant(seat, "skill:nudge")                       # a grant changes what is open
     assert lr.toy_open("toy:ball")
 
 
@@ -282,14 +282,16 @@ def test_the_toys_cache_never_keys_on_a_reused_dict_id(seat, monkeypatch):
     assert B.toys(seat)[0]["on_seat"]
 
 
-def test_the_level_counts_toy_grants_only(seat):
+def test_the_level_counts_skill_grants_only(seat):
     TB.add(seat, "tower", params={"n": 3})
     B.grant(seat, "shell:gh")
     B.grant(seat, "shell:ls")
     s = B.augment(seat, {"header": {}, "tree": []})
     assert s["level"] == 0 and s["header"]["title"] == "Lv 0"
     assert B.grants(seat) >= {"shell:gh", "shell:ls"}  # kept on file for later
-    B.grant(seat, "toy:tower")
+    B.grant(seat, "toy:tower")                         # a toy grant from before the skills: kept, not a level
+    assert B.augment(seat, {"header": {}, "tree": []})["level"] == 0
+    B.grant(seat, "skill:nudge")
     assert B.augment(seat, {"header": {}, "tree": []})["level"] == 1
 
 

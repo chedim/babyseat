@@ -15,9 +15,11 @@ pays for itself (a proposal), and GRANTED by the operator's Accept of
 `branch:<kind>` (seat_panel.control) -- only on a granted branch may a proposal
 act. The grants are the seat's (`ch-grants.json` beside the store).
 
-THE SHEET. augment() lays the branches out as the skill tree, the level as the
-branches granted, and the Code tab as Blurp's triggers (their line, state,
-balance, firings)."""
+THE SHEET. augment() lays out the skill tree -- while toys are the world, the
+child tree (SKILLS: each skill earned by its kind of guess, accepted as
+`branch:skill:<id>`, the toys opening under the skills; the roots earned on
+Blurp's body following the current, ch_body) -- the level as the skills granted,
+and the Code tab as Blurp's triggers (their line, state, balance, firings)."""
 from __future__ import annotations
 
 import collections
@@ -114,7 +116,7 @@ def grant(srv, branch: str, by: str = "operator") -> bool:
                 return False
         g.add(branch)
     try:
-        unlock(srv)                                    # #727: a granted toy opens the next one
+        unlock(srv)                                    # a granted skill opens the toys under it
     except Exception as e:                             # noqa: BLE001
         print(f"[blurp] the next toy not switched on ({e!r})")
     return True
@@ -136,8 +138,61 @@ def grant_times(srv) -> dict:
 
 # ---- the toys, in order (#727) ---------------------------------------------------------------
 
+# THE CHILD SKILL TREE (Dima's cards, 2026-10-30): the old ladder's 13 skills (02ffab9^
+# self_loop.ACHIEVEMENTS: ids, names, branches, prerequisites, the child analogies), each
+# EARNED by its kind of guess paying for itself on any toy (ch_learn.kind_of) over earned
+# prerequisites, and ACCEPTED by the operator (`branch:skill:<id>`). `kind` None: no kind of
+# guess is built for it yet (the tree shows it, not built).
+SKILLS = {
+    "feel": {"name": "feel itself", "branch": "self", "prereqs": (), "kind": "feel", "child_age": "newborn",
+             "child_ability": "tells its own touch from another's (Rochat & Hespos 1997)",
+             "test": "its own move of its body lands where it guessed (closer to the current or not)"},
+    "reach": {"name": "look", "branch": "world", "prereqs": (), "kind": "reach", "child_age": "~2-3 mo",
+              "child_ability": "learns what to expect of each thing it looks at (Fantz 1964, habituation)",
+              "test": "it guesses where the current will be"},
+    "kinds": {"name": "tell things apart", "branch": "world", "prereqs": ("reach",), "kind": "kinds",
+              "child_age": "~3-4 mo", "child_ability": "forms perceptual categories (Quinn & Eimas)",
+              "test": "it tells its own move of the body from the current's push"},
+    "patience": {"name": "patience", "branch": "world", "prereqs": ("kinds",), "kind": "patience",
+                 "child_age": "~3.5 mo", "child_ability": "anticipates timed events (Haith, anticipatory looking)",
+                 "test": "it guesses a toy's own later move"},
+    "shift": {"name": "notice the world changed", "branch": "world", "prereqs": ("reach",), "kind": None,
+              "child_age": "~3.5-5 mo",
+              "child_ability": "is surprised when the world breaks its expectation (Baillargeon, violation of expectation)",
+              "test": "not built yet"},
+    "nudge": {"name": "first reach", "branch": "world", "prereqs": ("feel",), "kind": "nudge", "child_age": "~2-3 mo",
+              "child_ability": "learns its kicks move a mobile (Rovee-Collier, contingency learning)",
+              "test": "it guesses what its own nudge does to a toy"},
+    "meet": {"name": "meet an other", "branch": "others", "prereqs": ("reach", "nudge"), "kind": "meet",
+             "child_age": "~3-5 mo",
+             "child_ability": "tells perfect self-contingency from imperfect social contingency (Bahrick & Watson)",
+             "test": "it guesses what someone else's poke does to a toy"},
+    "turns": {"name": "time its turn", "branch": "others", "prereqs": ("meet",), "kind": None, "child_age": "~3-5 mo",
+              "child_ability": ("times its turn in a proto-conversation: serve and return "
+                                "(Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)"),
+              "test": "not built yet"},
+    "expect": {"name": "expect a reply", "branch": "others", "prereqs": ("meet",), "kind": None, "child_age": "~2-3 mo",
+               "child_ability": "expects a caregiver's response: the still-face upset (Tronick et al. 1978)",
+               "test": "not built yet"},
+    "mirror": {"name": "recognize itself", "branch": "self", "prereqs": ("feel", "nudge"), "kind": "mirror",
+               "child_age": "~18 mo", "child_ability": "passes the mirror test (Amsterdam 1972)",
+               "test": "it guesses what the mirror shows"},
+    "change": {"name": "change itself", "branch": "self", "prereqs": ("mirror", "patience"), "kind": None,
+               "child_age": "~4-5 y",
+               "child_ability": ("picks the way it learns by its own track record, and keeps a change only "
+                                 "when it works better: adaptive strategy choice (Siegler & Shrager 1984)"),
+               "test": "not built yet"},
+    "speak": {"name": "speak", "branch": "others", "prereqs": ("turns", "expect"), "kind": None, "child_age": "~12 mo",
+              "child_ability": ("names a thing to an other and gets a response: first referential words "
+                                "and pointing to share (Bates, Camaioni & Volterra 1975)"),
+              "test": "not built yet"},
+    "invent": {"name": "invent", "branch": "self", "prereqs": ("change", "speak"), "kind": None, "child_age": "~5 y",
+               "child_ability": "makes up games with its own rules", "test": "not built yet"},
+}
+
 TOY_ORDER = ("tower", "ball", "mirror")   # #337's order; no self-moving toys (slow/fast/burst/die/drift): nothing earns them (#727)
-TOYS_OPEN = 1        # #727: toys open beyond the granted ones (awaiting the operator's approval)
+TOY_UNDER = {"tower": None, "ball": "nudge", "mirror": "nudge"}   # the skill whose grant opens each toy
+                     # (card 2026-10-30: the tower from the start, the ball and the mirror under first reach)
 
 
 _SEAT_TOYS: dict = {"key": None, "have": {}}
@@ -164,35 +219,32 @@ def _seat_toys() -> dict:
 
 
 def toys(srv) -> list[dict]:
-    """The toys in #337's order, each {kind, name, branch, state}: granted (its branch
-    accepted), current (open: Blurp learns on it), next (the one after), locked."""
+    """The toys in #337's order, each {kind, name, branch, state, under}: granted (its
+    branch accepted, before the skills), current (open: Blurp learns on it -- its
+    skill `under` is granted, or it needs none), locked (until that skill's Accept)."""
     from . import toybox as TB
     have, g = _seat_toys(), grants(srv)
     key = (TB.roster(), str(TB.root()), frozenset(g))  # what moved, never id(have): CPython reuses ids
     hit = getattr(srv, "_ch_toys", None)
     if hit is not None and hit[0] == key:
         return hit[1]                                  # #728: the open set moves only on a grant or a new toy
-    out, opened, nxt = [], 0, False
+    out = []
     for kind in TOY_ORDER:
         name = have.get(kind) or f"toy:{kind}"
-        if name in g:
-            state = "granted"
-        elif opened < TOYS_OPEN:
-            state, opened = "current", opened + 1
-        elif not nxt:
-            state, nxt = "next", True
-        else:
-            state = "locked"
-        out.append({"kind": kind, "name": name, "branch": name, "state": state, "on_seat": kind in have})
+        under = TOY_UNDER.get(kind)
+        state = ("granted" if name in g else
+                 "current" if under is None or f"skill:{under}" in g else "locked")
+        out.append({"kind": kind, "name": name, "branch": name, "state": state, "under": under,
+                    "on_seat": kind in have})
     srv._ch_toys = (key, out)
     return out
 
 
 def level(srv) -> int:
-    """Blurp's level: its granted toys while it learns toys (#728: a command grant
+    """Blurp's level: its granted skills while it learns toys (#728: a command grant
     stays on file for later, it does not count), every grant once commands are back."""
     if L.WORLD == "toys":
-        return sum(1 for t in toys(srv) if t["state"] == "granted")
+        return sum(1 for i in SKILLS if f"skill:{i}" in grants(srv))
     return len(grants(srv))
 
 
@@ -364,7 +416,7 @@ def _show_body(srv, vm) -> None:
     from . import fieldpulse as FP
     from .eids import field_id
     fp, fld = FP.of(srv), getattr(srv, "efield", None)
-    if fp is None or fld is None:
+    if fld is None:
         return
 
     def vec(fid):
@@ -381,7 +433,22 @@ def _show_body(srv, vm) -> None:
     look = vec(field_id(last["to"])) if last and last["to"] != last["from"] else None
     prev = getattr(srv, "_ch_body_at", None) or at
     srv._ch_body_at = at
-    fp.self_cycle({"from": prev, "at": at, "aim": look}, {"mode": "on", "rung": level(srv)})   # the tag reads its level
+    if fp is not None:
+        fp.self_cycle({"from": prev, "at": at, "aim": look}, {"mode": "on", "rung": level(srv)})   # the tag reads its level
+    _read_body(srv, fld, at)
+
+
+def _read_body(srv, fld, at) -> None:
+    """Card 1, C: the body against the current, told to the learner (ch_body.read)."""
+    from . import ch_body as BODY
+    cur = fld.current() if hasattr(fld, "current") else None
+    if cur is None:
+        return                                         # nobody spoke lately: no current to follow
+    try:
+        hits = fld.recall(cur, k=1, by="state") or []
+    except Exception:
+        hits = []
+    BODY.read(srv, at, cur, hits[0][0] if hits else "")
 
 
 # ---- the sheet -------------------------------------------------------------------------------
@@ -399,7 +466,7 @@ def code(srv) -> list[dict]:
     out = []
     for t in _mine(srv):
         p = t.properties or {}
-        out.append({"name": t.eid, "line": CH.render(t), "branch": p.get("branch") or "",
+        out.append({"name": t.eid, "line": CH.render(t), "branch": p.get("branch") or "", "kind": p.get("kind") or "",
                     "state": lr.state(t.eid) if lr is not None else "shadow",
                     "balance": round(lr.balance(t.eid) / L.WRITE_COST, 2) if lr is not None else 0.0,
                     "hits": lr.hits(t.eid) if lr is not None else 0,
@@ -409,14 +476,42 @@ def code(srv) -> list[dict]:
 
 
 def tree(srv) -> list[dict]:
+    """The child skill tree (SKILLS): a skill is earned when a guess of its kind pays for
+    itself (a proposal) and its prerequisites are earned, or once it is accepted; locked
+    while a prerequisite is not earned; open otherwise. The LLM's command branches stay
+    gated off (#727), so they are not shown."""
+    if L.WORLD != "toys":
+        return _branch_tree(srv)                       # commands are back: the per-branch tree (kept)
+    g = grants(srv)
+    by: dict[str, list] = {}
+    for c in code(srv):
+        by.setdefault(c.get("kind") or "", []).append(c)
+    nodes, earned = [], set()
+    for i, sk in SKILLS.items():                       # prerequisites come first
+        cs = by.get(sk["kind"], []) if sk["kind"] else []
+        n_pos = sum(1 for c in cs if c["state"] == "proposal")
+        accepted = f"skill:{i}" in g
+        ready = all(p in earned for p in sk["prereqs"])
+        state = "earned" if accepted or (n_pos and ready) else "open" if ready else "locked"
+        if state == "earned":
+            earned.add(i)
+        nodes.append({"id": f"branch:skill:{i}", "name": sk["name"], "branch": sk["branch"],
+                      "prereqs": [f"branch:skill:{p}" for p in sk["prereqs"]],
+                      "built": sk["kind"] is not None, "state": state, "accepted": accepted,
+                      "bar": None if state == "earned" else (min(1.0, max(c["balance"] for c in cs) + 1.0) if cs else 0.0),
+                      "child_age": sk["child_age"], "child_ability": sk["child_ability"],
+                      "test": (f"{sk['test']}: {len(cs)} guesses, {n_pos} paying for themselves"
+                               + (" -- granted" if accepted else "")) if sk["kind"] else sk["test"]})
+    return nodes
+
+
+def _branch_tree(srv) -> list[dict]:
+    """The tree while the LLM's commands are the world (#576 D2): one node per branch,
+    earned when a guess there pays for itself, accepted by `branch:<kind>`."""
     g = grants(srv)
     by: dict[str, list] = {}
     for c in code(srv):
         by.setdefault(c["branch"] or "?", []).append(c)
-    if L.WORLD == "toys":                              # #727: command branches are gated off, not shown
-        names = {t["name"] for t in toys(srv)}
-        by = {b: cs for b, cs in by.items() if b in names}
-        g = {b for b in g if b in names}
     nodes = []
     for b in sorted(set(by) | g):
         cs = by.get(b, [])
@@ -484,8 +579,9 @@ def augment(srv, sheet: dict) -> dict:
         for t in toys(srv):
             mine = [c for c in cs if c["branch"] == t["branch"]]
             rows.append({**t, "guesses": len(mine), "paying": sum(1 for c in mine if c["state"] == "proposal"),
-                         "granted_at": at.get(t["branch"])})
+                         "granted_at": at.get(t["branch"]), "built": True, "have": t["on_seat"],
+                         "under_name": SKILLS[t["under"]]["name"] if t.get("under") else None})
         out["toys"] = rows
         out["toy_current"] = next((t["kind"] for t in rows if t["state"] == "current"), None)
-        out["toy_next"] = next((t["kind"] for t in rows if t["state"] == "next"), None)
+        out["toy_next"] = next((t["kind"] for t in rows if t["state"] == "locked"), None)
     return out

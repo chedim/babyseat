@@ -1136,7 +1136,7 @@ function sheetQuest(s) {
 function sheetToys(s) {
   const rows = s.toys || [];
   if (!rows.length) return '<p class="muted">nothing yet</p>';
-  const st = (r) => r.state === "locked" ? "🔒 rung " + r.rung
+  const st = (r) => r.state === "locked" ? (r.under_name ? "🔒 opens with " + r.under_name : "🔒 rung " + r.rung)
     : r.state === "grandfathered" ? "kept (unlocks at rung " + r.rung + ")"
     : !r.built ? "unlocked · not built yet" : r.have ? "yours" : "unlocked · not added";
   return '<p class="note">toys unlock as ' + escText(SELF_NAME) + ' passes rungs; each one is the next lesson</p><ul class="toys">' + rows.map((r) =>
