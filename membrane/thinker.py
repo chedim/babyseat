@@ -329,6 +329,14 @@ class Thinker:
                 _marks["presence"] = _tm() - _tp
             except Exception:
                 traceback.print_exc()
+        # LIVE CODE TREES (#715 A): the source's symbol entities follow the
+        # files (codegraph's mtime sweep, off the beat's thread)
+        if self._beat % PRESENCE_EVERY == 0 and not paused:
+            try:
+                from . import srctree as _ST
+                _ST.sweep_soon(srv)
+            except Exception:
+                traceback.print_exc()
         # THE EXECUTOR'S REAPER (the queue's continuation beat, the same
         # slow cadence): the owed/continued nodes land here -- a link
         # turn whose walk outran the node budget, a pending-degrade, a

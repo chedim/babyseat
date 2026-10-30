@@ -3108,6 +3108,12 @@ def executor_value(est, exec_spec: str = EXECUTOR_EID, be=None,
            "pending": [r for _, r in sorted(pending, key=lambda x: x[0])][:EXEC_EDGES_CAP],
            "running": [r for _, r in sorted(running, key=lambda x: x[0])],
            "done": [r for _, r in sorted(done, key=lambda x: x[0])][-EXEC_EDGES_CAP:]}
+    if str(ent.eid).startswith(MEMBRANE_NS + "src:") and srv is not None:
+        try:                                   # #715: a source symbol reads its code from disk
+            from . import srctree as ST
+            val["source"] = ST.source(srv, ent.eid)
+        except Exception:
+            pass
     if str(ent.eid).startswith(MEMBRANE_NS + "node:") and srv is not None \
             and getattr(srv, "entity_store", None) is est:
         try:
