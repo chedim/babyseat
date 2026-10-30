@@ -1,3 +1,25 @@
+## v0.7.4 (2026-10-30) — code trees, recall as the banner, goals as a graph
+
+0.7.4 is a seat release on the 0.7 line. Code becomes a tree in the field, recall moves into the banner with a reranker, goals become a graph, and Blurp learns toys first. Blurp's six unbuilt skills (expect, turns, speak, shift, change, invent) are not in this release; they go to 0.7.5. **One default changes: no-context is on (#668, #691): the transcript is no longer replayed; the field is the memory.**
+
+- **Code is a tree in the field** (#614, #615, #621, #622, #623, #625, #628, #629). `code_run` (and `bash`, its familiar name, #619) parses sh and JS with tree-sitter into shared node entities, runs the root on its language's executor (JS on presence; `presence.exec` retires) and keeps each run as a result entity; a configurable number of runs is kept per thing. A program shape run 3 times as a one-shot is refused: define a method (#725). Passthrough methods are refused and retired (#741).
+- **Live code trees** (#715, #735, #745, #746), opt-in: `fs:dir` / `fs:file` / `fs:code`; an entity that extends one gets its file or symbol tree, `entity_edit source=` writes a symbol's span back to its file (refusing what does not parse; owner only), and the codegraph gives sh and JS callers and impact.
+- **Recall is the banner** (#668 and its series, #669–#698). A learned scorer, fact lines and echo skip; the banner learns labels from the model's searches and refits at night; THE CONVERSATION SO FAR is this chat's own history. A bge-reranker reorders the scorer's top 20 (#680, #682, #688, #694), with one reranker per machine served to the other seats over HTTP (#683). An event keeps its whole vector (#690, #702, #706, #707).
+- **Goals as a graph** (#738): a planner splits a goal into tasks and decision cards, run by a 3-worker pool, with cliffhanger triggers. A goal is picked up once (#608), a STEP continues at the next idle beat (#634), a goal BLOCKED on the operator plants a card (#643), and a goal re-asking an answered question is fed the answer (#650).
+- **Blurp learns toys first** (#727): toy changes become field writes and the learner earns toys in #337's order. The child skill tree returns with a one-time fresh start per seat (#730). Blurp's body is `Component:self` (#732), its own moves write a reach line (#740), and the learner sees the model's and getters' writes in the turn's chain (#713, #721). Its card shows what the learner saw and why it passed (#576).
+- **Watch loops triage only** (#729): each event ends ignored or ESCALATE into the latest chat; the planter's `escalate_when` decides.
+- **Restarts** (#648, #653, #655, #711, #720, #748): a restart re-execs with the ports the seat holds, holds while a turn or loop runs, and holds for a person's message in the grace window. A planned restart keeps a warm snapshot of the vector matrices, now on Couchbase Lite too.
+- **A leaner prompt** (#569, #705, #717, #718, #726, #689): tools named, not re-described; loop lanes hide the watch tools; `entity_edit`'s schema is trimmed.
+- **Decision cards**: a chat-planted card wakes its chat when answered (#699); cards fit their lane and a click opens one as a floating panel (#736); `entity_query` lists newest first (#672).
+- **Models**: an OpenAI provider row and o-series prices (#631, #639); one local LLM stays loaded (#708); saved model picks apply before any mind runs (#716).
+- **Stats**: Claude's token split (#561), real step token counts and prep time (#693), a loop turn counts once.
+
+### Fixes
+
+- **A run never waits on the embedder** (#617); turns read the store first while boot and night yield the lock (#541); an append costs an append (#542).
+- The launcher reinstalls the package when a fast-forward changes `pyproject.toml` (#624); `tool:filetree` keeps its last change and is re-seeded on existing seats (#597); a clean script run clears its old refusal stamp (#612); the self sheet is never cached before self's mode loads (#309); audit rows say who called (#646); retired-dialect lines with a label are refused (#586); the context exchange is a POST (#586).
+- Great Simplification: the `ai_terminal` tree and a stale doc removed (#712).
+
 ## v0.7.3 (2026-10-27) — the Great Cliffhangization
 
 0.7.3 rebuilds membrane's tool layer as a cliffhanger VM with no Python hatches (#576), and Blurp starts anew on it. **From 0.7.3 babyseat is MIT-licensed** (#593); releases up to 0.7.2 stay under PolyForm Noncommercial 1.0.0. **Blurp is reborn: its old ladder, skills and level are retired, and it starts with nothing but watchers.**
