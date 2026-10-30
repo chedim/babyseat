@@ -283,11 +283,16 @@ def attach(srv) -> None:
 def _reached(srv, eid: str) -> None:
     """#740: Blurp's own move is a `reach` line on its record -- the shape the eye cam's
     trail draws (home.js: kind, eid, fid, ts; fid = the field id, tried first), written
-    by the record's one writer."""
+    by the record's one writer: Blurp's own process when one runs (#440), else the seat."""
     import time
+    from . import self_super as SUP
     from . import self_writer as SW
     from .eids import field_id
-    SW.append(srv, {"ts": time.time(), "kind": "reach", "eid": eid, "fid": field_id(eid) or eid})
+    fid = field_id(eid) or eid
+    sup = SUP.of(srv)
+    if sup is not None and sup.reach(eid, fid):
+        return
+    SW.append(srv, {"ts": time.time(), "kind": "reach", "eid": eid, "fid": fid})
 
 
 ANEW = "child-tree"                 # Blurp's generation: a seat on an older one starts Blurp anew once
