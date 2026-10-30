@@ -18,10 +18,17 @@ os.environ.setdefault("MEMBRANE_RUN", "0")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import ch as CH  # noqa: E402
+from membrane import ch_learn as L  # noqa: E402
 from membrane import ch_blurp as B  # noqa: E402
 from membrane import writes as W  # noqa: E402
 from membrane.eids import field_id  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _commands_world(monkeypatch):
+    """#727 gates the LLM's command branches off (toys first); this file tests that kept code."""
+    monkeypatch.setattr(L, "WORLD", "commands")
 
 UI = Path(__file__).resolve().parent.parent / "membrane" / "ui"
 NODE = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")

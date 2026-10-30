@@ -189,6 +189,7 @@ def _locked(name: str):
 
 
 def _load(name: str) -> dict:
+    _told.q = []                                   # #727: a change noted but never saved is not told
     try:
         return json.loads(_path(name).read_text())
     except FileNotFoundError:
@@ -201,6 +202,56 @@ def _save(st: dict) -> None:
     tmp = p.with_name(p.name + f".{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(st, sort_keys=True))
     os.replace(tmp, p)
+    _tell(st)
+
+
+# ---- #727: a toy's change is a field write chain --------------------------------
+
+CAUSE = {"self": "nudged", "world": "ticked"}     # who moved it -> the counter it bumps (anyone else: poked)
+_told = threading.local()                         # the changes _note saw, written when _save lands them
+
+
+def _cause(by: str) -> str:
+    return CAUSE.get(str(by), "poked")
+
+
+def _writer(by: str) -> str:
+    """The write's writer (writes.py's convention): self, world, model, person:<name>."""
+    b = str(by or "")
+    return b if b in NOT_PEOPLE or b.startswith("person:") else f"person:{b}"
+
+
+def _tell(st: dict) -> None:
+    """#727: what _note saw, as field writes on the toy's entities, so the VM's
+    learner can predict a toy: in one chain (the caller's, else a new `toy` one),
+    for each entity it touched, WHO MOVED IT first (`nudged` / `ticked` / `poked`,
+    the toy's count of that mover's changes) and then WHAT IT SHOWS (its reading's
+    keys, the one a look returns). No seat, no entity layer: nothing is written;
+    the toy itself never depends on it."""
+    q, _told.q = getattr(_told, "q", None) or [], []
+    est = getattr(_SEAT["srv"], "entity_store", None)
+    if not q or est is None:
+        return
+    from . import writes as _W
+    try:
+        ents = {((e.properties or {}).get("toybox") or {}).get("block"): e for e in _ents(est, st["name"])}
+        counts = st.get("counts") or {}
+        cm = contextlib.nullcontext() if _W.current() else _W.source("toy", st["name"])
+        with cm:
+            for by, blocks in q:
+                cause = _cause(by)
+                n = sum(int(v) for k, v in counts.items() if _cause(k) == cause)
+                with _W.as_writer(_writer(by)):
+                    for block in [None] + [b for b in blocks if b in ents]:
+                        ent = ents.get(block)
+                        if ent is None:
+                            continue
+                        ent.properties[cause] = n
+                        est.upsert(ent, embedder=None)
+                        ent.properties.update(_reading(st, block))
+                        est.upsert(ent, embedder=None)
+    except Exception as e:                      # noqa: BLE001
+        print(f"[toybox] {st.get('name')}: change not written to the field ({e!r})", file=sys.stderr)
 
 
 def _note(st: dict, ts: float, by: str, what: str, **kw) -> None:
@@ -212,6 +263,10 @@ def _note(st: dict, ts: float, by: str, what: str, **kw) -> None:
         fh.write(json.dumps(rec, sort_keys=True) + "\n")
     if is_person(by):
         _mark_person(ts, by, st["name"])
+    q = getattr(_told, "q", None)
+    if q is None:
+        q = _told.q = []
+    q.append((by, [int(b) for b in (kw.get("blocks") or ([kw["block"]] if kw.get("block") else []))]))
 
 
 def is_person(by) -> bool:

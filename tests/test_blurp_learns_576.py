@@ -27,6 +27,12 @@ from membrane import writes as W  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _commands_world(monkeypatch):
+    """#727 gates the LLM's command branches off (toys first); this file tests that kept code."""
+    monkeypatch.setattr(L, "WORLD", "commands")
+
+
 @pytest.fixture
 def seat(tmp_path):
     est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
