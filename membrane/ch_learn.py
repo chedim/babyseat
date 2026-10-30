@@ -97,8 +97,10 @@ def kind_of(est, cause: dict, w: dict) -> str | None:
         ended closer is feel itself after its own move (`nudged`), tell things apart
         after the current's (`ticked`); anything else on the body practises none;
       on the mirror: recognize itself;
-      on any other toy, by who moved its cause: Blurp itself is first reach, the world
-        (the toy's own later move) patience, anyone else meet an other."""
+      on any other toy, by who moved its cause and who its effect (#751): Blurp itself
+        then Blurp is first reach, Blurp then someone else expect a reply, someone else
+        then Blurp time its turn, the world (the toy's own later move) patience, anyone
+        else meet an other."""
     eid, prop = str(w.get("eid") or ""), str(w.get("prop") or "")
     if eid == CH.SELF:
         if prop == SELF_PUSH:
@@ -110,8 +112,12 @@ def kind_of(est, cause: dict, w: dict) -> str | None:
     tb = ((d.properties or {}).get("toybox") if d is not None else None) or {}
     if isinstance(tb, dict) and tb.get("kind") == "mirror":
         return "mirror"
-    writer = str(cause.get("writer") or "")
-    return "nudge" if writer == "self" else "patience" if writer == "world" else "meet"
+    writer, by = str(cause.get("writer") or ""), str(w.get("writer") or "")
+    if writer == "self":
+        return "expect" if by and by not in ("self", "world") else "nudge"
+    if writer == "world":
+        return "patience"
+    return "turns" if by == "self" else "meet"
 
 
 def _same(a, b) -> bool:
@@ -140,6 +146,8 @@ class Learner:
         self._pending: collections.OrderedDict = collections.OrderedDict()  # chain -> [(cand, path, value)]
         self._bal: dict[str, float] = {}
         self._hits: dict[str, int] = {}
+        self._adopt: dict[str, int] = {}     # #751: adopted suggestions per candidate (speak)
+        self._on_toy: collections.OrderedDict = collections.OrderedDict()   # toy -> (chain, writer, link)
         self._guessed: collections.OrderedDict = collections.OrderedDict()  # chain -> new guesses defined
         self._refused: collections.OrderedDict = collections.OrderedDict()  # guess eids the VM refused
         self.counts: collections.Counter = collections.Counter()   # what it saw and why it passed (the card shows it)
@@ -157,6 +165,25 @@ class Learner:
 
     def hits(self, cand: str) -> int:
         return self._hits.get(cand, 0)
+
+    def adoptions(self, cand: str) -> int:
+        """#751 (speak): how often the LLM adopted this candidate's suggestion."""
+        return self._adopt.get(cand, 0)
+
+    def _link(self, ch: str, writer: str, w: dict) -> str:
+        """#751: a move on a toy by someone other than its previous mover ANSWERS that
+        mover's move: its chain is linked, so a reply (expect) or Blurp's turn (turns)
+        pairs with the move before it, though each poke is its own chain."""
+        toy = toy_of(self.vm.est, w.get("eid"))
+        if not toy or toy == SELF_BRANCH or not ch:
+            return ""
+        last = self._on_toy.get(toy)
+        if last is not None and last[0] == ch:
+            return last[2]                              # the same move's later writes
+        link = last[0] if last is not None and last[1] != writer else ""
+        self._remember(self._on_toy, toy, lambda: None)
+        self._on_toy[toy] = (ch, writer, link)
+        return link
 
     def state(self, cand: str) -> str:
         return "proposal" if self.balance(cand) > 0 else "shadow"
@@ -252,27 +279,31 @@ class Learner:
         by_llm = writer == "llm" or writer.startswith("llm:")   # the LLM's actions: taught, and confirming
         n["by_llm" if by_llm else "by_other"] += 1
         teach = by_llm or WORLD == "toys"               # #727: a toy teaches and confirms whoever moved it
+        link = self._link(ch, writer, w) if WORLD == "toys" else ""   # #751: the move it answers
         paid = set()
-        if teach and ch in self._pending:
+        for c_ch in (ch, link) if teach else ():
+            if not c_ch or c_ch not in self._pending:
+                continue
             keep = []
-            for cand, p, v in self._pending[ch]:
+            for cand, p, v in self._pending[c_ch]:
                 if p != path:
                     keep.append((cand, p, v))
                     continue
                 if v == w.get("new"):
                     self._hit(cand)
                     paid.add(cand)
-            self._pending[ch] = keep
+            self._pending[c_ch] = keep
         if by_llm and self.adopted is not None:
             try:
                 for cand in self.adopted(w):         # a suggestion shown, adopted in a later turn
+                    self._adopt[cand] = self.adoptions(cand) + 1   # #751: speak
                     if cand not in paid:
                         self._hit(cand)
                         paid.add(cand)
             except Exception:
                 pass
         recent = self._remember(self._recent, ch, lambda: collections.deque(maxlen=LOOK_BACK))
-        causes = list(recent)
+        causes = list(self._recent.get(link) or ()) + list(recent)   # the answered move first
         recent.append(w)
         if teach:
             for c in causes:

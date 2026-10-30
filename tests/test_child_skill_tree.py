@@ -92,9 +92,9 @@ def test_the_thirteen_skills_come_back_with_their_prerequisites(seat):
 
 def test_a_skill_with_no_kind_of_guess_yet_is_not_built(seat):
     n = _nodes(seat)
-    for i in ("shift", "turns", "expect", "change", "speak", "invent"):
+    for i in ("shift", "change", "invent"):
         assert n[f"branch:skill:{i}"]["built"] is False
-    for i in ("feel", "reach", "kinds", "patience", "nudge", "meet", "mirror"):
+    for i in ("feel", "reach", "kinds", "patience", "nudge", "meet", "mirror", "turns", "expect", "speak"):
         assert n[f"branch:skill:{i}"]["built"] is True
 
 
