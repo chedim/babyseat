@@ -3559,39 +3559,54 @@ def _peer_heartbeat(srv) -> None:
             pass
 
 
-def _pick_listen_port(preferred: int, host: str = "127.0.0.1") -> int:
+def port_pinned(argv, flag: str, reexec: bool = False) -> bool:
+    """#760: the person passed `flag` themselves -- that port is pinned (busy
+    is a loud exit, never a walk). A re-exec's argv carries the held ports
+    (#648 pin_ports) indistinguishably from the person's, so a restart keeps
+    walking: it never dies on a lingering socket."""
+    if reexec:
+        return False
+    return any(a == flag or a.startswith(flag + "=") for a in (argv or ()))
+
+
+def _pick_port(preferred: int, host: str, pinned: bool, flag: str,
+               what: str) -> int:
+    """The walk both pickers share: a pinned port is used or refused (#760);
+    an unpinned one walks up to 64 ports from it."""
+    if pinned:
+        if _port_free(preferred, host):
+            return preferred
+        raise SystemExit(
+            f"[opencode] {what}port {preferred} is busy and {flag} pins it "
+            f"-- free it or pass another {flag}")
+    port = preferred
+    for _ in range(64):
+        if _port_free(port, host):
+            return port
+        port += 1
+        if port > 65535:
+            break
+    raise SystemExit(
+        f"[opencode] no free {what}port found at or above {preferred} "
+        f"(probed 64); pass {flag} explicitly")
+
+
+def _pick_listen_port(preferred: int, host: str = "127.0.0.1",
+                      pinned: bool = False) -> int:
     """A port the proxy can actually bind.
 
-    Explicit --listen is respected but not sacred: if it (or the default
-    11500) is taken -- typically by ANOTHER project's membrane session, since
-    the port is global while the field is per-project -- the probe walks up
-    from it. The user-visible default stays 11500: only when several
-    membranes run at once does anyone land above it.
+    The default 11500 walks: if it is taken -- typically by ANOTHER
+    project's membrane session, since the port is global while the field is
+    per-project -- the probe walks up from it. A --listen the person passed
+    is pinned (#760): busy is a loud exit naming the port.
     """
-    port = preferred
-    for _ in range(64):
-        if _port_free(port, host):
-            return port
-        port += 1
-        if port > 65535:
-            break
-    raise SystemExit(
-        f"[opencode] no free port found at or above {preferred} "
-        f"(probed 64); pass --listen explicitly")
+    return _pick_port(preferred, host, pinned, "--listen", "")
 
 
-def _pick_serve_port(preferred: int, host: str = "127.0.0.1") -> int:
-    """The port `opencode serve` will bind (same walk, own flag in the error)."""
-    port = preferred
-    for _ in range(64):
-        if _port_free(port, host):
-            return port
-        port += 1
-        if port > 65535:
-            break
-    raise SystemExit(
-        f"[opencode] no free serve port found at or above {preferred} "
-        f"(probed 64); pass --serve-port explicitly")
+def _pick_serve_port(preferred: int, host: str = "127.0.0.1",
+                     pinned: bool = False) -> int:
+    """The port the serve surface will bind (same rule, own flag)."""
+    return _pick_port(preferred, host, pinned, "--serve-port", "serve ")
 
 
 def _lan_ip() -> str:
