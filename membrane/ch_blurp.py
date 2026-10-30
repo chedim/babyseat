@@ -279,6 +279,45 @@ def attach(srv) -> None:
                            adopted=lambda w: adopted(srv, w), toy_open=lambda name: toy_open(srv, name))
 
 
+ANEW = "child-tree"                 # Blurp's generation: a seat on an older one starts Blurp anew once
+ANEW_FILE = "ch-anew.json"
+
+
+def anew(srv) -> dict:
+    """Boot: the first time this generation runs on the seat, Blurp starts anew (Dima,
+    2026-10-30) -- the grants archived beside the store (never deleted), Blurp's own
+    triggers removed, the toys back to their start (toybox archives each run); the
+    record, energy and mode stay. Later boots change nothing. -> {anew, ...}"""
+    f = _grants_file(srv)
+    if f is None:
+        return {"anew": False, "why": "no store"}
+    mark = f.with_name(ANEW_FILE)
+    try:
+        if json.loads(mark.read_text()).get("generation") == ANEW:
+            return {"anew": False}
+    except (OSError, ValueError, AttributeError):
+        pass
+    now = time.time()
+    with _GRANT_LOCK:
+        if f.exists():
+            f.replace(f.with_name(f"ch-grants.{int(now)}.json"))
+        srv._ch_grants = set()
+    gone = []
+    vm = getattr(srv, "ch_vm", None)
+    if vm is not None:
+        for t in [t for t in vm.triggers() if vm._is_selfs(t)]:
+            if vm.est.remove(t.eid):
+                gone.append(t.eid)
+        if vm.learner is not None:
+            for d in (vm.learner._bal, vm.learner._hits, vm.learner._pending, vm.learner._guessed):
+                d.clear()
+    from . import toybox as _TB
+    toys = [r["name"] for r in _TB.list_toys() if _TB.reset(r["name"], now=now).get("ok")]
+    mark.write_text(json.dumps({"generation": ANEW, "ts": now, "triggers": len(gone), "toys": toys}))
+    print(f"[blurp] anew ({ANEW}): grants archived, {len(gone)} triggers removed, toys reset {toys}")
+    return {"anew": True, "triggers": gone, "toys": toys}
+
+
 # ---- suggestions (#576 H) --------------------------------------------------------------------
 
 TURNS_KEPT = 512                    # turns / chats remembered (a buffer bound)

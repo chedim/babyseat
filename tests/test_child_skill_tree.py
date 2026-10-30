@@ -269,3 +269,36 @@ def test_a_locked_toy_names_the_skill_that_opens_it(seat):
     rows = {t["kind"]: t for t in B.augment(seat, {"header": {}, "tree": []})["toys"]}
     assert rows["ball"]["under_name"] == "first reach" and rows["tower"]["under_name"] is None
     assert rows["tower"]["built"] is True and rows["tower"]["have"] is True
+
+
+# ---- Blurp anew on the seat's first boot of the child tree (Dima, 2026-10-30) ----------------
+
+def _self_trigger(srv, name="old"):
+    return srv.ch_vm.define(name, when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]],
+                            write=["?x.b", "1"], owner=CH.SELF)
+
+
+def test_anew_first_boot_clears_what_blurp_learned(seat):
+    B.grant(seat, "Component:toy")                    # an old branch grant
+    mine = _self_trigger(seat)
+    theirs = seat.ch_vm.define("op", when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]],
+                               write=["?x.c", "1"])
+    TB.add(seat, "tower", params={"n": 3})
+    TB.nudge("toy:tower", block=3); seat.ch_vm.drain()
+    assert TB.list_toys()[0]["counts"]
+    seat._ch_grants = None                            # a fresh boot reads the file again
+    out = B.anew(seat)
+    assert out["anew"] is True
+    assert B.grants(seat) == set() and B.level(seat) == 0
+    assert mine not in seat.entity_store.docs and theirs in seat.entity_store.docs
+    assert not any(TB.list_toys()[0]["counts"].values())   # the toy is back to its start
+    f = B._grants_file(seat)
+    assert not f.exists() and list(f.parent.glob("ch-grants.*.json"))   # archived, not deleted
+
+
+def test_anew_runs_once(seat):
+    assert B.anew(seat)["anew"] is True
+    B.grant(seat, "skill:nudge")
+    mine = _self_trigger(seat)
+    assert B.anew(seat)["anew"] is False              # the second boot keeps what was earned since
+    assert "skill:nudge" in B.grants(seat) and mine in seat.entity_store.docs
