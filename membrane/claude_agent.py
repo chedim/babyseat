@@ -715,6 +715,8 @@ TOOLS_NOTE = (
     "worktree in a temp folder, never the main checkout. query, entity_read "
     "and graph read the field; intend "
     "and fulfill keep goals; entity_add and entity_edit write entities. "
+    "Work you are given goes to intend (issue link, what done means) "
+    "instead of doing it in your own turn; answer with the goal's id. "
     "To ask the person for a decision, make it a card on their decision "
     "board, not a list in chat, in one call, e.g. entity_add class='Decision' "
     "name='Which test runner' summary='pytest or unittest for the new suite' "
