@@ -120,10 +120,12 @@ _PY = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
        ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b}
 _NP = {ast.Add: np.add, ast.Sub: np.subtract, ast.Mult: np.multiply, ast.Div: np.divide}
 _CMP = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,
-        ast.LtE: lambda a, b: a <= b, ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b}
+        ast.LtE: lambda a, b: a <= b, ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b,
+        ast.In: lambda a, b: a in b, ast.NotIn: lambda a, b: a not in b}   # #738: an eid in a list (a join)
 _ALLOWED = (ast.Constant, ast.Name, ast.List, ast.Tuple, ast.Dict, ast.Attribute, ast.BinOp, ast.UnaryOp,
             ast.BoolOp, ast.Compare, ast.Call, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div,
-            ast.Not, ast.USub, ast.And, ast.Or, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
+            ast.Not, ast.USub, ast.And, ast.Or, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+            ast.In, ast.NotIn)
 
 
 class EntityView:

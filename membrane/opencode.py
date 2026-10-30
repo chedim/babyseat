@@ -1664,6 +1664,14 @@ def main() -> None:
         if _wa_on():                       # MEMBRANE_WATCH_LOOPS=0: the documented kill switch (never read before)
             WA_start_loop_drainer(srv)
             start_goal_pulse(srv)
+            try:                           # #738: goals as a graph -- the triggers, the worker pool
+                from . import goalgraph as _GG
+                _n = _GG.seed(srv)
+                _r = _GG.reowe(srv)
+                print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool",
+                      file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] goal graph seeding skipped ({e})", file=sys.stderr)
         else:
             print("[opencode] watch loops OFF (MEMBRANE_WATCH_LOOPS=0)", file=sys.stderr)
         print("[opencode] the loop pool is live (3 loops + the "

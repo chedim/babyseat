@@ -557,12 +557,6 @@ def loop_task_text(ev: dict) -> str:
 
 _VERDICT_RE = re.compile(r"^(done|step|blocked|ignored)\b[\s:,.\-–—]*(.*)$",
                          re.IGNORECASE | re.DOTALL)
-FULFILL_NUDGE = ("You ended with DONE, but goal {eid} is still OPEN on the "
-                 "board, so the pulse would keep bringing it back. Call "
-                 "goal(action='close', spec='{eid}', evidence=<the receipt>) now. "
-                 "If it is not really done, end with STEP or BLOCKED instead.")
-
-
 def _plain(line: str) -> str:
     return re.sub(r"[*_`>#~]+", "", line).strip().lstrip("-").strip()
 
@@ -842,6 +836,17 @@ class _LoopDrainer:
                 return "held"
         except Exception:
             pass
+        # #738 GOALS AS A GRAPH: a planted goal asks its planner (a trigger makes the call);
+        # the planner's call and a ready task run in their own lanes
+        _kind = str(ev.get("kind") or "")
+        if _kind == "intent-planted":
+            return self._plan_goal(ev)
+        if _kind == "task":
+            return self._lane(ev, "worker")
+        if _kind == "llm-call" and ev.get("lane") == "planner":
+            return self._lane(ev, "planner")
+        if _kind == "decision" and self._graph_card(ev):
+            return "skip"               # the graph's triggers carry a goal card's answer
         # THE ALERT BUDGET (2026-10-08): past the seat's dial the event
         # folds into the digest (the next turn's WHERE WE ARE) instead of
         # spending a whole interrupt turn
@@ -893,6 +898,119 @@ class _LoopDrainer:
             if _fp is not None:
                 _fp.focus(agent, ent, "end")
             _mark_picked_up(self.srv, ent, "", end=True)
+
+    # ---- #738: the planner lane and the worker pool -----------------------------------------
+    def _graph_card(self, ev: dict) -> bool:
+        est = getattr(self.srv, "entity_store", None)
+        d = (getattr(est, "docs", None) or {}).get(str(ev.get("entity") or ""))
+        return d is not None and bool((d.properties or {}).get("goal")) and bool((d.properties or {}).get("plan_key"))
+
+    def _plan_goal(self, ev: dict) -> str:
+        """A goal planted (or the board's re-derivation, or a rewake): its planner is asked
+        once -- a goal that already has a graph moves on its own events."""
+        from . import goalgraph as GG
+        from . import writes as _W
+        est = getattr(self.srv, "entity_store", None)
+        goal = str(ev.get("entity") or "")
+        doc = (getattr(est, "docs", None) or {}).get(goal) if goal else None
+        if doc is None or ((doc.properties or {}).get("status") or "open") != "open":
+            return "skip"
+        pp = doc.properties or {}
+        if ev.get("rewake") and (pp.get("planned_ts") or pp.get("planner_ts")):
+            return "skip"               # the pulse: a goal its planner has seen moves on its own events
+        why = ("planted" if ev.get("created") else "open, not planned yet" if ev.get("rewake")
+               else "planted again")
+        with _W.source("goal", goal):
+            GG.plan_wanted(self.srv, goal, why)
+        return "planned"
+
+    def _lane(self, ev: dict, lane: str) -> str:
+        """One planner call or one ready task, in its lane's slot, in a NEW chain (the
+        loop rule must not refuse the graph's next round)."""
+        from . import goalgraph as GG
+        from . import writes as _W
+        srv = self.srv
+        ent = str(ev.get("entity") or "")
+        loops = getattr(srv, "loops", None)
+        pool = getattr(srv, "events_pool", None)
+        est = getattr(srv, "entity_store", None)
+        if loops is None or est is None:
+            return "skip"
+        if lane == "worker" and ((est.docs.get(ent) or QuantumEntity(eid="")).properties or {}).get("status") != GG.OWED:
+            return "skip"               # taken, dropped or re-planned since it was owed
+        desc = LoopDesc(lane, eid=ent)
+        if not loops.admit(desc):
+            if pool is not None:
+                pool.put(ev)
+            return "requeue"
+        agent = loop_agent_name(lane, ent)
+        titles = getattr(loops, "titles", None)
+        if isinstance(titles, list):
+            titles.append(agent)
+        if lane == "planner":
+            _mark_picked_up(srv, ent, agent)     # who is working the goal (the banner; no second pass)
+        taken = False
+        try:
+            with _W.source(lane, ent):
+                sid = srv.create_loop_session(agent, agent)
+                if lane == "worker":
+                    if not GG.take(srv, ent):
+                        return "skip"
+                    taken = True
+                    out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
+                    if isinstance(out.get("quota"), dict):
+                        d = est.docs.get(ent)
+                        if d is not None:
+                            with _W.as_writer("adapter:tasks"):    # back to owed, no second pool event
+                                d.properties = {**(d.properties or {}), "status": GG.OWED}
+                                est.upsert(d, embedder=None)
+                        self._quota_park(ev, str(out["quota"].get("model") or ""))
+                        return "held"
+                    verdict, detail = GG.parse_worker(str(out.get("text") or out.get("verdict_text") or ""))
+                    taken = False
+                    GG.finish(srv, ent, verdict, detail, session=sid)
+                    return verdict
+                from . import llm as _LLM
+                _prev = getattr(_LLM._ctx, "depth", 0)
+                _LLM._ctx.depth = int(ev.get("depth") or 1)
+                try:
+                    out = srv.run_loop_turn(sid, GG.planner_text(est, ent, str(ev.get("prompt") or "")), agent) or {}
+                finally:
+                    _LLM._ctx.depth = _prev
+                if isinstance(out.get("quota"), dict):
+                    self._quota_park(ev, str(out["quota"].get("model") or ""))
+                    return "held"
+                text = str(out.get("text") or out.get("verdict_text") or "")
+                try:
+                    _LLM.answered(srv, ev, text, model=out.get("model"))
+                    est.stamp_watch_decision(ent, {"verdict": "planned", "decision": text.strip()[-240:],
+                                                   "session": sid, "ts": time.time()})
+                    g = est.docs.get(ent)
+                    if g is not None:
+                        g.properties = {**(g.properties or {}), "planner_ts": time.time()}
+                        est.upsert(g, embedder=None)
+                except Exception:
+                    pass
+                try:
+                    with _W.as_writer("adapter:tasks"):
+                        GG.recount(srv, ent)     # with or without a plan: no task blocked for good
+                except Exception:
+                    pass
+                return "planned"
+        except Exception as e:
+            if taken:                            # never left running: the planner hears of it
+                try:
+                    with _W.source(lane, ent), _W.as_writer("adapter:tasks"):
+                        GG.finish(srv, ent, GG.STUCK, f"the worker raised: {e!r}"[:600])
+                except Exception:
+                    pass
+            return "error"
+        finally:
+            loops.release(desc)
+            if isinstance(titles, list) and agent in titles:
+                titles.remove(agent)
+            if lane == "planner":
+                _mark_picked_up(srv, ent, "", end=True)
 
     def _turn(self, ev: dict, ent: str, agent: str) -> str:
         from . import writes as _W
@@ -977,26 +1095,7 @@ class _LoopDrainer:
             except Exception:
                 pass
         verdict, detail = parse_verdict(text)
-        is_goal = str(ev.get("kind")) == "intent-planted"
-        est = getattr(srv, "entity_store", None)
-        goal = (est.docs or {}).get(ent) if (is_goal and est is not None) else None
-
-        def _open() -> bool:
-            return goal is not None and \
-                ((goal.properties or {}).get("status") or "open") == "open"
-
-        # DONE but the board still holds it: one nudge in the same
-        # session (the review: 'Done -- armed' with no fulfill ran the
-        # goal 6 more times)
-        if verdict == "done" and _open():
-            out2 = srv.run_loop_turn(sid, FULFILL_NUDGE.format(eid=ent),
-                                     agent) or {}
-            t2 = str(out2.get("text") or out2.get("verdict_text") or "")
-            if t2.strip():
-                text = text + "\n" + t2
-                v2, d2 = parse_verdict(t2)
-                if _open():
-                    verdict, detail = (v2, d2) if v2 != "done" else ("done", detail)
+        est = getattr(srv, "entity_store", None)   # #738: goals are the planner's now (goalgraph)
         if verdict == "aborted":
             trail = [str(x)[:120] for x in (out.get("trail") or [])][-4:]
             detail = ("the pass ended mid-tool with no verdict"
@@ -1016,45 +1115,6 @@ class _LoopDrainer:
                 try:                           # consequences.py: looked at again 1 h / 24 h / 72 h on
                     from . import consequences as _CQ
                     _CQ.record(srv, ent, decision, who=agent, session=sid, kind=verdict)
-                except Exception:
-                    pass
-        if goal is not None:
-            props = goal.properties or {}
-            if verdict == "blocked":
-                props["blocked_ts"] = time.time()
-                props["blocked_on"] = decision
-                props.pop("blocked_until", None)
-                props.pop("blocked_entity", None)
-                props.update(blocked_condition(decision))
-                if not props.get("blocked_until") and not props.get("blocked_entity"):
-                    fed = len(props.get("answer_fed") or [])
-                    card = ask_operator(est, goal.eid, props, decision)   # #643: plain BLOCKED asks
-                    if len(props.get("answer_fed") or []) > fed:
-                        # #650: an old answer was fed to the pool; the goal stays DUE
-                        # (not parked on the operator), so its next pass moves on from
-                        # the answer or BLOCKs again and gets a fresh card
-                        props.pop("blocked_ts", None)
-                    elif card:
-                        props["blocked_card"] = card
-                        props["blocked_entity"] = card     # the answer moves it: the goal wakes
-            elif verdict in ("step", "done"):
-                for k in ("blocked_ts", "blocked_on", "blocked_until", "blocked_entity"):
-                    props.pop(k, None)
-            goal.properties = props
-            # THE GOAL'S CLAIM RECEIPT (the landing ledger the backoff
-            # and the next pass read)
-            try:
-                from .opencode import nerve_paused
-                if not nerve_paused(srv):
-                    notify_intent_landed(
-                        est, getattr(srv, "events_pool", None), ent,
-                        {"op": verdict, "step": "loop-reaction",
-                         "decision": decision, "session": sid})
-            except Exception:
-                try:
-                    notify_intent_landed(est, None, ent,
-                                         {"op": verdict, "step": "loop-reaction",
-                                          "decision": decision, "session": sid})
                 except Exception:
                     pass
         # THE INJECT: a pass that
@@ -1143,9 +1203,13 @@ class LoopRunner:
     is the operator's channel)."""
 
     def __init__(self, max_loops: int = 3):
+        from . import goalgraph as _GG
         self.max = max(1, int(max_loops))
         self._lk = threading.Lock()
         self._held: set[str] = set()       # running non-operator loop keys
+        # #738: the planner lane and the worker pool hold their own slots
+        self.lanes = {"planner": _GG.PLANNERS, "worker": _GG.WORKERS}
+        self._lane_held: dict[str, set] = {k: set() for k in self.lanes}
 
     def admit(self, loop: LoopDesc) -> bool:
         if loop.is_operator:
@@ -1156,6 +1220,13 @@ class LoopRunner:
             if nerve_paused(srv):
                 return False               # the stable point: hold
         with self._lk:
+            if loop.kind in self.lanes:
+                lane = self._lane_held[loop.kind]
+                key = loop.eid or loop.kind
+                if len(lane) >= self.lanes[loop.kind] or key in lane or key in self._held:
+                    return False
+                lane.add(key)
+                return True
             if len(self._held) >= self.max:
                 return False
             key = loop.eid or loop.kind
@@ -1170,15 +1241,18 @@ class LoopRunner:
 
     def holds(self, eid: str) -> bool:
         with self._lk:
-            return bool(eid) and eid in self._held
+            return bool(eid) and (eid in self._held or any(eid in v for v in self._lane_held.values()))
 
     def release(self, loop: LoopDesc) -> None:
         with self._lk:
+            if loop.kind in self._lane_held:
+                self._lane_held[loop.kind].discard(loop.eid or loop.kind)
+                return
             self._held.discard(loop.eid or loop.kind)
 
     def running(self) -> int:
         with self._lk:
-            return len(self._held)
+            return len(self._held) + sum(len(v) for v in self._lane_held.values())
 
 # ---- the attach/detach events + the watch_ops CRUD -------------------------
 GOAL_TEXT_MAX = 1200            # the goal rides whole (it was cut to 120)

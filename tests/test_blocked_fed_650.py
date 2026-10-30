@@ -56,22 +56,7 @@ def _cards(est):
     return [d for d in est.docs.values() if d.cls == CLASS_DECISION]
 
 
-def test_a_fed_goal_is_not_parked_and_blocked_again_gets_a_fresh_card():
-    est, srv, eid = _seat()
-    _pass(srv, eid)
-    [card] = _cards(est)
-    card.properties = {**card.properties, "status": "decided", "value": "Memo"}
-    est.upsert(card)
-    srv.events_pool.take()
-    _pass(srv, eid)                                   # the same question again
-    evs = [e for e in srv.events_pool.take() if e["kind"] == "decision"]
-    assert len(evs) == 1 and evs[0]["value"] == "Memo" and evs[0]["blocks"] == [eid]
-    assert len(_cards(est)) == 1                      # no new card yet
-    props = est.docs[eid].properties
-    assert not WA._parked(srv, props)                 # due on the next beat
-    _pass(srv, eid)                                   # still blocked after the feed
-    opens = [d for d in _cards(est) if d.properties.get("status") == "open"]
-    assert len(opens) == 1 and opens[0].eid != card.eid
+# #738: the goal-loop BLOCKED pass is gone (a stuck worker re-plans; the planner's card escalates)
 
 
 def test_a_reused_card_keeps_the_other_goal_it_blocks():
