@@ -1,9 +1,10 @@
 """#576: Blurp's body on the map (the operator chose A). The old cycle published
 the amoeba's points; #580 retired it and the body vanished, so the "Blurp" and
-"Blurp's eyes" cameras had nothing to follow. Now each exchange with Blurp's
-process puts the body where its newest firing happened (the watched entity),
-looking at what that firing wrote; before any firing it rests at the seat.
-Asleep or off, no body is sent."""
+"Blurp's eyes" cameras had nothing to follow. Each exchange with Blurp's process
+sends the body. Since #732 Blurp is where `self` is: at the entity in `self.at`
+(its own move), looking at `self.current` (where the current is), and at the seat
+before any move. What its firings watched never places it. Asleep or off, no
+body is sent."""
 import os
 import sys
 import types
@@ -64,23 +65,29 @@ def test_before_any_firing_it_rests_at_the_seat(seat):
     assert pts["at"] == [1.0, 0.0, 0.0] and pts.get("aim") is None
 
 
-def test_it_sits_where_it_last_fired_and_looks_at_what_it_wrote(seat):
+def _self_at(seat, **props):
+    from membrane.entities import QuantumEntity
+    est = seat.entity_store
+    me = est.docs.get(CH.SELF) or QuantumEntity(eid=CH.SELF, cls="Component", properties={})
+    me.properties.update(props)
+    est.upsert(me, embedder=None)
+
+
+def test_it_sits_where_self_is_and_looks_at_the_current(seat):
     est = seat.entity_store
     B.exchange(seat, {"awake": True, "mode": "on"})
-    for i, n in enumerate("abc"):
-        e = _toy(est, n)
-        seat.efield.vecs[field_id(e.eid)] = [0.0, float(i + 1), 0.0]
-        _turn(seat, (e, "a", 1, "person:op"), (e, "b", 2, "llm"))
-    f = [r for r in seat.ch_vm.recent if seat.ch_vm._is_selfs(est.docs[r["trig"]])][-1]
+    x, y = _toy(est, "x"), _toy(est, "y")
+    seat.efield.vecs[field_id(x.eid)] = [0.0, 1.0, 0.0]
+    seat.efield.vecs[field_id(y.eid)] = [0.0, 0.0, 1.0]
+    _self_at(seat, at=x.eid, current=y.eid)
     B.exchange(seat, {"awake": True, "mode": "on"})
-    pts, _ = seat._field_pulse.sent[-1]
-    assert pts["at"] == seat.efield.vecs[field_id(f["from"])]
+    pts, stats = seat._field_pulse.sent[-1]
+    assert pts["at"] == [0.0, 1.0, 0.0] and pts["aim"] == [0.0, 0.0, 1.0]
     assert pts["from"] == [1.0, 0.0, 0.0]                       # it glides from the seat
-    assert pts.get("aim") is None                              # it wrote on the entity it watched
-    assert seat._field_pulse.sent[-1][1]["rung"] == 0          # the tag's level: no branch granted
+    assert stats["rung"] == 0                                  # the tag's level: no branch granted
 
 
-def test_its_eyes_look_at_the_other_entity_it_wrote(seat):
+def test_a_firing_never_places_it(seat):
     est = seat.entity_store
     B.exchange(seat, {"awake": True, "mode": "on"})          # its purse opens on the first report
     for n in "abc":
@@ -93,7 +100,7 @@ def test_its_eyes_look_at_the_other_entity_it_wrote(seat):
     seat.ch_vm.recent.append({"trig": trig, "from": x.eid, "to": y.eid, "ts": 1e12, "mode": "shadow"})
     B.exchange(seat, {"awake": True, "mode": "on"})
     pts, _ = seat._field_pulse.sent[-1]
-    assert pts["at"] == [0.0, 1.0, 0.0] and pts["aim"] == [0.0, 0.0, 1.0]
+    assert pts["at"] == [1.0, 0.0, 0.0] and pts.get("aim") is None   # still at the seat: it never moved
 
 
 def test_asleep_or_off_no_body(seat):
