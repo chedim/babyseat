@@ -528,17 +528,24 @@ def pin_ports(argv: list[str], listen: int | None, serve: int | None) -> list[st
 
 def save_warm(srv) -> None:
     """#720: a planned restart keeps the field's warm vector matrices for
-    the next boot (efstore.FileBackend.save_warm). Called after the
+    the next boot (efstore.MemBackend.save_warm: FileBackend and, #748,
+    CBLiteBackend). A backend that cannot snapshot says so in one line. Called after the
     teardown's last store close, so nothing writes after the snapshot; a
     plain stop saves nothing."""
     if not RESTART["requested"]:
         return
-    fn = getattr(getattr(getattr(srv, "efield", None), "b", None), "save_warm", None)
+    be = getattr(getattr(srv, "efield", None), "b", None)
+    fn = getattr(be, "save_warm", None)
     if fn is None:
+        print(f"[seat] warm snapshot skipped: {type(be).__name__} cannot snapshot",
+              file=sys.stderr, flush=True)
         return
     t0 = time.time()
     try:
         man = fn()
+        if man.get("unsupported"):
+            print(f"[seat] warm snapshot skipped: {man['unsupported']}", file=sys.stderr, flush=True)
+            return
         mats = ", ".join(f"{m['coll']}.{m['field']} {m['rows']}" for m in man.get("mats") or [])
         print(f"[seat] warm snapshot saved in {time.time() - t0:.1f}s: {mats or 'nothing built'}",
               file=sys.stderr, flush=True)

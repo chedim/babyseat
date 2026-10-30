@@ -81,6 +81,90 @@ class TestWarmSnapshot(unittest.TestCase):
         self.assertFalse(any((Path(self.dir) / efstore.WARM_DIR).glob("*")))
 
 
+try:
+    from membrane import cblite as _cblite
+    HAVE_CBL = _cblite.lib_paths() is not None
+except Exception:
+    HAVE_CBL = False
+
+
+@unittest.skipUnless(HAVE_CBL, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
+class TestWarmSnapshotOnCBLite(unittest.TestCase):
+    """#748: the live seat's store is Couchbase Lite; its RAM matrices (chunks,
+    entity states) are snapshotted too, proven by the database file's stat."""
+
+    def _open(self, **kw):
+        from membrane.cblstore import CBLiteBackend
+        return CBLiteBackend(Path(self.dir) / "db", **kw)
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        be = self._open()
+        for i in range(5):
+            be.upsert("chunks", f"c{i}", {"vec": pack_f16(_vec(i))})
+        self.assertIsNotNone(be._vec_matrix("chunks", "vec", None))
+        be.close()
+        self.be = be
+
+    def _warm(self):
+        return Path(self.dir) / "db" / efstore.WARM_DIR
+
+    def test_the_round_trip_loads_without_a_rebuild(self):
+        man = self.be.save_warm()
+        self.assertEqual([m["coll"] + "." + m["field"] for m in man["mats"]], ["chunks.vec"])
+        with mock.patch.object(efstore, "_build_matrix", side_effect=AssertionError("rebuilt at boot")):
+            be2 = self._open()
+        try:
+            self.assertIn("chunks.vec", be2.vec_status()["built"])
+            self.assertEqual(be2.vector_top_k("chunks", "vec", _vec(2), 1)[0][0], "c2")
+            self.assertFalse(self._warm().exists())                  # read once
+        finally:
+            be2.close()
+
+    def test_a_write_after_the_snapshot_drops_it(self):
+        import shutil
+        self.be.save_warm()
+        keep = Path(self.dir) / "kept-warm"
+        shutil.copytree(self._warm(), keep)
+        be2 = self._open()                                            # another open writes
+        be2.upsert("chunks", "c1", {"vec": pack_f16(_vec(6))})
+        be2.close()
+        shutil.copytree(keep, self._warm())                          # the old snapshot back
+        be3 = self._open()
+        try:
+            self.assertNotIn("chunks.vec", be3.vec_status()["built"])
+            self.assertFalse(self._warm().exists())
+        finally:
+            be3.close()
+
+    def test_a_read_only_open_neither_loads_nor_consumes_it(self):
+        self.be.save_warm()
+        ro = self._open(readonly=True)
+        self.assertNotIn("chunks.vec", ro.vec_status()["built"])
+        self.assertTrue((self._warm() / "manifest.json").exists())
+
+
+class TestABackendThatCannotSnapshotSaysSo(unittest.TestCase):
+    def _save(self, be):
+        import io
+        srv = type("S", (), {"efield": type("F", (), {"b": be})()})()
+        err = io.StringIO()
+        with mock.patch.dict(restarts.RESTART, {"requested": True}), mock.patch.object(sys, "stderr", err):
+            restarts.save_warm(srv)
+        return err.getvalue()
+
+    def test_a_ram_only_backend_says_it_cannot(self):
+        from membrane.efstore import MemBackend
+        out = self._save(MemBackend())
+        self.assertIn("warm snapshot", out)
+        self.assertIn("MemBackend", out)
+
+    def test_a_backend_without_the_method_says_it_cannot(self):
+        out = self._save(object())
+        self.assertIn("warm snapshot", out)
+        self.assertIn("object", out)
+
+
 class TestTeardownSavesOnlyOnAPlannedRestart(unittest.TestCase):
     def _srv(self, be):
         return type("S", (), {"efield": type("F", (), {"b": be})()})()

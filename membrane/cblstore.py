@@ -47,7 +47,7 @@ class StoreBusy(RuntimeError):
     """The store's writer lock is held by another membrane process
     (issue #26): open_backend fails fast -- a replay beside a live seat
     must never silently fall back to the stale file journals."""
-from .efstore import COLLECTIONS, MemBackend, matches
+from .efstore import COLLECTIONS, WARM_DIR, MemBackend, matches
 
 COLD = ("sentences",)
 VEC = {"sentences": ("vec", "sent_vec")}            # coll -> (field, index name)
@@ -166,6 +166,7 @@ class CBLiteBackend(MemBackend):
             self.migrate_from(Path(journal_dir))
         self._ensure_vector_indexes()              # after the import: sized for what came in
         self._load_hot()
+        self._load_warm()                          # #748: before any write of this boot
         if journal_dir is not None:
             self.replay_tails(Path(journal_dir))
         self._worker = threading.Thread(target=self._catchup_loop, name="cbl-vec", daemon=True)
@@ -416,6 +417,29 @@ class CBLiteBackend(MemBackend):
 
     def _bump(self, coll: str) -> None:
         self._vec_dirty.add(coll)
+
+    # ---- #748 the warm snapshot: the RAM matrices (chunks, entity states, ...)
+    _warm_skip = COLD                              # no RAM rows: the CBL index serves them
+
+    def _warm_dir(self):
+        return None if self.readonly else self.path / WARM_DIR
+
+    def _warm_proof(self, coll: str):
+        """The database file's [size, mtime_ns, wal bytes]. A clean close
+        checkpoints the WAL away and a reopen leaves the main file as it was
+        (measured), so any write between the snapshot and this boot moves it;
+        a WAL left with rows (a crash) never matches. One proof for every
+        collection: one restart writes nothing in between."""
+        db = self.path / "field.cblite2" / "db.sqlite3"
+        try:
+            st = db.stat()
+        except OSError:
+            return None
+        try:
+            wal = (db.parent / "db.sqlite3-wal").stat().st_size
+        except OSError:
+            wal = 0
+        return [int(st.st_size), int(st.st_mtime_ns), int(wal)]
 
     # ---- the contract ----------------------------------------------------------
     def get(self, coll, key):
