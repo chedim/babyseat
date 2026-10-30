@@ -47,7 +47,7 @@ class TestLoopPoolWiring(unittest.TestCase):
                 self.loop_sessions.append(sid)
                 return sid
         srv = _Srv()
-        srv.events_pool.put({"event_id": "ev1", "kind": "away",
+        srv.events_pool.put({"event_id": "ev1", "kind": "job-done",     # #729: watch kinds triage
                              "entity": "membrane::f:membrane/router.py",
                              "ts": time.time()})
         drainer = WA.start_loop_drainer(srv)

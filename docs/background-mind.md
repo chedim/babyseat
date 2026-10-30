@@ -548,6 +548,34 @@ MEMBRANE_NERVE_PAUSE=0         # pause becomes a no-op
 (the self loop)                # off by default; the operator's ⏻ on/off switch and accepts (#299)
 ```
 
+## The watch loops triage (#729, 2026-10-30)
+
+A watch event (a watch op, a watch field, a boundary, a script error, a
+field watch's hit, ...) no longer runs a working loop. The loops only
+decide whether the main chat sees it; the main model does the work there.
+
+- **The rule is the planter's.** When the main model plants a watch it writes
+  a one-line `escalate_when` on the watched entity in the same call (for
+  example `the suite fails, or anything needs the operator`).
+- **Triage.** An event on an entity with a note runs one pass in the `plan`
+  lane (read tools only: no writes, runs or plants) on the seat's local idle
+  model (the cortex pick, `qwen3:8b` today), never on Claude. It ends with
+  `ESCALATE <one line>` or `ignored: <reason>`; the verdict stamps the entity
+  (`watch_decisions`). Anything but `ignored` -- an old DONE/STEP line, an
+  unreadable answer -- escalates: a pass that can't say keeps the event.
+- **No note, no triage.** An event whose entity has no `escalate_when` goes
+  straight to the chat, with no loop run.
+- **The escalation** is one message into the latest chat (the one
+  `chat:<person>.say` resolves to), through #700's route
+  (`decision_map._tell` -> `runner.run`): it starts a main-model turn and
+  queues behind a running one, never cutting it off. It carries the event,
+  the watched entity and the loop's line.
+- **What still works in a loop** (`watch_agents.LOOP_KINDS`, until the
+  operator's scope card is answered): goal pulses and the goal machinery's own
+  events (a loop-planted card's answer, a fulfilled goal), wakes and model
+  calls (`llm-call`; a script's field-call stays read-only), the restart
+  notice and a loop's own job results.
+
 ## The goal loops' rhythm (2026-10-08)
 
 The cost review (116 loop runs, 2056 tool calls in 8 h, all cloud) set

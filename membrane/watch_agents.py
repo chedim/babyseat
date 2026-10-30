@@ -25,9 +25,15 @@ MCP lane. This module is the always-watched lane's brain:
   unconditional). Each loop = one thinking turn against the seat's
   own /v1 (the gate, recall, MCP tools, capture all run -- the loop
   is a REAL turn, nothing special-cased except its session/agent and
-  its task text); the model REACTS (MCP tool calls) OR IGNORES (a
-  plain verdict text); the verdict stamps the entity
-  (last_decision).
+  its task text); the verdict stamps the entity (last_decision).
+- TRIAGE (#729): a WATCH event only decides whether the main chat sees
+  it. The watched entity's `escalate_when` note is the rule; a read-only
+  pass on the local idle model answers `ignored: <reason>` or
+  `ESCALATE <line>` (one message into the latest chat, #700's route);
+  no note sends the event straight to the chat. Goal pulses (and their
+  cards' answers), wakes and model calls, the restart notice and job
+  results (LOOP_KINDS) keep
+  their working loops (DONE / STEP / BLOCKED / ignored).
 - THE FRONTEND SURFACES: loop sessions are real child sessions whose
   AGENT NAME carries the processed entity's id ('watch:
   f:membrane/server.py' -- the operator's ask); the /agent list +
@@ -527,6 +533,10 @@ def loop_task_text(ev: dict) -> str:
         for ln in cons[-3:]:
             detail += f"\n  - {str(ln)[:300]}"
         detail += "\nWeigh them before deciding again: a decision that didn't hold wants a different one."
+    if ev.get("_bare"):
+        return f"{head}\n{detail}".strip()          # #729: the event alone (the chat message)
+    if ev.get("_triage"):
+        return f"{head}\n{detail}\n" + TRIAGE_COVENANT.format(rule=str(ev["_triage"])[:300])
     return (f"{head}\n{detail}\n"
             "Decide: REACT (one concrete step through the membrane tools "
             "-- find / entity(action='read') to look; entity add/edit, "
@@ -574,6 +584,80 @@ def parse_verdict(text: str) -> tuple[str, str]:
     if m and m.group(1).lower() == "ignored":
         return "ignored", m.group(2).strip()[:240]
     return "reacted", " ".join(lines)[-240:]
+
+
+# ---- #729: the watch loops TRIAGE ONLY ---------------------------------------
+# A watch event decides whether the main chat sees it; the main model does the
+# work there. The planter's one-line `escalate_when` note on the watched entity
+# is the rule; an entity with no note goes straight to the chat, with no loop
+# run. The pass is read-only (the 'plan' lane, server._lane_of) on the seat's
+# local idle model (server._turn_model). The kinds below keep their working
+# loops (the scope card, 2026-10-30): goal pulses and the goal machinery's own
+# events (a loop-planted card's answer, a fulfilled goal), wakes and model calls,
+# the restart notice and a loop's own job results.
+LOOP_KINDS = frozenset(("intent-planted", "decision", "goal-fulfilled",     # the goal machinery
+                        "llm-call", "restart-pending", "job-done"))
+ESCALATE_WHEN = "escalate_when"
+
+TRIAGE_COVENANT = (
+    "You are TRIAGING this watch event for the main chat: you can only look "
+    "(find / entity(action='read')), never act. The planter's rule -- escalate "
+    "when: {rule}\n"
+    "Reply in a sentence or two and END with exactly one verdict line:\n"
+    "  ESCALATE <one line for the main chat: what happened, why it matters>\n"
+    "  ignored: <reason>   -- the rule does not call for it")
+
+_TRIAGE_RE = re.compile(r"^(escalate|ignored)\b[\s:,.\-–—]*(.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def is_triage_event(ev: dict) -> bool:
+    """A watch event (triaged), not a goal pulse, a wake / model call, the
+    restart notice or a job result (their loops still work)."""
+    ev = ev or {}
+    return str(ev.get("kind") or "") not in LOOP_KINDS and not ev.get("readonly") \
+        and not is_operator_event(ev)
+
+
+def escalate_when(srv, eid: str) -> str:
+    """The planter's rule on the watched entity ('' = none: straight to the chat)."""
+    doc = (getattr(getattr(srv, "entity_store", None), "docs", None) or {}).get(eid) if eid else None
+    return str(((doc.properties or {}) if doc is not None else {}).get(ESCALATE_WHEN) or "").strip()
+
+
+def parse_triage(text: str) -> tuple[str, str]:
+    """(verdict, line) of a triage pass: the last verdict-shaped line wins.
+    Only `ignored` drops the event; anything else (an ESCALATE, an old
+    DONE/STEP/BLOCKED, an unreadable answer, nothing) goes to the chat --
+    a pass that can't say keeps the event, never loses it."""
+    lines = [x for x in (_plain(x) for x in str(text or "").splitlines()) if x]
+    for line in reversed(lines[-3:]):
+        m = _TRIAGE_RE.match(line)
+        if m:
+            return m.group(1).lower(), m.group(2).strip()[:240]
+    return "escalate", (" ".join(lines)[-240:] if lines else "")
+
+
+def escalation_text(ev: dict, ent: str, line: str = "") -> str:
+    """The chat message: the event, the watched entity, the loop's line."""
+    head = loop_task_text({**ev, "_bare": True, "previous": None, "consequences": None})
+    return (f"[watch] {ent or 'field'}: {head}"
+            + (f"\ntriage: {line}" if line else "\n(no escalate_when note on it: sent as is)"))
+
+
+def escalate(srv, ev: dict, ent: str, line: str = "") -> bool:
+    """One message into the latest chat (#700's route, decision_map._tell:
+    it starts a main-model turn through runner.run, which queues behind a
+    running one). False: no chat to tell."""
+    from . import chat_io as _CIO
+    from . import decision_map as _DM
+    sid = _CIO.latest_chat(srv, "")
+    est = getattr(srv, "entity_store", None)
+    if not sid or est is None:
+        return False
+    if getattr(est, "_srv", None) is None:
+        est._srv = srv
+    _DM._tell(est, {"chat": sid}, ev, escalation_text(ev, ent, line))
+    return True
 
 
 _WAKE = threading.local()                       # the running wake's turn facts, for its ledger line
@@ -766,12 +850,16 @@ class _LoopDrainer:
             gate = None                 # never folded into a digest: the restart is his; a call has its own caps
         if gate is not None and not gate.allow(ev):
             return "skip"
+        ent = str(ev.get("entity") or "")
+        triage = is_triage_event(ev)
+        if triage and not escalate_when(self.srv, ent):
+            return self._escalated(ev, ent, "")    # #729: no note, no triage
         loops = getattr(self.srv, "loops", None)
         pool = getattr(self.srv, "events_pool", None)
         if loops is None:
             return "skip"           # no pool wired: nothing to admit
-        ent = str(ev.get("entity") or "")
-        agent = loop_agent_name("field-call" if ev.get("readonly") else "watch", ent or ev.get("kind"))
+        agent = loop_agent_name("triage" if triage else "field-call" if ev.get("readonly") else "watch",
+                                ent or ev.get("kind"))
         desc = LoopDesc("watch", eid=ent or ev.get("event_id", ""))
         holds = getattr(loops, "holds", None)
         if ent and callable(holds) and holds(desc.eid):
@@ -809,7 +897,38 @@ class _LoopDrainer:
     def _turn(self, ev: dict, ent: str, agent: str) -> str:
         from . import writes as _W
         with _W.resume(ev):                  # #576: the pass belongs to the chain that woke it
+            if is_triage_event(ev):
+                return self._triage_body(ev, ent, agent)
             return self._turn_body(ev, ent, agent)
+
+    def _escalated(self, ev: dict, ent: str, line: str) -> str:
+        return "escalate" if escalate(self.srv, ev, ent, line) else "no-chat"
+
+    def _triage_body(self, ev: dict, ent: str, agent: str) -> str:
+        """#729: one read-only pass -> `ignored` (stamped, nothing in the chat)
+        or an escalation (one message into the latest chat)."""
+        srv = self.srv
+        sid = srv.create_loop_session(agent, agent)
+        est = getattr(srv, "entity_store", None)
+        doc = (est.docs or {}).get(ent) if (est is not None and ent) else None
+        if doc is not None and (doc.properties or {}).get("watch_decisions"):
+            ev = {**ev, "previous": list(doc.properties["watch_decisions"])}
+        out = srv.run_loop_turn(sid, loop_task_text({**ev, "_triage": escalate_when(srv, ent)}), agent) or {}
+        if isinstance(out.get("quota"), dict):
+            self._quota_park(ev, str(out["quota"].get("model") or ""))
+            return "held"
+        verdict, line = parse_triage(str(out.get("text") or out.get("verdict_text") or ""))
+        if est is not None and ent:
+            try:
+                est.stamp_watch_decision(ent, {"verdict": verdict, "decision": line,
+                                               "event_id": ev.get("event_id"),
+                                               "session": sid, "ts": time.time()})
+            except Exception:
+                pass
+        _WAKE.info = {"session": sid, "decision": line[:160], "tools": len(out.get("trail") or [])}
+        if verdict == "ignored":
+            return "ignored"
+        return self._escalated(ev, ent, line)
 
     def _turn_body(self, ev: dict, ent: str, agent: str) -> str:
         srv = self.srv

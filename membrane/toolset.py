@@ -227,7 +227,13 @@ HELP = {
         "(closed to within z), around {rel: '*', z} (anything within z; bursts group into one event); "
         "cap 8, '[]' clears; each change fires a watch-attached/detached event to the pool. "
         "watch_fields: pos (moved > arg), align (coherence fell below arg), vel (velocity rose above "
-        "arg); each fires on the crossing and re-arms on return; cap 3 per entity, '[]' clears."),
+        "arg); each fires on the crossing and re-arms on return; cap 3 per entity, '[]' clears. "
+        "WHERE AN EVENT GOES (#729): set escalate_when on the watched entity in the same call you plant "
+        "the watch (entity_edit properties={escalate_when: 'the suite fails, or anything needs the "
+        "operator'}). Its events then go to a read-only triage pass on the seat's local model, which "
+        "answers ignored: <reason> (dropped) or ESCALATE <line> (one message into the latest chat, "
+        "where your turn does the work). An entity with no escalate_when sends every event straight "
+        "to the chat."),
     "voice": (
         "Membrane's own voice learns from your 'It meant:' lessons (x2) and Dmitrii's rewrites. A "
         "mistake that is GENERAL belongs in a VOICE RULE, which fixes every future sentence: "

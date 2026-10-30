@@ -105,7 +105,11 @@ class TestDrainerHonorsTheGate(unittest.TestCase):
         srv = _Srv()
         srv.events_pool = _Pool([ev("c:a"), ev("c:b"), ev("c:c")])
         srv.loops = WA.LoopRunner(max_loops=3)
-        srv.entity_store = None
+        from membrane.entities import EntityStore, QuantumEntity
+        srv.entity_store = EntityStore(path=None, shared=False)
+        for e in ("c:a", "c:b", "c:c"):                  # #729: a note makes each a triage pass
+            srv.entity_store.docs[e] = QuantumEntity(eid=e, cls="Component",
+                                                     properties={"name": e, "escalate_when": "it matters"})
         srv.ambient_mode = "day"
         srv._alert_gate = AlertGate(budget=1, window_s=600)
         turns = []
