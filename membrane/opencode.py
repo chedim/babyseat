@@ -1255,6 +1255,17 @@ def main() -> None:
                       "methods run commands through it)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] executor seeding skipped ({e})", file=sys.stderr)
+        # ONE SHAPE LOGIC (#741): retire the passthrough methods (marked, never deleted)
+        # and note every other method on its shape's node, so a run that has a method
+        # runs as it; idempotent.
+        try:
+            from .lang import boot_methods
+            _bm = boot_methods(srv)
+            if _bm["retired"]:
+                print(f"[seat] #741 retired passthrough methods: {', '.join(_bm['retired'])}",
+                      file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] method shapes skipped ({e})", file=sys.stderr)
         # THE WARM-UP (2026-10-10: the first turn after a restart paid 11.8 s
         # for the intent seeds -- a full scan + every seed embedded cold):
         # done in the background right after boot, nobody waits for it
