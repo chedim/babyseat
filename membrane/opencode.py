@@ -1240,6 +1240,11 @@ def main() -> None:
                       "to watch like it)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] filetree seeding skipped ({e})", file=sys.stderr)
+        try:                                  # #715: fs:dir / fs:file / fs:code, the classes an entity extends
+            from .fstree import seed_classes
+            seed_classes(srv.entity_store)
+        except Exception as e:
+            print(f"[seat] fs classes seeding skipped ({e})", file=sys.stderr)
         # THE EXECUTOR (2026-10-06): the exec organ -- commands link to
         # it and the engine runs them inline (the 'executes' edge is the
         # ledger); idempotent like every seeding.

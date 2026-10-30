@@ -76,9 +76,10 @@ ROOT_KINDS = {"program"}
 # ---- parsing: tree-sitter grammars (#622) ---------------------------------------------------
 
 HOLE = "\x00"          # where a child goes in its parent's template
-GRAMMARS = {"sh": "tree_sitter_bash", "js": "tree_sitter_javascript"}
+GRAMMARS = {"sh": "tree_sitter_bash", "js": "tree_sitter_javascript",
+            "py": "tree_sitter_python"}          # py: source trees only (#715), no executor
 _TS: dict = {}
-INSTALL = ("pip install tree-sitter tree-sitter-bash tree-sitter-javascript "
+INSTALL = ("pip install tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-python "
            "(where no wheel exists, e.g. Termux or HA on a Raspberry Pi, a C compiler first)")
 
 
