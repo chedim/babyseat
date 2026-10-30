@@ -300,6 +300,80 @@ def mint(srv, lang: str, text: str, params: bool = False) -> str:
         return _mint(srv, lang, tree, be, origin)
 
 
+# ---- the one-shot shape gate (#725) ------------------------------------------------------------
+# A program's SHAPE is its tree with the literal leaves as holes; the shape's own node counts
+# the one-shot runs (code_run's door: run(oneshot=True)). The K+1-th one-shot of a shape is
+# refused with the fix: define a method from it, its varying literals as {{params}}, and call
+# it. A method call never counts (it runs through run() without oneshot).
+SHAPE_K = 3                    # the operator's K (2026-10-29)
+SHAPE_RUNS = "oneshot_runs"    # on the shape's root node: the one-shot runs of that shape
+SHAPE_ROOTS = "oneshot_roots"  # ... and the roots that ran (the refusal names them)
+_HOLE_KIND = "literal"
+# sh: the DATA-LIKE leaves (the scope card): these kinds whole, and a bare word that looks
+# like data (a path, a number, key=value ...); command names, flags and bare words stay
+_SH_LITERAL_KINDS = {"number", "string", "raw_string", "ansi_c_string", "translated_string",
+                     "concatenation", "expansion", "simple_expansion", "command_substitution",
+                     "heredoc_body", "arithmetic_expansion"}
+_SH_DATA_WORD = re.compile(r"[/.~\d:=@,]")
+
+
+def _sh_literal(n: Node) -> bool:
+    return n.kind in _SH_LITERAL_KINDS or (n.kind == "word" and bool(_SH_DATA_WORD.search(n.text)))
+
+
+SHAPE_LITERAL = {"sh": _sh_literal}     # a language with no entry is not gated
+
+
+def shape_of(n: Node, lang: str = "sh") -> Node:
+    """The tree with its literal leaves (whole subtrees) as holes; a command's name stays."""
+    lit = SHAPE_LITERAL[lang]
+
+    def walk(n, in_name=False):
+        if not in_name and lit(n):
+            return Node(_HOLE_KIND, "?")
+        return Node(n.kind, n.text, [walk(k, in_name or n.kind == "command_name") for k in n.args])
+    return walk(n)
+
+
+def _eid_of(lang: str, n: Node) -> str:
+    return f"{MEMBRANE_NS}node:{lang}:{_hash(lang, n, [_eid_of(lang, k) for k in n.args])}"
+
+
+def shape_eid_of(n: Node, lang: str = "sh") -> str:
+    """The shape's node id (pure: nothing minted)."""
+    return _eid_of(lang, shape_of(n, lang))
+
+
+def shape_refusal(srv, lang: str, tree: Node) -> str | None:
+    """The one-shot door's refusal: this shape already ran SHAPE_K times. None: it may run."""
+    if lang not in SHAPE_LITERAL:
+        return None
+    doc = (srv.entity_store.docs or {}).get(shape_eid_of(tree, lang))
+    p = (doc.properties or {}) if doc is not None else {}
+    if int(p.get(SHAPE_RUNS) or 0) < SHAPE_K:
+        return None
+    roots = ", ".join(str(r) for r in (p.get(SHAPE_ROOTS) or [])[-SHAPE_K:])
+    return (f"refused: this program's shape already ran {int(p[SHAPE_RUNS])} times as a one-shot "
+            f"(roots: {roots}) -- program the field first: define a method from it on the entity it "
+            "belongs to (method_define, its command this code with the varying literals as "
+            "{{params}}), then method_call it")
+
+
+def note_oneshot(srv, lang: str, tree: Node, root: str) -> None:
+    """Count a one-shot run on its shape's node (minted on its first run)."""
+    if lang not in SHAPE_LITERAL:
+        return
+    be, origin = _rel(srv)
+    with _GC:
+        eid = _mint(srv, lang, shape_of(tree, lang), be, origin)
+        doc = srv.entity_store.docs[eid]
+        p = doc.properties or {}
+        p[SHAPE_RUNS] = int(p.get(SHAPE_RUNS) or 0) + 1
+        p[SHAPE_ROOTS] = [r for r in (p.get(SHAPE_ROOTS) or []) if r != root] + [root]
+        doc.properties = p
+        srv.entity_store.upsert(doc, embedder=None)
+
+
 def load(est, eid: str) -> Node:
     p = (est.docs[eid].properties or {})
     return Node(str(p.get("kind") or ""), str(p.get("text") or ""), [load(est, k) for k in p.get("args") or []])
@@ -432,15 +506,33 @@ def process(srv, root: str, ex: str, timeout_s=None) -> dict | None:
 
 
 def run(srv, code: str | None = None, lang: str = "sh", node: str | None = None,
-        on: str | None = None, timeout_s=None) -> dict:
+        on: str | None = None, timeout_s=None, oneshot: bool = False) -> dict:
     """The model's one door (exec(action='run')): mint the code (or take a root),
     owe its run to the executor, and run it here -- the same edges anyone else's
-    request makes."""
+    request makes. `oneshot` (code_run's door, not a method's run): the shape
+    gate (#725) refuses a shape that already ran SHAPE_K times, and counts it."""
+    tree = None
+    if oneshot:
+        try:
+            if node:
+                d = srv.entity_store._resolve_spec(node)
+                if d is not None and str(d.eid).startswith(MEMBRANE_NS + "node:"):
+                    lang = str((d.properties or {}).get("lang") or lang)
+                    tree = load(srv.entity_store, d.eid)
+            elif str(code or "").strip() and lang in LANGS:
+                tree = LANGS[lang].parse(str(code))
+        except (ValueError, KeyError, NoGrammar):
+            tree = None                       # _owe says what is wrong with it
+        why = shape_refusal(srv, lang, tree) if tree is not None else None
+        if why:
+            return {"ok": False, "error": why}
     with _GC:                                 # minted and owed before a collect can see it
         owed = _owe(srv, code, lang, node, on)
     if "error" in owed:
         return owed
     root, ex = owed["root"], owed["executor"]
+    if tree is not None:
+        note_oneshot(srv, lang, tree, root)
     try:
         out = process(srv, root, ex, timeout_s)
     finally:
@@ -535,6 +627,8 @@ def _collect(srv) -> dict:
         p = d.properties or {}
         if str(p.get("code") or "").startswith(node_ns):
             codes.add(p["code"])
+        if p.get(SHAPE_RUNS):
+            codes.add(d.eid)                  # #725: a shape's count is never collected
         bound = [r for r in (p.get("bound") or []) if r in docs]
         if bound:
             kept.update(bound[-keep:])

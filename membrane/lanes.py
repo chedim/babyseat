@@ -7159,10 +7159,13 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         except (TypeError, ValueError):
             timeout_s = None
         res = _LG.run(srv, code=body.get("code"), lang=str(body.get("lang") or "sh"),
-                      node=body.get("node") or None, on=body.get("on") or None, timeout_s=timeout_s)
+                      node=body.get("node") or None, on=body.get("on") or None, timeout_s=timeout_s,
+                      oneshot=True)                # #725: the one-shot door counts shapes
         _write_audit(srv.membrane, {"event": "agent-code-run", "origin": "code_run",
                                     "root": res.get("root"), "result": res.get("result"),
-                                    "rc": res.get("rc"), "ok": bool(res.get("ok"))})
+                                    "rc": res.get("rc"), "ok": bool(res.get("ok")),
+                                    **({"refused": "shape"} if str(res.get("error") or "")
+                                       .startswith("refused: this program's shape") else {})})
         self._json_out(res)
 
     def _method(self, op: str) -> None:
