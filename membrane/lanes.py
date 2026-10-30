@@ -7093,6 +7093,25 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             spec = _CIO.ensure(srv, spec) or spec    # ...and edited by its exact eid (#333 part 3a)
         except Exception:
             pass
+        # #715 B: a `source` write on a code symbol writes its file (owner only; the pause
+        # was checked above); the rest of the patch is an ordinary edit
+        from . import srctree as _ST
+        _rs = getattr(est, "_resolve_spec", None)
+        _sd = _rs(spec) if _rs is not None and isinstance(body.get("properties"), dict) \
+            and "source" in body["properties"] else None
+        _sw = _ST.source_write(srv, _sd.eid if _sd is not None else "", body.get("properties"),
+                               owner=_SA.owner(self))
+        if _sw is not None:
+            if _sw["refused"]:
+                from . import jwtauth as _JWT
+                _JWT.send_unauthorized(self); return
+            _se = _sw["edit"]
+            self._entity_audit("source-edit", {"ok": bool(_se.get("ok")), "eid": _sd.eid,
+                                               "result": _se.get("result"), "error": _se.get("error")})
+            if not _se.get("ok"):
+                self._json_err_raw(400, str(_se.get("error"))); return
+            spec = _sd.eid
+            body["properties"] = _sw["properties"] or {"last_edit": _se["result"]}
         res = est.edit(spec, summary=body.get("summary"),
                        links=body.get("links"), cls=body.get("class"),
                        merged_into=body.get("merged_into"),
@@ -7113,6 +7132,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         self._entity_audit("edit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
+        if _sw is not None:
+            res["source_edit"] = _sw["edit"]
         _pulse_edit(srv, res, body)
         if not body.get("defer_post"):               # jobs.py: the first fire runs as a job
             _entity_post_process(srv, res)

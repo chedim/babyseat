@@ -1199,6 +1199,10 @@ def tool_entity_edit(args: dict, port: int) -> str:
                 f"The seeded tool:filetree is the template.")
     msg = (f"Entity {out['eid']} updated: class {out.get('class')}, "
            f"summary {out.get('summary')!r}, links {out.get('links')}.")
+    if isinstance(out.get("source_edit"), dict):      # #715 B: the file was written
+        se = out["source_edit"]
+        msg += (f" SOURCE written to {se.get('file')} (span {se.get('span')}; the symbols re-read "
+                f"from disk); receipt {se.get('result')}.")
     if out.get("properties_set"):
         msg += f" Properties set: {', '.join(out['properties_set'])}."
     if out.get("properties_truncated"):
