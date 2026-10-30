@@ -458,6 +458,22 @@ class Supervisor:
         self._kick()
         return code, out
 
+    def reach(self, eid: str, fid: str) -> bool:
+        """#740: Blurp's own move, for the child to write on its record (#440: it owns
+        self/). -> handled (the seat writes nothing); False when no process exists."""
+        with self._lock:
+            port, busy = self._port, self._process()
+        if port is None:
+            return busy
+
+        def send():
+            try:
+                self._http(port, "/reach", {"eid": str(eid), "fid": str(fid or eid)})
+            except Exception as e:                   # noqa: BLE001
+                print(f"[self-super] reach not delivered ({e!r})", file=sys.stderr)
+        threading.Thread(target=send, name="self-super-reach", daemon=True).start()
+        return True
+
     def chat_in(self, person: str) -> bool:
         """A person spoke: to the child (on its own thread). -> handled (the
         seat writes nothing); False when no process exists (the seat's own)."""

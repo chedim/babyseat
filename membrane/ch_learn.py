@@ -127,13 +127,15 @@ def _literal(v) -> str | None:
 
 
 class Learner:
-    def __init__(self, vm, purse, granted=lambda path: False, suggest=None, adopted=None, toy_open=None):
+    def __init__(self, vm, purse, granted=lambda path: False, suggest=None, adopted=None, toy_open=None,
+                 moved=None):
         self.vm = vm
         self.toy_open = toy_open or (lambda name: True)   # #727: the toys Blurp may learn on now
         self.purse = purse
         self.granted = granted
         self.suggest = suggest           # (trigger, target path, value): a proposal's suggestion to the LLM
         self.adopted = adopted           # (write) -> the candidates whose suggestion it adopts (#583: a later turn)
+        self.moved = moved               # (eid) Blurp's own move landed on self.at (#740: its record's reach line)
         self._recent: collections.OrderedDict = collections.OrderedDict()   # chain -> its last writes
         self._pending: collections.OrderedDict = collections.OrderedDict()  # chain -> [(cand, path, value)]
         self._bal: dict[str, float] = {}
@@ -206,6 +208,17 @@ class Learner:
             except Exception:
                 pass
         return "shadow"
+
+    def landed(self, target_path: str, value, was=None) -> None:
+        """A live fire's write landed. Blurp's own move (`self.at`, #732) to a new place
+        is told to `moved` (#740: the eye cam's trail); a write that leaves it where it
+        was, or any other write, is not."""
+        if (target_path == f"{CH.SELF}.{SELF_MOVE}" and self.moved is not None and value
+                and value != was):
+            try:
+                self.moved(str(value))
+            except Exception:
+                pass
 
     @staticmethod
     def _remember(od, key, make):

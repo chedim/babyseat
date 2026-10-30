@@ -725,6 +725,7 @@ class VM:
                 mode = self.learner.on_fire(tr, f"{ent.eid}.{prop}", value)   # #576 C/H: shadow or asleep (it suggests, never acts)
             if mode == "skip":
                 return
+            was = ent.properties.get(prop)
             if mode == "shadow":                     # the prediction lands on the candidate itself
                 ch_now = W.current() or {}
                 tr.properties["predicted"] = {"path": self.learner._expected(f"{ent.eid}.{prop}"), "value": value,
@@ -736,6 +737,8 @@ class VM:
             else:
                 ent.properties[prop] = value          # in place: a concurrent writer's keys survive
                 self.est.upsert(ent)
+            if mine and mode == "live":
+                self.learner.landed(f"{ent.eid}.{prop}", value, was)   # #740: Blurp's own write, landed
         self.fired[tr.eid] = self.fired.get(tr.eid, 0) + 1
         src = binding.get("x") or next(iter(binding.values()), None) or ent.eid
         self.recent.append({"trig": tr.eid, "from": src, "to": ent.eid, "ts": now, "mode": mode})

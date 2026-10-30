@@ -305,3 +305,30 @@ def test_the_child_stops_on_sigterm(tmp_path):
             SP.stop(kid)
             assert kid.exited() and time.time() - t0 < SP.STOP_GRACE_S
             assert kid.returncode == 0                           # its own clean exit, not the SIGKILL
+
+
+def test_a_reach_posted_to_the_child_is_on_its_record_its_recent_and_through_a_sleep():
+    '''#740: the child owns self/ -- Blurp's move reaches the record through ITS writer,
+    so its in-memory record (what /recent serves) has the line at once, and the
+    consolidation (built from that memory) keeps it.'''
+    with _open_env():
+        srv = _felt()
+        with _served(srv) as url:
+            fac = _facade(url, srv)
+            SL.recent(fac)                                   # the child's record is loaded (in memory)
+            httpd = SP.serve(fac)
+            try:
+                port = httpd.server_address[1]
+                code, out = _call(port, '/reach', {'eid': 'w:b', 'fid': 'f:w:b'})
+                assert code == 200 and out['ok'] is True
+                got = [r for r in _call(port, '/recent')[1]['lines'] if r.get('kind') == 'reach']
+                assert len(got) == 1 and got[0]['eid'] == 'w:b' and got[0]['fid'] == 'f:w:b'
+                assert isinstance(got[0]['ts'], float)
+                assert _call(port, '/reach', {})[0] == 400      # no place: nothing to record
+                SL.consolidate(fac)
+                kept = [r for rec in _lines(fac) for r in ([rec] + list(rec.get('lines') or []))
+                        if r.get('kind') == 'reach']
+                assert [r['eid'] for r in kept] == ['w:b']
+            finally:
+                httpd.shutdown()
+                httpd.server_close()

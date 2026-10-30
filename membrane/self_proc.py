@@ -18,7 +18,7 @@ process of its own (its own GIL, its own CPU, a lower priority):
 - It serves Blurp's views and controls on a loopback port it picks and
   reports on stdout at start (one JSON line: {"self_proc": {"port", "pid"}}):
   GET /card, /sheet, /recent, /status; POST /control (mode, accept,
-  name) and /chat-in (a person spoke: energy.person_spoke). The seat's own
+  name), /chat-in (a person spoke: energy.person_spoke) and /reach (Blurp moved, #740). The seat's own
   token only (or open mode), through the seat's own door (jwtauth.gate).
 - It exits on SIGTERM, and when its stdin closes (macOS has no
   parent-death signal: a seat killed outright closes the pipe).
@@ -273,8 +273,22 @@ def _handler(fac: Facade):
                 from . import energy as _E
                 _E.person_spoke(fac, str(b.get("person") or ""))
                 return self._out({"ok": True})
+            if path == "/reach":
+                return self._out(*_reach(fac, b))
             return self._out({"error": "not found"}, 404)
     return H
+
+
+def _reach(fac: Facade, b: dict) -> tuple[dict, int]:
+    """#740: Blurp's own move, on its record through this process's writer (the one
+    that owns self/), so the in-memory record -- /recent, the next sleep -- has it."""
+    import time
+    from . import self_writer as _W
+    eid = str(b.get("eid") or "")
+    if not eid:
+        return {"ok": False, "refused": ["eid"]}, 400
+    _W.append(fac, {"ts": time.time(), "kind": "reach", "eid": eid, "fid": str(b.get("fid") or eid)})
+    return {"ok": True}, 200
 
 
 def _control(fac: Facade, b: dict) -> tuple[dict, int]:

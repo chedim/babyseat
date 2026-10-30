@@ -334,3 +334,33 @@ def test_a_child_that_ignores_sigterm_is_killed_after_the_grace(tmp_path):
 
 
 
+
+
+def test_blurps_own_move_goes_to_the_child_and_the_seat_writes_nothing_under_self():
+    '''#740 (#440's one writer): with a child up, the reach line is the child's to write.'''
+    from membrane import ch_blurp as B
+    with _open_env():
+        srv = _felt()
+        with _forwarding(srv) as (sup, stub):
+            before = SL.record_path(srv).read_text()
+            B._reached(srv, 'w:b')
+            deadline = time.time() + 5
+            while time.time() < deadline and not [g for g in stub.got if g[1] == '/reach']:
+                time.sleep(0.02)
+            posts = [b for m, p, b in stub.got if m == 'POST' and p == '/reach']
+            assert posts and posts[0]['eid'] == 'w:b' and posts[0]['fid']
+            assert SL.record_path(srv).read_text() == before
+
+
+def test_with_no_child_the_seat_writes_the_reach_line_itself():
+    from membrane import ch_blurp as B
+    with _open_env():
+        srv = _felt()
+        sup = SUP.Supervisor(srv, 'http://127.0.0.1:9', autostart=False)
+        try:
+            assert sup.reach('w:b', 'w:b') is False
+            B._reached(srv, 'w:b')
+            assert [r['eid'] for r in map(json.loads, SL.record_path(srv).read_text().splitlines())
+                    if r.get('kind') == 'reach'] == ['w:b']
+        finally:
+            sup.close()
