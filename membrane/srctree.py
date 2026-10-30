@@ -25,6 +25,7 @@ and call edges on these trees) build on this."""
 from __future__ import annotations
 
 import hashlib
+import os
 import time
 from pathlib import Path
 
@@ -213,3 +214,81 @@ def source(srv, eid: str) -> str | None:
         return None
     a, z = p.get("span") or [0, 0]
     return b[a:z].decode("utf-8", errors="replace")
+
+
+# ---- #715 part B: the write path -----------------------------------------------------------------
+# entity_edit(<symbol>, properties={source: ...}) writes the file: exactly that symbol's span is
+# replaced (the rest byte-identical), the new file must parse or nothing is written, the symbols
+# are re-read from disk (files stay the source of truth), and a result entity records the edit.
+
+def _within_of(est, key: str) -> str:
+    mod = (est.docs or {}).get(eid_of(key))
+    return str(((mod.properties or {}) if mod is not None else {}).get("within") or "")
+
+
+def edit_source(srv, eid: str, new: str) -> dict:
+    """Replace one symbol's source in its file. -> {ok, symbol, result, span} or {ok: False, error}."""
+    est = srv.entity_store
+    d = (est.docs or {}).get(eid)
+    if d is None or not str(eid).startswith(NS):
+        return {"ok": False, "error": f"no code symbol {eid!r}"}
+    p = d.properties or {}
+    key, path = str(p.get("path") or ""), Path(str(p.get("file") or ""))
+    within = _within_of(est, key)
+    sync_if_stale(srv, key, path, within)              # an outside edit first: the span is the disk's
+    p = est.docs[eid].properties or {}
+    if p.get("status") == RETIRED:
+        return {"ok": False, "error": f"{eid} is retired (gone from its file): edit the symbol that replaced it"}
+    lang = lang_of(path)
+    if not lang:
+        return {"ok": False, "error": f"no grammar for {path.name}"}
+    try:
+        b, st = path.read_bytes(), path.stat()
+    except OSError as e:
+        return {"ok": False, "error": f"cannot read {path}: {e}"}
+    a, z = p.get("span") or [0, 0]
+    if _hash(b[a:z]) != p.get("hash"):                 # changed within the same mtime tick: re-read
+        sync_file(srv, key, path, within)
+        p = est.docs[eid].properties or {}
+        a, z = p.get("span") or [0, 0]
+        if p.get("status") == RETIRED or _hash(b[a:z]) != p.get("hash"):
+            return {"ok": False, "error": f"{eid} moved under the edit; read it again"}
+    nb = str(new).encode()
+    out = b[:a] + nb + b[z:]
+    if symbols(out, lang) is None:
+        return {"ok": False, "error": f"the new source does not parse as {lang}; {path.name} is untouched"}
+    tmp = path.with_name(f".{path.name}.membrane-edit")
+    tmp.write_bytes(out)
+    os.chmod(tmp, st.st_mode & 0o7777)
+    os.replace(tmp, path)
+    old_hash = p.get("hash")
+    sync_file(srv, key, path, within)
+    p2 = est.docs[eid].properties or {}
+    n = int(p.get("edits") or 0) + 1
+    res = f"{MEMBRANE_NS}result:src:{_hash(eid.encode())}:{n}"
+    est.upsert(QuantumEntity(eid=res, cls=CLASS_COMPONENT, properties={
+        "name": f"edit {n} of {p.get('name') or eid}"[:80], "symbol": eid, "file": str(path),
+        "span": [a, z], "new_span": [a, a + len(nb)], "old_hash": old_hash,
+        "new_hash": p2.get("hash") if p2.get("status") == LIVE else _hash(nb),
+        "mtime": path.stat().st_mtime, "ts": time.time(), "silent_birth": True}), embedder=None)
+    d = est.docs[eid]
+    results = list((d.properties or {}).get("edit_results") or []) + [res]
+    from . import lang as LG
+    keep = LG._keep(srv)                               # code_run's: options.code_runs_keep
+    for old in results[:max(0, len(results) - keep)]:
+        est.remove(old)
+    d.properties = {**(d.properties or {}), "edits": n, "last_edit": res, "edit_results": results[-keep:]}
+    est.upsert(d, embedder=None)
+    return {"ok": True, "symbol": eid, "result": res, "span": [a, a + len(nb)], "file": str(path)}
+
+
+def source_write(srv, eid: str, props: dict, owner: bool) -> dict | None:
+    """The seat's edit route (lanes._entity_edit): a `source` write on a code symbol is code, so
+    the owner's only. None: not a source write (the edit goes on as usual). Else the source edit,
+    with `properties` the rest of the patch (the ordinary edit takes it)."""
+    if not isinstance(props, dict) or "source" not in props or not str(eid or "").startswith(NS):
+        return None
+    if not owner:
+        return {"refused": True, "error": "a source edit is code: only the seat's owner writes it"}
+    rest = {k: v for k, v in props.items() if k != "source"}
+    return {"refused": False, "edit": edit_source(srv, eid, str(props["source"])), "properties": rest}
