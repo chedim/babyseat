@@ -4032,7 +4032,8 @@ def field_read(srv, ent) -> bool:
         finally:
             with _FR_LOCK:
                 _FIELD_READS.discard(ent.eid)
-    threading.Thread(target=go, daemon=True, name="field-read").start()
+    from . import writes as _W                 # #721: the getter writes in the chain of the turn that read it
+    threading.Thread(target=_W.carry(go), daemon=True, name="field-read").start()
     return True
 
 
