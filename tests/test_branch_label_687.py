@@ -50,8 +50,8 @@ def test_no_entity_no_label_and_lines_byte_identical():
     assert RB.branch_periods(est) == []
     assert RB.branch_periods(None) == []
     r = _row(3, NOW - 2 * H)
-    assert RB.line_of(r, NOW, branches=[]) == RB.line_of(r, NOW) == "▸ #3 (2h ago, reply) a fact" \
-        or RB.line_of(r, NOW, branches=[]) == RB.line_of(r, NOW)
+    assert RB.line_of(r, NOW, branches=[]) == RB.line_of(r, NOW)
+    assert RB.line_of(r, NOW).startswith("▸ #3 (2h ago, ")
 
 
 def test_the_label_never_reorders_or_drops():
