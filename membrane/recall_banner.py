@@ -241,15 +241,56 @@ def pick(rows: list[dict], text: str, n: int = BANNER_N, skip=(), weights: dict 
     return out
 
 
-def line_of(r: dict, now: float | None = None) -> str:
+BRANCH_ENTITY = "git:branch"     # #687: the field's branch entity (its getter reads git, its ring is the timeline)
+
+
+def branch_periods(est) -> list[tuple]:
+    """#687: [(from_ts, branch)] in time order, from git:branch's readings
+    ring (each reading change starts a period); [] when there is no such
+    entity or no reading carries a branch."""
+    if est is None:
+        return []
+    try:
+        ent = est.resolve(BRANCH_ENTITY, exact=True)
+    except Exception:
+        return []
+    out = []
+    for rd in ((getattr(ent, "properties", None) or {}).get("readings") or []) if ent is not None else []:
+        b = (rd.get("v") or {}).get("branch") if isinstance(rd, dict) else None
+        if b and rd.get("ts") is not None:
+            out.append((float(rd["ts"]), str(b)))
+    out.sort(key=lambda t: t[0])
+    return out
+
+
+def branch_at(periods, ts) -> str | None:
+    """The branch checked out at ts; None before the timeline starts."""
+    if not periods or ts is None:
+        return None
+    got = None
+    for t0, b in periods:
+        if t0 > float(ts):
+            break
+        got = b
+    return got
+
+
+def hit_branch(r: dict, periods) -> str | None:
+    """#687: the label a query hit carries (the same reading as the banner's)."""
+    return branch_at(periods, r.get("ts"))
+
+
+def line_of(r: dict, now: float | None = None, branches=None) -> str:
     from .entity_block import DIRECT_LABEL, _age
     src = DIRECT_LABEL.get(r.get("role"), r.get("role")) if r.get("via") == "direct" else "earlier answer"
     n = (r.get("a_n") or [r.get("q_n")])[0]
-    return f"▸ #{n} ({_age(r.get('ts'), now)}, {src}) {r['fact']}"
+    b = branch_at(branches, r.get("ts"))            # #687: provenance, never a rank
+    return f"▸ #{n} ({_age(r.get('ts'), now)}{', ' + b if b else ''}, {src}) {r['fact']}"
 
 
 def build(field, text: str, session: str = "", prev: dict | None = None, n: int = BANNER_N,
-          now: float | None = None, sim_min: float | None = None) -> tuple[list[str], dict | None]:
+          now: float | None = None, sim_min: float | None = None,
+          branches=None) -> tuple[list[str], dict | None]:
     """(banner lines, state to keep for the next turn). A no-topic message
     keeps the previous set."""
     if not has_topic(text):
@@ -278,7 +319,7 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
     ranked = rank(spk, text, load_weights(field))
     rows = pick(ranked, text, n=n, skip=skip, ranked=ranked)
     t5 = _t.monotonic()
-    lines = [line_of(r, now) for r in rows]
+    lines = [line_of(r, now, branches) for r in rows]
     # where a rebuild's time went (the live seat paid 15-175 s where a lone
     # process pays ~0.6 s): conv_banner.recall_lines logs it per rebuild
     timing = {"vec": t1 - t0, "recall": t2 - t1, "speakers": t3 - t2, "recent": t4 - t3,

@@ -6574,7 +6574,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 # the banner's ranking (#680): pool -> scorer -> reranker -> top k
                 pool = recall_answers(fld, q, k=max(k, RB.POOL), sim_min=sim_min)
                 rows = RB.rank(RB.with_speakers(fld, pool), q, RB.load_weights(fld))[:k]
-                out["hits"] = [{"sim": r["sim"],
+                _per = RB.branch_periods(getattr(srv, "entity_store", None))   # #687: the hit's branch
+                out["hits"] = [{"sim": r["sim"], **({"branch": RB.hit_branch(r, _per)}
+                                                    if RB.hit_branch(r, _per) else {}),
                                 "situation": (r["q"][:400] if r.get("via") != "direct" else
                                               f"{DIRECT_LABEL.get(r.get('role'), r.get('role'))} "
                                               + (f"{r['tool']} " if r.get("tool") else "")

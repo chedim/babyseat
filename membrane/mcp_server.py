@@ -977,6 +977,7 @@ def tool_query(args: dict, port: int) -> str:
         src = h.get("src") or "user"
         seat = h.get("seat") or ""
         seat_l = f" [seat: {seat}]" if seat else ""
+        seat_l += f" [branch: {h['branch']}]" if h.get("branch") else ""   # #687
         lines.append(f"({h['sim']:.2f} [{tag}]{via}{seat_l} [src: {src}]) "
                      f"situation: {h['situation']}\n"
                      f"    response: {h['action']}")

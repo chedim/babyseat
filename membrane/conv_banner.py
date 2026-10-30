@@ -673,7 +673,8 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     memo = srv.__dict__.setdefault("_recall_prev", {})
     session = next((d.get("session") for _k, d in reversed(events or []) if d.get("session")), "")
     try:
-        lines, state = RB.build(fld, latest, session=session or "", prev=memo.get(conv), now=now)
+        lines, state = RB.build(fld, latest, session=session or "", prev=memo.get(conv), now=now,
+                                branches=RB.branch_periods(getattr(srv, "entity_store", None)))   # #687
     except Exception as e:
         print(f"[recall-banner] error: {e}", file=sys.stderr)
         return []
