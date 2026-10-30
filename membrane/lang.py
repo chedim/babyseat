@@ -375,6 +375,244 @@ def note_oneshot(srv, lang: str, tree: Node, root: str) -> None:
         srv.entity_store.upsert(doc, embedder=None)
 
 
+# ---- one shape logic for every program (#741) ---------------------------------------------------
+# A METHOD FIXES ITS PROGRAM; only its data varies. A {{param}} may sit only where the shape gate
+# reads a leaf as data: never a command's name, never an interpreter's script. Every method's
+# template is noted on its SKELETON's node (the tree with every argument leaf a hole -- coarser
+# than #725's shape, so `--json {{f}}` and `--json title` meet); a one-shot whose tree matches a
+# method's template (the fixed parts equal, each param binding one plain literal) runs AS that
+# method, and a define that an existing method's template already covers is refused.
+SHAPE_METHODS = "methods"      # on the skeleton's node: the methods whose template has it
+PASSTHROUGH = ("refused: a method fixes its program; only its data can vary (paths, values, "
+               "strings) -- put the program in the command and its data in {{params}}")
+_SCRIPT_FLAGS = {"bash": "-c", "sh": "-c", "zsh": "-c", "dash": "-c", "ksh": "-c", "fish": "-c",
+                 "python": "-c", "python3": "-c", "node": "-e", "perl": "-e", "ruby": "-e",
+                 "php": "-r", "osascript": "-e", "deno": "eval", "bun": "-e"}
+_ALL_SCRIPT = {"eval", "exec", "source", "."}      # what they take IS code: no param at all
+# WRAPPERS run the NEXT word as a command: a prefix, skipped with its own flags (and the flags'
+# values) and VAR=x assignments; the wrapped command then faces the same two tests (#743).
+_WRAPPERS = {"sudo": {"-u", "-g", "-C", "-p", "-U", "-r", "-t", "-D"}, "nohup": set(),
+             "time": {"-f", "-o"}, "watch": {"-n"},
+             "env": {"-u", "-C"}, "xargs": {"-n", "-I", "-L", "-P", "-d", "-E", "-s", "-a"}}
+_WRAPPER_SCRIPT_FLAGS = {"env": "-S"}       # a flag whose value is itself a command line
+_EXPANSIONS = {"expansion", "simple_expansion", "command_substitution", "arithmetic_expansion",
+               "process_substitution"}
+
+
+def _has_param(n: Node) -> bool:
+    return n.kind == "param" or any(_has_param(k) for k in n.args)
+
+
+def _name_of(cmd: Node) -> str:
+    for k in cmd.args:
+        if k.kind == "command_name":
+            return print_(k).strip().rsplit("/", 1)[-1]
+    return ""
+
+
+def passthrough_refusal(tree: Node) -> str | None:
+    """#741: a method's tree (params=True) whose param is the program -- in a command's name,
+    or as (part of) an interpreter's script. None: its params are data."""
+    def walk(n: Node) -> bool:
+        if n.kind == "command_name" and _has_param(n):
+            return True
+        if n.kind == "command":
+            name, rest = _name_of(n), [k for k in n.args if k.kind != "command_name"]
+            if command_passes(name, rest):
+                return True
+        return any(walk(k) for k in n.args)
+
+    def command_passes(name: str, rest: list) -> bool:
+        while name in _WRAPPERS:                       # unwrap: the wrapped command is judged
+            takes, script, i = _WRAPPERS[name], _WRAPPER_SCRIPT_FLAGS.get(name), 0
+            while i < len(rest):
+                t = print_(rest[i]).strip()
+                if script and t == script:
+                    return any(_has_param(k) for k in rest[i + 1:])
+                if t in takes:
+                    i += 2
+                elif t.startswith("-") or ("=" in t and not t.startswith("=")):
+                    i += 1
+                else:
+                    break
+            if i >= len(rest):
+                return False                           # a bare wrapper: nothing wrapped
+            if _has_param(rest[i]):
+                return True                            # the param is the wrapped command's name
+            name, rest = print_(rest[i]).strip().rsplit("/", 1)[-1], rest[i + 1:]
+        if name in _ALL_SCRIPT and any(_has_param(k) for k in rest):
+            return True
+        flag = _SCRIPT_FLAGS.get(name)
+        if flag:
+            for i, k in enumerate(rest[:-1]):
+                if print_(k).strip() == flag and _has_param(rest[i + 1]):
+                    return True
+        return False
+    return PASSTHROUGH if walk(tree) else None
+
+
+def skeleton_of(n: Node, lang: str = "sh") -> Node:
+    """The index key: every argument leaf (a param, a #725 literal, a bare word) a hole."""
+    lit = SHAPE_LITERAL[lang]
+
+    def walk(n, in_name=False):
+        if n.kind == "param" or (not in_name and (lit(n) or n.kind == "word")):
+            return Node(_HOLE_KIND, "?")
+        return Node(n.kind, n.text, [walk(k, in_name or n.kind == "command_name") for k in n.args])
+    return walk(n)
+
+
+def _plain(n: Node) -> str | None:
+    """A run's subtree as ONE plain value (a param binds it, quoted once on the way back),
+    or None when quoting it would change it (an expansion, a glob, several words)."""
+    import shlex
+
+    def bad(x: Node) -> bool:
+        return x.kind in _EXPANSIONS or x.kind == "param" or any(bad(k) for k in x.args)
+    if bad(n):
+        return None
+    t = print_(n)
+    if any(c in t for c in "*?[") and n.kind == "word":
+        return None
+    try:
+        parts = shlex.split(t)
+    except ValueError:
+        return None
+    return parts[0] if len(parts) == 1 else None
+
+
+def match_template(tpl: Node, n: Node, binds: list | None = None) -> list | None:
+    """The method's template over a tree: the fixed parts equal, each param binding one
+    plain value (in order: [(name, value)]). A param over a param (another template) binds
+    too. None: no match."""
+    binds = [] if binds is None else binds
+    if tpl.kind == "param":
+        name = PARAM.search(tpl.text).group(1)
+        v = "{{}}" if n.kind == "param" else _plain(n)
+        if v is None:
+            return None
+        binds.append((name, v))
+        return binds
+    if tpl.kind != n.kind or tpl.text != n.text or len(tpl.args) != len(n.args):
+        return None
+    for a, b in zip(tpl.args, n.args):
+        if match_template(a, b, binds) is None:
+            return None
+    return binds
+
+
+def _method_tree(doc) -> Node | None:
+    p = doc.properties or {}
+    cmd = str(p.get("command") or "").strip()
+    if not cmd or p.get("retired") or p.get("abstract") or not p.get("method_name"):
+        return None
+    try:
+        tree = parse("sh", cmd, params=True)
+    except (ValueError, NoGrammar):
+        return None
+    names = [PARAM.search(x.text).group(1) for x in _params_of(tree)]
+    if any(_feed(x) or "." in x or ":" in x for x in names):
+        return None                           # self.* / parent feeds bind from the call, never a run
+    return tree
+
+
+def _params_of(n: Node) -> list:
+    return [n] if n.kind == "param" else [x for k in n.args for x in _params_of(k)]
+
+
+def note_method(srv, tree: Node, method_eid: str) -> None:
+    """Note a method on its skeleton's node (minted on its first method)."""
+    be, origin = _rel(srv)
+    with _GC:
+        eid = _mint(srv, "sh", skeleton_of(tree), be, origin)
+        doc = srv.entity_store.docs[eid]
+        p = doc.properties or {}
+        if method_eid not in (p.get(SHAPE_METHODS) or []):
+            p[SHAPE_METHODS] = list(p.get(SHAPE_METHODS) or []) + [method_eid]
+            doc.properties = p
+            srv.entity_store.upsert(doc, embedder=None)
+
+
+def methods_matching(est, tree: Node, skip: str = "") -> list:
+    """[(method doc, binds)] whose template matches `tree`, the most-called first."""
+    try:
+        sk = (est.docs or {}).get(_eid_of("sh", skeleton_of(tree)))
+    except KeyError:
+        return []
+    out = []
+    for me in ((sk.properties or {}).get(SHAPE_METHODS) or []) if sk is not None else []:
+        d = (est.docs or {}).get(me)
+        if d is None or me == skip:
+            continue
+        mt = _method_tree(d)
+        binds = match_template(mt, tree) if mt is not None else None
+        if binds is not None:
+            out.append((d, binds))
+    out.sort(key=lambda x: -int((x[0].properties or {}).get("runs") or 0))
+    return out
+
+
+def _sig(d) -> str:
+    p = d.properties or {}
+    names = list(dict.fromkeys(PARAM.search(x.text).group(1) for x in _params_of(_method_tree(d))))
+    return f"{p.get('name') or d.eid}({', '.join(names)})"
+
+
+def duplicate_refusal(est, tree: Node, eid: str) -> str | None:
+    """#741: a new template an existing method's template already covers."""
+    hits = methods_matching(est, tree, skip=eid)
+    if not hits:
+        return None
+    return (f"refused: you have {_sig(hits[0][0])} for this: call it, or compose it via steps"
+            + (f" (also: {', '.join(_sig(d) for d, _ in hits[1:])})" if hits[1:] else ""))
+
+
+def route_oneshot(srv, tree: Node) -> dict | None:
+    """#741: a one-shot that matches a method runs as that method (recorded as its call)."""
+    from . import night as N
+    for d, binds in methods_matching(srv.entity_store, tree):
+        owner = ((d.properties or {}).get("method_of") or [None])[0]
+        if not owner or (srv.entity_store.docs or {}).get(owner) is None:
+            continue
+        args: dict = {}
+        if any(args.setdefault(k, v) != v for k, v in binds):
+            continue                          # one name, two values: not this template
+        others = [o for o, _ in methods_matching(srv.entity_store, tree) if o.eid != d.eid]
+        out = N.method_call(srv, srv.entity_store, getattr(srv, "efield", None), getattr(srv, "membrane", None),
+                            owner, d.properties["method_name"], args)
+        note = (f"you have {_sig(d)} for this: call it next time; this ran it for you"
+                + (f" (also matching: {', '.join(_sig(o) for o in others)})" if others else ""))
+        out.update(routed={"method": d.eid, "object": owner, "args": args}, note=note,
+                   text=note, executor=out.get("via"))
+        return out
+    return None
+
+
+def boot_methods(srv) -> dict:
+    """Boot (#741): retire the passthrough methods (marked, never deleted) and note every
+    other method on its skeleton's node. Idempotent."""
+    est = srv.entity_store
+    retired, noted = [], 0
+    for d in list((est.docs or {}).values()):
+        p = d.properties or {}
+        cmd = str(p.get("command") or "").strip()
+        if not p.get("method_name") or not cmd or p.get("retired") or p.get("abstract"):
+            continue
+        try:
+            tree = parse("sh", cmd, params=True)
+        except (ValueError, NoGrammar):
+            continue
+        if passthrough_refusal(tree):
+            p["retired"] = "#741: a passthrough method (its param is the program)"
+            d.properties = p
+            est.upsert(d, embedder=None)
+            retired.append(d.eid)
+        elif _method_tree(d) is not None:
+            note_method(srv, tree, d.eid)
+            noted += 1
+    return {"retired": retired, "noted": noted}
+
+
 def load(est, eid: str) -> Node:
     p = (est.docs[eid].properties or {})
     return Node(str(p.get("kind") or ""), str(p.get("text") or ""), [load(est, k) for k in p.get("args") or []])
@@ -524,6 +762,10 @@ def run(srv, code: str | None = None, lang: str = "sh", node: str | None = None,
                 tree = LANGS[lang].parse(str(code))
         except (ValueError, KeyError, NoGrammar):
             tree = None                       # _owe says what is wrong with it
+        if tree is not None and lang == "sh":
+            routed = route_oneshot(srv, tree)     # #741: a method has this program: run it as that
+            if routed is not None:
+                return routed
         why = shape_refusal(srv, lang, tree) if tree is not None else None
         if why:
             return {"ok": False, "error": why}
@@ -628,8 +870,8 @@ def _collect(srv) -> dict:
         p = d.properties or {}
         if str(p.get("code") or "").startswith(node_ns):
             codes.add(p["code"])
-        if p.get(SHAPE_RUNS):
-            codes.add(d.eid)                  # #725: a shape's count is never collected
+        if p.get(SHAPE_RUNS) or p.get(SHAPE_METHODS):
+            codes.add(d.eid)                  # #725 / #741: a shape's count or methods are never collected
         bound = [r for r in (p.get("bound") or []) if r in docs]
         if bound:
             kept.update(bound[-keep:])

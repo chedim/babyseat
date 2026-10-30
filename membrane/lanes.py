@@ -7185,6 +7185,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         _write_audit(srv.membrane, {"event": "agent-code-run", "origin": "code_run",
                                     "root": res.get("root"), "result": res.get("result"),
                                     "rc": res.get("rc"), "ok": bool(res.get("ok")),
+                                    **({"routed": res["routed"].get("method")}       # #741
+                                       if isinstance(res.get("routed"), dict) else {}),
                                     **({"refused": "shape"} if str(res.get("error") or "")
                                        .startswith("refused: this program's shape") else {})})
         self._json_out(res)
