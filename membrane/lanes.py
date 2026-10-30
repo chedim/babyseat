@@ -5970,9 +5970,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                            **_auth_headers(rec.backend, srv.cloud_keys)}
             else:
                 url = srv.backend + "/v1/chat/completions"
-                from .rag import MODE_TURN as _MODE_TURN
+                from .rag import MODE_TURN as _MODE_TURN, MODE_BACKGROUND as _MODE_BG
                 headers = {"Content-Type": "application/json",
-                           **_MODE_TURN}           # #753: the seat injected, the fork records
+                           **(_MODE_TURN if _DR.lane_of(srv, up) == "chat" else _MODE_BG)}           # #753: the seat injected, the fork records
             _DR.record(model_name, url, u2, headers=headers)
             rq = urllib.request.Request(
                 url, data=json.dumps(u2).encode(), method="POST",
@@ -6192,6 +6192,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 # socket registration -- the watchdog's abort CLOSES it
                 # (the wedged read raises now)
                 _turn_sid = str((up.get("_turn_sid") or ""))[:64]
+                _socks = None
                 if _turn_sid:
                     _runner = getattr(srv, "_loop_runner", None)
                     if _runner is not None:

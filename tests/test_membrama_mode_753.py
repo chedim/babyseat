@@ -133,6 +133,28 @@ class TheModeHeader(unittest.TestCase):
         reg.seed_imprints()
         self.assertEqual(self.b.seen[-1], ("/api/chat", "off"))
 
+    def _deliver(self, extra):
+        h = _handler(self.url)
+        up = {"model": "local-a", "stream": False, **extra,
+              "messages": [{"role": "user", "content": "hi"}]}
+        h._v1_deliver(up, json.dumps(up).encode(), "hi", None,
+                      {"verdict": "escalate", "route": {"route": "local-a", "kind": "local"}},
+                      "WHERE WE ARE")
+
+    def test_a_loop_lane_turn_carries_off(self):
+        self._deliver({"_turn_sid": "loop::x"})
+        self.assertIn(("/v1/chat/completions", "off"), self.b.seen)
+        self.assertNotIn(("/v1/chat/completions", "capture"), self.b.seen)
+
+    def test_a_chat_lane_turn_carries_capture(self):
+        self._deliver({})
+        self.assertIn(("/v1/chat/completions", "capture"), self.b.seen)
+
+    def test_the_claim_judge_carries_off(self):
+        from membrane.claims import OllamaClaimJudge
+        OllamaClaimJudge("m", base_url=self.url).ask("judge")
+        self.assertEqual(self.b.seen[-1], ("/api/chat", "off"))
+
 
 if __name__ == "__main__":
     unittest.main()
