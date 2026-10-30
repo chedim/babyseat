@@ -4204,6 +4204,12 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     return ctx, efield_mark
 
 
+def _rag_mode_off() -> dict:
+    """#753: a background call's X-Membrane-Mode (off: the fork never stores it)."""
+    from .rag import MODE_BACKGROUND
+    return dict(MODE_BACKGROUND)
+
+
 class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the timing ring
     """The RAG handler + the OpenAI-compatible surface: /v1/models,
     /v1/chat/completions (the RAG gate + the internal state/math intercept),
@@ -5964,7 +5970,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                            **_auth_headers(rec.backend, srv.cloud_keys)}
             else:
                 url = srv.backend + "/v1/chat/completions"
-                headers = {"Content-Type": "application/json"}
+                from .rag import MODE_TURN as _MODE_TURN
+                headers = {"Content-Type": "application/json",
+                           **_MODE_TURN}           # #753: the seat injected, the fork records
             _DR.record(model_name, url, u2, headers=headers)
             rq = urllib.request.Request(
                 url, data=json.dumps(u2).encode(), method="POST",
@@ -6734,7 +6742,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             srv.backend + "/v1/chat/completions",
             data=json.dumps({"model": model, "messages": messages,
                              "stream": False}).encode(),
-            method="POST", headers={"Content-Type": "application/json"})
+            method="POST", headers={"Content-Type": "application/json",
+                                    **_rag_mode_off()})     # #753: never stored
         t0 = time.monotonic()
         try:
             with urllib.request.urlopen(rq, timeout=300) as resp:
