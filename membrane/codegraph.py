@@ -26,7 +26,7 @@ governance: the covenant stays opt-in writes + audit trail, not ACLs.
 from __future__ import annotations
 
 import argparse
-import ast
+import os
 import sys
 from pathlib import Path
 
@@ -39,22 +39,160 @@ _MAX_FILES = 4000
 _IMPACT_DEPTH = 4
 
 
-def _py_files(root: Path) -> list[Path]:
-    out: list[Path] = []
+_MAX_BYTES = 1_000_000      # a file bigger than this is not scanned (vendored bundles); approved by the operator 2026-10-30
+
+
+def _src_files(root: Path) -> list[Path]:
+    """Every source file a grammar reads (srctree.EXT: py, sh, js), sorted, skip dirs
+    pruned; a file over _MAX_BYTES is left out."""
+    from .srctree import lang_of
     if root.is_file():
-        return [root]
-    for p in sorted(root.rglob("*.py")):
-        if any(part in _SKIP_DIRS for part in p.parts):
-            continue
-        out.append(p)
-        if len(out) >= _MAX_FILES:
+        return [root] if lang_of(root) else []
+    found: list[Path] = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if x not in _SKIP_DIRS]
+        for f in files:
+            p = Path(d) / f
+            if lang_of(p) is None:
+                continue
+            try:
+                if p.stat().st_size > _MAX_BYTES:
+                    continue
+            except OSError:
+                continue
+            found.append(p)
+    return sorted(found)[:_MAX_FILES]
+
+
+# ---- the scan: tree-sitter trees (#715 C) ----------------------------------------------------------
+# Python keeps exactly what the old stdlib-ast scan gave (tests/test_codegraph_ts_715.py holds it as
+# the oracle): a def's line is its `def` line (not its decorator's), a def nested under any def or
+# class is a "method", its calls are every call in it (decorators, defaults and nested defs too),
+# `sig` its argument spec (positional-only args left out), `doc` its cleaned docstring. Shell and JS
+# get symbols and calls the same way (no sig, no doc).
+
+_PY_DEFS = {"function_definition": "function", "class_definition": "class"}
+_SH_DEFS = {"function_definition": "function"}
+_JS_DEFS = {"class_declaration": "class", "function_declaration": "function",
+            "generator_function_declaration": "function", "method_definition": "method"}
+
+
+def _txt(src: bytes, n) -> str:
+    return src[n.start_byte:n.end_byte].decode("utf-8", errors="replace")
+
+
+def _unparen(n):
+    while n is not None and n.type == "parenthesized_expression" and n.named_child_count == 1:
+        n = n.named_children[0]
+    return n
+
+
+def _walk(n):
+    stack = [n]
+    while stack:
+        x = stack.pop()
+        yield x
+        stack.extend(x.children)
+
+
+def _dotted(src: bytes, f, attr: str, obj: str, member: str, name_types) -> str | None:
+    """A call's callee as a dotted name: `f`, `a.b.c`; an attribute chain on something
+    that is not a name keeps its attribute part (`x().b` -> `b`)."""
+    f = _unparen(f)
+    if f is None:
+        return None
+    if f.type in name_types:
+        return _txt(src, f)
+    parts: list[str] = []
+    while f is not None and f.type == member:
+        a = f.child_by_field_name(attr)
+        if a is None:
             break
-    return out
+        parts.append(_txt(src, a))
+        f = _unparen(f.child_by_field_name(obj))
+    if f is not None and f.type in name_types:
+        parts.append(_txt(src, f))
+    return ".".join(reversed(parts)) if parts else None
 
 
-def _collect_calls(fn) -> list[str]:
-    """Every name called inside one function body (``f()``, ``a.b.c()``),
-    deduped."""
+def _calls(src: bytes, node, lang: str) -> list[str]:
+    names: list[str] = []
+    for x in _walk(node):
+        if lang == "py" and x.type == "call":
+            c = _dotted(src, x.child_by_field_name("function"), "attribute", "object", "attribute",
+                        ("identifier",))
+        elif lang == "js" and x.type == "call_expression":
+            c = _dotted(src, x.child_by_field_name("function"), "property", "object",
+                        "member_expression", ("identifier",))
+        elif lang == "sh" and x.type == "command":
+            n = x.child_by_field_name("name")
+            c = _txt(src, n).strip() if n is not None else None
+        else:
+            continue
+        if c:
+            names.append(c)
+    return sorted(set(names))
+
+
+def _py_default(src: bytes, n) -> str:
+    """A default as the old scan rendered it (ast.unparse of the expression)."""
+    import ast as _ast
+    t = _txt(src, n)
+    try:
+        return _ast.unparse(_ast.parse("(\n" + t + "\n)", mode="eval").body)   # a default may span lines
+    except Exception:
+        return t
+
+
+def _py_sig(src: bytes, fn) -> dict:
+    pos: list = []
+    kw: list = []
+    vararg = kwarg = None
+    in_kw = False
+    params = fn.child_by_field_name("parameters")
+    for c in (params.children if params is not None else []):
+        t = c.type
+        if t == "typed_parameter":                 # `x: int`, `*a: int`, `**k: int`
+            inner = c.named_children[0] if c.named_children else None
+            t, c = (inner.type, inner) if inner is not None else (t, c)
+        if t in ("positional_separator", "/"):
+            pos = []                               # positional-only args are not in the spec
+        elif t in ("keyword_separator", "*"):
+            in_kw = True
+        elif t == "identifier":
+            (kw if in_kw else pos).append((_txt(src, c), None))
+        elif t in ("default_parameter", "typed_default_parameter"):
+            (kw if in_kw else pos).append((_txt(src, c.child_by_field_name("name")),
+                                           _py_default(src, c.child_by_field_name("value"))))
+        elif t == "list_splat_pattern":
+            vararg = _txt(src, c.named_children[0]) if c.named_children else None
+            in_kw = True
+        elif t == "dictionary_splat_pattern":
+            kwarg = _txt(src, c.named_children[0]) if c.named_children else None
+    return {"args": pos, "vararg": vararg, "kwonly": kw, "kwarg": kwarg}
+
+
+def _py_doc(src: bytes, d) -> str:
+    import ast as _ast
+    import inspect
+    body = d.child_by_field_name("body")
+    first = next((c for c in (body.named_children if body is not None else []) if c.type != "comment"), None)
+    if first is None or first.type != "expression_statement" or first.named_child_count != 1:
+        return ""
+    s = _unparen(first.named_children[0])
+    if s is None or s.type not in ("string", "concatenated_string") or \
+            any(x.type == "interpolation" for x in _walk(s)):
+        return ""
+    try:
+        v = _ast.literal_eval(_txt(src, s))
+    except Exception:
+        return ""
+    return inspect.cleandoc(v)[:600] if isinstance(v, str) else ""
+
+
+# ---- the fallback: the pre-#715 stdlib-ast scan, verbatim (Python only, no grammar needed) -----
+def _ast_calls(fn) -> list[str]:
+    import ast
     names: list[str] = []
     for node in ast.walk(fn):
         if not isinstance(node, ast.Call):
@@ -74,13 +212,13 @@ def _collect_calls(fn) -> list[str]:
     return sorted(set(names))
 
 
-def _scan_tree(tree: ast.AST, rel: str) -> dict:
-    """Qualname -> {file, line, kind, calls, sig} for one module. Nested
-    defs get dotted qualnames (``outer.inner``, ``Class.method``). The
-    ``sig`` entry (functions/methods only): the def site's argument
-    spec -- {args: [(name, default_or_None)...], vararg, kwonly:
-    [(name, default)...], kwarg, returns} -- the SIGNATURE VERB's data
-    (the call-edge graph answers who-calls-X; this answers what-X-TAKES)."""
+def _ast_scan_source(src: bytes, rel: str) -> dict | None:
+    """scan_source for Python where tree-sitter is not installed; None when it does not parse."""
+    import ast
+    try:
+        tree = ast.parse(src.decode("utf-8", errors="replace"))
+    except SyntaxError:
+        return None
     syms: dict = {}
 
     def _dflt(node) -> str:
@@ -91,42 +229,94 @@ def _scan_tree(tree: ast.AST, rel: str) -> dict:
 
     def _args(ch) -> dict:
         a = ch.args
-        # ast packs `defaults` onto the TRAILING positional args: zip
-        # must offset by n_args - n_defaults (else 'messages, n=3'
-        # pairs as 'messages=3')
-        ndef = len(a.defaults)
+        ndef = len(a.defaults)          # defaults pack onto the TRAILING positional args
         pos = []
         for i, x in enumerate(a.args):
             d = None
             if ndef and i >= len(a.args) - ndef:
                 d = _dflt(a.defaults[i - (len(a.args) - ndef)])
             pos.append((x.arg, d))
-        kw = [(x.arg, (_dflt(d) if d is not None else None))
-              for x, d in zip(a.kwonlyargs, a.kw_defaults)]
-        return {"args": pos, "vararg": getattr(a.vararg, "arg", None),
-                "kwonly": kw,
+        kw = [(x.arg, (_dflt(d) if d is not None else None)) for x, d in zip(a.kwonlyargs, a.kw_defaults)]
+        return {"args": pos, "vararg": getattr(a.vararg, "arg", None), "kwonly": kw,
                 "kwarg": getattr(a.kwarg, "arg", None)}
 
     def visit(node, prefix: str) -> None:
         for ch in ast.iter_child_nodes(node):
             if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 q = prefix + ch.name
-                kind = "method" if prefix else "function"
-                syms[q] = {"file": rel, "line": ch.lineno, "kind": kind,
-                           "calls": _collect_calls(ch), "sig": _args(ch),
+                syms[q] = {"file": rel, "line": ch.lineno, "kind": "method" if prefix else "function",
+                           "calls": _ast_calls(ch), "sig": _args(ch),
                            "doc": (ast.get_docstring(ch) or "")[:600]}
                 visit(ch, q + ".")
             elif isinstance(ch, ast.ClassDef):
                 q = prefix + ch.name
-                syms[q] = {"file": rel, "line": ch.lineno, "kind": "class",
-                           "calls": [],
+                syms[q] = {"file": rel, "line": ch.lineno, "kind": "class", "calls": [],
                            "doc": (ast.get_docstring(ch) or "")[:600]}
                 visit(ch, q + ".")
             else:
                 visit(ch, prefix)
-
     visit(tree, "")
     return syms
+
+
+def scan_source(src: bytes, rel: str, lang: str | None = None) -> dict | None:
+    """Qualname -> {file, line, kind, calls[, sig, doc]} for one file; None when it does
+    not parse (or no grammar reads it)."""
+    from . import lang as LG
+    from .srctree import lang_of
+    lang = lang or lang_of(rel)
+    if not lang:
+        return None
+    try:
+        import tree_sitter as ts
+        grammar = LG._language(lang)
+    except (ImportError, LG.NoGrammar):
+        # a seat with no tree-sitter wheel (Termux, HA on a Pi): Python keeps the stdlib-ast
+        # scan it always had; sh and js are skipped there
+        return _ast_scan_source(src, rel) if lang == "py" else None
+    root = ts.Parser(grammar).parse(src).root_node
+    if root.has_error:
+        return None
+    defs = {"py": _PY_DEFS, "sh": _SH_DEFS, "js": _JS_DEFS}[lang]
+    syms: dict = {}
+
+    def visit(node, prefix: str, within: str) -> None:
+        for ch in node.named_children:
+            d = ch.child_by_field_name("definition") if ch.type == "decorated_definition" else ch
+            name = d.child_by_field_name("name") if d is not None and d.type in defs else None
+            if name is None:
+                visit(ch, prefix, within)
+                continue
+            q = prefix + _txt(src, name)
+            kind = defs[d.type]
+            if lang == "py" and kind == "function" and prefix:
+                kind = "method"                    # the old scan: any nested def
+            elif lang == "js" and kind == "function" and within == "class":
+                kind = "method"
+            info = {"file": rel, "line": d.start_point[0] + 1, "kind": kind,
+                    "calls": [] if kind == "class" else _calls(src, ch, lang)}
+            if lang == "py":
+                if kind != "class":
+                    info["sig"] = _py_sig(src, d)
+                info["doc"] = _py_doc(src, d)
+            syms[q] = info
+            visit(d, q + ".", kind)
+    visit(root, "", "module")
+    return syms
+
+
+def _scan_file(path: Path, rel: str):
+    """(symbols, mtime) for one file; None when it cannot be read or does not parse."""
+    try:
+        src = path.read_bytes()
+        mt = path.stat().st_mtime
+    except OSError:
+        return None
+    if b"\x00" in src[:1024]:
+        return None
+    syms = scan_source(src, rel)
+    return None if syms is None else (syms, mt)
+
 
 
 def _sig_parts(info: dict, sig: dict) -> list[str]:
@@ -168,23 +358,12 @@ def build_graph(root: str | Path = ".") -> dict:
     files: dict = {}
     symbols: dict = {}
     defs: dict = {}
-    for path in _py_files(rootp):
-        rel = path.relative_to(rootp).as_posix()
-        try:
-            src = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+    for path in _src_files(rootp):
+        rel = path.relative_to(rootp).as_posix() if path != rootp else path.name
+        got = _scan_file(path, rel)
+        if got is None:
             continue
-        if "\x00" in src[:1024]:
-            continue
-        try:
-            tree = ast.parse(src)
-        except SyntaxError:
-            continue
-        syms = _scan_tree(tree, rel)
-        try:
-            mt = path.stat().st_mtime
-        except OSError:
-            mt = 0.0
+        syms, mt = got
         files[rel] = {"mtime": mt, "symbols": sorted(syms)}
         symbols.update(syms)
         defs.update(_qualify(syms, rel))
@@ -198,7 +377,9 @@ def build_graph(root: str | Path = ".") -> dict:
 def module_of(rel: str) -> str:
     """'membrane/opencode.py' -> 'membrane.opencode' (a package's
     __init__.py is the package itself)."""
-    mod = rel[:-3] if rel.endswith(".py") else rel
+    from .srctree import EXT
+    ext = Path(rel).suffix
+    mod = rel[:-len(ext)] if ext and ext.lower() in EXT else rel
     mod = mod.replace("/", ".")
     return mod[:-len(".__init__")] if mod.endswith(".__init__") else mod
 
@@ -348,18 +529,13 @@ def rebuild_paths(graph: dict, rels) -> dict:
             dropped.append(rel)
             touched.append(rel)
             continue
-        try:
-            src = p.read_text(encoding="utf-8", errors="replace")
-            if "\x00" in src[:1024]:
-                continue
-            tree = ast.parse(src)
-            mt = p.stat().st_mtime
-        except (OSError, SyntaxError):
+        got = _scan_file(p, rel)
+        if got is None:
             continue
+        syms, mt = got
         for s in files.get(rel, {}).get("symbols", ()):
             if owner.get(s) == rel:
                 symbols.pop(s, None)
-        syms = _scan_tree(tree, rel)
         files[rel] = {"mtime": mt, "symbols": sorted(syms)}
         symbols.update(syms)
         for full in [d for d in defs if defs[d].get("file") == rel]:
@@ -380,7 +556,7 @@ def stale_paths(graph: dict) -> list[str]:
     files = graph["files"]
     stale: list[str] = []
     seen: set[str] = set()
-    for p in _py_files(rootp):
+    for p in _src_files(rootp):
         rel = p.relative_to(rootp).as_posix()
         seen.add(rel)
         try:
