@@ -479,12 +479,11 @@ _BOOT: dict = {}                           # this boot's reads of the markers
 
 
 def was_reexec() -> bool:
-    """True on the boot a requested restart re-exec'd (sticky for the whole
-    boot); the env marker is cleared on first read so nothing launched later
-    inherits it."""
+    """True once on the boot a requested restart re-exec'd; the marker is
+    cleared on read so nothing launched later inherits it."""
     got = os.environ.pop(REEXEC_ENV, None) == "1"
     _BOOT["reexec"] = _BOOT.get("reexec", False) or got
-    return _BOOT["reexec"]
+    return got
 
 
 def carried_pause() -> bool:

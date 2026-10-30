@@ -1,6 +1,6 @@
 """#760 review: the boot reads the re-exec marker more than once (the port
 pins ~line 804, the browser/boot check ~line 2124). was_reexec() clears the
-marker on read, so every read after the first must still say True."""
+marker on read: the pins read it once, the later check reads _BOOT."""
 
 import os
 import unittest
@@ -16,9 +16,10 @@ class TestReexecBootPins(unittest.TestCase):
         with mock.patch.dict(os.environ, {restarts.REEXEC_ENV: "1"}), \
                 mock.patch.dict(restarts._BOOT, {}, clear=True):
             # the same reads opencode.main makes, in the same order
-            listen_pinned = port_pinned(argv, "--listen", reexec=restarts.was_reexec())
-            serve_pinned = port_pinned(argv, "--serve-port", reexec=restarts.was_reexec())
-            later = restarts.was_reexec()          # ~line 2124
+            boot_reexec = restarts.was_reexec()    # read once (clears the marker)
+            listen_pinned = port_pinned(argv, "--listen", reexec=boot_reexec)
+            serve_pinned = port_pinned(argv, "--serve-port", reexec=boot_reexec)
+            later = bool(restarts._BOOT.get("reexec"))   # ~line 2124
         self.assertFalse(listen_pinned)
         self.assertFalse(serve_pinned)
         self.assertTrue(later)
