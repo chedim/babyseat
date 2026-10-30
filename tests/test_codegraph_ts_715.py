@@ -8,6 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import codegraph as CG  # noqa: E402
@@ -102,9 +104,46 @@ def test_python_symbols_match_the_ast_scan_on_every_repo_file():
     assert n > 100 and not bad, bad[:5]
 
 
-def test_the_scan_is_not_stdlib_ast():
-    src = (REPO / "membrane" / "codegraph.py").read_text()
-    assert "ast.parse(src)" not in src and "ast.walk" not in src
+def test_with_a_grammar_the_scan_is_tree_sitter_not_the_ast_fallback(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("the stdlib-ast fallback ran with a grammar installed")
+    monkeypatch.setattr(CG, "_ast_scan_source", boom)
+    assert CG.scan_source(b"def f():\n    g()\n", "x.py")["f"]["calls"] == ["g"]
+
+
+def _no_grammar(monkeypatch, how):
+    from membrane import lang as LG
+    if how == "no-wheel":
+        monkeypatch.setitem(sys.modules, "tree_sitter", None)      # `import tree_sitter` raises
+        monkeypatch.setattr(LG, "_TS", {})
+    else:
+        def none(lang):
+            raise LG.NoGrammar("the code tree needs tree-sitter")
+        monkeypatch.setattr(LG, "_language", none)
+
+
+@pytest.mark.parametrize("how", ["no-wheel", "no-grammar"])
+def test_without_tree_sitter_python_falls_back_to_the_ast_scan(monkeypatch, how):
+    _no_grammar(monkeypatch, how)
+    n = 0
+    for p in list(_repo_py())[:60]:
+        src = p.read_text(encoding="utf-8", errors="replace")
+        try:
+            want = _ast_scan(ast.parse(src), "x.py")
+        except SyntaxError:
+            continue
+        assert CG.scan_source(src.encode(), "x.py") == want, p
+        n += 1
+    assert n > 20
+
+
+@pytest.mark.parametrize("how", ["no-wheel", "no-grammar"])
+def test_without_tree_sitter_the_graph_builds_python_only(monkeypatch, how):
+    _no_grammar(monkeypatch, how)
+    g = CG.build_graph(_proj())
+    assert g["symbols"]["py_f"]["file"] == "lib.py"
+    assert not any(s["file"].endswith((".sh", ".js")) for s in g["symbols"].values())
+    assert "run.sh" not in g["files"] and "web/boat.js" not in g["files"]
 
 
 SH = 'helper() {\n  echo hi\n}\ngreet() {\n  helper\n  ls -la\n}\n'

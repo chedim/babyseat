@@ -39,7 +39,7 @@ _MAX_FILES = 4000
 _IMPACT_DEPTH = 4
 
 
-_MAX_BYTES = 1_000_000      # a file bigger than this is not scanned (vendored bundles); operator approval: #715 C
+_MAX_BYTES = 1_000_000      # a file bigger than this is not scanned (vendored bundles); approved by the operator 2026-10-30
 
 
 def _src_files(root: Path) -> list[Path]:
@@ -190,16 +190,91 @@ def _py_doc(src: bytes, d) -> str:
     return inspect.cleandoc(v)[:600] if isinstance(v, str) else ""
 
 
+# ---- the fallback: the pre-#715 stdlib-ast scan, verbatim (Python only, no grammar needed) -----
+def _ast_calls(fn) -> list[str]:
+    import ast
+    names: list[str] = []
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if isinstance(f, ast.Name):
+            names.append(f.id)
+        elif isinstance(f, ast.Attribute):
+            parts: list[str] = []
+            while isinstance(f, ast.Attribute):
+                parts.append(f.attr)
+                f = f.value
+            if isinstance(f, ast.Name):
+                parts.append(f.id)
+            if parts:
+                names.append(".".join(reversed(parts)))
+    return sorted(set(names))
+
+
+def _ast_scan_source(src: bytes, rel: str) -> dict | None:
+    """scan_source for Python where tree-sitter is not installed; None when it does not parse."""
+    import ast
+    try:
+        tree = ast.parse(src.decode("utf-8", errors="replace"))
+    except SyntaxError:
+        return None
+    syms: dict = {}
+
+    def _dflt(node) -> str:
+        try:
+            return ast.unparse(node)
+        except Exception:
+            return "?"
+
+    def _args(ch) -> dict:
+        a = ch.args
+        ndef = len(a.defaults)          # defaults pack onto the TRAILING positional args
+        pos = []
+        for i, x in enumerate(a.args):
+            d = None
+            if ndef and i >= len(a.args) - ndef:
+                d = _dflt(a.defaults[i - (len(a.args) - ndef)])
+            pos.append((x.arg, d))
+        kw = [(x.arg, (_dflt(d) if d is not None else None)) for x, d in zip(a.kwonlyargs, a.kw_defaults)]
+        return {"args": pos, "vararg": getattr(a.vararg, "arg", None), "kwonly": kw,
+                "kwarg": getattr(a.kwarg, "arg", None)}
+
+    def visit(node, prefix: str) -> None:
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                q = prefix + ch.name
+                syms[q] = {"file": rel, "line": ch.lineno, "kind": "method" if prefix else "function",
+                           "calls": _ast_calls(ch), "sig": _args(ch),
+                           "doc": (ast.get_docstring(ch) or "")[:600]}
+                visit(ch, q + ".")
+            elif isinstance(ch, ast.ClassDef):
+                q = prefix + ch.name
+                syms[q] = {"file": rel, "line": ch.lineno, "kind": "class", "calls": [],
+                           "doc": (ast.get_docstring(ch) or "")[:600]}
+                visit(ch, q + ".")
+            else:
+                visit(ch, prefix)
+    visit(tree, "")
+    return syms
+
+
 def scan_source(src: bytes, rel: str, lang: str | None = None) -> dict | None:
     """Qualname -> {file, line, kind, calls[, sig, doc]} for one file; None when it does
     not parse (or no grammar reads it)."""
     from . import lang as LG
     from .srctree import lang_of
-    import tree_sitter as ts
     lang = lang or lang_of(rel)
     if not lang:
         return None
-    root = ts.Parser(LG._language(lang)).parse(src).root_node
+    try:
+        import tree_sitter as ts
+        grammar = LG._language(lang)
+    except (ImportError, LG.NoGrammar):
+        # a seat with no tree-sitter wheel (Termux, HA on a Pi): Python keeps the stdlib-ast
+        # scan it always had; sh and js are skipped there
+        return _ast_scan_source(src, rel) if lang == "py" else None
+    root = ts.Parser(grammar).parse(src).root_node
     if root.has_error:
         return None
     defs = {"py": _PY_DEFS, "sh": _SH_DEFS, "js": _JS_DEFS}[lang]
