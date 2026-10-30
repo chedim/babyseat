@@ -89,7 +89,9 @@ class Dreamer:
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
-                slept = self._cycle()
+                from .cblite import background
+                with background():           # #755: a person's turn reads first
+                    slept = self._cycle()
             except Exception:
                 traceback.print_exc()
                 slept = self._idle
