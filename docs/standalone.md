@@ -156,10 +156,11 @@ are pushed out of view). The cards form a dependency graph: lines run from past
 decisions to the work they led to, and from the open questions to the work
 they block. Linked cards share a side, and hovering a card lights its links.
 
-An open card asks for one value, pre-filled with the agent's pick; ✓ decides it
-(from another machine, the seat token first). Clicking a card loads a message
-about the decision into the center bar, pre-filled and never sent, so the talk
-happens in the center chat. Hovering a decided card marks the message where it
+An open card asks for one value, pre-filled with the agent's pick. Clicking it
+opens the whole card as a floating panel, where Decide answers it (from another
+machine, the seat token first) and Chat about it loads a message about the
+decision into the center bar, pre-filled and never sent, so the talk happens in
+the center chat. Hovering a decided card marks the message where it
 was decided, when that chat is open; clicking it opens its chat and scrolls
 there. On a phone the cockpit is one column: goals, open questions, in flight,
 the bar and the chat, then the past. See [decision-map.md](decision-map.md).

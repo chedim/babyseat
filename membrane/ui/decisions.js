@@ -15,9 +15,11 @@
  *           pushed out of view. New cards alternate left / right.
  *
  * The cards are Decision entities (GET /membrane/decisions). An open card asks
- * for ONE variable, pre-filled with the agent's pick, answered on the card
- * (POST /membrane/decision/answer). Clicking a card loads its question into
- * the center bar (never sent): the conversation happens in the center chat,
+ * for ONE variable, pre-filled with the agent's pick. A card always fits its
+ * lane (long text cut off with an ellipsis, no options on it, #736); clicking an
+ * open or in-flight card opens it in place as a floating panel over everything:
+ * the whole text, every option, Decide (POST /membrane/decision/answer), Drop,
+ * and Chat about it, which loads its question into the center bar (never sent),
  * recorded on the card (POST /membrane/decision/chat). An answer made while
  * the card's chat is open names that chat's newest message; hovering a past
  * card then scrolls the chat to where it was decided.
@@ -401,7 +403,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     /* the stack: every newer card in ONE grid cell, top-aligned and lifted by its own
        shift, so each shows a strip above the older card in front of it; hover (or
        focus) pops it over all the others */
-    .stack { display:grid; flex:none; }
+    .stack { display:grid; grid-template-columns:minmax(0,1fr); flex:none; }   /* #736: never wider than the lane */
     .stack > .dc { grid-area:1 / 1; align-self:start; transform-origin:50% 0; }
     .stack .dc:hover, .stack .dc:focus-visible, .stack .dc:focus-within { z-index:60 !important; opacity:1 !important; }
     .band.past { overflow:hidden; padding-top:10px; }
@@ -410,7 +412,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .fr .lbl, .nr .lbl, .pr .lbl { text-align:right; }
     .gone { font-size:11px; opacity:.45; text-align:center; letter-spacing:.08em; }
     /* a card: a chamfered HUD panel */
-    .dc { position:relative; flex:none; cursor:pointer; padding:9px 12px; outline:none; background:var(--panel);
+    .dc { position:relative; flex:none; min-width:0; max-width:100%; box-sizing:border-box; cursor:pointer;
+          padding:9px 12px; outline:none; background:var(--panel);
           --edge:var(--line); border:1px solid; border-color:var(--edge);
           clip-path:polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
           transition:transform .45s ease, opacity .45s ease, border-color .2s ease; }
@@ -424,10 +427,13 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .dc:focus-visible { --edge:var(--cyan); box-shadow:inset 0 0 0 1px var(--cyan); }
     .now .dc { --edge:var(--cyan); box-shadow:inset 3px 0 0 var(--cyan); }
     .nr .dc { box-shadow:inset -3px 0 0 var(--cyan); }
-    .dc .t { font-weight:600; overflow-wrap:anywhere; line-height:1.3; }
+    /* #736: a card fits its lane -- long text is cut off with an ellipsis; the whole card is in its panel */
+    .dc .t { font-weight:600; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .dc .d { font-size:12.5px; opacity:.75; margin-top:3px; overflow-wrap:anywhere;
              display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-    .dc .m { font-size:12px; opacity:.7; margin-top:5px; font-variant-numeric:tabular-nums; }
+    .dc .m { font-size:12px; opacity:.7; margin-top:5px; font-variant-numeric:tabular-nums;
+             white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dc .chip { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; box-sizing:border-box; }
     .dc .val { font-weight:600; color:var(--amber); opacity:1; }
     .chips { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
     .chip { font-size:10.5px; padding:0 7px; border:1px solid var(--dim); color:#b9c6d3; }
@@ -458,6 +464,30 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .cc { position:relative; z-index:1; min-height:0; display:flex; flex-direction:column; }
     .cc ::slotted(ai-terminal-panel) { flex:1; min-height:0; height:auto; }
     .msg { position:absolute; left:0; right:0; bottom:4px; text-align:center; font-size:12px; opacity:.6; pointer-events:none; }
+    /* THE CARD PANEL (#736): a click opens the card in place, floating over everything */
+    .dscrim { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.45); }
+    .dpanel { position:fixed; z-index:1001; top:50%; left:50%; transform:translate(-50%,-50%);
+              width:min(460px, calc(100vw - 32px)); max-height:calc(100vh - 64px); overflow-y:auto; box-sizing:border-box;
+              padding:14px 16px; background:rgba(8,13,20,.97); border:1px solid var(--cyan); outline:none;
+              box-shadow:0 0 24px rgba(95,214,255,.25); }
+    .dscrim[hidden], .dpanel[hidden] { display:none; }
+    .dpanel .ph { display:flex; gap:10px; align-items:flex-start; }
+    .dpanel .pt { flex:1; min-width:0; font-weight:600; line-height:1.35; overflow-wrap:anywhere; }
+    .dpanel .pd { font-size:13px; opacity:.8; margin-top:6px; overflow-wrap:anywhere; white-space:pre-wrap; }
+    .dpanel .m { font-size:12.5px; opacity:.75; margin-top:8px; overflow-wrap:anywhere; }
+    .dpanel .chip { overflow-wrap:anywhere; }
+    .dpanel form.ans { display:block; margin-top:10px; }
+    .dpanel fieldset.opts { border:0; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+    .dpanel label.opt { display:flex; gap:8px; align-items:flex-start; padding:5px 8px; cursor:pointer; opacity:1;
+              font-size:13px; border:1px solid var(--dim); overflow-wrap:anywhere; min-width:0; }
+    .dpanel label.opt span { min-width:0; overflow-wrap:anywhere; }
+    .dpanel label.opt:has(input:checked) { border-color:var(--cyan); }
+    .dpanel form.ans input:not([type=radio]) { width:100%; box-sizing:border-box; }
+    .dpanel .pa { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; justify-content:flex-end; }
+    .dpanel button { font:inherit; border:1px solid var(--amber); color:var(--amber); background:transparent;
+              padding:3px 12px; cursor:pointer; border-radius:2px; }
+    .dpanel button:hover { background:rgba(255,176,64,.16); }
+    .dpanel button.close { border-color:transparent; color:inherit; opacity:.7; padding:0 6px; }
     @media (prefers-reduced-motion: reduce) { .dc { transition:none; } }
     /* a phone: one column -- goals, the future, now and the bar, the chat, the past */
     @media ${NARROW} {
@@ -500,7 +530,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
           <section class="band now nr" aria-label="in flight, right"></section>
           <section class="band past pl" aria-label="decided, left"></section>
           <section class="band past pr" aria-label="decided, right"></section>
-        </div><div class="msg" role="status"></div>`;
+        </div><div class="msg" role="status"></div>
+        <div class="dscrim" hidden></div><div class="dpanel" role="dialog" aria-modal="true" tabindex="-1" hidden></div>`;
         this._root = this.shadowRoot.querySelector(".ck");
         this._msg = this.shadowRoot.querySelector(".msg");
         this._logo = this.shadowRoot.querySelector(".logo");
@@ -512,6 +543,23 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
           if (c && e.target === c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); this._activate(c); }
         });
         this._root.addEventListener("submit", (e) => { e.preventDefault(); this._answer(e.target); });
+        // the card panel (#736): its own clicks, its answer, Escape and the scrim close it
+        this._panel = this.shadowRoot.querySelector(".dpanel");
+        this._scrim = this.shadowRoot.querySelector(".dscrim");
+        this._scrim.addEventListener("click", () => this._closePanel());
+        this._panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._closePanel(); } });
+        this._panel.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          if (await this._answer(e.target)) this._closePanel();
+        });
+        this._panel.addEventListener("click", (e) => {
+          const b = e.target.closest && e.target.closest("button");
+          if (!b || b.type === "submit") return;
+          const card = this._byEid(this._panel.dataset.eid);
+          if (b.classList.contains("close")) this._closePanel();
+          else if (b.classList.contains("chat") && card) { this._closePanel(); this._loadIntoBar(card); }
+          else if (b.classList.contains("drop") && card) { this._closePanel(); this._drop({ dataset: { eid: card.eid } }); }
+        });
         // a past card: hover (or focus) finds where it was decided
         // any card: hover (or focus) lights its edges and its neighbours
         const over = (e) => {
@@ -602,13 +650,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       if (c.status === "open") {
         const sp = inputSpec(c.var), p = pickText(c.var, c.pick);
         if (sp) {
-          const id = "v-" + c.eid.replace(/[^a-z0-9]+/gi, "-");
-          const unit = c.var && c.var.unit ? esc(c.var.unit) : "";
-          const field = sp.kind === "select"
-            ? `<select id="${id}" name="v">${sp.options.map((o) => `<option${o === p ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`
-            : `<input id="${id}" name="v" type="${sp.kind}"${sp.step ? ` step="${sp.step}"` : ""} value="${esc(p)}" autocomplete="off">`;
-          body = `<form class="ans" data-eid="${esc(c.eid)}"><label for="${id}"${unit ? "" : ' class="sr"'}>${unit || esc(c.title)}</label>${field}` +
-            `<button type="submit" aria-label="decide ${esc(c.title)}" title="Decide">✓</button></form>`;
+          // #736: the collapsed card shows no options -- the pick, cut to the lane; the panel answers
+          body = `<div class="m">${p ? `pick: <span class="val">${esc(p)}</span>` : "open"}${c.var && c.var.unit ? " " + esc(c.var.unit) : ""}</div>`;
         } else {
           body = `<div class="m">no variable set: talk it over in the chat</div>`;
         }
@@ -630,7 +673,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
       const sl = band === "future" && !this._narrow ? stackSlot(row) : { stacked: false };
       const tf = sl.stacked ? `transform:translateY(-${sl.shift}px);z-index:${sl.z};opacity:.94`
         : `transform:rotateX(${d.tilt}deg) scale(${d.scale});opacity:${d.opacity}`;
-      const what = band === "past" ? "show where it was decided" : "talk it over in the chat";
+      const what = band === "past" ? "show where it was decided" : "open it";
       return `<article class="dc" tabindex="0" role="button" style="${tf}" data-eid="${esc(c.eid)}" aria-label="${esc(c.title)}: ${what}">` +
         `<div class="t">${esc(c.title)}</div>${c.description && band !== "now" ? `<div class="d">${esc(c.description)}</div>` : ""}` +
         `${body}${c.status === "open" ? `<button type="button" class="drop" aria-label="drop ${esc(c.title)}" title="Drop this card without answering">Drop</button>` : ""}` +
@@ -680,6 +723,10 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         }
       }
       this._paintGoals();
+      if (this._panel && !this._panel.hidden) {
+        const pc = this._byEid(this._panel.dataset.eid);
+        if (!pc || !(pc.status === "open" || inNow(pc))) this._closePanel();
+      }
       this._lines = narrow ? [] : ce.lines;
       this._bandOf = {};
       for (const k of ["future", "now", "past"]) for (const c of b[k]) this._bandOf[c.eid] = k;
@@ -839,7 +886,52 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     _activate(el) {
       const card = this._byEid(el.dataset.eid);
       if (!card) return;
-      if (card.status === "open" || inNow(card)) this._loadIntoBar(card); else this._openPast(card, el);
+      if (card.status === "open" || inNow(card)) this._openPanel(card); else this._openPast(card, el);
+    }
+
+    /** The card panel (#736): the whole card -- its full title and description, every option
+     * (wrapped, so a long one is read whole), Decide, Chat about it, Drop -- over everything. */
+    _openPanel(card) {
+      const pn = this._panel;
+      if (!pn) return;
+      let body = "";
+      if (card.status === "open") {
+        const sp = inputSpec(card.var), p = pickText(card.var, card.pick);
+        if (sp) {
+          const unit = card.var && card.var.unit ? esc(card.var.unit) : "";
+          const field = sp.kind === "select"
+            ? `<fieldset class="opts"><legend class="sr">${esc(card.title)}</legend>${sp.options.map((o) =>
+                `<label class="opt"><input type="radio" name="v" value="${esc(o)}"${o === p ? " checked" : ""}><span>${esc(o)}</span></label>`).join("")}</fieldset>`
+            : `<label class="m" for="pv">${unit || "value"}</label><input id="pv" name="v" type="${sp.kind}"` +
+              `${sp.step ? ` step="${sp.step}"` : ""} value="${esc(p)}" autocomplete="off">`;
+          body = `<form class="ans" data-eid="${esc(card.eid)}">${field}` +
+            `<div class="pa"><button type="submit" aria-label="decide ${esc(card.title)}">Decide</button></div></form>`;
+        } else body = `<div class="m">no variable set: talk it over in the chat</div>`;
+      } else {
+        const v = valueText(card);
+        body = `<div class="m">${v ? `<span class="val">${esc(v)}</span> · ` : ""}${card.status === "decided" ? "decided · waiting for work" : "in flight"}</div>`;
+      }
+      const titles = {};
+      for (const c of (this._board && this._board.cards) || []) titles[c.eid] = c.title;
+      const chips = cardEdges(this._board).chips, lines = cardEdges(this._board).lines;
+      const mine = (chips[card.eid] || []).concat(lines.filter((e) => e.from === card.eid).map((e) => ({ rel: e.rel, to: e.to })));
+      const ch = mine.map((x) => `<span class="chip">${esc(x.rel.replace("_", " "))}: ${esc(titles[x.to] || x.to)}</span>`).join("");
+      pn.dataset.eid = card.eid;
+      pn.setAttribute("aria-label", card.title);
+      pn.innerHTML = `<div class="ph"><div class="pt">${esc(card.title)}</div>` +
+        `<button type="button" class="close" aria-label="close" title="Close (Esc)">✕</button></div>` +
+        `${card.description ? `<div class="pd">${esc(card.description)}</div>` : ""}${body}` +
+        `${ch ? `<div class="chips">${ch}</div>` : ""}<div class="err" role="alert"></div>` +
+        `<div class="pa"><button type="button" class="chat">Chat about it</button>` +
+        `${card.status === "open" ? `<button type="button" class="drop" title="Drop this card without answering">Drop</button>` : ""}</div>`;
+      this._scrim.hidden = false; pn.hidden = false;
+      pn.focus({ preventScroll: true });
+    }
+
+    _closePanel() {
+      if (!this._panel || this._panel.hidden) return;
+      this._panel.hidden = true; this._scrim.hidden = true;
+      this._panel.innerHTML = ""; delete this._panel.dataset.eid;
     }
 
     /** An open / in-flight card: its question into the center bar, its chat recorded. */
@@ -901,7 +993,7 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     async _answer(form) {
       const eid = form.dataset.eid;
       const card = this._byEid(eid);
-      if (!card) return;
+      if (!card) return false;
       let value = form.elements.v.value;
       if (card.var && card.var.type === "bool") value = value === "yes";
       const btn = form.querySelector("button");
@@ -913,10 +1005,13 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
         delete this._errs[eid];
         if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
         await this._load();
+        return true;
       } catch (err) {
         this._errs[eid] = String(err && err.message || err);
         btn.disabled = false;
-        this._paint();
+        const pe = this._panel && !this._panel.hidden && this._panel.querySelector(".err");
+        if (pe) pe.textContent = this._errs[eid]; else this._paint();
+        return false;
       }
     }
   }
