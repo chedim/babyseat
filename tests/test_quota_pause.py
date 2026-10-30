@@ -525,7 +525,8 @@ class TestTheMindsPark(_Fresh):
         g = est.add(cls="Goal", name="g", summary="")["eid"]
         est.edit(g, properties={"status": "open"})
         srv.run_loop_turn = lambda *a: {"text": "", "quota": {"model": "cloudy:cloud"}}
-        ev = {"kind": "intent-planted", "entity": g, "event_id": "e1"}
+        ev = {"kind": "llm-call", "lane": "planner", "entity": g, "event_id": "e1",   # #738: the goal planner
+              "prompt": "plan the goal: planted", "depth": 1}
         self.assertEqual(_LoopDrainer(srv).handle(ev), "held")
         self.assertEqual([e["entity"] for e in srv.events_pool.take()], [g])
         self.assertNotIn("watch_decisions", est.docs[g].properties)

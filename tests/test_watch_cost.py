@@ -218,64 +218,8 @@ class _Runner:
         return self.replies.pop(0) if self.replies else {"text": ""}
 
 
-class TestDrainerVerdicts(unittest.TestCase):
-    def setUp(self):
-        self.est = _store("drain")
-        self.srv = _Srv(self.est)
-        self.srv.create_loop_session = lambda agent, title=None: "ses_x"
-        self.injected = []
-        self.srv._loop_runner = object()
-        self.srv._inject_to_primary = lambda runner, line: self.injected.append(line)
-        self.eid = _goal(self.est, "g1", "wire HA", intent_planted_ts=0)
-        self.drainer = WA._LoopDrainer(self.srv)
-
-    def _landing(self):
-        return self.est.docs[self.eid].properties["landings"][-1]
-
-    def test_a_silent_run_is_aborted_with_its_trail(self):
-        self.srv.run_loop_turn = _Runner([{"text": "", "trail": ["entity_read c:a -> error",
-                                                                  "entity_link curl -> rc=0"]}])
-        self.drainer.handle({"kind": "intent-planted", "entity": self.eid, "text": "wire HA"})
-        land = self._landing()
-        self.assertEqual(land["op"], "aborted")
-        self.assertIn("entity_link", land["decision"])
-        self.assertEqual(self.injected, [])
-
-    def test_done_without_fulfill_gets_one_nudge(self):
-        run = _Runner([{"text": "All wired.\nDONE automation armed"},
-                       {"text": "STEP fulfill refused, retrying next pass"}])
-        self.srv.run_loop_turn = run
-        self.drainer.handle({"kind": "intent-planted", "entity": self.eid, "text": "wire HA"})
-        self.assertEqual(len(run.calls), 2)
-        self.assertIn("action='close'", run.calls[1])
-        self.assertIn(self.eid, run.calls[1])
-
-    def test_done_and_fulfilled_needs_no_nudge(self):
-        def closing(sid, text, agent):
-            self.est.docs[self.eid].properties["status"] = "fulfilled"
-            return {"text": "DONE armed, receipt rc=0"}
-        self.srv.run_loop_turn = closing
-        self.drainer.handle({"kind": "intent-planted", "entity": self.eid, "text": "wire HA"})
-        self.assertEqual(self._landing()["op"], "done")
-
-    def test_blocked_parks_the_goal(self):
-        self.srv.run_loop_turn = _Runner([{"text": "BLOCKED on the operator's signature"}])
-        self.drainer.handle({"kind": "intent-planted", "entity": self.eid, "text": "wire HA"})
-        props = self.est.docs[self.eid].properties
-        self.assertIn("signature", props["blocked_on"])
-        self.assertGreater(props["blocked_ts"], 0)
-
-    def test_a_step_clears_an_old_block(self):
-        self.est.docs[self.eid].properties.update(blocked_ts=1.0, blocked_on="x")
-        self.srv.run_loop_turn = _Runner([{"text": "STEP moved on"}])
-        self.drainer.handle({"kind": "intent-planted", "entity": self.eid, "text": "wire HA"})
-        self.assertNotIn("blocked_ts", self.est.docs[self.eid].properties)
-
-    def test_markdown_ignored_is_ignored(self):
-        self.srv.run_loop_turn = _Runner([{"text": "**ignored**: nothing new"}])
-        self.drainer.handle({"kind": "intent-planted", "entity": self.eid, "text": "wire HA"})
-        self.assertEqual(self._landing()["op"], "ignored")
-        self.assertEqual(self.injected, [])
+# #738: the goal-loop pass and its verdicts (the DONE nudge, BLOCKED parking, the landing
+# ledger) are gone -- a goal is worked as a graph (tests/test_goal_graph_738.py)
 
 
 if __name__ == "__main__":

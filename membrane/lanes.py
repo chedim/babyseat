@@ -7304,6 +7304,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         _sh = script_health(ent.properties)
         if _sh:
             val["script"] = _sh                      # #149: a failing script is part of the read
+        if ent.cls == "Goal":                         # #738: a goal's read shows its graph
+            from . import goalgraph as _GG
+            _gv = _GG.view(est, ent.eid)
+            if _gv["tasks"] or _gv["cards"]:
+                val["goal_graph"] = _gv
         self._json_out(val)
 
     def _entity_audit(self, op: str, res: dict) -> None:

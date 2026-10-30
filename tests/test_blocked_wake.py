@@ -134,31 +134,6 @@ class TestWake(unittest.TestCase):
         self.assertEqual(self._due(), 1)
 
 
-class TestDrainerStampsTheCondition(unittest.TestCase):
-    def test_blocked_line_carries_its_condition(self):
-        est = _store()
-        srv = _Srv(est)
-        srv.create_loop_session = lambda agent, title=None: "ses_x"
-        srv.run_loop_turn = lambda sid, text, agent: {"text": "BLOCKED on w:agatha; retry after 2h"}
-        eid = _goal(est, "g", intent_planted_ts=0)
-        WA._LoopDrainer(srv).handle({"kind": "intent-planted", "entity": eid, "text": "g"})
-        p = est.docs[eid].properties
-        self.assertEqual(p["blocked_entity"], "w:agatha")
-        self.assertGreater(p["blocked_until"], time.time() + 7000)
-
-    def test_a_step_clears_the_condition(self):
-        est = _store()
-        srv = _Srv(est)
-        srv.create_loop_session = lambda agent, title=None: "ses_x"
-        srv.run_loop_turn = lambda sid, text, agent: {"text": "STEP moved"}
-        eid = _goal(est, "g", intent_planted_ts=0, blocked_ts=1.0, blocked_until=9e9,
-                    blocked_entity="w:x")
-        WA._LoopDrainer(srv).handle({"kind": "intent-planted", "entity": eid, "text": "g"})
-        p = est.docs[eid].properties
-        for k in ("blocked_ts", "blocked_until", "blocked_entity"):
-            self.assertNotIn(k, p)
-
-
 class TestDormantDigest(unittest.TestCase):
     def test_counts_without_waking(self):
         est = _store()

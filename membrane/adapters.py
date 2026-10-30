@@ -65,6 +65,11 @@ def _branch(path: str) -> tuple[str, str, str] | None:
         return "seat", eid, prop
     if prop == "invoke":
         return "methods", eid, prop             # a method entity or not: the worker reads method_name
+    if prop == "plan":
+        return "plan", eid, prop                # #738: a goal's plan (the worker checks it is a Goal)
+    from . import goalgraph as _GG
+    if prop == "status" and _GG.is_task(eid):
+        return "tasks", eid, prop               # #738: a task owed goes to the worker pool
     return None
 
 
@@ -133,7 +138,7 @@ def _llm(srv, est, ent, prop, new, by) -> None:
     d = new if isinstance(new, dict) else {}
     if prop == "call":
         r = LLM.request(srv, d.get("prompt") if d else str(new), about=str(d.get("about") or ""),
-                        caller=by)
+                        caller=by, extra={"lane": str(d["lane"])} if d.get("lane") else None)   # #738: the planner
     elif prop == "wake":
         r = LLM.set_wake(srv, str(d.get("about") or ""), str(d.get("at") or ""), str(d.get("prompt") or ""),
                          caller=by)
@@ -188,8 +193,25 @@ def _exec(srv, est, ent, prop, new, by) -> None:
     LG.process(srv, ent.eid, prop)              # prop: the executor; a taken edge is a no-op
 
 
+def _plan(srv, est, ent, prop, new, by) -> None:
+    """#738: `<goal>.plan` applies the planner's plan to the goal's graph."""
+    from . import goalgraph as GG
+    if ent.cls != "Goal":
+        return
+    r = GG.apply_plan(srv, ent.eid, new)
+    ent = est.docs.get(ent.eid) or ent
+    _consume(est, ent, prop, new, r if r.get("ok") else r.get("error"), rc=_rc(r))
+
+
+def _tasks(srv, est, ent, prop, new, by) -> None:
+    """#738: a task whose status became owed goes to the worker pool."""
+    from . import goalgraph as GG
+    if new == GG.OWED:
+        GG.owe(srv, ent.eid)
+
+
 EFFECTS = {"exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
-           "toybox": _toybox}
+           "toybox": _toybox, "plan": _plan, "tasks": _tasks}
 
 
 def write_and_wait(est, eid: str, prop: str, value, timeout: float = 20.0, srv=None) -> dict:

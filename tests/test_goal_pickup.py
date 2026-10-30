@@ -48,30 +48,36 @@ def _srv(est):
 
 
 class TestPickup(unittest.TestCase):
-    def test_a_loop_marks_the_goal_it_takes(self):
+    # #738: a goal is worked by its PLANNER (a planted notification asks it; the planner's
+    # pass is the one that takes the goal)
+    @staticmethod
+    def _planner_ev(eid):
+        return {"kind": "llm-call", "lane": "planner", "entity": eid, "prompt": "plan the goal: planted",
+                "depth": 1, "ts": time.time()}
+
+    def test_the_planner_marks_the_goal_it_takes(self):
         est = _store()
         srv = _srv(est)
         eid = _goal(est, "list")
         t0 = time.time()
-        WA._LoopDrainer(srv).handle({"kind": "intent-planted", "entity": eid, "text": "list",
-                                     "ts": t0})
+        WA._LoopDrainer(srv).handle(self._planner_ev(eid))
         p = est.docs[eid].properties
-        self.assertTrue(p["picked_up_by"])
+        self.assertTrue(p["picked_up_by"].startswith("planner"))
         self.assertGreaterEqual(p["picked_up_ts"], t0)
+        self.assertEqual(len(srv.turns), 1)
 
-    def test_a_notification_older_than_the_pickup_runs_no_second_pass(self):
+    def test_a_notification_older_than_the_pickup_asks_no_second_plan(self):
         est = _store()
         srv = _srv(est)
         eid = _goal(est, "list")
         old = {"kind": "intent-planted", "entity": eid, "text": "list", "ts": time.time() - 5}
-        WA._LoopDrainer(srv).handle(dict(old))
-        self.assertEqual(len(srv.turns), 1)
+        WA._LoopDrainer(srv).handle(self._planner_ev(eid))
         self.assertEqual(WA._LoopDrainer(srv).handle(dict(old)), "skip")   # queued before that pass
+        self.assertEqual(WA._LoopDrainer(srv).handle({**old, "ts": time.time() + 1, "created": True}),
+                         "planned")                                       # a later plant still asks
         self.assertEqual(len(srv.turns), 1)
-        WA._LoopDrainer(srv).handle({**old, "ts": time.time() + 1})        # a later wake still runs
-        self.assertEqual(len(srv.turns), 2)
 
-    def test_a_notification_sent_during_the_pass_runs_no_second_pass(self):
+    def test_a_notification_sent_during_the_planner_pass_asks_no_second_plan(self):
         est = _store()
         srv = _srv(est)
         eid = _goal(est, "list")
@@ -81,10 +87,9 @@ class TestPickup(unittest.TestCase):
             srv.turns.append(text)
             during.append({"kind": "intent-planted", "entity": eid, "text": "list",
                            "ts": time.time()})
-            return {"text": "STEP moved"}
+            return {"text": "PLANNED two tasks"}
         srv.run_loop_turn = turn
-        WA._LoopDrainer(srv).handle({"kind": "intent-planted", "entity": eid, "text": "list",
-                                     "ts": time.time()})
+        WA._LoopDrainer(srv).handle(self._planner_ev(eid))
         self.assertEqual(WA._LoopDrainer(srv).handle(during[0]), "skip")
         self.assertEqual(len(srv.turns), 1)
 

@@ -1620,6 +1620,16 @@ def tool_entity_read(args: dict, port: int) -> str:
                 lines.append(f"{prop}: " + json.dumps(val, default=str))
     elif props:
         lines.append("properties: " + json.dumps(props, default=str)[:800])
+    gg = out.get("goal_graph")
+    if isinstance(gg, dict) and not prop:            # #738: what waits on what, what runs, the receipts
+        lines.append(f"the goal's graph: {len(gg.get('tasks') or [])} task(s), {len(gg.get('cards') or [])} card(s)")
+        for t in gg.get("tasks") or []:
+            lines.append(f"- task {t.get('eid')} [{t.get('status')}] {t.get('title')}"
+                         + (f" waits on {', '.join(t['waits_on'])}" if t.get("waits_on") else "")
+                         + (f" -- receipt: {str(t.get('receipt'))[:120]}" if t.get("receipt") else ""))
+        for c in gg.get("cards") or []:
+            lines.append(f"- card {c.get('eid')} [{c.get('status')}] {c.get('name')}"
+                         + (f" blocks {', '.join(c['blocks'])}" if c.get("blocks") else ""))
     runs = (out.get("pending") or []) + [dict(d, queued="done")
                                          for d in (out.get("done") or [])]
     if runs:
