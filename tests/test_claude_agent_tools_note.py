@@ -78,7 +78,7 @@ def test_the_note_keeps_detach_and_the_decision_card():
 
 
 def test_the_note_stays_tight():
-    assert len(CA.TOOLS_NOTE) <= 3200, len(CA.TOOLS_NOTE)
+    assert len(CA.TOOLS_NOTE) <= 3320, len(CA.TOOLS_NOTE)  # +#766 work-to-goal line
 
 
 def test_the_name_map_carries_define_and_each():
