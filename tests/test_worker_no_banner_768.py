@@ -1,4 +1,4 @@
-"""#768: a goal-graph worker's turn gets no recall banner.
+"""#768 / #776: a loop's turn (worker, planner, watch, triage) gets no recall banner.
 
 The planner already wrote what the worker needs into the task text; the
 banner's recall made every worker gate wait 23-85 s and a person's turn
@@ -45,6 +45,9 @@ class TheWorkerTurnHasNoBanner(unittest.TestCase):
             "ses_w": {"id": "ses_w", "agent": loop_agent_name(GG.LANE_WORKER, "membrane::task:g1:k1")},
             "ses_p": {"id": "ses_p", "agent": loop_agent_name(GG.LANE_PLANNER, "membrane::goal:g1")},
             "ses_c": {"id": "ses_c", "agent": "build"},
+            "ses_t": {"id": "ses_t", "agent": loop_agent_name("watch", "f:x.py")},
+            "ses_ph": {"id": "ses_ph", "agent": "phone"},
+            "ses_sp": {"id": "ses_sp", "agent": "speaker"},
         })
 
     def tearDown(self):
@@ -70,17 +73,26 @@ class TheWorkerTurnHasNoBanner(unittest.TestCase):
     def test_the_chat_keeps_its_banner(self):
         self.assertIn("THIS CONVERSATION", self.ctx("ses_c") or "")
 
-    def test_the_planner_keeps_its_banner(self):
-        self.assertIn("THIS CONVERSATION", self.ctx("ses_p") or "")
+    def test_the_planner_and_a_watch_loop_build_no_banner_either(self):     # #776
+        from membrane import conv_banner as CB
+        with mock.patch.object(CB, "build", return_value="THIS CONVERSATION") as b:
+            self.assertFalse(self.ctx("ses_p"))
+            self.assertFalse(self.ctx("ses_t"))
+        b.assert_not_called()
+
+    def test_a_person_on_the_phone_or_the_speaker_keeps_the_banner(self):
+        self.assertIn("THIS CONVERSATION", self.ctx("ses_ph") or "")
+        self.assertIn("THIS CONVERSATION", self.ctx("ses_sp") or "")
 
     def test_a_turn_with_no_sid_keeps_its_banner(self):
         self.assertIn("THIS CONVERSATION", self.ctx("") or "")
 
-    def test_is_worker_turn(self):
-        self.assertTrue(L._is_worker_turn(self.srv, {"_turn_sid": "ses_w"}))
-        for sid in ("ses_p", "ses_c", "", "ses_unknown"):
-            self.assertFalse(L._is_worker_turn(self.srv, {"_turn_sid": sid}))
-        self.assertFalse(L._is_worker_turn(types.SimpleNamespace(), {"_turn_sid": "ses_w"}))
+    def test_is_loop_turn(self):
+        for sid in ("ses_w", "ses_p", "ses_t"):
+            self.assertTrue(L._is_loop_turn(self.srv, {"_turn_sid": sid}), sid)
+        for sid in ("ses_c", "ses_ph", "ses_sp", "", "ses_unknown"):
+            self.assertFalse(L._is_loop_turn(self.srv, {"_turn_sid": sid}), sid)
+        self.assertFalse(L._is_loop_turn(types.SimpleNamespace(), {"_turn_sid": "ses_w"}))
 
 
 if __name__ == "__main__":
