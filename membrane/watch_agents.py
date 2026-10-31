@@ -1002,9 +1002,7 @@ class _LoopDrainer:
                         est.upsert(g, embedder=None)
                 except Exception:
                     pass
-                _claim = GG.planner_claim(text)
-                if _claim is not None:                   # the chat turn decides (operator, 2026-10-31)
-                    GG.escalate_done(srv, ent, _claim)
+                GG.report(srv, ent, GG.planner_claim(text))   # every plan ends in the chat (2026-10-31)
                 try:
                     with _W.as_writer("adapter:tasks"):
                         GG.recount(srv, ent)     # with or without a plan: no task blocked for good
