@@ -4134,6 +4134,16 @@ def _entity_points(srv, fld, m: int = 400) -> list[dict]:
             for i, d in enumerate(rows)]
 
 
+def _is_worker_turn(srv, body: dict) -> bool:
+    """#768: is this turn a goal-graph worker's? Its session (the body's
+    `_turn_sid`) carries the agent loop_session stamped: 'worker: <task>'."""
+    sid = str((body or {}).get("_turn_sid") or "")
+    store = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
+    row = (getattr(store, "sessions", None) or {}).get(sid) if sid else None
+    from .goalgraph import LANE_WORKER
+    return str((row or {}).get("agent") or "").startswith(LANE_WORKER + ":")
+
+
 def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     """The turn's state blocks -> (ctx, the field watermark to keep once the
     turn is delivered). MEMBRANE_INJECTION picks the block: 'banner' (the
@@ -4144,6 +4154,9 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     _st = types.SimpleNamespace(mark=mark)
     _is_tool_round = is_tool_round
     ctx = None
+    # #768: a worker's task text carries what it needs; its banner's recall
+    # only queued a person's turn behind it
+    _no_banner = getattr(srv, "no_banner", False) or _is_worker_turn(srv, body)
     if _injection_mode(srv) == "conversation":
         fld = _efield_on(srv)
         efield_mark = None
@@ -4153,7 +4166,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
                 efield_mark = watermark(fld)
             except Exception as e:
                 print(f"[efield] watermark error: {e}", file=sys.stderr)
-        if not getattr(srv, "no_banner", False):
+        if not _no_banner:
             try:
                 from . import conv_banner as _CB
                 ctx = _CB.build(srv, body, _CAPMOD.current_conversation(),
@@ -4163,7 +4176,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
         mark("recall+banner")
         return ctx, efield_mark
     _massage = _injection_mode(srv) == "massage"
-    banner_block = (None if getattr(srv, "no_banner", False)
+    banner_block = (None if _no_banner
                     else _where_delta(srv, _where_we_are(srv, vec, events_only=_massage)))
     if banner_block:
         ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block

@@ -1123,6 +1123,19 @@ class TurnRunner:
     against the MCP tool impls -> role:'tool' results -> repeat. Every
     Message+Part state transition is published on the hub."""
 
+    # THE TURN'S OWN SID (#768): the chat and the loops run on this one
+    # runner at once, so the sid the loopback body carries is per thread --
+    # a shared attribute handed a chat turn the last-started worker's sid
+    _turn_local = threading.local()
+
+    @property
+    def _current_turn_sid(self):
+        return getattr(self._turn_local, "sid", None)
+
+    @_current_turn_sid.setter
+    def _current_turn_sid(self, sid):
+        self._turn_local.sid = sid
+
     def __init__(self, hub, sessions, messages, call_ladder, executor,
                  system: str, model: str, tools: list | None = None):
         self.hub = hub
