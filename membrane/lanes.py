@@ -29,7 +29,8 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import (RAGProxyHandler, _clip, _inject, _inject_after,
-                  _model_chat, doctrine_instructions_text, apply_think_dial)
+                  _model_chat, doctrine_instructions_text, apply_think_dial,
+                  MODE_TURN, MODE_BACKGROUND)
 from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
                      Registry)
@@ -6013,7 +6014,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                            **_auth_headers(rec.backend, srv.cloud_keys)}
             else:
                 url = srv.backend + "/v1/chat/completions"
-                headers = {"Content-Type": "application/json"}
+                headers = {"Content-Type": "application/json",
+                           **(MODE_BACKGROUND if _is_loop_turn(srv, up) else MODE_TURN)}           # #753: the seat injected, the fork records
             _DR.record(model_name, url, u2, headers=headers)
             rq = urllib.request.Request(
                 url, data=json.dumps(u2).encode(), method="POST",
@@ -6783,7 +6785,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             srv.backend + "/v1/chat/completions",
             data=json.dumps({"model": model, "messages": messages,
                              "stream": False}).encode(),
-            method="POST", headers={"Content-Type": "application/json"})
+            method="POST", headers={"Content-Type": "application/json",
+                                    **MODE_BACKGROUND})     # #753: never stored
         t0 = time.monotonic()
         try:
             with urllib.request.urlopen(rq, timeout=300) as resp:

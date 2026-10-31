@@ -313,10 +313,12 @@ class OllamaClaimJudge:
         """One temperature-0 completion from the local model."""
         import json
         import urllib.request
+        from .rag import MODE_BACKGROUND
         body = json.dumps({"model": self.model, "stream": False, "options": {"temperature": 0},
                            "messages": [{"role": "user", "content": prompt}]})
         rq = urllib.request.Request(self.base + "/api/chat", data=body.encode(),
-                                    headers={"Content-Type": "application/json"})
+                                    headers={"Content-Type": "application/json",
+                                             **MODE_BACKGROUND})
         with urllib.request.urlopen(rq, timeout=self.timeout) as r:
             resp = json.load(r)
         from . import bgusage

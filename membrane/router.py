@@ -475,9 +475,11 @@ class Registry:
                                   "tasks you are best at, (2) the tasks you "
                                   "are worst at, (3) what you were trained "
                                   "for. Plain text, no preamble."}]}).encode()
+                from .rag import MODE_BACKGROUND   # #753: never stored
                 req = urllib.request.Request(
                     self.backend + "/api/chat", data=body,
-                    headers={"Content-Type": "application/json"})
+                    headers={"Content-Type": "application/json",
+                             **MODE_BACKGROUND})
                 with urllib.request.urlopen(req, timeout=60) as r:
                     resp = json.loads(r.read())
                 from . import bgusage

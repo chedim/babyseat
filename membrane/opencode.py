@@ -1812,6 +1812,13 @@ def main() -> None:
         _backend_up = False
         print(f"[opencode] backend {backend} not answering ({type(e).__name__}): no embed "
               "probes -- the seat runs offline until it does", file=sys.stderr)
+    # THE MEMBRAMA PROBE (#753): is the upstream the membrama fork? Kept on
+    # srv; plain Ollama (404, any error) logs nothing.
+    from .rag import probe_membrama as _probe_membrama
+    srv.membrama = _probe_membrama(backend) if _backend_up else None
+    if srv.membrama:
+        print(f"[opencode] upstream is membrama (contract 1, capabilities "
+              f"{srv.membrama.get('capabilities')})", file=sys.stderr)
     if srv.embed_model_arg and _backend_up:
         emb = _probe_embedder(backend, srv.embed_model_arg)
         if emb is not None:
@@ -1877,12 +1884,12 @@ def main() -> None:
     # holds it for the whole session) instead of riding the per-turn RAG tail.
     # The proxy recognizes the stamp line and skips its own per-turn copy
     # (rag._DOCTRINE_STAMP). --no-doctrine-move reverts to per-turn injection.
-    # Fork stand-down: the fork's /api/chat stamps its own doctrine; this seat
-    # ships NO instructions file when the fork owns the field.
+    # A membrama upstream (#753) never injects for this seat: every chat call
+    # says capture (the seat's turn) or off (its background), so the seat
+    # owns its doctrine and recall whatever the backend is.
     instr_path = None
     # TRUST-THE-DELIVERY: the doctrine ships once (the instructions file
-    # when THIS seat launches opencode on its generated config; the
-    # transcript's first injection when the fork owns the field) -- _inject
+    # when THIS seat launches opencode on its generated config) -- _inject
     # never re-stamps the ~2k preamble per turn. With --no-launch an
     # EXTERNAL opencode runs on its own config: delivery is only real if
     # that config lists the stable file below, so the proxy trusts the

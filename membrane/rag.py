@@ -209,6 +209,32 @@ def _quota_ok(model: str) -> None:
         pass
 
 
+# THE MEMBRAMA CONTRACT (#753; chedim/membrama docs/BABYSEAT_CONTRACT.md):
+# every chat call to the backend says who does memory. capture: the seat
+# injected this turn, the fork only records it; off: the seat's own
+# background call (a judge, triage, a loop, the router), never stored.
+# Plain Ollama ignores an unknown header, so it always rides.
+MODE_HEADER = "X-Membrane-Mode"
+MODE_TURN = {MODE_HEADER: "capture"}
+MODE_BACKGROUND = {MODE_HEADER: "off"}
+_CHAT_PATHS = ("/api/chat", "/v1/chat/completions")
+
+
+def probe_membrama(backend: str, timeout: float = 8) -> dict | None:
+    """GET <backend>/api/membrane at boot: the fork's hello when the upstream
+    is membrama speaking contract 1, else None (plain Ollama answers 404;
+    any error is plain Ollama too, quietly)."""
+    try:
+        with urllib.request.urlopen(backend + "/api/membrane", timeout=timeout) as r:
+            hello = json.loads(r.read())
+    except Exception:
+        return None
+    if isinstance(hello, dict) and hello.get("impl") == "ollama-membrane" \
+            and hello.get("contract") == 1:
+        return hello
+    return None
+
+
 def _ollama_chat(backend: str, model: str, messages: list,
                  temperature: float = 0.2, timeout: int = 120,
                  think: bool | None = None, lane: str = "background") -> str:
@@ -223,7 +249,8 @@ def _ollama_chat(backend: str, model: str, messages: list,
     try:
         req = urllib.request.Request(backend + "/api/chat",
                                      data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json",
+                                              **MODE_BACKGROUND})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.loads(r.read())
     except Exception as e:
@@ -408,6 +435,12 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             # model server's (Ollama / a provider) -- nor is its cookie
             headers = {k: v for k, v in headers.items()
                        if k.lower() not in ("authorization", "cookie")}
+        headers = {k: v for k, v in headers.items()
+                   if k.lower() != MODE_HEADER.lower()}
+        # #753: only a chat call is a turn the fork records; any other path
+        # (embed, tags, ...) is never stored
+        headers.update(MODE_TURN if self.path.split("?", 1)[0] in _CHAT_PATHS
+                       else MODE_BACKGROUND)
         req = urllib.request.Request(url, data=raw, method=self.command,
                                      headers=headers)
         try:
