@@ -4150,6 +4150,28 @@ def _is_loop_turn(srv, body: dict) -> bool:
     return str(row.get("agent") or "").strip().lower() not in _CHAT_AGENTS
 
 
+def _recon_block(srv, fld, body: dict, query: str, vec):
+    """The no-context turn's rebuilt history: this chat's own reconstruction, then the
+    past answers (render_for). A loop's turn gets the reconstruction only: its task text
+    carries what it needs, and its recall's cold reads held the field store's one lock
+    while a person's turn waited for it (2026-10-31, profiled: the banner's 4 minutes)."""
+    recon = None
+    try:
+        from .entity_block import reconstruct, render_for
+        # this chat's own history (#668): the boot prefix mixed every chat
+        recon = reconstruct(fld, _own_session_prefix(srv), conv=_CAPMOD.current_conversation())
+        if _is_loop_turn(srv, body):
+            return recon
+        # past answers only: the banner's RECALL and the conversation
+        # block cover the entities (operator, 2026-10-29)
+        eblock = render_for(fld, query, vec, rows=_banner_top(srv, query), entities=False)
+        if eblock:
+            recon = (recon + "\n\n" + eblock) if recon else eblock
+    except Exception as e:
+        print(f"[efield] reconstruction error: {e}", file=sys.stderr)
+    return recon
+
+
 def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     """The turn's state blocks -> (ctx, the field watermark to keep once the
     turn is delivered). MEMBRANE_INJECTION picks the block: 'banner' (the
@@ -5683,19 +5705,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             if _saved:
                 print(f"[opencode] no-context: elided {_saved} chars of "
                       f"older in-turn tool traffic", file=sys.stderr)
-            recon = None
-            if fld is not None:
-                try:
-                    from .entity_block import reconstruct, render_for
-                    # this chat's own history (#668): the boot prefix mixed every chat
-                    recon = reconstruct(fld, _own_session_prefix(srv), conv=_CAPMOD.current_conversation())
-                    # past answers only: the banner's RECALL and the conversation
-                    # block cover the entities (operator, 2026-10-29)
-                    eblock = render_for(fld, query, vec, rows=_banner_top(srv, query), entities=False)
-                    if eblock:
-                        recon = (recon + "\n\n" + eblock) if recon else eblock
-                except Exception as e:
-                    print(f"[efield] reconstruction error: {e}", file=sys.stderr)
+            recon = _recon_block(srv, fld, body, query, vec) if fld is not None else None
             ctx = (ctx + "\n\n" + recon) if (ctx and recon) else (recon or ctx)
             up["messages"] = (_inject(stripped, ctx) if ctx
                               else stripped)
