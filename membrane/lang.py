@@ -711,6 +711,8 @@ def process(srv, root: str, ex: str, timeout_s=None) -> dict | None:
     """The executor's reaction to an owed edge: take it, print the tree, run it,
     land a result entity. None when the edge was not owed (someone else took it)."""
     est = srv.entity_store
+    if not _props(est, root).get("lang"):
+        return None                         # not code (a goal-graph task's edge to the worker pool): not ours
     if not _take(srv, root, ex):
         return None
     lang = str((est.docs[root].properties or {}).get("lang") or "")
