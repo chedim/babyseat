@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import contextlib
 import ctypes as C
+import functools
+import itertools
 import json
 import os
+import queue
 import sys
 import threading
 from pathlib import Path
@@ -247,16 +250,6 @@ class TurnFirst:
         self._c = threading.Condition()
         self._fg = 0
 
-    def waiting(self) -> bool:
-        """A foreground (turn) read is in its lane, waiting for or holding the store lock."""
-        return self._fg > 0
-
-    def wait_clear(self) -> None:
-        """Park until no foreground read is in its lane (a background writer between rows)."""
-        with self._c:
-            while self._fg:
-                self._c.wait()
-
     @staticmethod
     def is_background() -> bool:
         return bool(getattr(_BG, "on", False))
@@ -296,8 +289,21 @@ def background():
     return TurnFirst().background()
 
 
+def _queued(m):
+    """The operation runs on the database's own thread (Database._run)."""
+    @functools.wraps(m)
+    def w(self, *a, **k):
+        return self._run(lambda: m(self, *a, **k))
+    return w
+
+
 class Database:
-    """One CBL database; every call under its lock."""
+    """One CBL database, ONE handle, ONE thread that runs every operation from a
+    priority queue (2026-10-31, the operator: "keep shared handle ... queue db
+    operations on that handle"): a turn's operation runs before any queued
+    background one (a thread marked background(): the write-behind, the index
+    catch-up, the boot/night readers). A batch is many small operations, so a turn
+    waits for at most the one running now -- never for a whole batch."""
 
     def __init__(self, lib: Lib, name: str, directory: str, scope: str = "membrane"):
         self.lib, L = lib, lib.L
@@ -312,6 +318,37 @@ class Database:
         self.h = lib.check(L.CBLDatabase_Open(S(name), C.byref(cfg), C.byref(err)), err, "open")
         self.colls: dict[str, int] = {}
         self._q: dict[str, int] = {}
+        self._ops: queue.PriorityQueue = queue.PriorityQueue()
+        self._n = itertools.count()
+        self._tid = None
+        threading.Thread(target=self._serve, name="cbl-db", daemon=True).start()
+
+    # ---- the database thread ---------------------------------------------------
+    def _serve(self) -> None:
+        self._tid = threading.get_ident()
+        while True:
+            _prio, _n, fn, box = self._ops.get()
+            if fn is None:
+                return
+            try:
+                box["r"] = fn()
+            except BaseException as e:            # noqa: BLE001 -- handed to the caller
+                box["e"] = e
+            finally:
+                box["ev"].set()
+
+    def _run(self, fn):
+        """fn() on the database thread: a turn's first, background after, each kind in
+        arrival order. On that thread itself (an operation calling another) it runs now."""
+        ops = getattr(self, "_ops", None)
+        if ops is None or threading.get_ident() == self._tid or getattr(self, "_closed", False):
+            return fn()
+        box = {"ev": threading.Event()}
+        ops.put((1 if TurnFirst.is_background() else 0, next(self._n), fn, box))
+        box["ev"].wait()
+        if "e" in box:
+            raise box["e"]
+        return box.get("r")
 
     def coll(self, name: str):
         h = self.colls.get(name)
@@ -324,6 +361,7 @@ class Database:
         return h
 
     # ---- transactions --------------------------------------------------------
+    @_queued
     def begin(self):
         self.lock.acquire()
         err = CBLError()
@@ -333,6 +371,7 @@ class Database:
             self.lock.release()
             raise
 
+    @_queued
     def end(self, commit=True):
         try:
             err = CBLError()
@@ -341,6 +380,7 @@ class Database:
             self.lock.release()
 
     # ---- documents -----------------------------------------------------------
+    @_queued
     def put_json(self, coll: str, key: str, js: str):
         L, err = self.lib.L, CBLError()
         with self.lock:
@@ -351,6 +391,7 @@ class Database:
             finally:
                 L.CBL_Release(d)
 
+    @_queued
     def get_json(self, coll: str, key: str) -> bytes | None:
         if not key:                              # a None/'' key asked the
             return None                          # native lib for the doc ''
@@ -365,6 +406,7 @@ class Database:
             finally:
                 L.CBL_Release(d)
 
+    @_queued
     def exists(self, coll: str, key: str) -> bool:
         if not key:                              # '' can never be stored
             return False
@@ -375,16 +417,19 @@ class Database:
                 L.CBL_Release(d)
             return bool(d)
 
+    @_queued
     def purge(self, coll: str, key: str):
         with self.lock:
             err = CBLError()
             self.lib.L.CBLCollection_PurgeDocumentByID(self.coll(coll), S(key), C.byref(err))
 
+    @_queued
     def count(self, coll: str) -> int:
         with self.lock:
             return int(self.lib.L.CBLCollection_Count(self.coll(coll)))
 
     # ---- indexes -------------------------------------------------------------
+    @_queued
     def value_index(self, coll: str, name: str, exprs: str):
         with self.lock:
             err = CBLError()
@@ -392,6 +437,7 @@ class Database:
             self.lib.check(self.lib.L.CBLCollection_CreateValueIndex(self.coll(coll), S(name), cfg, C.byref(err)),
                            err, f"value index {name}")
 
+    @_queued
     def has_index(self, coll: str, name: str) -> bool:
         with self.lock:
             err = CBLError()
@@ -400,6 +446,7 @@ class Database:
                 self.lib.L.CBL_Release(ix)
             return bool(ix)
 
+    @_queued
     def vector_index(self, coll: str, name: str, expr: str, dims: int, centroids: int,
                      probes: int = 0, sq: int = 8, lazy: bool = True):
         L = self.lib.L
@@ -413,6 +460,7 @@ class Database:
             finally:
                 L.CBLVectorEncoding_Free(enc)
 
+    @_queued
     def update_lazy(self, coll: str, name: str, to_vec, limit: int = 500) -> int:
         """ONE batch of a lazy vector index: up to `limit` rows it still
         wants; `to_vec(str) -> float32 array | None` (None = skip the row).
@@ -481,10 +529,18 @@ class Database:
                 if doc:
                     L.FLDoc_Release(doc)
 
+    @_queued
     def query(self, sql: str, params: dict | None = None) -> list[dict]:
         return list(self.iter_query(sql, params))
 
     def close(self):
+        self._run(self._close)
+        self._closed = True
+        ops = getattr(self, "_ops", None)
+        if ops is not None:
+            ops.put((2, next(self._n), None, None))      # the thread ends after the close
+
+    def _close(self):
         with self.lock:
             err = CBLError()
             for q in self._q.values():
