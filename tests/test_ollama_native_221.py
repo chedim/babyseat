@@ -399,7 +399,7 @@ class TestPassThrough(_Seam):
 class TestJwt(_Seam):
     def setUp(self):
         super().setUp()
-        self.jwt = mock.patch.dict(os.environ, {"MEMBRANE_JWT_SECRET": SECRET})
+        self.jwt = mock.patch.dict(os.environ, {"MEMBRANE_JWT": "1", "MEMBRANE_JWT_SECRET": SECRET})
         self.jwt.start()
         self.tok = J.mint(SECRET, "alice", name="Alice")
 

@@ -226,7 +226,7 @@ def test_the_control_server_serves_blurps_views_and_takes_its_controls(monkeypat
 
 def test_the_control_server_takes_only_the_seats_own_token():
     from membrane import jwtauth as J
-    with _open_env(), mock.patch.dict(os.environ, {"MEMBRANE_JWT_SECRET": SECRET}):
+    with _open_env(), mock.patch.dict(os.environ, {"MEMBRANE_JWT": "1", "MEMBRANE_JWT_SECRET": SECRET}):
         srv = _felt()
         fac = SP.Facade(SP.SeatClient("http://127.0.0.1:9"), Path(srv._models_path).parent)
         SL._rt(fac)["mode"] = "on"
