@@ -247,6 +247,16 @@ class TurnFirst:
         self._c = threading.Condition()
         self._fg = 0
 
+    def waiting(self) -> bool:
+        """A foreground (turn) read is in its lane, waiting for or holding the store lock."""
+        return self._fg > 0
+
+    def wait_clear(self) -> None:
+        """Park until no foreground read is in its lane (a background writer between rows)."""
+        with self._c:
+            while self._fg:
+                self._c.wait()
+
     @staticmethod
     def is_background() -> bool:
         return bool(getattr(_BG, "on", False))

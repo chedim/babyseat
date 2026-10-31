@@ -61,6 +61,39 @@ class TestCBLiteBackend(unittest.TestCase):
         self.open.remove(b)
         return self._be()
 
+    def test_a_drain_lets_a_waiting_turn_read_between_rows(self):
+        """2026-10-31, profiled: the write-behind held ONE transaction (the store lock)
+        over its whole batch; a turn's banner reads waited for all of it."""
+        import threading
+        b = self._be()
+        b.upsert("sentences", "s0", {"text": "t"})
+        b.drain()
+        for i in range(400):
+            b.upsert("entity_deltas", f"d{i}", {"origin": "o", "seq": i, "eid": "e"})
+        real = b.db.put_json
+        first, read_done, rows_after_read = threading.Event(), threading.Event(), []
+
+        def put_json(*a, **k):
+            r = real(*a, **k)
+            if read_done.is_set():
+                rows_after_read.append(1)
+            first.set()
+            return r
+        b.db.put_json = put_json
+        b._cache.clear()
+
+        def turn():
+            first.wait(5)
+            with b.db.turns.lane():
+                b.db.get_json("sentences", "s0")
+            read_done.set()
+        t = threading.Thread(target=turn)
+        t.start()
+        b.drain()
+        t.join(5)
+        self.assertTrue(read_done.is_set())
+        self.assertTrue(rows_after_read, "the turn's read waited for the whole batch")
+
     def test_hot_rows_survive_a_reopen_in_their_first_written_order(self):
         b = self._be()
         for i in (3, 1, 2):
