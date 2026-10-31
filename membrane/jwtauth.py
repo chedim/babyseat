@@ -1,7 +1,8 @@
 """JWT MODE (issue #203): an optional gate on both of the seat's ports.
 
-OFF BY DEFAULT. With neither MEMBRANE_JWT_SECRET nor MEMBRANE_JWT_SECRET_FILE
-set, nothing here runs and the seat behaves exactly as before. With a secret:
+ON BY DEFAULT (MEMBRANE_JWT=0 turns it off, whatever else is set). With no
+explicit MEMBRANE_JWT_SECRET[_FILE], the folder's .membrane/jwt.secret (made
+at boot, 0600) signs; config() itself never writes. When on:
 
   - every request on :11500 (the OpenAI proxy) and :4096 (the serve API + UI)
     needs a valid token, or it gets 401 + `WWW-Authenticate: Bearer`; only
@@ -220,44 +221,58 @@ def parse_ttl(s) -> int:
 
 # -- configuration --------------------------------------------------------------
 
-_file_cache: dict = {}
+_file_cache: dict = {}              # path -> ((mtime_ns, size), data): one entry per file
 
 
 def _read_secret_file(path: str) -> bytes:
     try:
         st = os.stat(path)
-        k = (path, st.st_mtime_ns, st.st_size)
-        if k not in _file_cache:
+        k = (st.st_mtime_ns, st.st_size)
+        hit = _file_cache.get(path)
+        if hit is None or hit[0] != k:
             with open(path, "rb") as f:
                 data = f.read()
-            _file_cache.clear()
-            _file_cache[k] = data.rstrip(b"\r\n")      # a k8s Secret / echo's trailing newline
-        return _file_cache[k]
+            hit = _file_cache[path] = (k, data.rstrip(b"\r\n"))   # a k8s Secret / echo's trailing newline
+        return hit[1]
     except OSError as e:
-        raise JWTConfigError(f"MEMBRANE_JWT_SECRET_FILE is not readable ({e.strerror})") from None
+        raise JWTConfigError(f"the JWT secret file {path} is not readable ({e.strerror})") from None
 
 
-def _generated_secret(path: str) -> bytes:
-    """A generated secret file (0600), made on first use; read back after."""
+def _generated_secret(path: str, create: bool = True) -> bytes:
+    """A generated secret file (0600). Made on first use only when `create`
+    (boot); written complete to a temp file and linked into place, so a
+    reader never sees it empty. Read back after."""
     import secrets
-    if not os.path.isfile(path):
+    if create and not os.path.isfile(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        data = secrets.token_urlsafe(48).encode("ascii") + b"\n"
+        tmp = f"{path}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "wb") as f:
-                f.write(secrets.token_urlsafe(48).encode("ascii") + b"\n")
+                f.write(data)
+            os.link(tmp, path)
         except FileExistsError:
             pass
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
     return _read_secret_file(path)
 
 
 def _off() -> bool:
-    """MEMBRANE_JWT=0 with no explicit secret (an explicit secret is a deliberate 'on')."""
-    return os.environ.get("MEMBRANE_JWT", "").strip() == "0" and not _explicit()
+    """MEMBRANE_JWT=0 turns JWT mode off, whatever else is set."""
+    return os.environ.get("MEMBRANE_JWT", "").strip() == "0"
 
 
 def _explicit() -> bool:
     return "MEMBRANE_JWT_SECRET" in os.environ or "MEMBRANE_JWT_SECRET_FILE" in os.environ
+
+
+def _folder_secret_path() -> str:
+    return os.path.join(os.getcwd(), ".membrane", "jwt.secret")
 
 
 def _machine_secret() -> bytes:
@@ -273,10 +288,11 @@ def config() -> Config | None:
         return None
     has_s, has_f = "MEMBRANE_JWT_SECRET" in env, "MEMBRANE_JWT_SECRET_FILE" in env
     if not (has_s or has_f):
-        try:
-            raw = _generated_secret(os.path.join(os.getcwd(), ".membrane", "jwt.secret"))
-        except OSError as e:
-            raise JWTConfigError(f"the folder JWT secret is not usable ({e.strerror})") from None
+        path = _folder_secret_path()
+        if not os.path.isfile(path):
+            raise JWTConfigError(f"no seat here: {path} does not exist "
+                                 "(the seat makes it at boot; run from the seat's folder)")
+        raw = _generated_secret(path, create=False)
         return Config(_check_secret(raw), env.get("MEMBRANE_JWT_ISSUER") or None,
                       env.get("MEMBRANE_JWT_AUDIENCE") or None)
     if has_s and has_f:
@@ -301,6 +317,11 @@ def boot_check() -> Config | None:
     """At boot: the configuration, or SystemExit with the reason (a seat never
     starts half-protected)."""
     try:
+        if not _off() and not _explicit():
+            try:
+                _generated_secret(_folder_secret_path())
+            except OSError as e:
+                raise JWTConfigError(f"cannot make {_folder_secret_path()} ({e.strerror})") from None
         cfg = config()
     except JWTConfigError as e:
         raise SystemExit(f"membrane: JWT mode refused to start: {e}") from None
@@ -573,8 +594,7 @@ def cli_main(argv: list[str] | None = None) -> int:
         print(f"membrane token: {e}", file=sys.stderr)
         return 2
     if cfg is None:
-        print("membrane token: no MEMBRANE_JWT_SECRET or MEMBRANE_JWT_SECRET_FILE set "
-              "(the seat's secret signs the token)", file=sys.stderr)
+        print("membrane token: JWT mode is off (MEMBRANE_JWT=0): nothing to sign with", file=sys.stderr)
         return 2
     if a.sub.startswith("seat:"):
         print("membrane token: 'seat:' ids are the seat's own (reserved)", file=sys.stderr)

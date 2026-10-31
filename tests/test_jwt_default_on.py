@@ -43,6 +43,7 @@ class DefaultOn(unittest.TestCase):
         self.assertFalse((self.cwd / ".membrane" / "jwt.secret").exists())
 
     def test_machine_secret_signs_internal_token(self):
+        J.boot_check()      # only boot makes the secrets (review #2)
         tok = J.internal_token()
         m = self.home / ".membrane" / "jwt.secret"
         self.assertTrue(m.is_file())
