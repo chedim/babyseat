@@ -14,10 +14,11 @@ THE GRAPH
   edges close a cycle is refused whole.
 - Waits (#773): `wait:<goal>:<key>` entities (class Wait) with a `condition` -- a field
   property equal to a value ({field, prop, equals}) or a method that passes ({method,
-  args}). A wait arms when what it follows is done, the `every` trigger checks it each
-  WAIT_CHECK_S (a write to its `check` adapter branch), it is done when the condition
-  holds -- the tasks it blocks count it like a finished task -- and fails after
-  WAIT_DEADLINE_S, which replans the goal. Nothing runs while it waits.
+  args}) -- and the planner's `every_s` and `deadline_min`. A wait arms when what it
+  follows is done, the `every` trigger (WAIT_TICK_S) writes its `check` adapter branch and
+  the check runs each every_s; it is done when the condition holds -- the tasks it blocks
+  count it like a finished task -- and fails after deadline_min: the failure is escalated
+  into the chat (#729's route), which starts the model's turn there.
 - Task state, the code trees' executor pattern (#614): open -> owed (-execute->
   tool:workers) -> running (-executing->) -> done / failed / stuck, with
   -result-> a result entity carrying the worker's receipt (a failure is one too).
@@ -32,7 +33,8 @@ THE CASCADE (each step a write firing the next trigger -- never a loop):
 
 THE PLAN is the planner's one write: `<goal>.plan = {tasks: [{key, title, detail,
 after: [keys or eids]}], cards: [{key, name, summary, var, pick, blocks: [keys]}],
-waits: [{key, title, condition, after: [keys], blocks: [keys]}], drop: [keys]}` -- an adapter branch (effects are writes, #576 E) applies it: tasks and
+waits: [{key, title, condition, every_s, deadline_min, after: [keys], blocks: [keys]}],
+drop: [keys]}` -- an adapter branch (effects are writes, #576 E) applies it: tasks and
 cards are made or updated, edges set, cycles refused, open_blockers counted, every new
 card escalated into the operator's latest chat (#729's route). The receipt lands in
 `plan_result`.
@@ -65,13 +67,13 @@ CARD_ENDED = ("closed", "dropped")
 EXECUTE, EXECUTING, RESULT, BLOCKS = "execute", "executing", "result", "blocks"
 # #773: the third node class. A wait blocks tasks until its condition holds; it arms
 # when what it follows is done, is checked on the `every` trigger, and fails past its
-# deadline (the planner replans then). Constants proposed 2026-10-30, pending the
-# operator's approval.
+# deadline (the planner replans then). The planner chooses each wait's `every_s` and
+# `deadline_min` (operator, 2026-10-30); WAIT_TICK_S is only the trigger's beat, the
+# shortest interval a wait can ask for.
 WAIT = "Wait"
 WAIT_NS = MEMBRANE_NS + "wait:"
 ARMED = "armed"
-WAIT_CHECK_S = 60           # how often an armed wait's condition is checked
-WAIT_DEADLINE_S = 3600      # an armed wait still unmet this long fails
+WAIT_TICK_S = 10
 SOURCE = "goal-graph"
 LANE_PLANNER, LANE_WORKER = "planner", "worker"
 
@@ -122,14 +124,9 @@ TRIGGERS = [
      [["isa", "?w", WAIT], ["filter", "w.status == 'open'"]],
      ["?w.status", "'armed'"]),
     ("goal-graph wait check",
-     [["every", WAIT_CHECK_S]],
+     [["every", WAIT_TICK_S]],
      [["isa", "?w", WAIT], ["filter", "w.status == 'armed'"]],
      ["?w.check", "'due'"]),
-    ("goal-graph replan on wait failed",
-     [["changed", "?w.status"]],
-     [["isa", "?w", WAIT], ["isa", "?g", "Goal"],
-      ["filter", "g.eid == w.goal and w.status == 'failed'"]],
-     ["?g.replan", "'wait ' + w.eid + ' ' + w.status"]),
     ("goal-graph plan",
      [["changed", "?g.replan"]],
      [["isa", "?g", "Goal"], ["filter", "(g.status or 'open') == 'open' and g.replan"]],
@@ -252,7 +249,7 @@ def apply_plan(srv, goal: str, plan) -> dict:
     cards = [c for c in plan.get("cards") or [] if isinstance(c, dict) and c.get("key")]
     waits = [w for w in plan.get("waits") or [] if isinstance(w, dict) and w.get("key")]
     for w in waits:
-        why = _condition_error(w.get("condition"))
+        why = _wait_error(w)
         if why:
             return {"ok": False, "error": f"wait {w['key']}: {why}"}
     keys = {str(t["key"]): task_eid(goal, str(t["key"])) for t in tasks}
@@ -333,7 +330,8 @@ def apply_plan(srv, goal: str, plan) -> dict:
         eid = wkeys[str(w["key"])]
         d = (est.docs or {}).get(eid)
         p = {"name": str(w.get("title") or w["key"])[:120], "title": str(w.get("title") or w["key"])[:200],
-             "condition": w["condition"], "goal": goal, "plan_key": str(w["key"])}
+             "condition": w["condition"], "every_s": float(w["every_s"]),
+             "deadline_min": float(w["deadline_min"]), "goal": goal, "plan_key": str(w["key"])}
         if d is None:
             est.upsert(QuantumEntity(eid=eid, cls=WAIT, properties={**p, "status": OPEN, "blocks": [],
                                                                     "silent_birth": True}), embedder=None)
@@ -496,6 +494,23 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str 
     return res
 
 
+def _wait_error(w: dict) -> str | None:
+    """Why a planned wait can't be made, or None: its condition, and the planner's
+    choice of how often to check (every_s) and when to give up (deadline_min)."""
+    why = _condition_error(w.get("condition"))
+    if why:
+        return why
+    try:
+        every, deadline = float(w.get("every_s")), float(w.get("deadline_min"))
+    except (TypeError, ValueError):
+        return "a wait needs every_s (how often to check, seconds) and deadline_min (when to give up)"
+    if every < WAIT_TICK_S:
+        return f"every_s is at least {WAIT_TICK_S}"
+    if deadline <= 0:
+        return "deadline_min is above 0"
+    return None
+
+
 def _condition_error(cond) -> str | None:
     """Why a wait's condition can't be checked, or None."""
     if not isinstance(cond, dict):
@@ -540,6 +555,8 @@ def check_wait(srv, wait: str, now: float | None = None) -> str:
         return "not an armed wait"
     now = float(now if now is not None else time.time())
     p = dict(d.properties or {})
+    if now - float(p.get("last_check_ts") or 0) < float(p.get("every_s") or WAIT_TICK_S):
+        return ""                                # not due: its own interval, the planner's choice
     p.setdefault("armed_ts", now)
     try:
         ok, seen = _condition_holds(srv, p.get("condition") or {})
@@ -548,12 +565,28 @@ def check_wait(srv, wait: str, now: float | None = None) -> str:
     p.update({"last_check_ts": now, "last_check_result": seen})
     if ok:
         p.update({"status": DONE, "receipt": seen, "ended_ts": now})
-    elif now - float(p["armed_ts"]) >= WAIT_DEADLINE_S:
-        p.update({"status": FAILED, "receipt": f"unmet after {WAIT_DEADLINE_S // 60} min: {seen}",
+    elif now - float(p["armed_ts"]) >= 60 * float(p.get("deadline_min") or 0):
+        p.update({"status": FAILED, "receipt": f"unmet after {p.get('deadline_min')} min: {seen}",
                   "ended_ts": now})
     d.properties = p
     est.upsert(d, embedder=None)
+    if p.get("status") == FAILED:
+        _escalate_wait(srv, d)
     return seen
+
+
+def _escalate_wait(srv, d) -> None:
+    """A failed wait goes to the chat (#729's route, as a card does): one message that
+    starts the model's turn there (operator, 2026-10-30)."""
+    try:
+        from . import watch_agents as WA
+        p = d.properties or {}
+        title = p.get("title") or d.eid
+        WA.escalate(srv, {"kind": "wait-failed", "entity": d.eid, "goal": p.get("goal"), "title": title,
+                          "ts": time.time()}, d.eid,
+                    f"goal {p.get('goal')}: the wait '{title}' failed -- {p.get('receipt')}")
+    except Exception:
+        pass
 
 
 def reowe(srv) -> int:
@@ -603,8 +636,8 @@ The goal's graph now:
 {graph}
 
 Work the goal as a graph. Write ONE plan with entity_edit on the goal:
-  entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
-A task is one worker turn of concrete work. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every {check_s} s (a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after {deadline_min} min (you are asked again then). Never make a task wait inside its turn. Keep existing keys to update a task; a running or finished task keeps its state. Read the entity back for plan_result.
+  entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
+A task is one worker turn of concrete work. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or finished task keeps its state. Read the entity back for plan_result.
 When every task is done and the receipts prove the goal, close it with fulfill and the receipt. When the graph needs nothing new, write no plan.
 End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
 
@@ -637,7 +670,7 @@ def planner_text(est, goal: str, why: str) -> str:
     p = (g.properties or {}) if g is not None else {}
     text = p.get("text") or p.get("summary") or p.get("name") or goal
     return PLANNER_TEXT.format(goal=goal, text=str(text)[:1200], why=str(why)[:400], graph=_graph_lines(est, goal),
-                               check_s=WAIT_CHECK_S, deadline_min=WAIT_DEADLINE_S // 60)
+                               tick_s=WAIT_TICK_S)
 
 
 def worker_text(est, task: str) -> str:

@@ -218,7 +218,10 @@ def _wait(srv, est, ent, prop, new, by) -> None:
     from . import goalgraph as GG
     seen = GG.check_wait(srv, ent.eid)
     ent = est.docs.get(ent.eid) or ent
-    _consume(est, ent, prop, new, seen)
+    pp = ent.properties or {}
+    # consumed every beat, due or not: a `check` left at 'due' would make the next
+    # beat's write no change, and the wait would never be checked again
+    _consume(est, ent, prop, new, seen or pp.get(prop + "_result") or "not due")
 
 
 EFFECTS = {"exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
