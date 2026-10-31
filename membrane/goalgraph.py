@@ -583,6 +583,8 @@ def check_wait(srv, wait: str, now: float | None = None) -> str:
     est.upsert(d, embedder=None)
     if p.get("status") == FAILED:
         _escalate_wait(srv, d)
+    elif p.get("status") == DONE and p.get("goal"):
+        report(srv, p["goal"])                   # a wait that ends the graph ends it in the chat
     return seen
 
 
@@ -626,20 +628,58 @@ def planner_claim(text: str) -> str | None:
     return hits[-1].strip()[:600] if hits else None
 
 
-def escalate_done(srv, goal: str, receipt: str) -> None:
-    """The planner says the goal is done: the chat hears it and its turn decides
-    (operator, 2026-10-31) -- the goal stays open until that turn closes it."""
+def _moving(d) -> bool:
+    """A node that will still change by itself: a task open, owed or running, a wait open or
+    armed, a card still open."""
+    st = str((d.properties or {}).get("status") or OPEN)
+    if d.cls == TASK:
+        return st in (OPEN, OWED, RUNNING)
+    if d.cls == WAIT:
+        return st in (OPEN, ARMED)
+    return st not in CARD_ENDED
+
+
+def report(srv, goal: str, claim: str | None = None) -> bool:
+    """EVERY PLAN ENDS IN THE CHAT (operator, 2026-10-31: "force all plans to end with
+    turn-starting messages into chat"): a goal whose graph has nothing left moving, or
+    whose planner says FULFILLED, is told to the chat once, with its receipts; the chat
+    turn decides (close it, or send it back). The goal stays open. -> told."""
+    est = srv.entity_store
+    g = (est.docs or {}).get(goal)
+    if g is None or ((g.properties or {}).get("status") or OPEN) != OPEN:
+        return False
+    nodes = [d for d in list((est.docs or {}).values())
+             if (d.properties or {}).get("goal") == goal and d.cls in (TASK, WAIT, "Decision")]
+    if claim is None and (not nodes or any(_moving(d) for d in nodes)):
+        return False
+    sig = hashlib.sha1(json.dumps(sorted([d.eid, str((d.properties or {}).get("status"))] for d in nodes)
+                                  + [claim or ""]).encode()).hexdigest()[:16]
+    if (g.properties or {}).get("reported_graph") == sig:
+        return False
+    rows = []
+    for d in sorted(nodes, key=lambda d: d.eid):
+        p = d.properties or {}
+        kind = {TASK: "task", WAIT: "wait"}.get(d.cls, "card")
+        what = p.get("receipt") or p.get("value") or ""
+        rows.append(f"- {kind} {p.get('title') or p.get('name') or d.eid}: {p.get('status')}"
+                    + (f" -- {' '.join(str(what).split())[:200]}" if what else ""))
+    head = (f"its planner says it is done -- {claim}" if claim is not None
+            else "its graph has nothing left moving")
+    line = (f"goal {goal} ({(g.properties or {}).get('name') or goal}): {head}.\n" + "\n".join(rows)[:1500]
+            + "\nCheck the receipts against what is live now (the PR head, its CI); close the goal "
+            "(goal action='close') with the receipt, or send it back (entity_edit its replan with what "
+            "is missing).")
     try:
         from . import watch_agents as WA
-        g = (srv.entity_store.docs or {}).get(goal)
-        name = ((g.properties or {}).get("name") if g is not None else "") or goal
-        WA.escalate(srv, {"kind": "goal-done", "entity": goal, "goal": goal, "title": name,
-                          "ts": time.time()}, goal,
-                    f"goal {goal}: its planner says it is done -- {receipt}. Check that against what "
-                    "is live now; close it (goal action='close') with the receipt, or send it back "
-                    "(entity_edit its replan with what is missing).")
+        told = WA.escalate(srv, {"kind": "goal-ended", "entity": goal, "goal": goal,
+                                 "title": (g.properties or {}).get("name") or goal, "ts": time.time()},
+                           goal, line)
     except Exception:
-        pass
+        return False
+    if told:
+        g.properties = {**(g.properties or {}), "reported_graph": sig, "reported_ts": time.time()}
+        est.upsert(g, embedder=None)
+    return bool(told)
 
 
 def reowe(srv) -> int:
@@ -691,7 +731,7 @@ The goal's graph now:
 Work the goal as a graph. Write ONE plan with entity_edit on the goal:
   entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
 A task is one worker turn of concrete work; listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state. Read the entity back for plan_result.
-When every task is done and the receipts prove the goal, end with FULFILLED and the receipt: it goes to the chat, whose turn checks it and closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
+When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
 End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
 
 WORKER_TEXT = """You are a WORKER on task {task} of goal {goal}.
