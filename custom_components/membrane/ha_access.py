@@ -15,6 +15,16 @@ and it lands in the seat's ~/.config/membrane/hass.env).
   re-read every minute (GET /membrane/ha/subscriptions) -- membrane/ha_bridge.py.
   StatePush targets comp["serve_url"] in BOTH modes: inside = the local child,
   connect = the seat elsewhere; the pair is already on the entry.
+- MAPPED (2026-10-30, the operator: "automatic homeassistant entity, services and
+  methods mapping onto membrane graph"): HA's catalog -- every entity and every
+  service, with whether it targets entities and its field names -- is pushed to
+  POST /membrane/ha/catalog when it changes (checked every minute); the seat makes
+  classes, live entities and methods of it (ha_bridge.import_catalog).
+- MQTT (same day: "auto-integrate mqtt with the field if its configured in hass"):
+  when HA runs its MQTT integration, the topics the seat marked (mqtt_topics in the
+  subscriptions read) are subscribed through HA's own client and their messages
+  pushed to POST /membrane/ha/mqtt, batched with the states. No broker config on
+  the seat; nothing at all when HA has no MQTT.
 - TOLD: restarts.py's contract -- the integration posts {kind: "ha-start"}
   (and, on the way down, {kind: "ha-stop"}) to the seat's POST /membrane/seat/event,
   so a detached seat never reads an HA restart as the world going quiet.
@@ -251,6 +261,9 @@ class StatePush:
         self.hass, self.comp = hass, comp
         self.subs: set[str] = set()
         self.pending: dict[str, dict] = {}
+        self.mqtt_unsubs: dict = {}                  # topic filter -> HA's unsubscribe
+        self.mqtt_pending: list[dict] = []
+        self._catalog_digest: str | None = None
         self._unsub = None
         self._tasks: list[asyncio.Task] = []
 
@@ -268,6 +281,12 @@ class StatePush:
             self._unsub = None
         for t in self._tasks:
             t.cancel()
+        for un in self.mqtt_unsubs.values():
+            try:
+                un()
+            except Exception:                         # noqa: BLE001
+                pass
+        self.mqtt_unsubs = {}
 
     @callback
     def _on_change(self, event: Event) -> None:
@@ -287,7 +306,11 @@ class StatePush:
                     async with aiohttp.ClientSession() as s:
                         async with s.get(url + "/membrane/ha/subscriptions", auth=self._auth(),
                                          timeout=aiohttp.ClientTimeout(total=30)) as r:
-                            new = set((await r.json()).get("entity_ids") or []) if r.status == 200 else self.subs
+                            js = (await r.json()) if r.status == 200 else None
+                        new = set(js.get("entity_ids") or []) if js else self.subs
+                        if js is not None:
+                            await self._sync_mqtt(set(js.get("mqtt_topics") or []))
+                        await self._push_catalog(s)
                     for eid in new - self.subs:          # a new mirror starts with the state as it is
                         st = self.hass.states.get(eid)
                         if st is not None:
@@ -298,10 +321,72 @@ class StatePush:
                     _LOGGER.debug("membrane: subscriptions read failed: %r", e)
             await asyncio.sleep(SUBS_EVERY_S)
 
+    async def _catalog(self) -> dict:
+        from homeassistant.helpers.service import async_get_all_descriptions
+        desc = await async_get_all_descriptions(self.hass)
+        services = {dom: {svc: {"target": bool((d or {}).get("target")),
+                                "fields": sorted(((d or {}).get("fields") or {}).keys())}
+                          for svc, d in (svcs or {}).items()}
+                    for dom, svcs in desc.items()}
+        from homeassistant.components.homeassistant.exposed_entities import async_should_expose
+        entities = sorted(({"entity_id": st.entity_id, "name": str(st.attributes.get("friendly_name") or ""),
+                            "exposed": bool(async_should_expose(self.hass, "conversation", st.entity_id))}
+                           for st in self.hass.states.async_all()), key=lambda e: e["entity_id"])
+        return {"entities": entities, "services": services, "mqtt": "mqtt" in self.hass.config.components}
+
+    async def _push_catalog(self, s: aiohttp.ClientSession) -> None:
+        """HA's catalog to the seat, only when it changed since the last push."""
+        import hashlib
+        import json
+        try:
+            cat = await self._catalog()
+            dig = hashlib.sha1(json.dumps(cat, sort_keys=True, default=str).encode()).hexdigest()
+            if dig == self._catalog_digest:
+                return
+            async with s.post(self.comp["serve_url"] + "/membrane/ha/catalog", json=cat, auth=self._auth(),
+                              timeout=aiohttp.ClientTimeout(total=120)) as r:
+                if r.status == 200:
+                    self._catalog_digest = dig
+        except Exception as e:                        # noqa: BLE001
+            _LOGGER.debug("membrane: catalog push failed: %r", e)
+
+    @callback
+    def _on_mqtt(self, msg) -> None:
+        payload = msg.payload if isinstance(msg.payload, str) else bytes(msg.payload).decode("utf-8", "replace")
+        self.mqtt_pending.append({"topic": msg.topic, "payload": payload})
+        del self.mqtt_pending[:-500]                 # a flood keeps its newest
+
+    async def _sync_mqtt(self, want: set) -> None:
+        """Subscribe the seat's topics through HA's MQTT client (when HA has one)."""
+        if "mqtt" not in self.hass.config.components:
+            return
+        from homeassistant.components import mqtt
+        for t in set(self.mqtt_unsubs) - want:
+            try:
+                self.mqtt_unsubs.pop(t)()
+            except Exception:                         # noqa: BLE001
+                pass
+        for t in want - set(self.mqtt_unsubs):
+            try:
+                self.mqtt_unsubs[t] = await mqtt.async_subscribe(self.hass, t, self._on_mqtt, qos=0)
+            except Exception as e:                    # noqa: BLE001
+                _LOGGER.debug("membrane: mqtt subscribe %s failed: %r", t, e)
+
     async def _flush_loop(self) -> None:
         while True:
             await asyncio.sleep(FLUSH_S)
-            if not self.pending or not self.comp.get("serve_ready"):
+            if not self.comp.get("serve_ready"):
+                continue
+            if self.mqtt_pending:
+                msgs, self.mqtt_pending = self.mqtt_pending, []
+                try:
+                    async with aiohttp.ClientSession() as s:
+                        async with s.post(self.comp["serve_url"] + "/membrane/ha/mqtt", json={"messages": msgs},
+                                          auth=self._auth(), timeout=aiohttp.ClientTimeout(total=30)) as r:
+                            await r.read()
+                except Exception as e:                    # noqa: BLE001
+                    _LOGGER.debug("membrane: mqtt push failed: %r", e)
+            if not self.pending:
                 continue
             batch, self.pending = list(self.pending.values()), {}
             try:

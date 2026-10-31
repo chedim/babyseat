@@ -3648,7 +3648,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # HOME ASSISTANT'S PUSH (ha_bridge.py): the entity_ids the seat mirrors
                 from . import ha_bridge as _HB
                 psrv = getattr(runner, "srv", None) if runner is not None else None
-                self._json_out({"entity_ids": _HB.subscriptions(psrv) if psrv is not None else []})
+                self._json_out({"entity_ids": _HB.subscriptions(psrv) if psrv is not None else [],
+                                "mqtt_topics": _HB.mqtt_topics(psrv) if psrv is not None else []})
             elif path == "/session":
                 _all = sessions.list()
                 if self._jwt_person() is not None:
@@ -4109,6 +4110,19 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 b = self._read_body() or {}
                 return self._json_out(_HB.apply(psrv, b.get("states") or []) if psrv is not None else {"updated": 0})
+            if path == "/membrane/ha/catalog":
+                # HOME ASSISTANT'S CATALOG (ha_bridge.import_catalog): its domains,
+                # entities and services become classes, live entities and methods
+                from . import ha_bridge as _HB
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                b = self._read_body() or {}
+                return self._json_out(_HB.import_catalog(psrv, b) if psrv is not None else {"ok": False})
+            if path == "/membrane/ha/mqtt":
+                # MQTT THROUGH HOME ASSISTANT: the messages on the topics the seat marked
+                from . import ha_bridge as _HB
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                b = self._read_body() or {}
+                return self._json_out(_HB.apply_mqtt(psrv, b.get("messages") or []) if psrv is not None else {"updated": 0})
             if path == "/membrane/field/purge":
                 # THE NURSERY GHOSTS OUT (efield.purge_ghosts): the engineer's /
                 # operator's door (the serve's credentials), dry_run unless told
