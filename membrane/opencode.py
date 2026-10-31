@@ -1166,8 +1166,15 @@ def main() -> None:
         # folder reuses it), so the pub- and import lanes address THIS
         # seat by the same name on every restart.
         from .substrate import _origin_tag
+        # ENTITIES LIVE IN field.cblite: when the field's backend is cblite
+        # the store reads/writes through it (entities.json imported once)
+        _ef = getattr(srv, "efield", None)
+        _be = getattr(_ef, "backend", None) if _ef is not None else None
+        if _be is not None and not hasattr(_be, "_set_meta"):
+            _be = None
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"),
-                                       origin=_origin_tag(args.field))
+                                       origin=_origin_tag(args.field),
+                                       backend=_be)
         # THE SEAT'S ROOT (the stale-route retire's reference): the
         # start folder = the field path's resolved parent, or its
         # parent when the parent IS .membrane

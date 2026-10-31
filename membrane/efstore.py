@@ -25,7 +25,7 @@ from typing import Callable, Iterator
 import numpy as np
 
 COLLECTIONS = ("events", "sentences", "terms", "entity_states", "entity_deltas",
-               "relations", "claims", "annotations", "origin_stats", "chunks")
+               "relations", "claims", "annotations", "origin_stats", "chunks", "entities")
 
 def _json_line(coll: str, key: str, doc) -> str:
     """One journal line, json-safe ALWAYS (the 'when serializing dict

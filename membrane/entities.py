@@ -1326,8 +1326,14 @@ class EntityStore(MultiParentOps, TimelineOps):
     copies carry on."""
 
     def __init__(self, path: str | None = None, bucket: str = "cortex-core",
-                 shared: bool = True, origin: str | None = None) -> None:
+                 shared: bool = True, origin: str | None = None,
+                 backend=None) -> None:
         self.path = Path(path) if path else None
+        # ENTITIES LIVE IN field.cblite: with a backend, load/save go through
+        # its `entities` collection; an existing entities.json is imported
+        # once (meta marker) and never written again.
+        self.backend = backend
+        self._saved_h: dict[str, int] = {}
         self.bucket = bucket
         # THE TEST-ISOLATION GUARD (the 'doomed.py in the fork's banner'
         # bug): test stores were created with shared=True default, so
@@ -1432,6 +1438,8 @@ class EntityStore(MultiParentOps, TimelineOps):
 
     # ---- persistence --------------------------------------------------------
     def _load(self) -> None:
+        if self.backend is not None:
+            return self._load_backend()
         if not self.path or not self.path.exists():
             return
         try:
@@ -1448,6 +1456,75 @@ class EntityStore(MultiParentOps, TimelineOps):
             print(f"[entities] side-index load failed ({e})",
                   file=sys.stderr)
 
+    def _load_backend(self) -> None:
+        be = self.backend
+        try:
+            for k, rec in be.scan("entities"):
+                q = QuantumEntity.from_doc(k, rec)
+                if q is None:
+                    continue
+                q.properties = sanitize_properties(q.properties)
+                _stamp_guest_flavor(k, q.properties)
+                self.docs[k] = q
+                self._saved_h[k] = hash(json.dumps(rec, sort_keys=True, default=str))
+            if not be._meta("entities_imported"):
+                # the one-time import: legacy json fills only what cblite lacks
+                if self.path and self.path.exists():
+                    d = json.loads(self.path.read_text())
+                    for k, rec in (d.get("docs") or {}).items():
+                        if k in self.docs:
+                            continue
+                        q = QuantumEntity.from_doc(k, rec)
+                        if q is None:
+                            continue
+                        q.properties = sanitize_properties(q.properties)
+                        _stamp_guest_flavor(k, q.properties)
+                        self.docs[k] = q
+                    if not be._meta("entity_tracks") and d.get("tracks"):
+                        be._set_meta("entity_tracks", {"tracks": d["tracks"]})
+                be._set_meta("entities_imported", {"ts": _t.time()})
+                self._save_backend()
+        except Exception as e:
+            print(f"[entities] cblite load failed ({e})", file=sys.stderr)
+
+    def _save_backend(self) -> None:
+        be = self.backend
+        try:
+            with self._store_lock:
+                flat = [(eid, dict(ent.properties or {}), ent.cls,
+                         list(ent.links), list(ent.derived_by),
+                         getattr(ent, "position", None),
+                         list(getattr(ent, "position_history", None) or []))
+                        for eid, ent in list(self.docs.items())
+                        if not ((ent.properties or {}).get("ephemeral"))]
+                tracks = dict(self.tracks)
+            out, live = {}, set()
+            for eid, props, cls, links, dby, pos, hist in flat:
+                try:
+                    ent = self._snap_to_entity(eid, sanitize_properties(props), cls,
+                                               links, dby, pos, hist)
+                    doc = ent.to_doc()
+                    live.add(eid)
+                    h = hash(json.dumps(doc, sort_keys=True, default=str))
+                    if self._saved_h.get(eid) != h:
+                        out[eid] = (doc, h)
+                except Exception as e:
+                    print(f"[entities] cblite: doc {eid} skipped ({str(e)[:80]})",
+                          file=sys.stderr)
+            if out:
+                be.upsert_multi("entities", {k: v[0] for k, v in out.items()})
+                for k, (_, h) in out.items():
+                    self._saved_h[k] = h
+            for k in [k for k in self._saved_h if k not in live and k not in self.docs]:
+                be.delete("entities", k)
+                self._saved_h.pop(k, None)
+            be._set_meta("entity_tracks", {"tracks": tracks})
+            be.flush()
+            self._side_saved = True
+        except Exception as e:
+            self._side_saved = False
+            print(f"[entities] cblite save failed ({e})", file=sys.stderr)
+
     def save(self) -> None:
         """THE SIDE-INDEX SAVE, rebuilt (the 45s-PENDING exhibit):
         the old form built EVERY entity's full to_doc() dict (~10KB of
@@ -1459,6 +1536,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         doc that still can't serialize is skipped AND NAMED (the eid
         prints -- the poison is visble, not silent); the file always
         writes."""
+        if self.backend is not None:
+            return self._save_backend()
         if not self.path:
             return
         try:
@@ -3041,6 +3120,12 @@ class EntityStore(MultiParentOps, TimelineOps):
         return out
 
     def _save_tracks(self) -> None:
+        if self.backend is not None:
+            try:
+                self.backend._set_meta("entity_tracks", {"tracks": dict(self.tracks)})
+            except Exception as e:
+                print(f"[entities] track save failed ({e})", file=sys.stderr)
+            return
         if not self.path:
             return
         try:
@@ -3055,6 +3140,13 @@ class EntityStore(MultiParentOps, TimelineOps):
             print(f"[entities] track save failed ({e})", file=sys.stderr)
 
     def _load_tracks(self) -> None:
+        if self.backend is not None:
+            try:
+                for k, t in ((self.backend._meta("entity_tracks") or {}).get("tracks") or {}).items():
+                    self.tracks[k] = t
+            except Exception:
+                pass
+            return
         if self._mirror is not None:
             for k, t in (self._mirror.get("tracks") or {}).items():
                 self.tracks[k] = t

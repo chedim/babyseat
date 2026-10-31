@@ -75,8 +75,9 @@ class TestEntitiesInCblite(unittest.TestCase):
         be = self._be()
         st = self._store(be)                          # first start: imports
         self.assertEqual(st.docs[EID].properties.get("summary"), "from-json")
-        st.upsert(_ent("newer-in-cblite"))
-        st.flush()
+        # upsert MERGES (existing keys win), so the newer value is an edit in place
+        st.docs[EID].properties["summary"] = "newer-in-cblite"
+        st.save()
         self._close(be)
         be2 = self._be()                              # second start, json still there
         st2 = self._store(be2)
