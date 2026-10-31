@@ -121,3 +121,29 @@ class TheTurnSidIsPerThread(unittest.TestCase):
         ta.start(); tb.start(); ta.join(3); tb.join(3)
         self.assertEqual(seen, {"ses_chat": "ses_chat", "ses_w": "ses_w"})
         self.assertIsNone(r._current_turn_sid)          # an outside thread has no turn
+
+
+class TheLoopTurnRunsNoRecall(TheWorkerTurnHasNoBanner):
+    """2026-10-31, profiled: a goal loop's turn still ran render_for's recall (the
+    no-context rebuild); its cold reads held the field store's one lock while a person's
+    banner waited 4 minutes for it."""
+
+    def recon(self, sid):
+        from membrane import entity_block as EB
+        body = {"messages": [{"role": "user", "content": "what's next?"}], "_turn_sid": sid}
+        with mock.patch.object(EB, "render_for", return_value="PAST ANSWERS") as r, \
+                mock.patch.object(EB, "reconstruct", return_value="RECON"):
+            out = L._recon_block(self.srv, self.f, body, "what's next?", None)
+        return out, r
+
+    def test_a_loop_turn_gets_its_reconstruction_but_no_recall(self):
+        for sid in ("ses_w", "ses_p", "ses_t"):
+            out, r = self.recon(sid)
+            self.assertEqual(out, "RECON")
+            r.assert_not_called()
+
+    def test_a_persons_turn_keeps_its_recall(self):
+        for sid in ("ses_c", "ses_ph", ""):
+            out, r = self.recon(sid)
+            self.assertIn("PAST ANSWERS", out)
+            r.assert_called_once()
