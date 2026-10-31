@@ -980,6 +980,7 @@ class _LoopDrainer:
                     GG.finish(srv, ent, verdict, detail, session=sid)
                     return verdict
                 from . import llm as _LLM
+                _replan = ((est.docs.get(ent) or QuantumEntity(eid="")).properties or {}).get("replan")
                 _prev = getattr(_LLM._ctx, "depth", 0)
                 _LLM._ctx.depth = int(ev.get("depth") or 1)
                 try:
@@ -996,10 +997,14 @@ class _LoopDrainer:
                                                    "session": sid, "ts": time.time()})
                     g = est.docs.get(ent)
                     if g is not None:
-                        g.properties = {**(g.properties or {}), "planner_ts": time.time()}
+                        g.properties = {**(g.properties or {}), "planner_ts": time.time(),
+                                        "planned_replan": _replan}     # boot plans again what no pass finished
                         est.upsert(g, embedder=None)
                 except Exception:
                     pass
+                _claim = GG.planner_claim(text)
+                if _claim is not None:                   # the chat turn decides (operator, 2026-10-31)
+                    GG.escalate_done(srv, ent, _claim)
                 try:
                     with _W.as_writer("adapter:tasks"):
                         GG.recount(srv, ent)     # with or without a plan: no task blocked for good

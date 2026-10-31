@@ -600,6 +600,48 @@ def _escalate_wait(srv, d) -> None:
         pass
 
 
+def replan_lost(srv) -> int:
+    """Boot: an open goal whose last replan no planner pass finished (cut off by a
+    restart, or its call lost with the pool) is planned again."""
+    from . import llm as LLM
+    n = 0
+    for d in list((srv.entity_store.docs or {}).values()):
+        p = d.properties or {}
+        if d.cls != "Goal" or (p.get("status") or "open") != "open" or not p.get("replan"):
+            continue
+        if p.get("planned_replan") == p["replan"]:
+            continue
+        LLM.request(srv, "plan the goal: " + str(p["replan"]), about=d.eid, caller="boot",
+                    extra={"lane": LANE_PLANNER})
+        n += 1
+    return n
+
+
+_FULFILLED = re.compile(r"^\s*FULFILLED\b[:\s-]*(.*)$", re.I | re.M)
+
+
+def planner_claim(text: str) -> str | None:
+    """The planner's FULFILLED receipt (the last such line), or None."""
+    hits = _FULFILLED.findall(str(text or ""))
+    return hits[-1].strip()[:600] if hits else None
+
+
+def escalate_done(srv, goal: str, receipt: str) -> None:
+    """The planner says the goal is done: the chat hears it and its turn decides
+    (operator, 2026-10-31) -- the goal stays open until that turn closes it."""
+    try:
+        from . import watch_agents as WA
+        g = (srv.entity_store.docs or {}).get(goal)
+        name = ((g.properties or {}).get("name") if g is not None else "") or goal
+        WA.escalate(srv, {"kind": "goal-done", "entity": goal, "goal": goal, "title": name,
+                          "ts": time.time()}, goal,
+                    f"goal {goal}: its planner says it is done -- {receipt}. Check that against what "
+                    "is live now; close it (goal action='close') with the receipt, or send it back "
+                    "(entity_edit its replan with what is missing).")
+    except Exception:
+        pass
+
+
 def reowe(srv) -> int:
     """Boot: a task owed or running when the seat stopped goes back to the pool."""
     est = srv.entity_store
@@ -649,7 +691,7 @@ The goal's graph now:
 Work the goal as a graph. Write ONE plan with entity_edit on the goal:
   entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
 A task is one worker turn of concrete work; listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state. Read the entity back for plan_result.
-When every task is done and the receipts prove the goal, close it with fulfill and the receipt. When the graph needs nothing new, write no plan.
+When every task is done and the receipts prove the goal, end with FULFILLED and the receipt: it goes to the chat, whose turn checks it and closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
 End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
 
 WORKER_TEXT = """You are a WORKER on task {task} of goal {goal}.

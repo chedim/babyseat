@@ -894,6 +894,23 @@ _LISTENER_REFUSALS = {
 }
 
 
+# THE GOAL GRAPH NEVER CLOSES A GOAL (operator, 2026-10-31: "escalate to chat instead of
+# closing -- the chat turn decides"): its planner and workers keep every other hand
+_GRAPH_LOOPS = ("planner:", "worker:")
+_GRAPH_REFUSALS = {
+    "fulfill": ("goal-graph loop: a goal isn't closed from here -- the planner ends with "
+                "FULFILLED <receipt> (a worker with DONE); the claim goes to the chat, and the "
+                "chat turn decides"),
+}
+
+
+def _graph_refusal(name: str, agent: str | None) -> str | None:
+    """The refusal for a goal-graph loop's call (None = allowed)."""
+    if _lane_gate_off() or not str(agent or "").strip().lower().startswith(_GRAPH_LOOPS):
+        return None
+    return _GRAPH_REFUSALS.get(name)
+
+
 def _lane_gate_off() -> bool:
     # runtime-read: a kill switch set mid-session acts immediately
     return os.environ.get("MEMBRANE_LANE_GATE") == "0"
@@ -1012,7 +1029,7 @@ def _peers_possible() -> bool:
 
 def _openai_tools_for(agent: str | None) -> list:
     """The ADVERTISED tools for the lane (the same registry, filtered)."""
-    names = _lane_tools(_lane_of(agent))
+    names = [n for n in _lane_tools(_lane_of(agent)) if _graph_refusal(n, agent) is None]
     # NO PEERS, NO PEER TOOLS (2026-10-12: a seat inside Home Assistant was handed
     # peer_post, its exploration goal posted to seats that can't exist, failed, and
     # waited "BLOCKED on the operator" for good)
@@ -2884,7 +2901,8 @@ class TurnRunner:
                             _refusal = None
                         else:
                             _refusal = (None if self.tools is not None
-                                        else _lane_refusal(name_l, lane))
+                                        else (_lane_refusal(name_l, lane)
+                                              or _graph_refusal(name_l, (self._agents or {}).get(sid))))
                         if _help is not None:
                             output = _help
                         elif _bad is not None:
