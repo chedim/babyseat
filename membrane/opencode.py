@@ -1685,8 +1685,9 @@ def main() -> None:
                 from . import goalgraph as _GG
                 _n = _GG.seed(srv)
                 _r = _GG.reowe(srv)
-                print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool",
-                      file=sys.stderr)
+                _p = _GG.replan_lost(srv)
+                print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool, "
+                      f"{_p} goal(s) planned again", file=sys.stderr)
             except Exception as e:
                 print(f"[opencode] goal graph seeding skipped ({e})", file=sys.stderr)
         else:
