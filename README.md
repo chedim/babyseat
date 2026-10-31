@@ -385,8 +385,7 @@ embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 `membrane serve` runs the seat with **no TUI and no opencode at all** —
 sessions, messages, turns, tool parts, aborts, the SSE event stream, served by
 membrane itself on :4096 (reads are open on your network; from another machine
-every write needs the seat token, `membrane token seat`; or rely on the default-on
-JWT mode — a token on every request to both ports, off with `MEMBRANE_JWT=0`, [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
+every write needs the seat token, `membrane token seat`; with JWT mode on by default, every request to both ports also needs a token (`MEMBRANE_JWT=0` turns it off), [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
 [mobile companion app](https://opencode.app/), IDE plugins, a script. The turn
 loop calls the seat's OWN `/v1` on loopback — gate, injection, capture and
 routing run through the exact code path every other client's turn uses, so
@@ -612,7 +611,7 @@ multi-hop and adversarial; the other three names follow the common mapping.
 | [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, the ⚙ options window, the 📊 stats window, the ⏸ / ▶ pause, the out-of-tokens pause per model (⚠), updates, diagnosing a slow seat (request timing, the built-in profiler) |
 | [docs/claude-agent.md](docs/claude-agent.md) | **The claude-agent rung**: Claude through the Agent SDK on your Anthropic API key; enabling it, opt-in routing, membrane's tools in Claude's loop (built-ins off, no check-ins, a 2048-call ceiling per answer with a person's Continue, an idle guard instead of the wall clock), learned like any model with a `madeBy` provenance mark |
 | [docs/docker.md](docs/docker.md) | **babyseat in Docker**: the public image `chedim/babyseat`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
-| [docs/auth.md](docs/auth.md) | **JWT mode (on by default; `MEMBRANE_JWT=0` turns it off).** Minting tokens, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
+| [docs/auth.md](docs/auth.md) | **JWT mode (on by default; `MEMBRANE_JWT=0` turns it off).** Turning it off, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
 | [docs/home-assistant.md](docs/home-assistant.md) | **babyseat in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — the pointer to its own spec repo, and the LLM as a coprocessor (`MEMBRANE_COPROC=1`: decide / remember / intend parsed from a model's reply, person-traced or held as proposals) |
