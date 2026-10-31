@@ -133,6 +133,18 @@ class TestLifecycle(unittest.TestCase):
         self.assertIn("status", res.get("properties_refused") or {})
         self.assertEqual(_status(est, eid), "decided")
 
+    def test_agent_drop_of_a_watch_card_tells_the_watcher_pool(self):    # #758
+        est, _ = _store()
+        est._events_pool = pool = _Pool()
+        eid = _card(est, "w")                                  # planted_by watch
+        self.assertTrue(est.edit(eid, properties={"dropped_why": "shipped",
+                                                  "status": "dropped"})["ok"])
+        props = est.resolve(eid, exact=True).properties
+        self.assertEqual([e["kind"] for e in pool.events], ["decision"])
+        self.assertEqual(pool.events[0]["value"], "dropped")
+        self.assertIsInstance(props.get("value_ts"), float)
+        self.assertEqual(props.get("dropped_by"), "agent")
+
     def test_operator_drops_an_open_card(self):
         est, led = _store()
         est._events_pool = pool = _Pool()

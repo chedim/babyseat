@@ -205,8 +205,9 @@ PLANTED_BY = "planted_by"      # stamped at creation by the lane: "watch" (a wat
 def _tell(est, p: dict, ev: dict, text: str, pool=None) -> None:
     """Where a decision event goes: the watcher pool when a watch loop planted
     the card, else one message into the card's own chat (it starts a turn).
-    Only the operator's owner-only route answers or drops, so a turn that
-    message starts cannot fire another."""
+    Only the operator's owner-only route answers or drops (an agent's drop,
+    through entity_edit, comes here too via ``tell_drop`` and says so in
+    ``dropped_by``), so a turn that message starts cannot fire another."""
     pool = pool if pool is not None else getattr(est, "_events_pool", None)
     sid = str(p.get("chat") or "")
     hook = getattr(est, "_decision_chat", None)
@@ -298,16 +299,28 @@ def drop(est, spec: str) -> dict:
         p = ent.properties or {}
         if _status(p) != STATUS_OPEN:
             return {"ok": False, "conflict": True, "error": "only an open card can be dropped"}
-        p.update({"status": STATUS_DROPPED, "set_by": "operator",
+        p.update({"status": STATUS_DROPPED, "set_by": "operator", "dropped_by": "operator",
                   "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "value_ts": time.time()})
         ent.properties = p
         est.upsert(ent)
-        _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
-                       "value": "dropped", "blocks": p.get("blocks") or [],
-                       "work_needed": False, "ts": time.time()},
-              f"[decision] {p.get('name') or ent.eid} = dropped")
+        tell_drop(est, ent)
         return {"ok": True, "card": _card_of(ent)}
+
+
+def tell_drop(est, ent) -> None:
+    """The one tail of every drop: the decision event (operator's drop() and an
+    agent's entity_edit alike), so a parked goal or the watcher pool hears it."""
+    p = ent.properties or {}
+    _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
+                   "value": "dropped", "blocks": p.get("blocks") or [],
+                   "work_needed": False, "ts": time.time()},
+          f"[decision] {p.get('name') or ent.eid} = dropped")
+
+
+def stamp_agent_drop(props: dict) -> None:
+    """An agent's drop (status -> dropped via entity_edit): same stamps as drop()."""
+    props.update({"dropped_by": "agent", "value_ts": time.time()})
 
 
 def goals(est, active=()) -> dict:
