@@ -137,3 +137,21 @@ class TestGetJsonRealLib(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNothingReachesTheLibAfterClose(unittest.TestCase):
+    """2026-10-31: a background thread's operation after close() reached the native lib
+    with a NULL handle -- a SIGSEGV (CBLDatabase_CreateCollection, address 0x18). After
+    close every operation raises; the native lib is never called."""
+
+    def test_operations_after_close_raise_and_never_touch_the_lib(self):
+        db = fake_db({"k": '{"a":1}'})
+        db.h = None                                   # what _close leaves
+        db._closed = True
+        db.colls = {}
+        L = db.lib.L
+        for call in (lambda: db.get_json("c", "k"), lambda: db.put_json("c", "k", "{}"),
+                     lambda: db.exists("c", "k"), lambda: db.coll("c")):
+            with self.assertRaises(cblite.CBLException):
+                call()
+        self.assertEqual(L.got, [])

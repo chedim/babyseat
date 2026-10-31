@@ -293,7 +293,7 @@ def _queued(m):
     """The operation runs on the database's own thread (Database._run)."""
     @functools.wraps(m)
     def w(self, *a, **k):
-        return self._run(lambda: m(self, *a, **k))
+        return self._run(lambda: (self._open_or_raise(), m(self, *a, **k))[1])
     return w
 
 
@@ -337,11 +337,19 @@ class Database:
             finally:
                 box["ev"].set()
 
+    def _open_or_raise(self) -> None:
+        """2026-10-31, a SIGSEGV: an operation after close() reached the native lib with
+        a NULL handle. A closed database refuses in Python, checked where it runs."""
+        if getattr(self, "_closed", False) or getattr(self, "h", 1) is None:
+            raise CBLException("the database is closed")
+
     def _run(self, fn):
         """fn() on the database thread: a turn's first, background after, each kind in
         arrival order. On that thread itself (an operation calling another) it runs now."""
         ops = getattr(self, "_ops", None)
-        if ops is None or threading.get_ident() == self._tid or getattr(self, "_closed", False):
+        if getattr(self, "_closed", False):
+            self._open_or_raise()
+        if ops is None or threading.get_ident() == self._tid:
             return fn()
         box = {"ev": threading.Event()}
         ops.put((1 if TurnFirst.is_background() else 0, next(self._n), fn, box))
@@ -353,6 +361,7 @@ class Database:
     def coll(self, name: str):
         h = self.colls.get(name)
         if h is None:
+            self._open_or_raise()
             with self.lock:
                 err = CBLError()
                 h = self.colls[name] = self.lib.check(
