@@ -6006,7 +6006,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 url = srv.backend + "/v1/chat/completions"
                 from .rag import MODE_TURN as _MODE_TURN, MODE_BACKGROUND as _MODE_BG
                 headers = {"Content-Type": "application/json",
-                           **(_MODE_TURN if _DR.lane_of(srv, up) == "chat" else _MODE_BG)}           # #753: the seat injected, the fork records
+                           **(_MODE_BG if _is_loop_turn(srv, up) else _MODE_TURN)}           # #753: the seat injected, the fork records
             _DR.record(model_name, url, u2, headers=headers)
             rq = urllib.request.Request(
                 url, data=json.dumps(u2).encode(), method="POST",

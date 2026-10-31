@@ -141,11 +141,6 @@ class TheModeHeader(unittest.TestCase):
                       {"verdict": "escalate", "route": {"route": "local-a", "kind": "local"}},
                       "WHERE WE ARE")
 
-    def test_a_loop_lane_turn_carries_off(self):
-        self._deliver({"_turn_sid": "loop::x"})
-        self.assertIn(("/v1/chat/completions", "off"), self.b.seen)
-        self.assertNotIn(("/v1/chat/completions", "capture"), self.b.seen)
-
     def test_a_chat_lane_turn_carries_capture(self):
         self._deliver({})
         self.assertIn(("/v1/chat/completions", "capture"), self.b.seen)
@@ -154,6 +149,30 @@ class TheModeHeader(unittest.TestCase):
         from membrane.claims import OllamaClaimJudge
         OllamaClaimJudge("m", base_url=self.url).ask("judge")
         self.assertEqual(self.b.seen[-1], ("/api/chat", "off"))
+
+    def test_a_worker_runner_row_turn_carries_off(self):
+        """The mode check is _is_loop_turn(srv, up): a session the loop runner
+        stamped 'worker: <task>' is a loop turn even where lane_of says chat."""
+        h = _handler(self.url)
+        h.server._loop_runner = types.SimpleNamespace(sessions=types.SimpleNamespace(
+            sessions={"w1": {"agent": "worker: membrane::task:x"}}))
+        up = {"model": "local-a", "stream": False, "_turn_sid": "w1",
+              "messages": [{"role": "user", "content": "hi"}]}
+        h._v1_deliver(up, json.dumps(up).encode(), "hi", None,
+                      {"verdict": "escalate", "route": {"route": "local-a", "kind": "local"}},
+                      "WHERE WE ARE")
+        self.assertIn(("/v1/chat/completions", "off"), self.b.seen)
+        self.assertNotIn(("/v1/chat/completions", "capture"), self.b.seen)
+
+    def test_the_mode_check_uses_is_loop_turn(self):
+        src = Path(L.__file__).read_text()
+        self.assertNotIn('_DR.lane_of(srv, up) == "chat" else _MODE_BG', src)
+        self.assertIn("_is_loop_turn(srv, up)", src)
+
+    def test_claims_imports_mode_background_from_rag(self):
+        src = (Path(L.__file__).parent / "claims.py").read_text()
+        self.assertIn("from .rag import MODE_BACKGROUND", src)
+        self.assertNotIn('__import__("membrane.rag"', src)
 
 
 if __name__ == "__main__":
