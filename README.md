@@ -130,7 +130,7 @@ You get membrane home:
 Other devices on your network open `http://<this machine>:4096/`. They can
 read freely, and they ask once for the seat token before writing
 (`membrane token seat` prints it). Callers from outside your network are
-refused, unless you turn on [JWT mode](docs/auth.md). The microphone needs
+refused: [JWT mode](docs/auth.md) is on by default (turn it off with `MEMBRANE_JWT=0`). The microphone needs
 `localhost` (a secure origin), and the first voice use downloads about 65 MB
 of speech models.
 
@@ -185,8 +185,7 @@ OpenAI-compatible proxy on :11500, the memory on the `membrane-data` volume.
 host); on Linux add `--add-host=host.docker.internal:host-gateway`. Reads are
 open; writes need the seat token, which the container prints at boot
 (`docker exec membrane membrane token seat` prints it again). Publish the ports
-only on a network you trust, or set `MEMBRANE_JWT_SECRET` ([JWT mode](docs/auth.md))
-for a token on every request. Details:
+only on a network you trust. [JWT mode](docs/auth.md) is on by default (a token on every request); turn it off with `MEMBRANE_JWT=0`. Details:
 [docs/docker.md](docs/docker.md).
 
 ### Inside Home Assistant (HACS)
@@ -373,7 +372,7 @@ pass through to Ollama unchanged.
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running + the field's vitals |
 | `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): from another machine, every write to either port needs it (Bearer, Basic's password, or the web UI's one-time prompt); reads and localhost need none; see [docs/auth.md](docs/auth.md) |
-| `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running the optional JWT mode (`MEMBRANE_JWT_SECRET`); see [docs/auth.md](docs/auth.md) |
+| `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running JWT mode (on by default; off with `MEMBRANE_JWT=0`); see [docs/auth.md](docs/auth.md) |
 | `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, plus the background model calls from `bg-usage.json`; no model call) |
 | `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Every kind can be added (#576 retired the unlocks with the ladder). See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
@@ -386,8 +385,7 @@ embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 `membrane serve` runs the seat with **no TUI and no opencode at all** —
 sessions, messages, turns, tool parts, aborts, the SSE event stream, served by
 membrane itself on :4096 (reads are open on your network; from another machine
-every write needs the seat token, `membrane token seat`; or turn on the optional
-JWT mode — a token on every request to both ports, [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
+every write needs the seat token, `membrane token seat`; with JWT mode on by default, every request to both ports also needs a token (`MEMBRANE_JWT=0` turns it off), [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
 [mobile companion app](https://opencode.app/), IDE plugins, a script. The turn
 loop calls the seat's OWN `/v1` on loopback — gate, injection, capture and
 routing run through the exact code path every other client's turn uses, so
@@ -399,8 +397,8 @@ default 11500) are independent. The proxy binds all interfaces by default:
 reads are open on the LAN, and an off-box caller's writes (chat turns included)
 need the seat token; `--listen-host 127.0.0.1` (or
 `MEMBRANE_LISTEN_HOST=127.0.0.1`) keeps it on this machine. Exposure is LAN-only by design:
-reach the server only from a network you own — or set `MEMBRANE_JWT_SECRET`
-and hand each client a token ([docs/auth.md](docs/auth.md)).
+reach the server only from a network you own; JWT mode is on by default (`MEMBRANE_JWT=0` turns it off),
+so hand each client a token ([docs/auth.md](docs/auth.md)).
 
 - **The minds are visible.** `/agents` lists the ambient minds as agents —
   the three thinking-loop workers (each with its live claim and the event
@@ -613,7 +611,7 @@ multi-hop and adversarial; the other three names follow the common mapping.
 | [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, the ⚙ options window, the 📊 stats window, the ⏸ / ▶ pause, the out-of-tokens pause per model (⚠), updates, diagnosing a slow seat (request timing, the built-in profiler) |
 | [docs/claude-agent.md](docs/claude-agent.md) | **The claude-agent rung**: Claude through the Agent SDK on your Anthropic API key; enabling it, opt-in routing, membrane's tools in Claude's loop (built-ins off, no check-ins, a 2048-call ceiling per answer with a person's Continue, an idle guard instead of the wall clock), learned like any model with a `madeBy` provenance mark |
 | [docs/docker.md](docs/docker.md) | **babyseat in Docker**: the public image `chedim/babyseat`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
-| [docs/auth.md](docs/auth.md) | **JWT mode (optional, off by default).** Turning it on, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
+| [docs/auth.md](docs/auth.md) | **JWT mode (on by default; `MEMBRANE_JWT=0` turns it off).** Turning it off, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
 | [docs/home-assistant.md](docs/home-assistant.md) | **babyseat in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — the pointer to its own spec repo, and the LLM as a coprocessor (`MEMBRANE_COPROC=1`: decide / remember / intend parsed from a model's reply, person-traced or held as proposals) |

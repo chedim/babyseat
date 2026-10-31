@@ -153,6 +153,10 @@ class TestConfig(unittest.TestCase):
     def _env(self, **kw):
         base = {k: v for k, v in os.environ.items() if not k.startswith("MEMBRANE_JWT_")}
         base.update(kw)
+        if any(k in base for k in ('MEMBRANE_JWT_SECRET', 'MEMBRANE_JWT_SECRET_FILE')):
+            base.pop('MEMBRANE_JWT', None)   # explicit secret = deliberate 'on'
+        else:
+            base['MEMBRANE_JWT'] = '0'       # otherwise the suite's default: off
         return mock.patch.dict(os.environ, base, clear=True)
 
     def test_off_by_default(self):
@@ -187,7 +191,7 @@ class TestConfig(unittest.TestCase):
                     J.config()
                 with self.assertRaises(SystemExit) as cm:
                     J.boot_check()
-                self.assertIn("MEMBRANE_JWT", str(cm.exception.code))
+                self.assertIn("refused to start", str(cm.exception.code))
 
     def test_internal_token(self):
         with self._env(MEMBRANE_JWT_SECRET=SECRET):
@@ -223,6 +227,10 @@ class TestCli(unittest.TestCase):
     def _run(self, argv, env):
         base = {k: v for k, v in os.environ.items() if not k.startswith("MEMBRANE_JWT_")}
         base.update(env)
+        if any(k in base for k in ('MEMBRANE_JWT_SECRET', 'MEMBRANE_JWT_SECRET_FILE')):
+            base.pop('MEMBRANE_JWT', None)   # explicit secret = deliberate 'on'
+        else:
+            base['MEMBRANE_JWT'] = '0'       # otherwise the suite's default: off
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, base, clear=True), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -254,7 +262,7 @@ class TestCli(unittest.TestCase):
 
     def test_cli_dispatch(self):
         from membrane import cli
-        base = {k: v for k, v in os.environ.items() if not k.startswith("MEMBRANE_JWT_")}
+        base = {k: v for k, v in os.environ.items() if not k.startswith("MEMBRANE_JWT")}
         base["MEMBRANE_JWT_SECRET"] = SECRET
         out = io.StringIO()
         with mock.patch.dict(os.environ, base, clear=True), \
@@ -347,6 +355,10 @@ class _StubBackend(BaseHTTPRequestHandler):
 def _jwt_env(**kw):
     base = {k: v for k, v in os.environ.items() if not k.startswith("MEMBRANE_JWT_")}
     base.update(kw)
+    if any(k in base for k in ('MEMBRANE_JWT_SECRET', 'MEMBRANE_JWT_SECRET_FILE')):
+        base.pop('MEMBRANE_JWT', None)   # explicit secret = deliberate 'on'
+    else:
+        base['MEMBRANE_JWT'] = '0'       # otherwise the suite's default: off
     return mock.patch.dict(os.environ, base, clear=True)
 
 

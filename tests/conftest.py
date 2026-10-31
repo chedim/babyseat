@@ -3,6 +3,8 @@ backend is a fake, and a 'walk' declared mid-test would fail its embeds."""
 import os
 
 os.environ.setdefault("MEMBRANE_OFFLINE_PROBE", "0")
+# JWT is on by default (#762); the suite runs with it off unless a test turns it on
+os.environ.setdefault("MEMBRANE_JWT", "0")
 # the seat token (seatauth.py, #253): a test seat never writes the operator's
 # ~/.membrane/seat-token -- one throwaway file for the whole run (and its subprocesses)
 import tempfile as _tempfile

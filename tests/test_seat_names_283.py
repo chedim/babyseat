@@ -250,7 +250,7 @@ class TestTheRoute(unittest.TestCase):
     def test_the_card_is_behind_the_jwt_gate(self):
         from membrane import jwtauth as J
         secret = "s" * 40
-        with _env(MEMBRANE_JWT_SECRET=secret):
+        with _env(MEMBRANE_JWT="1", MEMBRANE_JWT_SECRET=secret):   # on, over the suite default (#762)
             self.assertEqual(self._req("/membrane/self/card")[0], 401)
             self.assertEqual(self._req("/membrane/self/card", tok=J.mint(secret, "alice"))[0], 200)
 

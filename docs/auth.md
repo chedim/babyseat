@@ -4,10 +4,10 @@ A seat has two ports: the OpenAI proxy (:11500) and the serve API + UI (:4096).
 Both listen on every interface, so the phone and Home Assistant reach the seat
 over Wi-Fi. Two levels protect them:
 
-- **The seat token (always on, unless JWT mode is).** Reads are open on the
+- **The seat token (only when JWT mode is off: `MEMBRANE_JWT=0`).** Reads are open on the
   network; localhost needs nothing. From any other machine, every request that
   changes something needs the seat token.
-- **JWT mode (optional).** Every request on both ports, reads and localhost
+- **JWT mode (on by default).** Every request on both ports, reads and localhost
   included, needs a signed token, and the token says who is talking. Use it to
   put a seat behind an ingress or on a network other people share.
 
@@ -74,12 +74,23 @@ peer asks) come from loopback and need nothing.
 
 ## JWT mode — a token on every request
 
-**It is off unless you set a secret.** With no `MEMBRANE_JWT_SECRET` /
-`MEMBRANE_JWT_SECRET_FILE`, nothing below this point applies. With one, JWT
-mode replaces the seat token: the seat token is not accepted, and a JWT is
-needed for every request, as described here.
+**It is on by default.** Nothing to set: at boot the seat makes two secrets
+(both 0600) and JWT mode replaces the seat token. The seat token is not
+accepted, and a JWT is needed for every request, as described here.
 
-### Turn it on
+- **Per-folder people secret**: `<seat folder>/.membrane/jwt.secret`. It signs the
+  tokens people use (`membrane token mint`), so each folder's seat has its own and
+  a token from one folder is refused by another. Made at boot if missing; a command
+  run from a folder with no seat reports "no seat here" and writes nothing.
+- **Per-machine startup secret**: `~/.membrane/jwt.secret`. It signs only the
+  seat's own internal token (`seat:internal`), so the seat's children and loopback
+  callers work with no setup. It can never sign a person.
+- **Explicit secret wins**: `MEMBRANE_JWT_SECRET` / `MEMBRANE_JWT_SECRET_FILE`
+  replaces the folder secret (use it for an ingress or a shared secret mount).
+- **Opt out**: `MEMBRANE_JWT=0` turns JWT mode off whatever else is set, and the
+  seat token applies again.
+
+### Use your own secret
 
 ```bash
 export MEMBRANE_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
@@ -94,7 +105,8 @@ membrane standalone            # or: membrane serve / membrane opencode
 | `MEMBRANE_JWT_AUDIENCE` | optional: tokens must carry this `aud` (a string, or a list containing it) |
 
 The seat refuses to start when the secret is set but unusable (shorter than 32
-bytes, empty, unreadable, or both variables set). It never starts half-protected.
+bytes, empty, unreadable, or both variables set), or when it cannot make its
+secret file (read-only folder or home). It never starts half-protected.
 The boot log says `[auth] JWT mode ON`.
 
 ### Mint a token
