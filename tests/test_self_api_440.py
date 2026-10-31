@@ -121,6 +121,10 @@ def test_an_unknown_effect_is_refused_and_a_bad_list_raises():
 def _jwt_env(**kw):
     base = {k: v for k, v in os.environ.items() if not k.startswith("MEMBRANE_JWT_")}
     base.update(kw)
+    if any(k in base for k in ('MEMBRANE_JWT_SECRET', 'MEMBRANE_JWT_SECRET_FILE')):
+        base.pop('MEMBRANE_JWT', None)   # explicit secret = deliberate 'on' (#762)
+    else:
+        base['MEMBRANE_JWT'] = '0'       # otherwise the suite's default: off
     return mock.patch.dict(os.environ, base, clear=True)
 
 

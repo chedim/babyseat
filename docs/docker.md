@@ -86,8 +86,9 @@ proxy answers `GET /membrane/state` (the healthcheck allows a 90 s start period)
 | `MEMBRANE_MODEL` | `--model` | the best chat model Ollama lists | the chat model |
 | `MEMBRANE_EMBED_MODEL` | `--embed-model` | a known embedding model Ollama has | the field's embedder; chat fails without one. Keep it once the field has grown |
 | `MEMBRANE_SEAT_TOKEN_PRINT` | | `1` (the entrypoint sets it) | print the [seat token](auth.md#the-seat-token) to the log at boot |
-| `MEMBRANE_JWT_SECRET` | | unset (JWT mode off) | turns on [JWT mode](auth.md): every request on both ports needs a token. At least 32 bytes |
+| `MEMBRANE_JWT_SECRET` | | unset (the folder's generated secret) | replaces the generated secret of [JWT mode](auth.md) (on by default: every request on both ports needs a token). At least 32 bytes |
 | `MEMBRANE_JWT_SECRET_FILE` | | unset | the secret read from a mounted file instead (a Docker / Kubernetes secret); set one or the other |
+| `MEMBRANE_JWT` | | unset (on) | `0` turns JWT mode off |
 | `MEMBRANE_JWT_ISSUER` / `MEMBRANE_JWT_AUDIENCE` | | unset | optional `iss` / `aud` every token must carry |
 
 Set in the image, all `1`: `MEMBRANE_NO_UPDATE_CHECK` (no boot-time update

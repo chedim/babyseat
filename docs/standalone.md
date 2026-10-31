@@ -101,7 +101,7 @@ sphere it was the distance to it).
   request a reverse proxy forwarded (`X-Forwarded-For` / `Forwarded`). For a seat
   behind a proxy, use JWT mode.
 - `"ui_lan_open": false` in `.membrane/settings.json` closes the LAN door too.
-- **JWT mode** (optional, off by default: set `MEMBRANE_JWT_SECRET`) replaces all of
+- **JWT mode** (on by default, with a per-folder secret made at boot; `MEMBRANE_JWT=0` turns it off) replaces all of
   this with a token. Every request to the page's API and the seat's needs one, from
   the LAN or behind an ingress alike. The page asks for the token instead of a name,
   and the token says who you are. See [auth.md](auth.md).
