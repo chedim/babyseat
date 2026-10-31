@@ -72,7 +72,7 @@ RECEIVE as their next turn's message — the operator creates, the thinker
 receives and executes. Work given in a chat goes the same way (#766): the
 chat's agent plants it as a goal (issue link + what done means) and answers
 with its id, the planner splits it into tasks and decision cards, and the
-workers run the tasks — the chat keeps only questions, reviews and lookups. The model-facing teaching lives in the doctrine +
+workers run the tasks — the chat keeps only questions, reviews and lookups. Something that takes time outside a turn (CI going green, a deploy, a reply) is a **wait** (#773): it blocks the tasks after it until its condition holds — a field property equal to a value, or a method that passes — checked once what it follows is done, as often as the planner chose for it (`every_s`), and a wait that fails at the planner's `deadline_min` is escalated into the chat, which starts the model's turn there. The model-facing teaching lives in the doctrine +
 the `membrane-intents` skill.
 
 ## The pause (the operator's stable point, 2026-10-06)
