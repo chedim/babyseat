@@ -7,8 +7,9 @@ over Wi-Fi. Two levels protect them:
 - **The seat token (only when JWT mode is off: `MEMBRANE_JWT=0`).** Reads are open on the
   network; localhost needs nothing. From any other machine, every request that
   changes something needs the seat token.
-- **JWT mode (on by default).** Every request on both ports, reads and localhost
-  included, needs a signed token, and the token says who is talking. Use it to
+- **JWT mode (on by default).** Every request on both ports, reads included, needs
+  a signed token, and the token says who is talking. A caller on this machine
+  needs none: a bare loopback request is the seat itself, as with JWT off. Use it to
   put a seat behind an ingress or on a network other people share.
 
 ## The seat token
@@ -152,7 +153,11 @@ logs and browser history.
 - **The address no longer matters.** Standalone's LAN guard (no login on the local
   network, `403` for anything proxied) and the seat token are replaced by the JWT:
   a valid token works from the LAN or behind an ingress, and a missing one is
-  refused on the LAN and on localhost too.
+  refused on the LAN and behind a proxy. On localhost (a loopback peer with no
+  `X-Forwarded-For`, `Forwarded` or `X-Real-IP`) a request with no token at all is
+  the seat itself: it keeps its own speaker line, sees every session, and the page
+  asks for a name. A token it does send is checked like any other, so a bad one is
+  still `401`.
 - **The token's identity is who said it.** Any speaker line a client sends
   (`[user: …]`, `[HA user: …]`, the page's `X-Membrane-Speaker`) is dropped, and
   the seat stamps `[user#<sub>: <name>]` itself, on `/v1/chat/completions` and on
@@ -171,8 +176,8 @@ logs and browser history.
 The seat calls itself over loopback: the turn loop's `/v1` calls, the MCP tools'
 relay, the restart notices, the serve's field reads, the peer asks. In JWT mode
 these carry an **internal token** the seat mints in memory at boot (`sub`
-`seat:internal`, one hour, re-minted before it runs out). There is no exemption for
-loopback addresses. Internal requests keep the speaker line they carry (the serve
+`seat:internal`, one hour, re-minted before it runs out). A bare loopback request
+(no token, no forwarding header) passes as the same identity. Internal requests keep the speaker line they carry (the serve
 already stamped the person's), and they see every session.
 
 When `membrane opencode` launches the opencode TUI, the child gets a token of its

@@ -457,7 +457,8 @@ def intercept(handler) -> bool:
         if jwt:                            # JWT mode: who the token says you are (the page asks no name)
             _id = getattr(handler, "_identity", None)
             c["auth"] = "jwt"
-            c["who"] = {"sub": _id.sub, "name": _id.name} if _id is not None else None
+            c["who"] = {"sub": _id.sub, "name": _id.name} \
+                if _id is not None and not _id.internal else None   # this machine, no token: the page asks the name
         else:                              # #253: off-box writes need the seat token
             c["auth"] = "seat"
             c["owner"] = _SA.owner(handler, cookie=True, basic=True)

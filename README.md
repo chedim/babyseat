@@ -130,7 +130,8 @@ You get membrane home:
 Other devices on your network open `http://<this machine>:4096/`. They can
 read freely, and they ask once for the seat token before writing
 (`membrane token seat` prints it). Callers from outside your network are
-refused: [JWT mode](docs/auth.md) is on by default (turn it off with `MEMBRANE_JWT=0`). The microphone needs
+refused: [JWT mode](docs/auth.md) is on by default (turn it off with `MEMBRANE_JWT=0`);
+this machine itself needs no token. The microphone needs
 `localhost` (a secure origin), and the first voice use downloads about 65 MB
 of speech models.
 
@@ -385,7 +386,7 @@ embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 `membrane serve` runs the seat with **no TUI and no opencode at all** —
 sessions, messages, turns, tool parts, aborts, the SSE event stream, served by
 membrane itself on :4096 (reads are open on your network; from another machine
-every write needs the seat token, `membrane token seat`; with JWT mode on by default, every request to both ports also needs a token (`MEMBRANE_JWT=0` turns it off), [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
+every write needs the seat token, `membrane token seat`; with JWT mode on by default, every request to both ports also needs a token, except from this machine (`MEMBRANE_JWT=0` turns it off), [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
 [mobile companion app](https://opencode.app/), IDE plugins, a script. The turn
 loop calls the seat's OWN `/v1` on loopback — gate, injection, capture and
 routing run through the exact code path every other client's turn uses, so

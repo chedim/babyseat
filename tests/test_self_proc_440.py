@@ -233,7 +233,8 @@ def test_the_control_server_takes_only_the_seats_own_token():
         httpd = SP.serve(fac)
         try:
             port = httpd.server_address[1]
-            assert _call(port, "/status")[0] == 401
+            with mock.patch("membrane.seatauth.is_loopback", lambda h: False):      # off-box
+                assert _call(port, "/status")[0] == 401
             assert _call(port, "/status", tok=J.mint(SECRET, "alice"))[0] == 403
             assert _call(port, "/status", tok=J.internal_token())[0] == 200
         finally:

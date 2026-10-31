@@ -352,7 +352,8 @@ def test_the_route_is_toybox_actions_only(route):
 def test_the_route_is_behind_the_jwt_gate_and_tags_the_token(route):
     from membrane import jwtauth as J
     with _jwt_env(MEMBRANE_JWT_SECRET=SECRET):
-        code, _ = route.post("/membrane/toybox/poke", {"toy": "toy:die", "action": "roll"})
+        with mock.patch("membrane.seatauth.is_loopback", lambda h: False):          # off-box
+            code, _ = route.post("/membrane/toybox/poke", {"toy": "toy:die", "action": "roll"})
         assert code == 401
         assert _log("toy:die") == []
         code, body = route.post("/membrane/toybox/poke", {"toy": "toy:die", "action": "roll", "person": "mallory"},

@@ -180,7 +180,8 @@ def test_a_persons_token_gets_neither(route):
     from membrane import jwtauth as J
     srv, call = route
     with _jwt_env(MEMBRANE_JWT_SECRET=SECRET):
-        assert call("/membrane/self/context")[0] == 401
+        with mock.patch("membrane.seatauth.is_loopback", lambda h: False):          # off-box
+            assert call("/membrane/self/context")[0] == 401
         alice = J.mint(SECRET, "alice")
         assert call("/membrane/self/context", tok=alice)[0] == 403
         assert call("/membrane/self/effects", {"effects": []}, tok=alice)[0] == 403

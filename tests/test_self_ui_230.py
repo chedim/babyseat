@@ -124,7 +124,8 @@ class TestRoute(unittest.TestCase):
     def test_behind_the_jwt_gate(self):
         from membrane import jwtauth as J
         with _jwt_env(MEMBRANE_JWT_SECRET=SECRET):
-            self.assertEqual(self._get("/membrane/self/recent")[0], 401)
+            with mock.patch("membrane.seatauth.is_loopback", lambda h: False):      # off-box
+                self.assertEqual(self._get("/membrane/self/recent")[0], 401)
             code, body = self._get("/membrane/self/recent?n=2", tok=J.mint(SECRET, "alice"))
             self.assertEqual(code, 200)
             self.assertEqual(len(body["lines"]), 2)
