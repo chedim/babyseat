@@ -640,18 +640,20 @@ def parse_triage(text: str) -> tuple[str, str]:
 
 def escalation_text(ev: dict, ent: str, line: str = "") -> str:
     """The chat message: the event, the watched entity, the loop's line."""
+    if ev.get("kind") == "goal-fulfilled" and line:
+        return line                              # #769: the close's own line, as is
     head = loop_task_text({**ev, "_bare": True, "previous": None, "consequences": None})
     return (f"[watch] {ent or 'field'}: {head}"
             + (f"\ntriage: {line}" if line else "\n(no escalate_when note on it: sent as is)"))
 
 
-def escalate(srv, ev: dict, ent: str, line: str = "") -> bool:
+def escalate(srv, ev: dict, ent: str, line: str = "", chat: str = "") -> bool:
     """One message into the latest chat (#700's route, decision_map._tell:
     it starts a main-model turn through runner.run, which queues behind a
     running one). False: no chat to tell."""
     from . import chat_io as _CIO
     from . import decision_map as _DM
-    sid = _CIO.latest_chat(srv, "")
+    sid = chat or _CIO.latest_chat(srv, "")
     est = getattr(srv, "entity_store", None)
     if not sid or est is None:
         return False
@@ -1777,13 +1779,14 @@ def notify_intent_landed(est, pool, goal_eid: str, receipt: dict) -> dict:
 
 def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
                           evidence: str = "") -> dict:
-    """A GOAL CLOSED IS TOLD (2026-10-28, #641): routed like a decided or dropped
-    Decision card (decision_map._tell): a goal planted in a chat gets one
-    `[goal] <title> fulfilled` message into that chat (the first of its
-    `convs`; it starts a turn there), a chatless goal (or no runner wired) puts
-    ONE `goal-fulfilled` event into the loops' pool. Announced once per close:
-    the stamp is the close's `fulfilled_ts`, so a goal that is reopened and
-    closed again is announced again."""
+    """A GOAL CLOSED IS TOLD (2026-10-28, #641): one message
+    `goal <id> fulfilled: <receipt>` goes to the goal's planting chat (the
+    LAST of its `convs`, convs[-1]; it starts a turn there). A goal with no
+    `convs` goes to the latest chat instead. Only an unwired seat (no server)
+    with no chat falls back to ONE `goal-fulfilled` event in the loops' pool.
+    Announced once per close: the stamp is the close's `fulfilled_ts`, so a
+    goal that is reopened and closed again is announced again. A goal still
+    `open` is skipped BEFORE the stamp, so it is never marked announced."""
     from . import decision_map as _DM
     ent = (est.docs or {}).get(goal_eid) if est is not None else None
     props = (ent.properties if ent is not None else None) or {}
@@ -1792,6 +1795,8 @@ def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
           "by": str(by or props.get("fulfilled_by") or "")[:40],
           "evidence": " ".join(str(evidence or props.get("fulfilled_evidence") or "").split())[:300],
           "ts": time.time()}
+    if str(props.get("status") or "") == "open":
+        return {"kind": "goal-fulfilled", "entity": ev["entity"], "skipped": "open"}
     if ent is not None:
         close = props.get("fulfilled_ts") or 0.0
         if "fulfilled_announced" in props and props["fulfilled_announced"] == close:
@@ -1802,8 +1807,17 @@ def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
             est.upsert(ent, embedder=None)
         except Exception:
             pass
-    chat = str(((props.get("convs") or [""])[0]) or "")
-    _DM._tell(est, {"chat": chat}, ev, f"[goal] {ev['title']} fulfilled", pool=pool)
+    line = f"goal {ev['entity']} fulfilled: {ev['evidence']}"
+    chat = str(((props.get("convs") or [""])[-1]) or "")
+    if getattr(est, "_srv", None) is not None:
+        sent = escalate(est._srv, ev, ev["entity"], line, chat)
+    elif chat:
+        _DM._tell(est, {"chat": chat}, ev, line, pool=pool)
+        sent = True
+    else:
+        sent = False
+    if not sent and pool is not None:
+        pool.put(ev)
     return ev
 
 

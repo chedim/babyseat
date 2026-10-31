@@ -77,8 +77,7 @@ def test_a_chat_goal_tells_its_chat_not_the_pool():
     WA.notify_goal_fulfilled(est, est._events_pool, eid, by="listener")
     assert est._events_pool.take() == []
     [(sid, text)] = est.sent
-    assert sid == "ses_1" and text.startswith("[goal]") and "ship the suite" in text \
-        and "fulfilled" in text
+    assert sid == "ses_2" and text.startswith(f"goal {eid} fulfilled")
 
 
 def test_a_chatless_goal_goes_to_the_pool():
