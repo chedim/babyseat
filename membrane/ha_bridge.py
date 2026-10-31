@@ -150,12 +150,14 @@ def card_line() -> str:
             "properties.ha_entity = '<entity_id>': Home Assistant then sets its ha_state and "
             "ha_attributes on every change (its watches fire). Once Home Assistant has pushed its catalog, its "
             "entities and services are in the field: class ha:<domain> per domain, entity ha:<entity_id> per "
-            "entity (live), each service a method on its class -- <service> or <service>_with "
+            "entity (live only when exposed to Assist; any other entity needs your own ha_entity), "
+            "each service a method on the class of a domain with an exposed entity -- <service> or <service>_with "
             "data='<json>' (e.g. turn_on_with data='{\"brightness_pct\": 40}'); entity-less "
             "services sit on the class (ha:notify.notify_with). "
             "When HA runs MQTT, give an entity properties.mqtt_topic = '<topic filter>' and HA "
             "sets its mqtt_payload / mqtt_last_topic on every message; publish with "
-            "ha:mqtt.publish_with. What you do in the house is real: "
+            "ha:mqtt.publish_with. A filter of only + levels ending in # (#, +/#) is ignored unless the "
+            "entity sets mqtt_allow_all true. What you do in the house is real: "
             "act only when asked, or when a goal of theirs plainly calls for it.\n")
 
 
@@ -193,7 +195,7 @@ def entity_eid(ha_entity_id: str) -> str:
     return entity_id(CLASS_COMPONENT, f"{ROOT}:{ha_entity_id}")
 
 
-def _ensure(est, name: str, props: dict, summary: str = "", parent: str | None = None):
+def _ensure(est, name: str, props: dict, summary: str = "", parent: str | None = None, drop: tuple = ()):
     """One entity by name: created silently, its props set, `parent` ADDED to
     its parents (the ones it already has stay). Writes only on a change."""
     from .entities import CLASS_COMPONENT, QuantumEntity, entity_id
@@ -206,6 +208,8 @@ def _ensure(est, name: str, props: dict, summary: str = "", parent: str | None =
     p = dict(doc.properties or {})
     before = dict(p)
     p.update(props)
+    for k in drop:
+        p.pop(k, None)
     if summary:
         p["summary"] = summary
     if parent and parent not in (p.get("parents") or []):
@@ -214,6 +218,14 @@ def _ensure(est, name: str, props: dict, summary: str = "", parent: str | None =
         doc.properties = p
         est.upsert(doc, embedder=None)
     return doc
+
+
+def _unexposed_drop(est, name: str) -> tuple:
+    """An entity the catalog no longer exposes loses the ha_entity IT was given by
+    the mirror (marked mirrored); a manual opt-in (no mirror mark) stays."""
+    from .entities import CLASS_COMPONENT, entity_id
+    doc = est.docs.get(entity_id(CLASS_COMPONENT, name))
+    return (PROP, "ha_mirrored") if doc is not None and (doc.properties or {}).get("ha_mirrored") else ("ha_mirrored",)
 
 
 def _digest(cat: dict) -> str:
@@ -243,8 +255,11 @@ def import_catalog(srv, cat) -> dict:
     by_domain: dict[str, list] = {}
     for e in ents:
         by_domain.setdefault(str(e["entity_id"]).split(".", 1)[0], []).append(e)
-    domains = set(by_domain) | {d for d, svcs in services.items() if isinstance(svcs, dict)
-                                and any(isinstance(s, dict) and not s.get("target") for s in svcs.values())}
+    # Assist exposure decides what is live: only exposed entities get ha_entity (the
+    # state push), and only domains holding an exposed entity get service methods.
+    # A non-exposed entity keeps the manual opt-in (its own ha_entity, if the seat set it).
+    exposed_doms = {d for d, es in by_domain.items() if any(e.get("exposed") for e in es)}
+    domains = set(by_domain)
     n_ent = n_m = 0
     for dom in sorted(domains):
         cls = _ensure(est, f"{ROOT}:{dom}", {"ha_domain": dom}, parent=root.eid,
@@ -252,10 +267,12 @@ def import_catalog(srv, cat) -> dict:
         for e in by_domain.get(dom, []):
             hid = str(e["entity_id"])
             label = str(e.get("name") or "").strip()
-            _ensure(est, f"{ROOT}:{hid}", {PROP: hid}, parent=cls.eid,
+            live = bool(e.get("exposed"))
+            _ensure(est, f"{ROOT}:{hid}", {PROP: hid, "ha_mirrored": True} if live else {}, parent=cls.eid,
+                    drop=() if live else _unexposed_drop(est, f"{ROOT}:{hid}"),
                     summary=f"{label} (Home Assistant {hid})" if label else f"Home Assistant {hid}")
             n_ent += 1
-        for svc, spec in sorted((services.get(dom) or {}).items()):
+        for svc, spec in sorted((services.get(dom) or {}).items() if dom in exposed_doms else ()):
             spec = spec if isinstance(spec, dict) else {}
             mname = re.sub(r"[^A-Za-z0-9_]+", "_", str(svc)).strip("_")
             if not mname or mname in _GENERIC:
@@ -309,8 +326,9 @@ def _mqtt_marked(srv) -> dict[str, list]:
     out: dict[str, list] = {}
     for ent in list((getattr(est, "docs", None) or {}).values()):
         t = str((ent.properties or {}).get(MQTT_PROP) or "").strip()
-        if t == "#" and not (ent.properties or {}).get("mqtt_allow_all"):
-            continue  # a bare '#' mirrors the whole broker: needs mqtt_allow_all=True
+        if t and set(t.split("/")) <= {"+", "#"} and t.endswith("#") \
+                and not (ent.properties or {}).get("mqtt_allow_all"):
+            continue  # '#', '+/#', '+/+/#' ... mirror the whole broker: need mqtt_allow_all=True
         if t:
             out.setdefault(t, []).append(ent)
     return out

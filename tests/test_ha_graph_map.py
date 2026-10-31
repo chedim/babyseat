@@ -24,9 +24,10 @@ from membrane import night as N  # noqa: E402
 import test_cliffhanger as C  # noqa: E402
 
 CATALOG = {
-    "entities": [{"entity_id": "light.port_strip", "name": "Port strip"},
-                 {"entity_id": "light.aft_cabin", "name": "Aft cabin"},
-                 {"entity_id": "switch.fan", "name": "Fan"}],
+    "entities": [{"entity_id": "light.port_strip", "name": "Port strip", "exposed": True},
+                 {"entity_id": "light.aft_cabin", "name": "Aft cabin", "exposed": True},
+                 {"entity_id": "switch.fan", "name": "Fan", "exposed": True},
+                 {"entity_id": "mqtt.broker", "name": "Broker", "exposed": True}],
     "services": {"light": {"turn_on": {"target": True, "fields": ["brightness_pct"]},
                            "turn_off": {"target": True, "fields": []}},
                  "switch": {"toggle": {"target": True, "fields": []}},
@@ -80,6 +81,31 @@ class TestImport(unittest.TestCase):
                              {"service": "publish", "data": '{"topic": "a/b", "payload": "1"}'})
         self.assertTrue(r["ok"], r)
         self.assertNotIn("ha_entity", str(r.get("would_run", "")))
+
+    def test_only_assist_exposed_entities_mirror_live(self):
+        srv, est = _srv()
+        cat = {**CATALOG, "entities": [
+            {"entity_id": "light.port_strip", "name": "Port strip", "exposed": True},
+            {"entity_id": "light.aft_cabin", "name": "Aft cabin", "exposed": False}]}
+        HB.import_catalog(srv, cat)
+        on = est.docs[HB.entity_eid("light.port_strip")]
+        off = est.docs[HB.entity_eid("light.aft_cabin")]
+        self.assertEqual(on.properties.get("ha_entity"), "light.port_strip")
+        self.assertNotIn("ha_entity", off.properties)
+        self.assertNotIn("light.aft_cabin", HB.subscriptions(srv))
+
+    def test_an_exposure_change_repushes_the_catalog(self):
+        srv, est = _srv()
+        ents = lambda flag: {**CATALOG, "entities": [
+            {"entity_id": "light.port_strip", "name": "Port strip", "exposed": flag}]}
+        HB.import_catalog(srv, ents(False))
+        r = HB.import_catalog(srv, ents(True))
+        self.assertFalse(r.get("unchanged"), r)
+        self.assertEqual(est.docs[HB.entity_eid("light.port_strip")].properties.get("ha_entity"),
+                         "light.port_strip")
+        r = HB.import_catalog(srv, ents(False))          # and back: live mirroring is dropped
+        self.assertFalse(r.get("unchanged"), r)
+        self.assertNotIn("light.port_strip", HB.subscriptions(srv))
 
     def test_the_same_catalog_twice_is_a_no_op(self):
         srv, est = _srv()
@@ -155,6 +181,19 @@ class TestMqtt(unittest.TestCase):
         r = HB.apply_mqtt(srv, [{"topic": "boat/any", "payload": "x"}])
         self.assertEqual(r.get("updated", 0), 0)
         self.assertNotIn("mqtt_payload", everything.properties)
+
+    def test_wildcard_only_filters_are_refused_like_bare_hash(self):
+        srv, est = _srv()
+        for f in ("+/#", "+/+/#"):
+            C._add(est, "all " + f, mqtt_topic=f)
+        self.assertEqual(HB.mqtt_topics(srv), [])
+        r = HB.apply_mqtt(srv, [{"topic": "boat/any/thing", "payload": "x"}])
+        self.assertEqual(r.get("updated", 0), 0)
+
+    def test_wildcard_only_filter_allowed_with_mqtt_allow_all(self):
+        srv, est = _srv()
+        C._add(est, "all", mqtt_topic="+/#", mqtt_allow_all=True)
+        self.assertEqual(HB.mqtt_topics(srv), ["+/#"])
 
     def test_marked_topics_are_subscribed_and_messages_land(self):
         srv, est = _srv()

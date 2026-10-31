@@ -328,7 +328,9 @@ class StatePush:
                                 "fields": sorted(((d or {}).get("fields") or {}).keys())}
                           for svc, d in (svcs or {}).items()}
                     for dom, svcs in desc.items()}
-        entities = sorted(({"entity_id": st.entity_id, "name": str(st.attributes.get("friendly_name") or "")}
+        from homeassistant.components.homeassistant.exposed_entities import async_should_expose
+        entities = sorted(({"entity_id": st.entity_id, "name": str(st.attributes.get("friendly_name") or ""),
+                            "exposed": bool(async_should_expose(self.hass, "conversation", st.entity_id))}
                            for st in self.hass.states.async_all()), key=lambda e: e["entity_id"])
         return {"entities": entities, "services": services, "mqtt": "mqtt" in self.hass.config.components}
 
