@@ -82,6 +82,16 @@ class TestImport(unittest.TestCase):
         self.assertTrue(r["ok"], r)
         self.assertNotIn("ha_entity", str(r.get("would_run", "")))
 
+    def test_entityless_domain_without_entities_gets_class_and_method(self):
+        srv, est = _srv()
+        cat = {"entities": [{"entity_id": "light.port_strip", "name": "Port strip", "exposed": True}],
+               "services": {"mqtt": {"publish_with": {"target": False, "fields": ["topic", "payload"]}}},
+               "mqtt": True}
+        HB.import_catalog(srv, cat)
+        mq = _get(est, "ha:mqtt")
+        self.assertIsNotNone(mq, "class ha:mqtt missing")
+        self.assertTrue(N.method_inspect(est, mq.eid, "publish_with")["ok"])
+
     def test_only_assist_exposed_entities_mirror_live(self):
         srv, est = _srv()
         cat = {**CATALOG, "entities": [
@@ -215,6 +225,20 @@ class TestMqtt(unittest.TestCase):
         self.assertTrue(m("a/+/c", "a/b/c"))
         self.assertFalse(m("a/+/c", "a/b/d"))
         self.assertFalse(m("a/b", "a/b/c"))
+
+
+class TestEntitylessDomain(unittest.TestCase):
+    def test_mqtt_publish_with_and_no_mqtt_entities(self):
+        srv, est = _srv()
+        cat = {"entities": [{"entity_id": "light.port_strip", "name": "Port strip", "exposed": True}],
+               "services": {"light": {"turn_on": {"target": True, "fields": []}},
+                            "mqtt": {"publish_with": {"target": False, "fields": ["topic", "payload"]}}},
+               "mqtt": True}
+        r = HB.import_catalog(srv, cat)
+        self.assertTrue(r["ok"], r)
+        mq = _get(est, "ha:mqtt")
+        self.assertIsNotNone(mq)                      # the class exists with no mqtt entity
+        self.assertTrue(N.method_inspect(est, mq.eid, "publish_with")["ok"])
 
 
 if __name__ == "__main__":
