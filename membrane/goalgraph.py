@@ -322,7 +322,10 @@ def apply_plan(srv, goal: str, plan) -> dict:
                                                                     "silent_birth": True}), embedder=None)
             made.append(eid)
         else:
-            d.properties = {**(d.properties or {}), **p}
+            again = (d.properties or {}).get("status") in (STUCK, FAILED)    # #777: listed again = retried
+            # retried: open again, its blocker count re-counted so `ready` fires afresh
+            d.properties = {**(d.properties or {}), **p,
+                            **({"status": OPEN, "open_blockers": None} if again else {})}
             est.upsert(d, embedder=None)
     # waits: made or updated (an armed or ended wait keeps its state)
     made_waits = []
@@ -460,6 +463,11 @@ def take(srv, task: str) -> bool:
 
 
 _VERDICT = re.compile(r"^\s*(DONE|FAILED|STUCK)\b[:\s-]*(.*)$", re.I | re.M)
+
+
+def has_verdict(text: str) -> bool:
+    """The worker's turn ended with a DONE / FAILED / STUCK line."""
+    return bool(_VERDICT.findall(str(text or "")))
 
 
 def parse_worker(text: str) -> tuple[str, str]:
@@ -637,7 +645,7 @@ The goal's graph now:
 
 Work the goal as a graph. Write ONE plan with entity_edit on the goal:
   entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
-A task is one worker turn of concrete work. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or finished task keeps its state. Read the entity back for plan_result.
+A task is one worker turn of concrete work; listing a stuck or failed task's key again runs it again. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state. Read the entity back for plan_result.
 When every task is done and the receipts prove the goal, close it with fulfill and the receipt. When the graph needs nothing new, write no plan.
 End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
 

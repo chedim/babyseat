@@ -383,6 +383,12 @@ def loop_agent_name(kind: str, eid: str = "") -> str:
     return f"{kind}{(': ' + eid) if eid else ''}"
 
 
+def _restarting() -> bool:
+    """#777: a restart is under way (its teardown cuts the loops' turns)."""
+    from .restarts import RESTART
+    return bool(RESTART.get("requested"))
+
+
 def loop_task_text(ev: dict) -> str:
     """THE LOOP'S TASK: the event described + the react-or-ignore
     covenant (the model's choice IS the turn; tools via the membrane
@@ -966,7 +972,10 @@ class _LoopDrainer:
                                 est.upsert(d, embedder=None)
                         self._quota_park(ev, str(out["quota"].get("model") or ""))
                         return "held"
-                    verdict, detail = GG.parse_worker(str(out.get("text") or out.get("verdict_text") or ""))
+                    text = str(out.get("text") or out.get("verdict_text") or "")
+                    if _restarting() and not GG.has_verdict(text):
+                        return "restart"         # #777: cut off by a restart -- left running, boot re-owes it
+                    verdict, detail = GG.parse_worker(text)
                     taken = False
                     GG.finish(srv, ent, verdict, detail, session=sid)
                     return verdict
@@ -998,6 +1007,8 @@ class _LoopDrainer:
                     pass
                 return "planned"
         except Exception as e:
+            if taken and _restarting():          # #777: cut off by a restart -- boot re-owes it
+                taken = False
             if taken:                            # never left running: the planner hears of it
                 try:
                     with _W.source(lane, ent), _W.as_writer("adapter:tasks"):
