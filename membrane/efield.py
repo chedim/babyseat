@@ -488,6 +488,9 @@ class EntityField:
         # (key, event doc, the vector of ALL its sentences) for every applied
         # event, boilerplate included (forewarn.py) -- cheap, never raise
         self.step_listeners: list = []
+        # the step listeners' slow half (an embedding call), run on each event BEFORE the
+        # lock is taken (2026-10-31: an HTTP embed inside the lock held every reader)
+        self.step_prepare: list = []
         # #337: (key, event doc) for EVERY applied event, its session and
         # mentions as stored, before any vector or boilerplate gate -- Blurp's
         # world hears the room through it (self_world.on_event); cheap, never raise
@@ -1482,6 +1485,11 @@ class EntityField:
         evs = list(self.b.scan("events", {"origin": self.origin, "status": "embedded"},
                                order=("seq",), limit=limit))
         for key, ev in evs:
+            for fn in self.step_prepare:
+                try:
+                    fn(ev)
+                except Exception:
+                    pass
             with self._lock:
                 self._apply(key, ev)
                 ev["status"] = "applied"

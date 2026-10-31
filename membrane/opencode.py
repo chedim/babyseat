@@ -1127,6 +1127,7 @@ def main() -> None:
                 from .forewarn import Forewarn
                 srv._forewarn = Forewarn(srv.efield)
                 srv.efield.step_listeners.append(srv._forewarn.listener)
+                srv.efield.step_prepare.append(srv._forewarn.prepare)
                 srv._forewarn.start()
             except Exception as e:
                 print(f"[seat] forewarning off ({e})", file=sys.stderr)
