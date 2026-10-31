@@ -670,7 +670,7 @@ def _build_ap():
                     help="don't resume opencode's last session (default: "
                          "resume; -c/-s in passthrough still win)")
     ap.add_argument("--no-absorb", action="store_true",
-                    help="don't absorb external-agent sessions on boot")
+                    help="no-op: the boot never absorbs external-agent sessions (2026-10-31)")
     ap.add_argument("--new-session", action="store_true",
                     help="skip absorption AND resume: start fresh")
     ap.add_argument("--no-autonode", action="store_true",
@@ -2047,7 +2047,6 @@ def main() -> None:
     if args.serve:
         _serve_board(serve_port, args.serve_host)
     native_up = False
-    _absorb_th = None                  # #436: the boot's absorb thread
     if serve_wanted and not legacy_serve:
         # THE REPLACEMENT (stage 3): no opencode child -- the native
         # server (membrane/server.py) IS the serve surface:
@@ -2200,27 +2199,10 @@ def main() -> None:
             print(f"[opencode] native serve up: session store "
                   f"{d / 'serve-sessions.json'}; the proxy's /v1 is "
                   "the turn lane", file=sys.stderr)
-            # ---- absorb external-agent sessions (part of the seat's
-            # boot breath): anything OpenCode/Claude Code did since the
-            # seat's last run lands in the store, and the newest
-            # absorbed session wins -c purely by recency. Flagged
-            # off --no-absorb / --new-session; lab seats never absorb.
-            # #436: ON ITS OWN THREAD -- the scan reads every transcript
-            # of the project (1+ GB on a long-lived one); inline it held
-            # the main thread before the proxy's serve loop, so :11500
-            # sat in LISTEN accepting nothing. A TUI launch waits for it
-            # before its child (below), so -c still finds the newest.
-            try:
-                from .absorb import boot_absorb
-                _absorb_th = boot_absorb(
-                    sess_store, msg_store, getattr(srv, "efield", None),
-                    field_path=str(args.field), new_session=args.new_session,
-                    no_absorb=args.no_absorb, native_up=native_up,
-                    cwd=os.getcwd(), marker_path=str(d / "serve-absorb.json"),
-                    model_id=_srv_model)
-            except Exception as _e:
-                print(f"[absorb] failed ({_e}) -- seat continues",
-                      file=sys.stderr)
+            # NO BOOT ABSORB (2026-10-31, the operator: "no fucking autoabsorption was
+            # ever requested"; "manual - yes, automatic - wtf?"): the boot imports no
+            # Claude Code / OpenCode session -- an imported transcript became a seat
+            # chat, the goal graph's messages landed in it and its turns held restarts
         except Exception as e:
             print(f"[opencode] native serve FAILED ({e}) -- seat keeps "
                   "running without the room-facing surface",
@@ -2276,12 +2258,6 @@ def main() -> None:
                              daemon=True).start()
         if args.launch:
             tui_direct = os.environ.get("MEMBRANE_TUI_DIRECT") == "1"
-            # #436: a TUI child resumes the newest session (-c), so it
-            # waits for the absorb; a launch serves the proxy on the main
-            # thread only after the child starts, so nothing waits longer
-            # than it did before
-            if _absorb_th is not None and not args.standalone:
-                _absorb_th.join()
             if args.serve and legacy_serve:
                 # MEMBRANE_LEGACY_SERVE=1: the OLD lane -- `opencode serve`
                 # as a child (the generated config's provider baseURL -> the

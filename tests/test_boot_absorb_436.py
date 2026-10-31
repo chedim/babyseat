@@ -64,12 +64,14 @@ class TestBootAbsorbOffTheMainThread(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertIn("bad transcript", lines[0])
 
-    def test_the_seat_absorbs_through_the_background_step(self):
+    def test_the_seat_never_absorbs_at_boot(self):
+        """2026-10-31, the operator: "no fucking autoabsorption was ever requested" --
+        "manual - yes, automatic - wtf?". The boot imports no external session."""
         import inspect
         from membrane import opencode as OC
         src = inspect.getsource(OC.main)
-        self.assertIn("boot_absorb(", src)
-        self.assertNotIn("_absorb(sess_store", src)     # no inline absorb on the main thread
+        self.assertNotIn("boot_absorb(", src)
+        self.assertNotIn("absorb(sess_store", src)
 
 
 class TestUnchangedTranscriptsAreNotReparsed(unittest.TestCase):
