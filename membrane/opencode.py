@@ -1169,7 +1169,7 @@ def main() -> None:
         # ENTITIES LIVE IN field.cblite: when the field's backend is cblite
         # the store reads/writes through it (entities.json imported once)
         _ef = getattr(srv, "efield", None)
-        _be = getattr(_ef, "backend", None) if _ef is not None else None
+        _be = getattr(_ef, "b", None) if _ef is not None else None
         if _be is not None and not hasattr(_be, "_set_meta"):
             _be = None
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"),
