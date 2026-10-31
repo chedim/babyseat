@@ -395,6 +395,13 @@ class CBLiteBackend(MemBackend):
         self.db.begin()
         try:
             for (c, k), (o, d) in todo.items():
+                if self.db.turns.waiting():
+                    # a turn's read waits for the store lock (2026-10-31, profiled: one
+                    # transaction over the whole batch held a banner for minutes):
+                    # commit what is written, let it in, then go on
+                    self.db.end()
+                    self.db.turns.wait_clear()
+                    self.db.begin()
                 if d is None:
                     self.db.purge(c, k)
                 else:
