@@ -12,6 +12,7 @@ to the effects that already exist:
   membrane::llm.unwake       llm.unwake: the wake's id
   membrane::presence.restart restarts.do_restart: the reason
   <method>.invoke            night.method_call: {object, args} (#576 C: a learned call acts)
+  <wait>.check               goalgraph.check_wait: an armed wait's condition (#773)
   rel:<root>|execute|<ex>    lang.process: the code tree runs on its executor (#614);
                              the edge is the write, -executing-> then -result-> its receipt
 
@@ -70,6 +71,8 @@ def _branch(path: str) -> tuple[str, str, str] | None:
     from . import goalgraph as _GG
     if prop == "status" and _GG.is_task(eid):
         return "tasks", eid, prop               # #738: a task owed goes to the worker pool
+    if prop == "check" and _GG.is_wait(eid):
+        return "wait", eid, prop                # #773: an armed wait's check is due
     return None
 
 
@@ -210,8 +213,16 @@ def _tasks(srv, est, ent, prop, new, by) -> None:
         GG.owe(srv, ent.eid)
 
 
+def _wait(srv, est, ent, prop, new, by) -> None:
+    """#773: `<wait>.check = 'due'` checks the wait's condition (done / failed / still armed)."""
+    from . import goalgraph as GG
+    seen = GG.check_wait(srv, ent.eid)
+    ent = est.docs.get(ent.eid) or ent
+    _consume(est, ent, prop, new, seen)
+
+
 EFFECTS = {"exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
-           "toybox": _toybox, "plan": _plan, "tasks": _tasks}
+           "toybox": _toybox, "plan": _plan, "tasks": _tasks, "wait": _wait}
 
 
 def write_and_wait(est, eid: str, prop: str, value, timeout: float = 20.0, srv=None) -> dict:

@@ -12,6 +12,12 @@ THE GRAPH
 - Edges: a blocker's `blocks` list (the Decision cards' existing edge key; a task's
   too), mirrored as `blocks` relation rows for the graph's readers. A plan whose
   edges close a cycle is refused whole.
+- Waits (#773): `wait:<goal>:<key>` entities (class Wait) with a `condition` -- a field
+  property equal to a value ({field, prop, equals}) or a method that passes ({method,
+  args}). A wait arms when what it follows is done, the `every` trigger checks it each
+  WAIT_CHECK_S (a write to its `check` adapter branch), it is done when the condition
+  holds -- the tasks it blocks count it like a finished task -- and fails after
+  WAIT_DEADLINE_S, which replans the goal. Nothing runs while it waits.
 - Task state, the code trees' executor pattern (#614): open -> owed (-execute->
   tool:workers) -> running (-executing->) -> done / failed / stuck, with
   -result-> a result entity carrying the worker's receipt (a failure is one too).
@@ -26,7 +32,7 @@ THE CASCADE (each step a write firing the next trigger -- never a loop):
 
 THE PLAN is the planner's one write: `<goal>.plan = {tasks: [{key, title, detail,
 after: [keys or eids]}], cards: [{key, name, summary, var, pick, blocks: [keys]}],
-drop: [keys]}` -- an adapter branch (effects are writes, #576 E) applies it: tasks and
+waits: [{key, title, condition, after: [keys], blocks: [keys]}], drop: [keys]}` -- an adapter branch (effects are writes, #576 E) applies it: tasks and
 cards are made or updated, edges set, cycles refused, open_blockers counted, every new
 card escalated into the operator's latest chat (#729's route). The receipt lands in
 `plan_result`.
@@ -57,6 +63,15 @@ DROPPED = "dropped"
 TASK_ENDED = (DONE, DROPPED)   # no longer blocking its dependents
 CARD_ENDED = ("closed", "dropped")
 EXECUTE, EXECUTING, RESULT, BLOCKS = "execute", "executing", "result", "blocks"
+# #773: the third node class. A wait blocks tasks until its condition holds; it arms
+# when what it follows is done, is checked on the `every` trigger, and fails past its
+# deadline (the planner replans then). Constants proposed 2026-10-30, pending the
+# operator's approval.
+WAIT = "Wait"
+WAIT_NS = MEMBRANE_NS + "wait:"
+ARMED = "armed"
+WAIT_CHECK_S = 60           # how often an armed wait's condition is checked
+WAIT_DEADLINE_S = 3600      # an armed wait still unmet this long fails
 SOURCE = "goal-graph"
 LANE_PLANNER, LANE_WORKER = "planner", "worker"
 
@@ -86,6 +101,35 @@ TRIGGERS = [
      [["isa", "?d", "Decision"], ["isa", "?g", "Goal"],
       ["filter", "g.eid == d.goal and (d.status == 'closed' or d.status == 'dropped')"]],
      ["?g.replan", "'card ' + d.eid + ' ' + d.status"]),
+    # #773: the waits
+    ("goal-graph unblock by wait",
+     [["changed", "?b.status"]],
+     [["isa", "?b", WAIT], ["isa", "?t", TASK],
+      ["filter", "b.status == 'done' and t.status == 'open' and t.eid in (b.blocks or [])"]],
+     ["?t.open_blockers", "t.open_blockers - 1"]),
+    ("goal-graph wait follows a task",
+     [["changed", "?b.status"]],
+     [["isa", "?b", TASK], ["isa", "?w", WAIT],
+      ["filter", "b.status == 'done' and w.status == 'open' and w.eid in (b.blocks or [])"]],
+     ["?w.open_blockers", "w.open_blockers - 1"]),
+    ("goal-graph wait follows a card",
+     [["changed", "?b.status"]],
+     [["isa", "?b", "Decision"], ["isa", "?w", WAIT],
+      ["filter", "b.status == 'closed' and w.status == 'open' and w.eid in (b.blocks or [])"]],
+     ["?w.open_blockers", "w.open_blockers - 1"]),
+    ("goal-graph wait armed",
+     [["changed", "?w.open_blockers"], ["below", "w.open_blockers", 0.5]],
+     [["isa", "?w", WAIT], ["filter", "w.status == 'open'"]],
+     ["?w.status", "'armed'"]),
+    ("goal-graph wait check",
+     [["every", WAIT_CHECK_S]],
+     [["isa", "?w", WAIT], ["filter", "w.status == 'armed'"]],
+     ["?w.check", "'due'"]),
+    ("goal-graph replan on wait failed",
+     [["changed", "?w.status"]],
+     [["isa", "?w", WAIT], ["isa", "?g", "Goal"],
+      ["filter", "g.eid == w.goal and w.status == 'failed'"]],
+     ["?g.replan", "'wait ' + w.eid + ' ' + w.status"]),
     ("goal-graph plan",
      [["changed", "?g.replan"]],
      [["isa", "?g", "Goal"], ["filter", "(g.status or 'open') == 'open' and g.replan"]],
@@ -126,6 +170,14 @@ def is_task(eid: str) -> bool:
     return str(eid or "").startswith(TASK_NS)
 
 
+def wait_eid(goal: str, key: str) -> str:
+    return f"{WAIT_NS}{_gid(goal)}:{_slug(key)}"
+
+
+def is_wait(eid: str) -> bool:
+    return str(eid or "").startswith(WAIT_NS)
+
+
 def _rel(srv):
     from .night import _relations_backend_of
     try:
@@ -156,7 +208,7 @@ def _unfinished(d) -> bool:
     """Still blocking: a task until done or dropped (a dropped task's dependents are the
     planner's to re-plan, never stuck behind it), a card until closed or dropped."""
     st = str((d.properties or {}).get("status") or "open")
-    return st not in (TASK_ENDED if d.cls == TASK else CARD_ENDED)
+    return st not in (TASK_ENDED if d.cls in (TASK, WAIT) else CARD_ENDED)
 
 
 def _cycle(edges: dict) -> list | None:
@@ -198,7 +250,13 @@ def apply_plan(srv, goal: str, plan) -> dict:
         return {"ok": False, "error": "a plan is {tasks: [...], cards: [...], drop: [...]}"}
     tasks = [t for t in plan.get("tasks") or [] if isinstance(t, dict) and t.get("key")]
     cards = [c for c in plan.get("cards") or [] if isinstance(c, dict) and c.get("key")]
+    waits = [w for w in plan.get("waits") or [] if isinstance(w, dict) and w.get("key")]
+    for w in waits:
+        why = _condition_error(w.get("condition"))
+        if why:
+            return {"ok": False, "error": f"wait {w['key']}: {why}"}
     keys = {str(t["key"]): task_eid(goal, str(t["key"])) for t in tasks}
+    wkeys = {str(w["key"]): wait_eid(goal, str(w["key"])) for w in waits}
     card_keys = {str(c["key"]): None for c in cards}
     for c in cards:
         ex = [d for d in (est.docs or {}).values() if d.cls == "Decision"
@@ -209,10 +267,14 @@ def apply_plan(srv, goal: str, plan) -> dict:
         x = str(x)
         if x in keys:
             return keys[x]
+        if x in wkeys:
+            return wkeys[x]
         if x in card_keys:
             return card_keys[x] or f"card:{x}"
         if (est.docs or {}).get(task_eid(goal, x)) is not None:
             return task_eid(goal, x)               # a task key of an earlier plan
+        if (est.docs or {}).get(wait_eid(goal, x)) is not None:
+            return wait_eid(goal, x)               # a wait key of an earlier plan
         return x if (est.docs or {}).get(x) is not None else None
 
     # the edges this plan wants: blocker -> [tasks]
@@ -229,9 +291,21 @@ def apply_plan(srv, goal: str, plan) -> dict:
             if t is None or not is_task(t):
                 return {"ok": False, "error": f"card {c['key']}: blocks {k!r} is not a task of this goal"}
             want.setdefault(card_keys[str(c["key"])] or f"card:{c['key']}", []).append(t)
+    for w in waits:
+        weid = wkeys[str(w["key"])]
+        for a in w.get("after") or []:
+            b = ref(a)
+            if b is None:
+                return {"ok": False, "error": f"wait {w['key']}: unknown 'after' {a!r} (a key of this plan or an eid)"}
+            want.setdefault(b, []).append(weid)
+        for k in w.get("blocks") or []:
+            t = ref(k)
+            if t is None or not is_task(t):
+                return {"ok": False, "error": f"wait {w['key']}: blocks {k!r} is not a task of this goal"}
+            want.setdefault(weid, []).append(t)
     graph: dict = {}
     for d in list((est.docs or {}).values()):
-        if d.cls == TASK and (d.properties or {}).get("goal") == goal:
+        if d.cls in (TASK, WAIT) and (d.properties or {}).get("goal") == goal:
             graph[d.eid] = list((d.properties or {}).get("blocks") or [])
     for b, ts in want.items():
         graph.setdefault(b, [])
@@ -250,6 +324,20 @@ def apply_plan(srv, goal: str, plan) -> dict:
             est.upsert(QuantumEntity(eid=eid, cls=TASK, properties={**p, "status": OPEN, "blocks": [],
                                                                     "silent_birth": True}), embedder=None)
             made.append(eid)
+        else:
+            d.properties = {**(d.properties or {}), **p}
+            est.upsert(d, embedder=None)
+    # waits: made or updated (an armed or ended wait keeps its state)
+    made_waits = []
+    for w in waits:
+        eid = wkeys[str(w["key"])]
+        d = (est.docs or {}).get(eid)
+        p = {"name": str(w.get("title") or w["key"])[:120], "title": str(w.get("title") or w["key"])[:200],
+             "condition": w["condition"], "goal": goal, "plan_key": str(w["key"])}
+        if d is None:
+            est.upsert(QuantumEntity(eid=eid, cls=WAIT, properties={**p, "status": OPEN, "blocks": [],
+                                                                    "silent_birth": True}), embedder=None)
+            made_waits.append(eid)
         else:
             d.properties = {**(d.properties or {}), **p}
             est.upsert(d, embedder=None)
@@ -298,7 +386,7 @@ def apply_plan(srv, goal: str, plan) -> dict:
     est.upsert(g, embedder=None)
     for c in new_cards:
         _escalate_card(srv, goal, c)
-    return {"ok": True, "tasks": made, "cards": new_cards, "dropped": dropped}
+    return {"ok": True, "tasks": made, "cards": new_cards, "waits": made_waits, "dropped": dropped}
 
 
 def recount(srv, goal: str) -> int:
@@ -308,7 +396,8 @@ def recount(srv, goal: str) -> int:
     est = srv.entity_store
     n_changed = 0
     for d in list((est.docs or {}).values()):
-        if d.cls != TASK or (d.properties or {}).get("goal") != goal or (d.properties or {}).get("status") != OPEN:
+        if d.cls not in (TASK, WAIT) or (d.properties or {}).get("goal") != goal \
+                or (d.properties or {}).get("status") != OPEN:
             continue
         n = sum(1 for b in _blockers_of(est, d.eid) if _unfinished(b))
         if (d.properties or {}).get("open_blockers") != n:
@@ -407,6 +496,66 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str 
     return res
 
 
+def _condition_error(cond) -> str | None:
+    """Why a wait's condition can't be checked, or None."""
+    if not isinstance(cond, dict):
+        return "a wait needs a condition: {field, prop, equals} or {method, args}"
+    if cond.get("method"):
+        if "." not in str(cond["method"]).strip(".") or not isinstance(cond.get("args", {}), dict):
+            return "a method condition is {method: '<object>.<method>', args: {...}}"
+        return None
+    if cond.get("field") and cond.get("prop") and "equals" in cond:
+        return None
+    return "a wait needs a condition: {field, prop, equals} or {method, args}"
+
+
+def _condition_holds(srv, cond: dict) -> tuple[bool, str]:
+    """(holds, what was seen) for a wait's condition."""
+    est = srv.entity_store
+    if cond.get("method"):
+        from . import night as N
+        obj, _, name = str(cond["method"]).rpartition(".")
+        why = N.direct_exec_refusal(est, obj, name)     # the executor: refused as on the adapter's route
+        if why:
+            return False, f"{cond['method']} refused: {why}"
+        r = N.method_call(srv, est, getattr(srv, "efield", None), getattr(srv, "membrane", None),
+                          obj, name, dict(cond.get("args") or {}))
+        rc = r.get("rc") if isinstance(r, dict) and r.get("rc") is not None else \
+            (0 if isinstance(r, dict) and r.get("ok", True) and r.get("status", "ok") == "ok" else 1)
+        head = str((r.get("head") or r.get("error") or "") if isinstance(r, dict) else r)[:300]
+        return rc == 0, f"{cond['method']} rc {rc}: {head}"
+    ent = est.resolve(str(cond["field"]), exact=True)
+    if ent is None:
+        return False, f"no entity {cond['field']}"
+    seen = (ent.properties or {}).get(str(cond["prop"]))
+    return seen == cond.get("equals"), f"{ent.eid}.{cond['prop']} = {seen!r}"
+
+
+def check_wait(srv, wait: str, now: float | None = None) -> str:
+    """One check of an armed wait (the `goal-graph wait check` trigger's effect): done when
+    its condition holds, failed past its deadline, else still armed. -> the receipt."""
+    est = srv.entity_store
+    d = (est.docs or {}).get(wait)
+    if d is None or d.cls != WAIT or (d.properties or {}).get("status") != ARMED:
+        return "not an armed wait"
+    now = float(now if now is not None else time.time())
+    p = dict(d.properties or {})
+    p.setdefault("armed_ts", now)
+    try:
+        ok, seen = _condition_holds(srv, p.get("condition") or {})
+    except Exception as e:                       # noqa: BLE001 -- a broken check is a check that failed
+        ok, seen = False, f"the check raised {type(e).__name__}: {e}"[:300]
+    p.update({"last_check_ts": now, "last_check_result": seen})
+    if ok:
+        p.update({"status": DONE, "receipt": seen, "ended_ts": now})
+    elif now - float(p["armed_ts"]) >= WAIT_DEADLINE_S:
+        p.update({"status": FAILED, "receipt": f"unmet after {WAIT_DEADLINE_S // 60} min: {seen}",
+                  "ended_ts": now})
+    d.properties = p
+    est.upsert(d, embedder=None)
+    return seen
+
+
 def reowe(srv) -> int:
     """Boot: a task owed or running when the seat stopped goes back to the pool."""
     est = srv.entity_store
@@ -422,7 +571,7 @@ def reowe(srv) -> int:
 # ---- reading -------------------------------------------------------------------------------------
 def view(est, goal: str) -> dict:
     """The goal's graph: its tasks (what each waits on, its state, its receipt) and cards."""
-    tasks, cards = [], []
+    tasks, cards, waits = [], [], []
     docs = list((est.docs or {}).values())
     for d in docs:
         p = d.properties or {}
@@ -433,10 +582,15 @@ def view(est, goal: str) -> dict:
                           "waits_on": [b.eid for b in _blockers_of(est, d.eid) if _unfinished(b)],
                           "open_blockers": p.get("open_blockers"), "result": p.get("result"),
                           "receipt": p.get("receipt")})
+        elif d.cls == WAIT:
+            waits.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"),
+                          "condition": p.get("condition"), "blocks": p.get("blocks") or [],
+                          "waits_on": [b.eid for b in _blockers_of(est, d.eid) if _unfinished(b)],
+                          "last_check": p.get("last_check_result"), "receipt": p.get("receipt")})
         elif d.cls == "Decision":
             cards.append({"eid": d.eid, "name": p.get("name"), "status": p.get("status"),
                           "blocks": p.get("blocks") or [], "value": p.get("value")})
-    return {"tasks": tasks, "cards": cards,
+    return {"tasks": tasks, "cards": cards, "waits": waits,
             "running": [t["eid"] for t in tasks if t["status"] == RUNNING],
             "ready": [t["eid"] for t in tasks if t["status"] == OWED]}
 
@@ -449,8 +603,8 @@ The goal's graph now:
 {graph}
 
 Work the goal as a graph. Write ONE plan with entity_edit on the goal:
-  entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "drop": ["<key no longer needed>"]}}}}
-A task is one worker turn of concrete work. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Keep existing keys to update a task; a running or finished task keeps its state. Read the entity back for plan_result.
+  entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
+A task is one worker turn of concrete work. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every {check_s} s (a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after {deadline_min} min (you are asked again then). Never make a task wait inside its turn. Keep existing keys to update a task; a running or finished task keeps its state. Read the entity back for plan_result.
 When every task is done and the receipts prove the goal, close it with fulfill and the receipt. When the graph needs nothing new, write no plan.
 End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
 
@@ -469,6 +623,10 @@ def _graph_lines(est, goal: str) -> str:
     out = [f"- task {t['eid']} [{t['status']}] {t['title']}"
            + (f" (waits on {', '.join(t['waits_on'])})" if t["waits_on"] else "")
            + (f" -- receipt: {str(t['receipt'])[:160]}" if t.get("receipt") else "") for t in v["tasks"]]
+    out += [f"- wait {w['eid']} [{w['status']}] {w['title']}"
+            + (f" (waits on {', '.join(w['waits_on'])})" if w["waits_on"] else "")
+            + (f" -- {str(w.get('receipt') or w.get('last_check') or '')[:160]}" if (w.get("receipt") or w.get("last_check")) else "")
+            for w in v["waits"]]
     out += [f"- card {c['eid']} [{c['status']}] {c['name']}" + (f" = {c['value']}" if c.get("value") is not None else "")
             for c in v["cards"]]
     return "\n".join(out) or "(empty: nothing planned yet)"
@@ -478,7 +636,8 @@ def planner_text(est, goal: str, why: str) -> str:
     g = (est.docs or {}).get(goal)
     p = (g.properties or {}) if g is not None else {}
     text = p.get("text") or p.get("summary") or p.get("name") or goal
-    return PLANNER_TEXT.format(goal=goal, text=str(text)[:1200], why=str(why)[:400], graph=_graph_lines(est, goal))
+    return PLANNER_TEXT.format(goal=goal, text=str(text)[:1200], why=str(why)[:400], graph=_graph_lines(est, goal),
+                               check_s=WAIT_CHECK_S, deadline_min=WAIT_DEADLINE_S // 60)
 
 
 def worker_text(est, task: str) -> str:
