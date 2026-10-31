@@ -204,7 +204,7 @@ class TestRestartHoldsWhileBusy647(unittest.TestCase):
 
     def test_the_hold_returns_when_the_seat_goes_idle(self):
         seq = [["turn s1"], ["turn s1"], []]
-        with mock.patch.object(RS, "busy", side_effect=lambda s: seq.pop(0)) as b, \
+        with mock.patch.object(RS, "busy", side_effect=lambda s, people_only=False: seq.pop(0)) as b, \
              mock.patch.object(RS.time, "sleep") as sl:
             held = RS.hold_until_idle(_Srv())
         self.assertEqual(held, ["turn s1"])

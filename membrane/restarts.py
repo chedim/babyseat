@@ -19,8 +19,9 @@ changes nothing by itself.
 A PLANNED RESTART ASKS FIRST (the operator: "and let them delay it if
 they're busy or need some time to shut down stuff gracefully"): the
 heads-up names what restarts and why; his reply DELAY <minutes> (up to
-MAX_DELAY_MIN) or GO decides, and a turn or loop still running holds it
-until idle (the same cap). A deploy asks through ASK_FILE (seat-install
+MAX_DELAY_MIN) or GO decides, and a person's turn still running holds it
+until idle (the same cap); a loop's turn never holds it -- the teardown cuts it
+and the boot re-queues its work (#777). A deploy asks through ASK_FILE (seat-install
 writes it, the panel's refresh answers in ANSWER_FILE); an HA restart
 asks over POST /membrane/seat/restart-ask.
 
@@ -215,16 +216,23 @@ def parse_delay(reply: str | None) -> int:
     return max(0, min(MAX_DELAY_MIN, int(m.group(1))))
 
 
-def busy(srv) -> list[str]:
-    """What is still running: a chat turn mid-flight, a loop."""
+def busy(srv, people_only: bool = False) -> list[str]:
+    """What is still running: a chat turn mid-flight, a loop. people_only (#777):
+    only a person's turns -- a loop's turn is interrupted by a restart and its work
+    re-queued at boot, so it never holds one."""
     out = []
     r = getattr(srv, "_loop_runner", None)
     store = getattr(r, "sessions", None)
+    rows = getattr(store, "sessions", None) or {}
     # #655: read each session the way /session/status does; no except here,
     # so a signature slip fails loudly instead of hiding every turn.
-    for sid in list(getattr(store, "sessions", None) or []):
+    for sid in list(rows):
         if (r.status(sid) or {}).get("type") == "busy":
+            if people_only and not _is_person_session(rows, sid):
+                continue
             out.append(f"turn {sid}")
+    if people_only:
+        return out
     try:
         n = srv.loops.running()
         if n:
@@ -232,6 +240,15 @@ def busy(srv) -> list[str]:
     except Exception:
         pass
     return out
+
+
+def _is_person_session(rows, sid: str) -> bool:
+    """A person's chat (its agent build / plan / phone / speaker / none), not a loop's."""
+    from .lanes import _CHAT_AGENTS
+    row = rows.get(sid) if isinstance(rows, dict) else None
+    if not isinstance(row, dict):
+        return True                         # nothing says it is a loop's: hold for it
+    return str(row.get("agent") or "").strip().lower() in _CHAT_AGENTS
 
 
 def _row_text(row: dict) -> str:
@@ -271,7 +288,8 @@ def waiting_messages(srv, since_ms: int) -> list[str]:
 
 
 def hold_until_idle(srv, since_ms: int | None = None) -> list[str]:
-    """#647: wait until no turn or loop runs, up to MAX_DELAY_MIN; returns what
+    """#647: wait until no person's turn runs (#777: loops never hold a restart --
+    their turns are cut and their work re-queued at boot), up to MAX_DELAY_MIN; returns what
     it last saw running (empty = idle). The caller's own turn ends once its
     call returns, so a restart asked from inside one waits for it to finish.
     #711: with since_ms (when the restart was scheduled), a person's message
@@ -279,7 +297,7 @@ def hold_until_idle(srv, since_ms: int | None = None) -> list[str]:
     cap = time.time() + MAX_DELAY_MIN * 60
     held: list[str] = []
     while True:
-        b = busy(srv)
+        b = busy(srv, people_only=True)
         if since_ms is not None:
             b += [f"message {sid}" for sid in waiting_messages(srv, since_ms)]
         if not b:
@@ -302,7 +320,7 @@ def ask(srv, what: str, reason: str, in_s: int = 60, wait_idle: bool = True) -> 
     held = []
     if wait_idle:
         while time.time() < cap:
-            b = busy(srv)
+            b = busy(srv, people_only=True)
             if not b:
                 break
             held = b
@@ -587,7 +605,7 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
     import signal
     for t in threading.enumerate():             # #647 review: one restart waits at a time
         if t.name == "restart" and t.is_alive():
-            return {"rc": 0, "text": f"a restart is already waiting on {', '.join(busy(srv)) or 'the seat'} -- "
+            return {"rc": 0, "text": f"a restart is already waiting on {', '.join(busy(srv, people_only=True)) or 'the seat'} -- "
                             "you'll get a notice when the seat is back"}
     pend = _pending(srv) or {}
     files = ", ".join(pend.get("files") or [])
@@ -613,7 +631,7 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
             pass
         os.kill(os.getpid(), signal.SIGTERM)
     threading.Thread(target=bye, daemon=True, name="restart").start()
-    waiting = busy(srv)
+    waiting = busy(srv, people_only=True)
     text = (f"restarting once {', '.join(waiting)} finish(es) (up to {MAX_DELAY_MIN} min) -- "
             if waiting else f"restarting in {delay_s:g}s -- ") + "you'll get a notice when the seat is back"
     try:
