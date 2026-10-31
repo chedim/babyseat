@@ -275,7 +275,10 @@ def test_a_worker_that_raises_ends_stuck_and_replans(seat):
 
 def test_the_lanes_have_their_own_slots():
     lr = WA.LoopRunner(3)
-    assert lr.admit(WA.LoopDesc("planner", eid="g1")) and not lr.admit(WA.LoopDesc("planner", eid="g2"))
+    ps = [lr.admit(WA.LoopDesc("planner", eid=f"g{i}")) for i in range(GG.PLANNERS + 1)]
+    assert ps == [True] * GG.PLANNERS + [False]
+    lr2 = WA.LoopRunner(3)
+    assert lr2.admit(WA.LoopDesc("planner", eid="g1")) and not lr2.admit(WA.LoopDesc("planner", eid="g1"))   # never one goal twice
     ws = [lr.admit(WA.LoopDesc("worker", eid=f"t{i}")) for i in range(GG.WORKERS + 1)]
     assert ws == [True] * GG.WORKERS + [False]
     assert all(lr.admit(WA.LoopDesc("watch", eid=f"w{i}")) for i in range(3))   # the other loops keep theirs
