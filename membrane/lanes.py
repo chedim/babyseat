@@ -4134,14 +4134,20 @@ def _entity_points(srv, fld, m: int = 400) -> list[dict]:
             for i, d in enumerate(rows)]
 
 
-def _is_worker_turn(srv, body: dict) -> bool:
-    """#768: is this turn a goal-graph worker's? Its session (the body's
-    `_turn_sid`) carries the agent loop_session stamped: 'worker: <task>'."""
+_CHAT_AGENTS = ("", "build", "plan", "phone", "speaker")     # a person's turn
+
+
+def _is_loop_turn(srv, body: dict) -> bool:
+    """#768 / #776: is this turn a loop's (a worker, the planner, a watch loop, a
+    triage pass)? Its session (the body's `_turn_sid`) carries the agent
+    loop_session stamped ('worker: <task>', 'planner: <goal>', 'watch: <eid>');
+    a person's chat carries build / plan / phone / speaker."""
     sid = str((body or {}).get("_turn_sid") or "")
     store = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
     row = (getattr(store, "sessions", None) or {}).get(sid) if sid else None
-    from .goalgraph import LANE_WORKER
-    return str((row or {}).get("agent") or "").startswith(LANE_WORKER + ":")
+    if row is None:
+        return False
+    return str(row.get("agent") or "").strip().lower() not in _CHAT_AGENTS
 
 
 def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
@@ -4154,9 +4160,9 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     _st = types.SimpleNamespace(mark=mark)
     _is_tool_round = is_tool_round
     ctx = None
-    # #768: a worker's task text carries what it needs; its banner's recall
-    # only queued a person's turn behind it
-    _no_banner = getattr(srv, "no_banner", False) or _is_worker_turn(srv, body)
+    # #768 / #776: a loop's task text carries what it needs; its banner's
+    # recall only queued a person's turn behind it
+    _no_banner = getattr(srv, "no_banner", False) or _is_loop_turn(srv, body)
     if _injection_mode(srv) == "conversation":
         fld = _efield_on(srv)
         efield_mark = None
