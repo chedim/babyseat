@@ -117,3 +117,16 @@ def test_a_done_task_listed_again_keeps_its_state(seat):
     settle(seat)
     write(seat, GOAL, "plan", {"tasks": [{"key": "a", "title": "do a"}]})
     assert st(seat, A) == "done"
+
+
+def test_a_plan_drops_a_stuck_task_and_what_it_blocked_moves_on(seat):
+    """A wait planned after a push that got stuck: dropping the stuck push (a new one
+    done) lets the wait arm -- a stuck task must not block the graph for good."""
+    write(seat, GOAL, "plan", {"tasks": [{"key": "a", "title": "push"}, {"key": "b", "title": "answer", "after": ["a"]}]})
+    assert GG.take(seat, A)
+    GG.finish(seat, A, "stuck", "cut off")
+    settle(seat)
+    b = GG.task_eid(GOAL, "b")
+    assert st(seat, b) == "open"
+    write(seat, GOAL, "plan", {"drop": ["a"]})
+    assert st(seat, A) == "dropped" and st(seat, b) == "owed"
