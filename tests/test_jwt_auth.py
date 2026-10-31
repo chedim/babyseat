@@ -411,6 +411,9 @@ class TestProxyGate(unittest.TestCase):
     def setUp(self):
         self.env = _jwt_env(MEMBRANE_JWT_SECRET=SECRET)
         self.env.start()
+        off = mock.patch("membrane.seatauth.is_loopback", lambda h: False)         # an off-box caller: a bare loopback one is the seat
+        off.start()
+        self.addCleanup(off.stop)
         from membrane import opencode as OC
         self.chat = mock.patch.object(OC.MembraneOpenAIHandler, "_v1_chat", _canned_chat)
         self.chat.start()
@@ -590,6 +593,9 @@ class TestServeGate(unittest.TestCase):
         self.env = _jwt_env(MEMBRANE_JWT_SECRET=SECRET, MEMBRANE_DATA_DIR=self.tmp.name,
                             MEMBRANE_STANDALONE="1")
         self.env.start()
+        off = mock.patch("membrane.seatauth.is_loopback", lambda h: False)         # an off-box caller: a bare loopback one is the seat
+        off.start()
+        self.addCleanup(off.stop)
         self.alice = J.mint(SECRET, "alice", name="Alice")
         self.bob = J.mint(SECRET, "bob", name="Bob")
 

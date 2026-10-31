@@ -15,7 +15,9 @@ at boot, 0600) signs; config() itself never writes. When on:
   - the token's identity is who said it: a client's own speaker line is
     stripped and '[user#<sub>: <name>]' stamped instead (speakers.py);
   - the seat's own loopback callers carry an internal token minted here
-    (sub 'seat:internal'); there is no bare-loopback exemption.
+    (sub 'seat:internal'); a bare loopback caller (this machine, no token,
+    no forwarding header) passes as that same internal identity, as with
+    JWT off; a token it does send is checked like any other.
 
 Tokens: HS256 only, a shared secret (>= 32 bytes), verified with the stdlib.
 `exp` is required, `nbf`/`iat` are checked with a small leeway, `sub` is
@@ -78,6 +80,10 @@ class Identity:
     @property
     def internal(self) -> bool:
         return self.sub == INTERNAL_SUB
+
+
+# a bare loopback caller (no token, no forwarding header): the seat's own, as with JWT off
+LOOPBACK = Identity(INTERNAL_SUB, claims={"loopback": True})
 
 
 @dataclass(frozen=True)
@@ -509,6 +515,11 @@ def gate(handler, cookie: bool = False, basic: bool = False, public: bool = Fals
         _write_json(handler, 503, {"error": {"message": "authentication is misconfigured",
                                              "type": "unavailable"}})
         return False
+    if ident is None and not _all(handler.headers, "Authorization") \
+            and not (cookie and any(COOKIE in str(v) for v in _all(handler.headers, "Cookie"))):
+        from .seatauth import is_loopback
+        if hasattr(handler, "client_address") and is_loopback(handler):
+            ident = LOOPBACK                 # this machine, no token: the seat itself, as with JWT off
     handler._identity = ident
     if ident is not None or public:
         return True

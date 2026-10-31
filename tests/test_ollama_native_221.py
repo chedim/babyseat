@@ -409,8 +409,9 @@ class TestJwt(_Seam):
 
     def test_no_token_401(self):
         for p in ("/api/chat", "/api/generate"):
-            code, raw, hd = self._req(p, {"model": "m", "prompt": "x",
-                                          "messages": [{"role": "user", "content": "x"}]})
+            with mock.patch("membrane.seatauth.is_loopback", lambda h: False):      # off-box
+                code, raw, hd = self._req(p, {"model": "m", "prompt": "x",
+                                              "messages": [{"role": "user", "content": "x"}]})
             self.assertEqual(code, 401, p)
             self.assertTrue(hd.get("WWW-Authenticate", "").startswith("Bearer"))
         self.assertEqual(_scripted_turn.seen, [])

@@ -162,7 +162,8 @@ class TestRoute(unittest.TestCase):
     def test_behind_the_jwt_gate(self):
         from membrane import jwtauth as J
         with _jwt_env(MEMBRANE_JWT_SECRET=SECRET):
-            self.assertEqual(self._get("/membrane/self/sheet")[0], 401)
+            with mock.patch("membrane.seatauth.is_loopback", lambda h: False):      # off-box
+                self.assertEqual(self._get("/membrane/self/sheet")[0], 401)
             code, body = self._get("/membrane/self/sheet", tok=J.mint(SECRET, "alice"))
         self.assertEqual(code, 200)
         self.assertIn("header", body)
@@ -512,7 +513,8 @@ class TestDockRoute(TestRoute):
     def test_toy_state_behind_the_jwt_gate(self):
         from membrane import jwtauth as J
         with _jwt_env(MEMBRANE_JWT_SECRET=SECRET):
-            self.assertEqual(self._get("/membrane/toybox/state")[0], 401)
+            with mock.patch("membrane.seatauth.is_loopback", lambda h: False):      # off-box
+                self.assertEqual(self._get("/membrane/toybox/state")[0], 401)
             self.assertEqual(self._get("/membrane/toybox/state", tok=J.mint(SECRET, "bob"))[0], 200)
 
     def test_the_relay_forwards_toy_state_read_only(self):
