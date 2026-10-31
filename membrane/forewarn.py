@@ -240,6 +240,12 @@ class Forewarn:
         return fa
 
     # ---- the listener ----------------------------------------------------------------
+    def prepare(self, ev: dict) -> None:
+        """EntityField.step_prepare: the act's embedding, made before the field lock is
+        taken, so the listener (called under it) never waits on the embedder."""
+        if enabled() and _kind(ev) == "obs":
+            self._act_vec(ev)
+
     def listener(self, key: str, ev: dict, x) -> None:
         """EntityField.listeners: cheap, never raises."""
         if not enabled():

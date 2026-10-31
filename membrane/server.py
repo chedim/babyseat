@@ -3215,7 +3215,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
                                     **_W.headers()})       # as the buffered call: the turn's chain + writer
         seen: dict = {}                      # this round's last usage (#472)
         try:
-            return _read_stream(req, on_event, seen)
+            return _read_stream(req, on_event, seen, body.get("_turn_sid"))
         except Exception as e:
             # A BROKEN ROUND KEEPS ITS COST (#472): the usage the stream had
             # carried so far rides the exception to the turn
@@ -3226,7 +3226,31 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     pass
             raise
 
-    def _read_stream(req, on_event, seen):
+    def _open_round(req, sid):
+        """The round's request, its socket registered under the turn BEFORE the proxy
+        answers (2026-10-31: a round waiting in the proxy's gate had no socket the
+        stop button or the watchdog could close, so the session stayed busy); the
+        proxy's backend response replaces it once it exists."""
+        import http.client
+        _r = runner if runner is not None else ((cell or {}).get("runner") if cell else None)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=CLOUD_TIMEOUT_S)
+        socks = getattr(_r, "_turn_sockets", None) if (_r is not None and sid) else None
+        if isinstance(socks, dict):
+            socks.setdefault(sid, conn)
+        try:
+            conn.request(req.get_method(), req.selector, body=req.data, headers=dict(req.header_items()))
+            resp = conn.getresponse()
+        except BaseException:
+            conn.close()
+            raise
+        finally:
+            if isinstance(socks, dict) and socks.get(sid) is conn:
+                socks.pop(sid, None)
+        if resp.status >= 400:
+            raise urllib.error.HTTPError(req.full_url, resp.status, resp.reason, resp.headers, resp)
+        return resp
+
+    def _read_stream(req, on_event, seen, sid=None):
         content, reasoning, tcs = [], [], {}
         usage, ext, finish = None, None, None
         provider = None                      # the answering provider's stamp (#384)
@@ -3234,7 +3258,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         capped = None                        # ...and its ceiling, when hit (#425)
         done = False
         cut = None                           # why the round ended early (#449)
-        with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
+        with _open_round(req, sid) as resp:
             for raw in resp:
                 line = raw.strip()
                 if not line.startswith(b"data:"):
