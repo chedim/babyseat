@@ -2,6 +2,7 @@
 listener embedded each tool call's act over HTTP inside apply_pending's lock, so every
 reader -- the chat's recall, the night, the dreamer -- waited minutes behind the network)."""
 import sys
+import threading
 import unittest
 from pathlib import Path
 
@@ -21,9 +22,25 @@ class LockWatchingEmbedder(FakeEmbedder):
         self.under_lock = 0
 
     def embed(self, texts):
-        if self.field is not None and self.field._lock.locked():
+        if self.field is not None and _held(self.field._lock):
             self.under_lock += 1
         return super().embed(texts)
+
+
+def _held(lock) -> bool:
+    """Is the lock held (by any thread)? Tried from another thread, so an RLock the
+    caller holds counts too (RLock.locked() is 3.14+ only)."""
+    got = []
+
+    def probe():
+        ok = lock.acquire(blocking=False)
+        got.append(ok)
+        if ok:
+            lock.release()
+    t = threading.Thread(target=probe)
+    t.start()
+    t.join()
+    return not got[0]
 
 
 def _field():
