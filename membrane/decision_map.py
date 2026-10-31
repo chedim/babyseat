@@ -8,7 +8,8 @@ store) with a ``status`` that moves right to left:
 
 A card tagged work_needed=False closes on the answer; one needing work stays
 decided until a watcher loop moves it to in_flight, and it closes only once a
-receipt is on it. The operator may also drop an open card. An agent may work on an
+receipt is on it. The operator may also drop an open card; an agent may drop one
+only with a non-empty ``dropped_why`` set first (#758). An agent may work on an
 undecided card without committing to it: reversible drafts go in its ``speculative``
 property; the card stays open (no in_flight, no close) until the answer, which keeps
 the drafts only if it is the pick they assumed. (Cards without a work_needed tag are
@@ -40,7 +41,7 @@ STATUS_DECIDED = "decided"
 STATUS_CLOSED = "closed"
 STATUS_DROPPED = "dropped"
 STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_DECIDED, STATUS_CLOSED, STATUS_DROPPED)
-AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_CLOSED)    # what entity_edit may set
+AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_CLOSED, STATUS_DROPPED)    # what entity_edit may set
 LOCKED = (STATUS_CLOSED, STATUS_DROPPED)
 ANSWER_OWNED = ("value", "set_by", "set_at")        # only answer() writes these
 SPECULATIVE = "speculative"     # reversible drafts an agent attaches to an undecided card
@@ -85,6 +86,11 @@ def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
             return "only a decided or in-flight card closes"
         if not str((props or {}).get("receipt") or "").strip():
             return "a card closes with a receipt: set its receipt property first"
+    if key == "status" and value == STATUS_DROPPED:     # #758: an agent drops a stale card, saying why
+        if cur not in (None, STATUS_OPEN) or (props or {}).get("value") is not None:
+            return "only an open card can be dropped"
+        if not str((props or {}).get("dropped_why") or "").strip():
+            return "a card drops with a reason: set its dropped_why property first"
     if key == "status" and value not in AGENT_STATUSES:
         return (f"a card's status is set to one of {', '.join(AGENT_STATUSES)} "
                 f"here; only the operator's answer makes it decided")
@@ -199,8 +205,9 @@ PLANTED_BY = "planted_by"      # stamped at creation by the lane: "watch" (a wat
 def _tell(est, p: dict, ev: dict, text: str, pool=None) -> None:
     """Where a decision event goes: the watcher pool when a watch loop planted
     the card, else one message into the card's own chat (it starts a turn).
-    Only the operator's owner-only route answers or drops, so a turn that
-    message starts cannot fire another."""
+    Only the operator's owner-only route answers or drops (an agent's drop,
+    through entity_edit, comes here too via ``tell_drop`` and says so in
+    ``dropped_by``), so a turn that message starts cannot fire another."""
     pool = pool if pool is not None else getattr(est, "_events_pool", None)
     sid = str(p.get("chat") or "")
     hook = getattr(est, "_decision_chat", None)
@@ -281,7 +288,7 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
 
 def drop(est, spec: str) -> dict:
     """The operator drops an open card without answering it. Owner-only at the
-    route; entity_edit refuses status dropped, so an agent never drops."""
+    route; an agent drops through entity_edit, only with a dropped_why (#758)."""
     from .entities import CLASS_DECISION
     with _ANSWER_LOCK:
         if est is None:
@@ -292,16 +299,28 @@ def drop(est, spec: str) -> dict:
         p = ent.properties or {}
         if _status(p) != STATUS_OPEN:
             return {"ok": False, "conflict": True, "error": "only an open card can be dropped"}
-        p.update({"status": STATUS_DROPPED, "set_by": "operator",
+        p.update({"status": STATUS_DROPPED, "set_by": "operator", "dropped_by": "operator",
                   "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "value_ts": time.time()})
         ent.properties = p
         est.upsert(ent)
-        _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
-                       "value": "dropped", "blocks": p.get("blocks") or [],
-                       "work_needed": False, "ts": time.time()},
-              f"[decision] {p.get('name') or ent.eid} = dropped")
+        tell_drop(est, ent)
         return {"ok": True, "card": _card_of(ent)}
+
+
+def tell_drop(est, ent) -> None:
+    """The one tail of every drop: the decision event (operator's drop() and an
+    agent's entity_edit alike), so a parked goal or the watcher pool hears it."""
+    p = ent.properties or {}
+    _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
+                   "value": "dropped", "blocks": p.get("blocks") or [],
+                   "work_needed": False, "ts": time.time()},
+          f"[decision] {p.get('name') or ent.eid} = dropped")
+
+
+def stamp_agent_drop(props: dict) -> None:
+    """An agent's drop (status -> dropped via entity_edit): same stamps as drop()."""
+    props.update({"dropped_by": "agent", "value_ts": time.time()})
 
 
 def goals(est, active=()) -> dict:
