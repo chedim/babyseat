@@ -259,7 +259,11 @@ def import_catalog(srv, cat) -> dict:
     # state push), and only domains holding an exposed entity get service methods.
     # A non-exposed entity keeps the manual opt-in (its own ha_entity, if the seat set it).
     exposed_doms = {d for d, es in by_domain.items() if any(e.get("exposed") for e in es)}
-    domains = set(by_domain)
+    # A domain with services but no entities at all (mqtt.publish) is entity-less: it keeps
+    # its class and methods; only a domain whose entities are all unexposed loses them.
+    entityless = {d for d in services if d not in by_domain}
+    exposed_doms |= entityless
+    domains = set(by_domain) | entityless
     n_ent = n_m = 0
     for dom in sorted(domains):
         cls = _ensure(est, f"{ROOT}:{dom}", {"ha_domain": dom}, parent=root.eid,
