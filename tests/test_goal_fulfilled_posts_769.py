@@ -63,3 +63,13 @@ def test_unfulfilled_close_posts_nothing(monkeypatch):
     est.edit(eid, properties={"convs": ["ses_A"], "status": "open"})
     WA.notify_goal_fulfilled(est, est._events_pool, eid, by="planner", evidence="not a close")
     assert est.sent == []
+
+
+def test_open_goal_is_not_marked_announced_so_its_later_close_posts(monkeypatch):
+    srv, est = _seat(monkeypatch)
+    eid = _goal(est)
+    est.edit(eid, properties={"convs": ["ses_A"], "status": "open", "fulfilled_ts": 100.0})
+    WA.notify_goal_fulfilled(est, est._events_pool, eid, by="planner", evidence="early")
+    assert "fulfilled_announced" not in (est.docs[eid].properties or {})
+    _close(est, eid)
+    assert est.sent == [("ses_A", f"goal {eid} fulfilled: rc=0 all green")]

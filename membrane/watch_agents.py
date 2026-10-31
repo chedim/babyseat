@@ -1741,7 +1741,9 @@ def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
     `convs`; it starts a turn there), a chatless goal (or no runner wired) puts
     ONE `goal-fulfilled` event into the loops' pool. Announced once per close:
     the stamp is the close's `fulfilled_ts`, so a goal that is reopened and
-    closed again is announced again."""
+    closed again is announced again. A goal still `open` is skipped BEFORE the
+    stamp, so it is never marked announced. The line is `goal <eid> fulfilled:
+    <evidence>`, sent through `escalate` when the seat is wired, else `_tell`."""
     from . import decision_map as _DM
     ent = (est.docs or {}).get(goal_eid) if est is not None else None
     props = (ent.properties if ent is not None else None) or {}
@@ -1750,6 +1752,8 @@ def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
           "by": str(by or props.get("fulfilled_by") or "")[:40],
           "evidence": " ".join(str(evidence or props.get("fulfilled_evidence") or "").split())[:300],
           "ts": time.time()}
+    if str(props.get("status") or "") == "open":
+        return {"kind": "goal-fulfilled", "entity": ev["entity"], "skipped": "open"}
     if ent is not None:
         close = props.get("fulfilled_ts") or 0.0
         if "fulfilled_announced" in props and props["fulfilled_announced"] == close:
@@ -1760,8 +1764,6 @@ def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
             est.upsert(ent, embedder=None)
         except Exception:
             pass
-    if str(props.get("status") or "") == "open":
-        return {"kind": "goal-fulfilled", "entity": ev["entity"], "skipped": "open"}
     line = f"goal {ev['entity']} fulfilled: {ev['evidence']}"
     chat = str(((props.get("convs") or [""])[-1]) or "")
     if getattr(est, "_srv", None) is not None:
