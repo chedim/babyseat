@@ -257,6 +257,7 @@ from .lanes import (  # noqa: E402,F401
     _pick_idle_cortex_model,
     _pick_listen_port,
     _pick_serve_port,
+    port_pinned,
     _port_free,
     _print_intercept,
     _probe_embedder,
@@ -415,7 +416,9 @@ def _build_ap():
                     "agent (math/state answered internally; model work proxied "
                     "to Ollama).")
     ap.add_argument("--listen", type=int, default=11500,
-                    help="port for the membrane OpenAI-compatible proxy")
+                    help="port for the membrane OpenAI-compatible proxy "
+                         "(default 11500, walks up if taken; passed = "
+                         "pinned: busy exits)")
     ap.add_argument("--listen-host", dest="listen_host", default=None,
                     help="the /v1 proxy's bind address (default 0.0.0.0 -- "
                          "the LAN; its write/exec routes carry NO auth; "
@@ -651,7 +654,8 @@ def _build_ap():
                          "old opencode child lane.")
     ap.add_argument("--serve-port", type=int, default=4096,
                     help="port for the native serve surface (default "
-                         "4096; walks up if taken)")
+                         "4096, walks up if taken; passed = pinned: "
+                         "busy exits)")
     ap.add_argument("--serve-host", default="0.0.0.0",
                     help="bind address for the serve surface (default "
                          "0.0.0.0 -- WiFi/VPN reach; 127.0.0.1 keeps it "
@@ -793,14 +797,23 @@ def main() -> None:
     # the probes ask the address each real bind will use (the wildcard
     # 0.0.0.0 a loopback probe blesses even while another seat holds it --
     # the silent Errno 48 boot death, 2026-10-13)
-    listen = _pick_listen_port(args.listen, host=proxy_bind_host(args))
+    # #760: a port the person passed is pinned (busy = a loud exit); the
+    # defaults and a restart's carried ports walk
+    from .restarts import was_reexec as _was_reexec
+    _argv = sys.argv[1:]
+    _boot_reexec = _was_reexec()    # read once: the read clears the marker
+    _listen_pinned = port_pinned(_argv, "--listen", reexec=_boot_reexec)
+    _serve_pinned = port_pinned(_argv, "--serve-port", reexec=_boot_reexec)
+    listen = _pick_listen_port(args.listen, host=proxy_bind_host(args),
+                               pinned=_listen_pinned)
     if listen != args.listen:
         print(f"[opencode] port {args.listen} busy -> using {listen} "
               f"(pass --listen to pin)", file=sys.stderr)
     serve_wanted = bool(args.serve) or bool(args.launch)
     serve_port = (_pick_serve_port(args.serve_port,
                                    host=args.serve_host if args.serve
-                                   else "127.0.0.1")
+                                   else "127.0.0.1",
+                                   pinned=_serve_pinned)
                   if serve_wanted else None)
     if serve_port is not None and serve_port != args.serve_port:
         print(f"[opencode] serve port {args.serve_port} busy -> using "
@@ -825,6 +838,10 @@ def main() -> None:
         except OSError as e:
             _serve_socket.close()
             _serve_socket = None
+            if _serve_pinned:          # #760: a pinned port never walks
+                raise SystemExit(
+                    f"[opencode] serve port {serve_port} was taken mid-boot "
+                    f"and --serve-port pins it ({e})")
             serve_port = _pick_serve_port(serve_port + 1, host=_serve_bind)
             print(f"[opencode] the serve port was taken mid-boot -> "
                   f"re-picked {serve_port} ({e})", file=sys.stderr)
@@ -2111,8 +2128,8 @@ def main() -> None:
                     _NM.plant(srv)
                 except Exception as e:
                     print(f"[seat] name entity not planted ({e})", file=sys.stderr)
-            from .restarts import was_reexec as _was_reexec
-            _reexec = _was_reexec()        # read + cleared on every boot (#243)
+            from .restarts import _BOOT as _RB
+            _reexec = bool(_RB.get("reexec"))   # read once at boot (#243, #760)
             try:                           # #711: a message that came in during the restart gets its turn
                 from .restarts import answer_dropped as _answer_dropped
                 _answer_dropped(srv)
