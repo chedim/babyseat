@@ -5832,8 +5832,13 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             except Exception as e:
                 print(f"[conv-banner] model line error: {e}", file=sys.stderr)
         _gate_s = round(time.time() - _t_v1, 2)
+        _sid_s = str(body.get("_turn_sid") or "")
+        _row_s = ((getattr(getattr(getattr(srv, "_loop_runner", None), "sessions", None), "sessions", None) or {})
+                  .get(_sid_s) or {}) if _sid_s else {}
         print(f"[proxy] turn staged: gate {_gate_s}s "
-              f"(model {str(up.get('model'))[:30]}) -- {_st.summary()}", file=sys.stderr)
+              f"(model {str(up.get('model'))[:30]}; sid {_sid_s[:20] or 'none'}, agent "
+              f"{str(_row_s.get('agent') or '?')[:40]}, loop {_is_loop_turn(srv, body)}) -- {_st.summary()}",
+              file=sys.stderr)
         _st.keep(srv, _gate_s, tool_round=_is_tool_round)
         self._gate_s = _gate_s      # the injection card's time (#693)
         try:
