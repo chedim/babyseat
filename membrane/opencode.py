@@ -1166,8 +1166,11 @@ def main() -> None:
         # folder reuses it), so the pub- and import lanes address THIS
         # seat by the same name on every restart.
         from .substrate import _origin_tag
+        # the field's Couchbase Lite database, when it has one: the entities live there
+        # too, one document each (2026-10-31: the JSON mirror was 308 MB, rewritten whole)
+        _ent_cbl = getattr(getattr(getattr(srv, "efield", None), "b", None), "db", None)
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"),
-                                       origin=_origin_tag(args.field))
+                                       origin=_origin_tag(args.field), cbl=_ent_cbl)
         # THE SEAT'S ROOT (the stale-route retire's reference): the
         # start folder = the field path's resolved parent, or its
         # parent when the parent IS .membrane

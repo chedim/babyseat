@@ -1326,8 +1326,15 @@ class EntityStore(MultiParentOps, TimelineOps):
     copies carry on."""
 
     def __init__(self, path: str | None = None, bucket: str = "cortex-core",
-                 shared: bool = True, origin: str | None = None) -> None:
+                 shared: bool = True, origin: str | None = None, cbl=None) -> None:
         self.path = Path(path) if path else None
+        # THE CBL HOME (operator, 2026-10-31: "ok, move it"): with the seat's Couchbase
+        # Lite database the store keeps its docs there, one document per entity, and a
+        # save writes only what changed (the JSON mirror had grown to 308 MB, rewritten
+        # whole every 10 s). The JSON file migrates once and stays as a backup.
+        self._cbl = cbl
+        self._cbl_sig: dict = {}
+        self._migrate = False
         self.bucket = bucket
         # THE TEST-ISOLATION GUARD (the 'doomed.py in the fork's banner'
         # bug): test stores were created with shared=True default, so
@@ -1483,7 +1490,43 @@ class EntityStore(MultiParentOps, TimelineOps):
                 ss["position"] = dict(ss["position"])
         return out
 
+    CBL_COLL = "entities"
+    CBL_TRACKS = "membrane::seat-tracks"          # a CBL id may not start with "_"
+
+    @staticmethod
+    def _cbl_key(eid: str) -> str:
+        """The entity's CBL document id: its eid, or a hash of it where CBL can't take
+        the eid (a URL entity ran past the id limit; '_' leads are reserved). The eid
+        itself rides inside the document."""
+        if eid and not eid.startswith("_") and len(eid.encode("utf-8")) <= 200:
+            return eid
+        import hashlib
+        return "membrane::h:" + hashlib.sha1(eid.encode("utf-8")).hexdigest()
+
     def _load(self) -> None:
+        if self._cbl is not None:
+            self._cbl.coll(self.CBL_COLL)          # created on the first CBL boot
+            rows = self._cbl.query(f"SELECT META().id AS k, e, d FROM membrane.{self.CBL_COLL}")
+            for r in rows:
+                k, rec = r.get("e") or r.get("k"), r.get("d")
+                if not k or k == self.CBL_TRACKS:
+                    if k == self.CBL_TRACKS and isinstance(rec, dict):
+                        self._mirror = {"tracks": rec}
+                    continue
+                q = QuantumEntity.from_doc(k, self._geometry(self._geometry_copy(rec), self._unpack))
+                if q is None:
+                    continue
+                q.properties = sanitize_properties(q.properties)
+                _stamp_guest_flavor(k, q.properties)
+                self.docs[k] = q
+            for eid, q in list(self.docs.items()):
+                self._cbl_sig[eid] = self._sig(q)
+            self._cbl_tsig = json.dumps(((self._mirror or {}).get("tracks") or {}), sort_keys=True, default=str)
+            if rows:
+                if self._mirror is None:
+                    self._mirror = {}
+                return
+            self._migrate = bool(self.path and self.path.exists())   # the first CBL boot
         if not self.path or not self.path.exists():
             return
         try:
@@ -1511,6 +1554,9 @@ class EntityStore(MultiParentOps, TimelineOps):
         doc that still can't serialize is skipped AND NAMED (the eid
         prints -- the poison is visble, not silent); the file always
         writes."""
+        if self._cbl is not None:
+            self._save_cbl()
+            return
         if not self.path:
             return
         try:
@@ -1574,6 +1620,68 @@ class EntityStore(MultiParentOps, TimelineOps):
             self._side_saved = False
             print(f"[entities] side-index save failed ({e})",
                   file=sys.stderr)
+
+    @staticmethod
+    def _sig(ent) -> tuple:
+        """What a save compares: the properties, class, links and lineage by value, the
+        geometry by identity and length (the tracker replaces position wholesale and
+        appends to its ring) -- an in-place edit without an upsert is still seen."""
+        hist = getattr(ent, "position_history", None) or []
+        try:
+            props = json.dumps(ent.properties or {}, sort_keys=True, default=str)
+        except Exception:
+            props = repr(ent.properties)
+        return (ent.cls, props, tuple(ent.links or ()), tuple(ent.derived_by or ()),
+                id(getattr(ent, "position", None)), len(hist), hist[-1][0] if hist else None)
+
+    def _save_cbl(self) -> None:
+        """The CBL save: only the docs whose signature moved are written, the docs that
+        left are purged, in one transaction queued behind the turns' reads."""
+        from . import cblite as _CB
+        try:
+            with self._store_lock:
+                live = {eid: ent for eid, ent in list(self.docs.items())
+                        if not ((ent.properties or {}).get("ephemeral"))}
+                sigs = {eid: self._sig(ent) for eid, ent in live.items()}
+                tracks = dict(self.tracks) if self.tracks else {}
+            changed = [eid for eid, sg in sigs.items() if self._cbl_sig.get(eid) != sg]
+            gone = [eid for eid in self._cbl_sig if eid not in sigs]
+            tsig = json.dumps(tracks, sort_keys=True, default=str)
+            if not changed and not gone and tsig == getattr(self, "_cbl_tsig", None) and not self._migrate:
+                self._side_saved = True
+                return
+            with _CB.background():
+                self._cbl.begin()
+                try:
+                    for eid in changed:
+                        ent = live[eid]
+                        try:
+                            ent.properties = sanitize_properties(ent.properties or {})
+                            doc = self._geometry(ent.to_doc(), self._pack)
+                            self._cbl.put_json(self.CBL_COLL, self._cbl_key(eid),
+                                               json.dumps({"e": eid, "d": doc}))
+                        except Exception as e:
+                            print(f"[entities] cbl save: doc {eid} skipped ({str(e)[:80]})",
+                                  file=sys.stderr)
+                            sigs.pop(eid, None)
+                    for eid in gone:
+                        self._cbl.purge(self.CBL_COLL, self._cbl_key(eid))
+                    if tsig != getattr(self, "_cbl_tsig", None):
+                        self._cbl.put_json(self.CBL_COLL, self.CBL_TRACKS, json.dumps({"d": tracks}))
+                finally:
+                    self._cbl.end()
+            self._cbl_sig = {eid: sg for eid, sg in sigs.items() if eid in sigs}
+            self._cbl_tsig = tsig
+            if self._migrate and self.path and self.path.exists():
+                self.path.rename(self.path.with_name(
+                    f"{self.path.name}.migrated-{_t.strftime('%Y%m%d-%H%M%S')}"))
+                print(f"[entities] migrated {len(sigs)} entities into couchbase lite; "
+                      f"the JSON file is kept as a backup", file=sys.stderr)
+            self._migrate = False
+            self._side_saved = True
+        except Exception as e:
+            self._side_saved = False
+            print(f"[entities] cbl save failed ({e})", file=sys.stderr)
 
     def _snap_to_entity(self, eid: str, props: dict, cls: str,
                         links: list, derived_by: list,
@@ -3097,6 +3205,9 @@ class EntityStore(MultiParentOps, TimelineOps):
         return out
 
     def _save_tracks(self) -> None:
+        if self._cbl is not None:
+            self.save_soon()                      # the tracks ride the next CBL save
+            return
         if not self.path:
             return
         try:
