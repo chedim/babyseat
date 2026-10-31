@@ -51,6 +51,7 @@ import json
 import os
 import threading
 import re
+import sys
 import time
 from collections import namedtuple
 
@@ -714,6 +715,8 @@ class _LoopDrainer:
         self.poll_s = poll_s
         self.alive = True
         self._t: threading.Thread | None = None
+        self._flight_lock = threading.Lock()
+        self._in_flight = 0
 
     def start(self):
         self._t = threading.Thread(target=self._run, daemon=True,
@@ -749,13 +752,39 @@ class _LoopDrainer:
             except Exception:
                 pass
             time.sleep(_poll_s)
-            for i, ev in enumerate(evs):
-                if self.handle(ev) == "requeue":
-                    # the pool is full: THIS event and the rest of the
-                    # batch go back (the old break dropped the rest)
-                    for rest in evs[i + 1:]:
-                        pool.put(rest)
-                    break
+            for ev in evs:
+                self.dispatch(ev)
+
+    def _capacity(self) -> int:
+        """How many turns may be in flight: the general loops plus every lane's own."""
+        loops = getattr(self.srv, "loops", None)
+        if loops is None:
+            return 1
+        return int(getattr(loops, "max", 1) or 1) + sum((getattr(loops, "lanes", None) or {}).values())
+
+    def dispatch(self, ev: dict) -> None:
+        """THE PARALLEL TURNS (2026-10-31, the operator: "of course it should"): each event's
+        turn runs on its own thread, so the lanes' approved sizes (3 workers, 2 planners) are
+        real -- one drainer thread used to run every turn to its end before the next. The
+        admission inside handle still caps each lane; with every slot's thread already
+        running, the event goes back to the pool untouched (no thread per waiting event)."""
+        pool = getattr(self.srv, "events_pool", None)
+        with self._flight_lock:
+            if self._in_flight >= self._capacity():
+                if pool is not None:
+                    pool.put(ev)
+                return
+            self._in_flight += 1
+
+        def run():
+            try:
+                self.handle(ev)
+            except Exception as e:                 # noqa: BLE001 -- a turn never kills the drainer
+                print(f"[loops] a turn failed ({e!r})", file=sys.stderr)
+            finally:
+                with self._flight_lock:
+                    self._in_flight -= 1
+        threading.Thread(target=run, daemon=True, name="loop-turn").start()
 
     def handle(self, ev: dict) -> str:
         """One event -> at most one loop turn (_handle), and its line in the
@@ -786,7 +815,8 @@ class _LoopDrainer:
                 info = getattr(_WAKE, "info", None) or {}
                 if shadow is not None:
                     info = {**info, "shadow": {k: shadow.get(k) for k in ("predict", "p_ignore", "level", "n", "sig")}}
-                _WK.log(self.srv, ev, "folded" if out == "skip" else out, feats=feats, **info)
+                if out != "requeue":         # waiting for a slot is not an outcome
+                    _WK.log(self.srv, ev, "folded" if out == "skip" else out, feats=feats, **info)
             except Exception:
                 pass
         return out

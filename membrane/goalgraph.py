@@ -408,6 +408,12 @@ def recount(srv, goal: str) -> int:
             d.properties = {**(d.properties or {}), "open_blockers": n}
             est.upsert(d, embedder=None)
             n_changed += 1
+        elif n == 0:
+            # READY BUT NEVER RELEASED (2026-10-31): the ready triggers fire when the count
+            # CHANGES to 0 -- a task (or wait) set back to open at 0 sat forever
+            d.properties = {**(d.properties or {}), "status": OWED if d.cls == TASK else ARMED}
+            est.upsert(d, embedder=None)
+            n_changed += 1
     return n_changed
 
 

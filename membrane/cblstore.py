@@ -407,6 +407,10 @@ class CBLiteBackend(MemBackend):
         return len(todo)
 
     def _writer_loop(self) -> None:
+        with CB.background():                      # its operations queue behind turns'
+            self._writer_loop_body()
+
+    def _writer_loop_body(self) -> None:
         while not self._stop:
             self._wflush.wait(self.WRITE_BEHIND_S)
             self._wflush.clear()
@@ -449,12 +453,11 @@ class CBLiteBackend(MemBackend):
 
     def get_multi(self, coll, keys):
         if coll in COLD:
-            out = {}
-            for k in dict.fromkeys(keys):
-                d = self._cold_get(k)
-                if d is not None:
-                    out[k] = d
-            return out
+            # ONE database operation for every key (profiled 08:33: one queued operation
+            # per key cost a banner hundreds of thread hand-offs)
+            ks = list(dict.fromkeys(keys))
+            got = self.db._run(lambda: {k: self._cold_get(k) for k in ks})
+            return {k: d for k, d in got.items() if d is not None}
         return super().get_multi(coll, keys)
 
     def upsert(self, coll, key, doc):
@@ -485,11 +488,12 @@ class CBLiteBackend(MemBackend):
 
     def insert_if_absent(self, coll, key, doc):
         if coll in COLD:
-            with self.db.lock:
+            def once():                            # check-then-insert: ONE database operation
                 if key in self._cache or self.db.exists(coll, key):
                     return False
                 self._cold_put(coll, key, doc)
                 return True
+            return self.db._run(once)
         with self._ram_lock:
             added = super().insert_if_absent(coll, key, doc)
             if added:
@@ -510,13 +514,14 @@ class CBLiteBackend(MemBackend):
 
     def cas_update(self, coll, key, fn):
         if coll in COLD:
-            with self.db.lock:
+            def once():                            # read-modify-write: ONE database operation
                 new = fn(self._cold_get(key))
                 if new is None:
                     self.delete(coll, key)
                 else:
                     self._cold_put(coll, key, new)
                 return new
+            return self.db._run(once)
         with self._ram_lock:
             new = super().cas_update(coll, key, fn)
             if new is None:
@@ -607,6 +612,10 @@ class CBLiteBackend(MemBackend):
         return tot
 
     def _catchup_loop(self) -> None:
+        with CB.background():                      # its batches queue behind turns'
+            self._catchup_loop_body()
+
+    def _catchup_loop_body(self) -> None:
         while not self._stop:
             self._wake.wait(self.CATCHUP_IDLE_S)
             if self._stop:

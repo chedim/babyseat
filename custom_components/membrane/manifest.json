@@ -1,6 +1,9 @@
 {
   "domain": "membrane",
   "name": "babyseat (membrane)",
+  "after_dependencies": [
+    "mqtt"
+  ],
   "codeowners": [
     "@chedim"
   ],
