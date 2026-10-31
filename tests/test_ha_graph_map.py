@@ -147,6 +147,15 @@ class TestTheCallReachesHomeAssistant(unittest.TestCase):
 
 
 class TestMqtt(unittest.TestCase):
+    def test_bare_hash_topic_is_refused(self):
+        # a bare '#' would subscribe the whole broker and funnel every message in
+        srv, est = _srv()
+        everything = C._add(est, "everything", mqtt_topic="#")
+        self.assertNotIn("#", HB.mqtt_topics(srv))
+        r = HB.apply_mqtt(srv, [{"topic": "boat/any", "payload": "x"}])
+        self.assertEqual(r.get("updated", 0), 0)
+        self.assertNotIn("mqtt_payload", everything.properties)
+
     def test_marked_topics_are_subscribed_and_messages_land(self):
         srv, est = _srv()
         dock = C._add(est, "dock power", mqtt_topic="boat/dock/+/power")

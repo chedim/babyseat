@@ -309,6 +309,8 @@ def _mqtt_marked(srv) -> dict[str, list]:
     out: dict[str, list] = {}
     for ent in list((getattr(est, "docs", None) or {}).values()):
         t = str((ent.properties or {}).get(MQTT_PROP) or "").strip()
+        if t == "#" and not (ent.properties or {}).get("mqtt_allow_all"):
+            continue  # a bare '#' mirrors the whole broker: needs mqtt_allow_all=True
         if t:
             out.setdefault(t, []).append(ent)
     return out
