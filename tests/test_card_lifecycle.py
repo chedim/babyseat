@@ -1,8 +1,8 @@
 """Card lifecycle: open -> decided -> (in_flight ->) closed, plus dropped.
 A card carries a work_needed tag (set at creation, overridable when answering):
 no work -> the answer closes it; work -> it stays decided until the watcher
-loop moves it to in_flight, and it closes only with a receipt. Only the
-operator drops a card."""
+loop moves it to in_flight, and it closes only with a receipt. The operator
+drops an open card; an agent drops one only with a dropped_why (#758)."""
 import os
 import sys
 import tempfile
@@ -107,10 +107,43 @@ class TestLifecycle(unittest.TestCase):
         self.assertFalse(est.edit(eid, properties={"status": "open"})["ok"])
         self.assertFalse(DM.answer(est, led, eid, "no")["ok"])
 
-    def test_agent_cannot_drop(self):
+    def test_agent_cannot_drop_without_a_reason(self):
         est, _ = _store()
         eid = _card(est, "d")
         self.assertFalse(est.edit(eid, properties={"status": "dropped"})["ok"])
+        res = est.edit(eid, properties={"dropped_why": "  ", "status": "dropped"})
+        self.assertIn("status", res.get("properties_refused") or {})
+        self.assertEqual(_status(est, eid), "open")
+
+    def test_agent_drops_an_open_card_with_a_reason(self):      # #758
+        est, _ = _store()
+        eid = _card(est, "d")
+        self.assertTrue(est.edit(eid, properties={"dropped_why": "shipped in #752",
+                                                  "status": "dropped"})["ok"])
+        self.assertEqual(_status(est, eid), "dropped")
+        props = est.resolve(eid, exact=True).properties
+        self.assertNotIn("value", props)                       # dropping is not answering
+        self.assertFalse(est.edit(eid, properties={"status": "open"})["ok"])   # locked
+
+    def test_agent_drops_only_open_cards(self):                 # #758
+        est, led = _store()
+        eid = _card(est, "x", work_needed=True)
+        DM.answer(est, led, eid, "yes")
+        res = est.edit(eid, properties={"dropped_why": "w", "status": "dropped"})
+        self.assertIn("status", res.get("properties_refused") or {})
+        self.assertEqual(_status(est, eid), "decided")
+
+    def test_agent_drop_of_a_watch_card_tells_the_watcher_pool(self):    # #758
+        est, _ = _store()
+        est._events_pool = pool = _Pool()
+        eid = _card(est, "w")                                  # planted_by watch
+        self.assertTrue(est.edit(eid, properties={"dropped_why": "shipped",
+                                                  "status": "dropped"})["ok"])
+        props = est.resolve(eid, exact=True).properties
+        self.assertEqual([e["kind"] for e in pool.events], ["decision"])
+        self.assertEqual(pool.events[0]["value"], "dropped")
+        self.assertIsInstance(props.get("value_ts"), float)
+        self.assertEqual(props.get("dropped_by"), "agent")
 
     def test_operator_drops_an_open_card(self):
         est, led = _store()

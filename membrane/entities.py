@@ -2607,6 +2607,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         props_set: list = []
         props_refused: dict = {}
         props_truncated: list = []
+        _agent_dropped = False
         if isinstance(properties, dict) and properties:
             for k in list(properties)[16:]:
                 props_refused[str(k)[:80]] = "over the 16-key cap per edit"
@@ -2628,6 +2629,8 @@ class EntityStore(MultiParentOps, TimelineOps):
                                          "script_cooldown_s are settable)")
                     continue
                 from .decision_map import refusal as _dm_refusal
+                _was_open = (ent.cls == "Decision"
+                             and (ent.properties or {}).get("status") in (None, "open"))
                 _why = _dm_refusal(ent.cls, kk, v, ent.properties)    # #470: agents ask, never decide
                 if _why:
                     props_refused[kk] = _why
@@ -2647,6 +2650,10 @@ class EntityStore(MultiParentOps, TimelineOps):
                 if isinstance(v, str) and len(v) > 2000:
                     props_truncated.append(kk)      # said, never silent (#158)
                 props2[kk] = (v if not isinstance(v, str) else v[:2000])
+                if kk == "status" and v == "dropped" and _was_open:    # #758
+                    from .decision_map import stamp_agent_drop
+                    stamp_agent_drop(props2)
+                    _agent_dropped = True
                 ent.properties = props2
                 props_set.append(kk)
             _only_props = (not publish and not unpublish and all(
@@ -2712,6 +2719,9 @@ class EntityStore(MultiParentOps, TimelineOps):
                     "merged_into": dst.eid}
         ent.derived_by = sorted(set(ent.derived_by or []) | {"model-edit"})
         self.upsert(ent)
+        if _agent_dropped:
+            from .decision_map import tell_drop
+            tell_drop(self, ent)
         res = {"ok": True, "eid": ent.eid, "class": ent.cls,
                "summary": ent.properties.get("summary", ""),
                "links": ent.links}
