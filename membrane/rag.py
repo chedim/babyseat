@@ -217,6 +217,7 @@ def _quota_ok(model: str) -> None:
 MODE_HEADER = "X-Membrane-Mode"
 MODE_TURN = {MODE_HEADER: "capture"}
 MODE_BACKGROUND = {MODE_HEADER: "off"}
+_CHAT_PATHS = ("/api/chat", "/v1/chat/completions")
 
 
 def probe_membrama(backend: str, timeout: float = 8) -> dict | None:
@@ -436,7 +437,10 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
                        if k.lower() not in ("authorization", "cookie")}
         headers = {k: v for k, v in headers.items()
                    if k.lower() != MODE_HEADER.lower()}
-        headers.update(MODE_TURN)            # #753: the seat's turn, the fork records
+        # #753: only a chat call is a turn the fork records; any other path
+        # (embed, tags, ...) is never stored
+        headers.update(MODE_TURN if self.path.split("?", 1)[0] in _CHAT_PATHS
+                       else MODE_BACKGROUND)
         req = urllib.request.Request(url, data=raw, method=self.command,
                                      headers=headers)
         try:

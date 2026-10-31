@@ -29,7 +29,8 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import (RAGProxyHandler, _clip, _inject, _inject_after,
-                  _model_chat, doctrine_instructions_text, apply_think_dial)
+                  _model_chat, doctrine_instructions_text, apply_think_dial,
+                  MODE_TURN, MODE_BACKGROUND)
 from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
                      Registry)
@@ -4260,12 +4261,6 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     return ctx, efield_mark
 
 
-def _rag_mode_off() -> dict:
-    """#753: a background call's X-Membrane-Mode (off: the fork never stores it)."""
-    from .rag import MODE_BACKGROUND
-    return dict(MODE_BACKGROUND)
-
-
 class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the timing ring
     """The RAG handler + the OpenAI-compatible surface: /v1/models,
     /v1/chat/completions (the RAG gate + the internal state/math intercept),
@@ -6019,9 +6014,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                            **_auth_headers(rec.backend, srv.cloud_keys)}
             else:
                 url = srv.backend + "/v1/chat/completions"
-                from .rag import MODE_TURN as _MODE_TURN, MODE_BACKGROUND as _MODE_BG
                 headers = {"Content-Type": "application/json",
-                           **(_MODE_BG if _is_loop_turn(srv, up) else _MODE_TURN)}           # #753: the seat injected, the fork records
+                           **(MODE_BACKGROUND if _is_loop_turn(srv, up) else MODE_TURN)}           # #753: the seat injected, the fork records
             _DR.record(model_name, url, u2, headers=headers)
             rq = urllib.request.Request(
                 url, data=json.dumps(u2).encode(), method="POST",
@@ -6241,7 +6235,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 # socket registration -- the watchdog's abort CLOSES it
                 # (the wedged read raises now)
                 _turn_sid = str((up.get("_turn_sid") or ""))[:64]
-                _socks = None
                 if _turn_sid:
                     _runner = getattr(srv, "_loop_runner", None)
                     if _runner is not None:
@@ -6793,7 +6786,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             data=json.dumps({"model": model, "messages": messages,
                              "stream": False}).encode(),
             method="POST", headers={"Content-Type": "application/json",
-                                    **_rag_mode_off()})     # #753: never stored
+                                    **MODE_BACKGROUND})     # #753: never stored
         t0 = time.monotonic()
         try:
             with urllib.request.urlopen(rq, timeout=300) as resp:

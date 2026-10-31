@@ -174,6 +174,31 @@ class TheModeHeader(unittest.TestCase):
         self.assertIn("from .rag import MODE_BACKGROUND", src)
         self.assertNotIn('__import__("membrane.rag"', src)
 
+    def test_a_non_chat_passthrough_never_carries_capture(self):
+        h = _handler(self.url)
+        h.path = "/api/embed"
+        h._send_to_backend(json.dumps({"model": "m", "input": "x"}).encode())
+        self.assertEqual(self.b.seen[-1], ("/api/embed", "off"))
+
+    def test_both_chat_paths_passthrough_carry_capture(self):
+        for path in ("/api/chat", "/v1/chat/completions"):
+            h = _handler(self.url)
+            h.path = path
+            h._send_to_backend(json.dumps({"model": "m", "messages": []}).encode())
+            self.assertEqual(self.b.seen[-1], (path, "capture"))
+
+    def test_lanes_has_no_rag_mode_off_wrapper(self):
+        self.assertFalse(hasattr(L, "_rag_mode_off"))
+
+    def test_lanes_imports_the_mode_constants_at_module_level(self):
+        src = Path(L.__file__).read_text()
+        self.assertNotIn("from .rag import MODE_TURN as _MODE_TURN", src)
+        self.assertNotIn("    from .rag import MODE_BACKGROUND\n", src)
+
+    def test_the_buffered_lane_has_no_dead_socks_none(self):
+        src = Path(L.__file__).read_text()
+        self.assertNotIn("                _socks = None\n", src)
+
 
 if __name__ == "__main__":
     unittest.main()
