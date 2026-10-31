@@ -1735,15 +1735,14 @@ def notify_intent_landed(est, pool, goal_eid: str, receipt: dict) -> dict:
 
 def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
                           evidence: str = "") -> dict:
-    """A GOAL CLOSED IS TOLD (2026-10-28, #641): routed like a decided or dropped
-    Decision card (decision_map._tell): a goal planted in a chat gets one
-    `[goal] <title> fulfilled` message into that chat (the first of its
-    `convs`; it starts a turn there), a chatless goal (or no runner wired) puts
-    ONE `goal-fulfilled` event into the loops' pool. Announced once per close:
-    the stamp is the close's `fulfilled_ts`, so a goal that is reopened and
-    closed again is announced again. A goal still `open` is skipped BEFORE the
-    stamp, so it is never marked announced. The line is `goal <eid> fulfilled:
-    <evidence>`, sent through `escalate` when the seat is wired, else `_tell`."""
+    """A GOAL CLOSED IS TOLD (2026-10-28, #641): one message
+    `goal <id> fulfilled: <receipt>` goes to the goal's planting chat (the
+    LAST of its `convs`, convs[-1]; it starts a turn there). A goal with no
+    `convs` goes to the latest chat instead. Only an unwired seat (no server)
+    with no chat falls back to ONE `goal-fulfilled` event in the loops' pool.
+    Announced once per close: the stamp is the close's `fulfilled_ts`, so a
+    goal that is reopened and closed again is announced again. A goal still
+    `open` is skipped BEFORE the stamp, so it is never marked announced."""
     from . import decision_map as _DM
     ent = (est.docs or {}).get(goal_eid) if est is not None else None
     props = (ent.properties if ent is not None else None) or {}
