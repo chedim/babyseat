@@ -121,8 +121,6 @@ class TheTurnSidIsPerThread(unittest.TestCase):
         ta.start(); tb.start(); ta.join(3); tb.join(3)
         self.assertEqual(seen, {"ses_chat": "ses_chat", "ses_w": "ses_w"})
         self.assertIsNone(r._current_turn_sid)          # an outside thread has no turn
-<<<<<<< HEAD
-=======
 
 
 class TheLoopTurnRunsNoRecall(TheWorkerTurnHasNoBanner):
@@ -149,4 +147,3 @@ class TheLoopTurnRunsNoRecall(TheWorkerTurnHasNoBanner):
             out, r = self.recon(sid)
             self.assertIn("PAST ANSWERS", out)
             r.assert_called_once()
->>>>>>> origin/main

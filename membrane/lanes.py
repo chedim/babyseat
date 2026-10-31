@@ -4150,8 +4150,6 @@ def _is_loop_turn(srv, body: dict) -> bool:
     return str(row.get("agent") or "").strip().lower() not in _CHAT_AGENTS
 
 
-<<<<<<< HEAD
-=======
 def _recon_block(srv, fld, body: dict, query: str, vec):
     """The no-context turn's rebuilt history: this chat's own reconstruction, then the
     past answers (render_for). A loop's turn gets the reconstruction only: its task text
@@ -4174,7 +4172,6 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
     return recon
 
 
->>>>>>> origin/main
 def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     """The turn's state blocks -> (ctx, the field watermark to keep once the
     turn is delivered). MEMBRANE_INJECTION picks the block: 'banner' (the
