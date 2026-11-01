@@ -406,3 +406,49 @@ def entity_history(srv, spec: str) -> dict:
     props = {k: v for k, v in (ent.properties or {}).items() if not str(k).startswith("script_")}
     return {"ok": True, "eid": ent.eid, "cls": ent.cls, "properties": props,
             "changes": changes, "relations": rels}
+
+
+def _item(srv, spec: str):
+    est = getattr(srv, "entity_store", None)
+    return est, (est._resolve_spec(spec) if est is not None and spec else None)
+
+
+def item_chat(srv, spec: str) -> dict:
+    """k7, the Chat tab: the messages (convgraph's Message entities) that -refers-to-> the
+    item, oldest first -- {ok, eid, messages: [{id, who, text, ts}]}."""
+    est, ent = _item(srv, spec)
+    if ent is None:
+        return {"ok": False, "error": f"no entity matches {spec!r}"}
+    ef = getattr(srv, "efield", None)
+    be, origin = getattr(ef, "b", None), getattr(ef, "origin", "")
+    msgs = []
+    if be is not None:
+        from . import relations as R
+        for r in R.of(be, origin, ent.eid, "refers-to"):
+            m = (est.docs or {}).get(r.get("subj")) if r.get("obj") == ent.eid else None
+            if m is not None:
+                p = m.properties or {}
+                msgs.append({"id": m.eid, "who": p.get("speaker") or "", "text": p.get("text", ""),
+                             "ts": float(p.get("ts") or 0)})
+    msgs.sort(key=lambda m: m["ts"])
+    return {"ok": True, "eid": ent.eid, "messages": msgs}
+
+
+def item_say(srv, spec: str, text: str, who: str = "") -> dict:
+    """k7: say something in an item's mini-chat -- a Message entity -refers-to-> the item
+    (the same entity and edge a chat turn makes)."""
+    est, ent = _item(srv, spec)
+    text = str(text or "").strip()
+    if ent is None:
+        return {"ok": False, "error": f"no entity matches {spec!r}"}
+    if not text:
+        return {"ok": False, "error": "empty message"}
+    import time
+    import uuid
+    from . import convgraph as CG
+    ef = getattr(srv, "efield", None)
+    be, origin = getattr(ef, "b", None), getattr(ef, "origin", "")
+    mid = "item-" + uuid.uuid4().hex[:12]
+    eid = CG._mint(est, "item:" + ent.eid, mid, "user", text, ts=time.time(), speaker=who or None)
+    CG._edge(be, origin, eid, "refers-to", ent.eid, source="item-chat")
+    return {"ok": True, "message": eid}
