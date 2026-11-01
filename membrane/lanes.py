@@ -4208,7 +4208,10 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
             from . import language as _LL
             if _LL.available():
                 steps = _LL.compile(srv, sid, said)
-                if steps and all(s["mapped"] for s in steps):
+                if steps and steps[0].get("kind") == "define" and steps[0]["mapped"]:
+                    adds.append(f"The person's message {_LL.describe(srv.entity_store, steps)}. If they mean it, "
+                                f"exec(action='run', lang='en', code={said!r}) keeps it.")
+                elif steps and all(s["mapped"] for s in steps):
                     _many = [s for s in steps if s.get("needs_all")]
                     adds.append(f"The person's message compiles to: {_LL.describe(srv.entity_store, steps)}. "
                                 + (f"It would change {sum(len(s['targets']) for s in _many)} things: ask before "

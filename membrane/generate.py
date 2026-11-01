@@ -52,21 +52,43 @@ def _cap(s: str) -> str:
     return s[:1].upper() + s[1:] if s else s
 
 
-def _first_line(s) -> str:
-    return next((ln.strip() for ln in str(s or "").splitlines() if ln.strip()), "")[:160]
+NAME_MAX = 60                 # a name's cut in a sentence (a goal's name can be its whole task text)
+NO_MEANING = "\u2192"         # marks "verb -> object has no meaning" in unmapped (never in a phrase)
+
+
+def _name(n) -> str:
+    n = " ".join(str(n).split())
+    return n if len(n) <= NAME_MAX else n[:NAME_MAX - 1].rstrip() + "\u2026"
+
+
+def _reason(why) -> str:
+    """A failure's reason: its LAST non-empty line (a traceback ends in the error), without its
+    own full stop (Memo on #820)."""
+    lines = [ln.strip() for ln in str(why or "").splitlines() if ln.strip()]
+    return lines[-1][:160].rstrip(" .!") if lines else ""
 
 
 def done(verb: str, names: list, failed: list) -> str:
     """What a step did: "Closed goal one.", "Closed 2 things: a and b.", "Couldn't close b: why."
-    `failed`: [(name, why)]."""
+    `failed`: [(name, why)] or [(name, why, exit code)]; a silent failure says its exit code."""
     out = []
-    ok = [n for n in names if n not in {f for f, _ in failed}]
+    bad = {f[0] for f in failed}
+    ok = [_name(n) for n in names if n not in bad]
     if ok:
         out.append(_cap(f"{past(verb)} {ok[0]}.") if len(ok) == 1
                    else _cap(f"{past(verb)} {len(ok)} things: {join(ok)}."))
-    for name, why in failed:
-        out.append(f"Couldn't {verb} {name}" + (f": {_first_line(why)}" if _first_line(why) else "") + ".")
+    for f in failed:
+        name, why, rc = f[0], f[1], (f[2] if len(f) > 2 else None)
+        r = _reason(why)
+        out.append(f"Couldn't {verb} {_name(name)}: {r}." if r
+                   else f"Couldn't {verb} {_name(name)}" + (f" (exit {rc})." if rc not in (None, 0) else "."))
     return " ".join(out)
+
+
+def no_meaning(verb: str, label: str) -> str:
+    """The unmapped entry for a verb with no meaning on an object (tagged, so an object whose
+    text starts with the verb's own word is never misread as one)."""
+    return f"{verb}{NO_MEANING}{label}"
 
 
 def not_understood(verb: str, unmapped: list) -> str:
@@ -78,13 +100,22 @@ def not_understood(verb: str, unmapped: list) -> str:
             out.append(f"I don't know how to {verb}.")
         elif u.startswith(verb + " needs "):
             out.append(f"To {verb} that I need {join(u[len(verb) + 7:].split(', '))}.")
-        elif u.startswith(verb + " "):
-            out.append(f"I can't {verb} {u[len(verb) + 1:]}: nothing gives it that meaning.")
+        elif u.startswith(verb + NO_MEANING):
+            out.append(f"I can't {verb} {_name(u[len(verb) + 1:])}: nothing gives it that meaning.")
         elif u == "(no object)":
             out.append(f"{_cap(verb)} what?")
         else:
             out.append(f"I don't know what \"{u}\" is.")
     return " ".join(out)
+
+
+def taught(word: str, meaning: str) -> str:
+    return f'Got it: "{word}" now means {meaning}.'
+
+
+def cant_define(word: str) -> str:
+    return (f'I don\'t know how to define "{word}" that way yet: say it with a word I know, '
+            "a verb, an adjective, a thing's name, or a property and a value.")
 
 
 def needs_all(verb: str, names: list) -> str:
