@@ -346,7 +346,10 @@ decision cockpit: what is still open above the chat's input bar, what is in
 flight on its line, what was decided below it. The conversation itself is a
 graph over the field: each chat message is an entity tied to what it names,
 what it ran, the decisions it asks and the answers it gives, and a reply's
-`Open decisions:` are answered in the chat (`1. yes`).
+`Open decisions:` are answered in the chat (`1. yes`). English is code too
+(living language, on by default): "close the open goals" compiles to calls on
+the field's verb, noun and adjective entities and runs with
+`exec(action='run', lang='en', code=...)` ([docs/cliffhanger.md](docs/cliffhanger.md)).
 
 The proxy speaks both APIs through the same memory turn: OpenAI's
 `/v1/chat/completions` and Ollama's native `/api/chat` and `/api/generate`
@@ -378,6 +381,7 @@ pass through to Ollama unchanged.
 | `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): from another machine, every write to either port needs it (Bearer, Basic's password, or the web UI's one-time prompt); reads and localhost need none; see [docs/auth.md](docs/auth.md) |
 | `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running JWT mode (on by default; off with `MEMBRANE_JWT=0`); see [docs/auth.md](docs/auth.md) |
 | `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads the chat message store (`serve-msgs.json`, or the seat's Couchbase Lite store once it has migrated there), plus the background model calls from `bg-usage.json`; no model call) |
+| `membrane shadow` | compile-first routing, shadow stage: how many person messages living language compiled, had gaps in (by type) or left to thinking, and whether the model then used tools (read-only, no model call). See [docs/cliffhanger.md](docs/cliffhanger.md#living-language-2026-11-01-on-by-default) |
 | `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Every kind can be added (#576 retired the unlocks with the ladder). See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
 
@@ -557,31 +561,39 @@ conservative.
 lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 (mature entities 0.206 → 0.634); see the v0.5.0 notes and `experiments/`.
 
-**Public benchmark: LoCoMo, retrieval mode (2026-10-25).** On LoCoMo
+**Public benchmark: LoCoMo, retrieval mode (recall run of 2026-10-29, code de097db).** On LoCoMo
 (Maharana et al. 2024: 10 long multi-session conversations, 5,882 turns),
-we score only whether `/membrane/ask` returns a question's annotated
-evidence turn in its top k. There is no answer generation and no LLM judge,
+we score only whether `/membrane/ask` returns the annotated
+evidence turn of a question in its top k. There is no answer generation and no LLM judge,
 so these numbers are **not comparable** to published answer-accuracy scores.
 Each conversation goes into its own fresh field through the capture path (no
 chat model), one turn per `doc` event, in session order with the session date;
-embedder mxbai-embed-large. The baseline is plain cosine over the same
-embeddings.
+embedder mxbai-embed-large. Median ask latency 121 ms. Whether a reranker was
+used in this run is not established (the run logs do not mention one), so we
+call it a recall run and claim nothing about a reranker. The baseline is plain
+cosine over the same embeddings, from the 2026-10-25 baseline run
+(same turn text, same embedder). Rates are over questions that
+have annotated evidence: 1,536 of the 1,540 questions in categories 1-4
+(open-domain: 92 of 96); adversarial: 446. Cell format: membrane / cosine.
 
-| category (n) | hit@8 | hit@20 | hit@50 | cosine baseline hit@8 |
-|---|---|---|---|---|
-| multi-hop (282) | 50.0% | 65.6% | 77.0% | 63.8% |
-| temporal* (321) | 60.8% | 68.2% | 76.3% | 71.3% |
-| open-domain* (92) | 37.0% | 50.0% | 65.2% | 46.7% |
-| single-hop* (841) | 57.6% | 67.7% | 77.4% | 65.8% |
-| **all answerable (1,536)** | **55.6%** | **66.3%** | **76.4%** | **65.4%** |
-| adversarial (446, no answer in the conversation) | 52.7% | 63.9% | 75.8% | 57.2% |
+| category (questions with evidence) | hit@8 | hit@20 | hit@50 |
+|---|---|---|---|
+| multi-hop (282) | 69.9 / 63.8 | 78.0 / **82.6** | 85.1 / **92.2** |
+| temporal* (321) | **78.8** / 71.3 | 78.5 / **81.3** | 86.9 / **87.5** |
+| open-domain* (92) | **53.3** / 46.7 | 58.7 / **63.0** | 75.0 / **77.2** |
+| single-hop* (841) | **75.7** / 65.8 | 77.6 / **78.0** | 85.7 / **88.8** |
+| **all, categories 1-4 (1,536)** | **74.0** / 65.4 | 76.8 / **78.6** | 85.2 / **88.5** |
+| adversarial (446, no answer in the conversation) | **74.2** / 57.2 | **76.2** / 71.3 | **84.5** / 82.5 |
 
-What it shows: membrane's recall ranks **below plain cosine** today: when a
-question names a person, the entity lane fills about 45% of the top 8 with
-that person's newest lines. And turns captured as a person's chat lines are
-never returned as recall answers (0%), though the injected context holds the
-evidence for 48% of questions. Both are open work. \*LoCoMo's code confirms
-multi-hop and adversarial; the other three names follow the common mapping.
+What it shows: membrane recall ranks **above plain cosine at hit@8** in
+every category (74.0% against 65.4% on the 1,536 questions with evidence, +8.6
+points), but **cosine is ahead at hit@20 (78.6% against 76.8%, -1.8 points)
+and at hit@50 (88.5% against 85.2%, -3.3 points)** for categories 1-4
+together and in each of the four; only the adversarial rows favor membrane
+at every cutoff. The injected context holds the evidence for 26.3% of the
+questions in categories 1-4. The cosine column was not re-run on 2026-10-29.
+\*LoCoMo code confirms multi-hop and adversarial; the other three names
+follow the common mapping.
 
 - **Token economics, live seat (2026-10-12):** 5,736 live entities over
   4,949 streamed events; the standing per-turn header ~3 KB (entity tracks,

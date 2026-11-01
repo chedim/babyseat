@@ -22,7 +22,7 @@ name on two classes is two implementations (polymorphism).
   classes'); other `{{params}}` bind from `args` — only `{{name}}` binds (`{n}`,
   `$n`, `$1` do not), and an arg the command never names is refused. The
   command is a code tree whose `{{name}}`s are `param` nodes (#614 part C):
-  a call fills them, each value shell-quoted once, and runs the bound code
+  a call fills them, each value shell-quoted once (a leading `~` or `~/` stays bare so the shell still expands it, #815), and runs the bound code
   as code (a result entity per call). Write a placeholder as its own word
   (`{{x}}`) or as a whole quoted word (`'{{x}}'`, `"{{x}}"`): inside a
   longer quoted string (`'foo {{x}} bar'`) the quoted value breaks the
@@ -47,6 +47,9 @@ of that name, one per class or object that has it (`membrane/verbs.py`). The ver
 its implementations (`implemented_by`) and each method points back (`verb`); boot notes every
 method, `method_define` notes a new one, and a retired method stops implementing.
 
+- **Aliases.** A compound name (`pr_checks`, `lint_file`) is also noted under each word that
+  reads as a command verb, with the rest as the noun it expects (`aliased` on that verb; see
+  Living language below).
 - **One verb, many meanings.** "Close the PR" and "close the goal" are one verb with two
   implementations. `verbs.implementation(est, obj, verb)` picks by the object in the call's
   own order: its own method, then its classes' (ISA), then a global one. A noun nothing
@@ -55,6 +58,88 @@ method, `method_define` notes a new one, and a retired method stops implementing
   is a role the word plays in a sentence; "the last run" is a noun and refers to entities.
 - **Method names keep working.** A call still dispatches by name (`night.resolve_method`);
   the pronoun resolver's verb fit reads the verb entity.
+
+## Living language (2026-11-01, on by default)
+
+English is a language of the code tree (`en`, beside `sh` and `js`; `membrane/language.py`). A
+sentence is parsed (spaCy) into node entities that print back exactly, and compiles to calls:
+
+- **The verb** is a verb entity. The field's own words lead: a known verb at a clause's start
+  (the message's start, or after *and*, *then*, a comma, *please*, *can you*) is the command
+  whatever the parser tagged it, phrasal ones too (*turn on*). Only commands compile: a verb
+  with a subject other than *you* is a report or a plan.
+- **Its object** runs to the next clause: a pronoun's register, something named in full (a
+  file, `PR #803`, an entity's name), or a class's members (*the goals*) narrowed by its
+  adjectives.
+- **Adjectives** are `Adjective` entities, each a cliffhanger filter over `x` (*open*:
+  `x.status == 'open'`); seeded ones at boot, `language.define_adjective` for more.
+- **Adverbs** are run options (*quietly*: no chat line).
+- **Compound method names alias their verb.** `pr_checks` is also noted under `verb:check`
+  with the noun it expects (`pr`), kept apart from exact names (`aliased` on the verb), so
+  "check PR #812" means it only because the object is a PR. Which word is the verb is
+  decided by reading each word as a command ("check it"); the rest of the name is the noun.
+- **Objects bind to parameters.** An aliased method is called on its owner with the object
+  bound to its one free parameter: a PR's number, a file's path, an entity's name ("check PR
+  #812" runs `pr_checks` with `num=812`). A method needing more than one argument is said
+  ("comment needs num, body"), never guessed.
+- **Compiled means runnable.** A step counts only when every target has the verb's meaning
+  for its class; "list the open goals" with no `list` on goals is unmapped, said as such.
+- **A write on many things needs *all*.** When a step would change more than one thing (its
+  method isn't `read_only`), it runs only if the sentence says so: *close **all** the open
+  goals*. Without it, the run is refused with "this would close 2 things …: say 'all' to do
+  it", and the model is told to ask first. Reads on many things need nothing.
+
+`exec(action='run', lang='en', code='close the open goals')` runs it on `tool:language`, each
+target's call through the verb's implementation for its class. A sentence with anything
+unmapped (an unknown verb, an object that names nothing, an adjective nobody defined) says
+what, and runs nothing. A chat message that compiles fully is told to the model as its
+program, in the seat owner's chats only (a session with an `owner`, a token person's or the
+Home Assistant relay's, gets none); membrane runs nothing on its own yet.
+
+**Teaching words in plain language.** "X means Y" (or "is the same as", "stands for") is a
+definition, not a command, and running it teaches the field:
+
+| Y | becomes |
+|---|---|
+| a known adjective, or `not Y`, `Y and Z` | an adjective with that filter ("pending means not closed") |
+| a known verb | a verb synonym, `same_as` on `verb:<X>` ("finish means close": "finish goal one" closes it) |
+| an entity's name | another name for it, in its `aliases` ("my boat means goal one") |
+| a property and a value | an adjective `x.<property> == '<value>'` ("stuck means status blocked") |
+
+Anything else is refused in words ("I don't know how to define "stale" that way yet: …"), and
+nothing is guessed. Membrane answers what it learned ('Got it: "finish" now means close.'). In a
+chat, a message that teaches a word is told to the model with the `exec` call that keeps it.
+
+**Compile-first routing, stage 1: the shadow** (2026-11-01). Each person message (it only reads, so every
+chat) is compiled locally (no model call) and sorted into one of three outcomes: **compiled**
+(every step maps to the field), **gaps** (typed: `unknown_verb`, `no_meaning`, `needs_args`,
+`unknown_object`, `no_object`, `unknown_definition`), or **thinking** (no
+step). The outcome is kept as the `shadow` property on the person's message
+entity, next to what the model then did (`model_tools`, the tool parts of its reply, and
+`model_ran`, the programs it ran). Nothing answers from the shadow yet: it only measures.
+`membrane shadow` prints the rates (read-only). Stage 2 (membrane answering
+questions itself) was dropped with the hardcoded question forms (2026-11-01). Later stages:
+membrane runs compiled actions, then closes gaps with narrow background model turns that only
+propose definitions (at most 3 rounds, stopping when a round doesn't shrink the gaps).
+
+**Membrane words the result itself** (`membrane/generate.py`): a run ends in a sentence built
+from its calls and their results -- the verb's past form (lemminflect, plain rules without
+it), the objects' names joined as English, the count when there are several: "Closed goal
+one.", "Closed 2 things: goal one and goal two.", "Couldn't close goal two: …". A refusal is
+worded the same way: "I don't know how to frobnicate.", "I don't know what "the bogus
+widgets" is.", "To comment that I need num and body.", "That would close 2 things (…). Say
+'all' to do it." The detail lines follow the sentence.
+
+A noun phrase a pronoun points back to that the field doesn't know becomes a `Concept`
+entity the register can hold: the nearest run of nouns before the pronoun that agrees in
+number, never the subject of the pronoun's own clause ("Claude fixed them" → *pronouns*).
+
+On by default: the seat installs spaCy and its `en_core_web_sm` model at boot when they're
+missing (ready-made wheels only), and keeps the older rules if it can't.
+`MEMBRANE_LANGUAGE=0` turns it off; `pip install 'babyseat[nlp]'` installs spaCy up front. A
+seat with `MEMBRANE_NO_AUTOINSTALL` (Home Assistant's supervisor sets it) installs nothing
+beside HA's pinned packages unless `MEMBRANE_LANGUAGE=1` asks for it. The seeded `closed`
+matches closed, fulfilled and done.
 
 ## The LLM as a coprocessor (#454, `MEMBRANE_COPROC=1`, off by default)
 
