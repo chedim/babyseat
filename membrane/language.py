@@ -354,7 +354,11 @@ def _span_targets(srv, sid: str, est, toks: list, unmapped: list) -> list[str]:
     text = " ".join(t.text for t in toks)
     named = CG._mentions(srv, text)
     if named:
-        return named
+        out = []
+        for e in named:                      # a file's field id (f:~name) -> its store entity
+            d = _by_name(est, e) if e.startswith("f:") else None
+            out.append(d.eid if d is not None else e)
+        return out
     d = _by_name(est, " ".join(t.text for t in words))
     if d is not None:
         return [d.eid]
