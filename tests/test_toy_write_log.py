@@ -35,7 +35,7 @@ def test_model_and_other_writes_are_logged_in_order_and_survive_reload(seat):
     assert TB.add(seat, "ball")["ok"]
     TB.nudge("toy:ball")
     assert TB.poke("toy:ball", "roll", by="model")["ok"]
-    assert TB.poke("toy:ball", "roll", by="Dima")["ok"]
+    assert TB.poke("toy:ball", "roll", by="alice")["ok"]
 
     def check(recs):
         recs = [r for r in recs if r.get("toy") == "toy:ball"]
@@ -43,8 +43,8 @@ def test_model_and_other_writes_are_logged_in_order_and_survive_reload(seat):
         assert all(KEYS <= set(r) for r in recs)
         assert all((r["chain"] or {}).get("id") for r in recs)
         writers = [r["writer"] for r in recs]
-        assert {"model", "person:Dima"} <= set(writers)
-        assert writers.index("model") < writers.index("person:Dima")
+        assert {"model", "person:alice"} <= set(writers)
+        assert writers.index("model") < writers.index("person:alice")
         assert all(r["property"] and "value" in r for r in recs)
 
     check(TB.write_log("toy:ball"))
@@ -70,7 +70,7 @@ def test_tower_topple_and_lift_carry_their_payload_in_value(seat):
 
 def test_ball_roll_carries_its_payload_in_value(seat):
     assert TB.add(seat, "ball")["ok"]
-    assert TB.poke("toy:ball", "roll", by="Dima")["ok"]
+    assert TB.poke("toy:ball", "roll", by="alice")["ok"]
     assert _recs("toy:ball", "roll")[-1]["value"] == {"side": "self"}
 
 
@@ -84,7 +84,7 @@ def test_record_outside_a_write_chain_is_flagged_synthetic(seat):
     from membrane import writes as W
     assert TB.add(seat, "ball")["ok"]
     assert W.current() is None
-    assert TB.poke("toy:ball", "roll", by="Dima")["ok"]
+    assert TB.poke("toy:ball", "roll", by="alice")["ok"]
     assert _recs("toy:ball", "roll")[-1].get("synthetic") is True
 
 
@@ -92,5 +92,5 @@ def test_record_inside_a_write_chain_is_not_synthetic(seat):
     from membrane import writes as W
     assert TB.add(seat, "ball")["ok"]
     with W.source("test", "chain"):
-        assert TB.poke("toy:ball", "roll", by="Dima")["ok"]
+        assert TB.poke("toy:ball", "roll", by="alice")["ok"]
     assert not _recs("toy:ball", "roll")[-1].get("synthetic")
