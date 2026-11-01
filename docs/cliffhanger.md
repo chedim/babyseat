@@ -56,6 +56,36 @@ method, `method_define` notes a new one, and a retired method stops implementing
 - **Method names keep working.** A call still dispatches by name (`night.resolve_method`);
   the pronoun resolver's verb fit reads the verb entity.
 
+## Living language (2026-11-01, on by default)
+
+English is a language of the code tree (`en`, beside `sh` and `js`; `membrane/language.py`). A
+sentence is parsed (spaCy) into node entities that print back exactly, and compiles to calls:
+
+- **The verb** is a verb entity. The field's own words lead: a known verb at a clause's start
+  (the message's start, or after *and*, *then*, a comma, *please*, *can you*) is the command
+  whatever the parser tagged it, phrasal ones too (*turn on*). Only commands compile: a verb
+  with a subject other than *you* is a report or a plan.
+- **Its object** runs to the next clause: a pronoun's register, something named in full (a
+  file, `PR #803`, an entity's name), or a class's members (*the goals*) narrowed by its
+  adjectives.
+- **Adjectives** are `Adjective` entities, each a cliffhanger filter over `x` (*open*:
+  `x.status == 'open'`); seeded ones at boot, `language.define_adjective` for more.
+- **Adverbs** are run options (*quietly*: no chat line).
+
+`exec(action='run', lang='en', code='close the open goals')` runs it on `tool:language`, each
+target's call through the verb's implementation for its class. A sentence with anything
+unmapped (an unknown verb, an object that names nothing, an adjective nobody defined) says
+what, and runs nothing. A chat message that compiles fully is told to the model as its
+program; membrane runs nothing on its own yet.
+
+A noun phrase a pronoun points back to that the field doesn't know becomes a `Concept`
+entity the register can hold: the nearest run of nouns before the pronoun that agrees in
+number, never the subject of the pronoun's own clause ("Claude fixed them" → *pronouns*).
+
+On by default: the seat installs spaCy and its `en_core_web_sm` model at boot when they're
+missing (ready-made wheels only), and keeps the older rules if it can't.
+`MEMBRANE_LANGUAGE=0` turns it off; `pip install 'babyseat[nlp]'` installs spaCy up front.
+
 ## The LLM as a coprocessor (#454, `MEMBRANE_COPROC=1`, off by default)
 
 With the flag on, a model's reply is read as cliffhanger words. The rule is

@@ -1297,6 +1297,15 @@ def main() -> None:
             print(f"[seat] verbs: {_boot_verbs(srv)['verbs']}", file=sys.stderr)
         except Exception as e:
             print(f"[seat] verbs skipped ({e})", file=sys.stderr)
+        # LIVING LANGUAGE (language.py): the seeded adjectives and the en executor, made once
+        try:
+            from .language import ensure as _ensure_lang, seed as _seed_adj, seed_executor as _seed_lang
+            _seed_adj(srv.entity_store)
+            _seed_lang(srv.entity_store)
+            threading.Thread(target=lambda: _ensure_lang(lambda m: print(m, file=sys.stderr)),
+                             daemon=True, name="language-ensure").start()   # on by default
+        except Exception as e:
+            print(f"[seat] living language skipped ({e})", file=sys.stderr)
         # THE GRAPH-WALK LANE's seeded rules (graphbanner): made once, kept as edited
         try:
             from .graphbanner import seed as _seed_banner_rules

@@ -968,3 +968,7 @@ def state(srv, root: str) -> dict:
         rp = _props(est, r)
         results.append({"eid": r, **{k: rp.get(k) for k in ("rc", "outcome", "head", "ms", "ts")}})
     return {"eid": root, "lang": p.get("lang"), "code": text(est, root), "state": st, "results": results}
+
+
+# ---- en: living language (language.py registers it) ----------------------------------------
+from . import language as _living  # noqa: E402,F401

@@ -1817,6 +1817,10 @@ class TurnRunner:
             if _psrv is not None and not _drained and _CG.is_chat((self.sessions.get(sid) or {}).get("agent")):
                 _ref = _CG.before_turn(_psrv, self, sid, user_info, text)
                 _psrv.__dict__.setdefault("_cg_turn", {})[sid] = _ref or {}   # the capture binding reads it
+                if _CG.from_person(text):                                      # living language compiles it
+                    _psrv.__dict__.setdefault("_cg_text", {})[sid] = _CG._words(text)[1]
+                else:
+                    (_psrv.__dict__.get("_cg_text") or {}).pop(sid, None)
                 if _ref and _ref.get("reask"):
                     return {"info": user_info, "parts": [], "reask": _ref["reask"]}
         except Exception as e:

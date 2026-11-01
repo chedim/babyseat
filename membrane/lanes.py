@@ -4199,6 +4199,17 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
         note = None
     if note:
         adds.append(note)
+    said = (getattr(srv, "_cg_text", None) or {}).pop(sid, None) if sid else None
+    if said:
+        try:                                      # living language: what the message compiles to
+            from . import language as _LL
+            if _LL.available():
+                steps = _LL.compile(srv, sid, said)
+                if steps and all(s["mapped"] for s in steps):
+                    adds.append(f"The person's message compiles to: {_LL.describe(srv.entity_store, steps)}. "
+                                f"Running it: exec(action='run', lang='en', code={said!r}).")
+        except Exception as e:
+            print(f"[language] {sid[:16]}: {e}", file=sys.stderr)
     if not adds:
         return ctx
     return "\n\n".join(([ctx] if ctx else []) + adds)

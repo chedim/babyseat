@@ -39,6 +39,8 @@ jobs:
       # real-store test skips here (#799's chat stores, the entity store), and green says nothing
       # about that code (Memo's review of #803)
       - run: sh scripts/fetch-cbl.sh linux-x86_64
+      # living language (language.py, on by default): spaCy and its small English model
+      - run: pip install "spacy>=3.8.18" && python -m spacy download en_core_web_sm
       # The seat's suite (tests/) -- live-lane tests skip themselves when the
       # runner has no ollama. (The thinking-indicator file was deselected at
       # e385aec and its tests went stale under a changed wire contract -- the
