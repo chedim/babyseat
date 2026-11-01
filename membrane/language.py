@@ -31,9 +31,11 @@ CONCEPT = MEMBRANE_NS + "concept:"
 CLASS_ADJECTIVE = "Adjective"
 INSTALL = "living language needs spaCy: pip install 'babyseat[nlp]' && python -m spacy download en_core_web_sm"
 ADVERBS = {"quietly": {"quiet": True}, "silently": {"quiet": True}}
-SEED_ADJECTIVES = {"open": "x.status == 'open'", "closed": "x.status == 'closed'",
+SEED_ADJECTIVES = {"open": "x.status == 'open'",
+                   "closed": "x.status == 'closed' or x.status == 'fulfilled' or x.status == 'done'",
                    "blocked": "x.status == 'blocked'", "dropped": "x.status == 'dropped'",
                    "decided": "x.status == 'decided'"}
+_FIRST_SEEDS = {"closed": "x.status == 'closed'"}    # #812's first seeds, before the `seeded` marker
 _NLP: dict = {"m": None}
 MODEL = "en_core_web_sm"
 
@@ -67,12 +69,19 @@ def ensure(log=print) -> bool:
     import importlib
     import subprocess
     import sys
+    import os
     if not enabled():
         return False
+    # Home Assistant's supervisor sets MEMBRANE_NO_AUTOINSTALL for the seats it runs: install
+    # nothing beside HA's pinned packages unless MEMBRANE_LANGUAGE=1 asks for it (Memo, #812)
+    may_install = not os.environ.get("MEMBRANE_NO_AUTOINSTALL") or os.environ.get("MEMBRANE_LANGUAGE") == "1"
     pip = [sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check"]
     try:
         importlib.import_module("spacy")
     except ImportError:
+        if not may_install:
+            log("[language] spaCy is not installed and installs are off here: living language is off")
+            return False
         r = subprocess.run(pip + ["--only-binary=:all:", "spacy>=3.8.18"], capture_output=True, text=True,
                            timeout=900)
         if r.returncode != 0:
@@ -83,6 +92,9 @@ def ensure(log=print) -> bool:
     try:
         importlib.import_module(MODEL)
     except ImportError:
+        if not may_install:
+            log(f"[language] the {MODEL} model is not installed and installs are off here")
+            return False
         r = subprocess.run([sys.executable, "-m", "spacy", "download", MODEL, "--", "-q"],
                            capture_output=True, text=True, timeout=900)
         if r.returncode != 0:
@@ -139,8 +151,13 @@ def define_adjective(est, name: str, expr: str) -> str:
     from .ch import _check, _parse
     _check(_parse(expr), {"x"})
     eid = _adj_eid(name)
-    est.upsert(QuantumEntity(eid=eid, cls=CLASS_ADJECTIVE, properties={
-        "name": name.lower(), "filter": expr, "silent_birth": True}), embedder=None)
+    props = {"name": name.lower(), "filter": expr, "silent_birth": True}
+    d = (est.docs or {}).get(eid)
+    if d is not None:                        # a redefinition replaces the filter (upsert would merge it)
+        d.properties = {**(d.properties or {}), **props}
+        est.upsert(d, embedder=None)
+    else:
+        est.upsert(QuantumEntity(eid=eid, cls=CLASS_ADJECTIVE, properties=props), embedder=None)
     return eid
 
 
@@ -148,8 +165,12 @@ def seed(est) -> int:
     """Boot: the seeded adjectives, made once (an edited one is kept)."""
     n = 0
     for name, expr in SEED_ADJECTIVES.items():
-        if _adj_eid(name) not in (est.docs or {}):
-            define_adjective(est, name, expr)
+        d = (est.docs or {}).get(_adj_eid(name))
+        p = (d.properties or {}) if d is not None else {}
+        seeded = p.get("seeded") or _FIRST_SEEDS.get(name)        # the seed it got when it had no marker
+        if d is None or (seeded and p.get("filter") == seeded and seeded != expr):
+            define_adjective(est, name, expr)       # new, or still the seed of an older boot
+            est.docs[_adj_eid(name)].properties["seeded"] = expr
             n += 1
     return n
 
@@ -233,6 +254,7 @@ def _by_name(est, name: str):
 _LEADS = {"please", "pls", "and", "then", "also", "now", "so", "ok", "okay", "yes", "can", "could",
           "would", "will", "you", "just", "first", "next"}
 _BREAK = {"and", "then", ",", ";", "."}
+_ALL = {"all", "every", "each", "both"}      # the quantifier that confirms a write on many things
 
 
 def _verb_at(est, doc, i: int):
@@ -294,10 +316,27 @@ def compile(srv, sid: str, text: str) -> list[dict]:
         targets = _span_targets(srv, sid, est, kept, unmapped) if kept else []
         if not kept:
             unmapped.append("(no object)")
+        writes = False
+        if not unmapped:                        # "compiles" means every target has the verb's meaning
+            from . import verbs as V
+            for e in targets:
+                d = (est.docs or {}).get(e)
+                m = V.implementation(est, d, verb)[0] if d is not None else None
+                if m is None:
+                    unmapped.append(f"{verb} {CG_label(est, e)}")
+                elif not (m.properties or {}).get("read_only"):
+                    writes = True
+        everyone = any(t.lower_ in _ALL for t in kept)
         steps.append({"verb": verb, "targets": targets, "options": options,
                       "mapped": not unmapped and bool(targets), "unmapped": unmapped,
+                      "writes": writes, "needs_all": writes and len(targets) > 1 and not everyone,
                       "text": doc[i:end].text.strip(" ,.;")})
     return steps
+
+
+def CG_label(est, eid: str) -> str:
+    from . import convgraph as CG
+    return CG._label(est, eid)
 
 
 def _span_targets(srv, sid: str, est, toks: list, unmapped: list) -> list[str]:
@@ -305,7 +344,7 @@ def _span_targets(srv, sid: str, est, toks: list, unmapped: list) -> list[str]:
     an entity's name), or a class's members narrowed by its adjectives."""
     from . import convgraph as CG
     from .ch import EntityView, Refused, evaluate
-    words = [t for t in toks if t.pos_ != "DET"]
+    words = [t for t in toks if t.pos_ != "DET" and t.lower_ not in _ALL]
     if len(words) == 1 and words[0].pos_ == "PRON" and words[0].lower_ in CG.FORMS:
         held = CG.register(srv, sid, words[0].lower_) if sid else None
         got = [held] if isinstance(held, str) else list(held or [])
@@ -370,8 +409,12 @@ def run(srv, text: str, timeout_s=None) -> dict:
         return {"ok": False, "rc": 2, "outcome": "refused", "output": str(e), "error": str(e),
                 "head": str(e)[:200], "tail": str(e)[-200:], "ms": 1}
     bad = [u for s in steps for u in s["unmapped"]] or ([] if steps else ["no command"])
-    if bad or not all(s["mapped"] for s in steps):
-        msg = "not understood: " + ", ".join(bad or ["an object that names nothing"])
+    many = [s for s in steps if s.get("needs_all")]
+    if bad or not all(s["mapped"] for s in steps) or many:
+        msg = ("not understood: " + ", ".join(bad or ["an object that names nothing"])) if bad or not all(
+            s["mapped"] for s in steps) else "; ".join(
+            f"this would {s['verb']} {len(s['targets'])} things ({describe(est, [s]).split(' ', 1)[-1]}): "
+            f"say 'all' to do it" for s in many)
         return {"ok": False, "rc": 2, "outcome": "refused", "output": msg, "error": msg,
                 "head": msg, "tail": msg, "ms": max(1, int((time.time() - t0) * 1000))}
     lines, rc = [], 0

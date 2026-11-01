@@ -4200,14 +4200,20 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     if note:
         adds.append(note)
     said = (getattr(srv, "_cg_text", None) or {}).pop(sid, None) if sid else None
+    _sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
+    if said and _sess is not None and ((_sess.get(sid) or {}).get("owner")):
+        said = None                               # a guest's chat (a token person, the HA relay): no program
     if said:
         try:                                      # living language: what the message compiles to
             from . import language as _LL
             if _LL.available():
                 steps = _LL.compile(srv, sid, said)
                 if steps and all(s["mapped"] for s in steps):
+                    _many = [s for s in steps if s.get("needs_all")]
                     adds.append(f"The person's message compiles to: {_LL.describe(srv.entity_store, steps)}. "
-                                f"Running it: exec(action='run', lang='en', code={said!r}).")
+                                + (f"It would change {sum(len(s['targets']) for s in _many)} things: ask before "
+                                   "running it (they confirm by saying 'all'). " if _many else "")
+                                + f"If they want it done, exec(action='run', lang='en', code={said!r}) runs it.")
         except Exception as e:
             print(f"[language] {sid[:16]}: {e}", file=sys.stderr)
     if not adds:

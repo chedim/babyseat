@@ -127,7 +127,77 @@ class Running(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
+class MemosReview(unittest.TestCase):
+    """Memo on #812: "compiles" must mean it can run; one sentence must not change many things
+    unasked; only the owner's chat gets a program; Home Assistant installs nothing; "closed"
+    must match fulfilled goals."""
+
+    def test_a_verb_nothing_implements_for_the_noun_does_not_compile(self):
+        srv, f, est, goal, g1, g2 = _world()
+        other = _add(est, "pull request")
+        N.method_define(srv, est, f, None, other.eid, "list", "echo listing")   # a verb, but not on goals
+        [step] = LL.compile(srv, SID, "list the open goals")
+        self.assertFalse(step["mapped"])
+
+    def test_a_write_on_many_things_needs_all(self):
+        srv, f, est, goal, g1, g2 = _world()
+        LL.seed_executor(est)
+        g2.properties["status"] = "open"
+        out = LG.run(srv, code="close the open goals", lang="en")
+        self.assertFalse(out.get("ok"))
+        self.assertIn("all", out.get("output") or "")
+        out = LG.run(srv, code="close all the open goals", lang="en")
+        self.assertTrue(out.get("ok"), out)
+        self.assertIn("goal two", out.get("output") or "")
+
+    def test_a_read_on_many_things_needs_nothing(self):
+        srv, f, est, goal, g1, g2 = _world()
+        LL.seed_executor(est)
+        g2.properties["status"] = "open"
+        N.method_define(srv, est, f, None, goal.eid, "show", "echo showing {{self.name}}", read_only=True)
+        self.assertTrue(LG.run(srv, code="show the open goals", lang="en").get("ok"))
+
+    def test_an_older_boots_seed_is_upgraded_and_an_edit_is_kept(self):
+        srv, f, est, goal, g1, g2 = _world()
+        d = est.docs[LL._adj_eid("closed")]
+        d.properties = {"name": "closed", "filter": "x.status == 'closed'"}       # #812's first boot
+        LL.seed(est)
+        self.assertIn("fulfilled", est.docs[LL._adj_eid("closed")].properties["filter"])
+        LL.define_adjective(est, "closed", "x.status == 'shut'")                 # someone's edit
+        LL.seed(est)
+        self.assertEqual(est.docs[LL._adj_eid("closed")].properties["filter"], "x.status == 'shut'")
+
+    def test_closed_matches_fulfilled(self):
+        srv, f, est, goal, g1, g2 = _world()
+        g2.properties["status"] = "fulfilled"
+        [step] = LL.compile(srv, SID, "close the closed goals")
+        self.assertEqual(step["targets"], [g2.eid])
+
+    def test_no_autoinstall_installs_nothing(self):
+        from unittest import mock
+        import importlib
+        real = importlib.import_module
+
+        def missing(name, *a, **k):
+            if name == "spacy":
+                raise ImportError("no spacy")
+            return real(name, *a, **k)
+        with mock.patch.dict(os.environ, {"MEMBRANE_NO_AUTOINSTALL": "1"}), \
+                mock.patch("importlib.import_module", missing), mock.patch("subprocess.run") as run:
+            self.assertFalse(LL.ensure(log=lambda m: None))
+            run.assert_not_called()
+
+
+@unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class TheChat(unittest.TestCase):
+    def test_only_the_owners_chat_gets_a_program(self):
+        from membrane import lanes as L
+        srv, f, est, goal, g1, g2 = _world()
+        srv._loop_runner = type("R", (), {"sessions": type("S", (), {"get": lambda self, s: {"owner": "guest"}})()})()
+        srv._cg_turn = {SID: {}}
+        srv._cg_text = {SID: "close the open goals"}
+        self.assertEqual(L._with_referent(srv, {"_turn_sid": SID}, "BANNER", False), "BANNER")
+
     def test_a_compiled_message_is_told_to_the_model(self):
         from membrane import lanes as L
         srv, f, est, goal, g1, g2 = _world()
@@ -135,6 +205,7 @@ class TheChat(unittest.TestCase):
         srv._cg_text = {SID: "close the open goals"}
         ctx = L._with_referent(srv, {"_turn_sid": SID}, "BANNER", False)
         self.assertIn("compiles to: close goal one", ctx)
+        self.assertNotIn("Running it", ctx)
 
     def test_a_plain_words_antecedent_is_a_concept(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent))

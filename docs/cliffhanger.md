@@ -71,12 +71,19 @@ sentence is parsed (spaCy) into node entities that print back exactly, and compi
 - **Adjectives** are `Adjective` entities, each a cliffhanger filter over `x` (*open*:
   `x.status == 'open'`); seeded ones at boot, `language.define_adjective` for more.
 - **Adverbs** are run options (*quietly*: no chat line).
+- **Compiled means runnable.** A step counts only when every target has the verb's meaning
+  for its class; "list the open goals" with no `list` on goals is unmapped, said as such.
+- **A write on many things needs *all*.** When a step would change more than one thing (its
+  method isn't `read_only`), it runs only if the sentence says so: *close **all** the open
+  goals*. Without it, the run is refused with "this would close 2 things …: say 'all' to do
+  it", and the model is told to ask first. Reads on many things need nothing.
 
 `exec(action='run', lang='en', code='close the open goals')` runs it on `tool:language`, each
 target's call through the verb's implementation for its class. A sentence with anything
 unmapped (an unknown verb, an object that names nothing, an adjective nobody defined) says
 what, and runs nothing. A chat message that compiles fully is told to the model as its
-program; membrane runs nothing on its own yet.
+program, in the seat owner's chats only (a session with an `owner`, a token person's or the
+Home Assistant relay's, gets none); membrane runs nothing on its own yet.
 
 A noun phrase a pronoun points back to that the field doesn't know becomes a `Concept`
 entity the register can hold: the nearest run of nouns before the pronoun that agrees in
@@ -84,7 +91,10 @@ number, never the subject of the pronoun's own clause ("Claude fixed them" → *
 
 On by default: the seat installs spaCy and its `en_core_web_sm` model at boot when they're
 missing (ready-made wheels only), and keeps the older rules if it can't.
-`MEMBRANE_LANGUAGE=0` turns it off; `pip install 'babyseat[nlp]'` installs spaCy up front.
+`MEMBRANE_LANGUAGE=0` turns it off; `pip install 'babyseat[nlp]'` installs spaCy up front. A
+seat with `MEMBRANE_NO_AUTOINSTALL` (Home Assistant's supervisor sets it) installs nothing
+beside HA's pinned packages unless `MEMBRANE_LANGUAGE=1` asks for it. The seeded `closed`
+matches closed, fulfilled and done.
 
 ## The LLM as a coprocessor (#454, `MEMBRANE_COPROC=1`, off by default)
 
