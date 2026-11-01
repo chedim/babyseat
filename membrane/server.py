@@ -172,7 +172,9 @@ class SessionStore:
                 pass
             if cbl is not None and self.sessions:           # the first database boot
                 with self._lock:
-                    self._flush()
+                    ok = self._save_cbl(None)
+                if not ok:              # the file stays where it is: the next boot imports it again
+                    return
                 try:
                     os.replace(path, _migrated_name(path))
                     print(f"[serve] migrated {len(self.sessions)} sessions into couchbase lite; "
@@ -290,7 +292,8 @@ class SessionStore:
         except Exception:
             pass
 
-    def _save_cbl(self, sid: str | None) -> None:
+    def _save_cbl(self, sid: str | None) -> bool:
+        """-> True when every changed session was written."""
         from .cblite import doc_key
         ids = [sid] if sid is not None else list(dict.fromkeys(list(self.sessions) + list(self._sig)))
         put, gone = [], []
@@ -304,7 +307,7 @@ class SessionStore:
             if self._sig.get(k) != sg:
                 put.append((k, s, sg))
         if not put and not gone:
-            return
+            return True
         try:
             many = len(put) + len(gone) > 1
             if many:
@@ -321,6 +324,8 @@ class SessionStore:
                     self._cbl.end()
         except Exception as e:
             print(f"[serve] sessions: database save failed ({e})", file=sys.stderr)
+            return False
+        return True
 
     def flush(self) -> None:
         with self._lock:
@@ -382,6 +387,9 @@ class MessageStore:
                     self._dirty_rows = {(sid, str(r["info"].get("id") or ""))
                                         for sid, rows in self.msgs.items() for r in rows}
                     self._flush()
+                    failed = bool(self._dirty_rows)        # a failed save leaves its rows dirty
+                if failed:              # the files stay where they are: the next boot imports them again
+                    return
                 try:
                     stamp = _migrated_name(path)
                     os.replace(path, stamp)

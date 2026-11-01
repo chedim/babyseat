@@ -42,9 +42,11 @@ ASKED_FROM_TEXT = "chat-text"          # a card made from a reply's numbered que
 
 _HEAD = re.compile(r"^[\W_]*open\s+decisions?[\W_]*(:.*)?$", re.I)
 _ITEM = re.compile(r"^\s*(\d+)[.)]\s+(.+?)\s*$")
-_NUMBERED = re.compile(r"(?:^|(?<=\s))(\d+)[.)]?\s+(.+?)(?=\s+\d+[.)]\s|\s*$)", re.S)
-_TIMES = re.compile(r"^\s*(yes|no|ok)\s*x\s*(\d+)\s*$", re.I)
-_BARE = re.compile(r"^\s*(yes|y|yep|yeah|no|nope|n|ok|okay|sure|go|go ahead|do it)\s*[.!]*\s*$", re.I)
+_YESNO = r"(?:yes|y|yep|yeah|no|nope|n)"
+# an answer's marker: "N." / "N)" then its text, or a bare "N" then a yes/no word ("1 yes")
+_MARK = re.compile(r"(?:^|(?<=\s))(\d+)(?:[.)]\s*|\s+(?=" + _YESNO + r"\b))", re.I)
+_TIMES = re.compile(r"^\s*(yes|no)\s*x\s*(\d+)\s*$", re.I)
+_BARE = re.compile(r"^\s*(" + _YESNO + r")\s*[.!]*\s*$", re.I)
 _PRONOUN = re.compile(r"^\s*(?:pls\s+|please\s+)?([a-z][a-z-]*)\s+(it|that|this|them|that one|this one)"
                       r"(?:\s+(?:pls|please|now))?\s*[.!]?\s*$", re.I)
 _NOT_ACTS = {"is", "was", "are", "be", "do", "does", "did", "have", "has", "had", "get", "got", "like", "love"}
@@ -176,10 +178,15 @@ def answers_in(text: str, open_n: list[int]) -> list[tuple[int, str]]:
     if m:
         k = int(m.group(2))
         return [(n, m.group(1).lower()) for n in open_n[:k]] if k == len(open_n) else []
-    got = [(int(n), v.strip().rstrip(".").strip()) for n, v in _NUMBERED.findall(t)]
-    got = [(n, v) for n, v in got if n in open_n and v]
-    if got and _NUMBERED.match(t):
-        return got
+    marks = list(_MARK.finditer(t))
+    if marks and marks[0].start() == 0:
+        got = []
+        for i, mk in enumerate(marks):
+            end = marks[i + 1].start() if i + 1 < len(marks) else len(t)
+            v = t[mk.end():end].strip().rstrip(".,;").strip()
+            if v:
+                got.append((int(mk.group(1)), v))
+        return [(n, v) for n, v in got if n in open_n]
     if len(open_n) == 1 and _BARE.match(t):
         return [(open_n[0], t.rstrip(".!").strip().lower())]
     return []
@@ -294,6 +301,11 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
 
 # ---- the referent ------------------------------------------------------------------------------
 
+def take_note(srv, sid: str) -> str | None:
+    """The resolved reading for this chat's turn (once), for the turn's context."""
+    return (getattr(srv, "_cg_notes", None) or {}).pop(sid, None) if sid else None
+
+
 def _label(est, eid: str) -> str:
     d = (est.docs or {}).get(eid)
     if d is not None:
@@ -332,6 +344,8 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     if len(cands) == 1:
         if u:
             _edge(be, origin, u, "refers-to", cands[0], source="resolver")
+        srv.__dict__.setdefault("_cg_notes", {})[sid] = \
+            f'In the person\'s last message, "{word}" means {_label(est, cands[0])} ({cands[0]}).'
         return {"resolved": cands[0]}
     from . import speech as SP
     line = SP.say("reask", word=word, options=[_label(est, c) for c in cands])

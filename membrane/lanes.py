@@ -4173,6 +4173,21 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
     return recon
 
 
+def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
+    """The turn's first round carries what a pronoun in the person's message was
+    resolved to (convgraph.before_turn), once."""
+    if is_tool_round:
+        return ctx
+    try:
+        from . import convgraph as _CG
+        note = _CG.take_note(srv, str(body.get("_turn_sid") or ""))
+    except Exception:
+        note = None
+    if not note:
+        return ctx
+    return (ctx + "\n\n" + note) if ctx else note
+
+
 def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     """The turn's state blocks -> (ctx, the field watermark to keep once the
     turn is delivered). MEMBRANE_INJECTION picks the block: 'banner' (the
@@ -4203,7 +4218,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
             except Exception as e:
                 print(f"[conv-banner] error: {e}", file=sys.stderr)
         mark("recall+banner")
-        return ctx, efield_mark
+        return _with_referent(srv, body, ctx, _is_tool_round), efield_mark
     _massage = _injection_mode(srv) == "massage"
     banner_block = (None if _no_banner
                     else _where_delta(srv, _where_we_are(srv, vec, events_only=_massage)))
@@ -4258,7 +4273,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
                 ctx = (ctx + "\n\n" + i_block) if ctx else i_block
         except Exception as e:
             print(f"[opencode] intent block error: {e}", file=sys.stderr)
-    return ctx, efield_mark
+    return _with_referent(srv, body, ctx, _is_tool_round), efield_mark
 
 
 class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the timing ring

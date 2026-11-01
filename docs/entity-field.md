@@ -500,7 +500,10 @@ Decision cards in that chat (`asked_from: chat-text`). The same question is the 
 when a reply lists its decisions, a text question it no longer lists is dropped, with no
 message. A card an agent opened in the chat that nobody asked yet is posted by membrane
 (`speech.say("asks")`), numbered after the reply's own. The person answers in the chat:
-`1. yes`, `2. no`, a bare answer when one card is open, `yesx2` for two.
+`1. yes`, `1 yes`, `2. only to the chat`, `1 yes 2 no`, a bare yes or no when one card is
+open, `yesx2` for two. An answer starts with its number followed by `.` or `)`, or by a
+yes/no word, so a sentence like "2 tests failed" answers nothing, and neither does a bare
+"ok". A speaker line (`[user: X]`) is read past.
 `decision_map.answer(..., tell=False)` decides the card and writes the ledger, and no
 decision message goes back (the chat already says it). A bare answer with several cards
 open answers nothing: matching free text to a card would need a cut-off that hasn't been
@@ -511,7 +514,8 @@ set. The cockpit stays the default view.
 message's `refers-to` targets). When a candidate has a method of the verb's name, the
 ones without one drop; then a candidate whose state is closed (closed, dropped,
 fulfilled, merged, retired, done, deleted) drops. One left is recorded
-(`refers-to`, source `resolver`). Two or more are asked back in the chat, in one line
+(`refers-to`, source `resolver`) and told to the model once, as a line in that turn's
+context (`lanes._with_referent`). Two or more are asked back in the chat, in one line
 (`"it": a or b?`), and that turn doesn't run. The person's reply then runs normally; the
 answer resolves that one reference and trains nothing.
 

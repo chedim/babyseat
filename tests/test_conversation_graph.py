@@ -193,6 +193,24 @@ class DecisionsInTheChat(unittest.TestCase):
         self.assertIs(card.properties["value"], False)
 
 
+class WhatCountsAsAnAnswer(unittest.TestCase):
+    """Memo's review of #803: ordinary sentences are not answers."""
+
+    def test_the_forms_that_answer(self):
+        self.assertEqual(CG.answers_in("1. yes", [1, 2]), [(1, "yes")])
+        self.assertEqual(CG.answers_in("1 yes", [1, 2]), [(1, "yes")])
+        self.assertEqual(CG.answers_in("1) no, just keep them in main", [1]), [(1, "no, just keep them in main")])
+        self.assertEqual(CG.answers_in("1 yes 2 no", [1, 2]), [(1, "yes"), (2, "no")])
+        self.assertEqual(CG.answers_in("1. yes. 2. only to the chat", [1, 2]), [(1, "yes"), (2, "only to the chat")])
+        self.assertEqual(CG.answers_in("yes", [3]), [(3, "yes")])
+
+    def test_sentences_that_dont(self):
+        self.assertEqual(CG.answers_in("2 tests failed", [1, 2]), [])
+        self.assertEqual(CG.answers_in("ok", [1]), [])
+        self.assertEqual(CG.answers_in("sure, after lunch", [1]), [])
+        self.assertEqual(CG.answers_in("3. yes", [1, 2]), [])
+
+
 class TheSpeakerLine(unittest.TestCase):
     """A chat client's speaker line ('[user: X]') heads the person's text: it is not their words."""
 
@@ -267,6 +285,20 @@ class TheReferent(unittest.TestCase):
         out = CG.before_turn(srv, runner, SID, {"id": "msg_u3"}, "deploy it")
         self.assertFalse(out and out.get("reask"))
         self.assertIn(("refers-to", MEMBRANE_NS + "thing:svc"), _out(srv, CG.msg_eid("msg_u3")))
+
+    def test_the_reading_is_passed_to_the_model_once(self):
+        srv, runner = _seat()
+        est = srv.entity_store
+        est.upsert(QuantumEntity(eid=MEMBRANE_NS + "goal:beta", cls="Goal", properties={"name": "beta", "status": "open"}))
+        _, a = _turn(srv, runner, 1, "look", "x")
+        R.upsert(srv.efield.b, srv.efield.origin, a, "refers-to", MEMBRANE_NS + "goal:beta", "chat")
+        runner.messages.add(SID, "msg_u2", "user", "close it")
+        CG.before_turn(srv, runner, SID, {"id": "msg_u2"}, "close it")
+        from membrane import lanes as L
+        ctx = L._with_referent(srv, {"_turn_sid": SID}, "BANNER", False)
+        self.assertIn('"it" means beta', ctx)
+        self.assertTrue(ctx.startswith("BANNER"))
+        self.assertEqual(L._with_referent(srv, {"_turn_sid": SID}, "BANNER", False), "BANNER")
 
     def test_no_pronoun_no_resolution(self):
         srv, runner = self._two_files()

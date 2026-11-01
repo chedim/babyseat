@@ -182,6 +182,34 @@ class TestMessagesInCBL(unittest.TestCase):
         self.assertEqual([r["info"]["id"] for r in raw.get("ses_a", [])], ["msg_1"])
 
 
+class _Failing(_Spy):
+    def put_json(self, coll, key, js):
+        raise RuntimeError("disk full")
+
+
+@unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
+class TestAFailedImportKeepsTheFile(unittest.TestCase):
+    """Memo's review of #800: a failed import must not rename the file it came from."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp())
+        self.be = CBLiteBackend(self.d / "field.cblite")
+        self.addCleanup(self.be.close)
+
+    def test_sessions(self):
+        p = self.d / "serve-sessions.json"
+        p.write_text(json.dumps({"ses_1": {"id": "ses_1", "title": "old", "time": {"created": 1, "updated": 1}}}))
+        SessionStore(str(p), cbl=_Failing(self.be.db))
+        self.assertTrue(p.exists())
+
+    def test_messages(self):
+        p = self.d / "serve-msgs.json"
+        p.write_text(json.dumps({"ses_a": [{"info": {"id": "msg_1", "role": "user", "time": {"created": 1}},
+                                           "parts": []}]}))
+        MessageStore(str(p), cbl=_Failing(self.be.db))
+        self.assertTrue(p.exists())
+
+
 class TestWithoutTheDatabase(unittest.TestCase):
     def test_a_store_without_the_database_keeps_its_files(self):
         d = Path(tempfile.mkdtemp())
