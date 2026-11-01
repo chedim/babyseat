@@ -4174,18 +4174,34 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
 
 
 def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
-    """The turn's first round carries what a pronoun in the person's message was
-    resolved to (convgraph.before_turn), once."""
+    """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what
+    this conversation is about now, walked off its graph) and what a pronoun in the person's
+    message was resolved to (convgraph.before_turn), once."""
     if is_tool_round:
         return ctx
+    sid = str(body.get("_turn_sid") or "")
+    adds = []
+    if sid and sid in (getattr(srv, "_cg_turn", None) or {}):
+        try:
+            from . import graphbanner as _GB
+            _t_gb = time.monotonic()
+            blk = _GB.block(srv, sid)
+            print(f"[graph-banner] {sid[:16]}: {blk.count(chr(10)) if blk else 0} lines in "
+                  f"{(time.monotonic() - _t_gb) * 1000:.0f} ms", file=sys.stderr)
+            if blk:
+                adds.append(blk)
+        except Exception as e:
+            print(f"[graph-banner] {sid[:16]}: {e}", file=sys.stderr)
     try:
         from . import convgraph as _CG
-        note = _CG.take_note(srv, str(body.get("_turn_sid") or ""))
+        note = _CG.take_note(srv, sid)
     except Exception:
         note = None
-    if not note:
+    if note:
+        adds.append(note)
+    if not adds:
         return ctx
-    return (ctx + "\n\n" + note) if ctx else note
+    return "\n\n".join(([ctx] if ctx else []) + adds)
 
 
 def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
