@@ -205,6 +205,41 @@ class TheOwnMessageFirst(unittest.TestCase):
         self.assertEqual((_say(srv, runner, 2, "park that until later", "ok") or {}).get("resolved"), A)
 
 
+class ShortFollowUpsAndStaleReadings(unittest.TestCase):
+    """Leftovers of #806 (replayed on main 6f52930)."""
+
+    def test_a_short_follow_up_falls_back_to_the_reply_before(self):
+        for text in ("look at it", "can you look at it", "show me it", "what do you think of it"):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+            self.assertEqual((_say(srv, runner, 2, text, "-") or {}).get("resolved"), A, text)
+
+    def test_a_short_follow_up_falls_back_to_the_register(self):
+        for text in ("look at it", "can you look at it", "show me it", "what do you think of it"):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+            _say(srv, runner, 2, "delete it", "Deleted.")
+            _say(srv, runner, 3, "ok", "Nothing named here.")
+            self.assertEqual((_say(srv, runner, 4, text, "-") or {}).get("resolved"), A, text)
+
+    def test_a_sentence_that_really_names_something_keeps_borrowing_nothing(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+        out = _say(srv, runner, 2, "claude suggested to clear that register, so I cleared it", "ok")
+        self.assertIsNone(out)
+
+    def test_a_reading_known_to_be_wrong_does_not_stay_loaded(self):
+        """The person's own words name what "them" means: the check stops, and the register an
+        earlier turn loaded must not go on saying something else."""
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py and membrane/b.py.")
+        _say(srv, runner, 2, "ping them", "pinged")
+        self.assertIsNotNone(_holds(srv, "they"))
+        out = _say(srv, runner, 3, "ok, pronouns should be fixed now. Claude fixed them.", "ok")
+        self.assertIsNone(out)
+        self.assertIsNone(_holds(srv, "they"))
+
+
 class TheCaptureBinding(unittest.TestCase):
     """2026-11-01: the seat's old lexical binder rewrote Memo's "can you benchmark it?" as
     "... benchmark explain?". A chat turn the graph looked at binds by the graph's reading."""
