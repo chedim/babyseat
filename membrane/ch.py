@@ -565,9 +565,16 @@ class VM:
                          if e.cls != CLASS and self._isa(e, atom[2], memo)]
         return memo[key]
 
-    def _bindings(self, spec: dict, memo: dict, fixed: dict | None = None) -> list[dict]:
+    def _bindings(self, spec: dict, memo: dict, fixed: dict | None = None,
+                  atoms: dict | None = None, env: dict | None = None) -> list[dict]:
+        """The WHERE atoms' bindings. `atoms`: more atom kinds, name -> fn(atom, bindings) ->
+        bindings (the banner rules' edge / recent / mine, graphbanner); `env`: plain values
+        the filters may read besides the bound entities."""
         out = [dict(fixed or {})]
         for a in spec.get("where") or []:
+            if atoms and a[0] in atoms:
+                out = atoms[a[0]](a, out)
+                continue
             if a[0] not in ("isa", "is"):
                 continue
             v = _var(a[1])
@@ -583,9 +590,9 @@ class VM:
             out = nxt
         res = []
         for b in out:
-            env = self._env(b)
+            env_b = {**(env or {}), **self._env(b)}
             try:
-                if all(evaluate(a[1], env) for a in spec.get("where") or [] if a[0] == "filter"):
+                if all(evaluate(a[1], env_b) for a in spec.get("where") or [] if a[0] == "filter"):
                     res.append(b)
             except Refused:
                 pass

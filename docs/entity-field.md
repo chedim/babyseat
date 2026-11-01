@@ -556,6 +556,32 @@ made it only.
 dropped card, a fulfilled goal, a goal whose graph has nothing left moving, a watch
 escalation, the asked decisions, the re-ask), filled from the subgraph it is about.
 
+### The graph-walk lane (graphbanner, 2026-11-01)
+
+A chat turn's first round carries **WHERE WE ARE (this conversation's graph)**: lines
+walked off the conversation graph, not guessed by text similarity. Measured first, on 2,124
+of the operator's turns: the walk over the last 8 messages brought something the turn then
+used in 70% of them, the text-recall proxy in 44%, and adding text recall to the walk added
+nothing. It runs beside the recall banner, not instead of it.
+
+The lane is a set of **rules**, each an entity (class `BannerRule`), written in cliffhanger's
+own pattern language: the triggers' `WHERE` atoms (`isa`, `is`, `filter`, the same binder,
+`ch.VM._bindings`) plus the graph's facts, and a `show` line:
+
+| atom | binds |
+|---|---|
+| `edge(?a, rel, ?b)` | a relations row `a -rel-> b`; `rel` exact or ending in `*` (`asks:*`); one side bound before it |
+| `recent(?m)` | this chat's last 8 messages (the operator's window), newest first |
+| `mine(?r)` | this person's pronoun registers |
+| `filter(expr)` | cliffhanger's safe expressions; `chat` is this chat's id |
+
+`show` fills `{var.prop}` from the bound entity (a name falls back to the field id's label;
+a missing value prints nothing). The seeded rules: open decisions this chat asked, what each
+pronoun holds, what the recent messages named (with its status), the programs the recent
+turns ran (with their rc). `graphbanner.define(est, name, where, show)` adds one, refused like
+a trigger when it can't bind. The lane is the rules' lines in their order, unique, at most 12
+(the banner's size); the gate logs its cost (`[graph-banner] … lines in … ms`).
+
 ## The gate and the replay A/B
 
 `membrane/efgate.py` runs on every real turn. It finds the earlier user

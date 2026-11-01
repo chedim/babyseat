@@ -1291,6 +1291,12 @@ def main() -> None:
                       file=sys.stderr)
         except Exception as e:
             print(f"[seat] method shapes skipped ({e})", file=sys.stderr)
+        # THE GRAPH-WALK LANE's seeded rules (graphbanner): made once, kept as edited
+        try:
+            from .graphbanner import seed as _seed_banner_rules
+            _seed_banner_rules(srv.entity_store)
+        except Exception as e:
+            print(f"[seat] banner rules skipped ({e})", file=sys.stderr)
         # THE WARM-UP (2026-10-10: the first turn after a restart paid 11.8 s
         # for the intent seeds -- a full scan + every seed embedded cold):
         # done in the background right after boot, nobody waits for it
