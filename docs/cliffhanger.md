@@ -110,33 +110,17 @@ Anything else is refused in words ("I don't know how to define "stale" that way 
 nothing is guessed. Membrane answers what it learned ('Got it: "finish" now means close.'). In a
 chat, a message that teaches a word is told to the model with the `exec` call that keeps it.
 
-**Questions compile to queries** (the first step of Blurp's `invent`): a question is a
-read-only query over the field, answered in words by membrane. It says what the field *has*,
-never that nothing exists.
-
-| question | answer |
-|---|---|
-| "which open goals are there?" | "2 open goals: goal one and goal two." / "The field has no open goals." |
-| "how many open goals?" | "1 open goal." |
-| "is goal one open?" | "Yes, goal one is open." / "No: goal two is closed." |
-| "what does finish mean?" | '"finish" means close.' |
-
-Anything else ("why are goals slow?") is refused in words ("I can't answer that from the
-field …"). In a chat, the model is told the field's answer with the compiled question, and it
-still answers the turn. Names never match membrane's own machinery (code-tree nodes, results,
-messages, registers, rules, verbs, adjectives).
-
 **Compile-first routing, stage 1: the shadow** (2026-11-01). Each person message (it only reads, so every
 chat) is compiled locally (no model call) and sorted into one of three outcomes: **compiled**
 (every step maps to the field), **gaps** (typed: `unknown_verb`, `no_meaning`, `needs_args`,
-`unknown_object`, `no_object`, `unknown_definition`), or **thinking** (no step, or a question
-outside the four forms). The outcome is kept as the `shadow` property on the person's message
+`unknown_object`, `no_object`, `unknown_definition`), or **thinking** (no
+step). The outcome is kept as the `shadow` property on the person's message
 entity, next to what the model then did (`model_tools`, the tool parts of its reply, and
 `model_ran`, the programs it ran). Nothing answers from the shadow yet: it only measures.
-`membrane shadow` prints the rates (read-only). The later stages, in order: membrane answers
-the read-only (compiled question) messages itself, then runs compiled actions, then closes gaps
-with narrow background model turns that only propose definitions (at most 3 rounds, stopping
-when a round doesn't shrink the gaps).
+`membrane shadow` prints the rates (read-only). Stage 2 (membrane answering
+questions itself) was dropped with the hardcoded question forms (2026-11-01). Later stages:
+membrane runs compiled actions, then closes gaps with narrow background model turns that only
+propose definitions (at most 3 rounds, stopping when a round doesn't shrink the gaps).
 
 **Membrane words the result itself** (`membrane/generate.py`): a run ends in a sentence built
 from its calls and their results -- the verb's past form (lemminflect, plain rules without

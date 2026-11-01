@@ -5,7 +5,7 @@ Shadow changes nothing and calls no model: every person message in a chat is com
 locally and the outcome is kept on its message entity, next to what the model then did, so the
 real rates exist before anything answers on its own.
 
-  compiled   a command, a question or a definition, every part mapped
+  compiled   a command or a definition, every part mapped
   gaps       typed: unknown_verb, no_meaning, needs_args, unknown_object, no_object
   thinking   nothing to compile ("thoughts on X?", "ok")
 """
@@ -29,7 +29,6 @@ class Classify(unittest.TestCase):
     def test_outcomes(self):
         srv, f, est, goal, g1, g2 = _world()
         self.assertEqual(LL.classify(srv, SID, "close goal one")["outcome"], "compiled")
-        self.assertEqual(LL.classify(srv, SID, "which open goals are there?")["outcome"], "compiled")
         self.assertEqual(LL.classify(srv, SID, "finish means close")["outcome"], "compiled")
         self.assertEqual(LL.classify(srv, SID, "thoughts on the field design?")["outcome"], "thinking")
         self.assertEqual(LL.classify(srv, SID, "ok")["outcome"], "thinking")
