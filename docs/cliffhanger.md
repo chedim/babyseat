@@ -126,6 +126,18 @@ field …"). In a chat, the model is told the field's answer with the compiled q
 still answers the turn. Names never match membrane's own machinery (code-tree nodes, results,
 messages, registers, rules, verbs, adjectives).
 
+**Compile-first routing, stage 1: the shadow** (2026-11-01). Each person message (it only reads, so every
+chat) is compiled locally (no model call) and sorted into one of three outcomes: **compiled**
+(every step maps to the field), **gaps** (typed: `unknown_verb`, `no_meaning`, `needs_args`,
+`unknown_object`, `no_object`, `unknown_definition`), or **thinking** (no step, or a question
+outside the four forms). The outcome is kept as the `shadow` property on the person's message
+entity, next to what the model then did (`model_tools`, the tool parts of its reply, and
+`model_ran`, the programs it ran). Nothing answers from the shadow yet: it only measures.
+`membrane shadow` prints the rates (read-only). The later stages, in order: membrane answers
+the read-only (compiled question) messages itself, then runs compiled actions, then closes gaps
+with narrow background model turns that only propose definitions (at most 3 rounds, stopping
+when a round doesn't shrink the gaps).
+
 **Membrane words the result itself** (`membrane/generate.py`): a run ends in a sentence built
 from its calls and their results -- the verb's past form (lemminflect, plain rules without
 it), the objects' names joined as English, the count when there are several: "Closed goal

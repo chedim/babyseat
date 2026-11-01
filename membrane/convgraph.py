@@ -306,6 +306,27 @@ def _ask(srv, runner, sid: str, a_eid: str, reply: str, be, origin) -> None:
 
 # ---- the turn ------------------------------------------------------------------------------
 
+def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
+    """Compile-first routing, shadow stage: what living language made of the person's message
+    (compiled / gaps / thinking), kept on its message next to what the model then did."""
+    try:
+        from . import language as LL
+        if not LL.available():
+            return
+        sh = LL.classify(srv, sid, text)
+    except Exception:
+        return
+    rows = runner.messages.list(sid) if runner is not None else []
+    row = next((r for r in rows if (r.get("info") or {}).get("id") == a_mid), None)
+    sh["model_tools"] = [p.get("tool") for p in ((row or {}).get("parts") or [])
+                         if isinstance(p, dict) and p.get("type") == "tool" and p.get("tool")
+                         and not str(p.get("callID") or "").startswith("inj-")]   # not membrane's injection card
+    sh["model_ran"] = list((getattr(runner, "_cg_roots", None) or {}).get(sid, []))
+    d = srv.entity_store.docs.get(u)
+    if d is not None:
+        d.properties = {**(d.properties or {}), "shadow": sh}
+        srv.entity_store.upsert(d, embedder=None)
+
 def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
                 a_info: dict, reply: str) -> None:
     """The finished chat turn into the graph (both messages, their edges, the answers to the
@@ -320,6 +341,8 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
     person = from_person(user_text)
     who, user_text = _words(user_text)
     u = _mint(est, sid, u_mid, "user" if person else "membrane", user_text, speaker=who)
+    if person:
+        _shadow(srv, runner, sid, u, a_mid, user_text)
     a = _mint(est, sid, a_mid, "assistant", reply)
     prev = _row_before(runner, sid, u_mid)
     prev_a = _row_before(runner, sid, u_mid, "assistant")

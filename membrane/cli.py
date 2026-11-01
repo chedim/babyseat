@@ -684,7 +684,7 @@ def main() -> None:
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth", "serve", "standalone", "stop",
-                   "stats", "bench", "erase-field", "token", "toybox", "self"):
+                   "stats", "bench", "erase-field", "token", "toybox", "self", "shadow"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -701,6 +701,10 @@ def main() -> None:
         raise SystemExit(token_main(forwarded))
     if cmd == "update":
         raise SystemExit(update_main())
+    if cmd == "shadow":
+        # COMPILE-FIRST ROUTING, shadow stage: what living language made of the person's messages
+        from .language import shadow_cli
+        raise SystemExit(shadow_cli(forwarded))
     if cmd == "toybox":
         # SELF'S TOYS (#239): the built-in kit, in this project's data dir
         os.environ.setdefault("MEMBRANE_DATA_DIR", str(DATA_DIR))
