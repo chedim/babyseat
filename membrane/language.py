@@ -246,7 +246,7 @@ def _members(est, lemma: str) -> list:
     from .night import ancestors
     out = []
     for d in list((est.docs or {}).values()):
-        if d.cls in (CLASS_ADJECTIVE, "Verb", "BannerRule", "Message", "Register"):
+        if d.cls in (CLASS_ADJECTIVE, "Verb", "BannerRule", "Message", "Register") or d.eid.startswith(_MACHINERY):
             continue
         if (d.cls or "").lower() == lemma or any(
                 str((a.properties or {}).get("name") or "").lower() == lemma for a in ancestors(est, d)):
@@ -254,9 +254,17 @@ def _members(est, lemma: str) -> list:
     return out
 
 
+_MACHINERY = tuple(MEMBRANE_NS + k for k in ("node:", "result:", "msg:", "register:", "bannerrule:",
+                                                 "verb:", "adjective:"))
+
+
 def _by_name(est, name: str):
+    """The thing with that name (or a taught other name) -- never membrane's own machinery:
+    a sentence that ran is minted as code-tree nodes named after its phrases."""
     n = name.lower().strip()
     for d in list((est.docs or {}).values()):
+        if d.eid.startswith(_MACHINERY):
+            continue
         p = d.properties or {}
         if str(p.get("name") or "").lower() == n or n in [str(a).lower() for a in (p.get("aliases") or [])]:
             return d
@@ -315,6 +323,109 @@ def _define_step(srv, est, word: str, meaning: str, text: str) -> dict:
             "targets": [], "calls": [], "options": {}, "writes": True, "needs_all": False,
             "mapped": plan is not None, "unmapped": [] if plan else [f"define {word}"],
             "text": str(text).strip()}
+
+
+_WH = {"what", "which", "who", "how", "is", "are", "does", "do", "did", "list", "show", "where", "why", "when"}
+_Q_MEANING = re.compile(r"(?i)^what does [\"']?(.+?)[\"']? mean$")
+_Q_COUNT = re.compile(r"(?i)^how many (.+?)(?:\s+(?:are there|exist|do we have|are there now))?$")
+_Q_LIST = re.compile(r"(?i)^(?:which|what|list|show me|show)\s+(?:are\s+)?(?:the\s+)?(.+?)"
+                     r"(?:\s+(?:are there|exist|do we have|are left|there are))?$")
+_Q_IS = re.compile(r"(?i)^is (.+) (\w+)$")
+
+
+def _is_question(text: str) -> bool:
+    t = str(text or "").strip()
+    first = (t.split() or [""])[0].lower()
+    return t.endswith("?") or first in ("which", "how")
+
+
+def _phrase(srv, sid: str, est, phrase: str):
+    """A noun phrase's members (a class narrowed by its adjectives) and its tokens."""
+    toks = [t for t in _doc(phrase) if not t.is_punct]
+    unmapped: list = []
+    return (_span_targets(srv, sid, est, toks, unmapped) if toks else []), toks, unmapped
+
+
+def _query_step(srv, sid: str, est, text: str) -> dict:
+    q = str(text).strip().rstrip("?!. ").strip()
+    plan, unmapped = None, []
+    m = _Q_MEANING.match(q)
+    if m:
+        plan = {"ask": "meaning", "word": m.group(1).strip().lower()}
+    elif _Q_COUNT.match(q):
+        phrase = _Q_COUNT.match(q).group(1)
+        targets, toks, unmapped = _phrase(srv, sid, est, phrase)
+        plan = {"ask": "count", "targets": targets, "phrase": phrase, "toks": toks}
+    elif _Q_IS.match(q) and _Q_IS.match(q).group(2).lower() in _adjectives(est):
+        name, adj = _Q_IS.match(q).group(1), _Q_IS.match(q).group(2).lower()
+        d = _by_name(est, re.sub(r"(?i)^the\s+", "", name))
+        if d is None:
+            unmapped.append(name)
+        plan = {"ask": "is", "target": d.eid if d is not None else None, "adjective": adj, "name": name}
+    elif _Q_LIST.match(q):
+        phrase = _Q_LIST.match(q).group(1)
+        targets, toks, unmapped = _phrase(srv, sid, est, phrase)
+        plan = {"ask": "list", "targets": targets, "phrase": phrase, "toks": toks}
+    else:
+        unmapped.append("question")
+    return {"kind": "query", "verb": "answer", "plan": plan, "targets": (plan or {}).get("targets") or [],
+            "calls": [], "options": {}, "writes": False, "needs_all": False,
+            "mapped": plan is not None and not unmapped, "unmapped": unmapped, "text": str(text).strip()}
+
+
+def _numbered(toks, n: int) -> str:
+    """The phrase in the number n wants: "open goals" -> "open goal" for one."""
+    words = [t.text for t in toks if t.pos_ != "DET"]
+    if n == 1 and toks:
+        head = [t for t in toks if t.pos_ != "DET"][-1]
+        words[-1] = head.lemma_ if head.tag_ in ("NNS", "NNPS") else head.text
+    return " ".join(words)
+
+
+def answer(srv, step: dict) -> tuple[bool, str]:
+    """A query step's answer in words: (answered, the sentence). Reads only."""
+    from . import convgraph as CG
+    from . import generate as GEN
+    from . import verbs as V
+    from .ch import EntityView, Refused, evaluate
+    est = srv.entity_store
+    p = step.get("plan") or {}
+    if not step.get("mapped"):
+        return False, ("I can't answer that from the field: it isn't a question about what the field "
+                       "holds, or I don't know " + GEN.join([f'"{u}"' for u in step.get("unmapped") or []]) + ".")
+    if p["ask"] in ("list", "count"):
+        n, names = len(p["targets"]), [CG._label(est, e) for e in p["targets"]]
+        if n == 0:
+            return True, f"The field has no {_numbered(p['toks'], 2)}."
+        if p["ask"] == "count":
+            return True, f"{n} {_numbered(p['toks'], n)}."
+        return True, f"{n} {_numbered(p['toks'], n)}: {GEN.join([GEN._name(x) for x in names])}."
+    if p["ask"] == "is":
+        adj = _adjectives(est)[p["adjective"]]
+        d = est.docs[p["target"]]
+        try:
+            yes = bool(evaluate((adj.properties or {}).get("filter") or "False", {"x": EntityView(est, d.eid)}))
+        except Refused:
+            yes = False
+        name = CG._label(est, d.eid)
+        if yes:
+            return True, f"Yes, {name} is {p['adjective']}."
+        st = (d.properties or {}).get("status")
+        return True, f"No: {name} is {st}." if st else f"No: {name} isn't {p['adjective']}."
+    w = p["word"]
+    v = (est.docs or {}).get(V.verb_eid(w))
+    if v is not None and (v.properties or {}).get("same_as"):
+        return True, f'"{w}" means {v.properties["same_as"]}.'
+    a = _adjectives(est).get(w)
+    if a is not None:
+        return True, f'"{w}" means {(a.properties or {}).get("filter")}.'
+    d = _by_name(est, w)
+    if d is not None and w in [str(x).lower() for x in ((d.properties or {}).get("aliases") or [])]:
+        return True, f'"{w}" means {CG._label(est, d.eid)}.'
+    if v is not None:
+        return True, f'"{w}" is a verb: ' + GEN.join([CG._label(est, m) for m in (v.properties or {}).get(
+            "implemented_by") or []] or ["nothing implements it"]) + "."
+    return False, f'I don\'t know what "{w}" means.'
 
 
 def teach(est, step: dict) -> str:
@@ -381,6 +492,8 @@ def compile(srv, sid: str, text: str) -> list[dict]:
     m = _DEFINE.match(str(text or ""))
     if m:                                        # "X means Y": a definition, not a command
         return [_define_step(srv, est, m.group(1).strip().lower(), m.group(2).strip(), text)]
+    if _is_question(text):                       # a question: a read-only query over the field
+        return [_query_step(srv, sid, est, text)]
     doc = _doc(text)
     starts = _clause_starts(doc)
     heads = []                                   # (token index, verb lemma, verb width)
@@ -524,6 +637,9 @@ def describe(est, steps: list[dict]) -> str:
     from . import convgraph as CG
     out = []
     for s in steps:
+        if s.get("kind") == "query":
+            out.append(f"answers {s['text']!r}")
+            continue
         if s.get("kind") == "define":
             out.append(f'teaches "{s["word"]}" = {(s.get("plan") or {}).get("shown") or s.get("meaning")}')
             continue
@@ -557,6 +673,11 @@ def run(srv, text: str, timeout_s=None) -> dict:
                 "head": msg[:200], "tail": msg[-200:], "ms": max(1, int((time.time() - t0) * 1000))}
     if not steps:
         return refused("I didn't find a command in that.")
+    if steps[0].get("kind") == "query":          # a question: read the field, word the answer
+        ok, line = answer(srv, steps[0])
+        r = {"ok": ok, "rc": 0 if ok else 2, "outcome": "ok" if ok else "refused", "output": line, "said": line,
+             "head": line, "tail": line, "error": "" if ok else line, "ms": max(1, int((time.time() - t0) * 1000))}
+        return r
     if steps[0].get("kind") == "define":         # teaching a word (generate.py words it)
         s = steps[0]
         if not s["mapped"]:

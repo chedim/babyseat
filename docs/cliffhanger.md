@@ -110,6 +110,22 @@ Anything else is refused in words ("I don't know how to define "stale" that way 
 nothing is guessed. Membrane answers what it learned ('Got it: "finish" now means close.'). In a
 chat, a message that teaches a word is told to the model with the `exec` call that keeps it.
 
+**Questions compile to queries** (the first step of Blurp's `invent`): a question is a
+read-only query over the field, answered in words by membrane. It says what the field *has*,
+never that nothing exists.
+
+| question | answer |
+|---|---|
+| "which open goals are there?" | "2 open goals: goal one and goal two." / "The field has no open goals." |
+| "how many open goals?" | "1 open goal." |
+| "is goal one open?" | "Yes, goal one is open." / "No: goal two is closed." |
+| "what does finish mean?" | '"finish" means close.' |
+
+Anything else ("why are goals slow?") is refused in words ("I can't answer that from the
+field …"). In a chat, the model is told the field's answer with the compiled question, and it
+still answers the turn. Names never match membrane's own machinery (code-tree nodes, results,
+messages, registers, rules, verbs, adjectives).
+
 **Membrane words the result itself** (`membrane/generate.py`): a run ends in a sentence built
 from its calls and their results -- the verb's past form (lemminflect, plain rules without
 it), the objects' names joined as English, the count when there are several: "Closed goal
