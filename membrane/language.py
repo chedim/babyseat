@@ -712,6 +712,74 @@ def run(srv, text: str, timeout_s=None) -> dict:
             "error": "" if rc == 0 else text_out, "ms": max(1, int((time.time() - t0) * 1000))}
 
 
+# ---- compile-first routing, stage 1: shadow (the operator, 2026-11-01) ---------------------------
+# Every person message is compiled locally (no model call) and the outcome kept on its message
+# entity next to what the model then did, so the real rates exist before anything answers itself.
+
+def _gap_type(verb: str, u: str) -> str:
+    from . import generate as GEN
+    if u == verb:
+        return "unknown_verb"
+    if GEN.NO_MEANING in u:
+        return "no_meaning"
+    if " needs " in u:
+        return "needs_args"
+    if u == "(no object)":
+        return "no_object"
+    if u.startswith("define "):
+        return "unknown_definition"
+    return "unknown_object"
+
+
+def classify(srv, sid: str, text: str) -> dict:
+    """compiled / gaps (typed) / thinking, with the compiled program -- local, reads only."""
+    try:
+        steps = compile(srv, sid, text)
+    except Exception as e:
+        return {"outcome": "error", "gaps": [], "error": str(e)[:200]}
+    if not steps or (len(steps) == 1 and steps[0].get("kind") == "query"
+                     and steps[0].get("unmapped") == ["question"]):
+        return {"outcome": "thinking", "gaps": []}
+    if all(s["mapped"] for s in steps):
+        return {"outcome": "compiled", "gaps": [], "program": describe(srv.entity_store, steps),
+                "kinds": [s.get("kind") or "command" for s in steps]}
+    gaps = [{"type": _gap_type(s["verb"], str(u)), "what": str(u)[:120]} for s in steps for u in s["unmapped"]]
+    return {"outcome": "gaps", "gaps": gaps}
+
+
+def shadow_report(rows: list[dict]) -> dict:
+    """The shadow's rates: how many messages compiled, had gaps (by type), needed thinking."""
+    from collections import Counter
+    out = Counter(r.get("outcome") for r in rows)
+    gaps = Counter(g.get("type") for r in rows for g in (r.get("gaps") or []))
+    tools = Counter(r.get("outcome") for r in rows if r.get("model_tools"))
+    return {"total": len(rows), "outcomes": dict(out), "gap_types": dict(gaps), "model_used_tools": dict(tools)}
+
+
+def shadow_cli(argv=None) -> int:
+    """`membrane shadow`: the shadow's rates on this seat (reads the field, never writes)."""
+    import json as _json
+    from pathlib import Path
+    from . import cblite as CB
+    db_path = Path(".membrane") / "field.cblite"
+    if not db_path.exists():
+        print("no seat here (no .membrane/field.cblite)")
+        return 1
+    try:
+        d = CB.Database(CB.load(), "field", str(db_path))
+    except Exception as e:
+        print(f"can't open the field: {e}")
+        return 1
+    try:                                   # an entity row is {e: eid, d: its doc}
+        got = d.query("SELECT d.data.properties.shadow AS s FROM membrane.entities "
+                      "WHERE d.data.properties.shadow IS VALUED")
+    finally:
+        d.close()
+    rows = [r["s"] for r in got if isinstance(r.get("s"), dict)]
+    print(_json.dumps(shadow_report(rows), indent=2))
+    return 0
+
+
 def _register_lang() -> None:
     from . import lang as LG
     LG.LANGS["en"] = LG.Lang("en", parse, LG.print_, EXECUTOR, run)
