@@ -107,6 +107,27 @@ class Aliases(unittest.TestCase):
         self.assertEqual(step["calls"], [{"object": g1.eid, "method": "close", "args": {}, "writes": True,
                                           "target": g1.eid}])
 
+    def test_removing_the_method_clears_what_its_verb_aliased(self):
+        srv, f, est, *_ = _world()
+        repo = _add(est, "babyseat repo")
+        out = N.method_define(srv, est, f, None, repo.eid, "pr_zap", "echo zap")
+        assert out.get("ok"), out
+        m = est.docs[out["eid"]]
+        veid = V.verb_eid("zap")
+        v = est.docs[veid]
+        self.assertIn({"method": m.eid, "noun": "pr"}, v.properties["aliased"])
+        N.remove_entity(est, m.eid, force=True)
+        v = est.docs.get(veid)
+        self.assertTrue(v is None or v.properties.get("retired"), "verb left aliased and empty must be retired")
+        if v is not None:
+            self.assertEqual(v.properties.get("implemented_by") or [], [])
+            self.assertEqual(v.properties.get("aliased") or [], [])
+            be, origin = V._rel(est)
+            if be is not None:
+                from membrane import relations as R
+                live = [r for r in R.of(be, origin, veid, "implemented-by") if r.get("obj") == m.eid]
+                self.assertEqual(live, [])
+
 
 if __name__ == "__main__":
     unittest.main()
