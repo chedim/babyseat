@@ -356,6 +356,14 @@ _LEAD = re.compile(r"^(?:(?:yes|yep|yeah|ok|okay|sure|pls|please|so|and|then|now
                    r"\b[\s,.!-]*)+", re.I)
 _VERB_PRON = re.compile(r"^([a-z][a-z-]*)\s+(this one|that one|it|this|that|them|him|her|these|those|there)\b",
                         re.I)
+# "this / that / these / those" are pronouns only when nothing starting a noun or a clause
+# follows: "park that until later", "do that" -- not "I think that we", "merge this PR"
+_DEMONSTRATIVES = {"this", "that", "these", "those", "this one", "that one"}
+_AFTER_PRONOUN = {"until", "for", "to", "in", "on", "at", "by", "with", "and", "or", "but", "when",
+                  "because", "so", "if", "now", "too", "again", "please", "pls", "first", "later",
+                  "instead", "then", "as", "after", "before", "today", "tomorrow", "up", "down", "out",
+                  "off", "over", "away", "back", "already", "yet", "anyway", "done", "is", "was"}
+_NEXT_WORD = re.compile(r"\s*([A-Za-z#][\w#-]*)")
 REASK_MAX = 3            # the operator's cap (2026-11-01): more readings than this are not asked back
 _ORDINAL = {"first": 1, "1": 1, "one": 1, "second": 2, "2": 2, "two": 2, "third": 3, "3": 3}
 
@@ -492,7 +500,15 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     got = _answer_reask(srv, sid, est, be, origin, u, text, prev_u)
     if got is not None:
         return got
-    found = _PRON.search(text)
+    found = None
+    for m in _PRON.finditer(text):
+        w = m.group(1).lower()
+        if w in _DEMONSTRATIVES:
+            nxt = _NEXT_WORD.match(text, m.end())
+            if nxt and nxt.group(1).lower() not in _AFTER_PRONOUN:
+                continue                  # a determiner or a conjunction, not a pronoun
+        found = m
+        break
     if not found:
         return None
     word = found.group(1).lower()
@@ -501,6 +517,10 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     if verb:
         word = cmd.group(2).lower()
     plural = FORMS.get(word) in PLURAL
+    # the person's own message first: the nearest thing it names before the pronoun
+    own = _applicable(est, list(reversed(_mentions(srv, text[:found.start()]))), verb)
+    if own:
+        return _resolved(srv, sid, est, be, origin, u, word, own if plural else own[:1])
     prev_a = _row_before(runner, sid, mid, "assistant")
     fresh = list(dict.fromkeys(r["obj"] for r in _out(be, origin, msg_eid(prev_a.get("id")), "refers-to"))) \
         if prev_a is not None else []

@@ -157,6 +157,33 @@ class MembranesOwnMessages(unittest.TestCase):
         self.assertIsNone(CG.take_note(srv, SID))
 
 
+class TheOwnMessageFirst(unittest.TestCase):
+    """Memo, 2026-11-01: "on field ui redesign -- yes, replace both please. But I think we should
+    park that until ..." -- "that" is the redesign named in the same message, not what the
+    reply before proposed."""
+
+    def test_the_persons_own_message_comes_first(self):
+        from membrane.entities import MEMBRANE_NS, QuantumEntity
+        srv, runner = _seat()
+        srv.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "goal:ui", cls="Goal",
+                                              properties={"name": "membrane/ui.py", "status": "open"}))
+        _say(srv, runner, 1, "cards?", "Dropping membrane/a.py, membrane/b.py, membrane/c.py and membrane/d.py.")
+        out = _say(srv, runner, 2, "on membrane/ui.py -- yes. But we should park that until later", "parked")
+        self.assertEqual((out or {}).get("resolved"), "f:membrane/ui.py")
+        self.assertNotIn("proposed", CG.take_note(srv, SID) or "")
+
+    def test_a_demonstrative_before_a_noun_or_a_clause_is_not_a_pronoun(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py and membrane/b.py.")
+        for text in ("I think that we should wait", "merge this PR", "is that the one we wanted?"):
+            self.assertIsNone(_say(srv, runner, 2, text, "-"), text)
+
+    def test_a_demonstrative_as_an_object_is(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+        self.assertEqual((_say(srv, runner, 2, "park that until later", "ok") or {}).get("resolved"), A)
+
+
 class TheCaptureBinding(unittest.TestCase):
     """2026-11-01: the seat's old lexical binder rewrote Memo's "can you benchmark it?" as
     "... benchmark explain?". A chat turn the graph looked at binds by the graph's reading."""
