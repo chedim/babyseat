@@ -316,22 +316,66 @@ def compile(srv, sid: str, text: str) -> list[dict]:
         targets = _span_targets(srv, sid, est, kept, unmapped) if kept else []
         if not kept:
             unmapped.append("(no object)")
-        writes = False
+        calls: list = []
         if not unmapped:                        # "compiles" means every target has the verb's meaning
-            from . import verbs as V
+            said = {t.lower_ for t in kept} | {t.lemma_.lower() for t in kept}
             for e in targets:
-                d = (est.docs or {}).get(e)
-                m = V.implementation(est, d, verb)[0] if d is not None else None
-                if m is None:
-                    unmapped.append(f"{verb} {CG_label(est, e)}")
-                elif not (m.properties or {}).get("read_only"):
-                    writes = True
+                c = _call(est, verb, e, said, unmapped)
+                if c is not None:
+                    calls.append(c)
+        writes = any(c["writes"] for c in calls)
         everyone = any(t.lower_ in _ALL for t in kept)
-        steps.append({"verb": verb, "targets": targets, "options": options,
-                      "mapped": not unmapped and bool(targets), "unmapped": unmapped,
-                      "writes": writes, "needs_all": writes and len(targets) > 1 and not everyone,
+        steps.append({"verb": verb, "targets": targets, "options": options, "calls": calls,
+                      "mapped": not unmapped and bool(calls), "unmapped": unmapped,
+                      "writes": writes, "needs_all": writes and len(calls) > 1 and not everyone,
                       "text": doc[i:end].text.strip(" ,.;")})
     return steps
+
+
+_KIND_WORDS = {"u": {"pr", "pull", "request", "issue"}, "f": {"file"}, "c": {"command"}}
+
+
+def _value(est, eid: str) -> str:
+    """What an object is as an argument: a PR's number, a file's path, an entity's name."""
+    from . import convgraph as CG
+    m = CG._GH.match(eid)
+    if m:
+        return m.group(2)
+    d = (est.docs or {}).get(eid)
+    if d is not None:
+        return str((d.properties or {}).get("name") or eid)
+    return eid.split(":", 1)[1] if ":" in eid else eid
+
+
+def _call(est, verb: str, e: str, said: set, unmapped: list) -> dict | None:
+    """The call `verb` means on object `e`: its class's method on it (verbs.implementation), or a
+    compound name's (`pr_checks` for "check PR #812") on that method's owner, the object bound
+    to its one free parameter."""
+    from . import night as N
+    from . import verbs as V
+    d = (est.docs or {}).get(e)
+    m = V.implementation(est, d, verb)[0] if d is not None else None
+    if m is not None:
+        return {"object": e, "method": (m.properties or {}).get("method_name"), "args": {},
+                "writes": not (m.properties or {}).get("read_only")}
+    kinds = set(_KIND_WORDS.get(e.split(":", 1)[0], set()))
+    if d is not None:
+        kinds |= {w.lower() for w in str((d.properties or {}).get("name") or "").split()} | {(d.cls or "").lower()}
+    for method, noun in V.aliased(est, verb):
+        if not set(noun.split()) <= (said | kinds):
+            continue                            # the name's noun must be what the sentence's object is
+        mp = method.properties or {}
+        owner = (mp.get("method_of") or [None])[0]
+        if not owner:
+            continue
+        params = N.command_params(str(mp.get("command") or "")) or list(mp.get("params") or [])
+        if len(params) > 1:
+            unmapped.append(f"{verb} needs {', '.join(params)}")
+            return None
+        return {"object": owner, "method": mp.get("method_name"),
+                "args": {params[0]: _value(est, e)} if params else {}, "writes": not mp.get("read_only")}
+    unmapped.append(f"{verb} {CG_label(est, e)}")
+    return None
 
 
 def CG_label(est, eid: str) -> str:
@@ -351,7 +395,7 @@ def _span_targets(srv, sid: str, est, toks: list, unmapped: list) -> list[str]:
         if not got:
             unmapped.append(words[0].text)
         return got
-    text = " ".join(t.text for t in toks)
+    text = toks[0].doc.text[toks[0].idx:toks[-1].idx + len(toks[-1].text)]   # the original words, punctuation kept
     named = CG._mentions(srv, text)
     if named:
         return named
@@ -419,17 +463,11 @@ def run(srv, text: str, timeout_s=None) -> dict:
                 "head": msg, "tail": msg, "ms": max(1, int((time.time() - t0) * 1000))}
     lines, rc = [], 0
     for s in steps:
-        for e in s["targets"]:
-            doc = (est.docs or {}).get(e)
-            m, _owner = V.implementation(est, doc, s["verb"]) if doc is not None else (None, None)
-            if m is None:
-                lines.append(f"{s['verb']} {e}: nothing gives it that meaning")
-                rc = max(rc, 2)
-                continue
-            out = N.method_call(srv, est, _efield_on(srv), getattr(srv, "membrane", None), e,
-                                (m.properties or {}).get("method_name"), {})
+        for c in s["calls"]:
+            out = N.method_call(srv, est, _efield_on(srv), getattr(srv, "membrane", None), c["object"],
+                                c["method"], dict(c["args"]))
             rc = max(rc, int(out.get("rc") or (0 if out.get("ok") else 1)))
-            lines.append(f"{s['verb']} {e}: {out.get('output') or out.get('error') or out.get('status')}")
+            lines.append(f"{s['verb']} {c['object']}: {out.get('output') or out.get('error') or out.get('status')}")
     text_out = "\n".join(lines)
     return {"ok": rc == 0, "rc": rc, "outcome": "ok" if rc == 0 else "error", "output": text_out,
             "head": text_out[:200], "tail": text_out[-200:], "error": "" if rc == 0 else text_out,
