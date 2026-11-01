@@ -47,6 +47,9 @@ of that name, one per class or object that has it (`membrane/verbs.py`). The ver
 its implementations (`implemented_by`) and each method points back (`verb`); boot notes every
 method, `method_define` notes a new one, and a retired method stops implementing.
 
+- **Aliases.** A compound name (`pr_checks`, `lint_file`) is also noted under each word that
+  reads as a command verb, with the rest as the noun it expects (`aliased` on that verb; see
+  Living language below).
 - **One verb, many meanings.** "Close the PR" and "close the goal" are one verb with two
   implementations. `verbs.implementation(est, obj, verb)` picks by the object in the call's
   own order: its own method, then its classes' (ISA), then a global one. A noun nothing
@@ -71,6 +74,14 @@ sentence is parsed (spaCy) into node entities that print back exactly, and compi
 - **Adjectives** are `Adjective` entities, each a cliffhanger filter over `x` (*open*:
   `x.status == 'open'`); seeded ones at boot, `language.define_adjective` for more.
 - **Adverbs** are run options (*quietly*: no chat line).
+- **Compound method names alias their verb.** `pr_checks` is also noted under `verb:check`
+  with the noun it expects (`pr`), kept apart from exact names (`aliased` on the verb), so
+  "check PR #812" means it only because the object is a PR. Which word is the verb is
+  decided by reading each word as a command ("check it"); the rest of the name is the noun.
+- **Objects bind to parameters.** An aliased method is called on its owner with the object
+  bound to its one free parameter: a PR's number, a file's path, an entity's name ("check PR
+  #812" runs `pr_checks` with `num=812`). A method needing more than one argument is said
+  ("comment needs num, body"), never guessed.
 - **Compiled means runnable.** A step counts only when every target has the verb's meaning
   for its class; "list the open goals" with no `list` on goals is unmapped, said as such.
 - **A write on many things needs *all*.** When a step would change more than one thing (its

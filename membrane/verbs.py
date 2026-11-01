@@ -73,6 +73,7 @@ def note(est, method) -> str | None:
     if p.get("verb") != eid:
         method.properties = {**p, "verb": eid}
         est.upsert(method, embedder=None)
+    _alias(est, method, lem)
     be, origin = _rel(est)
     if be is not None:
         from . import relations as R
@@ -86,16 +87,75 @@ def note(est, method) -> str | None:
     return eid
 
 
+def _command_verb(word: str) -> str | None:
+    """`word` read as a command ("check it"): its verb lemma, or None (living language's parser)."""
+    try:
+        from . import language as LL
+        if not LL.available():
+            return None
+        if len(word) < 3 or not word.isalpha():
+            return None
+        lem = LL._doc(word)[0].lemma_.lower() or word
+        t = LL._doc(f"{lem} the thing")[0]       # a command on an object: "check the thing"
+    except Exception:
+        return None
+    return t.lemma_.lower() if t.pos_ == "VERB" and t.dep_ == "ROOT" else None
+
+
+def _alias(est, method, lem: str) -> None:
+    """A compound name ("pr checks") under each of its words that reads as a command verb, with
+    the rest of the name as the noun it expects (verb check, noun pr): `aliased` on that verb,
+    apart from exact names -- it maps only where the sentence's object agrees."""
+    words = lem.split()
+    if len(words) < 2:
+        return
+    for i, w in enumerate(words):
+        vl = _command_verb(w)
+        if not vl or vl == lem:
+            continue
+        noun = " ".join(words[:i] + words[i + 1:])
+        eid = verb_eid(vl)
+        v = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls=CLASS_VERB, properties={
+            "name": vl, "word": "w:" + vl, "implemented_by": [], "silent_birth": True, "born_ts": time.time()})
+        vp = dict(v.properties or {})
+        al = [a for a in (vp.get("aliased") or []) if a.get("method") != method.eid]
+        if _implements(method):
+            al.append({"method": method.eid, "noun": noun})
+        vp["aliased"] = al
+        v.properties = vp
+        est.upsert(v, embedder=None)
+
+
+def aliased(est, verb: str) -> list:
+    """[(method, the noun it expects)] the verb means through compound names."""
+    v = (est.docs or {}).get(verb_eid(verb))
+    docs = est.docs or {}
+    return [(docs[a["method"]], a.get("noun") or "") for a in ((v.properties or {}).get("aliased") or []) if v
+            and a.get("method") in docs and _implements(docs[a["method"]])] if v is not None else []
+
+
 def boot(srv) -> dict:
-    """Boot: every method noted on its verb (idempotent; a retired one stops implementing)."""
+    """Boot: every method noted on its verb (idempotent; a retired one stops implementing).
+    Aliases are rebuilt from scratch, and a verb left meaning nothing is removed (a stale alias
+    of an older rule, a method that went)."""
     est = srv.entity_store
+    for d in list((est.docs or {}).values()):
+        if d.cls == CLASS_VERB and (d.properties or {}).get("aliased"):
+            d.properties = {**(d.properties or {}), "aliased": []}
     seen = set()
     for d in list((est.docs or {}).values()):
         if (d.properties or {}).get("method_name"):
             e = note(est, d)
             if e:
                 seen.add(e)
-    return {"verbs": len(seen)}
+    gone = [d.eid for d in list((est.docs or {}).values()) if d.cls == CLASS_VERB
+            and not (d.properties or {}).get("implemented_by") and not (d.properties or {}).get("aliased")]
+    for eid in gone:
+        try:
+            est.remove(eid)
+        except Exception:
+            est.docs.pop(eid, None)
+    return {"verbs": len(seen), "removed": len(gone)}
 
 
 def _impls(est, verb: str) -> list:
