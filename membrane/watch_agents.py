@@ -653,7 +653,7 @@ def escalate(srv, ev: dict, ent: str, line: str = "", chat: str = "") -> bool:
     running one). False: no chat to tell."""
     from . import chat_io as _CIO
     from . import decision_map as _DM
-    sid = chat or _CIO.latest_chat(srv, "")
+    sid = chat or _CIO.latest_chat(srv, str(ev.get("owner") or ""))
     est = getattr(srv, "entity_store", None)
     if not sid or est is None:
         return False
