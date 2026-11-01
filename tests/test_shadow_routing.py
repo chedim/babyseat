@@ -50,11 +50,30 @@ class Recorded(unittest.TestCase):
         LL.seed(srv.entity_store)
         u = runner.messages.add(SID, "msg_u1", "user", "frobnicate the goals")
         a = runner.messages.add(SID, "msg_a1", "assistant", "done")
-        runner.messages.rows[SID][-1]["parts"].append({"type": "tool", "tool": "exec"})
+        runner.messages.rows[SID][-1]["parts"] += [
+            {"type": "tool", "callID": "inj-1", "tool": "membrane"},   # membrane's injection card
+            {"type": "tool", "callID": "c1", "tool": "exec"}]
         CG.on_turn_end(srv, runner, SID, u, "frobnicate the goals", a, "done")
         sh = srv.entity_store.docs[CG.msg_eid("msg_u1")].properties["shadow"]
         self.assertEqual(sh["outcome"], "gaps")
         self.assertEqual(sh["model_tools"], ["exec"])
+
+    def test_a_run_on_a_tool_thread_reaches_the_turn(self):
+        """jobs.dispatch runs every tool call on its own thread; the run it makes still belongs
+        to the chat turn (Memo, #823: model_ran was empty after 5 code_runs)."""
+        import threading
+        from types import SimpleNamespace
+        from membrane import jobs
+        local = threading.local()             # the turn's sid is per thread, as on LoopRunner
+        R = type("R", (), {"_current_turn_sid": property(lambda s: getattr(local, "sid", None),
+                                                          lambda s, v: setattr(local, "sid", v))})
+        runner = R()
+        srv = SimpleNamespace(_loop_runner=runner)
+        runner._current_turn_sid = SID
+        out = jobs.dispatch(runner, SID, "code_run", {}, "c1",
+                            lambda a: CG.note_root(srv, "membrane::node:sh:abc") or "ok")
+        self.assertEqual(out, "ok")
+        self.assertEqual(runner._cg_roots, {SID: ["membrane::node:sh:abc"]})
 
     def test_the_report_counts(self):
         rows = [{"outcome": "compiled", "gaps": [], "model_tools": []},

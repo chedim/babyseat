@@ -319,7 +319,8 @@ def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
     rows = runner.messages.list(sid) if runner is not None else []
     row = next((r for r in rows if (r.get("info") or {}).get("id") == a_mid), None)
     sh["model_tools"] = [p.get("tool") for p in ((row or {}).get("parts") or [])
-                         if isinstance(p, dict) and p.get("type") == "tool" and p.get("tool")]
+                         if isinstance(p, dict) and p.get("type") == "tool" and p.get("tool")
+                         and not str(p.get("callID") or "").startswith("inj-")]   # not membrane's injection card
     sh["model_ran"] = list((getattr(runner, "_cg_roots", None) or {}).get(sid, []))
     d = srv.entity_store.docs.get(u)
     if d is not None:

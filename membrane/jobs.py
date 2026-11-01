@@ -88,6 +88,8 @@ def _run(runner, sid, name, args, call) -> str:
 
     def go():
         try:
+            if sid and hasattr(type(runner), "_current_turn_sid"):
+                runner._current_turn_sid = sid    # the turn's sid is per thread: this one is the turn's too
             box["out"] = call(args)
         except Exception as e:                    # noqa: BLE001
             box["out"] = f"Error: {type(e).__name__}: {e}"[:400]
