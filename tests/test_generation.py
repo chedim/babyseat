@@ -75,5 +75,37 @@ class Reports(unittest.TestCase):
         self.assertIn("That would close 2 things", LG.run(srv, code="close the open goals", lang="en")["output"])
 
 
+class MemosReviewOf820(unittest.TestCase):
+    """Memo on #820 (2026-11-01): the reason is the last line, a silent failure says its exit
+    code, no doubled full stop, long names are cut, an object starting with the verb's word is
+    not misread, refusals are `said` too."""
+
+    def test_the_reason_is_the_last_line(self):
+        out = GEN.done("close", ["goal one"], [("goal one", "Traceback (most recent call last):\n  File x\nValueError: no such goal")])
+        self.assertEqual(out, "Couldn't close goal one: ValueError: no such goal.")
+
+    def test_a_silent_failure_says_its_exit_code(self):
+        self.assertEqual(GEN.done("close", ["goal one"], [("goal one", "", 3)]), "Couldn't close goal one (exit 3).")
+
+    def test_no_doubled_full_stop(self):
+        self.assertEqual(GEN.done("close", ["g"], [("g", "goal is already closed.")]), "Couldn't close g: goal is already closed.")
+
+    def test_long_names_are_cut(self):
+        name = "a very long task description " * 10
+        self.assertLess(len(GEN.done("close", [name], [])), 140)
+
+    def test_an_object_starting_with_the_verbs_word(self):
+        self.assertEqual(GEN.not_understood("close", ["close requests"]), 'I don\'t know what "close requests" is.')
+        self.assertEqual(GEN.not_understood("close", [GEN.no_meaning("close", "goal one")]),
+                         "I can't close goal one: nothing gives it that meaning.")
+
+    @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed")
+    def test_refusals_are_said(self):
+        srv, f, est, goal, g1, g2 = _world()
+        LL.seed_executor(est)
+        out = LG.run(srv, code="frobnicate the goals", lang="en")
+        self.assertIn("frobnicate", out.get("said") or "")
+
+
 if __name__ == "__main__":
     unittest.main()

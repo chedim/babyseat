@@ -105,7 +105,13 @@ def ensure(log=print) -> bool:
         importlib.import_module("lemminflect")
     except ImportError:
         if may_install:
-            subprocess.run(pip + ["--only-binary=:all:", "lemminflect"], capture_output=True, text=True, timeout=600)
+            try:
+                r = subprocess.run(pip + ["--only-binary=:all:", "lemminflect"], capture_output=True, text=True,
+                                   timeout=600)
+                if r.returncode != 0:
+                    log("[language] lemminflect could not be installed: verb forms use plain rules")
+            except Exception as e:
+                log(f"[language] lemminflect install failed ({type(e).__name__}): verb forms use plain rules")
     _NLP["m"] = None                       # load on next use
     ok = available()
     log(f"[language] living language {'on' if ok else 'off'} ({MODEL})")
@@ -251,9 +257,87 @@ def _members(est, lemma: str) -> list:
 def _by_name(est, name: str):
     n = name.lower().strip()
     for d in list((est.docs or {}).values()):
-        if str((d.properties or {}).get("name") or "").lower() == n:
+        p = d.properties or {}
+        if str(p.get("name") or "").lower() == n or n in [str(a).lower() for a in (p.get("aliases") or [])]:
             return d
     return None
+
+
+_DEFINE = re.compile(r"^\s*(?:from now on,?\s+)?[\"']?([a-z][\w' -]*?)[\"']?\s+"
+                     r"(?:means|is the same as|stands for)\s+(.+?)\s*[.!]?\s*$", re.I)
+_PROP_VALUE = re.compile(r"^([a-z_][a-z0-9_]*)\s+(?:is\s+|=\s*)?([\w.:/-]+)$", re.I)
+
+
+def _adjective_expr(est, meaning: str) -> str | None:
+    """"not closed", "pending and mine", "status blocked" -> a cliffhanger filter over x; None."""
+    known = _adjectives(est)
+    parts = []
+    for part in re.split(r"\s+and\s+", meaning.strip(), flags=re.I):
+        neg = part.lower().startswith("not ")
+        core = part[4:].strip() if neg else part.strip()
+        adj = known.get(core.lower())
+        if adj is not None:
+            expr = (adj.properties or {}).get("filter")
+        else:
+            pv = _PROP_VALUE.match(core)
+            if not pv:
+                return None
+            expr = f"x.{pv.group(1)} == {pv.group(2)!r}"
+        parts.append(f"not ({expr})" if neg else f"({expr})")
+    return " and ".join(parts) if parts else None
+
+
+def _meaning(srv, est, word: str, meaning: str) -> dict | None:
+    """What a definition teaches: an adjective's filter, a verb synonym, another name for an
+    entity, or a filter from a property and a value -- in that order; None when none fits."""
+    from . import verbs as V
+    m = meaning.strip().strip("\"'").strip()
+    if m.lower() in _adjectives(est) or re.match(r"(?i)^not\s|.+\sand\s", m):
+        expr = _adjective_expr(est, m)
+        if expr:
+            return {"kind": "adjective", "filter": expr, "shown": m}
+    lem = " ".join(t.lemma_.lower() for t in _doc(m)) if m else ""
+    for cand in (m.lower(), lem):
+        if cand and (est.docs or {}).get(V.verb_eid(cand)) is not None:
+            return {"kind": "verb", "same_as": cand, "shown": cand}
+    d = _by_name(est, m)
+    if d is not None:
+        return {"kind": "entity", "target": d.eid, "shown": m}
+    expr = _adjective_expr(est, m)
+    if expr:
+        return {"kind": "adjective", "filter": expr, "shown": m}
+    return None
+
+
+def _define_step(srv, est, word: str, meaning: str, text: str) -> dict:
+    plan = _meaning(srv, est, word, meaning)
+    return {"kind": "define", "verb": "define", "word": word, "plan": plan, "meaning": meaning,
+            "targets": [], "calls": [], "options": {}, "writes": True, "needs_all": False,
+            "mapped": plan is not None, "unmapped": [] if plan else [f"define {word}"],
+            "text": str(text).strip()}
+
+
+def teach(est, step: dict) -> str:
+    """Keep a definition step: the adjective, the verb synonym, the other name. -> what it means."""
+    from . import verbs as V
+    p, word = step["plan"], step["word"]
+    if p["kind"] == "adjective":
+        define_adjective(est, word, p["filter"])
+    elif p["kind"] == "verb":
+        eid = V.verb_eid(word)
+        d = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls=V.CLASS_VERB, properties={
+            "name": V.lemma(word), "word": "w:" + V.lemma(word).split(" ", 1)[0], "implemented_by": [],
+            "silent_birth": True})
+        d.properties = {**(d.properties or {}), "same_as": p["same_as"]}
+        est.upsert(d, embedder=None)
+    else:
+        d = est.docs[p["target"]]
+        names = list((d.properties or {}).get("aliases") or [])
+        if word not in names:
+            names.append(word)
+        d.properties = {**(d.properties or {}), "aliases": names}
+        est.upsert(d, embedder=None)
+    return p["shown"]
 
 
 _LEADS = {"please", "pls", "and", "then", "also", "now", "so", "ok", "okay", "yes", "can", "could",
@@ -294,6 +378,9 @@ def compile(srv, sid: str, text: str) -> list[dict]:
     The field's own words lead: a known verb at a clause's start is the command whatever the
     parser tagged it; an unknown one is still read off the parse, and said as unmapped."""
     est = srv.entity_store
+    m = _DEFINE.match(str(text or ""))
+    if m:                                        # "X means Y": a definition, not a command
+        return [_define_step(srv, est, m.group(1).strip().lower(), m.group(2).strip(), text)]
     doc = _doc(text)
     starts = _clause_starts(doc)
     heads = []                                   # (token index, verb lemma, verb width)
@@ -380,7 +467,8 @@ def _call(est, verb: str, e: str, said: set, unmapped: list) -> dict | None:
         return {"object": owner, "method": mp.get("method_name"),
                 "args": {params[0]: _value(est, e)} if params else {}, "writes": not mp.get("read_only"),
                 "target": e}
-    unmapped.append(f"{verb} {CG_label(est, e)}")
+    from . import generate as GEN
+    unmapped.append(GEN.no_meaning(verb, CG_label(est, e)))
     return None
 
 
@@ -436,6 +524,9 @@ def describe(est, steps: list[dict]) -> str:
     from . import convgraph as CG
     out = []
     for s in steps:
+        if s.get("kind") == "define":
+            out.append(f'teaches "{s["word"]}" = {(s.get("plan") or {}).get("shown") or s.get("meaning")}')
+            continue
         names = ", ".join(CG._label(est, e) for e in s["targets"])
         opts = " (" + ", ".join(k for k in s["options"]) + ")" if s["options"] else ""
         out.append(f"{s['verb']} {names}{opts}")
@@ -462,10 +553,17 @@ def run(srv, text: str, timeout_s=None) -> dict:
     from . import convgraph as CG
 
     def refused(msg):
-        return {"ok": False, "rc": 2, "outcome": "refused", "output": msg, "error": msg,
+        return {"ok": False, "rc": 2, "outcome": "refused", "output": msg, "error": msg, "said": msg,
                 "head": msg[:200], "tail": msg[-200:], "ms": max(1, int((time.time() - t0) * 1000))}
     if not steps:
         return refused("I didn't find a command in that.")
+    if steps[0].get("kind") == "define":         # teaching a word (generate.py words it)
+        s = steps[0]
+        if not s["mapped"]:
+            return refused(GEN.cant_define(s["word"]))
+        line = GEN.taught(s["word"], teach(est, s))
+        return {"ok": True, "rc": 0, "outcome": "ok", "output": line, "said": line, "head": line,
+                "tail": line, "error": "", "ms": max(1, int((time.time() - t0) * 1000))}
     unclear = [s for s in steps if s["unmapped"] or not s["mapped"]]
     if unclear:                                  # worded by membrane (generate.py), nothing runs
         return refused(" ".join(GEN.not_understood(s["verb"], s["unmapped"] or ["(no object)"]) for s in unclear))
@@ -484,7 +582,7 @@ def run(srv, text: str, timeout_s=None) -> dict:
             name = CG._label(est, c["target"])
             names.append(name)
             if r != 0:
-                failed.append((name, out.get("error") or out.get("output") or out.get("status")))
+                failed.append((name, out.get("error") or out.get("output") or "", r))
             lines.append(f"{s['verb']} {c['object']}: {out.get('output') or out.get('error') or out.get('status')}")
         said.append(GEN.done(s["verb"], names, failed))
     text_out = " ".join(said) + ("\n\n" + "\n".join(lines) if lines else "")

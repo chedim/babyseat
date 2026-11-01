@@ -129,6 +129,8 @@ def _alias(est, method, lem: str) -> None:
 def aliased(est, verb: str) -> list:
     """[(method, the noun it expects)] the verb means through compound names."""
     v = (est.docs or {}).get(verb_eid(verb))
+    if v is not None and (v.properties or {}).get("same_as") and lemma(v.properties["same_as"]) != lemma(verb):
+        return aliased(est, v.properties["same_as"])
     docs = est.docs or {}
     return [(docs[a["method"]], a.get("noun") or "") for a in ((v.properties or {}).get("aliased") or []) if v
             and a.get("method") in docs and _implements(docs[a["method"]])] if v is not None else []
@@ -149,7 +151,8 @@ def boot(srv) -> dict:
             if e:
                 seen.add(e)
     gone = [d.eid for d in list((est.docs or {}).values()) if d.cls == CLASS_VERB
-            and not (d.properties or {}).get("implemented_by") and not (d.properties or {}).get("aliased")]
+            and not (d.properties or {}).get("implemented_by") and not (d.properties or {}).get("aliased")
+            and not (d.properties or {}).get("same_as")]          # a taught synonym means something
     for eid in gone:
         try:
             est.remove(eid)
@@ -172,6 +175,9 @@ def implementation(est, obj, verb: str):
     a global one. (None, None): nothing implements it for this noun. No verb entity yet:
     the method of that name (night.resolve_method)."""
     from .night import ancestors, resolve_method
+    same = ((est.docs or {}).get(verb_eid(verb)) or QuantumEntity(eid="", cls="")).properties or {}
+    if same.get("same_as") and lemma(same["same_as"]) != lemma(verb):
+        return implementation(est, obj, same["same_as"])          # a taught synonym ("finish" = close)
     if (est.docs or {}).get(verb_eid(verb)) is None:
         return resolve_method(est, obj, lemma(verb).replace(" ", "_"))
     impls = _impls(est, verb)

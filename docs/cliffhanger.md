@@ -96,6 +96,20 @@ what, and runs nothing. A chat message that compiles fully is told to the model 
 program, in the seat owner's chats only (a session with an `owner`, a token person's or the
 Home Assistant relay's, gets none); membrane runs nothing on its own yet.
 
+**Teaching words in plain language.** "X means Y" (or "is the same as", "stands for") is a
+definition, not a command, and running it teaches the field:
+
+| Y | becomes |
+|---|---|
+| a known adjective, or `not Y`, `Y and Z` | an adjective with that filter ("pending means not closed") |
+| a known verb | a verb synonym, `same_as` on `verb:<X>` ("finish means close": "finish goal one" closes it) |
+| an entity's name | another name for it, in its `aliases` ("my boat means goal one") |
+| a property and a value | an adjective `x.<property> == '<value>'` ("stuck means status blocked") |
+
+Anything else is refused in words ("I don't know how to define "stale" that way yet: …"), and
+nothing is guessed. Membrane answers what it learned ('Got it: "finish" now means close.'). In a
+chat, a message that teaches a word is told to the model with the `exec` call that keeps it.
+
 **Membrane words the result itself** (`membrane/generate.py`): a run ends in a sentence built
 from its calls and their results -- the verb's past form (lemminflect, plain rules without
 it), the objects' names joined as English, the count when there are several: "Closed goal
