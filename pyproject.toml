@@ -21,7 +21,7 @@ couchbase = ["couchbase>=4.6"]      # a Couchbase cluster for the field / peers;
 mdns = ["zeroconf"]                 # peers found on the LAN
 claude-agent = ["claude-agent-sdk"]  # Claude via the Agent SDK on the anthropic API key (#384, #413); membrane's tools only (#389)
 rerank = ["sentence-transformers"]  # the recall reranker (#680): bge-reranker-v2-m3 over the banner's top 20; torch, ~3.3 GB GPU memory loaded
-nlp = ["spacy>=3.8.18"]             # living language (language.py); on by default: the seat installs spaCy and en_core_web_sm itself at boot
+nlp = ["spacy>=3.8.18", "lemminflect"]             # living language (language.py); on by default: the seat installs spaCy and en_core_web_sm itself at boot
 
 [project.urls]
 Homepage = "https://github.com/chedim/membrane"
