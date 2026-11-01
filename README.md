@@ -568,9 +568,8 @@ evidence turn of a question in its top k. There is no answer generation and no L
 so these numbers are **not comparable** to published answer-accuracy scores.
 Each conversation goes into its own fresh field through the capture path (no
 chat model), one turn per `doc` event, in session order with the session date;
-embedder mxbai-embed-large. Median ask latency 121 ms. Whether a reranker was
-used in this run is not established (the run logs do not mention one), so we
-call it a recall run and claim nothing about a reranker. The baseline is plain
+embedder mxbai-embed-large. Median ask latency 121 ms. The 10-29 run was scorer-only (reranker off; see the held-out check below).
+The baseline is plain
 cosine over the same embeddings, from the 2026-10-25 baseline run
 (same turn text, same embedder). Rates are over questions that
 have annotated evidence: 1,536 of the 1,540 questions in categories 1-4
@@ -594,6 +593,30 @@ at every cutoff. The injected context holds the evidence for 26.3% of the
 questions in categories 1-4. The cosine column was not re-run on 2026-10-29.
 \*LoCoMo code confirms multi-hop and adversarial; the other three names
 follow the common mapping.
+
+**Held-out check (run of 2026-11-01, code de097db).** The scorer's weights were
+fit on conversations 2-9 (`DEFAULT_WEIGHTS` comment in `recall_banner.py`), so
+1,305 of the 1,536 evidence questions above are in-sample; only conversations
+0-1 (231 questions) are held out. hit@8, categories 1-4:
+
+| set | membrane (scorer) | + reranker | cosine |
+|---|---|---|---|
+| conversations 0-1, held out (231) | 168 / 231 = 72.7% | **179 / 231 = 77.5%** | 153 / 231 = 66.2% |
+| conversations 2-9, in-sample (1,305) | 968 / 1,305 = 74.2% | not run | not re-run |
+| all conversations (1,536) | 1,136 / 1,536 = 74.0% | not run | 65.4% |
+
+On the held-out conversations the reranker lifts hit@8 from 168 to 179 of 231
+(+4.8 points), same code and questions, rerank on against off; median ask
+latency 401 ms against 118 ms. At hit@20 it does not help (175 on, 176 off,
+cosine 180) and at hit@50 it is level (196 / 196, cosine 203). Held-out hit@8
+(72.7%) sits close to the all-conversations 74.0%, so the in-sample fit does
+not account for the lead over cosine at hit@8. The reranker was run on
+conversations 0-1 only; there is no all-conversations reranker figure.
+
+Why hit@8 can exceed hit@20: hit@8 is scored on the live `/membrane/ask` answer
+(the scorer, plus the reranker when on), while hit@20 and hit@50 come from a separate
+offline `recall_answers` call at that k, so the longer lists are not extensions
+of the top 8.
 
 - **Token economics, live seat (2026-10-12):** 5,736 live entities over
   4,949 streamed events; the standing per-turn header ~3 KB (entity tracks,
