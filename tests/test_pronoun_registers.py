@@ -172,6 +172,27 @@ class TheOwnMessageFirst(unittest.TestCase):
         self.assertEqual((out or {}).get("resolved"), "f:membrane/ui.py")
         self.assertNotIn("proposed", CG.take_note(srv, SID) or "")
 
+    def test_the_operators_own_sentences_stay_quiet(self):
+        """Memo's replay of #806 (2026-11-01): plain words before the pronoun name what it
+        means; the reply before must not be borrowed, nothing is told, nothing is loaded."""
+        for text in ("on field ui redesign -- yes, replace both please. But I think we should park "
+                     "that until we have membrane field shape finalized?",
+                     "ok, pronouns should be fixed now. Claude fixed them. It promised me they were fixed."):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "cards?", "Dropping #772: see https://github.com/chedim/babyseat/issues/772, "
+                                           "membrane/a.py, membrane/b.py and membrane/c.py.")
+            out = _say(srv, runner, 2, text, "ok")
+            self.assertIsNone(out, text)
+            self.assertIsNone(CG.take_note(srv, SID), text)
+            for p in ("that", "they", "it"):
+                self.assertIsNone(_holds(srv, p), text)
+
+    def test_only_the_command_before_the_pronoun_falls_back_to_the_reply(self):
+        for text in ("merge it", "can you benchmark it?", "yes, delete it"):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+            self.assertEqual((_say(srv, runner, 2, text, "-") or {}).get("resolved"), A, text)
+
     def test_a_demonstrative_before_a_noun_or_a_clause_is_not_a_pronoun(self):
         srv, runner = _seat()
         _say(srv, runner, 1, "look", "I changed membrane/a.py and membrane/b.py.")

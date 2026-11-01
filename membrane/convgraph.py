@@ -409,6 +409,21 @@ def _load(srv, sid: str, pronoun: str, targets: list[str], by: str = "") -> None
     est.upsert(d, embedder=None)
 
 
+_WORD_RUN = re.compile(r"[A-Za-z][A-Za-z'-]*")
+_FILLERS = {"pls", "plz", "kindly", "just", "go", "ahead", "let", "lets", "let's"}
+
+
+def _says_something(before: str) -> bool:
+    """Content words before the pronoun, past the command's own verb (the word right before
+    it): "on field ui redesign -- ... park" does, "can you benchmark" / "yes, merge" don't
+    (Memo's replay of #806: plain words were skipped and the reply before was borrowed)."""
+    from .recall_banner import _STOP
+    words = [w.lower() for w in _WORD_RUN.findall(before or "")]
+    if words:
+        words = words[:-1]                # the verb the pronoun is the object of
+    return any(w not in _STOP and w not in _FILLERS and w not in FORMS and len(w) > 1 for w in words)
+
+
 def take_note(srv, sid: str) -> str | None:
     """The resolved reading for this chat's turn (once), for the turn's context."""
     return (getattr(srv, "_cg_notes", None) or {}).pop(sid, None) if sid else None
@@ -521,6 +536,8 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     own = _applicable(est, list(reversed(_mentions(srv, text[:found.start()]))), verb)
     if own:
         return _resolved(srv, sid, est, be, origin, u, word, own if plural else own[:1])
+    if _says_something(text[:found.start()]):
+        return None          # its own words name what it means (unnamed in the field): borrow nothing
     prev_a = _row_before(runner, sid, mid, "assistant")
     fresh = list(dict.fromkeys(r["obj"] for r in _out(be, origin, msg_eid(prev_a.get("id")), "refers-to"))) \
         if prev_a is not None else []

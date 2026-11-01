@@ -521,7 +521,11 @@ last put in it.
 Before a chat turn, the person's pronoun is read: first the person's own message (the
 nearest thing it names before the pronoun: "on the UI redesign -- park that until later"),
 then the reply before (its `refers-to` targets), then the register when neither names
-anything that applies, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
+anything that applies. When the person's message has its own words before the pronoun
+(beyond the command's verb) but names nothing the field knows ("pronouns should be fixed
+now. Claude fixed them"), nothing is borrowed from the reply before: no note, no register
+load, no re-ask. Only a message that is just the command ("merge it", "can you benchmark
+it?", "yes, delete it") reads the reply before, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
 candidate has a method of the command's verb, the ones without one drop; then a candidate
 whose state is closed (closed, dropped, fulfilled, merged, retired, done, deleted) drops.
 One reading left (or several, for `they`) is recorded (`refers-to`, source `resolver`),
