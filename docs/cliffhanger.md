@@ -22,7 +22,7 @@ name on two classes is two implementations (polymorphism).
   classes'); other `{{params}}` bind from `args` — only `{{name}}` binds (`{n}`,
   `$n`, `$1` do not), and an arg the command never names is refused. The
   command is a code tree whose `{{name}}`s are `param` nodes (#614 part C):
-  a call fills them, each value shell-quoted once, and runs the bound code
+  a call fills them, each value shell-quoted once (a leading `~` or `~/` stays bare so the shell still expands it, #815), and runs the bound code
   as code (a result entity per call). Write a placeholder as its own word
   (`{{x}}`) or as a whole quoted word (`'{{x}}'`, `"{{x}}"`): inside a
   longer quoted string (`'foo {{x}} bar'`) the quoted value breaks the
