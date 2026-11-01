@@ -265,15 +265,20 @@ def _tell(st: dict) -> None:
 
 def _note(st: dict, ts: float, by: str, what: str, **kw) -> None:
     """One change, flagged with who caused it (self | world | model |
-    <person>), on the log."""
+    <person>), on the log. `property` holds the action (what), `value` the
+    payload: the plain value, or the kwargs for a multi-valued write."""
     st["counts"][by] = int(st["counts"].get(by, 0)) + 1
     from . import writes as _W
     ch = _W.current()
+    synthetic = ch is None
     if ch is None:
         ch = {"id": f"toy-{st['name']}-{sum(int(v) for v in st['counts'].values())}", "root": "toy"}   # replayable
     ch = {"id": ch["id"], "root": ch.get("root", ""), "via": list(ch.get("via") or [])}
     rec = {"ts": ts, "by": by, "what": what, **kw,
-           "chain": ch, "writer": _writer(by), "toy": st["name"], "property": what, "value": kw.get("value")}
+           "chain": ch, "writer": _writer(by), "toy": st["name"], "property": what,
+           "value": kw["value"] if "value" in kw else (kw or None)}
+    if synthetic:
+        rec["synthetic"] = True                    # no write chain was open: the chain id is made up
     with open(_log_path(st["name"]), "a") as fh:
         fh.write(json.dumps(rec, sort_keys=True) + "\n")
     if is_person(by):
