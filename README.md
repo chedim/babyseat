@@ -343,7 +343,10 @@ model is grounded by what those entities hold —
 [docs/entity-field.md](docs/entity-field.md) is the design doc. The project's
 decisions are entities too: [docs/decision-map.md](docs/decision-map.md) is the
 decision cockpit: what is still open above the chat's input bar, what is in
-flight on its line, what was decided below it.
+flight on its line, what was decided below it. The conversation itself is a
+graph over the field: each chat message is an entity tied to what it names,
+what it ran, the decisions it asks and the answers it gives, and a reply's
+`Open decisions:` are answered in the chat (`1. yes`).
 
 The proxy speaks both APIs through the same memory turn: OpenAI's
 `/v1/chat/completions` and Ollama's native `/api/chat` and `/api/generate`
@@ -374,7 +377,7 @@ pass through to Ollama unchanged.
 | `membrane doctor` | what's installed/running + the field's vitals |
 | `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): from another machine, every write to either port needs it (Bearer, Basic's password, or the web UI's one-time prompt); reads and localhost need none; see [docs/auth.md](docs/auth.md) |
 | `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running JWT mode (on by default; off with `MEMBRANE_JWT=0`); see [docs/auth.md](docs/auth.md) |
-| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, plus the background model calls from `bg-usage.json`; no model call) |
+| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads the chat message store (`serve-msgs.json`, or the seat's Couchbase Lite store once it has migrated there), plus the background model calls from `bg-usage.json`; no model call) |
 | `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Every kind can be added (#576 retired the unlocks with the ladder). See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
 
@@ -422,7 +425,13 @@ disk, at `<project>/.membrane/field/` (or `.membrane/field.cblite` where
 the Couchbase Lite libraries are fetched with `scripts/fetch-cbl.sh`). Its
 events, entity states, claims, scripts and turn text stay there and
 survive restarts with no cluster at all. Nothing is copied to the bucket
-unless one of the layers below sends it.
+unless one of the layers below sends it. With Couchbase Lite the seat's
+entities, its chat sessions and messages, and its small state files (the
+absorb watermark, the router's state, the watch board, the background-usage
+tally) live in that store too, one document each (#799); the first boot
+imports the old JSON files and keeps them renamed `<name>.migrated-<time>`.
+Secrets, hand-edited settings and the append-only logs (`audit.jsonl`,
+`consolidation.jsonl`) stay plain files.
 
 **2. Share chosen entities with publish.** The model (or you, through the
 MCP tool) calls `entity_edit` with `publish: true`. The entity goes to the
