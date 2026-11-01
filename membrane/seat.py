@@ -89,7 +89,23 @@ class Seat:
         if not query.strip():
             return Turn("", "", None)
         bind, failed = None, False
-        if self.pronoun_bind and _binding.has_pronoun(query):
+        # a chat turn the conversation graph looked at binds by ITS reading (the registers);
+        # nothing found there is no rewrite. Other clients keep the lexical binder (2026-11-01:
+        # it rewrote Memo's "can you benchmark it?" as "... benchmark explain?")
+        graph = None
+        if self.pronoun_bind and body.get("_turn_sid"):
+            try:
+                from . import convgraph as _CG
+                graph = _CG.capture_binding(self.server_ref, str(body.get("_turn_sid")))
+            except Exception:
+                graph = None
+        if self.pronoun_bind and graph is not None and _binding.has_pronoun(query):
+            bind = graph or None
+            if bind:
+                query = _binding.substitute(query, bind)
+            else:
+                failed = True
+        elif self.pronoun_bind and _binding.has_pronoun(query):
             bind = _binding.resolve(query, list(reversed(self._bind_ctx)))
             if bind is not None:
                 query = _binding.substitute(query, bind)

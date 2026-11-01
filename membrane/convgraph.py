@@ -129,7 +129,15 @@ def _row_before(runner, sid: str, mid: str, role: str | None = None):
 
 
 _GH = re.compile(r"^u:https?://github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d+)")
-_HASH_N = re.compile(r"(?<![\w/&#])#(\d{1,6})\b")
+# "#N" is an issue or PR only after a word that says so: membrane numbers its own events "#N"
+_HASH_N = re.compile(r"\b(?:prs?|pull(?:\s+request)?|issues?|merged?|review(?:ed|ing)?|closes|fixes)"
+                     r"\s+(?:[\w-]+\s+)?#(\d{1,6})\b", re.I)
+# a turn membrane itself started (a watch, a decision, a goal's report): not the person's words
+_NOTICE = re.compile(r"^\s*(?:\[(?:membrane|watch|goal|decision|seat|job|loop|triage)\b|goal \S+ (?:fulfilled|\())", re.I)
+
+
+def from_person(text: str) -> bool:
+    return not _NOTICE.match(_words(text)[1])
 _REPO: dict = {}
 
 
@@ -309,8 +317,9 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
     u_mid, a_mid = str((user_info or {}).get("id") or ""), str((a_info or {}).get("id") or "")
     if not u_mid or not a_mid:
         return
+    person = from_person(user_text)
     who, user_text = _words(user_text)
-    u = _mint(est, sid, u_mid, "user", user_text, speaker=who)
+    u = _mint(est, sid, u_mid, "user" if person else "membrane", user_text, speaker=who)
     a = _mint(est, sid, a_mid, "assistant", reply)
     prev = _row_before(runner, sid, u_mid)
     prev_a = _row_before(runner, sid, u_mid, "assistant")
@@ -323,7 +332,8 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
     for root in (getattr(runner, "_cg_roots", None) or {}).pop(sid, []) if runner is not None else []:
         _edge(be, origin, u, "led-to", root)
     pa = msg_eid(prev_a.get("id")) if prev_a is not None else None
-    _answer(srv, sid, u_mid, u, user_text, pa if pa in (est.docs or {}) else None, be, origin)
+    if person:
+        _answer(srv, sid, u_mid, u, user_text, pa if pa in (est.docs or {}) else None, be, origin)
     _ask(srv, runner, sid, a, reply, be, origin)
 
 
@@ -342,9 +352,11 @@ FORMS = {"it": "it", "this": "this", "this one": "this", "that": "that", "that o
 PLURAL = {"they"}
 _PRON = re.compile(r"\b(this one|that one|" + "|".join(sorted((f for f in FORMS if " " not in f), key=len,
                                                               reverse=True)) + r")\b", re.I)
-_LEAD = re.compile(r"^(?:(?:yes|yep|yeah|ok|okay|sure|pls|please|so|and|then|now)\b[\s,.!-]*)+", re.I)
+_LEAD = re.compile(r"^(?:(?:yes|yep|yeah|ok|okay|sure|pls|please|so|and|then|now|(?:can|could|would|will) you)"
+                   r"\b[\s,.!-]*)+", re.I)
 _VERB_PRON = re.compile(r"^([a-z][a-z-]*)\s+(this one|that one|it|this|that|them|him|her|these|those|there)\b",
                         re.I)
+REASK_MAX = 3            # the operator's cap (2026-11-01): more readings than this are not asked back
 _ORDINAL = {"first": 1, "1": 1, "one": 1, "second": 2, "2": 2, "two": 2, "third": 3, "3": 3}
 
 
@@ -383,6 +395,10 @@ def _load(srv, sid: str, pronoun: str, targets: list[str], by: str = "") -> None
         _edge(be, origin, reg, "holds", t, source="register")
         if by:
             _edge(be, origin, by, f"sets:{FORMS.get(pronoun.lower(), pronoun)}", t, source="register")
+    d = est.docs[reg]                    # mirrored onto the entity: a reader of properties sees it
+    d.properties = {**(d.properties or {}), "holds": list(targets),
+                    "holds_names": [_label(est, t) for t in targets], "set_by": by, "set_ts": time.time()}
+    est.upsert(d, embedder=None)
 
 
 def take_note(srv, sid: str) -> str | None:
@@ -419,7 +435,19 @@ def _resolved(srv, sid, est, be, origin, u, word, targets, source="resolver") ->
     shown = " and ".join(f"{_label(est, t)} ({t})" for t in targets)
     srv.__dict__.setdefault("_cg_notes", {})[sid] = \
         f'In the person\'s last message, "{word}" means {shown}.'
-    return {"resolved": targets[0] if len(targets) == 1 else tuple(targets)}
+    return {"resolved": targets[0] if len(targets) == 1 else tuple(targets), "word": word,
+            "label": " and ".join(_label(est, t) for t in targets)}
+
+
+def capture_binding(srv, sid: str):
+    """For the seat's capture-time binding (seat.Turn): None when the graph didn't look at this
+    turn (another client: the lexical binder stays); {} when it looked and resolved nothing (no
+    rewrite: a missed binding is the safe failure); else {"pronoun", "referent"}."""
+    seen = (getattr(srv, "_cg_turn", None) or {}) if sid else {}
+    if sid not in seen:
+        return None
+    r = seen[sid] or {}
+    return {"pronoun": r["word"], "referent": r["label"]} if r.get("resolved") and r.get("label") else {}
 
 
 def _answer_reask(srv, sid, est, be, origin, u, text, prev_u) -> dict | None:
@@ -450,6 +478,9 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     the model. Several, in a command ("delete it", "yes, merge it and restart"): asked back
     and the turn doesn't run. Several elsewhere ("is it done?"): left to the model.
     -> None | {"resolved": ...} | {"reask": line}."""
+    (getattr(srv, "_cg_notes", None) or {}).pop(sid, None)    # a note lives for its own message only
+    if not from_person(text):
+        return None
     who, text = _words(text)
     est = getattr(srv, "entity_store", None)
     be, origin = _rel(srv)
@@ -478,6 +509,11 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
         return None
     if len(cands) == 1 or plural:
         return _resolved(srv, sid, est, be, origin, u, word, cands)
+    if len(cands) > REASK_MAX:           # a reply naming many things: "it" is most likely its proposal
+        srv.__dict__.setdefault("_cg_notes", {})[sid] = (
+            f'In the person\'s last message, "{word}" most likely refers to what your last reply '
+            "proposed, not to one of the things it named.")
+        return {"hint": "proposal", "word": word}
     if not verb:
         return None
     from . import speech as SP

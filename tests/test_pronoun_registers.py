@@ -108,6 +108,92 @@ class Registers(unittest.TestCase):
         self.assertEqual(_holds(srv, "they"), _holds(srv, "them"))
 
 
+class MemosReview(unittest.TestCase):
+    """Memo on #804: the register's content must be readable, "can you X it?" is a request, and
+    a reply naming many things can't be re-asked from."""
+
+    def test_the_register_shows_what_it_holds(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+        _say(srv, runner, 2, "delete it", "Deleted.")
+        p = srv.entity_store.docs[CG.register_eid(SID, "it")].properties
+        self.assertEqual(p["holds"], [A])
+        self.assertEqual(p["set_by"], CG.msg_eid("msg_u2"))
+        self.assertTrue(p["set_ts"])
+
+    def test_a_polite_request_is_a_command(self):
+        for text in ("can you merge it?", "could you please merge it", "would you merge it"):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "look", "I changed membrane/a.py and membrane/b.py.")
+            self.assertTrue((_say(srv, runner, 2, text, "-") or {}).get("reask"), text)
+
+    def test_many_readings_hint_at_the_replys_proposal_instead_of_asking(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "papers?", "See membrane/a.py, membrane/b.py, membrane/c.py and membrane/d.py; "
+                                        "we could let surprise set the gain.")
+        out = _say(srv, runner, 2, "can you benchmark it?", "running")
+        self.assertFalse((out or {}).get("reask"))
+        self.assertEqual(runner.posted, [])
+        self.assertIn("proposed", CG.take_note(srv, SID) or "")
+
+
+class MembranesOwnMessages(unittest.TestCase):
+    """2026-11-01: a turn membrane started (a watch or a check event, '[watch] ...') was read
+    as the person's message: its "it" resolved and its note reached the model."""
+
+    def test_an_injected_message_is_not_resolved_and_is_not_a_person_message(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+        out = _say(srv, runner, 2, "[watch] goal:x: check it", "checked")
+        self.assertIsNone(out)
+        self.assertIsNone(CG.take_note(srv, SID))
+        self.assertEqual(srv.entity_store.docs[CG.msg_eid("msg_u2")].properties["role"], "membrane")
+
+    def test_a_note_never_outlives_its_message(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+        _say(srv, runner, 2, "delete it", "Deleted.")       # its note is never taken
+        _say(srv, runner, 3, "thanks, what else?", "nothing")
+        self.assertIsNone(CG.take_note(srv, SID))
+
+
+class TheCaptureBinding(unittest.TestCase):
+    """2026-11-01: the seat's old lexical binder rewrote Memo's "can you benchmark it?" as
+    "... benchmark explain?". A chat turn the graph looked at binds by the graph's reading."""
+
+    def _seat(self, seen):
+        import tempfile
+        import types
+        from membrane.seat import Seat
+        d = Path(tempfile.mkdtemp())
+        s = Seat(d / "field.json", d / "audit.jsonl", embedder=None)
+        s.server_ref = types.SimpleNamespace(_cg_turn=seen)
+        s.remember("the explain function is slow")
+        return s
+
+    def _body(self, text, sid=None):
+        b = {"messages": [{"role": "user", "content": text}]}
+        if sid:
+            b["_turn_sid"] = sid
+        return b
+
+    def test_the_graphs_reading_is_the_binding(self):
+        s = self._seat({"ses": {"resolved": A, "word": "it", "label": "membrane/a.py"}})
+        t = s.turn(self._body("can you benchmark it?", "ses"))
+        self.assertEqual(t.query, "can you benchmark membrane/a.py?")
+
+    def test_the_graph_found_nothing_so_nothing_is_rewritten(self):
+        s = self._seat({"ses": {}})
+        t = s.turn(self._body("can you benchmark it?", "ses"))
+        self.assertEqual(t.query, "can you benchmark it?")
+        self.assertTrue(t.binding_failed)
+
+    def test_another_client_keeps_the_lexical_binder(self):
+        s = self._seat({})
+        t = s.turn(self._body("turn it off"))
+        self.assertNotEqual(t.query, "turn it off")
+
+
 class LongerCommands(unittest.TestCase):
     def test_yes_merge_it_and_merge_it_and_restart_are_commands(self):
         for text in ("yes, merge it", "merge it and restart", "pls merge it now"):
@@ -141,14 +227,19 @@ class PullRequests(unittest.TestCase):
 
     def test_merge_it_finds_the_pr(self):
         srv, runner = _seat()
-        _say(srv, runner, 1, "status?", "#803 is ready.")
+        _say(srv, runner, 1, "status?", "PR #803 is ready.")
         out = _say(srv, runner, 2, "merge it", "merging")
         self.assertEqual((out or {}).get("resolved"), PR)
+
+    def test_an_event_number_is_not_an_issue(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "where?", "this chat's log (#47785) says so; see #12 too")
+        self.assertFalse([o for r, o in _out(srv, CG.msg_eid("msg_a1")) if "issues/" in o])
 
     def test_no_repo_no_number_entities(self):
         srv, runner = _seat()
         CG._repo = lambda srv: None
-        _say(srv, runner, 1, "status?", "#803 is ready.")
+        _say(srv, runner, 1, "status?", "PR #803 is ready.")
         self.assertNotIn(("refers-to", PR), _out(srv, CG.msg_eid("msg_a1")))
 
 
