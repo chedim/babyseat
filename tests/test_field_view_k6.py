@@ -14,7 +14,7 @@ G = {"nodes": [
     {"id": "g1", "kind": "goal", "title": "ship", "status": "open", "goal": None},
     {"id": "t1", "kind": "task", "title": "build", "status": "open", "goal": "g1"},
     {"id": "d1", "kind": "decision", "title": "which?", "status": "open", "goal": "g1"}],
-    "edges": [{"from": "t1", "to": "g1", "rel": "of"}, {"from": "d1", "to": "t1", "rel": "blocks"}]}
+    "edges": [{"from": "t1", "to": "g1", "rel": "of"}, {"from": "d1", "to": "g1", "rel": "of"}, {"from": "d1", "to": "t1", "rel": "blocks"}]}
 
 
 def _js(expr, f="fieldview.js", name="F"):
