@@ -1816,6 +1816,7 @@ class TurnRunner:
             from . import convgraph as _CG
             if _psrv is not None and not _drained and _CG.is_chat((self.sessions.get(sid) or {}).get("agent")):
                 _ref = _CG.before_turn(_psrv, self, sid, user_info, text)
+                _psrv.__dict__.setdefault("_cg_turn", {})[sid] = _ref or {}   # the capture binding reads it
                 if _ref and _ref.get("reask"):
                     return {"info": user_info, "parts": [], "reask": _ref["reask"]}
         except Exception as e:

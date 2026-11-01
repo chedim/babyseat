@@ -509,15 +509,48 @@ decision message goes back (the chat already says it). A bare answer with severa
 open answers nothing: matching free text to a card would need a cut-off that hasn't been
 set. The cockpit stays the default view.
 
-**What "it" means.** Before a chat turn, an imperative whose object is a pronoun
-(`delete it`, `merge that one`) reads its antecedent from the reply before (that
-message's `refers-to` targets). When a candidate has a method of the verb's name, the
-ones without one drop; then a candidate whose state is closed (closed, dropped,
-fulfilled, merged, retired, done, deleted) drops. One left is recorded
-(`refers-to`, source `resolver`) and told to the model once, as a line in that turn's
-context (`lanes._with_referent`). Two or more are asked back in the chat, in one line
-(`"it": a or b?`), and that turn doesn't run. The person's reply then runs normally; the
-answer resolves that one reference and trains nothing.
+**Pronouns are registers.** Each pronoun of each person is a field entity,
+`membrane::register:<person>:<pronoun>` (the chat is the person), whose live `holds` edge is
+what it means now. Forms share a register (`him` → `he`, `them`/`these`/`those` → `they`,
+`that one` → `that`). Loading a register supersedes its old edge, so its history stays, and
+the message that loaded it gets `sets:<pronoun>` to the same target. The register entity
+mirrors what it holds in its properties (`holds`, `holds_names`, `set_by`, `set_ts`), so a
+reader of properties sees it. Nothing is typed: a register holds whatever the conversation
+last put in it.
+
+Before a chat turn, the person's pronoun is read: first the reply before (its `refers-to`
+targets, the freshest mention), then the register when that reply names nothing that
+applies, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
+candidate has a method of the command's verb, the ones without one drop; then a candidate
+whose state is closed (closed, dropped, fulfilled, merged, retired, done, deleted) drops.
+One reading left (or several, for `they`) is recorded (`refers-to`, source `resolver`),
+loads the register, and is told to the model once, as a line in that turn's context
+(`lanes._with_referent`). Several left in a command (`delete it`, `yes, merge it`, `merge it
+and restart`: leading yes/ok/pls are read past) are asked back in the chat, in one line
+(`"it": a or b?`), and that turn doesn't run. The person's reply naming one of them (its
+name, its file name, `first`/`second`) loads the register; nothing is trained. A polite request
+(`can you / could you / would you …`) is a command too. A pronoun outside a command (`is it
+done?`) is never asked back: with several readings it is left to the model. When the reply
+before names more than 3 things that could apply (the operator's cap, `REASK_MAX`), nothing
+is asked back: the model is told the pronoun most likely refers to what its last reply
+proposed.
+
+The seat's older capture-time binder (`membrane/binding.py`, a lexical guess at the previous
+turn's last content word, which rewrites the turn's query before it is embedded and
+stored) no longer guesses on a chat turn the graph looked at: there it binds by the
+graph's reading, and when the graph resolved nothing, nothing is rewritten. Other clients
+(Home Assistant's voice, a direct `/v1` caller) keep the lexical binder.
+
+**Issues and PRs.** `PR #803` (or `issue`, `pull request`, `merge`/`merged`, `review`,
+`closes`, `fixes` before it) is the project repo's issue 803, one entity
+(`u:https://github.com/<repo>/issues/803`, the repo from the seat's git remote) that a
+pasted `…/pull/803` link maps to as well, so "merge it" after "PR #803 is ready" finds the
+PR. A bare `#N` is not an issue: membrane numbers its own events `#N`.
+
+**Membrane's own messages.** A turn membrane started (`[watch] …`, `[decision] …`,
+`goal … fulfilled`) is graphed as a `membrane` message, not the person's: it answers no
+card, and its pronouns are not resolved. A note to the model lives for the message that
+made it only.
 
 **What membrane says** is one template per kind in `membrane/speech.py` (a decided or
 dropped card, a fulfilled goal, a goal whose graph has nothing left moving, a watch
