@@ -140,9 +140,10 @@ def test_the_panel_has_a_cockpit_mode_not_a_fork():
 
 def test_the_cockpit_view_reuses_the_chat_and_the_field():
     src = (UI / "home.js").read_text()
-    assert 'setAttribute("cockpit"' in src                 # the real chat element, in cockpit mode
-    assert "/membrane/goals" in (UI / "decisions.js").read_text()
-    # the decisions view boots the field (a small one), the chat view still doesn't
+    # #772 (Dima: the field view replaces Everything and the Decisions cockpit):
+    # the view mounts membrane-fieldview over the page's own field, reads the work graph
+    assert 'createElement("membrane-fieldview")' in src
+    assert "/membrane/work-graph" in (UI / "fieldview.js").read_text()
     assert 'VIEW === "chat") {' in src
 
 
@@ -150,7 +151,7 @@ def test_the_camera_hint_never_shows_over_the_cockpit():
     """'Blurp is not moving yet' is the 3D view's camera hint; in the cockpit it
     landed right under the input bar (operator, 2026-10-23)."""
     src = (UI / "home.js").read_text()
-    assert ".view-decisions .msg" in src
+    assert ".view-field .msg { display:none !important; }" in src
 
 
 def test_the_chamfered_corners_draw_their_edge():
@@ -203,7 +204,7 @@ def test_the_field_is_the_cockpits_full_page_background():
     assert "this._host3d.slot" not in home
     assert 'slot name="field"' not in dec and ".fieldbox" not in dec
     # unclickable: its drag / hover / select never fire under the cockpit
-    rule = _cockpit_rule(home, ".view-decisions .field")
+    rule = _cockpit_rule(home, ".view-field .field")
     assert "pointer-events:none" in rule
     # the cockpit itself is see-through; its panels carry the backing that keeps text legible
     host = _cockpit_rule(dec, ":host")

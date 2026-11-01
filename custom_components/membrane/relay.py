@@ -64,7 +64,9 @@ ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane
                  "membrane/toybox/poke", "membrane/seat/pause",
                  # #470: the decision cockpit's writes, the out-of-tokens Resume, the ⚙ window
                  "membrane/decision/answer", "membrane/decision/chat", "membrane/decision/drop",
-                 "membrane/quota/resume", "membrane/options")
+                 "membrane/quota/resume", "membrane/options",
+                 # #772: the field view's item card says in its mini-chat
+                 "membrane/item-chat/say")
 # #244: the 👶 panel's play buttons -- the poke is tagged with the HA user, stamped here;
 # #299: the seat's switches too (an admin's accept of self's achievement names them on its record)
 PERSON_PATHS = ("membrane/toybox/poke", "membrane/seat/control", "membrane/seat/pause")
@@ -76,7 +78,7 @@ VOICE_PATHS = ("membrane/voice", "membrane/voice/state", "membrane/jsexec/regist
 # behind the owner's door, seatauth.py, and the relay holds the seat token)
 ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control", "membrane/seat/pause",
                      "membrane/decision/answer", "membrane/decision/chat", "membrane/decision/drop",
-                     "membrane/quota/resume", "membrane/options")
+                     "membrane/quota/resume", "membrane/options", "membrane/item-chat/say")
 # the field dashboard + the drawer: the seat's read surfaces the serve
 # relays (membrane/server.py SEAT_READ_PATHS) -- GET only, exact paths
 READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
@@ -93,6 +95,9 @@ READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/map/blurp",                # #576: Blurp's overlay on the 3D field
                    "membrane/decisions",                # #470: the decision cockpit's board
                    "membrane/goals",                    # #470: the cockpit's goals
+                   "membrane/work-graph",               # #772: the field view's icons + edges
+                   "membrane/entity-history",           # #772: the item card's Logs tab
+                   "membrane/item-chat",                # #772: the item card's mini-chat
                    "membrane/stats",                    # the 📊 window's tokenomics
                    "membrane/quota")                    # out of tokens: the paused models
 # the minds' inner text (the thinker's log, the dreamer's goals): admins only
