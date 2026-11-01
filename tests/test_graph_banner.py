@@ -90,6 +90,27 @@ class Seeded(unittest.TestCase):
         self.assertLessEqual(len(_lines(self.srv)), GB.LINES)
 
 
+class TheCost(unittest.TestCase):
+    """Live, 2026-11-01: 12 lines in 1,167 ms -- every rule re-read every message's edges.
+    A message's edges are read once per lane build."""
+
+    def test_each_entitys_edges_are_read_once(self):
+        srv, runner = _seat()
+        GB.seed(srv.entity_store)
+        for n in range(1, 5):
+            _say(srv, runner, n, f"look {n}", f"I changed membrane/f{n}.py.")
+        be = srv.efield.b
+        real, seen = be.scan, []
+
+        def scan(coll, eq, *a, **k):
+            if coll == "relations":
+                seen.append((eq.get("subj"), eq.get("obj")))
+            return real(coll, eq, *a, **k)
+        be.scan = scan
+        GB.lines(srv, SID)
+        self.assertEqual(len(seen), len(set(seen)))
+
+
 class AnyonesRule(unittest.TestCase):
     def test_a_defined_rule_works_like_a_seeded_one(self):
         srv, runner = _seat()

@@ -128,6 +128,17 @@ def _atoms(srv, sid: str) -> dict:
                 nxt += [{**b, v: e} for e in eids]
         return nxt
 
+    # each entity's live edges, read once per build (live 2026-11-01: re-reading them per rule
+    # cost 1.2 s a turn on the main chat)
+    by_subj: dict = {}
+    by_obj: dict = {}
+
+    def rows(side: str, eid: str) -> list:
+        memo = by_subj if side == "subj" else by_obj
+        if eid not in memo:
+            memo[eid] = [d for _, d in be.scan("relations", {"origin": origin, side: eid, "superseded": False})]
+        return memo[eid]
+
     def edge(a, out):
         if be is None:
             return []
@@ -136,19 +147,18 @@ def _atoms(srv, sid: str) -> dict:
 
         def ok(r):
             return (str(r.get("rel") or "").startswith(pre) if pre is not None
-                    else r.get("rel") == rel) and not r.get("superseded")
+                    else r.get("rel") == rel)
         nxt = []
         for b in out:
             if lv in b:
-                rows = [r for r in CG._out(be, origin, b[lv], pre or rel) if ok(r)]
-                for r in rows:
+                for r in sorted((r for r in rows("subj", b[lv]) if ok(r)),
+                                key=lambda r: float(r.get("first_ts") or 0)):
                     if rv in b and b[rv] != r["obj"]:
                         continue
                     nxt.append({**b, rv: r["obj"]})
             elif rv in b:
-                from . import relations as R
-                for r in R.of(be, origin, b[rv]):
-                    if r.get("obj") == b[rv] and ok(r):
+                for r in rows("obj", b[rv]):
+                    if ok(r):
                         nxt.append({**b, lv: r["subj"]})
         return nxt
 
