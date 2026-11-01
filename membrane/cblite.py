@@ -289,6 +289,15 @@ def background():
     return TurnFirst().background()
 
 
+def doc_key(s: str, prefix: str = "membrane::h:") -> str:
+    """A document id for `s`: `s` itself, or a hash of it where CBL can't take it (past
+    the id limit; '_' leads are reserved). Callers keep `s` inside the document."""
+    if s and not s.startswith("_") and len(s.encode("utf-8")) <= 200:
+        return s
+    import hashlib
+    return prefix + hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+
 def _queued(m):
     """The operation runs on the database's own thread (Database._run)."""
     @functools.wraps(m)

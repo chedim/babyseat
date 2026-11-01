@@ -776,6 +776,11 @@ def run(srv, code: str | None = None, lang: str = "sh", node: str | None = None,
     if "error" in owed:
         return owed
     root, ex = owed["root"], owed["executor"]
+    try:
+        from . import convgraph as _CG          # the chat turn's message -led-to-> this program
+        _CG.note_root(srv, root)
+    except Exception:
+        pass
     if tree is not None:
         note_oneshot(srv, lang, tree, root)
     try:

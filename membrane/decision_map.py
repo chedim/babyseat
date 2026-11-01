@@ -35,6 +35,8 @@ import math
 import threading
 import time
 
+from . import speech as _SP
+
 STATUS_OPEN = "open"
 STATUS_IN_FLIGHT = "in_flight"
 STATUS_DECIDED = "decided"
@@ -226,17 +228,21 @@ def _tell(est, p: dict, ev: dict, text: str, pool=None) -> None:
                      daemon=True, name="decision-event").start()
 
 
-def answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None) -> dict:
+def answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None,
+           tell: bool = True) -> dict:
     """The operator answers a card: validate the value against its var, append
     the decision to the ledger, then mark the card decided. Nothing changes on
     a refusal or a failed ledger write; one answer at a time. ``message`` (the
     cockpit's ✓ while the card's chat is open) is the id of that chat's newest
-    message: where the card was decided. It is kept only with its ``conv``."""
+    message: where the card was decided. It is kept only with its ``conv``.
+    ``tell=False``: the answer came from the chat itself (convgraph), which already
+    says it -- no decision message is sent back there."""
     with _ANSWER_LOCK:
-        return _answer(est, ledger, spec, value, conv, message, work)
+        return _answer(est, ledger, spec, value, conv, message, work, tell)
 
 
-def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None) -> dict:
+def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None,
+            tell: bool = True) -> dict:
     from .entities import CLASS_DECISION
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
@@ -279,10 +285,11 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
             p["speculative_discarded"] = p.pop(SPECULATIVE)
     ent.properties = p
     est.upsert(ent)
-    _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
-                   "blocks": p.get("blocks") or [], "work_needed": work is True,
-                   "speculative_kept": spec_kept, "ts": time.time()},
-          f"[decision] {title} = {shown}")
+    if tell:
+        _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": title, "value": shown,
+                       "blocks": p.get("blocks") or [], "work_needed": work is True,
+                       "speculative_kept": spec_kept, "ts": time.time()},
+              _SP.say("decided", title=title, value=shown))
     return {"ok": True, "card": _card_of(ent)}
 
 
@@ -315,7 +322,7 @@ def tell_drop(est, ent) -> None:
     _tell(est, p, {"kind": "decision", "entity": ent.eid, "title": p.get("name") or ent.eid,
                    "value": "dropped", "blocks": p.get("blocks") or [],
                    "work_needed": False, "ts": time.time()},
-          f"[decision] {p.get('name') or ent.eid} = dropped")
+          _SP.say("dropped", title=p.get("name") or ent.eid))
 
 
 def stamp_agent_drop(props: dict) -> None:

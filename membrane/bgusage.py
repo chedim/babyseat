@@ -28,7 +28,6 @@ the call it accounts for.
 """
 from __future__ import annotations
 
-import json
 import os
 import threading
 import time
@@ -55,10 +54,8 @@ def _empty() -> dict:
 def load(p) -> dict | None:
     """The persisted tally at `p`, or None when there is none (or it is not
     a tally)."""
-    try:
-        doc = json.loads(Path(p).read_text())
-    except Exception:
-        return None
+    from . import datafiles as DF          # #799: the seat's database when it has one
+    doc = DF.read_json(p)
     return doc if isinstance(doc, dict) and isinstance(doc.get("lanes"), dict) \
         else None
 
@@ -94,10 +91,8 @@ def record(lane: str, model: str, input: int = 0, output: int = 0,
             if p is None:
                 _mem = doc
                 return
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_name(p.name + ".tmp")
-            tmp.write_text(json.dumps(doc))
-            os.replace(tmp, p)
+            from . import datafiles as DF
+            DF.write_json(p, doc)
     except Exception:
         pass
 

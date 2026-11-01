@@ -647,11 +647,9 @@ def _field_events(a: AbsorbSession, rows: list[TurnRow], sid: str) -> list:
 # ---- the watermark -----------------------------------------------------------
 
 def load_marker(path: str) -> dict:
-    try:
-        d = json.loads(Path(path).read_text())
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
+    from . import datafiles as DF          # #799: the seat's database when it has one
+    d = DF.read_json(path, {})
+    return d if isinstance(d, dict) else {}
 
 
 def stamp_marker(path: str, rep: dict) -> None:
@@ -669,10 +667,8 @@ def stamp_marker(path: str, rep: dict) -> None:
             doc["claude_mtimes"] = rep["claude_mtimes"]
         elif prior.get("claude_mtimes"):
             doc["claude_mtimes"] = prior["claude_mtimes"]
-        tmp = path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(doc, f)
-        os.replace(tmp, path)
+        from . import datafiles as DF
+        DF.write_json(path, doc)
     except Exception:
         pass
 

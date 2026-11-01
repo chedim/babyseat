@@ -989,25 +989,23 @@ class Registry:
         if self.state_path is None:
             return
         try:
-            self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.state_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps({
+            from . import datafiles as DF      # #799: the seat's database when it has one
+            DF.write_json(self.state_path, {
                 "spend": {"day": self.spend_day, "usd": self.spend_today},
                 "records": {n: r.to_doc() for n, r in self.records.items()},
                 "calibration": self.calibration[-256:],
                 "outages": {n: list(o) for n, o in
                             self._outages.items() if o[0] > time.time()},
-            }))
-            os.replace(tmp, self.state_path)
+            })
         except Exception:
             pass
 
     def _load_state(self) -> None:
-        if self.state_path is None or not self.state_path.exists():
+        if self.state_path is None:
             return
-        try:
-            d = json.loads(self.state_path.read_text())
-        except Exception:
+        from . import datafiles as DF
+        d = DF.read_json(self.state_path)
+        if not isinstance(d, dict):
             return
         sp = d.get("spend") or {}
         if sp.get("day") == self.spend_day:

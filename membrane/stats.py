@@ -64,6 +64,10 @@ def read_raw(path: str) -> dict[str, list[dict]]:
         base = {}
     if not isinstance(base, dict):
         base = {}
+    if not text and not base:
+        db = Path(path).parent / "field.cblite"
+        if db.exists():                     # #799: the store moved into the database
+            return read_cbl(db)
     if not text:
         return base
     pos: dict = {}                      # (sid, mid) -> index in its list
@@ -92,6 +96,51 @@ def read_raw(path: str) -> dict[str, list[dict]]:
             if (ot.get("completed") or ot.get("created") or 0) <= ver:
                 rows[i] = row
     return base
+
+
+def read_cbl(db_path) -> dict[str, list[dict]]:
+    """The message store from the seat's Couchbase Lite store (#799), read beside
+    a live seat: the `messages` collection only, in stored order. {} on any error."""
+    try:
+        from . import cblite as CB
+        d = CB.Database(CB.load(), "field", str(db_path))
+    except Exception:
+        return {}
+    try:
+        got = d.query("SELECT sid, n, row FROM membrane.messages")
+    except Exception:
+        got = []
+    finally:
+        try:
+            d.close()
+        except Exception:
+            pass
+    out: dict[str, list[dict]] = {}
+    for r in sorted(got, key=lambda r: int(r.get("n") or 0)):
+        if r.get("sid") and isinstance(r.get("row"), dict):
+            out.setdefault(r["sid"], []).append(r["row"])
+    return out
+
+
+def read_cbl_file(db_path, name: str):
+    """A seat data file that moved into its Couchbase Lite store (#799, `datafiles`),
+    read beside a live seat. None when it isn't there."""
+    try:
+        from . import cblite as CB
+        from .datafiles import COLL
+        d = CB.Database(CB.load(), "field", str(db_path))
+    except Exception:
+        return None
+    try:
+        raw = d.get_json(COLL, CB.doc_key("file:" + name))
+        return json.loads(raw).get("d") if raw is not None else None
+    except Exception:
+        return None
+    finally:
+        try:
+            d.close()
+        except Exception:
+            pass
 
 
 def load_store(path: str) -> dict[str, list[dict]]:
@@ -357,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
     a = accounting(store)
     from .bgusage import FILE as _BG, load as _load_bg
     bg = _load_bg(args.bg or Path(args.store).parent / _BG)
+    if bg is None and not args.bg and (Path(args.store).parent / "field.cblite").exists():
+        bg = read_cbl_file(Path(args.store).parent / "field.cblite", _BG)   # #799
     if args.baseline:
         b = baseline(store)
     if args.json:

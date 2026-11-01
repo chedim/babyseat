@@ -1,5 +1,10 @@
 """Pronoun binding: capture-time referent resolution for the field.
 
+A CHAT TURN THE CONVERSATION GRAPH LOOKED AT does not use this lexicon (2026-11-01: it
+rewrote "can you benchmark it?" as "... benchmark explain?"): seat.Turn binds by the graph's
+reading (convgraph.capture_binding, the pronoun registers), and rewrites nothing when the
+graph found nothing. This module still binds every other client's turn.
+
 THE FAILURE (field sim 0.9, the kettle/lamp case): "turn it off" for the
 kettle and "turn it off" for the lamp embed identically -- a pronoun is a
 deictic pointer whose referent lives OUTSIDE the sentence, so the vector

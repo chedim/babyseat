@@ -671,10 +671,8 @@ def report(srv, goal: str, claim: str | None = None) -> bool:
                     + (f" -- {' '.join(str(what).split())[:200]}" if what else ""))
     head = (f"its planner says it is done -- {claim}" if claim is not None
             else "its graph has nothing left moving")
-    line = (f"goal {goal} ({(g.properties or {}).get('name') or goal}): {head}.\n" + "\n".join(rows)[:1500]
-            + "\nCheck the receipts against what is live now (the PR head, its CI); close the goal "
-            "(goal action='close') with the receipt, or send it back (entity_edit its replan with what "
-            "is missing).")
+    from . import speech as _SP
+    line = _SP.say("goal-ended", goal=goal, name=(g.properties or {}).get("name") or goal, head=head, rows=rows)
     try:
         from . import watch_agents as WA
         told = WA.escalate(srv, {"kind": "goal-ended", "entity": goal, "goal": goal,

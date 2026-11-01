@@ -35,6 +35,10 @@ jobs:
       # exception classes (the CI exhibit: ModuleNotFoundError 'couchbase');
       # there is no cluster in CI, the FakeCluster stands in for one.
       - run: pip install -e ".[couchbase]" pytest aiohttp
+      # Couchbase Lite C + its vector extension (vendor/cbl/, not in git): without them every
+      # real-store test skips here (#799's chat stores, the entity store), and green says nothing
+      # about that code (Memo's review of #803)
+      - run: sh scripts/fetch-cbl.sh linux-x86_64
       # The seat's suite (tests/) -- live-lane tests skip themselves when the
       # runner has no ollama. (The thinking-indicator file was deselected at
       # e385aec and its tests went stale under a changed wire contract -- the

@@ -49,6 +49,14 @@ On a `Decision`, `entity_edit` refuses `value`, `set_by`, `set_at` and any `stat
 - `POST /membrane/decision/chat {card, chat}` (serve port, owner only) records the chat a card opened. Only `chat` changes, and a card keeps one it already has.
 - `POST /membrane/decision/answer {card, value, conv, message}` (seat owner only) validates the value against the card's `var`. It then marks the card `decided` (keeping `message` when it comes with its `conv` and that is the card's chat) and appends `decided: <title> = <value>` to the operator ledger (`<field>.ledger.jsonl`), so the decision is recalled verbatim, as law. The ledger line is one line, and the title and value are each clipped to 160 characters. The ledger is written first, so a failed write leaves the card open. Answers run one at a time, so a card is decided once. A decided card refuses another answer (409), and `entity_edit` can't reopen it. Changing a past decision will create a timeline (step 3). A `Decision` with no status yet (made before the map) can be given one and become a card.
 
+### Asked and answered in the chat
+
+A card is also asked and answered in its chat (`membrane/convgraph.py`; the details are in
+[entity-field.md](entity-field.md#the-conversation-is-a-graph-convgraph-2026-11-01)). A
+reply's numbered `Open decisions:` items become cards in that chat, a card an agent opened
+there is posted by membrane, and the person's `1. yes` answers card 1 through the same
+`answer()`, with no decision message sent back.
+
 ### An answer wakes the watcher loops
 
 A successful answer puts one `decision` event into the watcher loops' events pool (`est._events_pool`, the pool a fired watch lands in): `{kind: "decision", entity: <card eid>, title, value, blocks}`. The loops' drainer admits a pass on the card like any watch event, and its task line reads `decided: <title> = <value> (card '<eid>')` with what the card blocks. A refused answer enqueues nothing.

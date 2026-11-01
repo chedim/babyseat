@@ -478,6 +478,84 @@ derived**:
   ground truth (a zero-exit run that *mentions* 'error' in its output
   keeps its `ok` class — the `rc=0 error` residue bug is dead).
 
+## The conversation is a graph (convgraph, 2026-11-01)
+
+Every chat turn mints both messages as entities (`membrane::msg:<message id>`, class
+`Message`: role, chat, text) and ties them into the field with relations rows
+(`membrane/convgraph.py`):
+
+| edge | from → to |
+|---|---|
+| `follows` | a person's message → the reply before it; a reply → the person's message |
+| `refers-to` | a message → the specific entities it names (files, commands, store entities by name, `eids.mentions_of`) |
+| `led-to` | a person's message → every program root its turn ran (`lang.run` notes them by the turn's sid) |
+| `asks:N` | a reply → the Decision card of its N-th open decision |
+| `answers` | a person's message → the card it answered |
+
+Only person chats are graphed (agents `build`, `plan`, `speaker`), never a loop's session.
+The work runs after the turn, on its own thread.
+
+**Decisions in the chat.** The numbered items under a reply's `Open decisions:` are
+Decision cards in that chat (`asked_from: chat-text`). The same question is the same card;
+when a reply lists its decisions, a text question it no longer lists is dropped, with no
+message. A card an agent opened in the chat that nobody asked yet is posted by membrane
+(`speech.say("asks")`), numbered after the reply's own. The person answers in the chat:
+`1. yes`, `1 yes`, `2. only to the chat`, `1 yes 2 no`, a bare yes or no when one card is
+open, `yesx2` for two. An answer starts with its number followed by `.` or `)`, or by a
+yes/no word, so a sentence like "2 tests failed" answers nothing, and neither does a bare
+"ok". A speaker line (`[user: X]`) is read past.
+`decision_map.answer(..., tell=False)` decides the card and writes the ledger, and no
+decision message goes back (the chat already says it). A bare answer with several cards
+open answers nothing: matching free text to a card would need a cut-off that hasn't been
+set. The cockpit stays the default view.
+
+**Pronouns are registers.** Each pronoun of each person is a field entity,
+`membrane::register:<person>:<pronoun>` (the chat is the person), whose live `holds` edge is
+what it means now. Forms share a register (`him` → `he`, `them`/`these`/`those` → `they`,
+`that one` → `that`). Loading a register supersedes its old edge, so its history stays, and
+the message that loaded it gets `sets:<pronoun>` to the same target. The register entity
+mirrors what it holds in its properties (`holds`, `holds_names`, `set_by`, `set_ts`), so a
+reader of properties sees it. Nothing is typed: a register holds whatever the conversation
+last put in it.
+
+Before a chat turn, the person's pronoun is read: first the reply before (its `refers-to`
+targets, the freshest mention), then the register when that reply names nothing that
+applies, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
+candidate has a method of the command's verb, the ones without one drop; then a candidate
+whose state is closed (closed, dropped, fulfilled, merged, retired, done, deleted) drops.
+One reading left (or several, for `they`) is recorded (`refers-to`, source `resolver`),
+loads the register, and is told to the model once, as a line in that turn's context
+(`lanes._with_referent`). Several left in a command (`delete it`, `yes, merge it`, `merge it
+and restart`: leading yes/ok/pls are read past) are asked back in the chat, in one line
+(`"it": a or b?`), and that turn doesn't run. The person's reply naming one of them (its
+name, its file name, `first`/`second`) loads the register; nothing is trained. A polite request
+(`can you / could you / would you …`) is a command too. A pronoun outside a command (`is it
+done?`) is never asked back: with several readings it is left to the model. When the reply
+before names more than 3 things that could apply (the operator's cap, `REASK_MAX`), nothing
+is asked back: the model is told the pronoun most likely refers to what its last reply
+proposed.
+
+The seat's older capture-time binder (`membrane/binding.py`, a lexical guess at the previous
+turn's last content word, which rewrites the turn's query before it is embedded and
+stored) no longer guesses on a chat turn the graph looked at: there it binds by the
+graph's reading, and when the graph resolved nothing, nothing is rewritten. Other clients
+(Home Assistant's voice, a direct `/v1` caller) keep the lexical binder.
+
+**Issues and PRs.** `PR #803` (or `issue`, `pull request`, `merge`/`merged`, `review`,
+`closes`, `fixes` before it) is the project repo's issue 803, one entity
+(`u:https://github.com/<repo>/issues/803`, the repo from the seat's git remote) that a
+pasted `…/pull/803` link maps to as well, so "merge it" after "PR #803 is ready" finds the
+PR. A bare `#N` is not an issue: membrane numbers its own events `#N`.
+
+**Membrane's own messages.** A turn membrane started (`[watch] …`, `[decision] …`,
+`goal … fulfilled`) is graphed as a `membrane` message, not the person's: it answers no
+card, and its pronouns are not resolved. A note to the model lives for the message that
+made it only.
+
+**What membrane says** is one template per kind in `membrane/speech.py` (a decided or
+dropped card, a fulfilled goal, a goal whose graph has nothing left moving, a watch
+escalation, the asked decisions, the re-ask), filled from the subgraph it is about.
+
 ## The gate and the replay A/B
 
 `membrane/efgate.py` runs on every real turn. It finds the earlier user

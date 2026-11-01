@@ -1498,10 +1498,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         """The entity's CBL document id: its eid, or a hash of it where CBL can't take
         the eid (a URL entity ran past the id limit; '_' leads are reserved). The eid
         itself rides inside the document."""
-        if eid and not eid.startswith("_") and len(eid.encode("utf-8")) <= 200:
-            return eid
-        import hashlib
-        return "membrane::h:" + hashlib.sha1(eid.encode("utf-8")).hexdigest()
+        from .cblite import doc_key
+        return doc_key(eid)
 
     def _load(self) -> None:
         if self._cbl is not None:

@@ -142,15 +142,41 @@ def migrate_one_chat(sessions, keep: str, operator: str) -> None:
     sessions.flush()
 
 
+def _migrated_name(path: str) -> str:
+    return f"{path}.migrated-{time.strftime('%Y%m%d-%H%M%S')}"
+
+
 class SessionStore:
     """opencode's Session dicts, persisted beside the field. A missing
     file, a corrupt one or an unwritable home degrade to RAM-only (never a
-    serve failure)."""
+    serve failure).
 
-    def __init__(self, path: str | None = None):
+    THE DATABASE HOME (#799): with the seat's Couchbase Lite store (`cbl`),
+    one document per session in the `sessions` collection, and a save writes
+    only the sessions that changed (the file was rewritten whole on every
+    touch). The first boot with the database imports the file and keeps it
+    renamed as a backup."""
+
+    CBL_COLL = "sessions"
+
+    def __init__(self, path: str | None = None, cbl=None):
         self.path = path
         self.sessions: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._cbl = cbl
+        self._sig: dict[str, str] = {}
+        if cbl is not None:
+            try:
+                cbl.coll(self.CBL_COLL)
+                for r in cbl.query(f"SELECT s FROM membrane.{self.CBL_COLL}"):
+                    s = r.get("s")
+                    if isinstance(s, dict) and s.get("id"):
+                        self.sessions[s["id"]] = s
+                self._sig = {sid: self._sig_of(s) for sid, s in self.sessions.items()}
+            except Exception as e:
+                print(f"[serve] sessions: database load failed ({e})", file=sys.stderr)
+            if self.sessions or path is None or not Path(path).exists():
+                return
         if path is not None:
             try:
                 raw = Path(path).read_text()
@@ -159,6 +185,21 @@ class SessionStore:
                     self.sessions = d
             except Exception:
                 pass
+            if cbl is not None and self.sessions:           # the first database boot
+                with self._lock:
+                    ok = self._save_cbl(None)
+                if not ok:              # the file stays where it is: the next boot imports it again
+                    return
+                try:
+                    os.replace(path, _migrated_name(path))
+                    print(f"[serve] migrated {len(self.sessions)} sessions into couchbase lite; "
+                          "the JSON file is kept as a backup", file=sys.stderr)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _sig_of(s: dict) -> str:
+        return json.dumps(s, sort_keys=True, default=str)
 
     def create(self, title: str | None = None, parent_id: str | None = None
                ) -> dict:
@@ -180,7 +221,7 @@ class SessionStore:
             s["parentID"] = parent_id
         with self._lock:
             self.sessions[s["id"]] = s
-            self._flush()
+            self._flush(s["id"])
         return s
 
     def list(self) -> list[dict]:
@@ -210,7 +251,7 @@ class SessionStore:
                     f"session {sid} already exists and is not an "
                     "absorbed session")
             self.sessions[sid] = d
-            self._flush()
+            self._flush(sid)
         return d
 
     def get(self, sid: str) -> dict | None:
@@ -229,7 +270,7 @@ class SessionStore:
                     ("build", "plan", "general", "explore", "watch", "phone"):
                 s["agent"] = str(agent).strip()
             s["time"]["updated"] = int(time.time() * 1000)
-            self._flush()
+            self._flush(sid)
             return s
 
     def touch(self, sid: str) -> None:
@@ -240,18 +281,22 @@ class SessionStore:
                 # -c/continue lane sorts sessions by time.updated desc --
                 # a seconds value sorted as ancient broke the lane
                 s["time"]["updated"] = int(time.time() * 1000)
-                self._flush()
+                self._flush(sid)
 
     def delete(self, sid: str) -> bool:
         with self._lock:
             if sid not in self.sessions:
                 return False
             del self.sessions[sid]
-            self._flush()
+            self._flush(sid)
             return True
 
-    def _flush(self) -> None:
-        """The caller holds the lock."""
+    def _flush(self, sid: str | None = None) -> None:
+        """The caller holds the lock. `sid`: the one session that changed
+        (None: compare every session, for callers that edited the dict)."""
+        if self._cbl is not None:
+            self._save_cbl(sid)
+            return
         if self.path is None:
             return
         try:
@@ -261,6 +306,41 @@ class SessionStore:
             os.replace(tmp, self.path)
         except Exception:
             pass
+
+    def _save_cbl(self, sid: str | None) -> bool:
+        """-> True when every changed session was written."""
+        from .cblite import doc_key
+        ids = [sid] if sid is not None else list(dict.fromkeys(list(self.sessions) + list(self._sig)))
+        put, gone = [], []
+        for k in ids:
+            s = self.sessions.get(k)
+            if s is None:
+                if k in self._sig:
+                    gone.append(k)
+                continue
+            sg = self._sig_of(s)
+            if self._sig.get(k) != sg:
+                put.append((k, s, sg))
+        if not put and not gone:
+            return True
+        try:
+            many = len(put) + len(gone) > 1
+            if many:
+                self._cbl.begin()
+            try:
+                for k, s, sg in put:
+                    self._cbl.put_json(self.CBL_COLL, doc_key(k), json.dumps({"s": s}, default=str))
+                    self._sig[k] = sg
+                for k in gone:
+                    self._cbl.purge(self.CBL_COLL, doc_key(k))
+                    self._sig.pop(k, None)
+            finally:
+                if many:
+                    self._cbl.end()
+        except Exception as e:
+            print(f"[serve] sessions: database save failed ({e})", file=sys.stderr)
+            return False
+        return True
 
     def flush(self) -> None:
         with self._lock:
@@ -275,51 +355,96 @@ class MessageStore:
     model turn is minutes apart -- the file write is nothing), atomic
     replace, RAM-only on any IO failure."""
 
-    def __init__(self, path: str | None = None):
+    CBL_COLL = "messages"
+
+    def __init__(self, path: str | None = None, cbl=None):
         self.path = path
         self.msgs: dict[str, list[dict]] = {}
         self._lock = threading.Lock()
         self._last_flush_ts = 0.0
         self._dirty_rows: set | None = None
+        # THE DATABASE HOME (#799): with the seat's Couchbase Lite store, one
+        # document per message in the `messages` collection ({sid, mid, n,
+        # row}; n keeps the order), and a flush writes only the rows that
+        # changed. The first boot with the database imports the snapshot +
+        # journal and keeps both renamed as backups.
+        self._cbl = cbl
+        self._n = 0
+        self._pos: dict[tuple, int] = {}
+        if cbl is not None:
+            try:
+                cbl.coll(self.CBL_COLL)
+                got = cbl.query(f"SELECT sid, mid, n, row FROM membrane.{self.CBL_COLL}")
+            except Exception as e:
+                print(f"[serve] messages: database load failed ({e})", file=sys.stderr)
+                got = []
+            if got:
+                got.sort(key=lambda r: int(r.get("n") or 0))
+                d: dict = {}
+                for r in got:
+                    if isinstance(r.get("row"), dict) and r.get("sid"):
+                        d.setdefault(r["sid"], []).append(r["row"])
+                        self._pos[(r["sid"], str(r.get("mid") or ""))] = int(r.get("n") or 0)
+                self._n = max(self._pos.values(), default=0)
+                self.msgs = self._mended(d)
+                return
+            if path is None or not (Path(path).exists() or Path(path + ".jnl").exists()):
+                return
         if path is not None:
             try:
                 d = _read_raw(path)       # snapshot + journal (#542)
                 if isinstance(d, dict):
-                    # a stored file may predate the snapshot upsert (one
-                    # message saved once per tool-part state change):
-                    # dedupe ON LOAD -- last parts win, first position
-                    # stays, or resumed history still duplicates
-                    # THE TOKEN MEND (the `K.tokens.output undefined`
-                    # TUI-crash exhibit, 2026-10-06, THE DATA-HALF): a
-                    # stored assistant row predating the tokens covenant
-                    # (the old watchdog-error mints carried NO tokens)
-                    # POISONED EVERY SESSION LOAD -- the attached TUI's
-                    # reducer findLast lands on it and reads
-                    # K.tokens.output -> the crash ON STARTUP, every
-                    # boot, forever. The load MENDS: every assistant
-                    # row gets a full tokens dict (zeros when unknown)
-                    # -- the persisted poison dies with this store's
-                    # next flush.
-                    for sid, rows in d.items():
-                        merged: dict[str, dict] = {}
-                        ordered: list[str] = []
-                        for r in rows:
-                            info = r.get("info") or {}
-                            mid = str(info.get("id") or "")
-                            if info.get("role") == "assistant" and \
-                                    not isinstance(info.get("tokens"),
-                                                   dict):
-                                info["tokens"] = {"total": 0, "input": 0,
-                                                  "output": 0, "reasoning": 0,
-                                                  "cache": {"read": 0,
-                                                            "write": 0}}
-                                r["info"] = info
-                            if mid not in merged:
-                                ordered.append(mid)
-                            merged[mid] = r
-                        self.msgs[sid] = [merged[m] for m in ordered]
+                    self.msgs = self._mended(d)
             except Exception:
                 pass
+            if cbl is not None and self.msgs:               # the first database boot
+                with self._lock:
+                    self._dirty_rows = {(sid, str(r["info"].get("id") or ""))
+                                        for sid, rows in self.msgs.items() for r in rows}
+                    self._flush()
+                    failed = bool(self._dirty_rows)        # a failed save leaves its rows dirty
+                if failed:              # the files stay where they are: the next boot imports them again
+                    return
+                try:
+                    stamp = _migrated_name(path)
+                    os.replace(path, stamp)
+                    if os.path.exists(path + ".jnl"):
+                        os.replace(path + ".jnl", stamp + ".jnl")
+                    print(f"[serve] migrated {len(self._pos)} messages into couchbase lite; "
+                          "the JSON files are kept as backups", file=sys.stderr)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _mended(d: dict) -> dict:
+        """A stored file may predate the snapshot upsert (one message saved
+        once per tool-part state change): dedupe ON LOAD -- last parts win,
+        first position stays, or resumed history still duplicates.
+        THE TOKEN MEND (the `K.tokens.output undefined` TUI-crash exhibit,
+        2026-10-06, THE DATA-HALF): a stored assistant row predating the
+        tokens covenant (the old watchdog-error mints carried NO tokens)
+        POISONED EVERY SESSION LOAD -- the attached TUI's reducer findLast
+        lands on it and reads K.tokens.output -> the crash ON STARTUP, every
+        boot, forever. The load MENDS: every assistant row gets a full
+        tokens dict (zeros when unknown) -- the persisted poison dies with
+        this store's next flush."""
+        out: dict[str, list[dict]] = {}
+        for sid, rows in d.items():
+            merged: dict[str, dict] = {}
+            ordered: list[str] = []
+            for r in rows:
+                info = r.get("info") or {}
+                mid = str(info.get("id") or "")
+                if info.get("role") == "assistant" and \
+                        not isinstance(info.get("tokens"), dict):
+                    info["tokens"] = {"total": 0, "input": 0, "output": 0, "reasoning": 0,
+                                      "cache": {"read": 0, "write": 0}}
+                    r["info"] = info
+                if mid not in merged:
+                    ordered.append(mid)
+                merged[mid] = r
+            out[sid] = [merged[m] for m in ordered]
+        return out
 
     def append(self, sid: str, info: dict, parts: list) -> dict:
         # the TurnRunner re-appends the SAME assistant message per
@@ -438,7 +563,11 @@ class MessageStore:
         completed/created ts winning -- a stale empty row never displaces
         a finished one. With no dirty set a flush is a no-op.
         A row is journaled whole on each change, so the journal can reach
-        the snapshot's size before it compacts (a boot reads up to ~2x)."""
+        the snapshot's size before it compacts (a boot reads up to ~2x).
+        With the database (#799) each changed row is its own document."""
+        if self._cbl is not None:
+            self._save_cbl()
+            return
         if self.path is None:
             return
         try:
@@ -474,6 +603,45 @@ class MessageStore:
             pass
 
     _dirty_rows: set | None = None
+
+    @staticmethod
+    def _doc_key(sid: str, mid: str) -> str:
+        from .cblite import doc_key
+        return doc_key(f"{sid}|{mid}")
+
+    def _save_cbl(self) -> None:
+        """The caller holds the lock: the dirty rows, one document each, in their
+        session order (a new row's n follows the rows before it)."""
+        dirty = self._dirty_rows
+        self._dirty_rows = None
+        if not dirty:
+            return
+        rows = []
+        for sid in {k[0] for k in dirty}:
+            for i, r in enumerate(self.msgs.get(sid) or []):
+                mid = str(r["info"].get("id") or "")
+                if (sid, mid) in dirty:
+                    rows.append((sid, mid, r))
+        if not rows:
+            return
+        try:
+            many = len(rows) > 1
+            if many:
+                self._cbl.begin()
+            try:
+                for sid, mid, r in rows:
+                    n = self._pos.get((sid, mid))
+                    if n is None:
+                        self._n += 1
+                        n = self._pos[(sid, mid)] = self._n
+                    self._cbl.put_json(self.CBL_COLL, self._doc_key(sid, mid),
+                                       json.dumps({"sid": sid, "mid": mid, "n": n, "row": r}, default=str))
+            finally:
+                if many:
+                    self._cbl.end()
+        except Exception as e:
+            self._dirty_rows = (self._dirty_rows or set()) | set(dirty)    # the next flush retries
+            print(f"[serve] messages: database save failed ({e})", file=sys.stderr)
 
     def _file_lock(self):
         import contextlib
@@ -514,6 +682,20 @@ class MessageStore:
                 if self._dirty_rows:
                     self._dirty_rows = {k for k in self._dirty_rows
                                         if k[0] != sid}
+            if self._cbl is not None:
+                gone = [k for k in self._pos if k[0] in sids]
+                try:
+                    if gone:
+                        self._cbl.begin()
+                        try:
+                            for sid, mid in gone:
+                                self._cbl.purge(self.CBL_COLL, self._doc_key(sid, mid))
+                                self._pos.pop((sid, mid), None)
+                        finally:
+                            self._cbl.end()
+                except Exception as e:
+                    print(f"[serve] messages: database delete failed ({e})", file=sys.stderr)
+                return had or bool(gone)
             if self.path is None:
                 return had
             try:
@@ -528,6 +710,27 @@ class MessageStore:
     def flush(self) -> None:
         with self._lock:
             self._flush()
+
+
+def post_line(runner, sid: str, text: str) -> None:
+    """A membrane line into a chat, as an assistant text part (never a turn,
+    never a model call). THE ROW'S TWO LIVES (the crash covenant, 2026-10-06,
+    the 'K.tokens.output undefined' TUI exhibit): with an assistant row last,
+    the part rides ITS id (the reducer holds it); otherwise append_part MINTS the
+    row and publishes the FULL message.updated first (row before part), and the
+    wire publishes the STORED part, which carries the minted row's id."""
+    rows = [r for r in runner.messages.list(sid) if r]
+    last_asst = next((r["info"] for r in reversed(rows)
+                      if (r.get("info") or {}).get("role") == "assistant"), None)
+    now = int(time.time() * 1000)
+    part = {"id": _gen_id("prt"), "sessionID": sid, "type": "text",
+            "text": str(text)[:2000], "time": {"start": now, "end": now}}
+    if last_asst is not None and last_asst.get("id"):
+        part["messageID"] = last_asst["id"]
+    runner.messages.append_part(sid, part)
+    rows2 = runner.messages.list(sid)
+    stored = ((rows2[-1].get("parts") or [])[-1]) if rows2 else part
+    runner.hub.publish({"type": "message.part.updated", "part": dict(stored), "sessionID": sid})
 
 
 class SSEHub:
@@ -1311,6 +1514,10 @@ class TurnRunner:
         self.hub.publish({"type": "session.diff", "sessionID": sid,
                           "diff": []})
 
+    def post_line(self, sid: str, text: str) -> None:
+        """A membrane line into this runner's chat `sid` (module post_line)."""
+        post_line(self, sid, text)
+
     def _announce_user(self, sid: str, info: dict, parts: list) -> None:
         # the user message rides the stream BEFORE busy: message.updated,
         # one part event per part, then the session refresh (real serve
@@ -1617,6 +1824,18 @@ class TurnRunner:
         user_info["_announced"] = True      # the inner's announce skips
         if (self.sessions.get(sid) or {}).get("blurp"):
             return self.blurp_message(sid, text, user_info)   # #337: no turn in Blurp's private chat
+        # THE REFERENT (convgraph.before_turn): "delete it" with two things "it" could be is
+        # asked back in the chat and this turn does not run; the person's reply reads normally
+        try:
+            _psrv = getattr(self, "srv", None)
+            from . import convgraph as _CG
+            if _psrv is not None and not _drained and _CG.is_chat((self.sessions.get(sid) or {}).get("agent")):
+                _ref = _CG.before_turn(_psrv, self, sid, user_info, text)
+                _psrv.__dict__.setdefault("_cg_turn", {})[sid] = _ref or {}   # the capture binding reads it
+                if _ref and _ref.get("reask"):
+                    return {"info": user_info, "parts": [], "reask": _ref["reask"]}
+        except Exception as e:
+            print(f"[convgraph] referent {sid[:16]}: {e}", file=sys.stderr)
         # OUT OF TOKENS (quota.py): the turn's model is paused -- a person's
         # message waits for it; a loop's turn is not run (its event waits)
         _qh = self._quota_hold(sid, text, user_info, user_parts)
@@ -3136,6 +3355,21 @@ class TurnRunner:
                                  daemon=True, name="predict-end").start()
         except Exception:
             pass
+        # THE CONVERSATION GRAPH (convgraph): a chat turn's two messages and their edges,
+        # the answers to the reply before and the decisions this reply asks -- off the turn
+        try:
+            _psrv = getattr(self, "srv", None)
+            from . import convgraph as _CG
+            if _psrv is not None and user_info is not None and \
+                    _CG.is_chat((self._agents or {}).get(sid) or (self.sessions.get(sid) or {}).get("agent")):
+                from . import writes as _W
+                _reply = "\n".join(p.get("text") or "" for p in parts
+                                   if isinstance(p, dict) and p.get("type") == "text")
+                _ui, _ai = dict(user_info), dict(a_info)
+                threading.Thread(target=_W.carry(lambda: _CG.on_turn_end(_psrv, self, sid, _ui, text, _ai, _reply)),
+                                 daemon=True, name="convgraph").start()
+        except Exception as e:
+            print(f"[convgraph] turn {sid[:16]}: {e}", file=sys.stderr)
         if _quota_hit:
             return {"info": a_info, "parts": parts, "quota": _quota_hit}
         return {"info": a_info, "parts": parts}

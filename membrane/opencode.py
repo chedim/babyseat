@@ -1047,6 +1047,9 @@ def main() -> None:
                 # that belongs to the chat thread
                 graph_fn=lambda: getattr(srv, "_codegraph", None))
             srv.capturer = Capturer(srv.efield)
+            # #799: the seat's small data files live in the same store when it is one
+            from . import datafiles as _DF
+            _DF.use(getattr(be, "db", None), Path(args.field).resolve().parent)
             # THE SELF-FEEDING GUARD'S CUT (the seat's #4): the fields
             # recall excludes entities whose ONLY deltas ride the
             # CURRENT turn's session (the boot's own session prefix
@@ -2065,8 +2068,11 @@ def main() -> None:
                                  TurnRunner, SSEHub, loopback_ladder,
                                  mcp_executor, start)
             d = Path(args.field).resolve().parent
-            sess_store = SessionStore(str(d / "serve-sessions.json"))
-            msg_store = MessageStore(str(d / "serve-msgs.json"))
+            # #799: the chat stores live in the field's Couchbase Lite store when it
+            # has one (one document per session / message), else in the files
+            _chat_cbl = getattr(getattr(getattr(srv, "efield", None), "b", None), "db", None)
+            sess_store = SessionStore(str(d / "serve-sessions.json"), cbl=_chat_cbl)
+            msg_store = MessageStore(str(d / "serve-msgs.json"), cbl=_chat_cbl)
             _serve_hub = SSEHub()             # the ONE room's event bus
             msg_store.hub = _serve_hub        # the row-before-part covenant
             system = ""
