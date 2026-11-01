@@ -193,6 +193,31 @@ class DecisionsInTheChat(unittest.TestCase):
         self.assertIs(card.properties["value"], False)
 
 
+class TheSpeakerLine(unittest.TestCase):
+    """A chat client's speaker line ('[user: X]') heads the person's text: it is not their words."""
+
+    def test_the_message_is_named_by_its_words_and_keeps_its_speaker(self):
+        srv, runner = _seat()
+        u, _ = _turn(srv, runner, 1, "[user: Dima]\nreview membrane/watch_agents.py", "ok")
+        p = srv.entity_store.docs[u].properties
+        self.assertEqual(p["name"], "review membrane/watch_agents.py")
+        self.assertEqual(p["speaker"], "Dima")
+        self.assertIn(("refers-to", "f:membrane/watch_agents.py"), _out(srv, u))
+
+    def test_an_answer_under_a_speaker_line_answers(self):
+        srv, runner = _seat()
+        _turn(srv, runner, 1, "[user: Dima]\ngo", REPLY)
+        _turn(srv, runner, 2, "[user: Dima]\n1. yes", "merging")
+        self.assertEqual([c.properties["value"] for c in _cards(srv, "decided")], ["yes"])
+
+    def test_a_pronoun_under_a_speaker_line_is_resolved(self):
+        srv, runner = _seat()
+        _turn(srv, runner, 1, "look", "I changed membrane/a.py and membrane/b.py.")
+        runner.messages.add(SID, "msg_u2", "user", "[user: Dima]\ndelete it")
+        out = CG.before_turn(srv, runner, SID, {"id": "msg_u2"}, "[user: Dima]\ndelete it")
+        self.assertTrue(out and out.get("reask"))
+
+
 class Speech(unittest.TestCase):
     def test_the_templates(self):
         self.assertEqual(SP.say("decided", title="t", value="v"), "[decision] t = v")

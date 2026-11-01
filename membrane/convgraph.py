@@ -97,14 +97,24 @@ def note_root(srv, root: str) -> None:
 
 # ---- messages ----------------------------------------------------------------------------
 
-def _mint(est, sid: str, mid: str, role: str, text: str, ts=None) -> str:
+def _words(text: str) -> tuple[str | None, str]:
+    """(the speaker, the person's words): a chat client's speaker line ('[user: X]',
+    the JWT stamp) heads the text and is not part of what they said."""
+    from .speakers import split_speaker, strip_speaker_lines
+    who, _rest = split_speaker(text or "")
+    return who, strip_speaker_lines(text or "").strip()
+
+
+def _mint(est, sid: str, mid: str, role: str, text: str, ts=None, speaker=None) -> str:
     eid = msg_eid(mid)
     if eid not in (est.docs or {}):
         first = next((ln for ln in str(text or "").splitlines() if ln.strip()), "")
-        est.upsert(QuantumEntity(eid=eid, cls=CLASS_MESSAGE, properties={
-            "name": " ".join(first.split())[:80] or f"{role} message", "role": role, "sid": sid,
-            "mid": mid, "text": str(text or "")[:TEXT_MAX], "ts": ts or time.time(),
-            "silent_birth": True}), embedder=None)
+        props = {"name": " ".join(first.split())[:80] or f"{role} message", "role": role, "sid": sid,
+                 "mid": mid, "text": str(text or "")[:TEXT_MAX], "ts": ts or time.time(),
+                 "silent_birth": True}
+        if speaker:
+            props["speaker"] = speaker
+        est.upsert(QuantumEntity(eid=eid, cls=CLASS_MESSAGE, properties=props), embedder=None)
     return eid
 
 
@@ -264,7 +274,8 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
     u_mid, a_mid = str((user_info or {}).get("id") or ""), str((a_info or {}).get("id") or "")
     if not u_mid or not a_mid:
         return
-    u = _mint(est, sid, u_mid, "user", user_text)
+    who, user_text = _words(user_text)
+    u = _mint(est, sid, u_mid, "user", user_text, speaker=who)
     a = _mint(est, sid, a_mid, "assistant", reply)
     prev = _row_before(runner, sid, u_mid)
     prev_a = _row_before(runner, sid, u_mid, "assistant")
@@ -293,7 +304,8 @@ def _label(est, eid: str) -> str:
 def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | None:
     """"delete it": resolve the pronoun against the reply before. None: nothing to resolve
     (or nothing it could mean); {"resolved": eid}; {"reask": line} after asking back."""
-    m = _PRONOUN.match(str(text or ""))
+    who, text = _words(text)
+    m = _PRONOUN.match(text)
     if not m or m.group(1).lower() in _NOT_ACTS:
         return None
     verb, word = m.group(1).lower(), m.group(2).lower()
@@ -324,7 +336,7 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     from . import speech as SP
     line = SP.say("reask", word=word, options=[_label(est, c) for c in cands])
     if mid:
-        _mint(est, sid, mid, "user", text)
+        _mint(est, sid, mid, "user", text, speaker=who)
         _edge(be, origin, u, "follows", pa)
     runner.post_line(sid, line)
     return {"reask": line, "readings": cands}
