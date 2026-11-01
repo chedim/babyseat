@@ -377,3 +377,32 @@ def work_graph(est) -> dict:
     ids = {n["id"] for n in nodes}
     nodes.sort(key=lambda n: (("goal", "task", "decision").index(n["kind"]), n["title"]))
     return {"nodes": nodes, "edges": [e for e in raw if e["from"] in ids and e["to"] in ids]}
+
+
+def entity_history(srv, spec: str) -> dict:
+    """THE ONE HISTORY CALL (k5, the Logs tab): one entity's current properties
+    (goal-processing receipts live there), its field changes (deltas, oldest
+    first) and its relations (live and superseded) -- {ok, eid, cls, properties,
+    changes, relations}."""
+    est = getattr(srv, "entity_store", None)
+    ent = est._resolve_spec(spec) if est is not None and spec else None
+    if ent is None:
+        return {"ok": False, "error": f"no entity matches {spec!r}"}
+    ef = getattr(srv, "efield", None)
+    changes = []
+    if ef is not None:
+        try:
+            changes = [dict(x) for x in ef.deltas_of(ent.eid)]
+        except Exception:
+            changes = []
+    rels = []
+    be, origin = getattr(ef, "b", None), getattr(ef, "origin", "")
+    if be is not None:
+        try:
+            from . import relations as R
+            rels = R.history_of(be, origin, ent.eid)
+        except Exception:
+            rels = []
+    props = {k: v for k, v in (ent.properties or {}).items() if not str(k).startswith("script_")}
+    return {"ok": True, "eid": ent.eid, "cls": ent.cls, "properties": props,
+            "changes": changes, "relations": rels}

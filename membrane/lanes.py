@@ -4395,6 +4395,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         if path == "/membrane/work-graph":            # k4: goals, tasks, decisions + edges
             from . import decision_map as _DM
             self._json_out(_DM.work_graph(getattr(self.server, "entity_store", None))); return
+        if path == "/membrane/entity-history":        # k5: one entity's properties, changes, relations
+            from . import decision_map as _DM
+            import urllib.parse as _up
+            _q = _up.parse_qs(self.path.split("?", 1)[-1])
+            self._json_out(_DM.entity_history(self.server, (_q.get("spec") or [""])[0].strip())); return
         if path == "/membrane/decisions":             # #470: the project decision map
             from . import decision_map as _DM
             self._json_out(_DM.board(getattr(self.server, "entity_store", None))); return
