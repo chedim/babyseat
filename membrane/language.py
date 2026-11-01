@@ -47,9 +47,21 @@ def _nlp():
         try:
             import spacy
             _NLP["m"] = spacy.load("en_core_web_sm")
+            _no_blis_finalize()
         except Exception:
             _NLP["m"] = False
     return _NLP["m"] or None
+
+
+def _no_blis_finalize() -> None:
+    """blis (under spaCy) finalizes at exit and abort()s when a parse on another thread still
+    holds its memory pool -- a Python crash dialog on the Mac (2026-11-01). The OS frees it."""
+    try:
+        import atexit
+        import blis.cy
+        atexit.unregister(blis.cy.finalize)
+    except Exception:
+        pass
 
 
 def available() -> bool:
