@@ -3540,7 +3540,21 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     /** k6: the view's API once fieldview.js is loaded: it only GETs /membrane/work-graph. */
     async _mountDecisions() {
       try { await import("/ui/www/fieldview.js"); } catch (e) { this._msgEl.textContent = "the field view failed to load"; return; }
-      this._cockpit.api = { get: (p) => this._get(p) };
+      this._cockpit.api = { get: (p) => this._get(p), post: (p, b) => this._post(p, b) };
+      // the bottom bar's message drives a chat turn; the turn's answer comes back through ai-reply
+      this._cockpit.addEventListener("chat-send", (e) => {
+        const c = this._chat, text = String(e.detail || "").trim();
+        if (!c || !c._ta || !text) return;
+        this._fvPending = true;
+        c._ta.value = text;
+        c._submit();
+      });
+      this._chat.addEventListener("ai-reply", (e) => {
+        if (!this._fvPending) return;
+        this._fvPending = false;
+        const t = (e.detail || {}).text;
+        if (t) this._cockpit.reply(t);
+      });
       this._msgEl.style.display = "none";
     }
 
@@ -3548,6 +3562,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const r = await this._hass.fetchWithAuth(HSERVE + path);
       const t = await r.text();
       let d = null; try { d = t ? JSON.parse(t) : null; } catch (e) { d = t; }
+      if (!r.ok) throw new Error(path + " → " + r.status);
+      return d;
+    }
+
+    async _post(path, body) {
+      const r = await this._hass.fetchWithAuth(HSERVE + path, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      let d = null; try { d = await r.json(); } catch (e) { /* no body */ }
       if (!r.ok) throw new Error(path + " → " + r.status);
       return d;
     }

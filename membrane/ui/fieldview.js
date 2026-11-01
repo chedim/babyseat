@@ -97,8 +97,10 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
     reply(text) { this._chat = chatStep(this._chat, "reply", text); this._draw(); }
     set api(a) { this._api = a; this.refresh(); }
     async refresh() {
-      try { this._graph = await this._api.get("/membrane/work-graph"); } catch (e) { this._graph = null; }
-      this._draw();
+      let g = null;
+      try { g = await this._api.get("/membrane/work-graph"); } catch (e) { g = null; }
+      const key = JSON.stringify(g);
+      if (key !== this._gkey) { this._gkey = key; this._graph = g; this._draw(); }
       clearTimeout(this._t); this._t = setTimeout(() => this.refresh(), 10000);
     }
     async _load() {
@@ -120,7 +122,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       const icons = layout(this._graph, w, h);
       const card = this._open && cardInfo(this._graph, this._open);
       const list = (l) => (l && l.length ? l.map(esc).join(", ") : "–");
-      this.shadowRoot.innerHTML = `<style>
+      let html = `<style>
         :host{position:absolute;inset:0;display:block;font:14px system-ui}
         .i{position:absolute;transform:translate(-50%,-50%) scale(1);font-size:26px;cursor:pointer;
            transition:transform .15s;user-select:none}
@@ -136,18 +138,19 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
           blocks: ${list(card.blocks)}<br>blocked by: ${list(card.blockedBy)}` :
           this._tab === 1 ? chatRows(this._extra).map((r) => `<div>${esc(r)}</div>`).join("") + `<input class="say" placeholder="say…">` :
           logRows(this._extra).map((r) => `<div>${esc(r)}</div>`).join("")) + `</div>` : "");
-      const say = this.shadowRoot.querySelector(".say");
-      if (say) say.onkeydown = (e) => { if (e.key === "Enter") this._say(say.value.trim()); };
       const sr = this.shadowRoot, pos = Object.fromEntries(icons.map((i) => [i.id, i]));
       const st = edgeStyles(this._graph), goalOf = Object.fromEntries(((this._graph && this._graph.nodes) || []).map((n) => [n.id, n.kind === "goal" ? n.id : n.goal]));
       const lines = (((this._graph && this._graph.edges) || [])).filter((e) => pos[e.from] && pos[e.to]).map((e) => {
         const s = st[goalOf[e.from]] || { color: "#888", dash: "" };
         return `<line x1="${pos[e.from].x}" y1="${pos[e.from].y}" x2="${pos[e.to].x}" y2="${pos[e.to].y}" stroke="${s.color}" stroke-width="2" stroke-dasharray="${s.dash}"/>`;
       }).join("");
-      sr.innerHTML += `<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0">${lines}</svg>` +
+      html += `<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0">${lines}</svg>` +
         `<div class="chatbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4;background:rgba(20,20,30,.92);color:#eee;padding:6px">` +
         `<div class="reply-window" style="max-height:30vh;overflow:auto">${(this._chat.log).map((m) => `<div>${m.who === "me" ? "▸" : "◂"} ${esc(m.text)}</div>`).join("")}</div>` +
         `<input class="ci" style="width:100%;box-sizing:border-box" placeholder="ask…" value="${esc(this._draft || "")}"></div>`;
+      sr.innerHTML = html;
+      const say = sr.querySelector(".say");
+      if (say) say.onkeydown = (e) => { if (e.key === "Enter") this._say(say.value.trim()); };
       const ci = sr.querySelector(".ci");
       ci.oninput = () => { this._draft = ci.value; };
       ci.onkeydown = (e) => {
