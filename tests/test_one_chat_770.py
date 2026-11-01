@@ -97,15 +97,56 @@ class Migration(unittest.TestCase):
     def test_boot_stamps_the_operators_chat_and_marks_the_others_readonly(self):
         s = NS.SessionStore()
         keep, other = s.create("memo")["id"], s.create("older")["id"]
-        s.sessions[other]["owner"] = "dmitrii"
+        s.sessions[other]["owner"] = "alice"
         s.sessions[keep]["owner"] = ""
-        NS.migrate_one_chat(s, keep, "dmitrii")
-        self.assertEqual(s.sessions[keep]["owner"], "dmitrii")
+        NS.migrate_one_chat(s, keep, "alice")
+        self.assertEqual(s.sessions[keep]["owner"], "alice")
         self.assertFalse(s.sessions[keep].get("readonly"))
         self.assertTrue(s.sessions[other].get("readonly"))
-        NS.migrate_one_chat(s, keep, "dmitrii")                   # idempotent
+        NS.migrate_one_chat(s, keep, "alice")                   # idempotent
         self.assertTrue(s.sessions[other].get("readonly"))
         self.assertFalse(s.sessions[keep].get("readonly"))
+
+
+class OwnerAndBoot(unittest.TestCase):
+    def test_tokenless_caller_is_the_seat_owner_with_one_chat(self):
+        d = Path(tempfile.mkdtemp())
+        ss = NS.SessionStore(str(d / "s.json"))
+        h = NS.make_handler(hub=NS.SSEHub(), sessions=ss, messages=NS.MessageStore(),
+                            config=_CFG, runner=_Runner())
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), h)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            def post():
+                r = urllib.request.Request(f"http://127.0.0.1:{httpd.server_address[1]}/session",
+                                           method="POST", data=b"{}",
+                                           headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(r, timeout=10) as resp:
+                    return json.loads(resp.read())
+            a, b = post(), post()
+        finally:
+            httpd.shutdown()
+        self.assertEqual(a["id"], b["id"])
+        self.assertEqual(a["owner"], NS.OWNER_SUB)
+
+    def test_boot_migration_reads_chat_and_person_from_config(self):
+        s = NS.SessionStore()
+        keep, other = s.create("memo")["id"], s.create("older")["id"]
+        s.sessions[other]["owner"] = "alice"
+        env = {"MEMBRANE_OPERATOR_CHAT": keep, "MEMBRANE_OPERATOR": "alice"}
+        NS.boot_migrate_one_chat(s, env)
+        self.assertEqual(s.sessions[keep]["owner"], "alice")
+        self.assertTrue(s.sessions[other].get("readonly"))
+
+    def test_boot_migration_defaults_the_person_to_the_owner_and_skips_without_a_chat(self):
+        s = NS.SessionStore()
+        keep, other = s.create("memo")["id"], s.create("older")["id"]
+        s.sessions[other]["owner"] = NS.OWNER_SUB
+        NS.boot_migrate_one_chat(s, {})
+        self.assertFalse(s.sessions[other].get("readonly"))
+        NS.boot_migrate_one_chat(s, {"MEMBRANE_OPERATOR_CHAT": keep})
+        self.assertEqual(s.sessions[keep]["owner"], NS.OWNER_SUB)
+        self.assertTrue(s.sessions[other].get("readonly"))
 
 
 class Routes(unittest.TestCase):
