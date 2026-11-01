@@ -556,7 +556,8 @@ def _condition_holds(srv, cond: dict) -> tuple[bool, str]:
             (0 if isinstance(r, dict) and r.get("ok", True) and r.get("status", "ok") == "ok" else 1)
         head = str((r.get("head") or r.get("error") or "") if isinstance(r, dict) else r)[:300]
         return rc == 0, f"{cond['method']} rc {rc}: {head}"
-    ent = est.resolve(str(cond["field"]), exact=True)
+    ent = est.resolve(str(cond["field"]), exact=True) \
+        or est.resolve(MEMBRANE_NS + "Component:" + str(cond["field"]), exact=True)   # #826: done:x
     if ent is None:
         return False, f"no entity {cond['field']}"
     seen = (ent.properties or {}).get(str(cond["prop"]))
