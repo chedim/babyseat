@@ -4392,6 +4392,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_out(_COP.state(self.server)); return
         if path == "/membrane/entity/read":
             self._entity_read(); return
+        if path == "/membrane/work-graph":            # k4: goals, tasks, decisions + edges
+            from . import decision_map as _DM
+            self._json_out(_DM.work_graph(getattr(self.server, "entity_store", None))); return
         if path == "/membrane/decisions":             # #470: the project decision map
             from . import decision_map as _DM
             self._json_out(_DM.board(getattr(self.server, "entity_store", None))); return

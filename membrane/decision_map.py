@@ -350,3 +350,30 @@ def goals(est, active=()) -> dict:
         return (act.index(g["eid"]) if g["active"] else len(act), -born, g["title"])
     out.sort(key=rank)
     return {"goals": out}
+
+
+def work_graph(est) -> dict:
+    """THE ONE GRAPH CALL (k4): {nodes: [goals, tasks, decisions], edges}. A node is
+    {id, kind: goal|task|decision, title, status, goal}; an edge is {from, to, rel}:
+    ``blocks`` (a task's or card's blocks list) and ``of`` (a task/card -> its goal).
+    Edges whose far end is not a node (a wait, a gone entity) are left out; the
+    drawing reads only this."""
+    from .entities import CLASS_DECISION, CLASS_GOAL
+    kinds = {CLASS_GOAL: "goal", "Task": "task", CLASS_DECISION: "decision"}
+    nodes, raw = [], []
+    for ent in list((getattr(est, "docs", None) or {}).values()):
+        p = ent.properties or {}
+        kind = kinds.get(ent.cls)
+        if not kind or p.get("merged_into"):
+            continue
+        nodes.append({"id": ent.eid, "kind": kind, "title": p.get("name") or p.get("title") or ent.eid,
+                      "status": _status(p) if kind == "decision" else p.get("status", "open"),
+                      "goal": p.get("goal") if kind != "goal" else None})
+        if kind != "goal":
+            for t in (p.get("blocks") if isinstance(p.get("blocks"), list) else []):
+                raw.append({"from": ent.eid, "to": str(t), "rel": "blocks"})
+            if p.get("goal"):
+                raw.append({"from": ent.eid, "to": str(p["goal"]), "rel": "of"})
+    ids = {n["id"] for n in nodes}
+    nodes.sort(key=lambda n: (("goal", "task", "decision").index(n["kind"]), n["title"]))
+    return {"nodes": nodes, "edges": [e for e in raw if e["from"] in ids and e["to"] in ids]}
