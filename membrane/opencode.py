@@ -1291,6 +1291,12 @@ def main() -> None:
                       file=sys.stderr)
         except Exception as e:
             print(f"[seat] method shapes skipped ({e})", file=sys.stderr)
+        # VERBS (verbs.py): every method noted on its verb entity; a retired one stops implementing
+        try:
+            from .verbs import boot as _boot_verbs
+            print(f"[seat] verbs: {_boot_verbs(srv)['verbs']}", file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] verbs skipped ({e})", file=sys.stderr)
         # THE GRAPH-WALK LANE's seeded rules (graphbanner): made once, kept as edited
         try:
             from .graphbanner import seed as _seed_banner_rules
