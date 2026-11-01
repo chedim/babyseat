@@ -101,6 +101,11 @@ def ensure(log=print) -> bool:
             log(f"[language] the {MODEL} model could not be downloaded: living language is off")
             return False
         importlib.invalidate_caches()
+    try:                                   # generation's verb forms (generate.py has plain rules too)
+        importlib.import_module("lemminflect")
+    except ImportError:
+        if may_install:
+            subprocess.run(pip + ["--only-binary=:all:", "lemminflect"], capture_output=True, text=True, timeout=600)
     _NLP["m"] = None                       # load on next use
     ok = available()
     log(f"[language] living language {'on' if ok else 'off'} ({MODEL})")
@@ -357,7 +362,7 @@ def _call(est, verb: str, e: str, said: set, unmapped: list) -> dict | None:
     m = V.implementation(est, d, verb)[0] if d is not None else None
     if m is not None:
         return {"object": e, "method": (m.properties or {}).get("method_name"), "args": {},
-                "writes": not (m.properties or {}).get("read_only")}
+                "writes": not (m.properties or {}).get("read_only"), "target": e}
     kinds = set(_KIND_WORDS.get(e.split(":", 1)[0], set()))
     if d is not None:
         kinds |= {w.lower() for w in str((d.properties or {}).get("name") or "").split()} | {(d.cls or "").lower()}
@@ -373,7 +378,8 @@ def _call(est, verb: str, e: str, said: set, unmapped: list) -> dict | None:
             unmapped.append(f"{verb} needs {', '.join(params)}")
             return None
         return {"object": owner, "method": mp.get("method_name"),
-                "args": {params[0]: _value(est, e)} if params else {}, "writes": not mp.get("read_only")}
+                "args": {params[0]: _value(est, e)} if params else {}, "writes": not mp.get("read_only"),
+                "target": e}
     unmapped.append(f"{verb} {CG_label(est, e)}")
     return None
 
@@ -452,26 +458,39 @@ def run(srv, text: str, timeout_s=None) -> dict:
     except Exception as e:
         return {"ok": False, "rc": 2, "outcome": "refused", "output": str(e), "error": str(e),
                 "head": str(e)[:200], "tail": str(e)[-200:], "ms": 1}
-    bad = [u for s in steps for u in s["unmapped"]] or ([] if steps else ["no command"])
-    many = [s for s in steps if s.get("needs_all")]
-    if bad or not all(s["mapped"] for s in steps) or many:
-        msg = ("not understood: " + ", ".join(bad or ["an object that names nothing"])) if bad or not all(
-            s["mapped"] for s in steps) else "; ".join(
-            f"this would {s['verb']} {len(s['targets'])} things ({describe(est, [s]).split(' ', 1)[-1]}): "
-            f"say 'all' to do it" for s in many)
+    from . import generate as GEN
+    from . import convgraph as CG
+
+    def refused(msg):
         return {"ok": False, "rc": 2, "outcome": "refused", "output": msg, "error": msg,
-                "head": msg, "tail": msg, "ms": max(1, int((time.time() - t0) * 1000))}
-    lines, rc = [], 0
+                "head": msg[:200], "tail": msg[-200:], "ms": max(1, int((time.time() - t0) * 1000))}
+    if not steps:
+        return refused("I didn't find a command in that.")
+    unclear = [s for s in steps if s["unmapped"] or not s["mapped"]]
+    if unclear:                                  # worded by membrane (generate.py), nothing runs
+        return refused(" ".join(GEN.not_understood(s["verb"], s["unmapped"] or ["(no object)"]) for s in unclear))
+    many = [s for s in steps if s.get("needs_all")]
+    if many:
+        return refused(" ".join(GEN.needs_all(s["verb"], [CG._label(est, c["target"]) for c in s["calls"]])
+                                for s in many))
+    said, lines, rc = [], [], 0
     for s in steps:
+        names, failed = [], []
         for c in s["calls"]:
             out = N.method_call(srv, est, _efield_on(srv), getattr(srv, "membrane", None), c["object"],
                                 c["method"], dict(c["args"]))
-            rc = max(rc, int(out.get("rc") or (0 if out.get("ok") else 1)))
+            r = int(out.get("rc") or (0 if out.get("ok") else 1))
+            rc = max(rc, r)
+            name = CG._label(est, c["target"])
+            names.append(name)
+            if r != 0:
+                failed.append((name, out.get("error") or out.get("output") or out.get("status")))
             lines.append(f"{s['verb']} {c['object']}: {out.get('output') or out.get('error') or out.get('status')}")
-    text_out = "\n".join(lines)
+        said.append(GEN.done(s["verb"], names, failed))
+    text_out = " ".join(said) + ("\n\n" + "\n".join(lines) if lines else "")
     return {"ok": rc == 0, "rc": rc, "outcome": "ok" if rc == 0 else "error", "output": text_out,
-            "head": text_out[:200], "tail": text_out[-200:], "error": "" if rc == 0 else text_out,
-            "ms": max(1, int((time.time() - t0) * 1000))}
+            "said": " ".join(said), "head": text_out[:200], "tail": text_out[-200:],
+            "error": "" if rc == 0 else text_out, "ms": max(1, int((time.time() - t0) * 1000))}
 
 
 def _register_lang() -> None:

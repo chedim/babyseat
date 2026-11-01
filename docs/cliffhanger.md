@@ -96,6 +96,14 @@ what, and runs nothing. A chat message that compiles fully is told to the model 
 program, in the seat owner's chats only (a session with an `owner`, a token person's or the
 Home Assistant relay's, gets none); membrane runs nothing on its own yet.
 
+**Membrane words the result itself** (`membrane/generate.py`): a run ends in a sentence built
+from its calls and their results -- the verb's past form (lemminflect, plain rules without
+it), the objects' names joined as English, the count when there are several: "Closed goal
+one.", "Closed 2 things: goal one and goal two.", "Couldn't close goal two: …". A refusal is
+worded the same way: "I don't know how to frobnicate.", "I don't know what "the bogus
+widgets" is.", "To comment that I need num and body.", "That would close 2 things (…). Say
+'all' to do it." The detail lines follow the sentence.
+
 A noun phrase a pronoun points back to that the field doesn't know becomes a `Concept`
 entity the register can hold: the nearest run of nouns before the pronoun that agrees in
 number, never the subject of the pronoun's own clause ("Claude fixed them" → *pronouns*).

@@ -56,7 +56,8 @@ class Aliases(unittest.TestCase):
         [step] = LL.compile(srv, SID, "check PR #812")
         self.assertTrue(step["mapped"], step)
         self.assertEqual(step["calls"], [{"object": repo.eid, "method": "pr_checks", "args": {"num": "812"},
-                                          "writes": True}])
+                                          "writes": True,
+                                          "target": "u:https://github.com/chedim/babyseat/issues/812"}])
         LL.seed_executor(est)
         out = LG.run(srv, code="check PR #812", lang="en")
         self.assertTrue(out.get("ok"), out)
@@ -103,7 +104,8 @@ class Aliases(unittest.TestCase):
     def test_class_meanings_are_unchanged(self):
         srv, f, est, goal, g1, g2 = _world()
         [step] = LL.compile(srv, SID, "close goal one")
-        self.assertEqual(step["calls"], [{"object": g1.eid, "method": "close", "args": {}, "writes": True}])
+        self.assertEqual(step["calls"], [{"object": g1.eid, "method": "close", "args": {}, "writes": True,
+                                          "target": g1.eid}])
 
 
 if __name__ == "__main__":
