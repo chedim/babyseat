@@ -2481,6 +2481,11 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
             _SC.graph_of(nd, est)
             _code_root(srv, est, fld, mem, nd)
     est.upsert(doc, embedder=None)
+    try:
+        from . import verbs as _V            # the method names a verb (verb:<name> -implemented-by-> it)
+        _V.note(est, doc)
+    except Exception as e:
+        print(f"[verbs] {eid}: {e}", file=sys.stderr)
     _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
                  "on": owner.eid if owner else "", "method": method, "ok": True})
     return {"ok": True, "eid": eid, "method": label, "created": created, "abstract": bool(abstract),

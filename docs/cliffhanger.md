@@ -39,6 +39,23 @@ The model reads this surface as `help('cliffhanger')` (and `help('exec')`). The
 repo linked above is where the language is defined; this page is only membrane's
 instantiation of it.
 
+## Verbs are entities (2026-11-01)
+
+A method names a verb: its name read as words (`close`, `run_tests` → `run tests`) is the
+entity `membrane::verb:<lemma>` (class `Verb`), and the verb `-implemented-by->` every method
+of that name, one per class or object that has it (`membrane/verbs.py`). The verb mirrors
+its implementations (`implemented_by`) and each method points back (`verb`); boot notes every
+method, `method_define` notes a new one, and a retired method stops implementing.
+
+- **One verb, many meanings.** "Close the PR" and "close the goal" are one verb with two
+  implementations. `verbs.implementation(est, obj, verb)` picks by the object in the call's
+  own order: its own method, then its classes' (ISA), then a global one. A noun nothing
+  implements the verb for gets none: another class's meaning is never borrowed.
+- **The word and the role.** `verb:run -word-> w:run`, the field's word entity. Being a verb
+  is a role the word plays in a sentence; "the last run" is a noun and refers to entities.
+- **Method names keep working.** A call still dispatches by name (`night.resolve_method`);
+  the pronoun resolver's verb fit reads the verb entity.
+
 ## The LLM as a coprocessor (#454, `MEMBRANE_COPROC=1`, off by default)
 
 With the flag on, a model's reply is read as cliffhanger words. The rule is

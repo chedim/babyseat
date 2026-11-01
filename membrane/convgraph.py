@@ -440,10 +440,10 @@ def _label(est, eid: str) -> str:
 
 
 def _applicable(est, cands: list[str], verb: str | None) -> list[str]:
-    from . import night as N
+    from . import verbs as V
     docs = est.docs or {}
     if verb:
-        with_method = [c for c in cands if c in docs and N.resolve_method(est, docs[c], verb)[0] is not None]
+        with_method = [c for c in cands if c in docs and V.implementation(est, docs[c], verb)[0] is not None]
         if with_method:
             cands = with_method
     return [c for c in cands if str(((docs.get(c).properties or {}) if c in docs else {})
