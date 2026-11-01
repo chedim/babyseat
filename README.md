@@ -561,33 +561,39 @@ conservative.
 lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 (mature entities 0.206 → 0.634); see the v0.5.0 notes and `experiments/`.
 
-**Public benchmark: LoCoMo, retrieval mode (reranker run, 2026-10-29).** On LoCoMo
+**Public benchmark: LoCoMo, retrieval mode (recall run of 2026-10-29, code de097db).** On LoCoMo
 (Maharana et al. 2024: 10 long multi-session conversations, 5,882 turns),
-we score only whether `/membrane/ask` returns a question's annotated
-evidence turn in its top k. There is no answer generation and no LLM judge,
+we score only whether `/membrane/ask` returns the annotated
+evidence turn of a question in its top k. There is no answer generation and no LLM judge,
 so these numbers are **not comparable** to published answer-accuracy scores.
 Each conversation goes into its own fresh field through the capture path (no
 chat model), one turn per `doc` event, in session order with the session date;
-embedder mxbai-embed-large. The baseline is plain cosine over the same
-embeddings (from the 2026-10-25 run, 1,536 answerable questions).
+embedder mxbai-embed-large. Median ask latency 121 ms. Whether a reranker was
+used in this run is not established (the run logs do not mention one), so we
+call it a recall run and claim nothing about a reranker. The baseline is plain
+cosine over the same embeddings, from the 2026-10-25 baseline run
+(same turn text, same embedder). Rates are over questions that
+have annotated evidence: 1,536 of the 1,540 questions in categories 1-4
+(open-domain: 92 of 96); adversarial: 446. Cell format: membrane / cosine.
 
-| category (n) | hit@8 | hit@20 | hit@50 | cosine baseline hit@8 |
-|---|---|---|---|---|
-| multi-hop (282) | 69.9% | 78.0% | 85.1% | 63.8% |
-| temporal* (321) | 78.8% | 78.5% | 86.9% | 71.3% |
-| open-domain* (96) | 53.3% | 58.7% | 75.0% | 46.7% |
-| single-hop* (841) | 75.7% | 77.7% | 85.7% | 65.8% |
-| **all answerable (1,540)** | **74.0%** | **76.8%** | **85.2%** | **65.4%** |
-| adversarial (446, no answer in the conversation) | 74.2% | 76.2% | 84.5% | 57.2% |
+| category (questions with evidence) | hit@8 | hit@20 | hit@50 |
+|---|---|---|---|
+| multi-hop (282) | 69.9 / 63.8 | 78.0 / **82.6** | 85.1 / **92.2** |
+| temporal* (321) | **78.8** / 71.3 | 78.5 / **81.3** | 86.9 / **87.5** |
+| open-domain* (92) | **53.3** / 46.7 | 58.7 / **63.0** | 75.0 / **77.2** |
+| single-hop* (841) | **75.7** / 65.8 | 77.6 / **78.0** | 85.7 / **88.8** |
+| **all, categories 1-4 (1,536)** | **74.0** / 65.4 | 76.8 / **78.6** | 85.2 / **88.5** |
+| adversarial (446, no answer in the conversation) | **74.2** / 57.2 | **76.2** / 71.3 | **84.5** / 82.5 |
 
-What it shows: with the reranker, membrane's recall ranks **above plain
-cosine** at hit@8 in every category (74.0% against 65.4% on all answerable
-questions, 1,540 of them; the earlier 2026-10-25 run, before the reranker,
-ranked below it at 55.6%). The injected context holds the evidence for 26.3%
-of answerable questions. The cosine column was not re-run on 2026-10-29, and
-the answerable counts differ by a few questions between the two runs
-(open-domain 92 before, 96 now). \*LoCoMo's code confirms multi-hop and
-adversarial; the other three names follow the common mapping.
+What it shows: membrane recall ranks **above plain cosine at hit@8** in
+every category (74.0% against 65.4% on the 1,536 questions with evidence, +8.6
+points), but **cosine is ahead at hit@20 (78.6% against 76.8%, -1.8 points)
+and at hit@50 (88.5% against 85.2%, -3.3 points)** for categories 1-4
+together and in each of the four; only the adversarial rows favor membrane
+at every cutoff. The injected context holds the evidence for 26.3% of the
+questions in categories 1-4. The cosine column was not re-run on 2026-10-29.
+\*LoCoMo code confirms multi-hop and adversarial; the other three names
+follow the common mapping.
 
 - **Token economics, live seat (2026-10-12):** 5,736 live entities over
   4,949 streamed events; the standing per-turn header ~3 KB (entity tracks,
