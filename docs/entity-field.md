@@ -524,8 +524,11 @@ then the reply before (its `refers-to` targets), then the register when neither 
 anything that applies. When the person's message has its own words before the pronoun
 (beyond the command's verb) but names nothing the field knows ("pronouns should be fixed
 now. Claude fixed them"), nothing is borrowed from the reply before: no note, no register
-load, no re-ask. Only a message that is just the command ("merge it", "can you benchmark
-it?", "yes, delete it") reads the reply before, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
+load, no re-ask, and the pronoun's register is unloaded (its old reading is superseded, so
+its history stays): a reading the person's own words contradict must not go on being
+offered. Only a message that is just the command ("merge it", "can you benchmark it?",
+"yes, delete it", "look at it", "show me it": stop words between the verb and the pronoun
+don't count) reads the reply before, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
 candidate has a method of the command's verb, the ones without one drop; then a candidate
 whose state is closed (closed, dropped, fulfilled, merged, retired, done, deleted) drops.
 One reading left (or several, for `they`) is recorded (`refers-to`, source `resolver`),
