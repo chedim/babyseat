@@ -1047,6 +1047,9 @@ def main() -> None:
                 # that belongs to the chat thread
                 graph_fn=lambda: getattr(srv, "_codegraph", None))
             srv.capturer = Capturer(srv.efield)
+            # #799: the seat's small data files live in the same store when it is one
+            from . import datafiles as _DF
+            _DF.use(getattr(be, "db", None), Path(args.field).resolve().parent)
             # THE SELF-FEEDING GUARD'S CUT (the seat's #4): the fields
             # recall excludes entities whose ONLY deltas ride the
             # CURRENT turn's session (the boot's own session prefix

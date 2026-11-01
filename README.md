@@ -423,10 +423,12 @@ the Couchbase Lite libraries are fetched with `scripts/fetch-cbl.sh`). Its
 events, entity states, claims, scripts and turn text stay there and
 survive restarts with no cluster at all. Nothing is copied to the bucket
 unless one of the layers below sends it. With Couchbase Lite the seat's
-entities and its chat sessions and messages live in that store too, one
-document each (#799); the first boot imports the old JSON files and keeps
-them renamed `<name>.migrated-<time>`. Secrets, hand-edited settings and
-the audit log stay plain files.
+entities, its chat sessions and messages, and its small state files (the
+absorb watermark, the router's state, the watch board, the background-usage
+tally) live in that store too, one document each (#799); the first boot
+imports the old JSON files and keeps them renamed `<name>.migrated-<time>`.
+Secrets, hand-edited settings and the append-only logs (`audit.jsonl`,
+`consolidation.jsonl`) stay plain files.
 
 **2. Share chosen entities with publish.** The model (or you, through the
 MCP tool) calls `entity_edit` with `publish: true`. The entity goes to the

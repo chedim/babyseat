@@ -122,6 +122,27 @@ def read_cbl(db_path) -> dict[str, list[dict]]:
     return out
 
 
+def read_cbl_file(db_path, name: str):
+    """A seat data file that moved into its Couchbase Lite store (#799, `datafiles`),
+    read beside a live seat. None when it isn't there."""
+    try:
+        from . import cblite as CB
+        from .datafiles import COLL
+        d = CB.Database(CB.load(), "field", str(db_path))
+    except Exception:
+        return None
+    try:
+        raw = d.get_json(COLL, CB.doc_key("file:" + name))
+        return json.loads(raw).get("d") if raw is not None else None
+    except Exception:
+        return None
+    finally:
+        try:
+            d.close()
+        except Exception:
+            pass
+
+
 def load_store(path: str) -> dict[str, list[dict]]:
     """Read + dedupe a serve-msgs store, mirroring `server.MessageStore`'s
     load: rows collapse on message id (last snapshot wins, first position
@@ -385,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
     a = accounting(store)
     from .bgusage import FILE as _BG, load as _load_bg
     bg = _load_bg(args.bg or Path(args.store).parent / _BG)
+    if bg is None and not args.bg and (Path(args.store).parent / "field.cblite").exists():
+        bg = read_cbl_file(Path(args.store).parent / "field.cblite", _BG)   # #799
     if args.baseline:
         b = baseline(store)
     if args.json:
