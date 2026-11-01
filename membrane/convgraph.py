@@ -419,9 +419,8 @@ def _says_something(before: str) -> bool:
     (Memo's replay of #806: plain words were skipped and the reply before was borrowed)."""
     from .recall_banner import _STOP
     words = [w.lower() for w in _WORD_RUN.findall(before or "")]
-    if words:
-        words = words[:-1]                # the verb the pronoun is the object of
-    return any(w not in _STOP and w not in _FILLERS and w not in FORMS and len(w) > 1 for w in words)
+    words = [w for w in words if w not in _STOP and w not in _FILLERS and w not in FORMS and len(w) > 1]
+    return len(words) > 1                 # the last content word is the verb the pronoun is the object of
 
 
 def take_note(srv, sid: str) -> str | None:
@@ -537,6 +536,14 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     if own:
         return _resolved(srv, sid, est, be, origin, u, word, own if plural else own[:1])
     if _says_something(text[:found.start()]):
+        from .night import _supersede_edge        # a reading known to be wrong must not stay loaded
+        reg = register_eid(sid, word)
+        for old in _held(be, origin, reg):
+            _supersede_edge(be, origin, reg, old, rel="holds", receipt={"op": "unloaded", "by": u})
+        d = (est.docs or {}).get(reg)
+        if d is not None:
+            d.properties = {**(d.properties or {}), "holds": [], "holds_names": []}
+            est.upsert(d, embedder=None)
         return None          # its own words name what it means (unnamed in the field): borrow nothing
     prev_a = _row_before(runner, sid, mid, "assistant")
     fresh = list(dict.fromkeys(r["obj"] for r in _out(be, origin, msg_eid(prev_a.get("id")), "refers-to"))) \
