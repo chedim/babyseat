@@ -26,7 +26,6 @@ the same covenant as the thought-ask ledger). Watch definitions persist in
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field as dc_field
 
@@ -139,10 +138,11 @@ class WatchBoard:
     # ---- persistence ----
     def save(self) -> None:
         try:
-            self.path.write_text(json.dumps({
+            from . import datafiles as DF      # #799: the seat's database when it has one
+            DF.write_json(self.path, {
                 "next_wid": self._next_wid,
                 "watches": [w.to_json() for w in self.watches.values()],
-            }))
+            })
         except Exception:
             pass                              # persistence never breaks chat
 
@@ -150,7 +150,10 @@ class WatchBoard:
     def load(cls, path, embedder=None) -> "WatchBoard":
         b = cls(path, embedder)
         try:
-            r = json.loads(path.read_text())
+            from . import datafiles as DF
+            r = DF.read_json(path)
+            if not isinstance(r, dict):
+                raise ValueError("no board")
             for w in r.get("watches", []):
                 rec = Watch.from_json(w)
                 b.watches[rec.wid] = rec
