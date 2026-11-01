@@ -536,6 +536,13 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     if own:
         return _resolved(srv, sid, est, be, origin, u, word, own if plural else own[:1])
     if _says_something(text[:found.start()]):
+        try:                                       # living language: the noun phrase it points at
+            from . import language as _LL
+            c = _LL.concept_before(est, text, found.start())
+        except Exception:
+            c = None
+        if c:
+            return _resolved(srv, sid, est, be, origin, u, word, [c])
         from .night import _supersede_edge        # a reading known to be wrong must not stay loaded
         reg = register_eid(sid, word)
         for old in _held(be, origin, reg):

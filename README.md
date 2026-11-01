@@ -346,7 +346,10 @@ decision cockpit: what is still open above the chat's input bar, what is in
 flight on its line, what was decided below it. The conversation itself is a
 graph over the field: each chat message is an entity tied to what it names,
 what it ran, the decisions it asks and the answers it gives, and a reply's
-`Open decisions:` are answered in the chat (`1. yes`).
+`Open decisions:` are answered in the chat (`1. yes`). English is code too
+(living language, on by default): "close the open goals" compiles to calls on
+the field's verb, noun and adjective entities and runs with
+`exec(action='run', lang='en', code=...)` ([docs/cliffhanger.md](docs/cliffhanger.md)).
 
 The proxy speaks both APIs through the same memory turn: OpenAI's
 `/v1/chat/completions` and Ollama's native `/api/chat` and `/api/generate`

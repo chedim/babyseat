@@ -523,8 +523,10 @@ nearest thing it names before the pronoun: "on the UI redesign -- park that unti
 then the reply before (its `refers-to` targets), then the register when neither names
 anything that applies. When the person's message has its own words before the pronoun
 (beyond the command's verb) but names nothing the field knows ("pronouns should be fixed
-now. Claude fixed them"), nothing is borrowed from the reply before: no note, no register
-load, no re-ask, and the pronoun's register is unloaded (its old reading is superseded, so
+now. Claude fixed them"), nothing is borrowed from the reply before. With living language
+on (the default, [cliffhanger.md](cliffhanger.md#living-language-2026-11-01-on-by-default))
+the pronoun holds that noun phrase as a `Concept` entity; without it there is no note, no
+register load, no re-ask, and the pronoun's register is unloaded (its old reading is superseded, so
 its history stays): a reading the person's own words contradict must not go on being
 offered. Only a message that is just the command ("merge it", "can you benchmark it?",
 "yes, delete it", "look at it", "show me it": stop words between the verb and the pronoun
