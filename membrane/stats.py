@@ -64,6 +64,10 @@ def read_raw(path: str) -> dict[str, list[dict]]:
         base = {}
     if not isinstance(base, dict):
         base = {}
+    if not text and not base:
+        db = Path(path).parent / "field.cblite"
+        if db.exists():                     # #799: the store moved into the database
+            return read_cbl(db)
     if not text:
         return base
     pos: dict = {}                      # (sid, mid) -> index in its list
@@ -92,6 +96,30 @@ def read_raw(path: str) -> dict[str, list[dict]]:
             if (ot.get("completed") or ot.get("created") or 0) <= ver:
                 rows[i] = row
     return base
+
+
+def read_cbl(db_path) -> dict[str, list[dict]]:
+    """The message store from the seat's Couchbase Lite store (#799), read beside
+    a live seat: the `messages` collection only, in stored order. {} on any error."""
+    try:
+        from . import cblite as CB
+        d = CB.Database(CB.load(), "field", str(db_path))
+    except Exception:
+        return {}
+    try:
+        got = d.query("SELECT sid, n, row FROM membrane.messages")
+    except Exception:
+        got = []
+    finally:
+        try:
+            d.close()
+        except Exception:
+            pass
+    out: dict[str, list[dict]] = {}
+    for r in sorted(got, key=lambda r: int(r.get("n") or 0)):
+        if r.get("sid") and isinstance(r.get("row"), dict):
+            out.setdefault(r["sid"], []).append(r["row"])
+    return out
 
 
 def load_store(path: str) -> dict[str, list[dict]]:
