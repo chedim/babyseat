@@ -518,9 +518,14 @@ mirrors what it holds in its properties (`holds`, `holds_names`, `set_by`, `set_
 reader of properties sees it. Nothing is typed: a register holds whatever the conversation
 last put in it.
 
-Before a chat turn, the person's pronoun is read: first the reply before (its `refers-to`
-targets, the freshest mention), then the register when that reply names nothing that
-applies, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
+Before a chat turn, the person's pronoun is read: first the person's own message (the
+nearest thing it names before the pronoun: "on the UI redesign -- park that until later"),
+then the reply before (its `refers-to` targets), then the register when neither names
+anything that applies. When the person's message has its own words before the pronoun
+(beyond the command's verb) but names nothing the field knows ("pronouns should be fixed
+now. Claude fixed them"), nothing is borrowed from the reply before: no note, no register
+load, no re-ask. Only a message that is just the command ("merge it", "can you benchmark
+it?", "yes, delete it") reads the reply before, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
 candidate has a method of the command's verb, the ones without one drop; then a candidate
 whose state is closed (closed, dropped, fulfilled, merged, retired, done, deleted) drops.
 One reading left (or several, for `they`) is recorded (`refers-to`, source `resolver`),
@@ -530,9 +535,11 @@ and restart`: leading yes/ok/pls are read past) are asked back in the chat, in o
 (`"it": a or b?`), and that turn doesn't run. The person's reply naming one of them (its
 name, its file name, `first`/`second`) loads the register; nothing is trained. A polite request
 (`can you / could you / would you …`) is a command too. A pronoun outside a command (`is it
-done?`) is never asked back: with several readings it is left to the model. When the reply
-before names more than 3 things that could apply (the operator's cap, `REASK_MAX`), nothing
-is asked back: the model is told the pronoun most likely refers to what its last reply
+done?`) is never asked back: with several readings it is left to the model. `this`, `that`, `these` and `those` count as pronouns only when
+nothing that starts a noun or a clause follows them (`park that until later`, `do that`; not
+`I think that we …` or `merge this PR`). When the person's message names nothing and the
+reply before names more than 3 things that could apply (the operator's cap, `REASK_MAX`),
+nothing is asked back: the model is told the pronoun most likely refers to what its last reply
 proposed.
 
 The seat's older capture-time binder (`membrane/binding.py`, a lexical guess at the previous
