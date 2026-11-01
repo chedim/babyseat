@@ -7858,8 +7858,7 @@ def _inject_to_primary_impl(srv, runner, text):
     session with NO assistant row yet gets a FULL synthetic assistant
     message row published first (with tokens), then the part -- the
     reducer's chain (message.updated -> part) never touches an
-    unknown id."""
-    from .server import _gen_id
+    unknown id. The posting itself is TurnRunner.post_line."""
     try:
         sessions = runner.sessions.sessions
         if not sessions:
@@ -7874,29 +7873,8 @@ def _inject_to_primary_impl(srv, runner, text):
         if not sids:
             return
         _updated, sid = max(sids)
-        rows = [r for r in runner.messages.list(sid) if r]
-        last_asst = next((r["info"] for r in reversed(rows)
-                          if (r.get("info") or {}).get("role")
-                          == "assistant"), None)
-        now = int(time.time() * 1000)
-        pid = _gen_id("prt")
-        part = {"id": pid, "sessionID": sid, "type": "text",
-                "text": str(text)[:2000],
-                "time": {"start": now, "end": now}}
-            # THE ROW'S TWO LIVES (the crash covenant): existing assistant
-        # row -> the part rides ITS id (held by the reducer already);
-        # no row -> append_part MINTS the row + publishes the FULL
-        # message.updated itself (the row-before-part covenant) -- and
-        # the wire publishes the STORED part (it carries the minted
-        # row's id -- a part whose id the client never saw was the
-        # TUI-crash's findLast->undefined).
-        if last_asst is not None and last_asst.get("id"):
-            part["messageID"] = last_asst["id"]
-        runner.messages.append_part(sid, part)
-        rows2 = runner.messages.list(sid)
-        stored = ((rows2[-1].get("parts") or [])[-1]) if rows2 else part
-        runner.hub.publish({"type": "message.part.updated",
-                            "part": dict(stored), "sessionID": sid})
+        from .server import post_line
+        post_line(runner, sid, text)
     except Exception:
         pass
 

@@ -5,6 +5,7 @@ migrate once and stay as backups."""
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -67,6 +68,7 @@ class TestSessionsInCBL(unittest.TestCase):
     def test_a_touch_writes_only_that_session(self):
         s = self._store()
         a, b = s.create(title="a"), s.create(title="b")
+        time.sleep(0.002)               # a touch in the creation's millisecond changes nothing
         spy = _Spy(self.be.db)
         s._cbl = spy
         s.touch(a["id"])

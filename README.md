@@ -343,7 +343,10 @@ model is grounded by what those entities hold —
 [docs/entity-field.md](docs/entity-field.md) is the design doc. The project's
 decisions are entities too: [docs/decision-map.md](docs/decision-map.md) is the
 decision cockpit: what is still open above the chat's input bar, what is in
-flight on its line, what was decided below it.
+flight on its line, what was decided below it. The conversation itself is a
+graph over the field: each chat message is an entity tied to what it names,
+what it ran, the decisions it asks and the answers it gives, and a reply's
+`Open decisions:` are answered in the chat (`1. yes`).
 
 The proxy speaks both APIs through the same memory turn: OpenAI's
 `/v1/chat/completions` and Ollama's native `/api/chat` and `/api/generate`

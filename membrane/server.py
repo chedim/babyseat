@@ -689,6 +689,27 @@ class MessageStore:
             self._flush()
 
 
+def post_line(runner, sid: str, text: str) -> None:
+    """A membrane line into a chat, as an assistant text part (never a turn,
+    never a model call). THE ROW'S TWO LIVES (the crash covenant, 2026-10-06,
+    the 'K.tokens.output undefined' TUI exhibit): with an assistant row last,
+    the part rides ITS id (the reducer holds it); otherwise append_part MINTS the
+    row and publishes the FULL message.updated first (row before part), and the
+    wire publishes the STORED part, which carries the minted row's id."""
+    rows = [r for r in runner.messages.list(sid) if r]
+    last_asst = next((r["info"] for r in reversed(rows)
+                      if (r.get("info") or {}).get("role") == "assistant"), None)
+    now = int(time.time() * 1000)
+    part = {"id": _gen_id("prt"), "sessionID": sid, "type": "text",
+            "text": str(text)[:2000], "time": {"start": now, "end": now}}
+    if last_asst is not None and last_asst.get("id"):
+        part["messageID"] = last_asst["id"]
+    runner.messages.append_part(sid, part)
+    rows2 = runner.messages.list(sid)
+    stored = ((rows2[-1].get("parts") or [])[-1]) if rows2 else part
+    runner.hub.publish({"type": "message.part.updated", "part": dict(stored), "sessionID": sid})
+
+
 class SSEHub:
     """The /event fan-out: one queue per connected client; publish is a
     snapshot fan-out under a lock (a slow client can drop events, never a
@@ -1470,6 +1491,10 @@ class TurnRunner:
         self.hub.publish({"type": "session.diff", "sessionID": sid,
                           "diff": []})
 
+    def post_line(self, sid: str, text: str) -> None:
+        """A membrane line into this runner's chat `sid` (module post_line)."""
+        post_line(self, sid, text)
+
     def _announce_user(self, sid: str, info: dict, parts: list) -> None:
         # the user message rides the stream BEFORE busy: message.updated,
         # one part event per part, then the session refresh (real serve
@@ -1776,6 +1801,17 @@ class TurnRunner:
         user_info["_announced"] = True      # the inner's announce skips
         if (self.sessions.get(sid) or {}).get("blurp"):
             return self.blurp_message(sid, text, user_info)   # #337: no turn in Blurp's private chat
+        # THE REFERENT (convgraph.before_turn): "delete it" with two things "it" could be is
+        # asked back in the chat and this turn does not run; the person's reply reads normally
+        try:
+            _psrv = getattr(self, "srv", None)
+            from . import convgraph as _CG
+            if _psrv is not None and not _drained and _CG.is_chat((self.sessions.get(sid) or {}).get("agent")):
+                _ref = _CG.before_turn(_psrv, self, sid, user_info, text)
+                if _ref and _ref.get("reask"):
+                    return {"info": user_info, "parts": [], "reask": _ref["reask"]}
+        except Exception as e:
+            print(f"[convgraph] referent {sid[:16]}: {e}", file=sys.stderr)
         # OUT OF TOKENS (quota.py): the turn's model is paused -- a person's
         # message waits for it; a loop's turn is not run (its event waits)
         _qh = self._quota_hold(sid, text, user_info, user_parts)
@@ -3295,6 +3331,21 @@ class TurnRunner:
                                  daemon=True, name="predict-end").start()
         except Exception:
             pass
+        # THE CONVERSATION GRAPH (convgraph): a chat turn's two messages and their edges,
+        # the answers to the reply before and the decisions this reply asks -- off the turn
+        try:
+            _psrv = getattr(self, "srv", None)
+            from . import convgraph as _CG
+            if _psrv is not None and user_info is not None and \
+                    _CG.is_chat((self._agents or {}).get(sid) or (self.sessions.get(sid) or {}).get("agent")):
+                from . import writes as _W
+                _reply = "\n".join(p.get("text") or "" for p in parts
+                                   if isinstance(p, dict) and p.get("type") == "text")
+                _ui, _ai = dict(user_info), dict(a_info)
+                threading.Thread(target=_W.carry(lambda: _CG.on_turn_end(_psrv, self, sid, _ui, text, _ai, _reply)),
+                                 daemon=True, name="convgraph").start()
+        except Exception as e:
+            print(f"[convgraph] turn {sid[:16]}: {e}", file=sys.stderr)
         if _quota_hit:
             return {"info": a_info, "parts": parts, "quota": _quota_hit}
         return {"info": a_info, "parts": parts}
