@@ -4208,12 +4208,7 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
             from . import language as _LL
             if _LL.available():
                 steps = _LL.compile(srv, sid, said)
-                if steps and steps[0].get("kind") == "query" and steps[0]["mapped"]:
-                    _ok, _line = _LL.answer(srv, steps[0])
-                    if _ok:
-                        adds.append(f"The field answers the person's question: {_line} "
-                                    "(from the field's own entities; use it, or say where it falls short).")
-                elif steps and steps[0].get("kind") == "define" and steps[0]["mapped"]:
+                if steps and steps[0].get("kind") == "define" and steps[0]["mapped"]:
                     adds.append(f"The person's message {_LL.describe(srv.entity_store, steps)}. If they mean it, "
                                 f"exec(action='run', lang='en', code={said!r}) keeps it.")
                 elif steps and all(s["mapped"] for s in steps):
