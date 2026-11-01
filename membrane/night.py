@@ -3074,7 +3074,24 @@ def remove_entity(est, spec: str, force: bool = False) -> dict:
     # a forced single method takes its own step nodes too (an owner's already ride `owned`)
     own_steps = ([e for e in list(est.docs or {}) if e.startswith(ent.eid + ":")]
                  if (ent.properties or {}).get("method_of") else [])
-    return {"removed": est.remove_many([ent.eid] + owned + own_steps)}
+    gone = [ent.eid] + owned + own_steps
+    verbs = {}
+    for e in gone:
+        vp = (est.docs[e].properties or {}) if e in est.docs else {}
+        if vp.get("method_name") and vp.get("verb"):
+            verbs.setdefault(vp["verb"], set()).add(e)
+    n = est.remove_many(gone)
+    for veid, dead in verbs.items():  # its verb forgets it; none left live -> retired
+        v = (est.docs or {}).get(veid)
+        if v is None:
+            continue
+        vp = dict(v.properties or {})
+        vp["implemented_by"] = [m for m in (vp.get("implemented_by") or []) if m not in dead]
+        if not vp["implemented_by"]:
+            vp["retired"] = True
+        v.properties = vp
+        est.upsert(v, embedder=None)
+    return {"removed": n}
 
 
 def short_name_of(obj) -> str:

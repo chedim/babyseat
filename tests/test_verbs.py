@@ -115,6 +115,20 @@ class Verbs(unittest.TestCase):
         _define(srv, f, est, pr.eid, "merge", "echo m")
         self.assertEqual(CG._applicable(est, [readme.eid, p803.eid], "merge"), [p803.eid])
 
+    def test_removing_a_method_updates_and_retires_its_verb(self):
+        srv, f, est, pr, goal, *_ = _world()
+        m1 = _define(srv, f, est, pr.eid, "zap809", "echo a")
+        m2 = _define(srv, f, est, goal.eid, "zap809", "echo b")
+        veid = V.verb_eid("zap809")
+        self.assertEqual(sorted(est.docs[veid].properties["implemented_by"]), sorted([m1.eid, m2.eid]))
+        N.remove_entity(est, m1.eid, force=True)
+        self.assertEqual(est.docs[veid].properties["implemented_by"], [m2.eid])
+        N.remove_entity(est, m2.eid, force=True)
+        v = est.docs.get(veid)
+        self.assertTrue(v is None or v.properties.get("retired")
+                        or not v.properties.get("implemented_by"))
+        self.assertTrue(v is None or v.properties.get("retired"), "verb with no live implementation must be retired")
+
 
 if __name__ == "__main__":
     unittest.main()
