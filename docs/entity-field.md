@@ -478,6 +478,51 @@ derived**:
   ground truth (a zero-exit run that *mentions* 'error' in its output
   keeps its `ok` class — the `rc=0 error` residue bug is dead).
 
+## The conversation is a graph (convgraph, 2026-11-01)
+
+Every chat turn mints both messages as entities (`membrane::msg:<message id>`, class
+`Message`: role, chat, text) and ties them into the field with relations rows
+(`membrane/convgraph.py`):
+
+| edge | from → to |
+|---|---|
+| `follows` | a person's message → the reply before it; a reply → the person's message |
+| `refers-to` | a message → the specific entities it names (files, commands, store entities by name, `eids.mentions_of`) |
+| `led-to` | a person's message → every program root its turn ran (`lang.run` notes them by the turn's sid) |
+| `asks:N` | a reply → the Decision card of its N-th open decision |
+| `answers` | a person's message → the card it answered |
+
+Only person chats are graphed (agents `build`, `plan`, `speaker`), never a loop's session.
+The work runs after the turn, on its own thread.
+
+**Decisions in the chat.** The numbered items under a reply's `Open decisions:` are
+Decision cards in that chat (`asked_from: chat-text`). The same question is the same card;
+when a reply lists its decisions, a text question it no longer lists is dropped, with no
+message. A card an agent opened in the chat that nobody asked yet is posted by membrane
+(`speech.say("asks")`), numbered after the reply's own. The person answers in the chat:
+`1. yes`, `1 yes`, `2. only to the chat`, `1 yes 2 no`, a bare yes or no when one card is
+open, `yesx2` for two. An answer starts with its number followed by `.` or `)`, or by a
+yes/no word, so a sentence like "2 tests failed" answers nothing, and neither does a bare
+"ok". A speaker line (`[user: X]`) is read past.
+`decision_map.answer(..., tell=False)` decides the card and writes the ledger, and no
+decision message goes back (the chat already says it). A bare answer with several cards
+open answers nothing: matching free text to a card would need a cut-off that hasn't been
+set. The cockpit stays the default view.
+
+**What "it" means.** Before a chat turn, an imperative whose object is a pronoun
+(`delete it`, `merge that one`) reads its antecedent from the reply before (that
+message's `refers-to` targets). When a candidate has a method of the verb's name, the
+ones without one drop; then a candidate whose state is closed (closed, dropped,
+fulfilled, merged, retired, done, deleted) drops. One left is recorded
+(`refers-to`, source `resolver`) and told to the model once, as a line in that turn's
+context (`lanes._with_referent`). Two or more are asked back in the chat, in one line
+(`"it": a or b?`), and that turn doesn't run. The person's reply then runs normally; the
+answer resolves that one reference and trains nothing.
+
+**What membrane says** is one template per kind in `membrane/speech.py` (a decided or
+dropped card, a fulfilled goal, a goal whose graph has nothing left moving, a watch
+escalation, the asked decisions, the re-ask), filled from the subgraph it is about.
+
 ## The gate and the replay A/B
 
 `membrane/efgate.py` runs on every real turn. It finds the earlier user

@@ -643,8 +643,8 @@ def escalation_text(ev: dict, ent: str, line: str = "") -> str:
     if ev.get("kind") == "goal-fulfilled" and line:
         return line                              # #769: the close's own line, as is
     head = loop_task_text({**ev, "_bare": True, "previous": None, "consequences": None})
-    return (f"[watch] {ent or 'field'}: {head}"
-            + (f"\ntriage: {line}" if line else "\n(no escalate_when note on it: sent as is)"))
+    from . import speech as _SP
+    return _SP.say("escalation", ent=ent, head=head, line=line)
 
 
 def escalate(srv, ev: dict, ent: str, line: str = "", chat: str = "") -> bool:
@@ -1807,7 +1807,8 @@ def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
             est.upsert(ent, embedder=None)
         except Exception:
             pass
-    line = f"goal {ev['entity']} fulfilled: {ev['evidence']}"
+    from . import speech as _SP
+    line = _SP.say("goal-fulfilled", goal=ev["entity"], receipt=ev["evidence"])
     chat = str(((props.get("convs") or [""])[-1]) or "")
     if getattr(est, "_srv", None) is not None:
         sent = escalate(est._srv, ev, ev["entity"], line, chat)

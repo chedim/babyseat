@@ -4173,6 +4173,21 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
     return recon
 
 
+def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
+    """The turn's first round carries what a pronoun in the person's message was
+    resolved to (convgraph.before_turn), once."""
+    if is_tool_round:
+        return ctx
+    try:
+        from . import convgraph as _CG
+        note = _CG.take_note(srv, str(body.get("_turn_sid") or ""))
+    except Exception:
+        note = None
+    if not note:
+        return ctx
+    return (ctx + "\n\n" + note) if ctx else note
+
+
 def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     """The turn's state blocks -> (ctx, the field watermark to keep once the
     turn is delivered). MEMBRANE_INJECTION picks the block: 'banner' (the
@@ -4203,7 +4218,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
             except Exception as e:
                 print(f"[conv-banner] error: {e}", file=sys.stderr)
         mark("recall+banner")
-        return ctx, efield_mark
+        return _with_referent(srv, body, ctx, _is_tool_round), efield_mark
     _massage = _injection_mode(srv) == "massage"
     banner_block = (None if _no_banner
                     else _where_delta(srv, _where_we_are(srv, vec, events_only=_massage)))
@@ -4258,7 +4273,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
                 ctx = (ctx + "\n\n" + i_block) if ctx else i_block
         except Exception as e:
             print(f"[opencode] intent block error: {e}", file=sys.stderr)
-    return ctx, efield_mark
+    return _with_referent(srv, body, ctx, _is_tool_round), efield_mark
 
 
 class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the timing ring
@@ -7858,8 +7873,7 @@ def _inject_to_primary_impl(srv, runner, text):
     session with NO assistant row yet gets a FULL synthetic assistant
     message row published first (with tokens), then the part -- the
     reducer's chain (message.updated -> part) never touches an
-    unknown id."""
-    from .server import _gen_id
+    unknown id. The posting itself is TurnRunner.post_line."""
     try:
         sessions = runner.sessions.sessions
         if not sessions:
@@ -7874,29 +7888,8 @@ def _inject_to_primary_impl(srv, runner, text):
         if not sids:
             return
         _updated, sid = max(sids)
-        rows = [r for r in runner.messages.list(sid) if r]
-        last_asst = next((r["info"] for r in reversed(rows)
-                          if (r.get("info") or {}).get("role")
-                          == "assistant"), None)
-        now = int(time.time() * 1000)
-        pid = _gen_id("prt")
-        part = {"id": pid, "sessionID": sid, "type": "text",
-                "text": str(text)[:2000],
-                "time": {"start": now, "end": now}}
-            # THE ROW'S TWO LIVES (the crash covenant): existing assistant
-        # row -> the part rides ITS id (held by the reducer already);
-        # no row -> append_part MINTS the row + publishes the FULL
-        # message.updated itself (the row-before-part covenant) -- and
-        # the wire publishes the STORED part (it carries the minted
-        # row's id -- a part whose id the client never saw was the
-        # TUI-crash's findLast->undefined).
-        if last_asst is not None and last_asst.get("id"):
-            part["messageID"] = last_asst["id"]
-        runner.messages.append_part(sid, part)
-        rows2 = runner.messages.list(sid)
-        stored = ((rows2[-1].get("parts") or [])[-1]) if rows2 else part
-        runner.hub.publish({"type": "message.part.updated",
-                            "part": dict(stored), "sessionID": sid})
+        from .server import post_line
+        post_line(runner, sid, text)
     except Exception:
         pass
 
