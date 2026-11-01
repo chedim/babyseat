@@ -85,6 +85,21 @@ class Aliases(unittest.TestCase):
         self.assertFalse(step["mapped"])
         self.assertTrue(any("body" in u for u in step["unmapped"]), step["unmapped"])
 
+    def test_non_verbs_are_not_aliased_and_boot_clears_stale_ones(self):
+        """Live, 2026-11-01: "green it", "ci it", "ab it" read as commands, so `ci_green` and
+        `arxiv_abs` made verb:green, verb:ci, verb:ab."""
+        srv, f, est, *_ = _world()
+        tool = _add(est, "watcher")
+        N.method_define(srv, est, f, None, tool.eid, "ci_green", "echo green")
+        for w in ("green", "ci", "ab"):
+            self.assertIsNone((est.docs.get(V.verb_eid(w)) or type("D", (), {"properties": {}})).properties.get(
+                "aliased") or None, w)
+        from membrane.entities import QuantumEntity
+        est.upsert(QuantumEntity(eid=V.verb_eid("bogus"), cls=V.CLASS_VERB, properties={
+            "name": "bogus", "implemented_by": [], "aliased": [{"method": "membrane::gone", "noun": "x"}]}))
+        V.boot(srv)
+        self.assertNotIn(V.verb_eid("bogus"), est.docs)
+
     def test_class_meanings_are_unchanged(self):
         srv, f, est, goal, g1, g2 = _world()
         [step] = LL.compile(srv, SID, "close goal one")

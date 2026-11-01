@@ -93,12 +93,13 @@ def _command_verb(word: str) -> str | None:
         from . import language as LL
         if not LL.available():
             return None
-        t = LL._doc(f"{word} it")[0]
-        if t.pos_ != "VERB":                     # "checks it" reads as a noun; "check it" doesn't
-            t = LL._doc(f"{t.lemma_} it")[0]
+        if len(word) < 3 or not word.isalpha():
+            return None
+        lem = LL._doc(word)[0].lemma_.lower() or word
+        t = LL._doc(f"{lem} the thing")[0]       # a command on an object: "check the thing"
     except Exception:
         return None
-    return t.lemma_.lower() if t.pos_ == "VERB" else None
+    return t.lemma_.lower() if t.pos_ == "VERB" and t.dep_ == "ROOT" else None
 
 
 def _alias(est, method, lem: str) -> None:
@@ -134,15 +135,27 @@ def aliased(est, verb: str) -> list:
 
 
 def boot(srv) -> dict:
-    """Boot: every method noted on its verb (idempotent; a retired one stops implementing)."""
+    """Boot: every method noted on its verb (idempotent; a retired one stops implementing).
+    Aliases are rebuilt from scratch, and a verb left meaning nothing is removed (a stale alias
+    of an older rule, a method that went)."""
     est = srv.entity_store
+    for d in list((est.docs or {}).values()):
+        if d.cls == CLASS_VERB and (d.properties or {}).get("aliased"):
+            d.properties = {**(d.properties or {}), "aliased": []}
     seen = set()
     for d in list((est.docs or {}).values()):
         if (d.properties or {}).get("method_name"):
             e = note(est, d)
             if e:
                 seen.add(e)
-    return {"verbs": len(seen)}
+    gone = [d.eid for d in list((est.docs or {}).values()) if d.cls == CLASS_VERB
+            and not (d.properties or {}).get("implemented_by") and not (d.properties or {}).get("aliased")]
+    for eid in gone:
+        try:
+            est.remove(eid)
+        except Exception:
+            est.docs.pop(eid, None)
+    return {"verbs": len(seen), "removed": len(gone)}
 
 
 def _impls(est, verb: str) -> list:
