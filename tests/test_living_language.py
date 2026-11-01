@@ -259,3 +259,46 @@ class WithoutSpacy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
+class FilesAndArgs(unittest.TestCase):
+    """`read membrane/verbs.py` names a file: its field id (f:~verbs.py) maps to the real path,
+    and the run binds the verb's args (read {path}; edit {path, old, new})."""
+
+    def _files(self):
+        srv, f, est, goal, g1, g2 = _world()
+        fcls = _add(est, "file")
+        real = str(Path(__file__).resolve().parent.parent / "membrane" / "verbs.py")
+        fd = _add(est, "f:~verbs.py", parents=[fcls.eid], path=real)
+        for verb in ("read", "edit"):
+            out = N.method_define(srv, est, f, None, fcls.eid, verb, "echo " + verb + " {{path}}")
+            assert out.get("ok"), out
+        return srv, f, est, fd, real
+
+    def test_read_a_path_resolves_the_file_entity(self):
+        srv, f, est, fd, real = self._files()
+        [step] = LL.compile(srv, SID, "read membrane/verbs.py")
+        self.assertEqual(step["targets"], [fd.eid])
+        self.assertNotIn("membrane/verbs.py", step["unmapped"])
+        LL.seed_executor(est)
+        out = LG.run(srv, code="read membrane/verbs.py", lang="en")
+        self.assertNotIn("not understood", out.get("output") or "")
+
+    def test_run_binds_read_path_and_edit_path_old_new(self):
+        srv, f, est, fd, real = self._files()
+        seen = []
+        orig = N.method_call
+
+        def spy(srv_, est_, fld, mem, eid, name, args=None, *a, **k):
+            seen.append((name, dict(args or {})))
+            return {"ok": True, "rc": 0, "output": "ok"}
+        N.method_call = spy
+        try:
+            LL.run(srv, "read membrane/verbs.py")
+            LL.run(srv, "edit membrane/verbs.py replacing 'old text' with 'new text'")
+        finally:
+            N.method_call = orig
+        calls = dict(seen)
+        self.assertEqual(calls.get("read"), {"path": real})
+        self.assertEqual(calls.get("edit"), {"path": real, "old": "old text", "new": "new text"})
