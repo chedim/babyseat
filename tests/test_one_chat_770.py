@@ -34,7 +34,7 @@ class _Runner:
 
 def _person(h):
     sub = h.headers.get("X-Test-Person")
-    return types.SimpleNamespace(sub=sub) if sub else None
+    return types.SimpleNamespace(sub=sub, name=sub) if sub else None
 
 
 class OneChat(unittest.TestCase):
