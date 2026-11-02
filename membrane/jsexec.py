@@ -7,7 +7,7 @@ The seat's presence entity implements remote_executor and is the executor of
 the `js` language (#614): JS is code like any other, a tree of node entities
 (lang.py, tree-sitter-javascript), run by linking its root to presence (exec(action='run',
 lang='js')). The run hands the code to a browser tab that opted in ("allow
-JS scripting in this window", per tab, off by default). The tab runs it IN ITS WINDOW
+JS scripting in this window", per tab, on by default, the button turns it off). The tab runs it IN ITS WINDOW
 (the operator's choice: "why a sandbox? why not let it access the window?") --
 the page, the HA connection, the chat panel in reach, i.e. as that person;
 the switch is the consent. Value and console come back. No opted-in tab =
