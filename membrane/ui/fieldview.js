@@ -129,7 +129,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       const w = this._open && windowInfo(this._graph, this._open, this._hist, this._chat);
       const list = (l) => (l && l.length ? l.map(esc).join(", ") : "–");
       const sec = (h) => `<b style="display:block;margin:10px 0 4px;opacity:.7">${h}</b>`;
-      const html = w ? `<div class="card" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b style="display:block;margin-bottom:6px">${GLYPH[w.info.kind]} ${esc(w.info.title)}</b>
+      const html = w ? `<div class="fvwin" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b style="display:block;margin-bottom:6px">${GLYPH[w.info.kind]} ${esc(w.info.title)}</b>
           <div style="white-space:pre-wrap">${w.textHtml}</div>` +
           sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${esc(w.info.of || "–")}<br>${w.info.waitingOn.length ? `<b style="color:#ff6b6b">blocked — waiting on: ${list(w.info.waitingOn)}</b><br>` : ""}blocks: ${list(w.info.blocks)}<br>blocked by: ${list(w.info.blockedBy)}` +
           sec("Chat") + w.chat.map((r) => `<div>${linkify(r)}</div>`).join("") + `<input class="say" placeholder="say…" style="width:100%">` +
@@ -141,7 +141,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       this.onclick = (e) => {
         if (e.target.closest(".x")) { this._open = null; this._draw(); const sc = this._scene; if (sc) { sc.select(null); if (sc.api && sc.api.onSelect) sc.api.onSelect(null); } return; }
       };
-      const c = this.querySelector && this.querySelector(".card"); if (c) c.style.pointerEvents = "auto";
+      const c = this.querySelector && this.querySelector(".fvwin"); if (c) c.style.pointerEvents = "auto";
     }
   }
   if (!customElements.get("membrane-fieldview")) customElements.define("membrane-fieldview", MembraneFieldView);
