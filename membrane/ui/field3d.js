@@ -710,7 +710,19 @@ function blurpLayers(ov, has, lastTs) {
   return { lines, halos, fresh, last };
 }
 
-const F3Logic = { blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+/** Goals, tasks and decisions as scene markers: one per work-graph node that has a field position (pos: id -> [x,y,z]). */
+function workMarkers(graph, pos) {
+  const out = [];
+  for (const n of (graph && graph.nodes) || []) {
+    const p = pos && pos[n.id];
+    if (p && !WORK_FINISHED.has(n.status) && (n.kind === "goal" || n.kind === "task" || n.kind === "decision")) out.push({ id: n.id, kind: n.kind, title: n.title, status: n.status, p: p.slice(0, 3) });
+  }
+  return out;
+}
+const WORK_FINISHED = new Set(["fulfilled", "done", "dropped"]);
+const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
+
+const F3Logic = { workMarkers, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -1248,6 +1260,7 @@ class Field3DView {
     if (moved) { this._dirtyPoints(); this._edgesDirty = true; }
     if (this._edgesDirty) { this._rebuildEdges(); this._rebuildBlurp(); }
     this._stepRings(now);
+    this._stepWork();
     this._stepEdgePulses(now);
     this._stepAvatars(dt);
     this._stepCurrent(now);
@@ -2316,6 +2329,44 @@ class Field3DView {
       if (a.thinking && !/thinking/.test(a.tag.textContent)) a.tag.textContent += " · thinking…";
       else if (!a.thinking && / · thinking…$/.test(a.tag.textContent)) a.tag.textContent = a.tag.textContent.replace(/ · thinking…$/, "");
     }
+  }
+
+  /** the work graph (goals/tasks/decisions) as markers in the scene, each at its entity's field position */
+  setWork(graph, onOpen) {
+    this._work = graph || null; this._workOpen = onOpen || this._workOpen;
+    this._workPos = this._workPos || {};
+    for (const n of (graph && graph.nodes) || []) {
+      if (this._workPos[n.id]) continue;
+      this.placeOf(n.id).then((p) => { if (p) this._workPos[n.id] = p; }).catch(() => {});
+    }
+    this._workEls = this._workEls || new Map();
+    const ids = new Set(workMarkers(graph, this._workPos).map((m) => m.id));
+    for (const [id, el] of this._workEls) if (!ids.has(id)) { el.remove(); this._workEls.delete(id); }
+  }
+
+  _stepWork() {
+    if (!this._work || !this._workEls) return;
+    for (const n of this._work.nodes || []) {
+      const s = this.slots.get(n.id);
+      if (s != null && this.sizeA[s]) this._workPos[n.id] = [this.posA[s * 3], this.posA[s * 3 + 1], this.posA[s * 3 + 2]];   // follows the entity
+    }
+    const marks = workMarkers(this._work, this._workPos);
+    const seen = new Set();
+    for (const m of marks) {
+      seen.add(m.id);
+      let el = this._workEls.get(m.id);
+      if (!el) {
+        el = document.createElement("div");
+        el.style.cssText = "position:absolute;font-size:22px;cursor:pointer;pointer-events:auto;user-select:none;margin:-14px 0 0 -11px";
+        el.textContent = WORK_GLYPH[m.kind]; el.title = m.title || m.id;
+        el.onclick = () => { if (this._workOpen) this._workOpen(m.id); };
+        this.labelLayer.appendChild(el); this._workEls.set(m.id, el);
+      }
+      const sc = this._project(m.p);
+      el.style.display = sc ? "" : "none";
+      if (sc) el.style.transform = "translate(" + sc[0].toFixed(0) + "px," + sc[1].toFixed(0) + "px)";
+    }
+    for (const [id, el] of this._workEls) if (!seen.has(id)) el.style.display = "none";
   }
 
   _ring(s) {

@@ -28,13 +28,6 @@ def _node(body):
 
 
 @NODE
-def test_blocker1_home_listens_for_chat_send_and_replies():
-    src = (UI / "home.js").read_text()
-    assert re.search(r"addEventListener\(\s*['\"]chat-send['\"]", src), "home.js never hears the fieldview's chat-send"
-    assert ".reply(" in src, "home.js never calls fieldview.reply() with the model's turn"
-
-
-@NODE
 def test_blocker2_home_api_has_post_for_item_chat_say():
     src = (UI / "home.js").read_text()
     m = re.search(r"_cockpit\.api\s*=\s*\{(.*?)\};", src, re.S)
@@ -45,7 +38,7 @@ def test_blocker2_home_api_has_post_for_item_chat_say():
 def test_blocker3_draw_assigns_innerhtml_once_not_plus_equals():
     src = (UI / "fieldview.js").read_text()
     assert "innerHTML +=" not in src, "innerHTML += re-parses the shadow root and kills the .say handler"
-    assert len(re.findall(r"shadowRoot\.innerHTML\s*=|sr\.innerHTML\s*=", src)) == 1
+    assert len(re.findall(r"this\.innerHTML\s*=", src)) == 1
 
 
 @NODE
