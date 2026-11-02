@@ -219,7 +219,7 @@ def feedback_line() -> str:
             "membrane -- a tool that misbehaves, a crash, a wrong reading of your own machinery -- or "
             "have an idea that would make it better, draft a GitHub issue: a short title, then what "
             "happened, what you expected, and how to see it again (no private data: no names, "
-            "addresses, tokens). Give the operator the prefilled link to file it -- "
+            "addresses, tokens). Then show the person the title and body for review, and post with gh once they approve (a direct 'file it' counts as approval). If there is no gh login, hand over the prefilled link instead -- "
             f"{ISSUES}/new?title=<url-encoded title>&body=<url-encoded body> -- and say why it "
-            "matters. You never post it yourself; they decide.\n")
+            "matters.\n")
 
