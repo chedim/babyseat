@@ -4403,6 +4403,19 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_out(_COP.state(self.server)); return
         if path == "/membrane/entity/read":
             self._entity_read(); return
+        if path == "/membrane/work-graph":            # k4: goals, tasks, decisions + edges
+            from . import decision_map as _DM
+            self._json_out(_DM.work_graph(getattr(self.server, "entity_store", None))); return
+        if path == "/membrane/entity-history":        # k5: one entity's properties, changes, relations
+            from . import decision_map as _DM
+            import urllib.parse as _up
+            _q = _up.parse_qs(self.path.split("?", 1)[-1])
+            self._json_out(_DM.entity_history(self.server, (_q.get("spec") or [""])[0].strip())); return
+        if path == "/membrane/item-chat":             # k7: an item's mini-chat (messages referring to it)
+            from . import decision_map as _DM
+            import urllib.parse as _up
+            _q = _up.parse_qs(self.path.split("?", 1)[-1])
+            self._json_out(_DM.item_chat(self.server, (_q.get("spec") or [""])[0].strip())); return
         if path == "/membrane/decisions":             # #470: the project decision map
             from . import decision_map as _DM
             self._json_out(_DM.board(getattr(self.server, "entity_store", None))); return
@@ -4513,6 +4526,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._decision_answer(); return
         if path == "/membrane/decision/drop":
             self._decision_drop(); return
+        if path == "/membrane/item-chat/say":
+            self._item_say(); return
         if path == "/membrane/peer/post":
             self._peer_post(); return
         if path == "/membrane/peer/read":
@@ -7122,6 +7137,22 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                          work=body.get("work") if isinstance(body.get("work"), bool) else None)
         if not res.get("ok"):
             self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
+        self._json_out(res)
+
+    def _item_say(self) -> None:
+        """POST /membrane/item-chat/say {spec, text}: say in an item's mini-chat (k7). Owner only."""
+        if self._paused_write_refused():
+            return
+        from . import seatauth as _SA
+        if not _SA.owner(self):
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
+        from . import decision_map as _DM
+        body = self._json_body()
+        res = _DM.item_say(self.server, str(body.get("spec") or ""), str(body.get("text") or ""),
+                           who=str(body.get("who") or ""))
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
 
     def _decision_drop(self) -> None:

@@ -350,3 +350,105 @@ def goals(est, active=()) -> dict:
         return (act.index(g["eid"]) if g["active"] else len(act), -born, g["title"])
     out.sort(key=rank)
     return {"goals": out}
+
+
+def work_graph(est) -> dict:
+    """THE ONE GRAPH CALL (k4): {nodes: [goals, tasks, decisions], edges}. A node is
+    {id, kind: goal|task|decision, title, status, goal}; an edge is {from, to, rel}:
+    ``blocks`` (a task's or card's blocks list) and ``of`` (a task/card -> its goal).
+    Edges whose far end is not a node (a wait, a gone entity) are left out; the
+    drawing reads only this."""
+    from .entities import CLASS_DECISION, CLASS_GOAL
+    kinds = {CLASS_GOAL: "goal", "Task": "task", CLASS_DECISION: "decision"}
+    nodes, raw = [], []
+    for ent in list((getattr(est, "docs", None) or {}).values()):
+        p = ent.properties or {}
+        kind = kinds.get(ent.cls)
+        if not kind or p.get("merged_into"):
+            continue
+        nodes.append({"id": ent.eid, "kind": kind, "title": p.get("name") or p.get("title") or ent.eid,
+                      "status": _status(p) if kind == "decision" else p.get("status", "open"),
+                      "goal": p.get("goal") if kind != "goal" else None})
+        if kind != "goal":
+            for t in (p.get("blocks") if isinstance(p.get("blocks"), list) else []):
+                raw.append({"from": ent.eid, "to": str(t), "rel": "blocks"})
+            if p.get("goal"):
+                raw.append({"from": ent.eid, "to": str(p["goal"]), "rel": "of"})
+    ids = {n["id"] for n in nodes}
+    nodes.sort(key=lambda n: (("goal", "task", "decision").index(n["kind"]), n["title"]))
+    return {"nodes": nodes, "edges": [e for e in raw if e["from"] in ids and e["to"] in ids]}
+
+
+def entity_history(srv, spec: str) -> dict:
+    """THE ONE HISTORY CALL (k5, the Logs tab): one entity's current properties
+    (goal-processing receipts live there), its field changes (deltas, oldest
+    first) and its relations (live and superseded) -- {ok, eid, cls, properties,
+    changes, relations}."""
+    est = getattr(srv, "entity_store", None)
+    ent = est._resolve_spec(spec) if est is not None and spec else None
+    if ent is None:
+        return {"ok": False, "error": f"no entity matches {spec!r}"}
+    ef = getattr(srv, "efield", None)
+    changes = []
+    if ef is not None:
+        try:
+            changes = [dict(x) for x in ef.deltas_of(ent.eid)]
+        except Exception:
+            changes = []
+    rels = []
+    be, origin = getattr(ef, "b", None), getattr(ef, "origin", "")
+    if be is not None:
+        try:
+            from . import relations as R
+            rels = R.history_of(be, origin, ent.eid)
+        except Exception:
+            rels = []
+    props = {k: v for k, v in (ent.properties or {}).items() if not str(k).startswith("script_")}
+    return {"ok": True, "eid": ent.eid, "cls": ent.cls, "properties": props,
+            "changes": changes, "relations": rels}
+
+
+def _item(srv, spec: str):
+    est = getattr(srv, "entity_store", None)
+    return est, (est._resolve_spec(spec) if est is not None and spec else None)
+
+
+def item_chat(srv, spec: str) -> dict:
+    """k7, the Chat tab: the messages (convgraph's Message entities) that -refers-to-> the
+    item, oldest first -- {ok, eid, messages: [{id, who, text, ts}]}."""
+    est, ent = _item(srv, spec)
+    if ent is None:
+        return {"ok": False, "error": f"no entity matches {spec!r}"}
+    ef = getattr(srv, "efield", None)
+    be, origin = getattr(ef, "b", None), getattr(ef, "origin", "")
+    msgs = []
+    if be is not None:
+        from . import relations as R
+        for r in R.of(be, origin, ent.eid, "refers-to"):
+            m = (est.docs or {}).get(r.get("subj")) if r.get("obj") == ent.eid else None
+            if m is not None:
+                p = m.properties or {}
+                msgs.append({"id": m.eid, "who": p.get("speaker") or "", "text": p.get("text", ""),
+                             "ts": float(p.get("ts") or 0)})
+    msgs.sort(key=lambda m: m["ts"])
+    return {"ok": True, "eid": ent.eid, "messages": msgs}
+
+
+def item_say(srv, spec: str, text: str, who: str = "") -> dict:
+    """k7: say something in an item's mini-chat -- a Message entity -refers-to-> the item
+    (the same entity and edge a chat turn makes)."""
+    est, ent = _item(srv, spec)
+    text = str(text or "").strip()
+    if ent is None:
+        return {"ok": False, "error": f"no entity matches {spec!r}"}
+    if not text:
+        return {"ok": False, "error": "empty message"}
+    import time
+    import uuid
+    from . import convgraph as CG
+    ef = getattr(srv, "efield", None)
+    be, origin = getattr(ef, "b", None), getattr(ef, "origin", "")
+    mid = "item-" + uuid.uuid4().hex[:12]
+    eid = CG._mint(est, "item:" + ent.eid, mid, "user", text, ts=time.time(), speaker=who or None)
+    CG._edge(be, origin, eid, "refers-to", ent.eid, source="item-chat")
+    return {"ok": True, "message": eid}

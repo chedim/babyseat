@@ -51,15 +51,15 @@ const ACTIVITY_EVERY_MS = 1500;
 // 0.7.2 (the operator): the decision cockpit (#470) is the DEFAULT -- no
 // ?view=, an empty or an unknown one opens it, standalone and under Home
 // Assistant alike.
-const VIEWS = ["chat", "graph", "decisions", "all"];
+const VIEWS = ["chat", "graph", "field"];
 /** The view a ?view= value names: "all" is everything (""); a missing, empty
  * or unknown one is the cockpit. */
-function knownView(v) { return v === "all" ? "" : VIEWS.includes(v) ? v : "decisions"; }
+function knownView(v) { return VIEWS.includes(v) ? v : "field"; }
 /** The menu's rows: the views, the current one marked ("" = everything). */
 function standaloneMenu(current) {
-  const here = current || "all";
+  const here = current || "field";
   const rows = [{ v: "chat", icon: "💬", title: "Chat only" }, { v: "graph", icon: "🕸", title: "Graph only" },
-    { v: "decisions", icon: "🗂", title: "Decisions" }, { v: "all", icon: "◎", title: "Everything" }];
+    { v: "field", icon: "◎", title: "Field" }];
   return rows.map((r) => Object.assign(r, { current: r.v === here }));
 }
 // index.html sets window.MEMBRANE_VIEW standalone; Home Assistant has no
@@ -1606,10 +1606,10 @@ const HSTYLE = `
   /* #470: the decision cockpit's view -- the cockpit under the top bar, the
    * chat inside it (moved there, the same element); the field stays the
    * full-page background behind it all, and takes no input there */
-  .view-decisions .chat, .view-decisions .sbox, .view-decisions .me, .view-decisions .chatbtn,
-  .view-decisions .card, .view-decisions .tip, .view-decisions .brainline { display:none; }
-  .view-decisions .msg { display:none !important; }
-  .view-decisions .field { pointer-events:none; background:radial-gradient(ellipse at 50% 46%, #0d1a28 0%, #060a10 62%, #04060a 100%); }   /* the 3D view's camera hints mean nothing here */
+  .view-field .chat, .view-field .sbox, .view-field .me, .view-field .chatbtn,
+  .view-field .card, .view-field .tip, .view-field .brainline { display:none; }
+  .view-field .msg { display:none !important; }
+  .view-field .field { pointer-events:none; background:radial-gradient(ellipse at 50% 46%, #0d1a28 0%, #060a10 62%, #04060a 100%); }   /* the 3D view's camera hints mean nothing here */
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card { position:absolute; z-index:3; left:12px; bottom:12px; max-width:min(420px, calc(100% - 24px));
@@ -1683,7 +1683,7 @@ const HSTYLE = `
     .chat { top:auto; left:8px; right:8px; bottom:8px; width:auto; height:56vh; height:56dvh; }
     .voice { bottom:calc(56dvh + 16px); }
     .chat.hidden ~ .voice { bottom:12px; }
-    .view-decisions .voice { bottom:12px; }   /* #470: the cockpit's chat is inside it, no sheet to clear */
+    .view-field .voice { bottom:12px; }   /* #470: the cockpit's chat is inside it, no sheet to clear */
     .card { bottom:calc(56dvh + 80px) !important; }
     .chat.hidden ~ .card { bottom:76px !important; }
     .status { display:none; }
@@ -3250,7 +3250,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const $ = (q) => root.querySelector(q);
       this._host3d = $(".field"); this._msgEl = $(".msg"); this._statusEl = $(".status");
       this._chatBox = $(".chat"); this._chat = $("ai-terminal-panel");
-      if (VIEW === "decisions") this._buildCockpit(root);   // #470: before the chat boots (hass below)
+      if (VIEW === "field") this._buildCockpit(root);   // k6: the field view, before the chat boots (hass below)
       this._card = $(".card"); this._tip = $(".tip");
       this._brainEl = $(".brainline"); this._brainText = $(".bl-t"); this._brainCite = $(".bl-c");
       this._q = $(".q"); this._hits = $(".hits");
@@ -3281,13 +3281,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         $(".chatbtn").style.display = "none";
       } else if (VIEW === "chat") {
         root.classList.add("view-chat");
-      } else if (VIEW === "decisions") {
-        root.classList.add("view-decisions");      // #470: the cockpit fills the screen
+      } else if (VIEW === "field") {
+        root.classList.add("view-field");      // #470: the cockpit fills the screen
         this._mountDecisions();
       }
       this._menu = $(".hamenu"); this._haBtn = $(".ha");
       this._haBtn.title = window.MEMBRANE_STANDALONE
-        ? "Membrane's interfaces: chat only, graph only, decisions, everything" : this._haBtn.title;
+        ? "Membrane's interfaces: chat only, graph only, field" : this._haBtn.title;
       this._haBtn.addEventListener("click", () => this._toggleMenu());
       this._menu.addEventListener("click", (e) => {
         if (e.target.closest("a[data-logout]")) { e.preventDefault(); this._logout(); return; }
@@ -3530,31 +3530,31 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       return out;
     }
 
-    /** #470: the decision cockpit. The real chat (in its cockpit mode:
-     * composer on top, newest message first) and the field's host move into
-     * it -- the same elements, slotted, so nothing is forked. Built before
-     * the chat is handed hass, so the chat boots once, already in place. */
+    /** k6: the field view -- icons for goals, tasks and decisions over the field; the
+     * normal chat stays as it is. It replaces Everything and the Decisions cockpit. */
     _buildCockpit(root) {
-      const el = this._cockpit = document.createElement("membrane-decisions");
-      this._chat.setAttribute("cockpit", "");
-      this._chat.slot = "chat";
-      el.append(this._chat);                      // the field stays behind, the page's background
+      const el = this._cockpit = document.createElement("membrane-fieldview");
       root.appendChild(el);
     }
 
-    /** #470: the cockpit's API once decisions.js is loaded. Clicking a card
-     * loads its question into the chat's bar; the cockpit records the chat on
-     * the card (POST /membrane/decision/chat) and answers on it. */
+    /** k6: the view's API once fieldview.js is loaded: it only GETs /membrane/work-graph. */
     async _mountDecisions() {
-      try { await import("/ui/www/decisions.js"); } catch (e) { this._msgEl.textContent = "the cockpit failed to load"; return; }
-      const post = async (p, b) => {
-        const r = await this._hass.fetchWithAuth(HSERVE + p, { method: "POST",
-          headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
-        let d = null; try { d = await r.json(); } catch (e) { /* no body */ }
-        if (!r.ok) throw new Error((d && d.error) || (r.status === 401 ? "the seat token is needed to decide" : String(r.status)));
-        return d;
-      };
-      this._cockpit.api = { get: (p) => this._get(p), post, chat: this._chat, logo: SEAT_LOGO };
+      try { await import("/ui/www/fieldview.js"); } catch (e) { this._msgEl.textContent = "the field view failed to load"; return; }
+      this._cockpit.api = { get: (p) => this._get(p), post: (p, b) => this._post(p, b) };
+      // the bottom bar's message drives a chat turn; the turn's answer comes back through ai-reply
+      this._cockpit.addEventListener("chat-send", (e) => {
+        const c = this._chat, text = String(e.detail || "").trim();
+        if (!c || !c._ta || !text) return;
+        this._fvPending = true;
+        c._ta.value = text;
+        c._submit();
+      });
+      this._chat.addEventListener("ai-reply", (e) => {
+        if (!this._fvPending) return;
+        this._fvPending = false;
+        const t = (e.detail || {}).text;
+        if (t) this._cockpit.reply(t);
+      });
       this._msgEl.style.display = "none";
     }
 
@@ -3562,6 +3562,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const r = await this._hass.fetchWithAuth(HSERVE + path);
       const t = await r.text();
       let d = null; try { d = t ? JSON.parse(t) : null; } catch (e) { d = t; }
+      if (!r.ok) throw new Error(path + " → " + r.status);
+      return d;
+    }
+
+    async _post(path, body) {
+      const r = await this._hass.fetchWithAuth(HSERVE + path, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      let d = null; try { d = await r.json(); } catch (e) { /* no body */ }
       if (!r.ok) throw new Error(path + " → " + r.status);
       return d;
     }
@@ -3600,7 +3608,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (!this._started) { v.stop(); return; }
         await this._aim(true);
         this._glide();
-        if (VIEW !== "decisions") this._brainStart();    // the cockpit has no brain caption
+        if (VIEW !== "field") this._brainStart();    // the cockpit has no brain caption
       } catch (e) {
         this._msgEl.style.display = ""; this._msgEl.textContent = "the field is unavailable\n" + ((e && e.message) || e);
         return;
