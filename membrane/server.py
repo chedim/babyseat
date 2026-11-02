@@ -550,12 +550,33 @@ class MessageStore:
 
     def _flush_maybe(self) -> None:
         """The cadence flush: a tool-state change waits FLUSH_MIN_S; a
-        real message append (_flush direct) never waits."""
+        real message append (_flush direct) never waits. A change the
+        cadence skipped is written once it allows (the reply's last words
+        were left in RAM until the next change, and a restart lost them)."""
         now = time.time()
-        if now - self._last_flush_ts >= self.FLUSH_MIN_S:
+        wait = self.FLUSH_MIN_S - (now - self._last_flush_ts)
+        if wait <= 0:
             self._flush()
             self._last_flush_ts = now
-        return
+        elif getattr(self, "_later", None) is None:
+            self._later = threading.Timer(wait, self._flush_later)
+            self._later.daemon = True
+            self._later.start()
+
+    def _flush_later(self) -> None:
+        with self._lock:
+            self._later = None
+            self._flush()
+            self._last_flush_ts = time.time()
+
+    def close(self) -> None:
+        """The teardown's write: what the cadence still holds, now."""
+        with self._lock:
+            later, self._later = getattr(self, "_later", None), None
+            if later is not None:
+                later.cancel()
+            self._flush()
+            self._last_flush_ts = time.time()
 
     def list(self, sid: str) -> list[dict]:
         with self._lock:
