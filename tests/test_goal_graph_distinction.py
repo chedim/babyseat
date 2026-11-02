@@ -91,5 +91,40 @@ class CancelledIsFinished(unittest.TestCase):
         self.assertEqual(es, [])
 
 
+@NODE
+class HoverHighlight(unittest.TestCase):
+    """#772: hovering a goal (or its task) makes that goal's lines stand out; the other goals' lines step back."""
+
+    def _args(self):
+        g = {"nodes": [{"id": "a", "kind": "goal", "status": "open", "title": "a"},
+                       {"id": "b", "kind": "goal", "status": "open", "title": "b"},
+                       {"id": "ta", "kind": "task", "status": "open", "goal": "a", "title": "ta"}],
+             "edges": [{"from": "ta", "to": "a", "rel": "of"}, {"from": "b", "to": "a", "rel": "x"}]}
+        pos = {"a": [0, 0, 0], "b": [1, 0, 0], "ta": [2, 0, 0]}
+        return json.dumps(g), json.dumps(pos)
+
+    def _hot(self, hover):
+        g, pos = self._args()
+        es = _js("field3d.js", "F.workEdges(%s,%s,{},%s)" % (g, pos, json.dumps(hover)))
+        return {e["from"]: e["hot"] for e in es}
+
+    def test_hovered_goal_lines_are_hot(self):
+        self.assertTrue(self._hot("a")["ta"])
+
+    def test_hovering_its_task_lights_the_goal(self):
+        self.assertTrue(self._hot("ta")["ta"])
+
+    def test_no_hover_nothing_hot(self):
+        self.assertFalse(any(self._hot(None).values()))
+
+    def test_other_goal_lines_not_hot(self):
+        self.assertFalse(self._hot("b")["ta"])
+
+    def test_scene_wires_pointer_hover(self):
+        src = (UI / "field3d.js").read_text()
+        self.assertIn("pointerenter", src)
+        self.assertIn("_workHover", src)
+
+
 if __name__ == "__main__":
     unittest.main()

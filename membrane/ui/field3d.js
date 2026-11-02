@@ -739,18 +739,20 @@ function workMarkers(graph, pos) {
   }
   return out;
 }
-/** The work graph's edges between visible markers: {from,to,a,b,color} (a/b = marker positions); the goal end picks the edgeStyles colour. */
-function workEdges(graph, pos, styles) {
+/** The work graph's edges between visible markers: {from,to,a,b,color,dash,hot} (hot = on the hovered goal) (a/b = marker positions); the goal end picks the edgeStyles colour. */
+function workEdges(graph, pos, styles, hover) {
   const marks = new Map(workMarkers(graph, pos).map((m) => [m.id, m]));
   const byId = new Map((((graph && graph.nodes) || [])).map((n) => [n.id, n]));
   const kinds = new Map([...byId].map(([id, n]) => [id, n.kind]));
   const out = [];
+  const hn = hover != null ? byId.get(hover) : null;   // hovering a goal or one of its items lights that goal's lines
+  const hg = hn ? (hn.kind === "goal" ? hn.id : hn.goal || null) : null;
   for (const e of (graph && graph.edges) || []) {
     const a = marks.get(e.from), b = marks.get(e.to);
     if (!a || !b) continue;
     const gid = kinds.get(e.from) === "goal" ? e.from : kinds.get(e.to) === "goal" ? e.to : ((byId.get(e.from) || {}).goal || (byId.get(e.to) || {}).goal || null);
     const st = (gid && styles && styles[gid]) || null;
-    out.push({ from: e.from, to: e.to, a: a.p, b: b.p, color: (st && st.color) || "#8aa0c8", dash: (st && st.dash) || "" });
+    out.push({ from: e.from, to: e.to, a: a.p, b: b.p, color: (st && st.color) || "#8aa0c8", dash: (st && st.dash) || "", hot: !!hg && gid === hg });
   }
   return out;
 }
@@ -2404,6 +2406,8 @@ class Field3DView {
         el.style.cssText = "position:absolute;font-size:22px;cursor:pointer;pointer-events:auto;user-select:none;margin:-14px 0 0 -11px";
         el.textContent = WORK_GLYPH[m.kind]; el.title = m.title || m.id;
         el.onclick = () => { if (this._workOpen) this._workOpen(m.id); };
+        el.addEventListener("pointerenter", () => { this._workHover = m.id; el.style.fontSize = "30px"; });
+        el.addEventListener("pointerleave", () => { if (this._workHover === m.id) this._workHover = null; el.style.fontSize = "22px"; });
         this.labelLayer.appendChild(el); this._workEls.set(m.id, el);
       }
       const sc = this._project(m.p);
@@ -2420,7 +2424,7 @@ class Field3DView {
     const CAP = 2000;
     const fv = (typeof window !== "undefined" && window.FieldViewLogic) || null;
     const styles = fv ? fv.edgeStyles(this._work) : {};
-    const es = workEdges(this._work, this._workPos, styles).slice(0, CAP);
+    const es = workEdges(this._work, this._workPos, styles, this._workHover).slice(0, CAP);
     const groups = workDashGroups(es);
     const DASHES = ["", "6 4", "2 3", "10 3 2 3"];
     this._workLines = this._workLines || {};
@@ -2442,6 +2446,7 @@ class Field3DView {
       const pa = ls.geometry.attributes.position, ca = ls.geometry.attributes.color;
       mine.forEach((e, i) => {
         col.set(e.color);
+        if (this._workHover != null) col.multiplyScalar(e.hot ? 1.6 : 0.35);   // hovered goal's lines stand out, the rest step back
         pa.setXYZ(i * 2, e.a[0], e.a[1], e.a[2]); pa.setXYZ(i * 2 + 1, e.b[0], e.b[1], e.b[2]);
         ca.setXYZ(i * 2, col.r, col.g, col.b); ca.setXYZ(i * 2 + 1, col.r, col.g, col.b);
       });
