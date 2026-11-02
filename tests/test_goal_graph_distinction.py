@@ -58,6 +58,21 @@ class DashRenders(unittest.TestCase):
 
 
 @NODE
+class DashRoutes(unittest.TestCase):
+    def test_different_dashes_land_in_different_line_objects(self):
+        es = [{"dash": "", "n": 1}, {"dash": "6 4", "n": 2}, {"dash": "", "n": 3}, {"dash": "2 3", "n": 4}]
+        g = _js("field3d.js", "F.workDashGroups(%s)" % json.dumps(es))
+        self.assertEqual({k: [e["n"] for e in v] for k, v in g.items()}, {"": [1, 3], "6 4": [2], "2 3": [4]})
+
+    def test_one_line_object_per_dash_entry(self):
+        src = (UI / "field3d.js").read_text()
+        a = src.index("_stepWorkEdges()")
+        body = src[a:src.index("_ring(s)", a)]
+        self.assertIn("LineBasicMaterial", body)
+        self.assertIn("workDashGroups", body)
+
+
+@NODE
 class CancelledIsFinished(unittest.TestCase):
     def _graph(self):
         return {"nodes": [{"id": "g", "kind": "goal", "status": "cancelled", "title": "g"},
