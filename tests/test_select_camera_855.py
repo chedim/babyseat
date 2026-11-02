@@ -1,4 +1,4 @@
-"""#855: double-click opens the item; selecting keeps the camera on the centre and puts the item
+"""#855: selecting keeps the camera on the centre and puts the item
 in front of it; unselecting restores the pose from before the first selection. Pure functions via node."""
 import json
 import math
@@ -66,9 +66,14 @@ def test_unselect_restores_pose_before_first_selection_through_a_then_b():
 
 
 @NODE
-def test_second_click_resolves_to_first_clicks_item_after_it_moved():
-    a = {"id": "e1"}
-    assert js("L.resolveClick({m:%s,t:1000},null,1200)" % json.dumps(a)) == a
-    assert js("L.resolveClick({m:%s,t:1000},null,5000)" % json.dumps(a)) is None
-    assert js("L.resolveClick(null,null,1200)") is None
-    assert js("L.resolveClick({m:%s,t:1000},{id:'e2'},5000)" % json.dumps(a)) == {"id": "e2"}
+def test_click_on_empty_spot_during_first_clicks_flight_keeps_selection():
+    assert js("L.clickAction('e1',null,true)") == "keep"      # the item flew away; this is not the background
+    assert js("L.clickAction('e1',null,false)") == "unselect"  # real background click
+    assert js("L.clickAction(null,null,true)") == "unselect"
+    assert js("L.clickAction('e1',{id:'e2'},true)") == "select"  # another item swaps
+
+
+def test_no_double_click_left():
+    src = (UI / "field3d.js").read_text()
+    for gone in ("F3_DBL_MS", "resolveClick", "dblclick", "_lastPick"):
+        assert gone not in src, gone

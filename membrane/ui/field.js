@@ -556,10 +556,8 @@ function defineFieldPanel() {
           stream: (path, signal) => hass.fetchWithAuth(FSERVE + path, { signal, headers: { Accept: "text/event-stream" } }),
           kindColor, isAdmin: !!(hass.user && hass.user.is_admin),
           onStatus: (t) => { this._status3.textContent = t; this._paintAgents(); },
-          // one click only selects (#850)
-          onSelect: (m) => { if (!m) { this._sel = null; this._drawer.classList.remove("open"); } },
-          // a double-click opens the drawer (#850)
-          onOpen: (m) => { if (m) this._select3d(m.id); },
+          // one click selects and slides the drawer out; nothing selected slides it away (#855)
+          onSelect: (m) => { if (!m) { this._sel = null; this._drawer.classList.remove("open"); } else if (!m.work) this._select3d(m.id); },
           onRelated: (id) => { if (this._sel === id && this._drawer.classList.contains("open")) this._select3d(id); },
           onHover: (m, x, y) => {
             if (!m) { this._tip.style.display = "none"; return; }

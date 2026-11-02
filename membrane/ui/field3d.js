@@ -33,7 +33,7 @@
  * newest a glowing point. No current (nobody spoke lately): nothing drawn.
  *
  * Controls: drag = orbit, right-drag / shift-drag / two fingers = pan,
- * wheel / pinch = zoom, click = the drawer, double-click = fly there.
+ * wheel / pinch = zoom, click = select and open its panel.
  */
 const F3_WORLD = 1000;
 const LOCATE_CACHE_MAX = 500;      // every entity a mind touches is located: cap it
@@ -811,15 +811,14 @@ function frameAround(target, item, points, cur, fovY, aspect, margin) {
 /** #855: the pose before the first selection is kept (A then B keeps the pre-A pose); restore gives it back. */
 function camSave(saved, cur) { return saved || { target: cur.target.slice(), theta: cur.theta, phi: cur.phi, r: cur.r }; }
 function camRestore(saved) { return saved ? { target: saved.target.slice(), theta: saved.theta, phi: saved.phi, r: saved.r } : null; }
-/** #855: the click that acts: a hit wins; a click on nothing just after a pick is the second click of a
- *  double-click on an item that flew away -- it stays that item (last = {m, t}). */
-const F3_DBL_MS = 500;
-function resolveClick(last, hit, now) {
-  if (hit) return hit;
-  return last && now - last.t < F3_DBL_MS ? last.m : null;
+/** #855: what a click on the canvas does. A hit selects it. A click on nothing unselects -- except while the
+ *  first click's camera flight is still running: the item has left the cursor, so that click is not the background. */
+function clickAction(sel, hit, flying) {
+  if (hit) return "select";
+  return sel != null && flying ? "keep" : "unselect";
 }
 
-const F3Logic = { frameAround, camSave, camRestore, resolveClick, selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+const F3Logic = { frameAround, camSave, camRestore, clickAction, selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -1635,18 +1634,15 @@ class Field3DView {
           if (this.api.onAvatar) this.api.onAvatar(this.selAgent);
           return;
         }
-        const m = resolveClick(this._lastPick, this._pick(e.offsetX, e.offsetY), performance.now());   // #855
-        this._lastPick = m ? { m, t: performance.now() } : null;
+        const m = this._pick(e.offsetX, e.offsetY);
+        const act = clickAction(this.sel, m, !!this._flyAnim);   // #855
+        if (act === "keep") return;
         if (this.selAgent) { this.selAgent = null; if (this.api.onAvatar) this.api.onAvatar(null); }
-        if (m) { this.select(m.id); this.api.onSelect(m); } else { this.select(null); this.api.onSelect(null); }
+        if (act === "select") { this.select(m.id); this.api.onSelect(m); } else { this.select(null); this.api.onSelect(null); }
       }
     };
     el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
     el.addEventListener("wheel", (e) => { e.preventDefault(); this.orbit.r = Math.max(30, Math.min(6000, this.orbit.r * Math.exp(e.deltaY * 0.0012))); }, { passive: false });
-    el.addEventListener("dblclick", (e) => {
-      const m = resolveClick(this._lastPick, this._pick(e.offsetX, e.offsetY), performance.now());   // #855
-      if (m && m.work) { this.select(m.id); if (this._workOpen) this._workOpen(m.id); return; }
-      if (m) { this.select(m.id); this.api.onSelect(m); if (this.api.onOpen) this.api.onOpen(m); } });
     el.addEventListener("pointerleave", () => this.api.onHover(null));
   }
 
@@ -2497,8 +2493,7 @@ class Field3DView {
         el = document.createElement("div");
         el.style.cssText = "position:absolute;font-size:22px;cursor:pointer;pointer-events:auto;user-select:none;margin:-14px 0 0 -11px";
         el.textContent = WORK_GLYPH[m.kind];
-        el.addEventListener("click", () => { this._lastPick = { m: { id: m.id, work: true }, t: performance.now() }; this.select(m.id); if (this.api.onSelect) this.api.onSelect({ id: m.id, work: true }); });
-        el.addEventListener("dblclick", () => { if (this._workOpen) this._workOpen(m.id); });
+        el.addEventListener("click", () => { this.select(m.id); if (this.api.onSelect) this.api.onSelect({ id: m.id, work: true }); if (this._workOpen) this._workOpen(m.id); });   // #855: one click selects and opens
         el.addEventListener("pointerenter", () => { this._workHover = m.id; el.style.fontSize = "30px"; });
         el.addEventListener("pointerleave", () => { if (this._workHover === m.id) this._workHover = null; el.style.fontSize = "22px"; });
         this.labelLayer.appendChild(el); this._workEls.set(m.id, el);
