@@ -63,13 +63,30 @@ function logRows(h) {
 
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+/** #772: the goal window's size: larger than the old 300px card, one scrollable view */
+const WINDOW = { width: 560, scroll: true };
+
+/** escape, then turn http(s) URLs into clickable links */
+function linkify(text) {
+  return esc(text).replace(/https?:\/\/[^\s<]+?(?=[.,;:!?)]*(?:\s|$|&lt;))/g,
+    (u) => `<a href="${u}" target="_blank" rel="noopener" style="color:#8ab4ff">${u}</a>`);
+}
+
+/** #772: everything the window shows: full text (links), info, chat rows, log rows */
+function windowInfo(graph, id, history, chat) {
+  const info = cardInfo(graph, id); if (!info) return null;
+  const p = (history && history.properties) || {};
+  const text = String(p.summary || p.text || p.description || info.title || "");
+  return { info, text, textHtml: linkify(text), chat: chatRows(chat), logs: logRows(history) };
+}
+
 if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined") {
   class MembraneFieldView extends HTMLElement {
     constructor() { super(); this._graph = null; this._open = null; this._tab = 0; this._extra = null; }
     set api(a) { this._api = a; this.refresh(); }
     /** the scene the markers live in (a Field3DView): it gets every new graph, and calls open(id) on a click */
     set scene(sc) { this._scene = sc; if (this._graph && sc) sc.setWork(this._graph, (id) => this.open(id)); }
-    open(id) { this._open = id; this._tab = 0; this._extra = null; this._draw(); }
+    open(id) { this._open = id; this._hist = null; this._chat = null; this._draw(); this._load(); }
     async refresh() {
       let g = null;
       try { g = await this._api.get("/membrane/work-graph"); } catch (e) { g = null; }
@@ -82,11 +99,10 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       clearTimeout(this._t); this._t = setTimeout(() => this.refresh(), 10000);
     }
     async _load() {
-      const id = this._open, tab = TABS[this._tab];
-      this._extra = null;
-      if (!id || tab === "Info") return;
-      const url = tab === "Chat" ? "/membrane/item-chat?spec=" : "/membrane/entity-history?spec=";
-      try { this._extra = await this._api.get(url + encodeURIComponent(id)); } catch (e) { this._extra = null; }
+      const id = this._open; if (!id) return;
+      const q = encodeURIComponent(id);
+      try { this._hist = await this._api.get("/membrane/entity-history?spec=" + q); } catch (e) { this._hist = null; }
+      try { this._chat = await this._api.get("/membrane/item-chat?spec=" + q); } catch (e) { this._chat = null; }
       this._draw();
     }
     async _say(text) {
@@ -96,21 +112,20 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
     }
     disconnectedCallback() { clearTimeout(this._t); if (this._scene) this._scene.setWork(null); }
     _draw() {
-      const card = this._open && cardInfo(this._graph, this._open);
+      const w = this._open && windowInfo(this._graph, this._open, this._hist, this._chat);
       const list = (l) => (l && l.length ? l.map(esc).join(", ") : "–");
-      const html = card ? `<div class="card" style="position:absolute;right:12px;top:12px;max-width:300px;padding:12px;border-radius:10px;background:rgba(20,20,30,.92);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b style="display:block;margin-bottom:6px">${GLYPH[card.kind]} ${esc(card.title)}</b>
-          <div>${TABS.map((t, k) => `<span class="tab" data-tab="${k}" style="cursor:pointer;margin-right:8px;${k === this._tab ? "text-decoration:underline" : ""}">${t}</span>`).join("")}</div>` +
-          (this._tab === 0 ? `${esc(card.kind)} · ${esc(card.status)}<br>goal: ${esc(card.of || "–")}<br>
-          blocks: ${list(card.blocks)}<br>blocked by: ${list(card.blockedBy)}` :
-          this._tab === 1 ? chatRows(this._extra).map((r) => `<div>${esc(r)}</div>`).join("") + `<input class="say" placeholder="say…">` :
-          logRows(this._extra).map((r) => `<div>${esc(r)}</div>`).join("")) + `</div>` : "";
+      const sec = (h) => `<b style="display:block;margin:10px 0 4px;opacity:.7">${h}</b>`;
+      const html = w ? `<div class="card" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b style="display:block;margin-bottom:6px">${GLYPH[w.info.kind]} ${esc(w.info.title)}</b>
+          <div style="white-space:pre-wrap">${w.textHtml}</div>` +
+          sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${esc(w.info.of || "–")}<br>blocks: ${list(w.info.blocks)}<br>blocked by: ${list(w.info.blockedBy)}` +
+          sec("Chat") + w.chat.map((r) => `<div>${linkify(r)}</div>`).join("") + `<input class="say" placeholder="say…" style="width:100%">` +
+          sec("Logs") + w.logs.map((r) => `<div style="font-size:12px">${linkify(r)}</div>`).join("") + `</div>` : "";
       this.style.cssText = "position:absolute;inset:0;display:block;pointer-events:none";
       this.innerHTML = html;
       const say = this.querySelector && this.querySelector(".say");
       if (say) say.onkeydown = (e) => { if (e.key === "Enter") this._say(say.value.trim()); };
       this.onclick = (e) => {
         if (e.target.closest(".x")) { this._open = null; this._draw(); return; }
-        const tb = e.target.closest(".tab"); if (tb) { this._tab = +tb.dataset.tab; this._draw(); this._load(); }
       };
       const c = this.querySelector && this.querySelector(".card"); if (c) c.style.pointerEvents = "auto";
     }
@@ -118,6 +133,6 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
   if (!customElements.get("membrane-fieldview")) customElements.define("membrane-fieldview", MembraneFieldView);
 }
 
-const FieldViewLogic = { cardInfo, edgeStyles, chatStep, GLYPH, TABS, chatRows, logRows };
+const FieldViewLogic = { cardInfo, linkify, windowInfo, WINDOW, edgeStyles, chatStep, GLYPH, TABS, chatRows, logRows };
 if (typeof window !== "undefined") window.FieldViewLogic = FieldViewLogic;
 if (typeof module !== "undefined" && module.exports) module.exports = FieldViewLogic;
