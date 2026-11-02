@@ -327,6 +327,23 @@ def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
         d.properties = {**(d.properties or {}), "shadow": sh}
         srv.entity_store.upsert(d, embedder=None)
 
+def _link_pending_answers(srv, est, sid: str, u_mid: str, u: str, be, origin, person: bool) -> None:
+    """#865: cards the agent answered with answer_card in this turn (decision_map.relay) get
+    their link to the person's message now that it exists: properties.message + an `answers` edge.
+    The turn's kept words go with it."""
+    d = getattr(srv, "__dict__", {})
+    (d.get("_cg_said_now") or {}).pop(sid, None)
+    for card in (d.get("_cg_pending_answers") or {}).pop(sid, []):
+        ent = (est.docs or {}).get(card)
+        if ent is None or not person:
+            continue
+        p = dict(ent.properties or {})
+        p["message"] = str(u_mid)[:200]
+        ent.properties = p
+        est.upsert(ent)
+        _edge(be, origin, u, "answers", card)
+
+
 def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
                 a_info: dict, reply: str) -> None:
     """The finished chat turn into the graph (both messages, their edges, the answers to the
@@ -341,6 +358,7 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
     person = from_person(user_text)
     who, user_text = _words(user_text)
     u = _mint(est, sid, u_mid, "user" if person else "membrane", user_text, speaker=who)
+    _link_pending_answers(srv, est, sid, u_mid, u, be, origin, person)
     if person:
         _shadow(srv, runner, sid, u, a_mid, user_text)
     a = _mint(est, sid, a_mid, "assistant", reply)

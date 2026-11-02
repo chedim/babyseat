@@ -4208,6 +4208,11 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     if note:
         adds.append(note)
     said = (getattr(srv, "_cg_text", None) or {}).pop(sid, None) if sid else None
+    if said and srv is not None:                  # #865: the turn's words stay for answer_card until its message is minted
+        try:
+            srv.__dict__.setdefault("_cg_said_now", {})[sid] = said
+        except Exception:
+            pass
     _sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
     if said and _sess is not None and ((_sess.get(sid) or {}).get("owner")):
         said = None                               # a guest's chat (a token person, the HA relay): no program
