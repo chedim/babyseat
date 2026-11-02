@@ -130,6 +130,7 @@ CONTINUE_TEXT = "Continue"          # the person's row a Continue adds
 CONTINUE_PROMPT = ("Continue the task from where you stopped at the turn "
                    "limit.")
 MAX_TURNS_SUBTYPE = "error_max_turns"   # the SDK's result subtype at the cap
+NO_AUTO_MEMORY_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"   # the CLI's own switch (build_options)
 QUOTA_ERRORS = ("rate_limit", "billing_error")   # an AssistantMessage error that
                                     # means out of tokens: the rung pauses (quota.py)
 
@@ -765,9 +766,13 @@ def build_options(sdk, system: str, model: str, stream: bool, port=None,
                   resume=None, env=None, answer=None):
     answer = answer if answer is not None else _Answer()
     extra = {"resume": str(resume)} if resume else {}   # Continue: the same session
+    env = credential_env() if env is None else dict(env)   # the key (#413)
+    # no auto-memory: the CLI keys it to the cwd, so a seat in a project a Claude
+    # Code session also works in got that session's MEMORY.md on every turn
+    env[NO_AUTO_MEMORY_ENV] = "1"
     return sdk.ClaudeAgentOptions(
         **extra,
-        env=credential_env() if env is None else dict(env),   # the key (#413)
+        env=env,
         system_prompt=_with_tools_note(system),
         tools=[],                  # Claude Code's built-in tools: off
         allowed_tools=tool_names(),  # only membrane's tools (#389)
