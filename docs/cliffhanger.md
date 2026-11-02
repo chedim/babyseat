@@ -118,9 +118,18 @@ step). The outcome is kept as the `shadow` property on the person's message
 entity, next to what the model then did (`model_tools`, the tool parts of its reply, and
 `model_ran`, the programs it ran). Nothing answers from the shadow yet: it only measures.
 `membrane shadow` prints the rates (read-only). Stage 2 (membrane answering
-questions itself) was dropped with the hardcoded question forms (2026-11-01). Later stages:
-membrane runs compiled actions, then closes gaps with narrow background model turns that only
-propose definitions (at most 3 rounds, stopping when a round doesn't shrink the gaps).
+questions itself) was dropped with the hardcoded question forms (2026-11-01).
+
+**Stage 3: the model fills the gaps** (2026-11-02). A chat message that compiles except for
+words the field doesn't know is told to the model in the turn already running, with each word
+and the definition that fills it: an unknown verb (`<word> means <a verb it knows>`), an unknown
+object (`<word> means <the name of a thing it knows>`, the word as the lookup reads it, without
+"the" or "all"). The model teaches what it can tell (`exec(action='run', lang='en', code='<word>
+means <meaning>')`), runs the message, or asks the person; taught once, the same message
+compiles next time. Gaps no definition fills (no object, a verb with no meaning on that thing,
+missing arguments) aren't told. Membrane still runs nothing on its own; the model decides.
+Not built yet: membrane running compiled actions itself, and narrow background turns that
+only propose definitions.
 
 **Membrane words the result itself** (`membrane/generate.py`): a run ends in a sentence built
 from its calls and their results -- the verb's past form (lemminflect, plain rules without
