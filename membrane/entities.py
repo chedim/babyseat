@@ -1706,6 +1706,15 @@ class EntityStore(MultiParentOps, TimelineOps):
         upsert wedged every bulk pass (the boot consolidation included)
         behind multi-second writes."""
         self._dirty = True
+        if getattr(self, "_closed", False):
+            # #818: after close() no debounce timer may carry a write (it
+            # dies with the process); save through, now.
+            self._dirty = False
+            try:
+                self.save()
+            except Exception as e:
+                print(f"[entities] save after close failed ({e})", file=sys.stderr)
+            return
         if self._save_timer is None:
             th = threading.Timer(self.SAVE_DEBOUNCE_S, self._flush_save)
             th.daemon = True
@@ -1750,6 +1759,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         BEFORE interpreter finalization (a live asio thread touching
         CPython during Py_Finalize is a SIGSEGV, seen in the wild)."""
         self._cancel_save_timer()
+        self._closed = True
         if self._dirty:
             self._dirty = False
             try:
