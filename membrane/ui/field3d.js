@@ -711,7 +711,7 @@ function blurpLayers(ov, has, lastTs) {
 }
 
 /** Goals, tasks and decisions as scene markers: one per work-graph node that has a field position (pos: id -> [x,y,z]). */
-function workMarkers(graph, pos) {
+function workShows(graph) {
   const out = [], nodes = (graph && graph.nodes) || [], edges = (graph && graph.edges) || [];
   const byId = new Map(nodes.map((n) => [n.id, n]));
   // rule 2b: an answered decision leaves only once every goal/task linked to it has finished; unanswered, or answered with nothing linked, stays
@@ -725,22 +725,30 @@ function workMarkers(graph, pos) {
     return linked.length > 0 && linked.every((o) => WORK_FINISHED.has(o.status));
   };
   for (const n of nodes) {
-    const p = pos && pos[n.id];
-    if (!p || !(n.kind === "goal" || n.kind === "task" || n.kind === "decision")) continue;
+    if (!(n.kind === "goal" || n.kind === "task" || n.kind === "decision")) continue;
     if (n.kind === "decision" ? (n.status === "dropped" || decisionDone(n)) : WORK_FINISHED.has(n.status)) continue;
-    out.push({ id: n.id, kind: n.kind, title: n.title, status: n.status, p: p.slice(0, 3) });
+    out.push(n);
+  }
+  return out;
+}
+function workMarkers(graph, pos) {
+  const out = [];
+  for (const n of workShows(graph)) {
+    const p = pos && pos[n.id];
+    if (p) out.push({ id: n.id, kind: n.kind, title: n.title, status: n.status, p: p.slice(0, 3) });
   }
   return out;
 }
 /** The work graph's edges between visible markers: {from,to,a,b,color} (a/b = marker positions); the goal end picks the edgeStyles colour. */
 function workEdges(graph, pos, styles) {
   const marks = new Map(workMarkers(graph, pos).map((m) => [m.id, m]));
-  const kinds = new Map((((graph && graph.nodes) || [])).map((n) => [n.id, n.kind]));
+  const byId = new Map((((graph && graph.nodes) || [])).map((n) => [n.id, n]));
+  const kinds = new Map([...byId].map(([id, n]) => [id, n.kind]));
   const out = [];
   for (const e of (graph && graph.edges) || []) {
     const a = marks.get(e.from), b = marks.get(e.to);
     if (!a || !b) continue;
-    const gid = kinds.get(e.from) === "goal" ? e.from : kinds.get(e.to) === "goal" ? e.to : null;
+    const gid = kinds.get(e.from) === "goal" ? e.from : kinds.get(e.to) === "goal" ? e.to : ((byId.get(e.from) || {}).goal || (byId.get(e.to) || {}).goal || null);
     const st = (gid && styles && styles[gid]) || null;
     out.push({ from: e.from, to: e.to, a: a.p, b: b.p, color: (st && st.color) || "#8aa0c8", dash: (st && st.dash) || "" });
   }
@@ -750,7 +758,7 @@ const WORK_ANSWERED = new Set(["decided", "closed"]);
 const WORK_FINISHED = new Set(["fulfilled", "done", "dropped"]);
 const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
 
-const F3Logic = { workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+const F3Logic = { workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -2363,7 +2371,7 @@ class Field3DView {
   setWork(graph, onOpen) {
     this._work = graph || null; this._workOpen = onOpen || this._workOpen;
     this._workPos = this._workPos || {};
-    for (const n of (graph && graph.nodes) || []) {
+    for (const n of workShows(graph)) {
       if (this._workPos[n.id]) continue;
       this.placeOf(n.id).then((p) => { if (p) this._workPos[n.id] = p; }).catch(() => {});
     }

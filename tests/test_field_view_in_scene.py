@@ -110,3 +110,25 @@ def test_goal_edges_are_drawn_in_scene_styled_follow_markers_and_leave_with_endp
     src = (UI / "field3d.js").read_text()
     body = src[src.index("_stepWork() {"):src.index("_ring(s) {")]
     assert "workEdges(" in body and "LineSegments" in body
+
+
+@NODE
+def test_non_goal_edge_takes_the_goal_colour_of_its_node():
+    nodes = [{"id": "g1", "kind": "goal", "status": "open"}, {"id": "t1", "kind": "task", "status": "open", "goal": "g1"},
+             {"id": "d1", "kind": "decision", "status": "open"}]
+    g = {"nodes": nodes, "edges": [{"from": "d1", "to": "t1", "rel": "blocks"}]}
+    pos = {"g1": [0, 0, 0], "t1": [1, 0, 0], "d1": [0, 1, 0]}
+    sty = {"g1": {"color": "#ff0000", "dash": ""}}
+    es = _f3("F.workEdges(%s, %s, %s)" % (json.dumps(g), json.dumps(pos), json.dumps(sty)))
+    assert es[0]["color"] == "#ff0000", es
+
+
+@NODE
+def test_locate_only_for_nodes_that_would_show():
+    nodes = [{"id": "g1", "kind": "goal", "status": "fulfilled"}, {"id": "t1", "kind": "task", "status": "open"},
+             {"id": "d1", "kind": "decision", "status": "decided"}, {"id": "d2", "kind": "decision", "status": "open"}]
+    g = {"nodes": nodes, "edges": [{"from": "d1", "to": "g1", "rel": "blocks"}]}
+    assert sorted(n["id"] for n in _f3("F.workShows(%s)" % json.dumps(g))) == ["d2", "t1"]
+    src = (UI / "field3d.js").read_text()
+    body = src[src.index("  setWork(graph"):src.index("  _stepWork() {")]
+    assert "workShows(" in body
