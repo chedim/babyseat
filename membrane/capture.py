@@ -253,23 +253,24 @@ class Capturer:
                     if discourse:               # all discourse: the oldest line goes
                         self._lose(self.q.get_nowait())
                     else:
-                        self._lose(item)
+                        self._lose(item, queued=False)
                         return
                 self.q.put_nowait(item)
         except Exception:
             self.errors += 1
 
-    def _lose(self, item) -> None:
+    def _lose(self, item, queued: bool = True) -> None:
         self.dropped += 1
         from . import diag as _D
         _D.note_capture_loss("dropped")
         if len(item) > 3 and item[3]:
             self.dropped_discourse += 1
             _D.note_capture_loss("dropped_discourse")
-        try:
-            self.q.task_done()
-        except ValueError:
-            pass
+        if queued:
+            try:
+                self.q.task_done()
+            except ValueError:
+                pass
 
     def _evict_observation(self) -> bool:
         """Drop the oldest queued non-discourse item; True when one went."""

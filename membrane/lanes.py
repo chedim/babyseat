@@ -6006,16 +6006,29 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
 
     def _v1_deliver(self, up: dict, raw: bytes, query: str, vec, verdict: dict,
                     ctx: str | None) -> None:
+        """#858: a turn cut before the model answered (seat_busy, quota, a dead
+        rung) never reaches the capture below; its person message is recorded
+        here so the chat's next turn still has it."""
+        self._turn_captured = False
+        try:
+            return self._v1_deliver_turn(up, raw, query, vec, verdict, ctx)
+        finally:
+            if not self._turn_captured and query:
+                _c = getattr(self.server, "capturer", None)
+                if _c is not None:
+                    try:
+                        _c.on_turn(query, "")
+                    except Exception:
+                        pass
+
+    def _v1_deliver_turn(self, up: dict, raw: bytes, query: str, vec, verdict: dict,
+                         ctx: str | None) -> None:
         """Forward to Ollama's /v1/chat/completions (stream or buffered), tee
         to the client, then learn the exchange into the field."""
         srv = self.server
         mem = srv.membrane
         self._v1_stream_open = False          # set once the SSE headers go out (#431)
-        # #858: the person's message is remembered BEFORE the model answers, so
-        # a turn cut in the gate (seat_busy, quota, a dead rung) still has it
-        _cap0 = getattr(srv, "capturer", None)
-        if _cap0 is not None and query:
-            _cap0.on_turn(query)
+
         route = verdict.get("route") or {}
         routed_model = route.get("route")
         orig_model = str(up.get("model") or "membrane")
@@ -6447,8 +6460,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         _learned = "" if _ca_failed else content
         _cap = getattr(srv, "capturer", None)
         if _cap is not None:
-            # the person's message was recorded when the turn began (#858)
-            _cap.on_turn("", _learned, "" if _ca_failed else (thought or ""))
+            self._turn_captured = True
+            _cap.on_turn(query, _learned, "" if _ca_failed else (thought or ""))
             if _ca_tools:
                 _cap.on_calls(query, _CA.captured_calls(_ca_tools))
                 for _t in _ca_tools:
