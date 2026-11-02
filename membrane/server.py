@@ -3875,6 +3875,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, an OFF-BOX
             # caller's writes need the seat token (Bearer, Basic's password
             # or the UI's cookie); reads and localhost stay open
+            if self._jwt_person() is not None:      # a token that names a person is a credential
+                return True
             return _SA.gate(self, _SA.serve_is_write(self.command, self.path.split("?", 1)[0]),
                             cookie=True, basic=True)
 
@@ -4650,7 +4652,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 _w = self._jwt_person()
                 _me = _w.sub if _w is not None else (
                     str(getattr(self, "_ui_speaker", "") or "") if getattr(self, "_ui_relay", False)
-                    else OWNER_SUB)                 # tokenless loopback = the seat owner
+                    else str(os.environ.get("MEMBRANE_OPERATOR") or OWNER_SUB))   # the seat token = the operator (#842)
                 if _me and not b.get("parentID"):       # #770: one chat per person
                     _mine = [x for x in sessions.list() if str(x.get("owner") or "") == _me
                              and not x.get("readonly") and not x.get("parentID")]

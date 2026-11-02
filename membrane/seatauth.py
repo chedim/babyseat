@@ -156,13 +156,14 @@ def presented_seat_token(handler, cookie: bool = False, basic: bool = False) -> 
 
 def owner(handler, cookie: bool = False, basic: bool = False) -> bool:
     """Is this request the seat's owner? JWT mode: it carried a valid token
-    (jwtauth.gate set handler._identity). Off: loopback, or the seat token.
+    (jwtauth.gate set handler._identity). Off: the seat token -- no address is
+    a credential (#842).
     An in-process call (no socket at all) is the seat itself."""
     if _JWT.enabled():
         return getattr(handler, "_identity", None) is not None
     if not hasattr(handler, "client_address"):
         return True
-    return is_loopback(handler) or presented_seat_token(handler, cookie=cookie, basic=basic)
+    return presented_seat_token(handler, cookie=cookie, basic=basic)
 
 
 # -- which requests are writes ------------------------------------------------------
@@ -223,7 +224,7 @@ def boot() -> None:
               "off-box writes are refused until it can", file=sys.stderr)
         return
     print(f"[auth] off-box writes need the seat token ({token_file()}; "
-          "`membrane token seat` prints it); localhost needs none", file=sys.stderr)
+          "`membrane token seat` prints it); every write needs it", file=sys.stderr)
     if os.environ.get(PRINT_ENV) == "1":
         print(f"[auth] seat token: {tok}", file=sys.stderr)
 

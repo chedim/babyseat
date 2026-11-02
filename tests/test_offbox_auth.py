@@ -293,10 +293,12 @@ class TestProxyLocal(_TokenFile):
         cls.srv.shutdown()
         cls.backend.shutdown()
 
-    def test_writes_need_nothing(self):
-        code, b, _ = _req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT)
+    def test_writes_need_the_token(self):      # #842: no address is a credential
+        self.assertEqual(_req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT)[0], 401)
+        auth = {"Authorization": f"Bearer {self.tok}"}
+        code, b, _ = _req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT, headers=auth)
         self.assertEqual(code, 200, b)
-        self.assertEqual(_req(self.port, "/api/pull", "POST", {})[0], 200)
+        self.assertEqual(_req(self.port, "/api/pull", "POST", {}, headers=auth)[0], 200)
 
     def test_internal_callers(self):
         from membrane import mcp_server as M
@@ -447,11 +449,13 @@ class TestServeOffBox(_Serve):
 class TestServeLocal(_Serve):
     OFFBOX = False
 
-    def test_writes_need_nothing(self):
-        code, s, _ = self._req("/session", "POST", {})
+    def test_writes_need_the_token(self):      # #842
+        self.assertEqual(self._req("/session", "POST", {})[0], 401)
+        auth = {"Authorization": f"Bearer {self.tok}"}
+        code, s, _ = self._req("/session", "POST", {}, auth)
         self.assertEqual(code, 200)
-        self.assertEqual(self._req(f"/session/{s['id']}", "PATCH", {"title": "t"})[0], 200)
-        self.assertEqual(self._req("/ui/conf")[1]["owner"], True)
+        self.assertEqual(self._req(f"/session/{s['id']}", "PATCH", {"title": "t"}, auth)[0], 200)
+        self.assertEqual(self._req("/ui/conf", headers=auth)[1]["owner"], True)
 
     def test_forwarded_header_is_off_box(self):
         self.assertEqual(self._req("/session", "POST", {}, {"X-Forwarded-For": "127.0.0.1"})[0], 401)

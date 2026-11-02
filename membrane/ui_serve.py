@@ -184,12 +184,14 @@ def find_file(name: str) -> Path | None:
     return assets.ensure(name, S.data_dir() / "assets")
 
 
-def _send_file(handler, p: Path) -> None:
+def _send_file(handler, p: Path, cookie: str = "") -> None:
     size = p.stat().st_size
     handler.send_response(200)
     handler.send_header("Content-Type", TYPES.get(p.suffix, "application/octet-stream"))
     handler.send_header("Content-Length", str(size))
     handler.send_header("Cache-Control", "public, max-age=604800" if p.suffix in BIG else "no-cache")
+    if cookie:
+        handler.send_header("Set-Cookie", cookie)
     handler.end_headers()
     if handler.command == "HEAD":
         return
@@ -449,7 +451,9 @@ def intercept(handler) -> bool:
         _json(handler, {"error": "method not allowed"}, 405)
         return True
     if path in ("/", "/membrane", "/index.html"):
-        _send_file(handler, UI_DIR / "index.html")
+        # the page arrives with the seat's cookie already minted (#842): no login prompt
+        _ck = "" if jwt else _SA.login_cookie(_SA.ensure(), _JWT.request_is_https(handler.headers))
+        _send_file(handler, UI_DIR / "index.html", _ck)
     elif path == "/favicon.ico":
         _send_file(handler, UI_DIR / "favicon.svg")
     elif path == "/ui/conf":
