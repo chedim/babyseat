@@ -2485,6 +2485,22 @@ def main() -> None:
                   "expired -- cutting the drain", file=sys.__stderr__),
             os._exit(70))[-1])
         _teardown_halt.start()
+        # each step's time into the log, so a slow one names itself (the 90 s hang, 2026-11-02)
+        _td = {"t": time.monotonic()}
+
+        def _td_mark(step: str) -> None:
+            now = time.monotonic()
+            print(f"[teardown] {step} {now - _td['t']:.1f}s", file=sys.__stderr__, flush=True)
+            _td["t"] = now
+        # capture stops first: what it holds is written, then it no longer writes into the
+        # field the steps below flush and close
+        try:
+            _cap = getattr(srv, "capturer", None)
+            if _cap is not None and hasattr(_cap, "stop"):
+                _cap.stop(timeout=5)
+        except Exception:
+            pass
+        _td_mark("capture stopped")
         # THE PICK'S RESERVATION (teardown): an unused bind closes -- a
         # failing boot never holds the serve port against its own retry
         try:
@@ -2512,6 +2528,7 @@ def main() -> None:
                 srv.autonode.close()
         except Exception:
             pass
+        _td_mark("autonode closed")
         # THE SEED PERSISTENCE (the personalized field's enabler):
         # session:now is RAM-only by covenant (never a shared doc), but
         # the seat's OWN seed file is the boot's neighborhood center: the
@@ -2542,16 +2559,19 @@ def main() -> None:
             _SUP.close_all()
         except Exception:
             pass
+        _td_mark("self process closed")
         if getattr(srv, "dreamer", None) is not None:
             try:
                 srv.dreamer.stop()
             except Exception:
                 pass
+        _td_mark("dreamer stopped")
         if getattr(srv, "thinker", None) is not None:
             try:
                 srv.thinker.stop()
             except Exception:
                 pass
+        _td_mark("thinker stopped")
         # THE FIELD'S LAST FLUSH (the file home, stage 4): the debounced
         # snapshots close their window NOW -- a clean stop loses nothing.
         try:
@@ -2561,6 +2581,7 @@ def main() -> None:
                 getattr(getattr(_fld, "b", None), "flush", lambda: None)()
         except Exception:
             pass
+        _td_mark("field flushed")
         # the couchbase clusters FIRST (peers substrate, the field's store,
         # the entity layer): each close() joins the SDK's asio IO threads so
         # no C-extension thread touches the interpreter during Py_Finalize
@@ -2574,11 +2595,13 @@ def main() -> None:
                 closer()
             except Exception:
                 pass
+            _td_mark(f"{getattr(closer, '__qualname__', 'store')} done")
         try:                           # #720: a planned restart keeps the warm matrices
             from .restarts import save_warm
             save_warm(srv)
         except Exception:
             pass
+        _td_mark("warm snapshot")
         for p in (cfg_path,):          # the doctrine file is stable: kept
             if not p:
                 continue

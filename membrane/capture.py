@@ -237,7 +237,7 @@ class Capturer:
     # ---- the worker ------------------------------------------------------------------
     def _put(self, build, discourse: bool = False, session: str | None = None,
              conv: str | None = None, exact_session: bool = False) -> None:
-        if self.mode == "off":
+        if self.mode == "off" or getattr(self, "_stopped", False):
             return
         try:
             # the key is read HERE, on the caller's (request) thread
@@ -306,10 +306,14 @@ class Capturer:
     def _run(self) -> None:
         while True:
             try:
-                build, session, conv, *_ = self.q.get(timeout=self.IDLE_S)
+                item = self.q.get(timeout=self.IDLE_S)
             except queue.Empty:
                 self._idle()
                 continue
+            if item is None:                       # stop(): the worker ends here
+                self.q.task_done()
+                return
+            build, session, conv, *_ = item
             try:
                 from .cblite import background
                 with background():                 # #755: a person's turn reads first
@@ -333,6 +337,20 @@ class Capturer:
                 self.errors += 1
                 if self.errors <= 3 or self.errors % 100 == 0:
                     print(f"[efield] idle hook error: {e}", file=sys.stderr)
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """The teardown's stop: what is queued is written (bounded by ``timeout``), nothing new
+        is taken, and the worker ends -- so it no longer writes into a field being closed."""
+        if getattr(self, "_stopped", False):
+            return
+        self._stopped = True
+        self.flush(timeout)
+        if self._t is not None:
+            try:
+                self.q.put_nowait(None)
+            except queue.Full:
+                return                             # still busy after the flush: the daemon dies with the process
+            self._t.join(timeout=timeout)
 
     def flush(self, timeout: float = 5.0) -> bool:
         """Wait until the queue drains (tests, shutdown)."""
