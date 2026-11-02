@@ -119,4 +119,5 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
 }
 
 const FieldViewLogic = { cardInfo, edgeStyles, chatStep, GLYPH, TABS, chatRows, logRows };
+if (typeof window !== "undefined") window.FieldViewLogic = FieldViewLogic;
 if (typeof module !== "undefined" && module.exports) module.exports = FieldViewLogic;

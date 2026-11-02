@@ -732,11 +732,25 @@ function workMarkers(graph, pos) {
   }
   return out;
 }
+/** The work graph's edges between visible markers: {from,to,a,b,color} (a/b = marker positions); the goal end picks the edgeStyles colour. */
+function workEdges(graph, pos, styles) {
+  const marks = new Map(workMarkers(graph, pos).map((m) => [m.id, m]));
+  const kinds = new Map((((graph && graph.nodes) || [])).map((n) => [n.id, n.kind]));
+  const out = [];
+  for (const e of (graph && graph.edges) || []) {
+    const a = marks.get(e.from), b = marks.get(e.to);
+    if (!a || !b) continue;
+    const gid = kinds.get(e.from) === "goal" ? e.from : kinds.get(e.to) === "goal" ? e.to : null;
+    const st = (gid && styles && styles[gid]) || null;
+    out.push({ from: e.from, to: e.to, a: a.p, b: b.p, color: (st && st.color) || "#8aa0c8", dash: (st && st.dash) || "" });
+  }
+  return out;
+}
 const WORK_ANSWERED = new Set(["decided", "closed"]);
 const WORK_FINISHED = new Set(["fulfilled", "done", "dropped"]);
 const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
 
-const F3Logic = { workMarkers, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+const F3Logic = { workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -2381,6 +2395,33 @@ class Field3DView {
       if (sc) el.style.transform = "translate(" + sc[0].toFixed(0) + "px," + sc[1].toFixed(0) + "px)";
     }
     for (const [id, el] of this._workEls) if (!seen.has(id)) el.style.display = "none";
+    this._stepWorkEdges();
+  }
+
+  /** goal edges as 3D line segments between marker positions, rebuilt each frame (follow the markers, vanish with an endpoint) */
+  _stepWorkEdges() {
+    const THREE = this.THREE; if (!THREE) return;
+    const CAP = 2000;
+    if (!this._workLines) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(CAP * 6), 3));
+      g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(CAP * 6), 3));
+      this._workLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false }));
+      this._workLines.frustumCulled = false;
+      this.scene.add(this._workLines);
+    }
+    const fv = (typeof window !== "undefined" && window.FieldViewLogic) || null;
+    const styles = fv ? fv.edgeStyles(this._work) : {};
+    const es = workEdges(this._work, this._workPos, styles).slice(0, CAP);
+    const pa = this._workLines.geometry.attributes.position, ca = this._workLines.geometry.attributes.color;
+    const col = new THREE.Color();
+    es.forEach((e, i) => {
+      col.set(e.color);
+      pa.setXYZ(i * 2, e.a[0], e.a[1], e.a[2]); pa.setXYZ(i * 2 + 1, e.b[0], e.b[1], e.b[2]);
+      ca.setXYZ(i * 2, col.r, col.g, col.b); ca.setXYZ(i * 2 + 1, col.r, col.g, col.b);
+    });
+    this._workLines.geometry.setDrawRange(0, es.length * 2);
+    pa.needsUpdate = true; ca.needsUpdate = true;
   }
 
   _ring(s) {

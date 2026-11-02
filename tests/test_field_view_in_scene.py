@@ -86,3 +86,27 @@ def test_answered_decision_leaves_only_when_every_linked_item_finished():
     g = {"nodes": nodes, "edges": edges}
     ids = [m["id"] for m in _f3("F.workMarkers(%s, %s)" % (json.dumps(g), json.dumps(pos)))]
     assert sorted(ids) == ["dfree", "dopen", "dsome", "t2"], ids
+
+
+def _fv(expr):
+    js = "const V=require(%r); process.stdout.write(JSON.stringify(%s))" % (str(UI / "fieldview.js"), expr)
+    return json.loads(subprocess.check_output(["node", "-e", js]))
+
+
+@NODE
+def test_goal_edges_are_drawn_in_scene_styled_follow_markers_and_leave_with_endpoints():
+    g = {"nodes": G["nodes"], "edges": [{"from": "g1", "to": "t1", "rel": "has"}, {"from": "d1", "to": "t1", "rel": "blocks"}]}
+    pos = {"g1": [0, 0, 0], "t1": [1, 0, 0], "d1": [0, 1, 0]}
+    sty = _fv("V.edgeStyles(%s)" % json.dumps(g))
+    es = _f3("F.workEdges(%s, %s, %s)" % (json.dumps(g), json.dumps(pos), json.dumps(sty)))
+    assert len(es) == 2
+    e = next(x for x in es if x["from"] == "g1")
+    assert e["a"] == [0, 0, 0] and e["b"] == [1, 0, 0] and e["color"] == sty["g1"]["color"]   # edgeStyles drives the look
+    pos["t1"] = [5, 5, 5]                                                                      # moves with the marker
+    e = next(x for x in _f3("F.workEdges(%s, %s, %s)" % (json.dumps(g), json.dumps(pos), json.dumps(sty))) if x["from"] == "g1")
+    assert e["b"] == [5, 5, 5]
+    g2 = {"nodes": [dict(n, status="done") if n["id"] == "t1" else n for n in G["nodes"]], "edges": g["edges"]}
+    assert _f3("F.workEdges(%s, %s, %s)" % (json.dumps(g2), json.dumps(pos), json.dumps(sty))) == []   # endpoint left
+    src = (UI / "field3d.js").read_text()
+    body = src[src.index("_stepWork() {"):src.index("_ring(s) {")]
+    assert "workEdges(" in body and "LineSegments" in body
