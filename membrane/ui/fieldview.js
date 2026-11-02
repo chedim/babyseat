@@ -1,7 +1,7 @@
 /* k6: THE FIELD VIEW -- goals, tasks and decisions are objects IN the field3d scene (field3d.js workMarkers,
  * at their entity positions). This element only fetches GET /membrane/work-graph, hands it to the scene and
  * shows the clicked item's card. The real chat stays the chat. */
-const GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
+const GLYPH = { goal: "🎯", task: "🔧", decision: "❓", wait: "⏳" };
 
 /** what a clicked icon's card shows */
 function cardInfo(graph, id) {
@@ -12,6 +12,7 @@ function cardInfo(graph, id) {
   const of = edges.find((e) => e.from === id && e.rel === "of");
   return { id, kind: n.kind, title: n.title, status: n.status,
     of: of ? t(of.to) : null,
+    waitingOn: (n.waiting_on || []).map((w) => w.title + " (" + w.reason + ")"),
     blocks: edges.filter((e) => e.from === id && e.rel === "blocks").map((e) => t(e.to)),
     blockedBy: edges.filter((e) => e.to === id && e.rel === "blocks").map((e) => t(e.from)) };
 }
@@ -117,7 +118,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       const sec = (h) => `<b style="display:block;margin:10px 0 4px;opacity:.7">${h}</b>`;
       const html = w ? `<div class="card" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b style="display:block;margin-bottom:6px">${GLYPH[w.info.kind]} ${esc(w.info.title)}</b>
           <div style="white-space:pre-wrap">${w.textHtml}</div>` +
-          sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${esc(w.info.of || "–")}<br>blocks: ${list(w.info.blocks)}<br>blocked by: ${list(w.info.blockedBy)}` +
+          sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${esc(w.info.of || "–")}<br>${w.info.waitingOn.length ? `<b style="color:#ff6b6b">blocked — waiting on: ${list(w.info.waitingOn)}</b><br>` : ""}blocks: ${list(w.info.blocks)}<br>blocked by: ${list(w.info.blockedBy)}` +
           sec("Chat") + w.chat.map((r) => `<div>${linkify(r)}</div>`).join("") + `<input class="say" placeholder="say…" style="width:100%">` +
           sec("Logs") + w.logs.map((r) => `<div style="font-size:12px">${linkify(r)}</div>`).join("") + `</div>` : "";
       this.style.cssText = "position:absolute;inset:0;display:block;pointer-events:none";
