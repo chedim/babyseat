@@ -82,4 +82,9 @@ if __name__ == "__main__":
 def test_feedback_goes_through_a_person():
     line = N.feedback_line()
     assert "https://github.com/chedim/babyseat/issues/new?title=" in line
-    assert "never post it yourself" in line
+    assert "show the person the title and body for review" in line
+    assert "post with gh once they approve" in line
+    assert "'file it' counts as approval" in line
+    assert "no gh login" in line
+    assert "no private data" in line
+    assert "never post it yourself" not in line
