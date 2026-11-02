@@ -127,6 +127,37 @@ def _slug() -> str:
 
 # ---- stores -----------------------------------------------------------------
 
+def migrate_one_chat(sessions, keep: str, operator: str) -> None:
+    """#770 boot migration: the operator's chat `keep` is stamped theirs; every
+    other chat they own goes readonly. Idempotent."""
+    with sessions._lock:
+        k = sessions.sessions.get(keep)
+        if k is None:
+            return
+        k["owner"] = operator
+        k.pop("readonly", None)
+        for sid, s in sessions.sessions.items():
+            if sid != keep and str(s.get("owner") or "") == operator:
+                s["readonly"] = True
+    sessions.flush()
+
+
+# The seat owner's identity for a tokenless loopback caller (#770): one person,
+# one chat, and the owner is a person too.
+OWNER_SUB = "owner"
+
+
+def boot_migrate_one_chat(sessions, env=None) -> None:
+    """#770 one-time boot migration, configured not hardcoded: the chat named by
+    MEMBRANE_OPERATOR_CHAT (a session id) becomes MEMBRANE_OPERATOR's (default
+    the seat owner) one chat; their other chats go readonly. No chat named:
+    nothing moves."""
+    env = os.environ if env is None else env
+    keep = str(env.get("MEMBRANE_OPERATOR_CHAT") or "").strip()
+    if keep:
+        migrate_one_chat(sessions, keep, str(env.get("MEMBRANE_OPERATOR") or OWNER_SUB))
+
+
 def _migrated_name(path: str) -> str:
     return f"{path}.migrated-{time.strftime('%Y%m%d-%H%M%S')}"
 
@@ -4502,14 +4533,22 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 return self._json_out(out)
             if path == "/session":
                 b = self._read_body()
+                _w = self._jwt_person()
+                _me = _w.sub if _w is not None else (
+                    str(getattr(self, "_ui_speaker", "") or "") if getattr(self, "_ui_relay", False)
+                    else OWNER_SUB)                 # tokenless loopback = the seat owner
+                if _me and not b.get("parentID"):       # #770: one chat per person
+                    _mine = [x for x in sessions.list() if str(x.get("owner") or "") == _me
+                             and not x.get("readonly") and not x.get("parentID")]
+                    if _mine:
+                        return self._json_out(_mine[-1])
                 s = sessions.create(title=b.get("title"),
                                     parent_id=b.get("parentID"))
                 _who = self._jwt_person()
-                if _who is not None or getattr(self, "_ui_relay", False):   # the session is this person's
+                if not b.get("parentID"):           # the session is this person's (the owner's when tokenless)
                     _row = sessions.sessions.get(s["id"])
                     if _row is not None:
-                        _row["owner"] = s["owner"] = (_who.sub if _who is not None
-                                                      else str(getattr(self, "_ui_speaker", "") or ""))
+                        _row["owner"] = s["owner"] = _me
                         sessions.flush()
                 # THE REQUESTER'S PICK WINS (the 'qwen3:8b by hash
                 # order' exhibit): the POST body's model (the TUI's
@@ -4579,8 +4618,18 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
         # -- the message turn ---------------------------------------------------
 
         def _message(self, sid: str, async_: bool) -> None:
-            if sessions.get(sid) is None:
+            _ses = sessions.get(sid)
+            if _ses is None:
                 return self._notfound()
+            if _ses.get("readonly"):                  # #770: the person has one chat
+                _o = str(_ses.get("owner") or "")
+                _c = next((x["id"] for x in reversed(sessions.list()) if str(x.get("owner") or "") == _o
+                           and not x.get("readonly")), "")
+                _b = json.dumps({"error": "this chat is readonly: use the person's chat",
+                                 "chat": _c, "sessionID": _c}).encode()
+                self.send_response(409); self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(_b))); self.end_headers(); self.wfile.write(_b)
+                return
             b = self._read_body()
             if runner is None:
                 return self._json_err(503, "the turn runner is not wired")

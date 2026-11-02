@@ -2093,6 +2093,11 @@ def main() -> None:
             # has one (one document per session / message), else in the files
             _chat_cbl = getattr(getattr(getattr(srv, "efield", None), "b", None), "db", None)
             sess_store = SessionStore(str(d / "serve-sessions.json"), cbl=_chat_cbl)
+            try:
+                from .server import boot_migrate_one_chat
+                boot_migrate_one_chat(sess_store)     # #770: one-time, from MEMBRANE_OPERATOR_CHAT
+            except Exception:
+                pass
             msg_store = MessageStore(str(d / "serve-msgs.json"), cbl=_chat_cbl)
             _serve_hub = SSEHub()             # the ONE room's event bus
             msg_store.hub = _serve_hub        # the row-before-part covenant

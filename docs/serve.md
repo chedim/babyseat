@@ -1,0 +1,4 @@
+
+## One chat per person (#770)
+
+`POST /session` as a person returns that person's existing chat (a new one only if they have none); loop sessions are still new each time. A tokenless localhost caller is the seat owner (identity `owner`) and gets the owner's one chat too: no new chat per `POST /session`. At boot the seat runs a one-time migration (idempotent): set `MEMBRANE_OPERATOR_CHAT` to the session id that is the operator's one chat (and `MEMBRANE_OPERATOR` to their `sub`; default `owner`); that chat is stamped theirs if unowned and their other chats are marked `readonly` (still listed and readable). With no chat named, nothing is migrated. Posting a message to a readonly chat is refused with 409 and the person's chat id (`chat` / `sessionID`). Watch escalations go to the event owner's chat, not the newest chat.
