@@ -1681,7 +1681,7 @@ const HSTYLE = `
     .chat.hidden ~ .voice { bottom:12px; }
     .view-field .voice { bottom:12px; }   /* #470: the cockpit's chat is inside it, no sheet to clear */
     .card { bottom:calc(56dvh + 80px) !important; }
-    .chat.hidden ~ .card { bottom:76px !important; }
+    .chat.hidden ~ .card, .chat.covered ~ .card { bottom:76px !important; }
     .status { display:none; }
     .sbox input { width:110px; }
     .top { max-width:calc(100% - 24px) !important; }
