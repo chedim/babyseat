@@ -100,7 +100,10 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
     set api(a) { this._api = a; this.refresh(); }
     /** the scene the markers live in (a Field3DView): it gets every new graph, and calls open(id) on a click */
     set scene(sc) { this._scene = sc; if (this._graph && sc) sc.setWork(this._graph, (id) => this.open(id)); }
-    open(id) { this._open = id; this._hist = null; this._chat = null; this._draw(); this._load(); }
+    open(id) {
+      if (id && typeof id === "object") { this._run = id; this._open = null; this._draw(); return; }   // #843: a flown run: its code, rc, output
+      this._run = null; this._open = id; this._hist = null; this._chat = null; this._draw(); this._load();
+    }
     async refresh() {
       let g = null;
       try { g = await this._api.get("/membrane/work-graph"); } catch (e) { g = null; }
@@ -134,12 +137,14 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
           sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${esc(w.info.of || "–")}<br>${w.info.waitingOn.length ? `<b style="color:#ff6b6b">blocked — waiting on: ${list(w.info.waitingOn)}</b><br>` : ""}blocks: ${list(w.info.blocks)}<br>blocked by: ${list(w.info.blockedBy)}` +
           sec("Chat") + w.chat.map((r) => `<div>${linkify(r)}</div>`).join("") + `<input class="say" placeholder="say…" style="width:100%">` +
           sec("Logs") + w.logs.map((r) => `<div style="font-size:12px">${linkify(r)}</div>`).join("") + `</div>` : "";
+      const r = this._run;
+      const rhtml = r ? `<div class="card" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b>rc ${esc(String(r.rc))}</b>${sec("Code")}<pre style="white-space:pre-wrap">${esc(r.code || "")}</pre>${sec("Output")}<pre style="white-space:pre-wrap">${esc(r.output || "")}</pre></div>` : "";
       this.style.cssText = "position:absolute;inset:0;display:block;pointer-events:none";
-      this.innerHTML = html;
+      this.innerHTML = html || rhtml;
       const say = this.querySelector && this.querySelector(".say");
       if (say) say.onkeydown = (e) => { if (e.key === "Enter") this._say(say.value.trim()); };
       this.onclick = (e) => {
-        if (e.target.closest(".x")) { this._open = null; this._draw(); return; }
+        if (e.target.closest(".x")) { this._open = null; this._run = null; this._draw(); return; }
       };
       const c = this.querySelector && this.querySelector(".card"); if (c) c.style.pointerEvents = "auto";
     }

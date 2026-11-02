@@ -766,6 +766,9 @@ function workEdges(graph, pos, styles, hover) {
   }
   return out;
 }
+/** #843 rocket view: a finished run drifts slowly backward along the fixed world Z axis, from where it ran. */
+const ROCKET_SPEED = 0.4;   // field units per second
+function rocketZ(run, now) { return Math.max(0, now - ((run && run.ts) || now)) * ROCKET_SPEED; }
 const WORK_ANSWERED = new Set(["decided", "closed"]);
 const WORK_FINISHED = new Set(["fulfilled", "done", "dropped", "cancelled"]);
 const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓", wait: "⏳" };
@@ -798,7 +801,7 @@ function frameSelection(center, points, fovY, aspect, margin) {
   return { target: center.slice(0, 3), r: frameBall(Math.max(R, 1), fovY, aspect, margin) };
 }
 
-const F3Logic = { selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+const F3Logic = { rocketZ, selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -1338,6 +1341,7 @@ class Field3DView {
     if (this._edgesDirty) { this._rebuildEdges(); this._rebuildBlurp(); }
     this._stepRings(now);
     this._stepWork();
+    this._stepRocket();
     this._stepEdgePulses(now);
     this._stepAvatars(dt);
     this._stepCurrent(now);
@@ -2433,9 +2437,37 @@ class Field3DView {
     }
   }
 
+  _rocketClick(id) {   // a flying run opens like a work marker: its code, rc and output
+    const r = (this._runs || []).find((x) => x.id === id);
+    if (r && this._workOpen) this._workOpen({ id: r.id, root: r.root, rc: r.rc, code: r.text, output: r.head });
+  }
+
+  _stepRocket() {   // each finished run = one tiny glyph graph, flying back along +Z from the work origin
+    this._rocketEls = this._rocketEls || new Map();
+    const runs = this._runs || [], now = Date.now() / 1000, seen = new Set();
+    const o = Object.values(this._workPos || {})[0] || [0, 0, 0];
+    for (const r of runs) {
+      seen.add(r.id);
+      let el = this._rocketEls.get(r.id);
+      if (!el) {
+        el = document.createElement("div");
+        el.style.cssText = "position:absolute;font-size:12px;cursor:pointer;pointer-events:auto;user-select:none;white-space:nowrap";
+        el.textContent = (r.rc ? "✗" : "✓") + "●".repeat(Math.min((r.nodes || []).length, 6));
+        el.title = (r.text || r.root).slice(0, 80) + " — rc " + r.rc;
+        el.addEventListener("click", () => this._rocketClick(r.id));
+        this.labelLayer.appendChild(el); this._rocketEls.set(r.id, el);
+      }
+      const sc = this._project([o[0], o[1], o[2] + rocketZ(r, now)]);
+      el.style.display = sc ? "" : "none";
+      if (sc) el.style.transform = "translate(" + sc[0].toFixed(0) + "px," + sc[1].toFixed(0) + "px)";
+    }
+    for (const [id, el] of this._rocketEls) if (!seen.has(id)) { el.remove(); this._rocketEls.delete(id); }
+  }
+
   /** the work graph (goals/tasks/decisions) as markers in the scene, each at its entity's field position */
   setWork(graph, onOpen) {
     this._work = graph || null; this._workOpen = onOpen || this._workOpen;
+    this._runs = (graph && graph.runs) || [];   // #843: the feed's finished runs, capped server-side (12)
     if (!graph && this._workLines) for (const k in this._workLines) this._workLines[k].geometry.setDrawRange(0, 0);   // the view closed: lines go too
     this._workPos = this._workPos || {};
     for (const n of workShows(graph)) {
