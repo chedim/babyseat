@@ -349,6 +349,13 @@ class IntentBoard:
                 lines.append(f"- {g.eid.rsplit(':', 1)[-1]} "
                              f"{(props.get('name') or '')[:100]!r}"
                              f"{near}")
+            held = {g.eid for g in goals}
+            for e in self.selection._open_goals():
+                if e.eid in held:
+                    continue
+                lines.append(f"- {e.eid.rsplit(':', 1)[-1]} "
+                             f"{((e.properties or {}).get('name') or '')[:100]!r}"
+                             " (open, off the set)")
             return "\n".join(lines)
         closed = [i for i in self.intents.values() if i.status != "open"]
         if not self.intents:

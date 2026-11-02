@@ -1270,11 +1270,17 @@ def tool_intend(args: dict, port: int) -> str:
     out = _http(port, "POST", "/membrane/intend", body)
     if not out.get("ok"):
         return f"Intend failed: {out.get('error', 'unknown error')}"
-    what = "created + pinned" if out.get("created") else "pinned (existing goal)"
-    return (f"Goal active ({what}): {out.get('eid')}\n"
-            f"The active set steers the dream loop; the banner shows it. "
-            f"Drop intent #N suppresses it on this seat; fulfill #N closes "
-            f"it shared.")
+    what = "created" if out.get("created") else "existing goal"
+    if out.get("on_set", True):
+        return (f"Goal active ({what}, pinned): {out.get('eid')}\n"
+                f"The active set steers the dream loop; the banner shows it. "
+                f"Drop intent #N suppresses it on this seat; fulfill #N closes "
+                f"it shared.")
+    cap = out.get("cap", "")
+    return (f"Goal open ({what}) but NOT on the active set: {out.get('eid')}\n"
+            f"The set is full (cap {cap}) and held goals outrank this pin. "
+            f"It stays open and shared; free a slot with drop intent #N or "
+            f"fulfill #N, then it can rank in.")
 
 
 def tool_fulfill(args: dict, port: int) -> str:

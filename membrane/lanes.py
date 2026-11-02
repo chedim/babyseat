@@ -1725,7 +1725,15 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = "",
                               goal.eid, text, created=created)
     except Exception:
         pass
-    return {"ok": True, "eid": goal.eid, "created": created, "pinned": True}
+    # THE TRUTHFUL REPLY (#771): the pin is a bonus, not a seat -- say
+    # whether the goal is really on the capped active set now
+    from .intent import GOAL_SET_CAP
+    try:
+        on_set = goal.eid in {g.eid for g in sel.refresh(time.time())}
+    except Exception:
+        on_set = False
+    return {"ok": True, "eid": goal.eid, "created": created, "pinned": True,
+            "on_set": on_set, "cap": GOAL_SET_CAP}
 
 
 def _intent_cmd(srv, q: str) -> str:
