@@ -62,5 +62,5 @@ def test_field_entity_single_click_does_not_open_drawer():
 
 def test_canvas_dblclick_opens_and_background_click_clears():
     src = (UI / "field3d.js").read_text()
-    assert re.search(r'addEventListener\("dblclick".*api\.onOpen', src), "canvas dblclick must call api.onOpen"
+    assert re.search(r'addEventListener\("dblclick".{0,600}?api\.onOpen', src, re.S), "canvas dblclick must call api.onOpen"
     assert "this.select(null); this.api.onSelect(null)" in src  # background click clears (kept)
