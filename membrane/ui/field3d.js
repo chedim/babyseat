@@ -777,7 +777,28 @@ function workDashGroups(edges) {
   return g;
 }
 
-const F3Logic = { workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+/** #850: the ids a selection keeps lit: an item of the work graph -> its goal graph (the goal and everything
+ *  under it); anything else -> itself and its relations. null = nothing selected. */
+function selectionScope(graph, id, relatedIds) {
+  if (id == null) return null;
+  const nodes = (graph && graph.nodes) || [], me = nodes.find((n) => n.id === id);
+  if (me) {
+    const gid = me.kind === "goal" ? me.id : me.goal || null;
+    if (gid) return nodes.filter((n) => n.id === gid || n.goal === gid).map((n) => n.id);
+  }
+  return [id, ...(relatedIds || [])];
+}
+/** #850: brightness of id under a scope (1 = full); F3_FADE approved by the operator. */
+const F3_FADE = 0.2;
+function fadeFor(scope, id) { return !scope || scope.includes(id) ? 1 : F3_FADE; }
+/** #850: camera that centres the item and fits all the points round it (same margin as the default frame). */
+function frameSelection(center, points, fovY, aspect, margin) {
+  let R = 0;
+  for (const p of points || []) R = Math.max(R, Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2]));
+  return { target: center.slice(0, 3), r: frameBall(Math.max(R, 1), fovY, aspect, margin) };
+}
+
+const F3Logic = { selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -1132,7 +1153,8 @@ class Field3DView {
     const m = this.meta[s];
     const off = !m || this.hidden.has(m.kind);
     this.sizeA[s] = off ? 0 : this.baseSize[s] * (this.sel && m && this.sel === m.id ? 1.8 : 1);
-    for (let i = 0; i < 3; i++) this.colA[s * 3 + i] = this.baseCol[s * 3 + i];
+    const f = m ? fadeFor(this._scope, m.id) : 1;   // #850: outside the selection's graph = dimmed
+    for (let i = 0; i < 3; i++) this.colA[s * 3 + i] = this.baseCol[s * 3 + i] * f;
   }
 
   _dirtyPoints() {
@@ -1417,8 +1439,32 @@ class Field3DView {
     return best == null ? null : this.meta[best];
   }
 
+  /** #850: scope of the current selection (work graph, else relations) -> fade everything else; frame it */
+  _applyScope(frame) {
+    const rel = this.sel ? this.related(this.sel).map((x) => x.id) : [];
+    this._scope = selectionScope(this._work, this.sel, rel);
+    for (const s of this.slots.values()) this._paintSlot(s);
+    this._dirtyPoints();
+    if (!frame || !this._scope) return;
+    const at = (i) => { const s = this.slots.get(i); return this._workPos[i] || (s != null ? [this.posA[s * 3], this.posA[s * 3 + 1], this.posA[s * 3 + 2]] : null); };
+    const c = at(this.sel); if (!c) return;
+    const pts = this._scope.map(at).filter(Boolean), fit = frameSelection(c, pts, this.camera.fov * Math.PI / 180, this.camera.aspect);
+    this._flyAnim = { from: this.orbit.target.slice(), to: fit.target, r0: this.orbit.r, r1: fit.r, t0: performance.now() };
+    const step = () => {
+      const a = this._flyAnim; if (!a) return;
+      const u = Math.min(1, (performance.now() - a.t0) / 700), e = u * u * (3 - 2 * u);
+      for (let i = 0; i < 3; i++) this.orbit.target[i] = a.from[i] + (a.to[i] - a.from[i]) * e;
+      this.orbit.r = a.r0 + (a.r1 - a.r0) * e;
+      if (u < 1) requestAnimationFrame(step); else this._flyAnim = null;
+    };
+    requestAnimationFrame(step);
+  }
+
+  _fadeOf(id) { return fadeFor(this._scope, id); }
+
   select(id) {
     const old = this.sel; this.sel = id;
+    this._applyScope(id != null && id !== old);
     for (const k of [old, id]) { const s = this.slots.get(k); if (s != null) this._paintSlot(s); }
     this._dirtyPoints();
     this._edgesDirty = true;
@@ -1430,6 +1476,7 @@ class Field3DView {
       if (this.sel !== id || this.pid !== pid || !hit) return;
       this.selNb = { id, p: hit.p, nb: hit.neighbours || [] };
       this._edgesDirty = true;
+      this._applyScope(true);
       if (this.api.onRelated) this.api.onRelated(id);
     }).catch(() => {});
   }
@@ -1564,7 +1611,7 @@ class Field3DView {
     };
     el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
     el.addEventListener("wheel", (e) => { e.preventDefault(); this.orbit.r = Math.max(30, Math.min(6000, this.orbit.r * Math.exp(e.deltaY * 0.0012))); }, { passive: false });
-    el.addEventListener("dblclick", (e) => { const m = this._pick(e.offsetX, e.offsetY); if (m) { this.flyTo(m.id); this.api.onSelect(m); } });
+    el.addEventListener("dblclick", (e) => { const m = this._pick(e.offsetX, e.offsetY); if (m) { this.select(m.id); this.api.onSelect(m); if (this.api.onOpen) this.api.onOpen(m); } });
     el.addEventListener("pointerleave", () => this.api.onHover(null));
   }
 
@@ -2415,14 +2462,15 @@ class Field3DView {
         el = document.createElement("div");
         el.style.cssText = "position:absolute;font-size:22px;cursor:pointer;pointer-events:auto;user-select:none;margin:-14px 0 0 -11px";
         el.textContent = WORK_GLYPH[m.kind];
-        el.onclick = () => { if (this._workOpen) this._workOpen(m.id); };
+        el.addEventListener("click", () => { this.select(m.id); if (this.api.onSelect) this.api.onSelect({ id: m.id, work: true }); });
+        el.addEventListener("dblclick", () => { if (this._workOpen) this._workOpen(m.id); });
         el.addEventListener("pointerenter", () => { this._workHover = m.id; el.style.fontSize = "30px"; });
         el.addEventListener("pointerleave", () => { if (this._workHover === m.id) this._workHover = null; el.style.fontSize = "22px"; });
         this.labelLayer.appendChild(el); this._workEls.set(m.id, el);
       }
       el.title = (m.title || m.id) + (m.blocked ? " — blocked: " + m.why : "");
       el.style.filter = m.blocked ? "grayscale(1) drop-shadow(0 0 4px #e6194b)" : "";   // blocked looks different from plain open
-      el.style.opacity = m.blocked ? "0.7" : "1";
+      el.style.opacity = String((m.blocked ? 0.7 : 1) * (this._fadeOf ? this._fadeOf(m.id) : 1));
       const sc = this._project(m.p);
       el.style.display = sc ? "" : "none";
       if (sc) el.style.transform = "translate(" + sc[0].toFixed(0) + "px," + sc[1].toFixed(0) + "px)";
@@ -2431,8 +2479,7 @@ class Field3DView {
     this._stepWorkEdges();
   }
 
-  /** goal edges as 3D line segments between marker positions, rebuilt each frame (follow the markers, vanish with an endpoint) */
-  _stepWorkEdges() {
+  _stepWorkEdges() {   // goal edges as 3D line segments between marker positions, rebuilt each frame (follow the markers, vanish with an endpoint)
     const THREE = this.THREE; if (!THREE) return;
     const CAP = 2000;
     const fv = (typeof window !== "undefined" && window.FieldViewLogic) || null;
