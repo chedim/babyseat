@@ -712,13 +712,27 @@ function blurpLayers(ov, has, lastTs) {
 
 /** Goals, tasks and decisions as scene markers: one per work-graph node that has a field position (pos: id -> [x,y,z]). */
 function workMarkers(graph, pos) {
-  const out = [];
-  for (const n of (graph && graph.nodes) || []) {
+  const out = [], nodes = (graph && graph.nodes) || [], edges = (graph && graph.edges) || [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  // rule 2b: an answered decision leaves only once every goal/task linked to it has finished; unanswered, or answered with nothing linked, stays
+  const decisionDone = (d) => {
+    if (!WORK_ANSWERED.has(d.status)) return false;
+    const linked = [];
+    for (const e of edges) {
+      const o = byId.get(e.from === d.id ? e.to : e.to === d.id ? e.from : null);
+      if (o && (o.kind === "goal" || o.kind === "task")) linked.push(o);
+    }
+    return linked.length > 0 && linked.every((o) => WORK_FINISHED.has(o.status));
+  };
+  for (const n of nodes) {
     const p = pos && pos[n.id];
-    if (p && !WORK_FINISHED.has(n.status) && (n.kind === "goal" || n.kind === "task" || n.kind === "decision")) out.push({ id: n.id, kind: n.kind, title: n.title, status: n.status, p: p.slice(0, 3) });
+    if (!p || !(n.kind === "goal" || n.kind === "task" || n.kind === "decision")) continue;
+    if (n.kind === "decision" ? (n.status === "dropped" || decisionDone(n)) : WORK_FINISHED.has(n.status)) continue;
+    out.push({ id: n.id, kind: n.kind, title: n.title, status: n.status, p: p.slice(0, 3) });
   }
   return out;
 }
+const WORK_ANSWERED = new Set(["decided", "closed"]);
 const WORK_FINISHED = new Set(["fulfilled", "done", "dropped"]);
 const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
 

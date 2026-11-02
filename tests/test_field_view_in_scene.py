@@ -68,3 +68,21 @@ def test_normal_chat_input_history_and_live_replies_untouched():
     fv = (UI / "fieldview.js").read_text()
     assert 'placeholder="ask…"' not in fv and "panel" not in fv.split("customElements")[0].lower().replace("panel-", ""), \
         "field view must not reach into the chat panel"
+
+
+@NODE
+def test_answered_decision_leaves_only_when_every_linked_item_finished():
+    # rule 2b: unanswered always stays; answered with no linked goal/task stays; answered leaves once all linked are finished
+    pos = {k: [0, 0, 0] for k in ("dopen", "dfree", "dall", "dsome", "g1", "t1", "g2", "t2")}
+    nodes = [{"id": "dopen", "kind": "decision", "status": "open"},
+             {"id": "dfree", "kind": "decision", "status": "decided"},
+             {"id": "dall", "kind": "decision", "status": "decided"},
+             {"id": "dsome", "kind": "decision", "status": "decided"},
+             {"id": "g1", "kind": "goal", "status": "fulfilled"}, {"id": "t1", "kind": "task", "status": "done"},
+             {"id": "g2", "kind": "goal", "status": "fulfilled"}, {"id": "t2", "kind": "task", "status": "open"}]
+    edges = [{"from": "dopen", "to": "g1", "rel": "blocks"},      # unanswered, linked work finished: stays
+             {"from": "dall", "to": "g1", "rel": "blocks"}, {"from": "dall", "to": "t1", "rel": "blocks"},
+             {"from": "dsome", "to": "g2", "rel": "blocks"}, {"from": "dsome", "to": "t2", "rel": "blocks"}]
+    g = {"nodes": nodes, "edges": edges}
+    ids = [m["id"] for m in _f3("F.workMarkers(%s, %s)" % (json.dumps(g), json.dumps(pos)))]
+    assert sorted(ids) == ["dfree", "dopen", "dsome", "t2"], ids
