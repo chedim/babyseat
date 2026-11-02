@@ -217,7 +217,7 @@ Every write on the field is an event `{path, old, new, writer, chain, ts}` (`mem
 - **Births:** a new entity is one birth event (`<eid>`); its first properties ride the entity, not separate events.
 - **Other threads:** threads that are not handed the chain start fresh. These are Blurp's loop, the dreamer, consequences, predict, and the claude-agent runner; each is its own root until part D gives Blurp's chain to self. A deleted property and one set to `None` read the same.
 - **Listeners** run inside the writer's call. They must be cheap and **must not write**: a listener that reacts queues the work and writes later. One that raises is counted (`writes.errors`).
-- **Not authority:** the writer and chain are provenance only, and nothing may gate on them. Any local caller can send the headers.
+- **Not authority:** the writer and chain are provenance only, and nothing may gate on them for safety. (One routing use, #867: a goal's `replan` is a send-back when its writer is `llm`/`person:`, not a trigger's; the adapter records it as `replan_by`.) Any local caller can send the headers.
 
 ## Effects are writes (#576, part E)
 

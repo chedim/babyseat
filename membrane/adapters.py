@@ -66,6 +66,8 @@ def _branch(path: str) -> tuple[str, str, str] | None:
         return "seat", eid, prop
     if prop == "invoke":
         return "methods", eid, prop             # a method entity or not: the worker reads method_name
+    if prop == "replan":
+        return "replan", eid, prop              # #867: who wrote a goal's replan decides a send-back
     if prop == "plan":
         return "plan", eid, prop                # #738: a goal's plan (the worker checks it is a Goal)
     from . import goalgraph as _GG
@@ -206,6 +208,18 @@ def _plan(srv, est, ent, prop, new, by) -> None:
     _consume(est, ent, prop, new, r if r.get("ok") else r.get("error"), rc=_rc(r))
 
 
+def _replan(srv, est, ent, prop, new, by) -> None:
+    """#867: record who wrote a goal's replan (`replan_by`); a person's or the chat's
+    send-back (not a trigger's) on a fulfilled or closed goal reopens it."""
+    from . import goalgraph as GG
+    if ent.cls != "Goal":
+        return
+    ent.properties = {**(ent.properties or {}), "replan_by": by}
+    if GG.is_send_back(by) and (ent.properties.get("status") or GG.OPEN) in ("fulfilled", "closed"):
+        ent.properties["status"] = GG.OPEN
+    est.upsert(ent, embedder=None)
+
+
 def _tasks(srv, est, ent, prop, new, by) -> None:
     """#738: a task whose status became owed goes to the worker pool."""
     from . import goalgraph as GG
@@ -225,7 +239,7 @@ def _wait(srv, est, ent, prop, new, by) -> None:
 
 
 EFFECTS = {"exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
-           "toybox": _toybox, "plan": _plan, "tasks": _tasks, "wait": _wait}
+           "toybox": _toybox, "plan": _plan, "replan": _replan, "tasks": _tasks, "wait": _wait}
 
 
 def write_and_wait(est, eid: str, prop: str, value, timeout: float = 20.0, srv=None) -> dict:

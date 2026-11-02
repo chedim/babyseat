@@ -6,7 +6,8 @@ from __future__ import annotations
 
 ACT_HINT = ("Check the receipts against what is live now (the PR head, its CI); close the goal "
             "(goal action='close') with the receipt, or send it back (entity_edit its replan with "
-            "what is missing).")
+            "what is missing; to run a done task again the plan lists its key with redo: true, and a "
+            "send-back on a fulfilled goal reopens it). A pass that finds nothing runnable says so here.")
 
 
 def _or(options) -> str:
