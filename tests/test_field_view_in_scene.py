@@ -59,12 +59,20 @@ def test_finished_goals_and_tasks_leave_the_field_without_reload():
     assert "workMarkers(" in body and "el.remove()" in body, "setWork must drop elements of finished nodes"
 
 
+def test_closing_the_view_clears_the_work_lines():
+    src = (UI / "field3d.js").read_text()
+    a = src.index("setWork(graph, onOpen)")
+    body = src[a:src.index("_stepWork() {", a)]
+    assert re.search(r"_workLines[^;]*setDrawRange\(0,\s*0\)", body) and "!graph" in body, \
+        "setWork(null) must zero the work-lines draw range"
+
+
 def test_normal_chat_input_history_and_live_replies_untouched():
     # the real chat is panel.js (input bar, history on reload, live replies); the field view must not replace or edit it
     panel = (UI / "panel.js").read_text()
     assert re.search(r"/message|prompt_async", panel), "chat send path missing"
     assert re.search(r"history|/message\b", panel), "chat history reload path missing"
-    assert "placeholder" in panel and "<input" in panel or "textarea" in panel, "chat input bar missing"
+    assert "placeholder" in panel and ("<input" in panel or "textarea" in panel), "chat input bar missing"
     fv = (UI / "fieldview.js").read_text()
     assert 'placeholder="ask…"' not in fv and "panel" not in fv.split("customElements")[0].lower().replace("panel-", ""), \
         "field view must not reach into the chat panel"

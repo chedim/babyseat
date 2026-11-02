@@ -2370,6 +2370,7 @@ class Field3DView {
   /** the work graph (goals/tasks/decisions) as markers in the scene, each at its entity's field position */
   setWork(graph, onOpen) {
     this._work = graph || null; this._workOpen = onOpen || this._workOpen;
+    if (!graph && this._workLines) this._workLines.geometry.setDrawRange(0, 0);   // the view closed: lines go too
     this._workPos = this._workPos || {};
     for (const n of workShows(graph)) {
       if (this._workPos[n.id]) continue;
