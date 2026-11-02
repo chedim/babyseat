@@ -22,7 +22,10 @@ arrives with the agent's ``pick``. Agents make cards with the entity tools
 (entity_add + entity_edit properties); only the operator answers, through
 :func:`answer`, which sets ``value``/``set_by``/``set_at`` and appends the
 decision to the operator ledger (recalled verbatim, as law). entity_edit
-refuses those keys on a Decision, so an agent can ask but never decide.
+refuses those keys on a Decision, so an agent can ask but never decide on its own.
+A person who answered in the chat in plain words is passed on by the agent in that
+chat through :func:`relay` (#845): their quoted words must be there, and the record
+says it was relayed.
 
 The edges are eid lists on the card: ``blocks`` (future -> future),
 ``led_to`` (past -> what it led to) and ``carried_by`` (in flight -> the work
@@ -51,6 +54,7 @@ EDGE_KEYS = ("blocks", "led_to", "carried_by")
 VAR_TYPES = ("int", "float", "bool", "string", "option")
 MESSAGE_ID_MAX = 200                # a chat message id's clip (ids are short; never a paste)
 LEDGER_TITLE_MAX = 160              # the title's clip in the ledger line (one line, never a paste)
+QUOTE_MAX = 2000                    # a relayed answer's quote on the card: entity_edit's own property cap
 _ANSWER_LOCK = threading.Lock()     # one answer at a time: a card is decided once
 
 _TRUE = ("true", "yes", "y", "on", "1")
@@ -64,7 +68,8 @@ def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
     if cls != CLASS_DECISION:
         return None
     if key in ANSWER_OWNED:
-        return "answer-owned (only the operator answers a Decision card)"
+        return ("answer-owned (only the person answers a Decision card: pass on what they "
+                "said in the chat with answer_card)")
     cur = (props or {}).get("status")
     if key == "status" and cur in LOCKED:
         return f"the card is {cur}; changing a past decision comes with timelines (#470 step 3)"
@@ -95,7 +100,8 @@ def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
             return "a card drops with a reason: set its dropped_why property first"
     if key == "status" and value not in AGENT_STATUSES:
         return (f"a card's status is set to one of {', '.join(AGENT_STATUSES)} "
-                f"here; only the operator's answer makes it decided")
+                f"here; only the person's answer makes it decided (what they said in the "
+                f"chat goes through answer_card)")
     return None
 
 
@@ -229,20 +235,21 @@ def _tell(est, p: dict, ev: dict, text: str, pool=None) -> None:
 
 
 def answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None,
-           tell: bool = True) -> dict:
+           tell: bool = True, relayed: dict | None = None) -> dict:
     """The operator answers a card: validate the value against its var, append
     the decision to the ledger, then mark the card decided. Nothing changes on
     a refusal or a failed ledger write; one answer at a time. ``message`` (the
     cockpit's ✓ while the card's chat is open) is the id of that chat's newest
     message: where the card was decided. It is kept only with its ``conv``.
     ``tell=False``: the answer came from the chat itself (convgraph), which already
-    says it -- no decision message is sent back there."""
+    says it -- no decision message is sent back there. ``relayed``: the person's words an
+    agent passed on (:func:`relay`), kept on the card and in the ledger line."""
     with _ANSWER_LOCK:
-        return _answer(est, ledger, spec, value, conv, message, work, tell)
+        return _answer(est, ledger, spec, value, conv, message, work, tell, relayed)
 
 
 def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", work=None,
-            tell: bool = True) -> dict:
+            tell: bool = True, relayed: dict | None = None) -> dict:
     from .entities import CLASS_DECISION
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
@@ -264,7 +271,10 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
         return {"ok": False, "error": err}
     title = _one_line(p.get("name") or ent.eid, LEDGER_TITLE_MAX)
     shown = _one_line(_shown(v, var), LEDGER_TITLE_MAX)
-    if ledger is not None and not ledger.append(f"decided: {title} = {shown}", conv=conv):
+    line = f"decided: {title} = {shown}"
+    if relayed:
+        line += f' (relayed from the chat: "{_one_line(relayed["quote"], LEDGER_TITLE_MAX)}")'
+    if ledger is not None and not ledger.append(line, conv=conv):
         return {"ok": False, "error": "the ledger could not be written; the card stays open"}
     work = p.get("work_needed") if work is None else work     # the answer may override the tag
     if work is not None:
@@ -273,6 +283,11 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
               "set_by": "operator",
               "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "value_ts": time.time()})   # #643: a goal parked on the card wakes
+    if relayed:
+        p.update({"relayed_by": "llm", "answer_quote": relayed["quote"][:QUOTE_MAX],
+                  "answer_chat": relayed.get("sid") or ""})
+        if relayed.get("mid"):
+            p["message"] = str(relayed["mid"])[:MESSAGE_ID_MAX]
     if conv:
         p["chat"] = p.get("chat") or conv     # a card keeps the chat it already has
         message = str(message or "").strip()[:MESSAGE_ID_MAX]
@@ -291,6 +306,56 @@ def _answer(est, ledger, spec: str, value, conv: str = "", message: str = "", wo
                        "speculative_kept": spec_kept, "ts": time.time()},
               _SP.say("decided", title=title, value=shown))
     return {"ok": True, "card": _card_of(ent)}
+
+
+def _person_said(srv, quote: str, since: float) -> dict | None:
+    """The person's message that holds ``quote`` word for word, newest first: {sid, mid, eid}.
+    The turn running now has no message entity yet (convgraph mints at its end): its words
+    are what convgraph kept for it. Only a person's words count, never a reply's or membrane's."""
+    from . import convgraph as CG
+    q = CG._norm(quote)
+    if not q:
+        return None
+    holds = lambda text: f" {q} " in f" {CG._norm(text)} "
+    for sid, text in (getattr(srv, "_cg_text", None) or {}).items():
+        if holds(text):
+            return {"sid": sid, "mid": "", "eid": ""}
+    est = srv.entity_store
+    said = [d for d in list((est.docs or {}).values()) if d.cls == CG.CLASS_MESSAGE
+            and (d.properties or {}).get("role") == "user"
+            and float((d.properties or {}).get("ts") or 0) >= since
+            and holds((d.properties or {}).get("text") or "")]
+    if not said:
+        return None
+    d = max(said, key=lambda x: float(x.properties.get("ts") or 0))
+    return {"sid": d.properties.get("sid") or "", "mid": d.properties.get("mid") or "", "eid": d.eid}
+
+
+def relay(srv, spec: str, value, quote: str) -> dict:
+    """The agent in a person's chat passes on what they answered there (#845). ``quote`` must
+    be their own words, said after the card was made; it proves they said them, not that the
+    agent read them right, so the card and the ledger keep it. The answer then runs like any
+    other; a card with its own chat hears it there already (the chat said it), any other tells
+    the pool, so a goal parked on it wakes. Which lanes may call this is the tool's gate
+    (server.OPERATOR_TOOLS), the route is owner-only like every answer."""
+    from .entities import CLASS_DECISION
+    est = getattr(srv, "entity_store", None)
+    ent = est.resolve(str(spec or ""), exact=True) if est is not None else None
+    if ent is None or ent.cls != CLASS_DECISION:
+        return {"ok": False, "error": f"no Decision card {spec!r}"}
+    p = ent.properties or {}
+    quote = " ".join(str(quote or "").split())
+    said = _person_said(srv, quote, float(p.get("born") or 0))
+    if said is None:
+        return {"ok": False, "error": "no message of the person's since this card was made says "
+                                      "those words: quote them word for word, or ask them"}
+    res = answer(est, getattr(srv, "user_ledger", None), ent.eid, value, tell=not p.get("chat"),
+                 relayed={"quote": quote, **said})
+    if res.get("ok") and said["eid"]:
+        from . import convgraph as CG
+        be, origin = CG._rel(srv)
+        CG._edge(be, origin, said["eid"], "answers", ent.eid)
+    return res
 
 
 def drop(est, spec: str) -> dict:

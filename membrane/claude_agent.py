@@ -626,7 +626,7 @@ def _blocks_prompt(blocks):
 _LOOP_HIDDEN = frozenset({
     "attention", "junk_cut", "field_watch", "entity_watch", "entity_unwatch",
     "entity_tracks", "graph", "entities_related", "entity_inherit",
-    "method_each", "peer_post"})
+    "method_each", "peer_post", "answer_card"})
 
 
 def tool_names() -> list[str]:
@@ -725,7 +725,8 @@ TOOLS_NOTE = (
     "with no quotes or apostrophes (they are refused); var.type is int, "
     "float, bool, string or option; pick is your recommendation; add 'blocks': "
     "[<eids it blocks>] when it holds work up. One variable per card; only "
-    "the person answers.\n\n"
+    "the person answers: when they answered in the chat, pass it on with "
+    "answer_card, quoting their words; never answer one yourself.\n\n"
     "The doctrine names the seat's tool families; here they are: "
     "exec(action='run'/'call'/'inspect'/'define'/'each') -> "
     "code_run/method_call/method_inspect/method_define/method_each; goal(action="

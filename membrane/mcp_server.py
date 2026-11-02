@@ -180,6 +180,24 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "answer_card",
+        "description": (
+            "Pass on a Decision card's answer the person gave you in this chat, so they need "
+            "not answer again on the board. Only for words they really said about this card; "
+            "if they said nothing clear, ask. The quote must match a message of theirs word "
+            "for word, and it stays on the card and in the ledger. Chat lane only."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "card": {"type": "string", "description": "The card's eid."},
+                "value": {"description": "The answer, of the card's var type."},
+                "quote": {"type": "string",
+                          "description": "The person's own words that give the answer."},
+            },
+            "required": ["card", "value", "quote"],
+        },
+    },
+    {
         "name": "intents",
         "description": (
             "Read YOUR intent board: the seat's active set steered goals "
@@ -1283,6 +1301,17 @@ def tool_intend(args: dict, port: int) -> str:
             f"fulfill #N, then it can rank in.")
 
 
+def tool_answer_card(args: dict, port: int) -> str:
+    """#845: what the person said in the chat reaches the card (decision_map.relay)."""
+    out = _http(port, "POST", "/membrane/decision/relay", {
+        "card": _arg(args, "card", "spec", "eid"), "value": args.get("value"),
+        "quote": str(args.get("quote") or "")})
+    if not out.get("ok"):
+        return f"Answer failed: {out.get('error', 'unknown error')}"
+    card = out.get("card") or {}
+    return f"Card {card.get('status')}: value {card.get('value')} (relayed, with the quote on record)"
+
+
 def tool_fulfill(args: dict, port: int) -> str:
     """The close with a receipt: an open goal flips to fulfilled (shared)
     when the caller hands the evidence that proves it done."""
@@ -1681,6 +1710,7 @@ TOOL_IMPLS = {
     "intend": tool_intend,
     "intents": tool_intents,
     "fulfill": tool_fulfill,
+    "answer_card": tool_answer_card,
     "learn": tool_learn,
     "forget": tool_forget,
     "entity_watch": tool_watch_entity,

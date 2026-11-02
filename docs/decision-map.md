@@ -57,6 +57,13 @@ reply's numbered `Open decisions:` items become cards in that chat, a card an ag
 there is posted by membrane, and the person's `1. yes` answers card 1 through the same
 `answer()`, with no decision message sent back.
 
+A person who answered in plain words ("12 is fine for now") is passed on by the agent in that
+chat with the `answer_card {card, value, quote}` tool (#845). The quote must match a person's
+message since the card was made, word for word. The card keeps `relayed_by`, `answer_quote`,
+`answer_chat` and `message`, the ledger line carries the quote, and an `answers` edge ties the
+message to the card. Only the chat lane holds the tool: goal planners and workers, watch loops,
+plan mode and phone calls don't. `entity_edit` keeps refusing the answer keys.
+
 ### An answer wakes the watcher loops
 
 A successful answer puts one `decision` event into the watcher loops' events pool (`est._events_pool`, the pool a fired watch lands in): `{kind: "decision", entity: <card eid>, title, value, blocks}`. The loops' drainer admits a pass on the card like any watch event, and its task line reads `decided: <title> = <value> (card '<eid>')` with what the card blocks. A refused answer enqueues nothing.
