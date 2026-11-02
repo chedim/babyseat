@@ -140,3 +140,21 @@ def test_locate_only_for_nodes_that_would_show():
     src = (UI / "field3d.js").read_text()
     body = src[src.index("  setWork(graph"):src.index("  _stepWork() {")]
     assert "workShows(" in body
+
+
+@NODE
+def test_blocked_work_marked_with_reason_and_waits_shown():
+    W = [{"id": "w1", "kind": "wait", "title": "CI", "reason": "unfinished wait"}]
+    g = {"nodes": [
+        {"id": "g1", "kind": "goal", "title": "ship", "status": "open", "goal": None, "waiting_on": []},
+        {"id": "t1", "kind": "task", "title": "build", "status": "open", "goal": "g1", "waiting_on": W},
+        {"id": "t2", "kind": "task", "title": "free", "status": "open", "goal": "g1", "waiting_on": []},
+        {"id": "w1", "kind": "wait", "title": "CI", "status": "open", "goal": "g1"}], "edges": []}
+    pos = {k: [0, 0, 0] for k in ("g1", "t1", "t2", "w1")}
+    m = {x["id"]: x for x in _f3("F.workMarkers(%s, %s)" % (json.dumps(g), json.dumps(pos)))}
+    assert set(m) == {"g1", "t1", "t2", "w1"}
+    assert m["t1"]["blocked"] is True and "CI" in m["t1"]["why"]
+    assert m["t2"]["blocked"] is False and m["g1"]["blocked"] is False
+    assert _f3("F.WORK_GLYPH")["wait"]
+    js = "const F=require(%r);process.stdout.write(JSON.stringify(F.cardInfo(%s,'t1')))" % (str(UI / "fieldview.js"), json.dumps(g))
+    assert json.loads(subprocess.check_output(["node", "-e", js]))["waitingOn"] == ["CI (unfinished wait)"]

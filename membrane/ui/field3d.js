@@ -725,7 +725,7 @@ function workShows(graph) {
     return linked.length > 0 && linked.every((o) => WORK_FINISHED.has(o.status));
   };
   for (const n of nodes) {
-    if (!(n.kind === "goal" || n.kind === "task" || n.kind === "decision")) continue;
+    if (!(n.kind === "goal" || n.kind === "task" || n.kind === "decision" || n.kind === "wait")) continue;
     if (n.kind === "decision" ? (n.status === "dropped" || decisionDone(n)) : WORK_FINISHED.has(n.status)) continue;
     out.push(n);
   }
@@ -735,7 +735,11 @@ function workMarkers(graph, pos) {
   const out = [];
   for (const n of workShows(graph)) {
     const p = pos && pos[n.id];
-    if (p) out.push({ id: n.id, kind: n.kind, title: n.title, status: n.status, p: p.slice(0, 3) });
+    if (p) {
+      const w = n.waiting_on || [];   // blocked = waiting on something unfinished; why = what and why
+      out.push({ id: n.id, kind: n.kind, title: n.title, status: n.status, p: p.slice(0, 3), blocked: w.length > 0,
+                 why: w.map((x) => x.title + " (" + x.reason + ")").join("; ") });
+    }
   }
   return out;
 }
@@ -758,7 +762,7 @@ function workEdges(graph, pos, styles, hover) {
 }
 const WORK_ANSWERED = new Set(["decided", "closed"]);
 const WORK_FINISHED = new Set(["fulfilled", "done", "dropped", "cancelled"]);
-const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
+const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓", wait: "⏳" };
 
 /** #772: route work edges by e.dash -- one line object per dash pattern ("" = solid), so goals sharing a colour still differ on screen */
 function workDashGroups(edges) {
@@ -2404,12 +2408,15 @@ class Field3DView {
       if (!el) {
         el = document.createElement("div");
         el.style.cssText = "position:absolute;font-size:22px;cursor:pointer;pointer-events:auto;user-select:none;margin:-14px 0 0 -11px";
-        el.textContent = WORK_GLYPH[m.kind]; el.title = m.title || m.id;
+        el.textContent = WORK_GLYPH[m.kind];
         el.onclick = () => { if (this._workOpen) this._workOpen(m.id); };
         el.addEventListener("pointerenter", () => { this._workHover = m.id; el.style.fontSize = "30px"; });
         el.addEventListener("pointerleave", () => { if (this._workHover === m.id) this._workHover = null; el.style.fontSize = "22px"; });
         this.labelLayer.appendChild(el); this._workEls.set(m.id, el);
       }
+      el.title = (m.title || m.id) + (m.blocked ? " — blocked: " + m.why : "");
+      el.style.filter = m.blocked ? "grayscale(1) drop-shadow(0 0 4px #e6194b)" : "";   // blocked looks different from plain open
+      el.style.opacity = m.blocked ? "0.7" : "1";
       const sc = this._project(m.p);
       el.style.display = sc ? "" : "none";
       if (sc) el.style.transform = "translate(" + sc[0].toFixed(0) + "px," + sc[1].toFixed(0) + "px)";
