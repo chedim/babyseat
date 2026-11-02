@@ -87,3 +87,31 @@ def test_click_resolves_to_work_open_with_code_rc_output():
     assert o and len(o) == 1
     p = o[0]
     assert p["id"] == "r1" and p["rc"] == 3 and p["code"] == "echo hi" and p["output"] == "out"
+
+
+def test_node_cap_is_a_named_constant_default_12():
+    assert DM.ROCKET_MAX_NODES == 12
+    est = _est()
+    kids = [MEMBRANE_NS + f"node:sh:k{i}" for i in range(30)]
+    _run(est, "big", 100.0, children=kids)
+    assert len(DM.work_graph(est)["runs"][0]["nodes"]) == 12
+
+
+DRV2 = r"""
+const L = require(process.argv[1]);
+const nodes = [{id:'r',parent:null}]; for (let i=0;i<30;i++) nodes.push({id:'c'+i,parent:i%2?'c'+(i-1):'r'});
+const g = L.rocketGraph({nodes: nodes});
+const o = L.rocketOrigin({root:'r'}, (id)=> id==='r' ? [5,6,7] : null);
+const o2 = L.rocketOrigin({root:'zz'}, ()=>null);
+process.stdout.write(JSON.stringify({cap:L.ROCKET_NODE_CAP, speed:L.ROCKET_SPEED, n:g.nodes.length, e:g.edges.length,
+  ok: g.edges.every(e=>g.nodes.some(n=>n.id===e.from)&&g.nodes.some(n=>n.id===e.to)), o, o2}));
+"""
+
+
+@NODE
+def test_miniature_graph_nodes_edges_capped_and_origin():
+    o = json.loads(subprocess.check_output(["node", "-e", DRV2, str(UI / "field3d.js")]))
+    assert o["cap"] == 12 and o["speed"] == 0.4
+    assert o["n"] == 12 and o["e"] == 11 and o["ok"], "nodes+edges, capped, edges only between kept nodes"
+    assert o["o"] == [5, 6, 7], "run starts at its root's position"
+    assert o["o2"] == [0, 0, 0], "falls back to the centre"

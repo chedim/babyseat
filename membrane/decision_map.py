@@ -483,6 +483,7 @@ def work_graph(est) -> dict:
             "runs": _finished_runs(est)}
 
 
+ROCKET_MAX_NODES = 12     # nodes kept per run's miniature graph (default until the operator answers the cap card)
 ROCKET_MAX_RUNS = 12      # the operator's cap on command graphs in flight (card: 12 for now)
 
 
@@ -503,7 +504,7 @@ def _finished_runs(est) -> list:
     for ent in res[:ROCKET_MAX_RUNS]:
         p = ent.properties or {}
         nodes, seen, todo = [], set(), [(str(p["root"]), None)]
-        while todo and len(nodes) < 40:
+        while todo and len(nodes) < ROCKET_MAX_NODES:
             nid, par = todo.pop(0)
             if nid in seen:
                 continue
