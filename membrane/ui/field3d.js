@@ -798,7 +798,28 @@ function frameSelection(center, points, fovY, aspect, margin) {
   return { target: center.slice(0, 3), r: frameBall(Math.max(R, 1), fovY, aspect, margin) };
 }
 
-const F3Logic = { selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+/** #855: camera that keeps looking at `target` and sits on the line target->item, beyond the item, so the item is
+ *  in front of the centre and the ball of points round it fits the view. Item at the centre: the direction stays. */
+function frameAround(target, item, points, cur, fovY, aspect, margin) {
+  let R = 0;
+  for (const p of points || []) R = Math.max(R, Math.hypot(p[0] - item[0], p[1] - item[1], p[2] - item[2]));
+  const d = [item[0] - target[0], item[1] - target[1], item[2] - target[2]], L = Math.hypot(d[0], d[1], d[2]);
+  const D = frameBall(Math.max(R, 1), fovY, aspect, margin);
+  if (L < 1e-6) return { theta: cur.theta, phi: cur.phi, r: D };
+  return { theta: Math.atan2(d[0], d[2]), phi: Math.acos(Math.max(-1, Math.min(1, d[1] / L))), r: L + D };
+}
+/** #855: the pose before the first selection is kept (A then B keeps the pre-A pose); restore gives it back. */
+function camSave(saved, cur) { return saved || { target: cur.target.slice(), theta: cur.theta, phi: cur.phi, r: cur.r }; }
+function camRestore(saved) { return saved ? { target: saved.target.slice(), theta: saved.theta, phi: saved.phi, r: saved.r } : null; }
+/** #855: the click that acts: a hit wins; a click on nothing just after a pick is the second click of a
+ *  double-click on an item that flew away -- it stays that item (last = {m, t}). */
+const F3_DBL_MS = 500;
+function resolveClick(last, hit, now) {
+  if (hit) return hit;
+  return last && now - last.t < F3_DBL_MS ? last.m : null;
+}
+
+const F3Logic = { frameAround, camSave, camRestore, resolveClick, selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -1448,13 +1469,22 @@ class Field3DView {
     if (!frame || !this._scope) return;
     const at = (i) => { const s = this.slots.get(i); return this._workPos[i] || (s != null ? [this.posA[s * 3], this.posA[s * 3 + 1], this.posA[s * 3 + 2]] : null); };
     const c = at(this.sel); if (!c) return;
-    const pts = this._scope.map(at).filter(Boolean), fit = frameSelection(c, pts, this.camera.fov * Math.PI / 180, this.camera.aspect);
-    this._flyAnim = { from: this.orbit.target.slice(), to: fit.target, r0: this.orbit.r, r1: fit.r, t0: performance.now() };
+    const pts = this._scope.map(at).filter(Boolean), o = this.orbit;
+    this._camSaved = camSave(this._camSaved, o);
+    const fit = frameAround(o.target, c, pts, o, this.camera.fov * Math.PI / 180, this.camera.aspect);
+    this._flyPose({ target: o.target.slice(), theta: fit.theta, phi: fit.phi, r: fit.r });
+  }
+
+  /** #855: fly the orbit to a pose (target, theta, phi, r) over 700 ms; theta takes the short way round */
+  _flyPose(to) {
+    const o = this.orbit, dth = Math.atan2(Math.sin(to.theta - o.theta), Math.cos(to.theta - o.theta));
+    this._flyAnim = { from: o.target.slice(), to: to.target, r0: o.r, r1: to.r, th0: o.theta, th1: o.theta + dth, ph0: o.phi, ph1: to.phi, t0: performance.now() };
     const step = () => {
       const a = this._flyAnim; if (!a) return;
       const u = Math.min(1, (performance.now() - a.t0) / 700), e = u * u * (3 - 2 * u);
       for (let i = 0; i < 3; i++) this.orbit.target[i] = a.from[i] + (a.to[i] - a.from[i]) * e;
       this.orbit.r = a.r0 + (a.r1 - a.r0) * e;
+      this.orbit.theta = a.th0 + (a.th1 - a.th0) * e; this.orbit.phi = a.ph0 + (a.ph1 - a.ph0) * e;
       if (u < 1) requestAnimationFrame(step); else this._flyAnim = null;
     };
     requestAnimationFrame(step);
@@ -1465,6 +1495,7 @@ class Field3DView {
   select(id) {
     const old = this.sel; this.sel = id;
     this._applyScope(id != null && id !== old);
+    if (id == null && old != null && this._camSaved) { this._flyPose(camRestore(this._camSaved)); this._camSaved = null; }   // #855
     for (const k of [old, id]) { const s = this.slots.get(k); if (s != null) this._paintSlot(s); }
     this._dirtyPoints();
     this._edgesDirty = true;
@@ -1604,14 +1635,18 @@ class Field3DView {
           if (this.api.onAvatar) this.api.onAvatar(this.selAgent);
           return;
         }
-        const m = this._pick(e.offsetX, e.offsetY);
+        const m = resolveClick(this._lastPick, this._pick(e.offsetX, e.offsetY), performance.now());   // #855
+        this._lastPick = m ? { m, t: performance.now() } : null;
         if (this.selAgent) { this.selAgent = null; if (this.api.onAvatar) this.api.onAvatar(null); }
         if (m) { this.select(m.id); this.api.onSelect(m); } else { this.select(null); this.api.onSelect(null); }
       }
     };
     el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
     el.addEventListener("wheel", (e) => { e.preventDefault(); this.orbit.r = Math.max(30, Math.min(6000, this.orbit.r * Math.exp(e.deltaY * 0.0012))); }, { passive: false });
-    el.addEventListener("dblclick", (e) => { const m = this._pick(e.offsetX, e.offsetY); if (m) { this.select(m.id); this.api.onSelect(m); if (this.api.onOpen) this.api.onOpen(m); } });
+    el.addEventListener("dblclick", (e) => {
+      const m = resolveClick(this._lastPick, this._pick(e.offsetX, e.offsetY), performance.now());   // #855
+      if (m && m.work) { this.select(m.id); if (this._workOpen) this._workOpen(m.id); return; }
+      if (m) { this.select(m.id); this.api.onSelect(m); if (this.api.onOpen) this.api.onOpen(m); } });
     el.addEventListener("pointerleave", () => this.api.onHover(null));
   }
 
@@ -2462,7 +2497,7 @@ class Field3DView {
         el = document.createElement("div");
         el.style.cssText = "position:absolute;font-size:22px;cursor:pointer;pointer-events:auto;user-select:none;margin:-14px 0 0 -11px";
         el.textContent = WORK_GLYPH[m.kind];
-        el.addEventListener("click", () => { this.select(m.id); if (this.api.onSelect) this.api.onSelect({ id: m.id, work: true }); });
+        el.addEventListener("click", () => { this._lastPick = { m: { id: m.id, work: true }, t: performance.now() }; this.select(m.id); if (this.api.onSelect) this.api.onSelect({ id: m.id, work: true }); });
         el.addEventListener("dblclick", () => { if (this._workOpen) this._workOpen(m.id); });
         el.addEventListener("pointerenter", () => { this._workHover = m.id; el.style.fontSize = "30px"; });
         el.addEventListener("pointerleave", () => { if (this._workHover === m.id) this._workHover = null; el.style.fontSize = "22px"; });
