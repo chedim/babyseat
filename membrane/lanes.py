@@ -4524,6 +4524,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._entity_add(); return
         if path == "/membrane/decision/answer":
             self._decision_answer(); return
+        if path == "/membrane/decision/relay":
+            self._decision_relay(); return
         if path == "/membrane/decision/drop":
             self._decision_drop(); return
         if path == "/membrane/item-chat/say":
@@ -7135,6 +7137,23 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                          conv=str(body.get("conv") or ""),
                          message=str(body.get("message") or ""),
                          work=body.get("work") if isinstance(body.get("work"), bool) else None)
+        if not res.get("ok"):
+            self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
+        self._json_out(res)
+
+    def _decision_relay(self) -> None:
+        """POST /membrane/decision/relay {card, value, quote}: the answer_card tool passes on
+        what the person said in the chat (#845). Owner only, like every answer."""
+        if self._paused_write_refused():
+            return
+        from . import seatauth as _SA
+        if not _SA.owner(self):
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
+        from . import decision_map as _DM
+        body = self._json_body()
+        res = _DM.relay(self.server, str(body.get("card") or ""), body.get("value"),
+                        str(body.get("quote") or ""))
         if not res.get("ok"):
             self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
         self._json_out(res)

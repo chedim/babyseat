@@ -98,11 +98,15 @@ FAMILIES: dict[str, dict] = {
         "description": "Your commitments: plant one, list the board, close one with its "
                        "receipt (evidence). An empty board leaves the idle mind unsteered: "
                        "help('goals').",
-        "actions": {"plant": "intend", "list": "intents", "close": "fulfill"},
-        "params": {"text": _S("plant: the goal"), "ttl": _S("plant: optional, e.g. '2w'"),
-                   "spec": _S("close: the goal's id"), "evidence": _S("close: the receipt")},
+        "actions": {"plant": "intend", "list": "intents", "close": "fulfill",
+                    "answer": "answer_card"},
+        "params": {"text": _S("the goal"), "ttl": _S("e.g. '2w'"),
+                   "spec": _S("goal or card id"), "evidence": _S("the receipt"),
+                   "value": {}},
         "map": {"plant": lambda a: _pick(a, "text", "ttl"), "list": lambda a: {},
-                "close": lambda a: _pick(a, "spec", "evidence")},
+                "close": lambda a: _pick(a, "spec", "evidence"),
+                "answer": lambda a: {"card": a.get("card") or a.get("spec"), "value": a.get("value"),
+                                     "quote": a.get("quote") or a.get("text") or ""}},
     },
     "memory": {
         "description": "learn: keep one lesson you earned; forget: drop a memory (by #N or text).",

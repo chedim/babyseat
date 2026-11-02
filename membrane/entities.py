@@ -2448,6 +2448,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         if merged:
             existing.merge(ent)
             ent = existing
+        if c == CLASS_DECISION and not merged:      # #845: a chat answer must come after the question
+            ent.properties.setdefault("born", _t.time())
         self.upsert(ent)
         return {"ok": True, "eid": eid, "merged": merged,
                 "class": c, "name": name}

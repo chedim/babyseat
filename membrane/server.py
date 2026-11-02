@@ -1081,6 +1081,8 @@ OPERATOR_TOOLS = frozenset((
     # COMPOSITION IS INHERITANCE (the doctrine's own hand; it sat in no
     # lane -- 52 refusals, 2026-10-08)
     "entity_inherit",
+    # #845: passes on what the person said in the chat; the one hand no loop holds
+    "answer_card",
 ))
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
@@ -1089,13 +1091,13 @@ LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the board's spatial watches (2026-10-08): attention is the
     # listeners' to allocate; the chat lane announces through intend
     "field_watch",
-}) - {"intend"}
+}) - {"intend", "answer_card"}
 # plan reads/communicates: never plants, closes or executes
 PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_call", "method_each", "code_run",
                                "method_inspect",
                                "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
-                               "entity_inherit"}
+                               "entity_inherit", "answer_card"}
 
 # THE PHONE LANE (2026-10-08): a call's turn reads and answers. A misheard
 # sentence must never reach the shell or rewrite entities; a request
@@ -1105,6 +1107,8 @@ PHONE_TOOLS = frozenset(("query", "state", "graph", "entities_related",
                          "learn", "intend", "intents"))
 
 _LANE_REFUSALS = {
+    "answer_card": ("plan mode: a card isn't answered from a planning session -- the build-mode "
+                    "turn passes on what the person said"),
     "field_watch": ("plan mode: watches aren't planted from a planning "
                     "session -- the build-mode turn plants them"),
     "entity_add": ("plan mode: entities aren't created from a planning "
@@ -1121,6 +1125,8 @@ _LANE_REFUSALS = {
                "word; the board reads via goal(action='list')"),
 }
 _LISTENER_REFUSALS = {
+    "answer_card": ("listener lane: a loop doesn't answer a Decision card -- only the person's "
+                    "chat passes on what they said; end with BLOCKED on them"),
     "intend": ("listener lane: a watch loop does not plant new goals -- "
                "take this goal's next step yourself, close it (goal action='close') with the "
                "receipt, or end with BLOCKED; the operator's chat plants "

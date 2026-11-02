@@ -626,7 +626,7 @@ def _blocks_prompt(blocks):
 _LOOP_HIDDEN = frozenset({
     "attention", "junk_cut", "field_watch", "entity_watch", "entity_unwatch",
     "entity_tracks", "graph", "entities_related", "entity_inherit",
-    "method_each", "peer_post"})
+    "method_each", "peer_post", "answer_card"})
 
 
 def tool_names() -> list[str]:
