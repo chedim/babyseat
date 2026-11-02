@@ -739,26 +739,35 @@ function workMarkers(graph, pos) {
   }
   return out;
 }
-/** The work graph's edges between visible markers: {from,to,a,b,color} (a/b = marker positions); the goal end picks the edgeStyles colour. */
-function workEdges(graph, pos, styles) {
+/** The work graph's edges between visible markers: {from,to,a,b,color,dash,hot} (hot = on the hovered goal) (a/b = marker positions); the goal end picks the edgeStyles colour. */
+function workEdges(graph, pos, styles, hover) {
   const marks = new Map(workMarkers(graph, pos).map((m) => [m.id, m]));
   const byId = new Map((((graph && graph.nodes) || [])).map((n) => [n.id, n]));
   const kinds = new Map([...byId].map(([id, n]) => [id, n.kind]));
   const out = [];
+  const hn = hover != null ? byId.get(hover) : null;   // hovering a goal or one of its items lights that goal's lines
+  const hg = hn ? (hn.kind === "goal" ? hn.id : hn.goal || null) : null;
   for (const e of (graph && graph.edges) || []) {
     const a = marks.get(e.from), b = marks.get(e.to);
     if (!a || !b) continue;
     const gid = kinds.get(e.from) === "goal" ? e.from : kinds.get(e.to) === "goal" ? e.to : ((byId.get(e.from) || {}).goal || (byId.get(e.to) || {}).goal || null);
     const st = (gid && styles && styles[gid]) || null;
-    out.push({ from: e.from, to: e.to, a: a.p, b: b.p, color: (st && st.color) || "#8aa0c8", dash: (st && st.dash) || "" });
+    out.push({ from: e.from, to: e.to, a: a.p, b: b.p, color: (st && st.color) || "#8aa0c8", dash: (st && st.dash) || "", hot: !!hg && gid === hg });
   }
   return out;
 }
 const WORK_ANSWERED = new Set(["decided", "closed"]);
-const WORK_FINISHED = new Set(["fulfilled", "done", "dropped"]);
+const WORK_FINISHED = new Set(["fulfilled", "done", "dropped", "cancelled"]);
 const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
 
-const F3Logic = { workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+/** #772: route work edges by e.dash -- one line object per dash pattern ("" = solid), so goals sharing a colour still differ on screen */
+function workDashGroups(edges) {
+  const g = {};
+  for (const e of edges) (g[e.dash || ""] = g[e.dash || ""] || []).push(e);
+  return g;
+}
+
+const F3Logic = { workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -2370,7 +2379,7 @@ class Field3DView {
   /** the work graph (goals/tasks/decisions) as markers in the scene, each at its entity's field position */
   setWork(graph, onOpen) {
     this._work = graph || null; this._workOpen = onOpen || this._workOpen;
-    if (!graph && this._workLines) this._workLines.geometry.setDrawRange(0, 0);   // the view closed: lines go too
+    if (!graph && this._workLines) for (const k in this._workLines) this._workLines[k].geometry.setDrawRange(0, 0);   // the view closed: lines go too
     this._workPos = this._workPos || {};
     for (const n of workShows(graph)) {
       if (this._workPos[n.id]) continue;
@@ -2397,6 +2406,8 @@ class Field3DView {
         el.style.cssText = "position:absolute;font-size:22px;cursor:pointer;pointer-events:auto;user-select:none;margin:-14px 0 0 -11px";
         el.textContent = WORK_GLYPH[m.kind]; el.title = m.title || m.id;
         el.onclick = () => { if (this._workOpen) this._workOpen(m.id); };
+        el.addEventListener("pointerenter", () => { this._workHover = m.id; el.style.fontSize = "30px"; });
+        el.addEventListener("pointerleave", () => { if (this._workHover === m.id) this._workHover = null; el.style.fontSize = "22px"; });
         this.labelLayer.appendChild(el); this._workEls.set(m.id, el);
       }
       const sc = this._project(m.p);
@@ -2411,26 +2422,38 @@ class Field3DView {
   _stepWorkEdges() {
     const THREE = this.THREE; if (!THREE) return;
     const CAP = 2000;
-    if (!this._workLines) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(CAP * 6), 3));
-      g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(CAP * 6), 3));
-      this._workLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false }));
-      this._workLines.frustumCulled = false;
-      this.scene.add(this._workLines);
-    }
     const fv = (typeof window !== "undefined" && window.FieldViewLogic) || null;
     const styles = fv ? fv.edgeStyles(this._work) : {};
-    const es = workEdges(this._work, this._workPos, styles).slice(0, CAP);
-    const pa = this._workLines.geometry.attributes.position, ca = this._workLines.geometry.attributes.color;
+    const es = workEdges(this._work, this._workPos, styles, this._workHover).slice(0, CAP);
+    const groups = workDashGroups(es);
+    const DASHES = ["", "6 4", "2 3", "10 3 2 3"];
+    this._workLines = this._workLines || {};
     const col = new THREE.Color();
-    es.forEach((e, i) => {
-      col.set(e.color);
-      pa.setXYZ(i * 2, e.a[0], e.a[1], e.a[2]); pa.setXYZ(i * 2 + 1, e.b[0], e.b[1], e.b[2]);
-      ca.setXYZ(i * 2, col.r, col.g, col.b); ca.setXYZ(i * 2 + 1, col.r, col.g, col.b);
-    });
-    this._workLines.geometry.setDrawRange(0, es.length * 2);
-    pa.needsUpdate = true; ca.needsUpdate = true;
+    for (const dash of DASHES) {
+      let ls = this._workLines[dash];
+      if (!ls) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(CAP * 6), 3));
+        g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(CAP * 6), 3));
+        const o = { vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false };
+        const [d, gap] = dash.split(" ").map(Number);
+        ls = new THREE.LineSegments(g, dash === "" ? new THREE.LineBasicMaterial(o)
+          : new THREE.LineDashedMaterial(Object.assign({ dashSize: d, gapSize: gap }, o)));
+        ls.frustumCulled = false;
+        this.scene.add(ls); this._workLines[dash] = ls;
+      }
+      const mine = groups[dash] || [];
+      const pa = ls.geometry.attributes.position, ca = ls.geometry.attributes.color;
+      mine.forEach((e, i) => {
+        col.set(e.color);
+        if (this._workHover != null) col.multiplyScalar(e.hot ? 1.6 : 0.35);   // hovered goal's lines stand out, the rest step back
+        pa.setXYZ(i * 2, e.a[0], e.a[1], e.a[2]); pa.setXYZ(i * 2 + 1, e.b[0], e.b[1], e.b[2]);
+        ca.setXYZ(i * 2, col.r, col.g, col.b); ca.setXYZ(i * 2 + 1, col.r, col.g, col.b);
+      });
+      ls.geometry.setDrawRange(0, mine.length * 2);
+      pa.needsUpdate = true; ca.needsUpdate = true;
+      if (dash !== "") ls.computeLineDistances();
+    }
   }
 
   _ring(s) {
