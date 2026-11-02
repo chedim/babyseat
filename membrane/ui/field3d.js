@@ -167,6 +167,10 @@ const F3_AGENTS = {
   worker: "#2a9d8f", "worker-1": "#2a9d8f", "worker-2": "#43aa8b", "worker-3": "#90be6d", thinker: "#4cc9f0", dreamer: "#b5e48c",
 };
 
+function f3AgentColor(agent) {
+  return F3_AGENTS[agent] || F3_AGENTS[String(agent).replace(/-\d+$/, "")] || "#ffffff";
+}
+
 // ------------------------------------------------------------ pure logic
 
 function tileKey(l, x, y, z) { return l + "/" + x + "/" + y + "/" + z; }
@@ -2285,7 +2289,7 @@ class Field3DView {
     const n = this.avatars.size, ang = n * 0.9;
     const idle = [Math.cos(ang) * F3_WORLD * 0.75, F3_WORLD * 0.62, Math.sin(ang) * F3_WORLD * 0.75];
     a = new Avatar(agent, idle);
-    const THREE = this.THREE, color = new THREE.Color(F3_AGENTS[agent] || "#ffffff");
+    const THREE = this.THREE, color = new THREE.Color(f3AgentColor(agent));
     const c = document.createElement("canvas"); c.width = c.height = 64;
     const g = c.getContext("2d"), grd = g.createRadialGradient(32, 32, 2, 32, 32, 30);
     grd.addColorStop(0, "#fff"); grd.addColorStop(0.25, "#" + color.getHexString()); grd.addColorStop(1, "rgba(0,0,0,0)");
@@ -2297,7 +2301,7 @@ class Field3DView {
     a.trailLine = new THREE.Line(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(32 * 3), 3)),
       new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.35 }));
     a.tag = document.createElement("div");
-    a.tag.style.cssText = "position:absolute;font:600 11px system-ui,sans-serif;color:" + (F3_AGENTS[agent] || "#fff") + ";text-shadow:0 1px 2px #000;white-space:nowrap";
+    a.tag.style.cssText = "position:absolute;font:600 11px system-ui,sans-serif;color:" + f3AgentColor(agent) + ";text-shadow:0 1px 2px #000;white-space:nowrap";
     a.tag.textContent = agent;
     this.labelLayer.appendChild(a.tag);
     this.scene.add(a.sprite, a.beam, a.trailLine);

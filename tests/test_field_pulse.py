@@ -207,5 +207,20 @@ class TestPlannerWorkerOrbs(unittest.TestCase):
             self.assertIn(("mind.focus", "start", "ses_1"), kinds, lane)
 
 
+class LaneOrbSessionUI(unittest.TestCase):
+    """#848 review: planner/worker orbs open their session like a loop orb; unlisted numbered lanes keep their colour."""
+
+    def test_select_mind_maps_lane_orbs_to_loop_kind(self):
+        import re
+        src = open(os.path.join(os.path.dirname(FP.__file__), "ui", "home.js"), encoding="utf-8").read()
+        m = re.search(r"async _selectMind\(agent\) \{.*?\n    \}\n", src, re.S)
+        self.assertIn("(loop|planner|worker)", m.group(0))
+
+    def test_numbered_lane_orbs_get_family_colour(self):
+        src = open(os.path.join(os.path.dirname(FP.__file__), "ui", "field3d.js"), encoding="utf-8").read()
+        self.assertIn("function f3AgentColor", src)
+        self.assertNotIn('F3_AGENTS[agent] || "#', src)
+
+
 if __name__ == "__main__":
     unittest.main()
