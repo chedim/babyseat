@@ -131,11 +131,7 @@ TRIGGERS = [
      [["changed", "?g.replan"]],
      [["isa", "?g", "Goal"], ["filter", "(g.status or 'open') == 'open' and g.replan"]],
      [MEMBRANE_NS + "llm.call", "{'about': g.eid, 'prompt': 'plan the goal: ' + g.replan, 'lane': 'planner'}"]),
-    # #867: a send-back on a closed goal reopens it (never silently dropped), then plans
-    ("goal-graph reopen on replan",
-     [["changed", "?g.replan"]],
-     [["isa", "?g", "Goal"], ["filter", "(g.status == 'fulfilled' or g.status == 'closed') and g.replan"]],
-     ["?g.status", "'open'"]),
+    # #867: a send-back on a closed goal reopens it (adapters.py `replan`: it needs the writer)
     ("goal-graph plan after reopen",
      [["changed", "?g.status"]],
      [["isa", "?g", "Goal"], ["filter", "g.status == 'open' and g.replan and g.planned_ts and g.replan != g.planned_replan"]],
@@ -156,6 +152,7 @@ def seed(srv) -> int:
         return 0
     for name, when, where, write in TRIGGERS:
         vm.define(name, when, where, write)
+    est.docs.pop(MEMBRANE_NS + "trigger:goal-graph-reopen-on-replan", None)   # #867: now adapters._replan
     return len(TRIGGERS)
 
 
@@ -460,7 +457,9 @@ def plan_wanted(srv, goal: str, why: str) -> None:
     if g is None:
         return
     g.properties = {**(g.properties or {}), "replan": f"{why} at {time.strftime('%H:%M:%S')}"}
-    est.upsert(g, embedder=None)
+    from . import writes as _W
+    with _W.as_writer("adapter:goals"):
+        est.upsert(g, embedder=None)
 
 
 # ---- the worker pool -----------------------------------------------------------------------------
@@ -667,13 +666,17 @@ def _moving(d) -> bool:
     return st not in CARD_ENDED
 
 
-SEND_BACK_NOT = ("task ", "card ", "planted")
+def is_send_back(writer) -> bool:
+    """#867: a replan is a send-back when a person or the chat wrote it (the write's
+    `writer`: llm, llm:<x>, person:<x>), not a trigger, an adapter or the field."""
+    w = str(writer or "")
+    return w == "llm" or w.startswith(("llm:", "person:"))
 
 
-def is_send_back(replan) -> bool:
-    """#867: a replan written by hand (the chat sending the goal back), not by a trigger."""
-    r = str(replan or "")
-    return bool(r) and not r.startswith(SEND_BACK_NOT)
+def send_back_of(srv, goal: str):
+    """The goal's replan text when its last writer sent it back, else None."""
+    p = ((srv.entity_store.docs or {}).get(goal) or QuantumEntity(eid="")).properties or {}
+    return p.get("replan") if p.get("replan") and is_send_back(p.get("replan_by")) else None
 
 
 def report(srv, goal: str, claim: str | None = None, sent_back: str | None = None) -> bool:

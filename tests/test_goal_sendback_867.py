@@ -77,3 +77,30 @@ def test_a_stuck_or_failed_task_listed_again_still_retries(seat):
         write(seat, GOAL, "plan", {"tasks": [{"key": "a", "title": "again"}]})
         assert st(seat, A) == "owed", s
         tasks_in_pool(seat)
+
+
+def test_a_chat_send_back_worded_like_a_trigger_is_still_a_send_back(seat):
+    """#869 review: the writer decides, not the text ("task 3 again please")."""
+    done_goal(seat)
+    write(seat, GOAL, "replan", "task 3 again please", writer="llm:chat")
+    assert GG.is_send_back(seat.entity_store.docs[GOAL].properties.get("replan_by"))
+    assert GG.report(seat, GOAL, None, sent_back=GG.send_back_of(seat, GOAL))
+    assert "nothing runnable" in seat.told[-1][1], seat.told
+
+
+def test_a_trigger_replan_is_not_a_send_back_whatever_it_says(seat):
+    done_goal(seat)
+    write(seat, GOAL, "replan", "rework the thing", writer="trigger:x")
+    assert GG.send_back_of(seat, GOAL) is None
+
+
+def test_a_trigger_replan_on_a_fulfilled_goal_leaves_it_fulfilled(seat):
+    done_goal(seat)
+    g = seat.entity_store.docs[GOAL]
+    g.properties = {**g.properties, "status": "fulfilled"}
+    seat.entity_store.upsert(g, embedder=None)
+    settle(seat)
+    seat.calls.clear()
+    write(seat, GOAL, "replan", "task late-one stuck", writer="trigger:goal-graph-replan-on-task-end")
+    assert seat.entity_store.docs[GOAL].properties["status"] == "fulfilled"
+    assert not seat.calls, seat.calls

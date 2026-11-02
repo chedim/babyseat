@@ -1041,7 +1041,7 @@ class _LoopDrainer:
                 except Exception:
                     pass
                 GG.report(srv, ent, GG.planner_claim(text),
-                          sent_back=_replan if GG.is_send_back(_replan) else None)   # every plan ends in the chat (2026-10-31)
+                          sent_back=GG.send_back_of(srv, ent))   # every plan ends in the chat (2026-10-31)
                 try:
                     with _W.as_writer("adapter:tasks"):
                         GG.recount(srv, ent)     # with or without a plan: no task blocked for good
