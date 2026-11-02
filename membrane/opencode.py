@@ -2465,6 +2465,21 @@ def main() -> None:
     finally:
         # THE TEARDOWN'S BOUND: the chain gets its every chance, then
         # the lease cuts it (the lease itself: TEARDOWN_LEASE_S above).
+        # The chat is written first, before anything that can hang: a cut
+        # teardown lost the replies' last words (2026-11-02)
+        try:
+            _lr = getattr(srv, "_loop_runner", None)
+            if _lr is not None:
+                _lr.messages.close()
+                _lr.sessions.flush()
+        except Exception as e:
+            print(f"[opencode] chat write at teardown failed ({e})", file=sys.__stderr__)
+        # where a teardown hangs: every thread's stack into the log just before the cut
+        try:
+            import faulthandler
+            faulthandler.dump_traceback_later(max(1.0, TEARDOWN_LEASE_S - 5), file=sys.__stderr__)
+        except Exception:
+            pass
         _teardown_halt = threading.Timer(TEARDOWN_LEASE_S, lambda: (
             print(f"\n[opencode] teardown lease ({TEARDOWN_LEASE_S:g}s) "
                   "expired -- cutting the drain", file=sys.__stderr__),
