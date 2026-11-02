@@ -306,6 +306,17 @@ def _queued(m):
     return w
 
 
+def _queued_write(m):
+    """A write: queued like any operation, and never carried inside another caller's open
+    transaction (Database._outside_txn); another caller's begin waits for it to end."""
+    kind = "begin" if m.__name__ == "begin" else True
+
+    @functools.wraps(m)
+    def w(self, *a, **k):
+        return self._run(lambda: (self._open_or_raise(), m(self, *a, **k))[1], write=kind)
+    return w
+
+
 class Database:
     """One CBL database, ONE handle, ONE thread that runs every operation from a
     priority queue (2026-10-31, the operator: "keep shared handle ... queue db
@@ -330,6 +341,10 @@ class Database:
         self._ops: queue.PriorityQueue = queue.PriorityQueue()
         self._n = itertools.count()
         self._tid = None
+        self._caller = None                 # the thread whose operation runs now
+        self._txn_owner = None              # the caller whose transaction is open
+        self._txn_depth = 0
+        self._deferred: list = []            # other callers' begins, waiting for the open transaction
         threading.Thread(target=self._serve, name="cbl-db", daemon=True).start()
 
     # ---- the database thread ---------------------------------------------------
@@ -339,12 +354,41 @@ class Database:
             _prio, _n, fn, box = self._ops.get()
             if fn is None:
                 return
+            foreign = bool(self._txn_depth) and box.get("caller") != self._txn_owner
+            if foreign and box.get("write") == "begin":
+                self._deferred.append((_prio, _n, fn, box))   # its batch starts when the open one ends
+                continue
             try:
-                box["r"] = fn()
+                self._caller = box.get("caller")
+                box["r"] = self._outside_txn(fn) if foreign and box.get("write") else fn()
             except BaseException as e:            # noqa: BLE001 -- handed to the caller
                 box["e"] = e
             finally:
                 box["ev"].set()
+            if not self._txn_depth and self._deferred:
+                for item in self._deferred:
+                    self._ops.put(item)
+                self._deferred = []
+
+    def _outside_txn(self, fn):
+        """Another caller's operation while a transaction is open: it must not ride in it
+        (2026-11-02: chat rows saved during the write-behind's batch were committed only with
+        the batch, and a cut seat lost them). The open batch is committed, the operation runs
+        and commits on its own, and the batch reopens at the same depth for its owner. Every
+        transaction here is a speed batch that always commits, so committing it early changes
+        what is on disk sooner, never what it means."""
+        L, depth = self.lib.L, self._txn_depth
+        for _ in range(depth):
+            err = CBLError()
+            self.lib.check(L.CBLDatabase_EndTransaction(self.h, True, C.byref(err)), err, "end (split)")
+        owner, self._txn_owner, self._txn_depth = self._txn_owner, None, 0
+        try:
+            return fn()
+        finally:
+            for _ in range(depth):
+                err = CBLError()
+                self.lib.check(L.CBLDatabase_BeginTransaction(self.h, C.byref(err)), err, "begin (split)")
+            self._txn_owner, self._txn_depth = owner, depth
 
     def _open_or_raise(self) -> None:
         """2026-10-31, a SIGSEGV: an operation after close() reached the native lib with
@@ -352,7 +396,7 @@ class Database:
         if getattr(self, "_closed", False) or getattr(self, "h", 1) is None:
             raise CBLException("the database is closed")
 
-    def _run(self, fn):
+    def _run(self, fn, write=False):
         """fn() on the database thread: a turn's first, background after, each kind in
         arrival order. On that thread itself (an operation calling another) it runs now."""
         ops = getattr(self, "_ops", None)
@@ -360,7 +404,7 @@ class Database:
             self._open_or_raise()
         if ops is None or threading.get_ident() == self._tid:
             return fn()
-        box = {"ev": threading.Event()}
+        box = {"ev": threading.Event(), "caller": threading.get_ident(), "write": write}
         ops.put((1 if TurnFirst.is_background() else 0, next(self._n), fn, box))
         box["ev"].wait()
         if "e" in box:
@@ -379,7 +423,7 @@ class Database:
         return h
 
     # ---- transactions --------------------------------------------------------
-    @_queued
+    @_queued_write
     def begin(self):
         self.lock.acquire()
         err = CBLError()
@@ -388,6 +432,9 @@ class Database:
         except Exception:
             self.lock.release()
             raise
+        if not self._txn_depth:
+            self._txn_owner = self._caller
+        self._txn_depth += 1
 
     @_queued
     def end(self, commit=True):
@@ -395,10 +442,13 @@ class Database:
             err = CBLError()
             self.lib.check(self.lib.L.CBLDatabase_EndTransaction(self.h, commit, C.byref(err)), err, "end")
         finally:
+            self._txn_depth = max(0, self._txn_depth - 1)
+            if not self._txn_depth:
+                self._txn_owner = None
             self.lock.release()
 
     # ---- documents -----------------------------------------------------------
-    @_queued
+    @_queued_write
     def put_json(self, coll: str, key: str, js: str):
         L, err = self.lib.L, CBLError()
         with self.lock:
@@ -435,7 +485,7 @@ class Database:
                 L.CBL_Release(d)
             return bool(d)
 
-    @_queued
+    @_queued_write
     def purge(self, coll: str, key: str):
         with self.lock:
             err = CBLError()
@@ -478,7 +528,7 @@ class Database:
             finally:
                 L.CBLVectorEncoding_Free(enc)
 
-    @_queued
+    @_queued_write
     def update_lazy(self, coll: str, name: str, to_vec, limit: int = 500) -> int:
         """ONE batch of a lazy vector index: up to `limit` rows it still
         wants; `to_vec(str) -> float32 array | None` (None = skip the row).

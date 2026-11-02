@@ -340,19 +340,14 @@ class SessionStore:
         if not put and not gone:
             return True
         try:
-            many = len(put) + len(gone) > 1
-            if many:
-                self._cbl.begin()
-            try:
-                for k, s, sg in put:
-                    self._cbl.put_json(self.CBL_COLL, doc_key(k), json.dumps({"s": s}, default=str))
-                    self._sig[k] = sg
-                for k in gone:
-                    self._cbl.purge(self.CBL_COLL, doc_key(k))
-                    self._sig.pop(k, None)
-            finally:
-                if many:
-                    self._cbl.end()
+            # no batch of its own: a chat write commits by itself and never waits for, or rides
+            # in, another caller's open transaction (cblite._outside_txn, 2026-11-02)
+            for k, s, sg in put:
+                self._cbl.put_json(self.CBL_COLL, doc_key(k), json.dumps({"s": s}, default=str))
+                self._sig[k] = sg
+            for k in gone:
+                self._cbl.purge(self.CBL_COLL, doc_key(k))
+                self._sig.pop(k, None)
         except Exception as e:
             print(f"[serve] sessions: database save failed ({e})", file=sys.stderr)
             return False
@@ -662,20 +657,15 @@ class MessageStore:
         if not rows:
             return
         try:
-            many = len(rows) > 1
-            if many:
-                self._cbl.begin()
-            try:
-                for sid, mid, r in rows:
-                    n = self._pos.get((sid, mid))
-                    if n is None:
-                        self._n += 1
-                        n = self._pos[(sid, mid)] = self._n
-                    self._cbl.put_json(self.CBL_COLL, self._doc_key(sid, mid),
-                                       json.dumps({"sid": sid, "mid": mid, "n": n, "row": r}, default=str))
-            finally:
-                if many:
-                    self._cbl.end()
+            # one commit per row, no batch of its own: a chat row never waits for, or rides in,
+            # another caller's open transaction (cblite._outside_txn, 2026-11-02)
+            for sid, mid, r in rows:
+                n = self._pos.get((sid, mid))
+                if n is None:
+                    self._n += 1
+                    n = self._pos[(sid, mid)] = self._n
+                self._cbl.put_json(self.CBL_COLL, self._doc_key(sid, mid),
+                                   json.dumps({"sid": sid, "mid": mid, "n": n, "row": r}, default=str))
         except Exception as e:
             self._dirty_rows = (self._dirty_rows or set()) | set(dirty)    # the next flush retries
             print(f"[serve] messages: database save failed ({e})", file=sys.stderr)
