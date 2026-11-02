@@ -85,5 +85,49 @@ class ForeignWriteCommits(unittest.TestCase):
         self.assertIsNone(self.db.get_json("c", "x"))
 
 
+
+@unittest.skipUnless(cblite.lib_paths() is not None, "CBL libraries not vendored")
+class AGoalSurvivesTheCut(unittest.TestCase):
+    """The entity store (goals live there) saves in a batch of its own: before, that batch nested
+    inside the write-behind's open one and a cut rolled the goal back (goal 38b98d393565,
+    2026-11-02). Now it waits for the open batch to end and commits by itself."""
+
+    def test_a_goal_saved_during_the_write_behinds_batch_survives_the_cut(self):
+        import os
+        os.environ.setdefault("MEMBRANE_STORE", "json")
+        from membrane.cblstore import CBLiteBackend
+        from membrane.entities import EntityStore, QuantumEntity
+        d = Path(tempfile.mkdtemp())
+        be = CBLiteBackend(d / "field.cblite")
+        try:
+            db = be.db
+            db.put_json("c", "seed", "{}")
+            est = EntityStore(path=str(d / "entities.json"), shared=False, cbl=db)
+            est.save()                                     # its collections exist before the batch
+            began, release = threading.Event(), threading.Event()
+
+            def batch():
+                db.begin()
+                db.put_json("c", "batch-1", '{"n":1}')
+                began.set()
+                release.wait(10)
+                db.end(commit=False)                       # the cut
+            t = threading.Thread(target=batch)
+            t.start()
+            began.wait(10)
+            est.upsert(QuantumEntity(eid="membrane::goal:alice1", cls="Goal",
+                                     properties={"name": "ship it", "status": "open"}), embedder=None)
+            saver = threading.Thread(target=est.save)
+            saver.start()
+            saver.join(1.0)                                # the save gets its moment while the batch is open
+            release.set()
+            t.join(10)
+            saver.join(10)
+            again = EntityStore(path=str(d / "entities.json"), shared=False, cbl=db)
+            self.assertIn("membrane::goal:alice1", again.docs)
+        finally:
+            be.close()
+
+
 if __name__ == "__main__":
     unittest.main()
