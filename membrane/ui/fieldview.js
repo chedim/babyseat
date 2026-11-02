@@ -138,7 +138,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
           sec("Chat") + w.chat.map((r) => `<div>${linkify(r)}</div>`).join("") + `<input class="say" placeholder="say…" style="width:100%">` +
           sec("Logs") + w.logs.map((r) => `<div style="font-size:12px">${linkify(r)}</div>`).join("") + `</div>` : "";
       const r = this._run;
-      const rhtml = r ? `<div class="card" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b>rc ${esc(String(r.rc))}</b>${sec("Code")}<pre style="white-space:pre-wrap">${esc(r.code || "")}</pre>${sec("Output")}<pre style="white-space:pre-wrap">${esc(r.output || "")}</pre></div>` : "";
+      const rhtml = r ? `<div class="fvwin" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b>rc ${esc(String(r.rc))}</b>${sec("Code")}<pre style="white-space:pre-wrap">${esc(r.code || "")}</pre>${sec("Output")}<pre style="white-space:pre-wrap">${esc(r.output || "")}</pre></div>` : "";
       this.style.cssText = "position:absolute;inset:0;display:block;pointer-events:none";
       this.innerHTML = html || rhtml;
       const say = this.querySelector && this.querySelector(".say");
