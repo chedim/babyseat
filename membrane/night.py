@@ -3074,7 +3074,28 @@ def remove_entity(est, spec: str, force: bool = False) -> dict:
     # a forced single method takes its own step nodes too (an owner's already ride `owned`)
     own_steps = ([e for e in list(est.docs or {}) if e.startswith(ent.eid + ":")]
                  if (ent.properties or {}).get("method_of") else [])
-    return {"removed": est.remove_many([ent.eid] + owned + own_steps)}
+    gone = [ent.eid] + owned + own_steps
+    # Each removed method is marked retired and noted on its verb BEFORE the removal, so implemented_by,
+    # aliased and the implemented-by edge clear by the one path (verbs.note); `retired` on a method is
+    # only read until the next boot -- it is gone with the removal. A verb left with nothing is retired.
+    from . import verbs as _V
+    dead = set(gone)
+    touched = [k for k, v in (est.docs or {}).items() if v.cls == _V.CLASS_VERB and (
+        dead & set(v.properties.get("implemented_by") or [])
+        or dead & {a.get("method") for a in (v.properties.get("aliased") or [])})]
+    for e in gone:
+        d = est.docs.get(e)
+        if d is not None and (d.properties or {}).get("method_name"):
+            d.properties = {**(d.properties or {}), "retired": True}
+            _V.note(est, d)
+    n = est.remove_many(gone)
+    for veid in touched:  # a verb left with no method and no alias means nothing: retired
+        v = (est.docs or {}).get(veid)
+        vp = dict(v.properties or {}) if v is not None else {}
+        if v is not None and not vp.get("implemented_by") and not vp.get("aliased") and not vp.get("retired"):
+            v.properties = {**vp, "retired": True}
+            est.upsert(v, embedder=None)
+    return {"removed": n}
 
 
 def short_name_of(obj) -> str:
