@@ -71,15 +71,16 @@ class TestCapturer(unittest.TestCase):
             c.flush()
         self.assertEqual(c.errors, 1)
 
-    def test_a_full_queue_drops_discourse_not_observations(self):
+    def test_a_full_queue_keeps_the_newest_discourse_and_counts_the_loss(self):
         f = EF.EntityField(MemBackend(), FakeEmbedder(), "seat@host")
         c = Capturer(f, mode="shadow", start=False, maxsize=1)
         c.on_turn("first message here")
-        c.on_turn("second message dropped")        # full: discourse dropped
-        c.on_calls("q", CALLS)                     # full: oldest evicted, obs kept
+        c.on_turn("second message kept")           # full of discourse: the oldest goes (#858)
+        c.on_calls("q", CALLS)                     # full of discourse: the observation is lost
         c.flush()
         kinds = [d["stream"] for d in events(f)]
-        self.assertEqual(kinds, ["observation"])
+        self.assertEqual(kinds, ["discourse"])
+        self.assertEqual((c.dropped, c.dropped_discourse), (2, 1))
 
     def test_sessions_advance_after_a_gap(self):
         s = Sessions(boot=100, gap_s=10)
