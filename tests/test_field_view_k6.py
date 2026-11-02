@@ -23,17 +23,7 @@ def _js(expr, f="fieldview.js", name="F"):
 
 
 @NODE
-def test_icons_by_kind_and_positions():
-    icons = _js("F.layout(%s, 800, 600)" % json.dumps(G))
-    assert {i["id"]: i["kind"] for i in icons} == {"g1": "goal", "t1": "task", "d1": "decision"}
-    assert len({i["glyph"] for i in icons}) == 3
-    assert all(0 <= i["x"] <= 800 and 0 <= i["y"] <= 600 for i in icons)
-    assert len({(i["x"], i["y"]) for i in icons}) == 3
-
-
-@NODE
 def test_hover_grows_and_card_has_info():
-    assert _js("F.scale(true)") > _js("F.scale(false)")
     c = _js("F.cardInfo(%s, 'd1')" % json.dumps(G))
     assert c["title"] == "which?" and c["kind"] == "decision" and c["status"] == "open"
     assert c["of"] == "ship" and c["blocks"] == ["build"]

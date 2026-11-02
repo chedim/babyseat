@@ -1,34 +1,7 @@
-/* k6: THE FIELD VIEW -- goals, tasks and decisions as icons on the field. It draws ONLY
- * what GET /membrane/work-graph answers (k4). Hover grows an icon; click opens a card. */
+/* k6: THE FIELD VIEW -- goals, tasks and decisions are objects IN the field3d scene (field3d.js workMarkers,
+ * at their entity positions). This element only fetches GET /membrane/work-graph, hands it to the scene and
+ * shows the clicked item's card. The real chat stays the chat. */
 const GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
-const RING = { goal: 0.0, task: 0.55, decision: 0.9 };
-
-/** hovered icons grow */
-function scale(hover) { return hover ? 1.6 : 1; }
-
-/** icons from the graph: goals at the centre, tasks on a middle ring, decisions outside it. */
-function layout(graph, w, h) {
-  const cx = w / 2, cy = h / 2, r = Math.min(w, h) * 0.42;
-  const by = { goal: [], task: [], decision: [] };
-  for (const n of (graph && graph.nodes) || []) if (by[n.kind]) by[n.kind].push(n);
-  const out = [];
-  for (const kind of ["goal", "task", "decision"]) {
-    const ns = by[kind];
-    ns.forEach((n, i) => {
-      let x = cx, y = cy;
-      const rad = r * RING[kind];
-      if (kind === "goal" && ns.length === 1) { /* centre */ }
-      else {
-        const rr = kind === "goal" ? r * 0.25 : rad;
-        const a = (2 * Math.PI * i) / ns.length + (kind === "decision" ? Math.PI / ns.length : 0);
-        x = cx + rr * Math.cos(a); y = cy + rr * Math.sin(a);
-      }
-      out.push({ id: n.id, kind, glyph: GLYPH[kind], title: n.title, status: n.status,
-        x: Math.max(0, Math.min(w, x)), y: Math.max(0, Math.min(h, y)) });
-    });
-  }
-  return out;
-}
 
 /** what a clicked icon's card shows */
 function cardInfo(graph, id) {
@@ -92,15 +65,20 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": 
 
 if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined") {
   class MembraneFieldView extends HTMLElement {
-    constructor() { super(); this.attachShadow({ mode: "open" }); this._graph = null; this._open = null; this._tab = 0; this._extra = null; this._chat = { log: [] }; this._draft = ""; }
-    /** the answer to a chat-send lands in the response window */
-    reply(text) { this._chat = chatStep(this._chat, "reply", text); this._draw(); }
+    constructor() { super(); this._graph = null; this._open = null; this._tab = 0; this._extra = null; }
     set api(a) { this._api = a; this.refresh(); }
+    /** the scene the markers live in (a Field3DView): it gets every new graph, and calls open(id) on a click */
+    set scene(sc) { this._scene = sc; if (this._graph && sc) sc.setWork(this._graph, (id) => this.open(id)); }
+    open(id) { this._open = id; this._tab = 0; this._extra = null; this._draw(); }
     async refresh() {
       let g = null;
       try { g = await this._api.get("/membrane/work-graph"); } catch (e) { g = null; }
       const key = JSON.stringify(g);
-      if (key !== this._gkey) { this._gkey = key; this._graph = g; this._draw(); }
+      if (key !== this._gkey) {
+        this._gkey = key; this._graph = g;
+        if (this._scene) this._scene.setWork(g, (id) => this.open(id));
+        this._draw();
+      }
       clearTimeout(this._t); this._t = setTimeout(() => this.refresh(), 10000);
     }
     async _load() {
@@ -116,58 +94,30 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       try { await this._api.post("/membrane/item-chat/say", { spec: this._open, text }); } catch (e) { /* shown by reload */ }
       this._load();
     }
-    disconnectedCallback() { clearTimeout(this._t); }
+    disconnectedCallback() { clearTimeout(this._t); if (this._scene) this._scene.setWork(null); }
     _draw() {
-      const w = this.clientWidth || 800, h = this.clientHeight || 600;
-      const icons = layout(this._graph, w, h);
       const card = this._open && cardInfo(this._graph, this._open);
       const list = (l) => (l && l.length ? l.map(esc).join(", ") : "–");
-      let html = `<style>
-        :host{position:absolute;inset:0;display:block;font:14px system-ui}
-        .i{position:absolute;transform:translate(-50%,-50%) scale(1);font-size:26px;cursor:pointer;
-           transition:transform .15s;user-select:none}
-        .i:hover{transform:translate(-50%,-50%) scale(${scale(true)});z-index:2}
-        .card{position:absolute;right:12px;top:12px;max-width:300px;padding:12px;border-radius:10px;
-           background:rgba(20,20,30,.92);color:#eee;z-index:3}
-        .card b{display:block;margin-bottom:6px}.x{float:right;cursor:pointer}
-      </style>` + icons.map((i) => `<div class="i" data-id="${esc(i.id)}" title="${esc(i.title)}"
-        style="left:${i.x}px;top:${i.y}px">${i.glyph}</div>`).join("") +
-        (card ? `<div class="card"><span class="x">✕</span><b>${GLYPH[card.kind]} ${esc(card.title)}</b>
+      const html = card ? `<div class="card" style="position:absolute;right:12px;top:12px;max-width:300px;padding:12px;border-radius:10px;background:rgba(20,20,30,.92);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b style="display:block;margin-bottom:6px">${GLYPH[card.kind]} ${esc(card.title)}</b>
           <div>${TABS.map((t, k) => `<span class="tab" data-tab="${k}" style="cursor:pointer;margin-right:8px;${k === this._tab ? "text-decoration:underline" : ""}">${t}</span>`).join("")}</div>` +
           (this._tab === 0 ? `${esc(card.kind)} · ${esc(card.status)}<br>goal: ${esc(card.of || "–")}<br>
           blocks: ${list(card.blocks)}<br>blocked by: ${list(card.blockedBy)}` :
           this._tab === 1 ? chatRows(this._extra).map((r) => `<div>${esc(r)}</div>`).join("") + `<input class="say" placeholder="say…">` :
-          logRows(this._extra).map((r) => `<div>${esc(r)}</div>`).join("")) + `</div>` : "");
-      const sr = this.shadowRoot, pos = Object.fromEntries(icons.map((i) => [i.id, i]));
-      const st = edgeStyles(this._graph), goalOf = Object.fromEntries(((this._graph && this._graph.nodes) || []).map((n) => [n.id, n.kind === "goal" ? n.id : n.goal]));
-      const lines = (((this._graph && this._graph.edges) || [])).filter((e) => pos[e.from] && pos[e.to]).map((e) => {
-        const s = st[goalOf[e.from]] || { color: "#888", dash: "" };
-        return `<line x1="${pos[e.from].x}" y1="${pos[e.from].y}" x2="${pos[e.to].x}" y2="${pos[e.to].y}" stroke="${s.color}" stroke-width="2" stroke-dasharray="${s.dash}"/>`;
-      }).join("");
-      html += `<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0">${lines}</svg>` +
-        `<div class="chatbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4;background:rgba(20,20,30,.92);color:#eee;padding:6px">` +
-        `<div class="reply-window" style="max-height:30vh;overflow:auto">${(this._chat.log).map((m) => `<div>${m.who === "me" ? "▸" : "◂"} ${esc(m.text)}</div>`).join("")}</div>` +
-        `<input class="ci" style="width:100%;box-sizing:border-box" placeholder="ask…" value="${esc(this._draft || "")}"></div>`;
-      sr.innerHTML = html;
-      const say = sr.querySelector(".say");
+          logRows(this._extra).map((r) => `<div>${esc(r)}</div>`).join("")) + `</div>` : "";
+      this.style.cssText = "position:absolute;inset:0;display:block;pointer-events:none";
+      this.innerHTML = html;
+      const say = this.querySelector && this.querySelector(".say");
       if (say) say.onkeydown = (e) => { if (e.key === "Enter") this._say(say.value.trim()); };
-      const ci = sr.querySelector(".ci");
-      ci.oninput = () => { this._draft = ci.value; };
-      ci.onkeydown = (e) => {
-        if (e.key !== "Enter") return;
-        this._chat = chatStep(this._chat, "send", ci.value);
-        if (this._chat.send) { const t = this._chat.send; this._draft = ""; this.dispatchEvent(new CustomEvent("chat-send", { detail: t })); }
-        this._draw();
-      };
-      this.shadowRoot.onclick = (e) => {
+      this.onclick = (e) => {
         if (e.target.closest(".x")) { this._open = null; this._draw(); return; }
-        const tb = e.target.closest(".tab"); if (tb) { this._tab = +tb.dataset.tab; this._draw(); this._load(); return; }
-        const el = e.target.closest(".i"); if (el) { this._open = el.dataset.id; this._tab = 0; this._extra = null; this._draw(); }
+        const tb = e.target.closest(".tab"); if (tb) { this._tab = +tb.dataset.tab; this._draw(); this._load(); }
       };
+      const c = this.querySelector && this.querySelector(".card"); if (c) c.style.pointerEvents = "auto";
     }
   }
   if (!customElements.get("membrane-fieldview")) customElements.define("membrane-fieldview", MembraneFieldView);
 }
 
-const FieldViewLogic = { scale, layout, cardInfo, edgeStyles, chatStep, GLYPH, TABS, chatRows, logRows };
+const FieldViewLogic = { cardInfo, edgeStyles, chatStep, GLYPH, TABS, chatRows, logRows };
+if (typeof window !== "undefined") window.FieldViewLogic = FieldViewLogic;
 if (typeof module !== "undefined" && module.exports) module.exports = FieldViewLogic;
