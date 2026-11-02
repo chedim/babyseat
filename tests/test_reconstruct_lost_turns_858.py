@@ -51,3 +51,18 @@ class TestNormalTurnAfterBacklog(unittest.TestCase):
             cap.flush()
         out = EB.reconstruct(f, conv=CONV) or ""
         self.assertIn("backup question", out, "discourse dropped silently when the queue was full")
+
+
+class TestLossIsCounted(unittest.TestCase):
+    def test_a_dropped_capture_shows_on_the_deliver_stats(self):
+        from membrane import diag as D
+        D.reset_deliver_stats()
+        cap = Capturer(_field(), mode="shadow", start=False, maxsize=1)
+        cap.on_turn("one", "a")
+        cap.on_turn("two", "b")                    # all discourse: the oldest goes
+        self.assertEqual(D.deliver_stats()["capture_dropped_discourse"], 1)
+        self.assertEqual(cap.dropped_discourse, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

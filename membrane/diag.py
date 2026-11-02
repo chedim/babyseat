@@ -60,7 +60,8 @@ DIAG_PATHS = ("/membrane/diag/timing", "/membrane/diag/profile",
 SEAT_BUSY_TYPE = "seat_busy"
 SEAT_BUSY_MESSAGE = ("the seat is too busy to answer with its memory right now "
                      "-- try again")
-_deliver = {"busy_timeouts": 0}
+_deliver = {"busy_timeouts": 0, "capture_dropped": 0, "capture_dropped_discourse": 0,
+            "capture_errors": 0}
 
 _lock = threading.Lock()      # this module's own; never one of the seat's
 _ring: deque = deque(maxlen=TIMING_RING)
@@ -343,6 +344,13 @@ def note_busy_timeout() -> None:
         _deliver["busy_timeouts"] += 1
 
 
+def note_capture_loss(kind: str) -> None:
+    """A capture the field lost silently (#858): kind is 'dropped',
+    'dropped_discourse' or 'errors'; read on /membrane/diag/deliver."""
+    with _lock:
+        _deliver["capture_" + kind] = _deliver.get("capture_" + kind, 0) + 1
+
+
 def deliver_stats() -> dict:
     with _lock:
         return dict(_deliver)
@@ -350,7 +358,8 @@ def deliver_stats() -> dict:
 
 def reset_deliver_stats() -> None:
     with _lock:
-        _deliver["busy_timeouts"] = 0
+        for k in _deliver:
+            _deliver[k] = 0
 
 
 def _flag(v) -> bool:

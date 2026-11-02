@@ -6011,6 +6011,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         srv = self.server
         mem = srv.membrane
         self._v1_stream_open = False          # set once the SSE headers go out (#431)
+        # #858: the person's message is remembered BEFORE the model answers, so
+        # a turn cut in the gate (seat_busy, quota, a dead rung) still has it
+        _cap0 = getattr(srv, "capturer", None)
+        if _cap0 is not None and query:
+            _cap0.on_turn(query)
         route = verdict.get("route") or {}
         routed_model = route.get("route")
         orig_model = str(up.get("model") or "membrane")
@@ -6442,7 +6447,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         _learned = "" if _ca_failed else content
         _cap = getattr(srv, "capturer", None)
         if _cap is not None:
-            _cap.on_turn(query, _learned, "" if _ca_failed else (thought or ""))
+            # the person's message was recorded when the turn began (#858)
+            _cap.on_turn("", _learned, "" if _ca_failed else (thought or ""))
             if _ca_tools:
                 _cap.on_calls(query, _CA.captured_calls(_ca_tools))
                 for _t in _ca_tools:

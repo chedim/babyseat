@@ -172,6 +172,8 @@ class Capturer:
         self.sessions = sessions or Sessions()
         self.q: queue.Queue = queue.Queue(maxsize=maxsize)
         self.errors = 0
+        self.dropped = 0                       # #858: captures lost to a full queue
+        self.dropped_discourse = 0
         # the tool results captured before chunking (#429): cut a batch
         # whenever the queue idles
         self.idle_hooks: list = [field.chunk_backlog] if hasattr(field, "chunk_backlog") else []
@@ -240,20 +242,49 @@ class Capturer:
         try:
             # the key is read HERE, on the caller's (request) thread
             item = (build, session if exact_session else (session or self.sessions.current()),
-                    current_conversation() if conv is None else conv)
+                    current_conversation() if conv is None else conv, discourse)
             try:
                 self.q.put_nowait(item)
             except queue.Full:
-                if discourse:
-                    return                      # drop discourse, never observations
-                try:
-                    self.q.get_nowait()
-                    self.q.task_done()
-                except queue.Empty:
-                    pass
+                # #858: a full queue makes room by evicting the oldest
+                # observation (never a person's words); every loss is counted
+                # where a person can read it (/membrane/diag/deliver)
+                if not self._evict_observation():
+                    if discourse:               # all discourse: the oldest line goes
+                        self._lose(self.q.get_nowait())
+                    else:
+                        self._lose(item)
+                        return
                 self.q.put_nowait(item)
         except Exception:
             self.errors += 1
+
+    def _lose(self, item) -> None:
+        self.dropped += 1
+        from . import diag as _D
+        _D.note_capture_loss("dropped")
+        if len(item) > 3 and item[3]:
+            self.dropped_discourse += 1
+            _D.note_capture_loss("dropped_discourse")
+        try:
+            self.q.task_done()
+        except ValueError:
+            pass
+
+    def _evict_observation(self) -> bool:
+        """Drop the oldest queued non-discourse item; True when one went."""
+        with self.q.mutex:
+            for i, it in enumerate(self.q.queue):
+                if not (len(it) > 3 and it[3]):
+                    del self.q.queue[i]
+                    self.q.unfinished_tasks = max(0, self.q.unfinished_tasks - 1)
+                    break
+            else:
+                return False
+        self.dropped += 1
+        from . import diag as _D
+        _D.note_capture_loss("dropped")
+        return True
 
     def _step(self, build, session: str, conv: str = "") -> None:
         evs = build()
@@ -274,7 +305,7 @@ class Capturer:
     def _run(self) -> None:
         while True:
             try:
-                build, session, conv = self.q.get(timeout=self.IDLE_S)
+                build, session, conv, *_ = self.q.get(timeout=self.IDLE_S)
             except queue.Empty:
                 self._idle()
                 continue
@@ -284,6 +315,8 @@ class Capturer:
                     self._step(build, session, conv)
             except Exception as e:                 # never into the chat path
                 self.errors += 1
+                from . import diag as _D
+                _D.note_capture_loss("errors")
                 if self.errors <= 3 or self.errors % 100 == 0:
                     print(f"[efield] capture error #{self.errors}: {e}", file=sys.stderr)
             finally:
@@ -304,7 +337,7 @@ class Capturer:
         """Wait until the queue drains (tests, shutdown)."""
         if self._t is None:
             while not self.q.empty():
-                build, session, conv = self.q.get()
+                build, session, conv, *_ = self.q.get()
                 try:
                     self._step(build, session, conv)
                 except Exception:
