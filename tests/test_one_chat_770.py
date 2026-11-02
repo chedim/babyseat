@@ -129,6 +129,37 @@ class OwnerAndBoot(unittest.TestCase):
         self.assertEqual(a["id"], b["id"])
         self.assertEqual(a["owner"], NS.OWNER_SUB)
 
+    def _tokenless_post(self, env):
+        d = Path(tempfile.mkdtemp())
+        ss = NS.SessionStore(str(d / "s.json"))
+        mine = ss.create("mine")["id"]
+        ss.sessions[mine]["owner"] = "alice"
+        h = NS.make_handler(hub=NS.SSEHub(), sessions=ss, messages=NS.MessageStore(),
+                            config=_CFG, runner=_Runner())
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), h)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            r = urllib.request.Request(f"http://127.0.0.1:{httpd.server_address[1]}/session",
+                                       method="POST", data=b"{}",
+                                       headers={"Content-Type": "application/json"})
+            with mock.patch.dict(os.environ, env):
+                if "MEMBRANE_OPERATOR" not in env:
+                    os.environ.pop("MEMBRANE_OPERATOR", None)
+                with urllib.request.urlopen(r, timeout=10) as resp:
+                    return mine, json.loads(resp.read())
+        finally:
+            httpd.shutdown()
+
+    def test_tokenless_caller_is_the_operator_when_one_is_configured(self):
+        mine, out = self._tokenless_post({"MEMBRANE_OPERATOR": "alice"})
+        self.assertEqual(out["id"], mine)
+        self.assertEqual(out["owner"], "alice")
+
+    def test_tokenless_caller_falls_back_to_owner_without_an_operator(self):
+        mine, out = self._tokenless_post({})
+        self.assertNotEqual(out["id"], mine)
+        self.assertEqual(out["owner"], NS.OWNER_SUB)
+
     def test_boot_migration_reads_chat_and_person_from_config(self):
         s = NS.SessionStore()
         keep, other = s.create("memo")["id"], s.create("older")["id"]

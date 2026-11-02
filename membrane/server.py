@@ -4536,7 +4536,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 _w = self._jwt_person()
                 _me = _w.sub if _w is not None else (
                     str(getattr(self, "_ui_speaker", "") or "") if getattr(self, "_ui_relay", False)
-                    else OWNER_SUB)                 # tokenless loopback = the seat owner
+                    else (os.environ.get("MEMBRANE_OPERATOR") or OWNER_SUB))  # #836: tokenless loopback = the operator, else the seat owner
                 if _me and not b.get("parentID"):       # #770: one chat per person
                     _mine = [x for x in sessions.list() if str(x.get("owner") or "") == _me
                              and not x.get("readonly") and not x.get("parentID")]
