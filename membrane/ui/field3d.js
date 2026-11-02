@@ -36,6 +36,13 @@
  * wheel / pinch = zoom, click = the drawer, double-click = fly there.
  */
 const F3_WORLD = 1000;
+
+/** The idle parking spot of the n-th avatar: a golden-angle spiral whose radius grows
+ *  with n, so no two orbs (46 wide) overlap however many minds run. */
+function f3IdleSlot(n) {
+  const ang = n * 2.399963229728653, r = F3_WORLD * 0.3 + 90 * Math.sqrt(n);
+  return [Math.cos(ang) * r, F3_WORLD * 0.62, Math.sin(ang) * r];
+}
 const LOCATE_CACHE_MAX = 500;      // every entity a mind touches is located: cap it
 const BRAIN_TRAIL = 8;             // #237: self's last looks drawn (dots + paths), capped
 const BRAIN_RINGS = 4;             // #237: shift / level-up rings alive at once, capped
@@ -2222,8 +2229,7 @@ class Field3DView {
   _avatar(agent) {
     let a = this.avatars.get(agent);
     if (a) return a;
-    const n = this.avatars.size, ang = n * 0.9;
-    const idle = [Math.cos(ang) * F3_WORLD * 0.75, F3_WORLD * 0.62, Math.sin(ang) * F3_WORLD * 0.75];
+    const idle = f3IdleSlot(this.avatars.size);
     a = new Avatar(agent, idle);
     const THREE = this.THREE, color = new THREE.Color(F3_AGENTS[agent] || "#ffffff");
     const c = document.createElement("canvas"); c.width = c.height = 64;
