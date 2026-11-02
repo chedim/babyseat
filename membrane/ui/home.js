@@ -4810,7 +4810,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._mindFollow = agent; this._selFollow = null; this._sel = null;
       if (this._card) this._card.classList.remove("open");
       this._say("following " + agent);
-      const kind = /^loop/.test(agent) ? "loop" : agent;
+      const kind = /^(loop|planner|worker)/.test(agent) ? "loop" : agent;
       let sid = ((this._v3 && this._v3.agentSids) || {})[agent] || null;
       if (kind === "loop" && !sid) {
         try { const d = await this._get("/membrane/minds"); sid = ((d.loops || {})[agent] || {}).sid || null; } catch (e) { /* not an admin, or the seat is old */ }

@@ -988,9 +988,15 @@ class _LoopDrainer:
         if lane == "planner":
             _mark_picked_up(srv, ent, agent)     # who is working the goal (the banner; no second pass)
         taken = False
+        from .fieldpulse import of as _pulse_of
+        _fp = _pulse_of(srv)
+        if _fp is not None:
+            _fp.focus(agent, ent, "start")       # #848: the lane's orb
         try:
             with _W.source(lane, ent):
                 sid = srv.create_loop_session(agent, agent)
+                if _fp is not None:
+                    _fp.loop_session(agent, ent, sid)
                 if lane == "worker":
                     if not GG.take(srv, ent):
                         return "skip"
@@ -1055,6 +1061,8 @@ class _LoopDrainer:
             loops.release(desc)
             if isinstance(titles, list) and agent in titles:
                 titles.remove(agent)
+            if _fp is not None:
+                _fp.focus(agent, ent, "end")
             if lane == "planner":
                 _mark_picked_up(srv, ent, "", end=True)
 
