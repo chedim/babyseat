@@ -1725,7 +1725,15 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = "",
                               goal.eid, text, created=created)
     except Exception:
         pass
-    return {"ok": True, "eid": goal.eid, "created": created, "pinned": True}
+    # THE TRUTHFUL REPLY (#771): the pin is a bonus, not a seat -- say
+    # whether the goal is really on the capped active set now
+    from .intent import GOAL_SET_CAP
+    try:
+        on_set = goal.eid in {g.eid for g in sel.refresh(time.time())}
+    except Exception:
+        on_set = False
+    return {"ok": True, "eid": goal.eid, "created": created, "pinned": True,
+            "on_set": on_set, "cap": GOAL_SET_CAP}
 
 
 def _intent_cmd(srv, q: str) -> str:
@@ -4174,18 +4182,54 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
 
 
 def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
-    """The turn's first round carries what a pronoun in the person's message was
-    resolved to (convgraph.before_turn), once."""
+    """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what
+    this conversation is about now, walked off its graph) and what a pronoun in the person's
+    message was resolved to (convgraph.before_turn), once."""
     if is_tool_round:
         return ctx
+    sid = str(body.get("_turn_sid") or "")
+    adds = []
+    if sid and sid in (getattr(srv, "_cg_turn", None) or {}):
+        try:
+            from . import graphbanner as _GB
+            _t_gb = time.monotonic()
+            blk = _GB.block(srv, sid)
+            print(f"[graph-banner] {sid[:16]}: {blk.count(chr(10)) if blk else 0} lines in "
+                  f"{(time.monotonic() - _t_gb) * 1000:.0f} ms", file=sys.stderr)
+            if blk:
+                adds.append(blk)
+        except Exception as e:
+            print(f"[graph-banner] {sid[:16]}: {e}", file=sys.stderr)
     try:
         from . import convgraph as _CG
-        note = _CG.take_note(srv, str(body.get("_turn_sid") or ""))
+        note = _CG.take_note(srv, sid)
     except Exception:
         note = None
-    if not note:
+    if note:
+        adds.append(note)
+    said = (getattr(srv, "_cg_text", None) or {}).pop(sid, None) if sid else None
+    _sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
+    if said and _sess is not None and ((_sess.get(sid) or {}).get("owner")):
+        said = None                               # a guest's chat (a token person, the HA relay): no program
+    if said:
+        try:                                      # living language: what the message compiles to
+            from . import language as _LL
+            if _LL.available():
+                steps = _LL.compile(srv, sid, said)
+                if steps and steps[0].get("kind") == "define" and steps[0]["mapped"]:
+                    adds.append(f"The person's message {_LL.describe(srv.entity_store, steps)}. If they mean it, "
+                                f"exec(action='run', lang='en', code={said!r}) keeps it.")
+                elif steps and all(s["mapped"] for s in steps):
+                    _many = [s for s in steps if s.get("needs_all")]
+                    adds.append(f"The person's message compiles to: {_LL.describe(srv.entity_store, steps)}. "
+                                + (f"It would change {sum(len(s['targets']) for s in _many)} things: ask before "
+                                   "running it (they confirm by saying 'all'). " if _many else "")
+                                + f"If they want it done, exec(action='run', lang='en', code={said!r}) runs it.")
+        except Exception as e:
+            print(f"[language] {sid[:16]}: {e}", file=sys.stderr)
+    if not adds:
         return ctx
-    return (ctx + "\n\n" + note) if ctx else note
+    return "\n\n".join(([ctx] if ctx else []) + adds)
 
 
 def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
@@ -4359,6 +4403,19 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_out(_COP.state(self.server)); return
         if path == "/membrane/entity/read":
             self._entity_read(); return
+        if path == "/membrane/work-graph":            # k4: goals, tasks, decisions + edges
+            from . import decision_map as _DM
+            self._json_out(_DM.work_graph(getattr(self.server, "entity_store", None))); return
+        if path == "/membrane/entity-history":        # k5: one entity's properties, changes, relations
+            from . import decision_map as _DM
+            import urllib.parse as _up
+            _q = _up.parse_qs(self.path.split("?", 1)[-1])
+            self._json_out(_DM.entity_history(self.server, (_q.get("spec") or [""])[0].strip())); return
+        if path == "/membrane/item-chat":             # k7: an item's mini-chat (messages referring to it)
+            from . import decision_map as _DM
+            import urllib.parse as _up
+            _q = _up.parse_qs(self.path.split("?", 1)[-1])
+            self._json_out(_DM.item_chat(self.server, (_q.get("spec") or [""])[0].strip())); return
         if path == "/membrane/decisions":             # #470: the project decision map
             from . import decision_map as _DM
             self._json_out(_DM.board(getattr(self.server, "entity_store", None))); return
@@ -4469,6 +4526,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._decision_answer(); return
         if path == "/membrane/decision/drop":
             self._decision_drop(); return
+        if path == "/membrane/item-chat/say":
+            self._item_say(); return
         if path == "/membrane/peer/post":
             self._peer_post(); return
         if path == "/membrane/peer/read":
@@ -7078,6 +7137,22 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                          work=body.get("work") if isinstance(body.get("work"), bool) else None)
         if not res.get("ok"):
             self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
+        self._json_out(res)
+
+    def _item_say(self) -> None:
+        """POST /membrane/item-chat/say {spec, text}: say in an item's mini-chat (k7). Owner only."""
+        if self._paused_write_refused():
+            return
+        from . import seatauth as _SA
+        if not _SA.owner(self):
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
+        from . import decision_map as _DM
+        body = self._json_body()
+        res = _DM.item_say(self.server, str(body.get("spec") or ""), str(body.get("text") or ""),
+                           who=str(body.get("who") or ""))
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
 
     def _decision_drop(self) -> None:

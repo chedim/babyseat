@@ -25,7 +25,9 @@ It returns at once (queued); the turn runs under the loops' rules -- one
 loop per entity, the cap, the pause switch -- and its verdict lands on the
 entity (watch_last_decision / watch_decisions). The calls are counted and
 capped: CALLER_PER_HOUR per caller, GLOBAL_PER_HOUR in all, so no script
-loops the model into a bill. The entity keeps the last calls (who, about
+loops the model into a bill. A goal's plan request (the planner lane, about an
+open goal) counts only in the global cap: every goal's plan rides one trigger,
+and the planner lane's slots pace planning. The entity keeps the last calls (who, about
 what, why): the field can see what it costs.
 """
 from __future__ import annotations
@@ -113,12 +115,12 @@ def seat():
     return _SEAT["srv"]
 
 
-def _budget(caller: str, now: float) -> str | None:
+def _budget(caller: str, now: float, per_caller: bool = True) -> str | None:
     with _lock:
         _calls[:] = [c for c in _calls if now - c[0] < 3600]
         if len(_calls) >= GLOBAL_PER_HOUR:
             return f"the hour's budget is spent ({GLOBAL_PER_HOUR} calls)"
-        if sum(1 for _, c in _calls if c == caller) >= CALLER_PER_HOUR:
+        if per_caller and sum(1 for _, c in _calls if c == caller) >= CALLER_PER_HOUR:
             return f"{caller} has called {CALLER_PER_HOUR} times this hour"
         _calls.append((now, caller))
     return None
@@ -165,7 +167,11 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
         ans = seen.get("answer")
         return {"rc": 0, "text": (f"already asked at {time.strftime('%H:%M', time.localtime(seen['ts']))}; "
                                   + (f"its answer: {ans}" if ans else "its answer is still coming"))}
-    why = _budget(caller, now)
+    # a plan request (the planner lane, about an open goal): every goal's plan rides one trigger,
+    # one caller -- the planner lane's slots pace it, not the per-caller cap (2026-11-01)
+    plan = (extra or {}).get("lane") == "planner" and target is not None and target.cls == "Goal" \
+        and ((target.properties or {}).get("status") or "open") == "open"
+    why = _budget(caller, now, per_caller=False) if plan else _budget(caller, now)
     if why:
         _remember(srv, ent, now, caller, about_eid, prompt, refused=why)
         try:

@@ -91,29 +91,7 @@ def test_the_chat_opens_with_the_decision_prefilled():
 
 # ---- the view in membrane home (home.js, HomeLogic) ---------------------------------
 
-@NODE
-def test_decisions_is_a_view_of_the_page():
-    assert _js('H.knownView("decisions")', "home.js", "H") == "decisions"
-    assert _js('H.knownView("chat")', "home.js", "H") == "chat"
-    assert _js('H.knownView("graph")', "home.js", "H") == "graph"
-    assert _js('H.knownView("all")', "home.js", "H") == ""      # Everything is asked for by name
-
-
-@NODE
-def test_the_cockpit_is_the_default_view():
-    # standalone and Home Assistant alike: no ?view=, an empty one or an unknown one is the cockpit
-    for raw in (None, "", "bogus"):
-        assert _js('H.knownView(%s)' % json.dumps(raw), "home.js", "H") == "decisions", raw
-
-
-@NODE
-def test_the_standalone_menu_lists_every_view():
-    rows = _js('H.standaloneMenu("decisions")', "home.js", "H")
-    assert [r["v"] for r in rows] == ["chat", "graph", "decisions", "all"]
-    assert rows[2]["title"] == "Decisions" and rows[3]["title"] == "Everything"
-    assert [r["v"] for r in rows if r["current"]] == ["decisions"]
-    every = _js('H.standaloneMenu("")', "home.js", "H")                 # Everything is the "" view
-    assert [r["v"] for r in every if r["current"]] == ["all"]
+# k6: the view tests moved to tests/test_field_view_k6.py (the field view replaced Everything and the cockpit)
 
 
 def test_hass_and_standalone_read_the_same_view():
@@ -125,5 +103,5 @@ def test_hass_and_standalone_read_the_same_view():
 
 def test_the_page_loads_the_board_only_in_its_view():
     src = (UI / "home.js").read_text()
-    assert '"/ui/www/decisions.js"' in src
-    assert "membrane-decisions" in src
+    assert '"/ui/www/fieldview.js"' in src       # k6: the field view replaced the cockpit
+    assert "membrane-fieldview" in src

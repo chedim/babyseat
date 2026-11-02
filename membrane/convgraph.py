@@ -306,6 +306,27 @@ def _ask(srv, runner, sid: str, a_eid: str, reply: str, be, origin) -> None:
 
 # ---- the turn ------------------------------------------------------------------------------
 
+def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
+    """Compile-first routing, shadow stage: what living language made of the person's message
+    (compiled / gaps / thinking), kept on its message next to what the model then did."""
+    try:
+        from . import language as LL
+        if not LL.available():
+            return
+        sh = LL.classify(srv, sid, text)
+    except Exception:
+        return
+    rows = runner.messages.list(sid) if runner is not None else []
+    row = next((r for r in rows if (r.get("info") or {}).get("id") == a_mid), None)
+    sh["model_tools"] = [p.get("tool") for p in ((row or {}).get("parts") or [])
+                         if isinstance(p, dict) and p.get("type") == "tool" and p.get("tool")
+                         and not str(p.get("callID") or "").startswith("inj-")]   # not membrane's injection card
+    sh["model_ran"] = list((getattr(runner, "_cg_roots", None) or {}).get(sid, []))
+    d = srv.entity_store.docs.get(u)
+    if d is not None:
+        d.properties = {**(d.properties or {}), "shadow": sh}
+        srv.entity_store.upsert(d, embedder=None)
+
 def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
                 a_info: dict, reply: str) -> None:
     """The finished chat turn into the graph (both messages, their edges, the answers to the
@@ -320,6 +341,8 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
     person = from_person(user_text)
     who, user_text = _words(user_text)
     u = _mint(est, sid, u_mid, "user" if person else "membrane", user_text, speaker=who)
+    if person:
+        _shadow(srv, runner, sid, u, a_mid, user_text)
     a = _mint(est, sid, a_mid, "assistant", reply)
     prev = _row_before(runner, sid, u_mid)
     prev_a = _row_before(runner, sid, u_mid, "assistant")
@@ -356,6 +379,14 @@ _LEAD = re.compile(r"^(?:(?:yes|yep|yeah|ok|okay|sure|pls|please|so|and|then|now
                    r"\b[\s,.!-]*)+", re.I)
 _VERB_PRON = re.compile(r"^([a-z][a-z-]*)\s+(this one|that one|it|this|that|them|him|her|these|those|there)\b",
                         re.I)
+# "this / that / these / those" are pronouns only when nothing starting a noun or a clause
+# follows: "park that until later", "do that" -- not "I think that we", "merge this PR"
+_DEMONSTRATIVES = {"this", "that", "these", "those", "this one", "that one"}
+_AFTER_PRONOUN = {"until", "for", "to", "in", "on", "at", "by", "with", "and", "or", "but", "when",
+                  "because", "so", "if", "now", "too", "again", "please", "pls", "first", "later",
+                  "instead", "then", "as", "after", "before", "today", "tomorrow", "up", "down", "out",
+                  "off", "over", "away", "back", "already", "yet", "anyway", "done", "is", "was"}
+_NEXT_WORD = re.compile(r"\s*([A-Za-z#][\w#-]*)")
 REASK_MAX = 3            # the operator's cap (2026-11-01): more readings than this are not asked back
 _ORDINAL = {"first": 1, "1": 1, "one": 1, "second": 2, "2": 2, "two": 2, "third": 3, "3": 3}
 
@@ -401,6 +432,20 @@ def _load(srv, sid: str, pronoun: str, targets: list[str], by: str = "") -> None
     est.upsert(d, embedder=None)
 
 
+_WORD_RUN = re.compile(r"[A-Za-z][A-Za-z'-]*")
+_FILLERS = {"pls", "plz", "kindly", "just", "go", "ahead", "let", "lets", "let's"}
+
+
+def _says_something(before: str) -> bool:
+    """Content words before the pronoun, past the command's own verb (the word right before
+    it): "on field ui redesign -- ... park" does, "can you benchmark" / "yes, merge" don't
+    (Memo's replay of #806: plain words were skipped and the reply before was borrowed)."""
+    from .recall_banner import _STOP
+    words = [w.lower() for w in _WORD_RUN.findall(before or "")]
+    words = [w for w in words if w not in _STOP and w not in _FILLERS and w not in FORMS and len(w) > 1]
+    return len(words) > 1                 # the last content word is the verb the pronoun is the object of
+
+
 def take_note(srv, sid: str) -> str | None:
     """The resolved reading for this chat's turn (once), for the turn's context."""
     return (getattr(srv, "_cg_notes", None) or {}).pop(sid, None) if sid else None
@@ -417,10 +462,10 @@ def _label(est, eid: str) -> str:
 
 
 def _applicable(est, cands: list[str], verb: str | None) -> list[str]:
-    from . import night as N
+    from . import verbs as V
     docs = est.docs or {}
     if verb:
-        with_method = [c for c in cands if c in docs and N.resolve_method(est, docs[c], verb)[0] is not None]
+        with_method = [c for c in cands if c in docs and V.implementation(est, docs[c], verb)[0] is not None]
         if with_method:
             cands = with_method
     return [c for c in cands if str(((docs.get(c).properties or {}) if c in docs else {})
@@ -492,7 +537,15 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     got = _answer_reask(srv, sid, est, be, origin, u, text, prev_u)
     if got is not None:
         return got
-    found = _PRON.search(text)
+    found = None
+    for m in _PRON.finditer(text):
+        w = m.group(1).lower()
+        if w in _DEMONSTRATIVES:
+            nxt = _NEXT_WORD.match(text, m.end())
+            if nxt and nxt.group(1).lower() not in _AFTER_PRONOUN:
+                continue                  # a determiner or a conjunction, not a pronoun
+        found = m
+        break
     if not found:
         return None
     word = found.group(1).lower()
@@ -501,6 +554,27 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     if verb:
         word = cmd.group(2).lower()
     plural = FORMS.get(word) in PLURAL
+    # the person's own message first: the nearest thing it names before the pronoun
+    own = _applicable(est, list(reversed(_mentions(srv, text[:found.start()]))), verb)
+    if own:
+        return _resolved(srv, sid, est, be, origin, u, word, own if plural else own[:1])
+    if _says_something(text[:found.start()]):
+        try:                                       # living language: the noun phrase it points at
+            from . import language as _LL
+            c = _LL.concept_before(est, text, found.start())
+        except Exception:
+            c = None
+        if c:
+            return _resolved(srv, sid, est, be, origin, u, word, [c])
+        from .night import _supersede_edge        # a reading known to be wrong must not stay loaded
+        reg = register_eid(sid, word)
+        for old in _held(be, origin, reg):
+            _supersede_edge(be, origin, reg, old, rel="holds", receipt={"op": "unloaded", "by": u})
+        d = (est.docs or {}).get(reg)
+        if d is not None:
+            d.properties = {**(d.properties or {}), "holds": [], "holds_names": []}
+            est.upsert(d, embedder=None)
+        return None          # its own words name what it means (unnamed in the field): borrow nothing
     prev_a = _row_before(runner, sid, mid, "assistant")
     fresh = list(dict.fromkeys(r["obj"] for r in _out(be, origin, msg_eid(prev_a.get("id")), "refers-to"))) \
         if prev_a is not None else []

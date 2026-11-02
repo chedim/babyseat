@@ -128,7 +128,20 @@ def _ts_node(n, src: bytes, a: int, b: int) -> Node:
 # quotes ('{{x}}' / "{{x}}") -- the value replaces the pair, quoted once (#128)
 PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}")   # entity specs carry ':' and '-'
 QUOTED_PARAM = re.compile(r"(['\"]?)\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}\1")
-QUOTE = {"sh": lambda v: __import__("shlex").quote(v), "js": json.dumps}
+def _sh_quote(v: str) -> str:
+    """A value quoted once for sh. A leading ~ or ~/ stays bare so the shell still expands it
+    (#815: '~/some/repo' quoted whole was never expanded); the rest is quoted as before. Only
+    the current user's ~: ~user, or a tilde anywhere else, is data and stays quoted."""
+    import shlex
+    v = str(v)
+    if v == "~":
+        return "~"
+    if v.startswith("~/"):
+        return "~/" + shlex.quote(v[2:])    # the slash bare too: a quoted one ends the tilde-prefix
+    return shlex.quote(v)
+
+
+QUOTE = {"sh": _sh_quote, "js": json.dumps}
 
 
 def _feed(name: str) -> bool:
@@ -968,3 +981,7 @@ def state(srv, root: str) -> dict:
         rp = _props(est, r)
         results.append({"eid": r, **{k: rp.get(k) for k in ("rc", "outcome", "head", "ms", "ts")}})
     return {"eid": root, "lang": p.get("lang"), "code": text(est, root), "state": st, "results": results}
+
+
+# ---- en: living language (language.py registers it) ----------------------------------------
+from . import language as _living  # noqa: E402,F401

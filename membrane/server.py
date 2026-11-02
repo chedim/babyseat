@@ -1848,6 +1848,10 @@ class TurnRunner:
             if _psrv is not None and not _drained and _CG.is_chat((self.sessions.get(sid) or {}).get("agent")):
                 _ref = _CG.before_turn(_psrv, self, sid, user_info, text)
                 _psrv.__dict__.setdefault("_cg_turn", {})[sid] = _ref or {}   # the capture binding reads it
+                if _CG.from_person(text):                                      # living language compiles it
+                    _psrv.__dict__.setdefault("_cg_text", {})[sid] = _CG._words(text)[1]
+                else:
+                    (_psrv.__dict__.get("_cg_text") or {}).pop(sid, None)
                 if _ref and _ref.get("reask"):
                     return {"info": user_info, "parts": [], "reask": _ref["reask"]}
         except Exception as e:
@@ -4125,6 +4129,18 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 from . import decision_map as _DM
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 self._json_out(_DM.board(getattr(psrv, "entity_store", None)))
+            elif path in ("/membrane/work-graph", "/membrane/entity-history", "/membrane/item-chat"):
+                # #772: the field view's reads (the page calls the serve port)
+                from . import decision_map as _DM
+                import urllib.parse as _up
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                _spec = (_up.parse_qs(_up.urlsplit(self.path).query).get("spec") or [""])[0].strip()
+                if path == "/membrane/work-graph":
+                    self._json_out(_DM.work_graph(getattr(psrv, "entity_store", None)))
+                elif path == "/membrane/entity-history":
+                    self._json_out(_DM.entity_history(psrv, _spec))
+                else:
+                    self._json_out(_DM.item_chat(psrv, _spec))
             elif path == "/membrane/goals":
                 # #470: the cockpit's goals -- the open Goal entities, the
                 # seat's active set (the intent board's selection) first
@@ -4460,6 +4476,17 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     res = _DM.set_chat(est, str(b.get("card") or ""), str(b.get("chat") or ""))
                 if not res.get("ok"):
                     return self._json_out({"error": res.get("error")}, code=409 if res.get("conflict") else 400)
+                return self._json_out(res)
+            if path == "/membrane/item-chat/say":
+                # #772: the item card's mini-chat -- a Message that refers to the item (owner's door above)
+                from . import decision_map as _DM
+                b = self._read_body()
+                if not isinstance(b, dict):
+                    return self._json_out({"error": "a JSON object body is required"}, code=400)
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                res = _DM.item_say(psrv, str(b.get("spec") or ""), str(b.get("text") or ""), who=str(b.get("who") or ""))
+                if not res.get("ok"):
+                    return self._json_out({"error": res.get("error")}, code=400)
                 return self._json_out(res)
             if path == "/membrane/quota/resume":
                 # OUT OF TOKENS: a person's Resume now -- the model's pause is

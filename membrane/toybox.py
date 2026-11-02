@@ -265,9 +265,20 @@ def _tell(st: dict) -> None:
 
 def _note(st: dict, ts: float, by: str, what: str, **kw) -> None:
     """One change, flagged with who caused it (self | world | model |
-    <person>), on the log."""
+    <person>), on the log. `property` holds the action (what), `value` the
+    payload: the plain value, or the kwargs for a multi-valued write."""
     st["counts"][by] = int(st["counts"].get(by, 0)) + 1
-    rec = {"ts": ts, "by": by, "what": what, **kw}
+    from . import writes as _W
+    ch = _W.current()
+    synthetic = ch is None
+    if ch is None:
+        ch = {"id": f"toy-{st['name']}-{sum(int(v) for v in st['counts'].values())}", "root": "toy"}   # replayable
+    ch = {"id": ch["id"], "root": ch.get("root", ""), "via": list(ch.get("via") or [])}
+    rec = {"ts": ts, "by": by, "what": what, **kw,
+           "chain": ch, "writer": _writer(by), "toy": st["name"], "property": what,
+           "value": kw["value"] if "value" in kw else (kw or None)}
+    if synthetic:
+        rec["synthetic"] = True                    # no write chain was open: the chain id is made up
     with open(_log_path(st["name"]), "a") as fh:
         fh.write(json.dumps(rec, sort_keys=True) + "\n")
     if is_person(by):
@@ -711,6 +722,21 @@ def mirror_feed(name: str, move: float, now: float | None = None) -> dict:
                 st[side] = None
         _save(st)
         return {"ok": True, "name": name, **_reading(st)}
+
+
+def write_log(name: str) -> list[dict]:
+    """The toy's writes in order (chain, writer, toy, property, value), read from its log."""
+    out = []
+    try:
+        lines = _log_path(name).read_text().splitlines()
+    except OSError:
+        return out
+    for ln in lines:
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            continue
+    return out
 
 
 def log_len(name: str) -> int:

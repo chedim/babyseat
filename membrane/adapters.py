@@ -330,6 +330,11 @@ def start(srv) -> None:
         t = threading.Thread(target=_worker, daemon=True, name="adapters")
         _SEAT["thread"] = t
         t.start()
+    from . import goalgraph as _GG
+    for d in list((srv.entity_store.docs or {}).values()):
+        if _GG.is_wait(d.eid) and (d.properties or {}).get("check"):
+            d.properties = {**d.properties, "check": ""}      # #798: a flag left 'due' by the last
+            srv.entity_store.upsert(d, embedder=None)         # process would make the next 'due' no change
 
 
 def drain(timeout: float = 5.0) -> None:

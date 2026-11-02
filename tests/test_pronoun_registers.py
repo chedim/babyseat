@@ -33,6 +33,15 @@ A, B = "f:membrane/a.py", "f:membrane/b.py"
 PR = "u:https://github.com/chedim/babyseat/issues/803"
 
 
+def _LL():
+    from membrane import language
+    return language
+
+
+def _living() -> bool:
+    return _LL().available()
+
+
 def _say(srv, runner, n, user, reply, sid=SID):
     """One exchange: the person's message, membrane's look at its pronouns, then (unless it
     asked back) the reply and the graph."""
@@ -155,6 +164,100 @@ class MembranesOwnMessages(unittest.TestCase):
         _say(srv, runner, 2, "delete it", "Deleted.")       # its note is never taken
         _say(srv, runner, 3, "thanks, what else?", "nothing")
         self.assertIsNone(CG.take_note(srv, SID))
+
+
+class TheOwnMessageFirst(unittest.TestCase):
+    """Memo, 2026-11-01: "on field ui redesign -- yes, replace both please. But I think we should
+    park that until ..." -- "that" is the redesign named in the same message, not what the
+    reply before proposed."""
+
+    def test_the_persons_own_message_comes_first(self):
+        from membrane.entities import MEMBRANE_NS, QuantumEntity
+        srv, runner = _seat()
+        srv.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "goal:ui", cls="Goal",
+                                              properties={"name": "membrane/ui.py", "status": "open"}))
+        _say(srv, runner, 1, "cards?", "Dropping membrane/a.py, membrane/b.py, membrane/c.py and membrane/d.py.")
+        out = _say(srv, runner, 2, "on membrane/ui.py -- yes. But we should park that until later", "parked")
+        self.assertEqual((out or {}).get("resolved"), "f:membrane/ui.py")
+        self.assertNotIn("proposed", CG.take_note(srv, SID) or "")
+
+    def test_the_operators_own_sentences_stay_quiet(self):
+        """Memo's replay of #806 (2026-11-01): plain words before the pronoun name what it
+        means; the reply before must not be borrowed, nothing is told, nothing is loaded."""
+        for text in ("on field ui redesign -- yes, replace both please. But I think we should park "
+                     "that until we have membrane field shape finalized?",
+                     "ok, pronouns should be fixed now. Claude fixed them. It promised me they were fixed."):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "cards?", "Dropping #772: see https://github.com/chedim/babyseat/issues/772, "
+                                           "membrane/a.py, membrane/b.py and membrane/c.py.")
+            out = _say(srv, runner, 2, text, "ok")
+            borrowed = {"f:membrane/a.py", "f:membrane/b.py", "f:membrane/c.py",
+                        "u:https://github.com/chedim/babyseat/issues/772"}
+            for p in ("that", "they", "it"):
+                held = _holds(srv, p)
+                self.assertFalse(set([held] if isinstance(held, str) else held or []) & borrowed, text)
+            if _living():          # living language: the pronoun holds the message's own noun phrase
+                self.assertTrue(str((out or {}).get("resolved") or "").startswith(_LL().CONCEPT), text)
+            else:
+                self.assertIsNone(out, text)
+                self.assertIsNone(CG.take_note(srv, SID), text)
+
+    def test_only_the_command_before_the_pronoun_falls_back_to_the_reply(self):
+        for text in ("merge it", "can you benchmark it?", "yes, delete it"):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+            self.assertEqual((_say(srv, runner, 2, text, "-") or {}).get("resolved"), A, text)
+
+    def test_a_demonstrative_before_a_noun_or_a_clause_is_not_a_pronoun(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py and membrane/b.py.")
+        for text in ("I think that we should wait", "merge this PR", "is that the one we wanted?"):
+            self.assertIsNone(_say(srv, runner, 2, text, "-"), text)
+
+    def test_a_demonstrative_as_an_object_is(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+        self.assertEqual((_say(srv, runner, 2, "park that until later", "ok") or {}).get("resolved"), A)
+
+
+class ShortFollowUpsAndStaleReadings(unittest.TestCase):
+    """Leftovers of #806 (replayed on main 6f52930)."""
+
+    def test_a_short_follow_up_falls_back_to_the_reply_before(self):
+        for text in ("look at it", "can you look at it", "show me it", "what do you think of it"):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+            self.assertEqual((_say(srv, runner, 2, text, "-") or {}).get("resolved"), A, text)
+
+    def test_a_short_follow_up_falls_back_to_the_register(self):
+        for text in ("look at it", "can you look at it", "show me it", "what do you think of it"):
+            srv, runner = _seat()
+            _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+            _say(srv, runner, 2, "delete it", "Deleted.")
+            _say(srv, runner, 3, "ok", "Nothing named here.")
+            self.assertEqual((_say(srv, runner, 4, text, "-") or {}).get("resolved"), A, text)
+
+    def test_a_sentence_that_really_names_something_keeps_borrowing_nothing(self):
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py.")
+        out = _say(srv, runner, 2, "claude suggested to clear that register, so I cleared it", "ok")
+        self.assertNotEqual((out or {}).get("resolved"), A)
+        if not _living():
+            self.assertIsNone(out)
+
+    def test_a_reading_known_to_be_wrong_does_not_stay_loaded(self):
+        """The person's own words name what "them" means: the check stops, and the register an
+        earlier turn loaded must not go on saying something else."""
+        srv, runner = _seat()
+        _say(srv, runner, 1, "look", "I changed membrane/a.py and membrane/b.py.")
+        _say(srv, runner, 2, "ping them", "pinged")
+        self.assertIsNotNone(_holds(srv, "they"))
+        out = _say(srv, runner, 3, "ok, pronouns should be fixed now. Claude fixed them.", "ok")
+        held = _holds(srv, "they")
+        self.assertFalse(set([held] if isinstance(held, str) else held or []) & {A, "f:membrane/b.py"})
+        if not _living():
+            self.assertIsNone(out)
+            self.assertIsNone(held)
 
 
 class TheCaptureBinding(unittest.TestCase):

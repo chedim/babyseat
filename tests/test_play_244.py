@@ -146,7 +146,8 @@ def test_rebuild_lifts_only_block_k():
     assert out["ok"], out
     assert _standing("toy:tower") == [True, False, False, True, False]
     last = _log("toy:tower")[-1]
-    assert last == {"ts": 2.0, "by": "model", "what": "lift", "block": 4}
+    assert {k: last[k] for k in ("ts", "by", "what", "block")} == {
+        "ts": 2.0, "by": "model", "what": "lift", "block": 4}
 
 
 def test_tower_pokes_that_make_no_change_are_refused():

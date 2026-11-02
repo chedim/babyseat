@@ -518,9 +518,19 @@ mirrors what it holds in its properties (`holds`, `holds_names`, `set_by`, `set_
 reader of properties sees it. Nothing is typed: a register holds whatever the conversation
 last put in it.
 
-Before a chat turn, the person's pronoun is read: first the reply before (its `refers-to`
-targets, the freshest mention), then the register when that reply names nothing that
-applies, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
+Before a chat turn, the person's pronoun is read: first the person's own message (the
+nearest thing it names before the pronoun: "on the UI redesign -- park that until later"),
+then the reply before (its `refers-to` targets), then the register when neither names
+anything that applies. When the person's message has its own words before the pronoun
+(beyond the command's verb) but names nothing the field knows ("pronouns should be fixed
+now. Claude fixed them"), nothing is borrowed from the reply before. With living language
+on (the default, [cliffhanger.md](cliffhanger.md#living-language-2026-11-01-on-by-default))
+the pronoun holds that noun phrase as a `Concept` entity; without it there is no note, no
+register load, no re-ask, and the pronoun's register is unloaded (its old reading is superseded, so
+its history stays): a reading the person's own words contradict must not go on being
+offered. Only a message that is just the command ("merge it", "can you benchmark it?",
+"yes, delete it", "look at it", "show me it": stop words between the verb and the pronoun
+don't count) reads the reply before, so "undo it" after "delete it" → "Deleted." still means the deleted thing. When a
 candidate has a method of the command's verb, the ones without one drop; then a candidate
 whose state is closed (closed, dropped, fulfilled, merged, retired, done, deleted) drops.
 One reading left (or several, for `they`) is recorded (`refers-to`, source `resolver`),
@@ -530,9 +540,11 @@ and restart`: leading yes/ok/pls are read past) are asked back in the chat, in o
 (`"it": a or b?`), and that turn doesn't run. The person's reply naming one of them (its
 name, its file name, `first`/`second`) loads the register; nothing is trained. A polite request
 (`can you / could you / would you …`) is a command too. A pronoun outside a command (`is it
-done?`) is never asked back: with several readings it is left to the model. When the reply
-before names more than 3 things that could apply (the operator's cap, `REASK_MAX`), nothing
-is asked back: the model is told the pronoun most likely refers to what its last reply
+done?`) is never asked back: with several readings it is left to the model. `this`, `that`, `these` and `those` count as pronouns only when
+nothing that starts a noun or a clause follows them (`park that until later`, `do that`; not
+`I think that we …` or `merge this PR`). When the person's message names nothing and the
+reply before names more than 3 things that could apply (the operator's cap, `REASK_MAX`),
+nothing is asked back: the model is told the pronoun most likely refers to what its last reply
 proposed.
 
 The seat's older capture-time binder (`membrane/binding.py`, a lexical guess at the previous
@@ -555,6 +567,32 @@ made it only.
 **What membrane says** is one template per kind in `membrane/speech.py` (a decided or
 dropped card, a fulfilled goal, a goal whose graph has nothing left moving, a watch
 escalation, the asked decisions, the re-ask), filled from the subgraph it is about.
+
+### The graph-walk lane (graphbanner, 2026-11-01)
+
+A chat turn's first round carries **WHERE WE ARE (this conversation's graph)**: lines
+walked off the conversation graph, not guessed by text similarity. Measured first, on 2,124
+of the operator's turns: the walk over the last 8 messages brought something the turn then
+used in 70% of them, the text-recall proxy in 44%, and adding text recall to the walk added
+nothing. It runs beside the recall banner, not instead of it.
+
+The lane is a set of **rules**, each an entity (class `BannerRule`), written in cliffhanger's
+own pattern language: the triggers' `WHERE` atoms (`isa`, `is`, `filter`, the same binder,
+`ch.VM._bindings`) plus the graph's facts, and a `show` line:
+
+| atom | binds |
+|---|---|
+| `edge(?a, rel, ?b)` | a relations row `a -rel-> b`; `rel` exact or ending in `*` (`asks:*`); one side bound before it |
+| `recent(?m)` | this chat's last 8 messages (the operator's window), newest first |
+| `mine(?r)` | this person's pronoun registers |
+| `filter(expr)` | cliffhanger's safe expressions; `chat` is this chat's id |
+
+`show` fills `{var.prop}` from the bound entity (a name falls back to the field id's label;
+a missing value prints nothing). The seeded rules: open decisions this chat asked, what each
+pronoun holds, what the recent messages named (with its status), the programs the recent
+turns ran (with their rc). `graphbanner.define(est, name, where, show)` adds one, refused like
+a trigger when it can't bind. The lane is the rules' lines in their order, unique, at most 12
+(the banner's size); the gate logs its cost (`[graph-banner] … lines in … ms`).
 
 ## The gate and the replay A/B
 
