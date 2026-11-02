@@ -4225,6 +4225,14 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
                                 + (f"It would change {sum(len(s['targets']) for s in _many)} things: ask before "
                                    "running it (they confirm by saying 'all'). " if _many else "")
                                 + f"If they want it done, exec(action='run', lang='en', code={said!r}) runs it.")
+                elif steps and (_teach := _LL.teachable(steps)):
+                    # stage 3 (#802): the model fills only what the field doesn't know, by teaching it
+                    _words = "; ".join(f'"{g["word"]}" ({g["word"]} means <{_LL.TEACHABLE[g["type"]]}>)'
+                                       for g in _teach)
+                    adds.append(f"The person's message has words the field doesn't know: {_words}. If you can "
+                                "tell what they mean, teach each one with exec(action='run', lang='en', "
+                                "code='<word> means <meaning>') and then exec(action='run', lang='en', "
+                                f"code={said!r}) runs it; if you can't, ask them.")
         except Exception as e:
             print(f"[language] {sid[:16]}: {e}", file=sys.stderr)
     if not adds:

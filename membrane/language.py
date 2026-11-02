@@ -425,7 +425,8 @@ def compile(srv, sid: str, text: str) -> list[dict]:
             elif t.lower_ not in ("please", "pls"):
                 kept.append(t)
         unmapped: list = [] if _verb_at(est, doc, i) else [verb]
-        targets = _span_targets(srv, sid, est, kept, unmapped) if kept else []
+        names: dict = {}
+        targets = _span_targets(srv, sid, est, kept, unmapped, names) if kept else []
         if not kept:
             unmapped.append("(no object)")
         calls: list = []
@@ -437,7 +438,7 @@ def compile(srv, sid: str, text: str) -> list[dict]:
                     calls.append(c)
         writes = any(c["writes"] for c in calls)
         everyone = any(t.lower_ in _ALL for t in kept)
-        steps.append({"verb": verb, "targets": targets, "options": options, "calls": calls,
+        steps.append({"verb": verb, "targets": targets, "options": options, "calls": calls, "names": names,
                       "mapped": not unmapped and bool(calls), "unmapped": unmapped,
                       "writes": writes, "needs_all": writes and len(calls) > 1 and not everyone,
                       "text": doc[i:end].text.strip(" ,.;")})
@@ -497,9 +498,10 @@ def CG_label(est, eid: str) -> str:
     return CG._label(est, eid)
 
 
-def _span_targets(srv, sid: str, est, toks: list, unmapped: list) -> list[str]:
+def _span_targets(srv, sid: str, est, toks: list, unmapped: list, names: dict | None = None) -> list[str]:
     """What an object span means: a pronoun's register, what it names in full (a file, #803,
-    an entity's name), or a class's members narrowed by its adjectives."""
+    an entity's name), or a class's members narrowed by its adjectives. ``names``: for each
+    unmapped span, the name the lookup tried (what a definition has to teach)."""
     from . import convgraph as CG
     from .ch import EntityView, Refused, evaluate
     words = [t for t in toks if t.pos_ != "DET" and t.lower_ not in _ALL]
@@ -513,9 +515,12 @@ def _span_targets(srv, sid: str, est, toks: list, unmapped: list) -> list[str]:
     named = CG._mentions(srv, text)
     if named:
         return named
-    d = _by_name(est, " ".join(t.text for t in words))
+    name = " ".join(t.text for t in words)
+    d = _by_name(est, name)
     if d is not None:
         return [d.eid]
+    if names is not None:
+        names[text] = name
     known = _adjectives(est)
     adjs = [t for t in words[:-1] if (t.lemma_.lower() in known or t.lower_ in known)]
     rest = [t for t in words if t not in adjs]
@@ -641,8 +646,27 @@ def classify(srv, sid: str, text: str) -> dict:
     if all(s["mapped"] for s in steps):
         return {"outcome": "compiled", "gaps": [], "program": describe(srv.entity_store, steps),
                 "kinds": [s.get("kind") or "command" for s in steps]}
-    gaps = [{"type": _gap_type(s["verb"], str(u)), "what": str(u)[:120]} for s in steps for u in s["unmapped"]]
-    return {"outcome": "gaps", "gaps": gaps}
+    return {"outcome": "gaps", "gaps": gaps(steps)}
+
+
+def gaps(steps: list[dict]) -> list[dict]:
+    """The steps' unmapped words, typed (the shadow's and the turn's one reading)."""
+    return [{"type": _gap_type(s["verb"], str(u)), "what": str(u)[:120]} for s in steps for u in s["unmapped"]]
+
+
+# stage 3 (#802): the gaps a definition ("X means Y") can fill, and what Y has to be
+TEACHABLE = {"unknown_verb": "a verb it knows", "unknown_object": "the name of a thing it knows"}
+
+
+def teachable(steps: list[dict]) -> list[dict]:
+    """The gaps the model can fill by teaching, each once, in order."""
+    out, seen = [], set()
+    for g in gaps(steps):
+        if g["type"] in TEACHABLE and g["what"] not in seen:
+            seen.add(g["what"])
+            out.append(g)
+    names = {k: v for s in steps for k, v in (s.get("names") or {}).items()}
+    return [{**g, "word": names.get(g["what"], g["what"])} for g in out]
 
 
 def shadow_report(rows: list[dict]) -> dict:
