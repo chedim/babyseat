@@ -1,4 +1,4 @@
-"""#850 (Dima's addition): selecting fades what is not in the item's goal graph and frames
+"""#850 (the operator's addition): selecting fades what is not in the item's goal graph and frames
 that graph (item centred, whole graph in view). Pure functions, driven through node."""
 import json
 import shutil

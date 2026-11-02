@@ -782,7 +782,7 @@ function selectionScope(graph, id, relatedIds) {
   }
   return [id, ...(relatedIds || [])];
 }
-/** #850: brightness of id under a scope (1 = full). F3_FADE awaits Dima's approval (Decision card). */
+/** #850: brightness of id under a scope (1 = full); F3_FADE approved by the operator. */
 const F3_FADE = 0.2;
 function fadeFor(scope, id) { return !scope || scope.includes(id) ? 1 : F3_FADE; }
 /** #850: camera that centres the item and fits all the points round it (same margin as the default frame). */
