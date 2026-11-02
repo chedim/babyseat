@@ -2378,7 +2378,7 @@ function definePanel() {
             <button class="btn icon selfsleep" aria-pressed="false" title="${escAttr(SELF_NAME)}: on or off -- tap to switch">⏻</button>
             <span class="selfstat" title="where ${escAttr(SELF_NAME)} is now: its rung, the bar toward the next, what it waits on"></span>
             <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
-            <button class="btn icon jsbtn" title="allow JS scripting in this window -- the page runs it with your HA login -- off by default">🧩</button>
+            <button class="btn icon jsbtn" title="allow JS scripting in this window -- the page runs it with your HA login -- on by default, click to stop">🧩</button>
             <button class="btn icon vlogbtn" title="the voice log: what was said aloud (hidden from the chat)">🗒</button>
             <button class="btn icon pausebtn" title="pause the seat: every acting lane stands down (loops, dreamer, thinker, night)">⏸</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
@@ -2460,7 +2460,9 @@ function definePanel() {
       this._jsBtn = $(".jsbtn");
       this._jsBtn.addEventListener("click", () => this._toggleJs().catch(() => {}));
       this._jsTab = "tab_" + Math.random().toString(36).slice(2, 10);
+      this._jsOn = true;
       this._paintJs();
+      this._jsBeat = setInterval(() => this._jsRegister().catch(() => {}), 20000);
       this._vlogEl = $(".vlog");
       this._vlogBtn = $(".vlogbtn");
       this._vlogBtn.addEventListener("click", () => this._toggleVoiceLog().catch(() => {}));
@@ -3671,7 +3673,7 @@ function definePanel() {
       if (lbl) lbl.textContent = this._jsOn ? "JS scripting: ON" : "JS scripting: off";
       this._jsBtn.style.opacity = this._jsOn ? "1" : ".5";
       this._jsBtn.title = this._jsOn ? "JS scripting is on in this window: the page runs it with your HA login -- click to stop"
-                                     : "allow JS scripting in this window: the page runs it with your HA login -- off by default";
+                                     : "allow JS scripting in this window: the page runs it with your HA login";
     }
 
     /** Run a job IN THIS WINDOW (the operator's choice, 2026-10-11: "why a sandbox?
