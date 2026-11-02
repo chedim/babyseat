@@ -131,6 +131,15 @@ TRIGGERS = [
      [["changed", "?g.replan"]],
      [["isa", "?g", "Goal"], ["filter", "(g.status or 'open') == 'open' and g.replan"]],
      [MEMBRANE_NS + "llm.call", "{'about': g.eid, 'prompt': 'plan the goal: ' + g.replan, 'lane': 'planner'}"]),
+    # #867: a send-back on a closed goal reopens it (never silently dropped), then plans
+    ("goal-graph reopen on replan",
+     [["changed", "?g.replan"]],
+     [["isa", "?g", "Goal"], ["filter", "(g.status == 'fulfilled' or g.status == 'closed') and g.replan"]],
+     ["?g.status", "'open'"]),
+    ("goal-graph plan after reopen",
+     [["changed", "?g.status"]],
+     [["isa", "?g", "Goal"], ["filter", "g.status == 'open' and g.replan and g.planned_ts and g.replan != g.planned_replan"]],
+     [MEMBRANE_NS + "llm.call", "{'about': g.eid, 'prompt': 'plan the goal: ' + g.replan, 'lane': 'planner'}"]),
 ]
 
 
@@ -311,7 +320,7 @@ def apply_plan(srv, goal: str, plan) -> dict:
     if cyc:
         return {"ok": False, "error": "refused: these edges close a cycle: " + " -> ".join(cyc)}
     # tasks: made or updated (a running or ended task keeps its state)
-    made = []
+    made, updated, reopened = [], [], []
     for t in tasks:
         eid = keys[str(t["key"])]
         d = (est.docs or {}).get(eid)
@@ -322,7 +331,11 @@ def apply_plan(srv, goal: str, plan) -> dict:
                                                                     "silent_birth": True}), embedder=None)
             made.append(eid)
         else:
-            again = (d.properties or {}).get("status") in (STUCK, FAILED)    # #777: listed again = retried
+            cur = (d.properties or {}).get("status")
+            redo = str(t.get("redo") or t.get("reopen") or "").lower() in ("true", "1", "yes")
+            # #777: listed again = retried; #867: a DONE task runs again only when asked (redo: true)
+            again = cur in (STUCK, FAILED) or (redo and cur == DONE)
+            (reopened if again else updated).append(eid)
             # retried: open again, its blocker count re-counted so `ready` fires afresh
             d.properties = {**(d.properties or {}), **p,
                             **({"status": OPEN, "open_blockers": None} if again else {})}
@@ -390,7 +403,15 @@ def apply_plan(srv, goal: str, plan) -> dict:
     est.upsert(g, embedder=None)
     for c in new_cards:
         _escalate_card(srv, goal, c)
-    return {"ok": True, "tasks": made, "cards": new_cards, "waits": made_waits, "dropped": dropped}
+    out = {"ok": True, "tasks": made, "cards": new_cards, "waits": made_waits, "dropped": dropped,
+           "updated": updated, "reopened": reopened}
+    nodes = [d for d in list((est.docs or {}).values())
+             if (d.properties or {}).get("goal") == goal and d.cls in (TASK, WAIT, "Decision")]
+    if nodes and not any(_moving(d) for d in nodes):
+        # #867: a plan that leaves nothing to run says so (never a bare `tasks: []`)
+        out["nothing runnable"] = ("every task has ended; to run one again list its key with redo: true, "
+                                   "or write a new task under a new key")
+    return out
 
 
 def recount(srv, goal: str) -> int:
@@ -646,7 +667,16 @@ def _moving(d) -> bool:
     return st not in CARD_ENDED
 
 
-def report(srv, goal: str, claim: str | None = None) -> bool:
+SEND_BACK_NOT = ("task ", "card ", "planted")
+
+
+def is_send_back(replan) -> bool:
+    """#867: a replan written by hand (the chat sending the goal back), not by a trigger."""
+    r = str(replan or "")
+    return bool(r) and not r.startswith(SEND_BACK_NOT)
+
+
+def report(srv, goal: str, claim: str | None = None, sent_back: str | None = None) -> bool:
     """EVERY PLAN ENDS IN THE CHAT (operator, 2026-10-31: "force all plans to end with
     turn-starting messages into chat"): a goal whose graph has nothing left moving, or
     whose planner says FULFILLED, is told to the chat once, with its receipts; the chat
@@ -659,8 +689,10 @@ def report(srv, goal: str, claim: str | None = None) -> bool:
              if (d.properties or {}).get("goal") == goal and d.cls in (TASK, WAIT, "Decision")]
     if claim is None and (not nodes or any(_moving(d) for d in nodes)):
         return False
+    if sent_back and any(_moving(d) for d in nodes):
+        sent_back = None                 # the pass took the send-back up: work is running
     sig = hashlib.sha1(json.dumps(sorted([d.eid, str((d.properties or {}).get("status"))] for d in nodes)
-                                  + [claim or ""]).encode()).hexdigest()[:16]
+                                  + [claim or "", sent_back or ""]).encode()).hexdigest()[:16]
     if (g.properties or {}).get("reported_graph") == sig:
         return False
     rows = []
@@ -672,6 +704,9 @@ def report(srv, goal: str, claim: str | None = None) -> bool:
                     + (f" -- {' '.join(str(what).split())[:200]}" if what else ""))
     head = (f"its planner says it is done -- {claim}" if claim is not None
             else "its graph has nothing left moving")
+    if sent_back and claim is None:
+        head = (f"sent back ({str(sent_back)[:160]}), but its planner left nothing runnable: every task has "
+                "ended. Reopen one (plan task redo: true) or add a new task under a new key")
     from . import speech as _SP
     line = _SP.say("goal-ended", goal=goal, name=(g.properties or {}).get("name") or goal, head=head, rows=rows)
     try:
@@ -735,7 +770,7 @@ The goal's graph now:
 
 Work the goal as a graph. Write ONE plan with entity_edit on the goal:
   entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
-A task is one worker turn of concrete work; listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state. Read the entity back for plan_result.
+A task is one worker turn of concrete work; listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, and `nothing runnable` when the plan leaves nothing to run.
 When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
 End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
 
