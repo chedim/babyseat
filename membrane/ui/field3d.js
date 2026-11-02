@@ -755,7 +755,7 @@ function workEdges(graph, pos, styles) {
   return out;
 }
 const WORK_ANSWERED = new Set(["decided", "closed"]);
-const WORK_FINISHED = new Set(["fulfilled", "done", "dropped"]);
+const WORK_FINISHED = new Set(["fulfilled", "done", "dropped", "cancelled"]);
 const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓" };
 
 const F3Logic = { workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
@@ -2415,7 +2415,7 @@ class Field3DView {
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(CAP * 6), 3));
       g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(CAP * 6), 3));
-      this._workLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false }));
+      this._workLines = new THREE.LineSegments(g, new THREE.LineDashedMaterial({ vertexColors: true, dashSize: 6, gapSize: 4, transparent: true, opacity: 0.85, depthWrite: false }));
       this._workLines.frustumCulled = false;
       this.scene.add(this._workLines);
     }
@@ -2431,6 +2431,7 @@ class Field3DView {
     });
     this._workLines.geometry.setDrawRange(0, es.length * 2);
     pa.needsUpdate = true; ca.needsUpdate = true;
+    this._workLines.computeLineDistances();
   }
 
   _ring(s) {

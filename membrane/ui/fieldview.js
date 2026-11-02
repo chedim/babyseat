@@ -16,15 +16,28 @@ function cardInfo(graph, id) {
     blockedBy: edges.filter((e) => e.to === id && e.rel === "blocks").map((e) => t(e.from)) };
 }
 
-const PALETTE = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#42d4f4", "#f032e6", "#bfef45"];
+const PALETTE = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#008080", "#9a6324", "#800000"];
 const DASHES = ["", "6 4", "2 3", "10 3 2 3"];
+const GOAL_DONE = new Set(["fulfilled", "done", "dropped", "cancelled"]);
 
-/** k8: one edge style per goal ({color, dash}), stable by the goal's order in the graph. */
+function slotHash(id) {
+  let h = 2166136261;
+  for (const c of String(id)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  return h;
+}
+
+/** #772: one edge style per LIVE goal ({color, dash}); finished goals take no slot. A goal's slot comes from its id (probing past
+ *  a taken one), so colours stay put when other goals appear or finish. */
 function edgeStyles(graph) {
-  const out = {};
-  ((graph && graph.nodes) || []).filter((n) => n.kind === "goal").forEach((g, i) => {
-    out[g.id] = { color: PALETTE[i % PALETTE.length], dash: DASHES[Math.floor(i / PALETTE.length) % DASHES.length] };
-  });
+  const out = {}, taken = new Set(), N = PALETTE.length * DASHES.length;
+  const live = ((graph && graph.nodes) || []).filter((n) => n.kind === "goal" && !GOAL_DONE.has(n.status))
+    .map((g) => [slotHash(g.id), g.id]).sort((x, y) => x[0] - y[0] || (x[1] < y[1] ? -1 : 1));
+  for (const [h, id] of live) {
+    let k = h % N;
+    while (taken.has(k) && taken.size < N) k = (k + 1) % N;
+    taken.add(k);
+    out[id] = { color: PALETTE[k % PALETTE.length], dash: DASHES[Math.floor(k / PALETTE.length) % DASHES.length] };
+  }
   return out;
 }
 
