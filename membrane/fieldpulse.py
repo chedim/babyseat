@@ -79,6 +79,10 @@ def _ekey(eid: str) -> str:
     return str(eid or "").strip().lower().replace("membrane::", "")
 
 
+GRAPH_ROLES = ("planner", "worker")          # #848: the goal graph's lanes, an orb each
+LOOP_PREFIXES = ("watch", "field-call", "triage") + GRAPH_ROLES
+
+
 def touched_eid(tool: str, args: dict) -> str:
     """The entity a tool call names (the MCP tools' alias set), or ''."""
     if not isinstance(args, dict):
@@ -196,10 +200,11 @@ class FieldPulse:
             if not take:
                 return ""
             used = set(self._slots.values())
+            role = next((r for r in GRAPH_ROLES if agent.startswith(r + ":")), "loop")
             n = 1
-            while f"loop-{n}" in used:
+            while f"{role}-{n}" in used:
                 n += 1
-            self._slots[agent] = f"loop-{n}"
+            self._slots[agent] = f"{role}-{n}"
             return self._slots[agent]
 
     def focus(self, agent: str, eid: str, phase: str) -> None:
@@ -253,7 +258,7 @@ class FieldPulse:
         a = str(session_agent or "").strip()
         if a == "phone":
             return "phone"
-        return (self._slots.get(a) or "loop") if a.startswith(("watch", "field-call", "triage")) else "chat"
+        return (self._slots.get(a) or "loop") if a.startswith(LOOP_PREFIXES) else "chat"
 
     def thinking(self, session_agent, phase: str) -> None:
         self.mind("think", agent=self._agent_of(session_agent), phase="start" if phase == "start" else "end")
@@ -263,9 +268,7 @@ class FieldPulse:
         if not eid:
             return
         a = str(session_agent or "").strip()
-        agent = (self._slots.get(a) or "loop") if a.startswith(("watch", "field-call", "triage")) else "chat"
-        if a == "phone":
-            agent = "phone"
+        agent = self._agent_of(a)
         self.mind("touch", agent=agent, eid=eid, tool=str(tool or ""))
 
     # ---- the beat

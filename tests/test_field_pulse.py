@@ -164,5 +164,48 @@ class TestLoopTitles(unittest.TestCase):
         self.assertEqual(srv.loops.titles, [])
 
 
+class TestPlannerWorkerOrbs(unittest.TestCase):
+    """#848: goal-graph planner and worker lanes show as their own orbs."""
+
+    def test_agent_of_knows_planner_and_worker(self):
+        p = FP.FieldPulse(_Srv(), hub=_Hub())
+        ps, ws = p.loop_slot("planner: g:1"), p.loop_slot("worker: t:1")
+        self.assertTrue(ps.startswith("planner-"))
+        self.assertTrue(ws.startswith("worker-"))
+        self.assertEqual(p._agent_of("planner: g:1"), ps)
+        self.assertEqual(p._agent_of("worker: t:1"), ws)
+
+    def test_touch_attributes_planner_and_worker(self):
+        p = FP.FieldPulse(_Srv(), hub=_Hub())
+        ws = p.loop_slot("worker: t:1")
+        p.touch("worker: t:1", "entity_read", {"spec": "c:x"})
+        self.assertEqual(p._mind[-1]["agent"], ws)
+
+    def test_lane_focuses_and_carries_the_session(self):
+        from unittest import mock
+        from membrane import goalgraph as GG
+        from membrane.entities import QuantumEntity
+        for lane, ent in (("worker", "t:1"), ("planner", "g:1")):
+            srv = _Srv()
+            srv.loops = WA.LoopRunner(max_loops=3)
+            srv.loops.titles = []
+            srv._field_pulse = p = FP.FieldPulse(srv, hub=_Hub())
+            srv.entity_store = est = type("E", (), {})()
+            est.docs = {ent: QuantumEntity(eid=ent, properties={"status": GG.OWED, "goal": "g:1", "plan_key": "k"})}
+            est.upsert = lambda *a, **k: None
+            srv.create_loop_session = lambda agent, title=None: "ses_1"
+            srv.run_loop_turn = lambda sid, text, agent: {"text": "ignored: x"}
+            with mock.patch.object(GG, "take", lambda s, e: True), \
+                    mock.patch.object(GG, "worker_text", lambda e, x: "t"), \
+                    mock.patch.object(GG, "planner_text", lambda e, x, pr: "t"):
+                try:
+                    WA._LoopDrainer(srv)._lane({"entity": ent, "kind": "x"}, lane)
+                except Exception:
+                    pass
+            kinds = [(m["type"], m.get("phase"), m.get("sid")) for m in p._mind]
+            self.assertIn(("mind.focus", "start", None), kinds, lane)
+            self.assertIn(("mind.focus", "start", "ses_1"), kinds, lane)
+
+
 if __name__ == "__main__":
     unittest.main()

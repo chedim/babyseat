@@ -162,7 +162,9 @@ function selfTag(L, short, name) {
 }
 const F3_AGENTS = {
   chat: "#ffd166", phone: "#06d6a0", "loop-1": "#ef476f", "loop-2": "#f78c6b",
-  "loop-3": "#c77dff", loop: "#ff8fab", thinker: "#4cc9f0", dreamer: "#b5e48c",
+  "loop-3": "#c77dff", loop: "#ff8fab",
+  planner: "#ffb703", "planner-1": "#ffb703", "planner-2": "#fb8500",
+  worker: "#2a9d8f", "worker-1": "#2a9d8f", "worker-2": "#43aa8b", "worker-3": "#90be6d", thinker: "#4cc9f0", dreamer: "#b5e48c",
 };
 
 // ------------------------------------------------------------ pure logic
