@@ -1606,10 +1606,6 @@ const HSTYLE = `
   /* #470: the decision cockpit's view -- the cockpit under the top bar, the
    * chat inside it (moved there, the same element); the field stays the
    * full-page background behind it all, and takes no input there */
-  .view-field .chat, .view-field .sbox, .view-field .me, .view-field .chatbtn,
-  .view-field .card, .view-field .tip, .view-field .brainline { display:none; }
-  .view-field .msg { display:none !important; }
-  .view-field .field { pointer-events:none; background:radial-gradient(ellipse at 50% 46%, #0d1a28 0%, #060a10 62%, #04060a 100%); }   /* the 3D view's camera hints mean nothing here */
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card { position:absolute; z-index:3; left:12px; bottom:12px; max-width:min(420px, calc(100% - 24px));
@@ -3541,21 +3537,6 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     async _mountDecisions() {
       try { await import("/ui/www/fieldview.js"); } catch (e) { this._msgEl.textContent = "the field view failed to load"; return; }
       this._cockpit.api = { get: (p) => this._get(p), post: (p, b) => this._post(p, b) };
-      // the bottom bar's message drives a chat turn; the turn's answer comes back through ai-reply
-      this._cockpit.addEventListener("chat-send", (e) => {
-        const c = this._chat, text = String(e.detail || "").trim();
-        if (!c || !c._ta || !text) return;
-        this._fvPending = true;
-        c._ta.value = text;
-        c._submit();
-      });
-      this._chat.addEventListener("ai-reply", (e) => {
-        if (!this._fvPending) return;
-        this._fvPending = false;
-        const t = (e.detail || {}).text;
-        if (t) this._cockpit.reply(t);
-      });
-      this._msgEl.style.display = "none";
     }
 
     async _get(path) {
@@ -3606,6 +3587,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         v.selfEyes = this._mode === "eyes"; v.selfFollow = this._mode === "self" || this._mode === "eyes"; v.selfName = SELF_NAME;
         await v.start();
         if (!this._started) { v.stop(); return; }
+        if (this._cockpit) this._cockpit.scene = v;      // the work items live in this scene
         await this._aim(true);
         this._glide();
         if (VIEW !== "field") this._brainStart();    // the cockpit has no brain caption

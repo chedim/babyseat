@@ -147,13 +147,6 @@ def test_the_cockpit_view_reuses_the_chat_and_the_field():
     assert 'VIEW === "chat") {' in src
 
 
-def test_the_camera_hint_never_shows_over_the_cockpit():
-    """'Blurp is not moving yet' is the 3D view's camera hint; in the cockpit it
-    landed right under the input bar (operator, 2026-10-23)."""
-    src = (UI / "home.js").read_text()
-    assert ".view-field .msg { display:none !important; }" in src
-
-
 def test_the_chamfered_corners_draw_their_edge():
     """The cards' cut corners are clipped with clip-path, which cut the border
     too: the top-left and bottom-right edges never rendered. Each corner draws
@@ -203,9 +196,8 @@ def test_the_field_is_the_cockpits_full_page_background():
     # the field's host stays where the page put it (full page), not slotted into a small box
     assert "this._host3d.slot" not in home
     assert 'slot name="field"' not in dec and ".fieldbox" not in dec
-    # unclickable: its drag / hover / select never fire under the cockpit
-    rule = _cockpit_rule(home, ".view-field .field")
-    assert "pointer-events:none" in rule
+    # clickable: the work items are objects in the scene (field3d.js), so it takes input
+    assert "pointer-events:none" not in _cockpit_rule(home, ".view-field .field")
     # the cockpit itself is see-through; its panels carry the backing that keeps text legible
     host = _cockpit_rule(dec, ":host")
     assert "background:transparent" in host

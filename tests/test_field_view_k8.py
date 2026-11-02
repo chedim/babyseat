@@ -36,7 +36,3 @@ def test_chat_bar_sends_and_shows_the_response():
     st = _js("F.chatStep({log: []}, 'reply', 'hello')")
     assert st["log"][-1] == {"who": "bot", "text": "hello"}
 
-
-def test_view_has_bar_and_response_window():
-    src = (UI / "fieldview.js").read_text()
-    assert "chatbar" in src and "reply-window" in src
