@@ -1537,9 +1537,10 @@ class EntityField:
     def flush(self) -> None:
         self._wgen += 1
         if self._dirty:
+            _dirty = set(self._dirty)       # #858: a copy -- another thread may add while we iterate
             self.b.upsert_multi("entity_states", {
                 self._state_key(e): self._states[e].to_doc(self.origin)
-                for e in self._dirty if e in self._states})
+                for e in _dirty if e in self._states})
             # THE FIELD-WATCH INTAKE (the model's filters over the
             # field): the dirty pass IS the event source -- each
             # changed entity's watch_fields check + the gravity/
@@ -1548,7 +1549,7 @@ class EntityField:
                 from .night import note_field_change
                 _store = getattr(self, "_est_sink", None)
                 if _store is not None:
-                    for e in list(self._dirty):
+                    for e in _dirty:
                         # a FIELD id -> its stored entity (the store keys are
                         # membrane::...: docs.get(field id) never matched)
                         _ent = _store.docs.get(e) or _store.by_field_id(e)
@@ -1561,14 +1562,14 @@ class EntityField:
             # into the cached 3D projections (fieldpulse.FieldPulse.moved)
             _moved = getattr(self, "pulse_moved", None)
             if _moved is not None:
-                for e in list(self._dirty):
+                for e in _dirty:
                     _st = self._states.get(e)
                     if _st is not None and _st.tier == "live" and _st.state is not None:
                         try:
                             _moved(e, _st.state)
                         except Exception:
                             pass
-            self._dirty.clear()
+            self._dirty -= _dirty
         if self._deltas:
             g0 = self._dgen()
             self.b.upsert_multi("entity_deltas", self._deltas)

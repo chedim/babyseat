@@ -1596,7 +1596,7 @@ const HSTYLE = `
   .chat { position:absolute; z-index:2; top:12px; right:12px; bottom:12px; width:min(460px, 44vw);
           border-radius:16px; overflow:hidden; display:flex; flex-direction:column;
           transition:transform .2s ease, opacity .2s ease; }
-  .chat.hidden { transform:translateX(calc(100% + 24px)); opacity:0; pointer-events:none; }
+  .chat.covered, .chat.hidden { transform:translateX(calc(100% + 24px)); opacity:0; pointer-events:none; }
   .chat ai-terminal-panel { flex:1; min-height:0; height:auto; }
   /* THE VIEW (2026-10-13, the operator's burger-menu ask): chat-only fills
    * the screen with the conversation -- nothing but field chrome left */
@@ -4823,8 +4823,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (m && this._mindFollow) { this._mindFollow = null; if (this._chat && this._chat.endMind) this._chat.endMind(); }
       this._sel = m || null;
       this._selFollow = m ? m.id : null;
-      if (!m) { this._card.classList.remove("open"); this._goal = null; this._aim(true); return; }
+      // #855: a selection slides its panel over the chat (the chat keeps its scroll and draft); none gives the chat back
+      this._chatBox.classList.toggle("covered", !!m);
+      if (this._cockpit && (!m || !m.work) && this._cockpit.open) this._cockpit.open(null);
+      if (!m || m.work) this._card.classList.remove("open");
+      if (!m) { this._goal = null; this._aim(true); return; }
       this._aim(true);
+      if (m.work) return;
       this._lastTouch = performance.now();
       this._card.querySelector(".t").textContent = m.label || m.id;
       this._card.querySelector(".k").textContent = (m.kind || "") + (m.mass != null ? "  ·  mass " + m.mass : "");

@@ -4208,6 +4208,11 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     if note:
         adds.append(note)
     said = (getattr(srv, "_cg_text", None) or {}).pop(sid, None) if sid else None
+    if said and srv is not None:                  # #865: the turn's words stay for answer_card until its message is minted
+        try:
+            srv.__dict__.setdefault("_cg_said_now", {})[sid] = said
+        except Exception:
+            pass
     _sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
     if said and _sess is not None and ((_sess.get(sid) or {}).get("owner")):
         said = None                               # a guest's chat (a token person, the HA relay): no program
@@ -6014,11 +6019,29 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
 
     def _v1_deliver(self, up: dict, raw: bytes, query: str, vec, verdict: dict,
                     ctx: str | None) -> None:
+        """#858: a turn cut before the model answered (seat_busy, quota, a dead
+        rung) never reaches the capture below; its person message is recorded
+        here so the chat's next turn still has it."""
+        self._turn_captured = False
+        try:
+            return self._v1_deliver_turn(up, raw, query, vec, verdict, ctx)
+        finally:
+            if not self._turn_captured and query:
+                _c = getattr(self.server, "capturer", None)
+                if _c is not None:
+                    try:
+                        _c.on_turn(query, "")
+                    except Exception:
+                        pass
+
+    def _v1_deliver_turn(self, up: dict, raw: bytes, query: str, vec, verdict: dict,
+                         ctx: str | None) -> None:
         """Forward to Ollama's /v1/chat/completions (stream or buffered), tee
         to the client, then learn the exchange into the field."""
         srv = self.server
         mem = srv.membrane
         self._v1_stream_open = False          # set once the SSE headers go out (#431)
+
         route = verdict.get("route") or {}
         routed_model = route.get("route")
         orig_model = str(up.get("model") or "membrane")
@@ -6450,6 +6473,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         _learned = "" if _ca_failed else content
         _cap = getattr(srv, "capturer", None)
         if _cap is not None:
+            self._turn_captured = True
             _cap.on_turn(query, _learned, "" if _ca_failed else (thought or ""))
             if _ca_tools:
                 _cap.on_calls(query, _CA.captured_calls(_ca_tools))

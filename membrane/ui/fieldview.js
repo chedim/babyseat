@@ -144,7 +144,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       const say = this.querySelector && this.querySelector(".say");
       if (say) say.onkeydown = (e) => { if (e.key === "Enter") this._say(say.value.trim()); };
       this.onclick = (e) => {
-        if (e.target.closest(".x")) { this._open = null; this._run = null; this._draw(); return; }
+        if (e.target.closest(".x")) { this._open = null; this._run = null; this._draw(); const sc = this._scene; if (sc) { sc.select(null); if (sc.api && sc.api.onSelect) sc.api.onSelect(null); } return; }
       };
       const c = this.querySelector && this.querySelector(".card"); if (c) c.style.pointerEvents = "auto";
     }

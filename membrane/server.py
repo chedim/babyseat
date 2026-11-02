@@ -1875,6 +1875,7 @@ class TurnRunner:
             if _psrv is not None and not _drained and _CG.is_chat((self.sessions.get(sid) or {}).get("agent")):
                 _ref = _CG.before_turn(_psrv, self, sid, user_info, text)
                 _psrv.__dict__.setdefault("_cg_turn", {})[sid] = _ref or {}   # the capture binding reads it
+                (_psrv.__dict__.get("_cg_said_now") or {}).pop(sid, None)       # #865: a new message ends the last one's words
                 if _CG.from_person(text):                                      # living language compiles it
                     _psrv.__dict__.setdefault("_cg_text", {})[sid] = _CG._words(text)[1]
                 else:
