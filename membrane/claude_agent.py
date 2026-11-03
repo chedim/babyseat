@@ -118,6 +118,8 @@ WORKER_CEILING = 20                 # a goal worker's chunk: each its own sessio
 CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
                    f"person can press Continue.")
+CHUNK_MESSAGE = (f"This chunk reached its limit of {WORKER_CEILING} tool "
+                 f"calls. Stop here; the work resumes in a fresh chunk.")
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
@@ -270,6 +272,8 @@ class _Answer:
         self.limit = WORKER_CEILING if _DR.current().get("lane") == "worker" \
             else MAX_TOOL_CALLS_PER_ANSWER
         self.calls = 0                  # allowed calls in this answer
+        self.message = CHUNK_MESSAGE if self.limit == WORKER_CEILING \
+            else CEILING_MESSAGE
         self.denied: set = set()        # tool_use ids the hook refused
         self.ceiling = False
 
@@ -278,10 +282,10 @@ class _Answer:
         if self.calls >= self.limit:
             self.ceiling = True
             self.denied.add(tid)
-            return {"continue_": False, "stopReason": CEILING_MESSAGE,
+            return {"continue_": False, "stopReason": self.message,
                     "hookSpecificOutput": {"hookEventName": "PreToolUse",
                                            "permissionDecision": "deny",
-                                           "permissionDecisionReason": CEILING_MESSAGE}}
+                                           "permissionDecisionReason": self.message}}
         self.calls += 1
         return {}
 
@@ -936,7 +940,7 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                 name, args = pending.pop(tid, ("", {}))
                 if tid in answer.denied:
                     if tid in started:    # its start went out: dropped, not running
-                        put(("tool_start", {"id": tid, "dropped": CEILING_MESSAGE}))
+                        put(("tool_start", {"id": tid, "dropped": answer.message}))
                     continue          # the hook's denial: Claude's, never run (#425)
                 put(("tool", {"id": tid, "name": name, "input": args,
                               "output": _result_text(getattr(b, "content", None)),
