@@ -4225,7 +4225,10 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     _owner = str((_sess.get(sid) or {}).get("owner") or "") if said and _sess is not None else ""
     if said and _owner and not _is_operator(_owner):
         said = None                               # a guest's chat (a token person, the HA relay): no program
-    _answered = False
+    _ran = False
+    if sid and srv is not None:                   # a dead turn's leftovers never reach this message
+        for _k in ("_cg_understood", "_cg_filled"):
+            (srv.__dict__.get(_k) or {}).pop(sid, None)
     if said and getattr(getattr(srv, "_loop_runner", None), "post_line", None) is not None:
         try:                                      # #887: fill the message's gaps, then membrane answers it
             from . import language as _LL
@@ -4233,17 +4236,21 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
                 _u = _LL.understand(srv, sid, said)
                 srv.__dict__.setdefault("_cg_understood", {})[sid] = _u     # the shadow keeps the before
                 if _u.get("surprise"):
-                    _got = _LL.fill_gaps(srv, sid, said, _u["surprise"])
+                    _got = _LL.fill_gaps_before(srv, sid, said, _u["surprise"])
                     if _got is not None:
                         srv.__dict__.setdefault("_cg_filled", {})[sid] = _got
-                _reply = _LL.respond(srv, sid, said)
-                if _reply:
-                    from . import speech as _SP
-                    srv._loop_runner.post_line(sid, _SP.say("membrane-ran", text=_reply))
-                    adds.append(f"membrane already answered in the chat from what it understood of the person's "
-                                f"message (no model): {_reply[:600]!r}. Don't run it again or repeat it; add what "
-                                "it missed or correct it.")
-                    _answered = True
+                if _LL.answer_on():
+                    _a = _LL.answer(srv, sid, said)
+                    _ran = _a["ran"]
+                    if _a["text"]:
+                        from . import speech as _SP
+                        srv._loop_runner.post_line(sid, _SP.say("membrane-ran", text=_a["text"]))
+                        adds.append(
+                            f"membrane already ran the person's message as a read-only program and answered in "
+                            f"the chat (no model): {_a['text'][:600]!r}. Don't run it again; add what it missed "
+                            "or correct it." if _ran else
+                            f"membrane already said in the chat what the field shows about the person's message "
+                            f"(no model; it ran nothing): {_a['text'][:600]!r}. Add what it missed or correct it.")
         except Exception as e:
             print(f"[language] {sid[:16]}: {e}", file=sys.stderr)
     if said:
@@ -4254,8 +4261,7 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
                 if steps and steps[0].get("kind") == "define" and steps[0]["mapped"]:
                     adds.append(f"The person's message {_LL.describe(srv.entity_store, steps)}. If they mean it, "
                                 f"exec(action='run', lang='en', code={said!r}) keeps it.")
-                elif _answered and steps and all(s["mapped"] for s in steps) \
-                        and not any(s.get("writes") for s in steps):
+                elif _ran:
                     pass                          # #887: membrane's answer above already ran it
                 elif steps and all(s["mapped"] for s in steps) and not any(s.get("writes") for s in steps) \
                         and getattr(getattr(srv, "_loop_runner", None), "post_line", None) is not None:

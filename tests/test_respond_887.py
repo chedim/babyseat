@@ -89,7 +89,8 @@ class BeforeTheTurn(unittest.TestCase):
         [(sid, text)] = posted
         self.assertTrue(text.startswith(MARK), text)
         self.assertIn("goal two is shut", text)
-        self.assertIn("membrane already answered", ctx)
+        self.assertIn("membrane already said", ctx)
+        self.assertIn("it ran nothing", ctx)
 
     def test_the_understanding_before_the_fill_is_what_the_shadow_keeps(self):
         srv, *_ = _world()
@@ -100,6 +101,88 @@ class BeforeTheTurn(unittest.TestCase):
         srv, *_ = _world()
         ctx, posted, asked = self._ctx(srv, "yup", reply="yup: none")
         self.assertEqual(posted, [])
+
+
+@unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
+class MemosReview(unittest.TestCase):
+    """Memo's review of #892."""
+    def test_a_hung_gap_call_never_holds_the_turn(self):
+        import threading
+        import time
+        srv, *_ = _world()
+        gate = threading.Event()
+        old = LL._ask_model
+        LL._ask_model = lambda prompt: gate.wait(5) and ("", {})
+        try:
+            t = time.monotonic()
+            got = LL.fill_gaps_before(srv, SID, "frobnicate goal one", ["frobnicate"], wait_s=0.2)
+            self.assertLess(time.monotonic() - t, 2.0)
+            self.assertTrue(got["late"])
+        finally:
+            gate.set()
+            LL._ask_model = old
+
+    def test_a_condition_the_field_cant_evaluate_is_not_a_no(self):
+        srv, f, est, *_ = _world()
+        from membrane.entities import QuantumEntity
+        est.upsert(QuantumEntity(eid="membrane::adjective:weird", cls=LL.CLASS_ADJECTIVE,   # refuses when run
+                                 properties={"name": "weird", "filter": "x.status.deeper == 1"}), embedder=None)
+        self.assertIn("can't tell whether goal one is weird", LL.respond(srv, SID, "is goal one weird?"))
+
+    def test_the_answer_is_marked_as_now(self):
+        srv, *_ = _world()
+        self.assertTrue(LL.respond(srv, SID, "were the goals open yesterday?").startswith("Now: "))
+
+    def test_a_group_is_called_by_its_noun(self):
+        srv, *_ = _world()
+        r = LL.respond(srv, SID, "how many goals are open?")
+        self.assertIn("1 of 2 goals is open", r)
+
+    def test_a_long_name_doesnt_slow_a_long_message(self):
+        import time
+        from membrane.entities import QuantumEntity
+        srv, f, est, *_ = _world()
+        est.upsert(QuantumEntity(eid="membrane::Component:long", cls="Component",
+                                 properties={"name": " ".join(["word"] * 200)}), embedder=None)
+        t = time.monotonic()
+        LL.understand(srv, SID, " ".join(["word"] * 1500))
+        self.assertLess(time.monotonic() - t, 5.0)
+
+    def test_the_switch_stops_the_posts(self):
+        srv, *_ = _world()
+        os.environ["MEMBRANE_ANSWER"] = "0"
+        try:
+            ctx, posted, asked = BeforeTheTurn()._ctx(srv, "goal two open?")
+        finally:
+            del os.environ["MEMBRANE_ANSWER"]
+        self.assertEqual(posted, [])
+
+    def test_the_shadow_keeps_the_before_score_and_the_fill(self):
+        from test_conversation_graph import _seat
+        from membrane import convgraph as CG
+        from membrane import lanes as L
+        srv, runner = _seat()
+        LL.seed(srv.entity_store)
+        runner.post_line = lambda sid, text: None
+        srv._cg_turn, srv._cg_text = {SID: {}}, {SID: "frobnicate the goals"}
+        old = LL._ask_model
+        LL._ask_model = lambda prompt: ("frobnicate: none", {"output_tokens": 2})
+        try:
+            L._with_referent(srv, {"_turn_sid": SID}, "BANNER", False)
+            u = runner.messages.add(SID, "msg_u1", "user", "frobnicate the goals")
+            a = runner.messages.add(SID, "msg_a1", "assistant", "done")
+            CG.on_turn_end(srv, runner, SID, u, "frobnicate the goals", a, "done")
+        finally:
+            LL._ask_model = old
+        sh = srv.entity_store.docs[CG.msg_eid("msg_u1")].properties["shadow"]
+        self.assertIn("frobnicate", sh["understanding"]["surprise"])
+        self.assertEqual(sh["filled"]["usage"], {"output_tokens": 2})
+
+    def test_a_dead_turns_leftovers_dont_reach_the_next_message(self):
+        srv, *_ = _world()
+        srv._cg_filled = {SID: {"words": [{"word": "stale"}]}}
+        BeforeTheTurn()._ctx(srv, "goal two open?")
+        self.assertNotIn(SID, srv._cg_filled)
 
 
 if __name__ == "__main__":

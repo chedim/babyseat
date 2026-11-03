@@ -22,6 +22,7 @@ that") becomes a Concept entity, so the registers can hold it.
 from __future__ import annotations
 
 import re
+import threading
 import time
 
 from .entities import CLASS_CONCEPT, MEMBRANE_NS, QuantumEntity
@@ -692,12 +693,16 @@ def _names(est) -> dict:
 
 def _named(doc, names: dict) -> list:
     """The runs of two or more words that are a thing's whole name ("goal one"), longest first."""
-    longest = max((k for k in names.values()), default=0)
+    by_first: dict = {}                          # first word -> the lengths of the names it starts
+    for n, k in names.items():
+        if k > 1:
+            by_first.setdefault(n.split(" ", 1)[0], set()).add(k)
     out, i = [], 0
     while i < len(doc):
         hit = None
-        for j in range(min(len(doc), i + longest), i + 1, -1):
-            if " ".join(t.lower_ for t in doc[i:j]) in names:
+        for k in sorted(by_first.get(doc[i].lower_, ()), reverse=True):
+            j = i + k
+            if j <= len(doc) and " ".join(t.lower_ for t in doc[i:j]) in names:
                 hit = doc[i:j]
                 break
         if hit is not None:
@@ -768,8 +773,25 @@ def _state(est, eid: str) -> str:
     return str(((est.docs or {}).get(eid) or QuantumEntity(eid="", cls="")).properties.get("status") or "")
 
 
+def answer_on() -> bool:
+    """Membrane's own 🧩 answers: on by default; MEMBRANE_ANSWER=0 turns them off."""
+    import os
+    return os.environ.get("MEMBRANE_ANSWER", "1").strip().lower() not in ("0", "off", "false", "no")
+
+
 def respond(srv, sid: str, text: str) -> str:
     """The reply membrane words itself from what it understood of `text`, or "" (nothing understood)."""
+    return answer(srv, sid, text)["text"]
+
+
+def _group_name(span) -> str:
+    """What the message called a group: its nouns ("how many goals" -> "goals")."""
+    words = [t.text for t in span if t.pos_ in ("NOUN", "PROPN", "NUM")]
+    return " ".join(words) or span.text
+
+
+def answer(srv, sid: str, text: str) -> dict:
+    """{text, ran}: the reply (see respond) and whether a read-only program ran for it."""
     from collections import Counter
     from . import generate as GEN
     from .ch import EntityView, Refused, evaluate
@@ -788,46 +810,52 @@ def respond(srv, sid: str, text: str) -> str:
             continue                              # a verb is the program's, below
         got = _known_targets(srv, sid, est, span)
         if got:
-            groups.append((span.text, list(dict.fromkeys(got))))
+            groups.append((_group_name(span), list(dict.fromkeys(got))))
         else:
             unknown.append(span.text)
-    lines = []
+    lines, ran = [], False
     try:
         steps = compile(srv, sid, text)
     except Exception:
         steps = []
     if steps and all(s["mapped"] and s.get("kind") != "define" and not s.get("writes") for s in steps):
-        ran = run(srv, text)                      # a read-only program: its result (stage 3)
-        out = str(ran.get("output") or ran.get("said") or "").strip()
+        got_run = run(srv, text)                  # a read-only program: its result (stage 3)
+        ran = True
+        out = str(got_run.get("output") or got_run.get("said") or "").strip()
         if out:
             lines.append(out)
 
     def holds(expr, eid):
+        """True / False, or None when the field can't tell (the condition doesn't evaluate)."""
         try:
             return bool(evaluate(expr, {"x": EntityView(est, eid)}))
-        except Refused:
-            return False
+        except Exception:
+            return None
     for called, eids in groups:
         if len(eids) == 1:
             e = eids[0]
             label, st = CG_label(est, e), _state(est, e)
             for word, expr in conds:
-                lines.append(f"{label} is {word}" if holds(expr, e)
+                h = holds(expr, e)
+                lines.append(f"can't tell whether {label} is {word}" if h is None else f"{label} is {word}" if h
                              else f"{label} isn't {word}" + (f" (status {st})" if st else ""))
             if not conds and st:              # a name alone says nothing: only a state is an answer
                 lines.append(f"{label}: {st}")
             continue
         for word, expr in conds:
-            k = sum(1 for e in eids if holds(expr, e))
-            lines.append(f"{k} of {len(eids)} {called} {'is' if k == 1 else 'are'} {word}")
+            hs = [holds(expr, e) for e in eids]
+            k = sum(1 for h in hs if h)
+            unsure = sum(1 for h in hs if h is None)
+            lines.append(f"{k} of {len(eids)} {called} {'is' if k == 1 else 'are'} {word}"
+                         + (f" ({unsure} can't tell)" if unsure else ""))
         if not conds:
             by = Counter(_state(est, e) or "no status" for e in eids)
             lines.append(f"{called}: {len(eids)} ({', '.join(f'{n} {st}' for st, n in by.most_common())})")
     if not lines:
-        return ""
+        return {"text": "", "ran": ran}
     if unknown:
         lines.append("I don't know " + GEN.join([f'"{u}"' for u in unknown]))
-    return "; ".join(lines)
+    return {"text": "Now: " + "; ".join(lines), "ran": ran}       # the field as it is now, whatever the tense
 
 
 # ---- filling the gaps (#887 B): membrane asks the model about the surprise words only ---------
@@ -873,6 +901,23 @@ def _ask_model(prompt: str):
         elif kind == "usage" and isinstance(val, dict):
             usage = val
     return "".join(text), usage
+
+
+GAP_WAIT_S = 10.0       # #887 C: how long a person's turn waits for the gap call (flagged for approval)
+
+
+def fill_gaps_before(srv, sid: str, text: str, words: list, wait_s: float | None = None) -> dict | None:
+    """fill_gaps on its own thread, waited for at most GAP_WAIT_S: a slow or hung call never
+    holds the person's turn. Late -> {words: [], late: True}; its answers are still kept when
+    they come (the words are marked then)."""
+    box: dict = {}
+    th = threading.Thread(target=lambda: box.update(r=fill_gaps(srv, sid, text, words)), daemon=True,
+                          name="gap-fill")
+    th.start()
+    th.join(GAP_WAIT_S if wait_s is None else wait_s)
+    if th.is_alive():
+        return {"words": [], "usage": {}, "late": True}
+    return box.get("r")
 
 
 def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
