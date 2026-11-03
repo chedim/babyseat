@@ -79,3 +79,55 @@ def test_stalled_running_task_is_not_moving():
     assert GG._moving(D) is False
     D.properties = {"status": GG.RUNNING, "started_ts": time.time()}
     assert GG._moving(D) is True
+
+
+class _Store:
+    """The session store as server.py keeps it: docs by id, each with its agent + title."""
+    def __init__(self, docs):
+        self.sessions = docs
+
+    def get(self, sid):
+        return self.sessions.get(sid)
+
+    def list(self):
+        return list(self.sessions.values())
+
+
+def _real_runner(registry=None):
+    """Real doc shapes: a person's chat (agent 'build'), the speaker lane's session
+    (speaker.session: agent 'speaker', the voice title), a worker loop session
+    (create_loop_session: agent == title == 'worker: <eid>'). `_agents` is the
+    in-memory registry, filled only on turns."""
+    from membrane import speaker as SP
+    r = _Runner()
+    r._agents = dict(registry or {})
+    r.sessions = _Store({
+        "ses_P": {"id": "ses_P", "agent": "build", "title": "New session 10:00"},
+        "ses_V": {"id": "ses_V", "agent": SP.AGENT, "title": SP.TITLE},
+        "ses_W": {"id": "ses_W", "agent": "worker: membrane::task:1", "title": "worker: membrane::task:1"},
+    })
+    return r
+
+
+def test_goal_chat_skips_speaker_session(monkeypatch):
+    srv, _ = _seat(monkeypatch)
+    srv._loop_runner = _real_runner({"ses_V": "speaker"})   # lane_of('speaker') is 'operator'
+    assert CIO.goal_chat({"convs": ["sid:ses_P", "sid:ses_V"]}, srv) == "ses_P"
+    srv._loop_runner = _real_runner()                       # after a restart: doc only
+    assert CIO.goal_chat({"convs": ["sid:ses_P", "sid:ses_V"]}, srv) == "ses_P"
+
+
+def test_goal_chat_skips_item_chat_tags(monkeypatch):
+    srv, _ = _seat(monkeypatch)
+    srv._loop_runner = _real_runner()
+    # a decision item's mini-chat is conv 'item:<eid>' (decision_map.item_say): no session
+    props = {"convs": ["sid:ses_P", "sid:item:membrane::decision:7", "item:membrane::decision:7"]}
+    assert CIO.goal_chat(props, srv) == "ses_P"
+
+
+def test_loop_session_still_loop_after_restart(monkeypatch):
+    srv, _ = _seat(monkeypatch)
+    srv._loop_runner = _real_runner()                       # _agents empty: a restart
+    assert CIO._is_loop(srv._loop_runner, "ses_W") is True
+    assert CIO._is_loop(srv._loop_runner, "ses_P") is False
+    assert CIO.goal_chat({"convs": ["sid:ses_P", "sid:ses_W"]}, srv) == "ses_P"

@@ -305,18 +305,34 @@ def conv_session(tag: str) -> str:
     t = str(tag or "").strip()
     while t.startswith("sid:"):
         t = t[4:]
-    return "" if not t or t.startswith("head:") else t
+    return "" if not t or t.startswith(("head:", "item:")) else t     # item: a decision's mini-chat (no session)
+
+
+def _is_voice(r, sid: str) -> bool:
+    """The speaker lane's session (speaker.AGENT): lane 'operator', but never a person's chat."""
+    from .speaker import AGENT
+    agent = (getattr(r, "_agents", None) or {}).get(sid)
+    if not agent:
+        docs = getattr(getattr(r, "sessions", None), "sessions", None) or {}
+        agent = (docs.get(sid) or {}).get("agent")
+    return str(agent or "") == AGENT
 
 
 def goal_chat(props: dict, srv=None) -> str:
     """The goal's own person chat: the last of its `convs` that is a real session and
-    not a loop session (the registry, as `latest_chat` does). Without a runner the
-    registry is unknown: the last unwrapped tag."""
+    neither a loop session (the registry, then the session doc, as `latest_chat` does)
+    nor the voice session. Without a runner the registry is unknown: the last unwrapped tag."""
     r = _runner(srv) if srv is not None else None
+    docs = getattr(getattr(r, "sessions", None), "sessions", None) if r is not None else None
     for tag in reversed(list((props or {}).get("convs") or [])):
         sid = conv_session(tag)
-        if sid and not (r is not None and _is_loop(r, sid)):
-            return sid
+        if not sid:
+            continue
+        if r is not None and (_is_loop(r, sid) or _is_voice(r, sid)):
+            continue
+        if docs and sid not in docs:            # a tag naming no session (an item's mini-chat)
+            continue
+        return sid
     return ""
 
 

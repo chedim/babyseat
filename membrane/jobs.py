@@ -64,6 +64,11 @@ def _is_loop(runner, sid: str) -> bool:
     try:
         from .server import _lane_of
         agent = (getattr(runner, "_agents", None) or {}).get(sid)
+        if not agent:
+            # the registry is filled only on turns: after a restart the session doc
+            # (create_loop_session stamps + flushes the loop's agent) is the record
+            docs = getattr(getattr(runner, "sessions", None), "sessions", None) or {}
+            agent = (docs.get(sid) or {}).get("agent")
         return _lane_of(agent) in ("listener", "plan") and str(agent or "") not in ("", "build", "plan")
     except Exception:
         return False
