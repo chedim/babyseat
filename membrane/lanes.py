@@ -4220,7 +4220,9 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     said = (getattr(srv, "_cg_text", None) or {}).pop(sid, None) if sid else None
     if said and srv is not None:                  # #865: the turn's words stay for answer_card until its message is minted
         try:
-            srv.__dict__.setdefault("_cg_said_now", {})[sid] = said
+            _sn = srv.__dict__.setdefault("_cg_said_now", {}).setdefault(sid, [])
+            if not any(t == said for _m, t in _sn):          # the glue may have noted these words already
+                _sn.append(("", said))
         except Exception:
             pass
     _sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)

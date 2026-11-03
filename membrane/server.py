@@ -2154,7 +2154,17 @@ class TurnRunner:
             return False
         ref, words = pre
         psrv.__dict__.setdefault("_cg_turn", {})[sid] = ref or {}
-        (psrv.__dict__.get("_cg_said_now") or {}).pop(sid, None)
+        D = psrv.__dict__
+        cur = D.setdefault("_cg_cur_mid", {}).get(sid)
+        if cur:             # the slots hold the previous glued message's state: file it under that message
+            D.setdefault("_cg_by_msg", {})[cur] = {"understood": (D.get("_cg_understood") or {}).pop(sid, None),
+                                                   "filled": (D.get("_cg_filled") or {}).pop(sid, None)}
+        mid_now = str((user_info or {}).get("id") or "")
+        D["_cg_cur_mid"][sid] = mid_now
+        if words:                                   # every person message of the turn stays quotable
+            _sn = D.setdefault("_cg_said_now", {}).setdefault(sid, [])
+            if not any(t == words for _m, t in _sn):
+                _sn.append((mid_now, words))
         if words:
             psrv.__dict__.setdefault("_cg_text", {})[sid] = words
         else:
