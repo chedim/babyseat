@@ -25,7 +25,8 @@ or fired); part D2 hands in the real one.
 STAY POSITIVE. A candidate whose balance is above zero is a proposal; on a
 granted branch (granted(path), the skill tree's Accept -- D2) a proposal fires
 live: it writes the real path. Below zero it is back in shadow. Sleep prunes
-every candidate whose balance is negative (prune())."""
+every candidate whose balance is below -1 x WRITE_COST (prune()); untested candidates
+and ones with evidence in flight stay (PR 905, decided)."""
 from __future__ import annotations
 
 import collections
@@ -443,10 +444,13 @@ class Learner:
 
     # -- sleep ------------------------------------------------------------------------------
     def prune(self) -> list[str]:
-        """Sleep: every candidate below zero goes (most draining first)."""
+        """Sleep: a candidate below -1 x WRITE_COST goes (most draining first); untested
+        (balance 0) and in-flight evidence (a pending prediction) are kept."""
         est = self.vm.est
+        flying = {c for pend in self._pending.values() for c, _p, _v in pend}
         bad = sorted((self.balance(t.eid), t.eid) for t in self.vm.triggers()
-                     if (t.properties or {}).get("owner") == CH.SELF and self.balance(t.eid) < 0)
+                     if (t.properties or {}).get("owner") == CH.SELF
+                     and self.balance(t.eid) < -WRITE_COST and t.eid not in flying)
         gone = []
         for _b, eid in bad:
             if est.remove(eid):

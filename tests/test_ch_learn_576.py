@@ -143,10 +143,33 @@ def test_sleep_prunes_the_negative(world):
     x, y = _ent(est, "x"), _ent(est, "y")
     _turn(est, vm, (x, "a", 1), (x, "b", 2))
     _turn(est, vm, (y, "a", 1), (y, "b", 7))                   # the "= 2" guess was wrong on y
+    from membrane.ch_learn import WRITE_COST
     bad = [t.eid for t in _cands(vm) if vm.learner.balance(t.eid) < 0]
     assert bad
+    for e in bad:                                              # drained past -1 x WRITE_COST
+        vm.learner._bal[e] = -2 * WRITE_COST
     gone = vm.learner.prune()
     assert set(bad) <= set(gone) and not any(e in est.docs for e in gone)
+
+
+def test_sleep_prunes_only_below_minus_one_write_cost(world):
+    # Dima (PR 905): prune only below -1 x WRITE_COST; keep untested and in-flight
+    from membrane.ch_learn import WRITE_COST
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    for i, ent in enumerate("pqrs"):
+        _turn(est, vm, (_ent(est, ent), "a", i), (_ent(est, ent), "b", 10 + i))
+    c = _cands(vm)
+    assert len(c) >= 4
+    keep_half, drop, untested, flying = (t.eid for t in c[:4])
+    vm.learner._bal[keep_half] = -0.5 * WRITE_COST
+    vm.learner._bal[drop] = -1.5 * WRITE_COST
+    vm.learner._bal[untested] = 0.0
+    vm.learner._bal[flying] = -3 * WRITE_COST
+    vm.learner._pending["chain"] = [(flying, "p", 1)]
+    gone = vm.learner.prune()
+    assert gone == [drop]
+    assert keep_half in est.docs and untested in est.docs and flying in est.docs and drop not in est.docs
 
 
 def test_a_proposal_never_acts_by_itself_it_suggests(world):
