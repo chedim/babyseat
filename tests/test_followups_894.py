@@ -106,6 +106,18 @@ class Followups(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertTrue(self._unlearns(text))
 
+    def test_a_persons_definition_is_not_replaced_by_a_proposal(self):
+        srv, f, est, *_ = _seat()
+        _say(srv, "goal two landed", "landed", "landed means status closed")
+        _say(srv, "goal three landed", "landed")
+        [step] = LL.compile(srv, SID, "landed means status closed")
+        LL.teach(est, step)                      # the person's own: learned=False
+        g = est.docs[LL._gap_eid("landed")]
+        g.properties = {**g.properties, "kept": False}
+        est.upsert(g, embedder=None)
+        self.assertIsNone(LL.confirm_proposed(srv, SID, "goal three landed", "landed"))
+        self.assertFalse(est.docs[LL._adj_eid("landed")].properties["learned"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1251,7 +1251,7 @@ def confirm_proposed(srv, sid: str, text: str, word: str) -> dict | None:
     evidence, k >= 2 distinct things -- and never picks a write's targets). Only a condition has
     field evidence (_confirmed); a verb synonym or another name stays a proposal for the person to
     teach ("X means Y"): recurrence isn't evidence (Memo: "review means show" posted "Reviewed
-    goal two."). -> {word, meaning, p, k} when taught."""
+    goal two."). A person's own definition is never replaced. -> {word, meaning, k} when taught."""
     est = srv.entity_store
     g = (est.docs or {}).get(_gap_eid(word))
     plan = ((g.properties or {}).get("proposed") or {}) if g is not None else {}
@@ -1259,6 +1259,9 @@ def confirm_proposed(srv, sid: str, text: str, word: str) -> dict | None:
         return None
     if (g.properties or {}).get("contradicted_text") == " ".join(str(text).split())[:200]:
         return None                              # this very message just unlearned it: not taught back by it
+    d0 = (est.docs or {}).get(_adj_eid(word))
+    if d0 is not None and not is_learned(est, d0):
+        return None                              # the person defined it: a proposal never replaces that (Memo on #894)
     if " " in word.strip():                      # a phrase ("big thing"): nothing reads one as a word yet
         return None                              # (Memo on #894), so it stays a proposal
     a = observe(srv, sid, text, word)
