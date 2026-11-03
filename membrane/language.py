@@ -250,6 +250,20 @@ def concept_before(est, text: str, pos: int) -> str | None:
 
 # ---- compiling --------------------------------------------------------------------------------
 
+def is_learned(est, d) -> bool:
+    """A meaning the person did not give: flagged `learned`, or a LEGACY guess -- no `learned`
+    flag at all, not seeded, and the model's gap answer was kept for the word (before #894 those
+    counted as the owner's definitions, so a contradiction could not remove them). A definition
+    taught by the person carries learned=False, and a seed carries `seeded`: never a guess."""
+    p = (d.properties or {}) if d is not None else {}
+    if "learned" in p:
+        return bool(p["learned"])
+    if p.get("seeded") or p.get("corrected"):
+        return False
+    g = (est.docs or {}).get(_gap_eid(str(p.get("name") or "")))
+    return bool(g is not None and (g.properties or {}).get("kept"))
+
+
 def _adjectives(est) -> dict:
     return {(d.properties or {}).get("name"): d for d in list((est.docs or {}).values())
             if d.cls == CLASS_ADJECTIVE}
@@ -345,7 +359,7 @@ def _correct(est, word: str) -> None:
     from . import verbs as V
     for eid in (_adj_eid(word), V.verb_eid(word)):
         d = (est.docs or {}).get(eid)
-        if d is not None and (d.properties or {}).get("learned"):
+        if d is not None and is_learned(est, d):
             d.properties = {**d.properties, "learned": False, "corrected": True, "corrected_ts": time.time()}
             est.upsert(d, embedder=None)
 
@@ -356,7 +370,11 @@ def teach(est, step: dict) -> str:
     p, word = step["plan"], step["word"]
     _correct(est, word)
     if p["kind"] == "adjective":
-        define_adjective(est, word, p["filter"])
+        eid = define_adjective(est, word, p["filter"])
+        d = est.docs[eid]
+        if "learned" not in d.properties:        # the person's own definition: never a guess (legacy-safe)
+            d.properties = {**d.properties, "learned": False}
+            est.upsert(d, embedder=None)
     elif p["kind"] == "verb":
         eid = V.verb_eid(word)
         d = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls=V.CLASS_VERB, properties={
@@ -551,7 +569,7 @@ def _span_targets(srv, sid: str, est, toks: list, unmapped: list, names: dict | 
         return []
     for a in adjs:
         adj = known.get(a.lemma_.lower()) or known.get(a.lower_)
-        if names is not None and (adj.properties or {}).get("learned"):
+        if names is not None and is_learned(est, adj):
             names.setdefault("__learned__", []).append(a.text)    # #894: noted, so a write can refuse it
         expr = (adj.properties or {}).get("filter") or "False"
         kept = []
@@ -1076,10 +1094,10 @@ def observe(srv, sid: str, text: str, word: str) -> dict | None:
     p["seen"] = int(p.get("seen") or 0) + 1
     things, held = list(p.get("things") or []), {k: list(v) for k, v in (p.get("held") or {}).items()}
     learned = _adjectives(est).get(word.lower())
-    if learned is not None and (learned.properties or {}).get("learned"):
+    if learned is not None and is_learned(est, learned):
         expr = (learned.properties or {}).get("filter") or "False"
         if any(_holds(est, expr, e) is False for e in said):      # the chat now says otherwise
-            _unlearn(est, word, said)
+            _unlearn(est, word, said, text)
     for e in said:
         if e not in things:
             things.append(e)
@@ -1175,7 +1193,7 @@ def observe_learned(srv, sid: str, text: str) -> list:
     learned word is no surprise, so nothing saw it; and natural statements -- "goal one landed
     today", "yes, goal one landed" -- must count). -> the words unlearned."""
     est = srv.entity_store
-    learned = {n: d for n, d in _adjectives(est).items() if (d.properties or {}).get("learned")}
+    learned = {n: d for n, d in _adjectives(est).items() if is_learned(est, d)}
     if not learned:
         return []
     gone = []
@@ -1186,12 +1204,12 @@ def observe_learned(srv, sid: str, text: str) -> list:
         expr = (learned[w].properties or {}).get("filter") or "False"
         said = _subjects(t, est, srv, sid)
         if any(_holds(est, expr, e) is False for e in said):
-            _unlearn(est, w, said)
+            _unlearn(est, w, said, text)
             gone.append(w)
     return gone
 
 
-def _unlearn(est, word: str, said: list) -> None:
+def _unlearn(est, word: str, said: list, text: str = "") -> None:
     """A learned meaning the chat contradicts goes back to a proposal (Memo on #894)."""
     eid = _adj_eid(word)
     try:
@@ -1200,7 +1218,8 @@ def _unlearn(est, word: str, said: list) -> None:
         (est.docs or {}).pop(eid, None)
     g = (est.docs or {}).get(_gap_eid(word))
     if g is not None:
-        g.properties = {**g.properties, "kept": False, "contradicted_by": list(said), "contradicted_ts": time.time()}
+        g.properties = {**g.properties, "kept": False, "contradicted_by": list(said), "contradicted_ts": time.time(),
+                        "contradicted_text": " ".join(str(text).split())[:200]}
         est.upsert(g, embedder=None)
 
 
@@ -1216,6 +1235,8 @@ def confirm_proposed(srv, sid: str, text: str, word: str) -> dict | None:
     plan = ((g.properties or {}).get("proposed") or {}) if g is not None else {}
     if not plan or (g.properties or {}).get("kept") or plan.get("kind") != "adjective":
         return None
+    if (g.properties or {}).get("contradicted_text") == " ".join(str(text).split())[:200]:
+        return None                              # this very message just unlearned it: not taught back by it
     if " " in word.strip():                      # a phrase ("big thing"): nothing reads one as a word yet
         return None                              # (Memo on #894), so it stays a proposal
     a = observe(srv, sid, text, word)
