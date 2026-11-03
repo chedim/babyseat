@@ -66,19 +66,22 @@ class TestCeilingPerLane(_SDK):
 def _chunked_turn(seat, total=45):
     """run_loop_turn stand-in: a 45-call answer, at most 20 calls per session; a
     session that stops at the ceiling comes back capped, the last one says DONE."""
-    log = {"left": total, "turns": []}
-    n = [0]
+    log = {"left": total, "turns": [], "wiped": 0, "keeps": []}
 
-    def create(agent, title=None):
-        n[0] += 1
-        return f"ses_{n[0]}"
+    def create(agent, title=None, keep=False):
+        """Like opencode.loop_session (#570): one session per entity, wiped on reuse unless keep."""
+        log["keeps"].append(keep)
+        if not keep:
+            log["wiped"] += 1
+        return "ses_task"
 
     def run(sid, text, agent, **kw):
         k = min(WORKER_CEILING, log["left"])
         log["left"] -= k
         log["turns"].append({"sid": sid, "text": text, "calls": k, "kw": kw})
         if log["left"] > 0:
-            return {"text": "", "capped": {"session": f"sdk-{sid}", "calls": k}}
+            return {"text": "", "capped": {"session": f"sdk-{sid}", "calls": k,
+                                           "progress": "- bash chunk %d -> completed: ok" % len(log["turns"])}}
         return {"text": f"DONE all {total} landed"}
     seat.loops = WA.LoopRunner(3)
     seat.create_loop_session, seat.run_loop_turn = create, run
@@ -94,13 +97,15 @@ def _go(seat):
     return log
 
 
-def test_45_calls_run_as_3_sessions_of_at_most_20(seat):
+def test_45_calls_run_as_3_chunks_of_at_most_20_and_keep_their_rows(seat):
+    """Memo on #913: loop_session wiped the earlier chunks' rows, so /membrane/stats counted only the
+    last chunk. Later chunks reuse the task's session with keep=True."""
     log = _go(seat)
     assert [t["calls"] for t in log["turns"]] == [20, 20, 5]
-    assert len({t["sid"] for t in log["turns"]}) == 3
+    assert log["keeps"][1:] == [True, True]
 
 
-def test_later_sessions_do_not_resume_the_first(seat):
+def test_later_chunks_do_not_resume_the_first(seat):
     log = _go(seat)
     assert len(log["turns"]) == 3
     for t in log["turns"]:
@@ -150,7 +155,7 @@ def test_the_next_chunk_is_told_what_the_last_one_did(seat):
     log = {"left": 45, "turns": []}
     n = [0]
 
-    def create(agent, title=None):
+    def create(agent, title=None, keep=False):
         n[0] += 1
         return f"ses_{n[0]}"
 
@@ -171,3 +176,76 @@ def test_the_next_chunk_is_told_what_the_last_one_did(seat):
     assert "earlier session" not in log["turns"][0]
     assert "step 1" in log["turns"][1] and "Continue from there" in log["turns"][1]
     assert "step 1" in log["turns"][2] and "step 2" in log["turns"][2]
+
+
+def test_a_redo_is_not_told_to_skip_the_work(seat):
+    """Memo on #913: nothing cleared `progress`, so a send-back was told "don't redo what's done"."""
+    _go(seat)
+    assert not seat.entity_store.docs[A].properties.get("progress")
+    assert "earlier session" not in GG.worker_text(seat.entity_store, A)
+
+
+def test_a_restart_between_chunks_keeps_that_chunks_progress(seat, monkeypatch):
+    """Memo on #913: the restart check returned before the note was written."""
+    log = _chunked_turn(seat)
+    calls = {"n": 0}
+
+    def restarting():
+        calls["n"] += 1
+        return True                                   # the seat restarts right after the first chunk
+    monkeypatch.setattr(WA, "_restarting", restarting)
+    write(seat, GOAL, "plan", PLAN)
+    ev = [e for e in seat.events_pool.take() if e.get("kind") == "task"][0]
+    WA._LoopDrainer(seat)._handle(ev)
+    settle(seat)
+    assert len(log["turns"]) == 1
+    prog = seat.entity_store.docs[A].properties.get("progress") or []
+    assert prog and prog[0].startswith("session 1:")
+
+
+def test_the_progress_note_keeps_the_first_calls_too():
+    """Memo on #913: the clips kept the end and dropped the start (the worktree, the branch)."""
+    from membrane import opencode as OC
+    parts = [{"type": "tool", "tool": "bash", "state": {"input": {"cmd": f"step {i} " + "z" * 150},
+                                                      "status": "completed", "output": "ok " * 60}}
+             for i in range(1, 21)]
+    note = OC.chunk_progress(parts, "now writing the tests")
+    assert "step 1 " in note and "step 20 " in note
+    assert "Its last words: now writing the tests" in note
+    assert len(note) < 3000 + 200
+
+
+def test_the_task_text_keeps_the_first_sessions_setup():
+    est = WA_seat_est()
+    est.docs[A].properties["progress"] = ["session 1:\nworktree /tmp/wt-x on branch b" + "y" * 3000] + \
+        [f"session {i}:\n" + "w" * 3000 for i in range(2, 6)]
+    text = GG.worker_text(est, A)
+    assert "worktree /tmp/wt-x on branch b" in text
+    assert "session 5:" in text
+
+
+def WA_seat_est():
+    from membrane.entities import EntityStore, QuantumEntity
+    import tempfile
+    est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
+    est.upsert(QuantumEntity(eid=A, cls="Task", properties={"title": "do a", "goal": GOAL}), embedder=None)
+    return est
+
+
+def test_loop_session_keeps_rows_only_when_asked():
+    from types import SimpleNamespace
+    from membrane import opencode as OC
+    deleted = []
+
+    class Store:
+        _lock = __import__("threading").Lock()
+        sessions = {"ses_t": {"id": "ses_t", "agent": "worker: x", "time": {"updated": 1}}}
+
+        def touch(self, sid):
+            pass
+    srv = SimpleNamespace(_loop_runner=SimpleNamespace(sessions=Store(),
+                                                       messages=SimpleNamespace(delete=deleted.append)))
+    assert OC.loop_session(srv, "worker: x", keep=True) == "ses_t"
+    assert deleted == []
+    assert OC.loop_session(srv, "worker: x") == "ses_t"
+    assert deleted == ["ses_t"]

@@ -1007,6 +1007,13 @@ class _LoopDrainer:
                     while isinstance(out.get("capped"), dict) and not isinstance(out.get("quota"), dict):
                         # #857: a chunk hit the worker ceiling -- a NEW session, no resume,
                         # the task as the field has it; never past one answer's old ceiling in all
+                        _note = str((out.get("capped") or {}).get("progress") or "").strip()
+                        _d = est.docs.get(ent)
+                        if _note and _d is not None:  # the field carries it -- written before a restart can cut in
+                            _d.properties = {**(_d.properties or {}), "progress":
+                                             list((_d.properties or {}).get("progress") or [])
+                                             + [f"session {_chunks}:\n{_note}"]}
+                            est.upsert(_d, embedder=None)
                         if _restarting():
                             return "restart"
                         if _chunks * _CA.WORKER_CEILING >= _CA.MAX_TOOL_CALLS_PER_ANSWER:
@@ -1014,14 +1021,10 @@ class _LoopDrainer:
                                   f"({_CA.MAX_TOOL_CALLS_PER_ANSWER} tool calls); stopping", file=sys.stderr)
                             break
                         _chunks += 1
-                        _note = str((out.get("capped") or {}).get("progress") or "").strip()
-                        _d = est.docs.get(ent)
-                        if _note and _d is not None:  # the field carries it, not the old transcript
-                            _d.properties = {**(_d.properties or {}), "progress":
-                                             list((_d.properties or {}).get("progress") or [])
-                                             + [f"session {_chunks - 1}:\n{_note}"]}
-                            est.upsert(_d, embedder=None)
-                        sid = srv.create_loop_session(agent, agent)
+                        try:                          # the same session, its earlier chunks' rows kept (Memo on #913)
+                            sid = srv.create_loop_session(agent, agent, keep=True)
+                        except TypeError:
+                            sid = srv.create_loop_session(agent, agent)
                         if _fp is not None:
                             _fp.loop_session(agent, ent, sid)
                         out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
