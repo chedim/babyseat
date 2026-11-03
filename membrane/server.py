@@ -1691,6 +1691,17 @@ class TurnRunner:
         refused, the HA seat's commands never ran)."""
         a = str((user_info or {}).get("agent") or "")
         if a:
+            # #915: a plain 'build'/'plan' post onto a planner:/worker:/watch: loop
+            # session must not demote it to a person chat (latest_chat would pick it
+            # and goal-ended would land there): the loop's own stamp holds.
+            if a in ("build", "plan"):
+                try:
+                    _own = str((((getattr(self, "sessions", None) or object()).sessions) or {})
+                               .get(sid, {}).get("agent") or "")
+                except Exception:
+                    _own = ""
+                if _own and _own not in ("build", "plan") and _lane_of(_own) in ("listener", "plan"):
+                    return _own
             return a
         try:
             _docs = getattr(getattr(self, "sessions", None), "sessions",
