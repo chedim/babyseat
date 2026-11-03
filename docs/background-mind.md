@@ -29,6 +29,15 @@ All cadenced organs use the idle local model for any model calls they
 make (`--idle-cortex-model`), so a wedged background seat can never burn
 cloud tokens.
 
+**A person's turn goes first.** One door (`cblite.TurnFirst`) keeps background
+work behind a person: the dreamer and capture read the field as background
+(#756), and every turn that isn't a person's (a worker's, the planner's, a
+watch loop's, the seat's own calls with no session) stages as background too
+(`lanes.staging_lane`, 2026-11-03). While a person's chat turn is staging
+(recall, banner, the injected context), the others park at the door before
+they start, and wake on the event, not a clock; the model call itself never
+holds the door. The gate's own timing line shows the wait as `lane`.
+
 ### The thinker's working memory
 
 `deque(maxlen=5)`, drop-oldest — **attention, not a backlog**. Feed hooks:
