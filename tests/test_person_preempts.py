@@ -49,11 +49,13 @@ class TestPersonPreempts(unittest.TestCase):
         a.join(10); b.join(10)
         return log, time.time() - t0
 
-    def test_a_person_cuts_a_running_goal_turn(self):
+    def test_a_person_is_glued_not_cutting_a_running_goal_turn(self):
+        # glue at the step boundary: the running turn is NOT cut; the message
+        # joins at its next round (real loop: test_glue_at_step_boundary) -- this
+        # fake turn never reads the queue, so the drain runs it after
         log, waited = self._two("goal still open (the board's pulse): x", "[HA user: Dmitrii]\nhey Argus")
-        self.assertEqual(log[1][0], "cut")
+        self.assertEqual(log[1][0], "done")
         self.assertEqual(log[2], ("start", "[HA user: Dmitrii]\nhey Argus"))
-        self.assertLess(log[1][2], 1.0)            # cut within a round, not after the 3 s turn
 
     def test_a_loop_message_still_waits(self):
         log, _ = self._two("[HA user: Dmitrii]\nfirst", "goal still open (the board's pulse): y")

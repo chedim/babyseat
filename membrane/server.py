@@ -1506,15 +1506,24 @@ class TurnRunner:
         self.hub.publish({"type": "message.part.updated", "part": dict(_ip),
                           "time": _now, "sessionID": sid})
 
-    def preempt(self, sid: str) -> bool:
+    def preempt(self, sid: str, glue: bool = False) -> bool:
         """A PERSON SPOKE (2026-10-10, the operator: "interrupt the chat loop
         whenever there is a message"): the running turn of this session is cut
         now -- the abort flag (between rounds) + its model socket (a round
         blocked in the model) -- and its finally drains the queue, so the
-        person's message runs next. False when nothing runs."""
+        person's message runs next. False when nothing runs.
+
+        GLUE AT THE STEP BOUNDARY (glue=True, a person's message): nothing is
+        cut -- no abort flag, no socket kill; the running tool call finishes
+        and the message, already queued by the door, joins the SAME turn at
+        its next round top (`_take_interjections`). Stop/pause/operator
+        cancel call without glue: unchanged. No running turn: False, and the
+        door takes its old path."""
         running = sid in (getattr(self, "_turn_stops", None) or {}) or sid in (getattr(self, "_busy", None) or {})
         if not running:
             return False
+        if glue:
+            return True
         self._aborting = getattr(self, "_aborting", None) or set()
         self._aborting.add(sid)
         self._preempted = getattr(self, "_preempted", None) or set()
@@ -1891,8 +1900,8 @@ class TurnRunner:
             # a PERSON's message does not wait behind a running turn: that
             # turn is cut and this one goes next (loops and goals still wait)
             if _from_person(text, user_parts):
-                if self.preempt(sid):
-                    print(f"[serve] {sid}: a person spoke -- the running turn is cut, theirs is next",
+                if self.preempt(sid, glue=True):
+                    print(f"[serve] {sid}: a person spoke -- glued into the running turn at its next round",
                           file=sys.stderr)
             depth = self._queued_depth(sid)
             if depth >= self.queue_depth_max:
