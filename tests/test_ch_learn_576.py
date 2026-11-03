@@ -351,3 +351,47 @@ def test_toy_writes_are_logged(world, monkeypatch):
     _turn(est, vm, (x, "a", 1))
     assert vm.learner.counts["seen"] >= 1
     assert "toy_write" in vm.learner.counts or vm.learner.counts["pass:not_toy"] >= 1
+
+
+def _edge_srv(vm):
+    import types
+    return types.SimpleNamespace(ch_purse=types.SimpleNamespace(awake=True, take=lambda: 0.0), ch_vm=vm)
+
+
+def test_awake_to_off_without_asleep_does_not_prune(world):
+    from membrane import ch_blurp as B
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))
+    c = _cands(vm)[0]
+    vm.learner._bal[c.eid] = -3 * L.WRITE_COST
+    B.exchange(_edge_srv(vm), {"awake": False, "mode": "off"})
+    assert c.eid in {t.eid for t in _cands(vm)}
+
+
+def test_asleep_edge_prunes_under_the_run_lock(world):
+    from membrane import ch_blurp as B
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))
+    c = _cands(vm)[0]
+    vm.learner._bal[c.eid] = -3 * L.WRITE_COST
+    held = []
+
+    class Spy:
+        depth = 0
+
+        def __enter__(self):
+            Spy.depth += 1
+
+        def __exit__(self, *a):
+            Spy.depth -= 1
+    real = vm.learner.prune
+
+    def spy():
+        held.append(Spy.depth)
+        return real()
+    vm._run = Spy()
+    vm.learner.prune = spy
+    B.exchange(_edge_srv(vm), {"awake": False, "asleep": True, "mode": "off"})
+    assert held == [1]

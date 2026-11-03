@@ -473,7 +473,10 @@ def exchange(srv, report: dict | None) -> dict:
     report = report or {}
     was = p.awake
     p.awake = bool(report.get("awake")) and str(report.get("mode") or "") in ("on", "watch")
-    pruned = vm.learner.prune() if (was and not p.awake) else []   # the awake->asleep edge: sleep prunes (below -1 x WRITE_COST)
+    pruned = []
+    if was and not p.awake and report.get("asleep"):    # the awake->asleep edge only: sleep prunes (below -1 x WRITE_COST)
+        with vm._run:                                  # not mid-drain
+            pruned = vm.learner.prune()
     stall = vm.learner.check_stall()
     if stall:
         _surface_stall(srv, stall)
