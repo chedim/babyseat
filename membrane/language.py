@@ -268,7 +268,7 @@ def _members(est, lemma: str) -> list:
 
 
 _MACHINERY = tuple(MEMBRANE_NS + k for k in ("node:", "result:", "msg:", "register:", "bannerrule:",
-                                                 "verb:", "adjective:", "gap:"))
+                                                 "verb:", "adjective:", "gap:", "assoc:"))
 
 
 def _by_name(est, name: str):
@@ -959,6 +959,18 @@ def _tie(tok, span) -> str | None:
     return None
 
 
+def _asks_or_denies(tok) -> bool:
+    """A question or a negation asserts nothing the field can check the word against (Memo on
+    #894: "is goal one merged?" made merged = open; "goal two is not landed" made landed = closed)."""
+    sent = tok.sent
+    if sent.text.rstrip().endswith("?") or sent[0].pos_ == "AUX":     # "is goal one merged", "did it land"
+        return True
+    for t in (tok, tok.head):
+        if any(c.dep_ == "neg" for c in t.children):
+            return True
+    return False
+
+
 def _state_values(est, eid: str) -> list:
     """(prop, value) of a thing's plain one-word states: the conditions it could mean."""
     p = ((est.docs or {}).get(eid) or QuantumEntity(eid="", cls="")).properties or {}
@@ -966,78 +978,112 @@ def _state_values(est, eid: str) -> list:
             and k.isidentifier() and v and v.replace("-", "").replace("_", "").isalpha()]
 
 
-def invent(srv, sid: str, text: str, word: str, embed=None) -> dict | None:
-    """A meaning for `word` from what the message ties it to -> {word, kind, meaning, score}, kept
-    at once and marked invented; None when nothing holds (the model is asked then). Candidates: the
-    tied things' own states (x.status == 'merged') and the read-only verbs that apply to them,
-    ranked by the word's vector, the top INVENT_CANDIDATES checked on the field."""
-    import numpy as np
-    from . import verbs as V
+INVENT_MIN_SEEN = 2         # the operator, 2026-11-03: messages that must agree before an invention is used
+ASSOC = MEMBRANE_NS + "assoc:"
+
+
+def _assoc_eid(word: str) -> str:
+    return ASSOC + re.sub(r"[^a-z0-9_-]+", "-", word.lower()).strip("-")
+
+
+def _holds(est, expr: str, eid: str):
+    """True / False, or None when it doesn't evaluate (never counted as a "no")."""
     from .ch import EntityView, evaluate
+    try:
+        return bool(evaluate(expr, {"x": EntityView(est, eid)}))
+    except Exception:
+        return None
+
+
+def observe(srv, sid: str, text: str, word: str) -> dict | None:
+    """The word's association edges for this message (the operator, 2026-11-03: "unique to the
+    convo associations"): the things the parse ties it to as a state, and which of their one-word
+    states held. Kept on membrane::assoc:<word> as counts ({n, held: {condition: messages}}) plus a
+    `said_of` edge to each thing; a message is counted once. None when the message ties it to
+    nothing it can be checked against (a question, a negation, an action, nothing named)."""
     est = srv.entity_store
-    emb = embed or getattr(getattr(srv, "efield", None), "emb", None)
-    if emb is None or " " in word.strip():
+    if " " in word.strip():
         return None
     doc = _doc(text)
     tok = next((t for t in doc if t.text == word or t.lower_ == word.lower()), None)
-    if tok is None:
+    if tok is None or _asks_or_denies(tok):
         return None
-    tied: dict = {"state": [], "object": []}
+    things: list = []
     for span, pos in _meaning_nodes(doc, _names(est)):
-        how = None if tok.i in range(span.start, span.end) else _tie(tok, span)
-        if how:
-            tied[how] += [e for e in _known_targets(srv, sid, est, span) if e not in tied[how]]
-    if not tied["state"] and not tied["object"]:
+        if tok.i not in range(span.start, span.end) and _tie(tok, span) == "state":
+            things += [e for e in _known_targets(srv, sid, est, span) if e not in things]
+    if not things:
         return None
-    cands = {}                                   # (kind, meaning) -> the words its vector is read from
-    for e in tied["state"]:                      # a state of the things it's said about
-        for k, v in _state_values(est, e):
-            cands[("adjective", f"x.{k} == {v!r}")] = v
-    if tied["object"]:                           # a read-only verb on the things it acts on
-        for d in list((est.docs or {}).values()):
-            if d.cls == V.CLASS_VERB:
-                name = str((d.properties or {}).get("name") or "")
-                ms = [V.implementation(est, (est.docs or {}).get(e), name)[0] for e in tied["object"]]
-                if name and all(m is not None and (m.properties or {}).get("read_only") for m in ms):
-                    cands[("verb", name)] = name
-    things = tied["state"]
-    if not cands:
-        return None
-    keys = list(cands)
-    try:
-        vecs = np.asarray(emb.embed([word] + [cands[k] for k in keys]), dtype=float)
-    except Exception:
-        return None
-    w, cv = vecs[0], vecs[1:]
-    sims = cv @ w / ((np.linalg.norm(cv, axis=1) * (np.linalg.norm(w) or 1.0)) + 1e-12)
-    ranked = sorted(zip(sims.tolist(), keys), key=lambda x: -x[0])[:INVENT_CANDIDATES]
-    def holds(expr, e):
+    held = None                                  # the conditions true of every thing it was said of
+    for e in things:
+        here = {f"x.{k} == {v!r}" for k, v in _state_values(est, e)}
+        held = here if held is None else held & here
+    eid = _assoc_eid(word)
+    d = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls="Association", properties={
+        "name": word.lower(), "n": 0, "held": {}, "silent_birth": True})
+    p = dict(d.properties or {})
+    key = f"{sid}:{' '.join(str(text).split())[:200]}"
+    if p.get("last") != key:                     # the same message counted once (before and after its turn)
+        p["n"] = int(p.get("n") or 0) + 1
+        h = dict(p.get("held") or {})
+        for c in held or ():
+            h[c] = int(h.get(c) or 0) + 1
+        p["held"], p["last"], p["ts"] = h, key, time.time()
+        d.properties = p
+        est.upsert(d, embedder=None)
         try:
-            return bool(evaluate(expr, {"x": EntityView(est, e)}))
+            from . import convgraph as CG
+            be, origin = CG._rel(srv)
+            for e in things:
+                CG._edge(be, origin, eid, "said_of", e)
         except Exception:
-            return False
-    for score, (kind, meaning) in ranked:
-        if kind == "adjective":
-            if not all(holds(meaning, e) for e in things):
-                continue
-            classes = {(est.docs.get(e).cls if est.docs.get(e) is not None else "") for e in things}
-            peers = [d.eid for d in list((est.docs or {}).values()) if d.cls in classes and d.eid not in things]
-            if not any(not holds(meaning, e) for e in peers):
-                continue                         # true of every such thing: it can't fail, so it says nothing
-            eid = define_adjective(est, word.lower(), meaning)
-        else:
-            eid = V.verb_eid(word.lower())
-            d = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls=V.CLASS_VERB, properties={
-                "name": V.lemma(word.lower()), "word": "w:" + V.lemma(word.lower()), "implemented_by": [],
-                "silent_birth": True})
-            d.properties = {**(d.properties or {}), "same_as": meaning}
-            est.upsert(d, embedder=None)
+            pass
+    return {"n": int(p["n"]), "held": dict(p["held"]), "things": things}
+
+
+def invent(srv, sid: str, text: str, word: str, embed=None) -> dict | None:
+    """A meaning for `word` the conversation's association edges confirm -> {word, kind, meaning,
+    score, n}, kept at once and marked invented; None otherwise (the model is asked then). The
+    candidates are the conditions that held every time the word was said of something, over at
+    least INVENT_MIN_SEEN messages, and that can fail (false for some other thing of the class).
+    The word's vector ranks them; the top INVENT_CANDIDATES are checked. No verb is invented (Memo
+    on #894: "please review goal one" made review = check, so a real command would only read)."""
+    import numpy as np
+    est = srv.entity_store
+    seen = observe(srv, sid, text, word)
+    if seen is None or seen["n"] < INVENT_MIN_SEEN:
+        return None
+    every = [c for c, k in seen["held"].items() if k >= seen["n"]]
+    if not every:
+        return None                              # a mood word: no state held every time ("great")
+    emb = embed or getattr(getattr(srv, "efield", None), "emb", None)
+    ranked = [(0.0, c) for c in every]
+    if emb is not None:
+        try:
+            vals = [c.split("==", 1)[1].strip().strip("'\"") for c in every]
+            vecs = np.asarray(emb.embed([word] + vals), dtype=float)
+            w, cv = vecs[0], vecs[1:]
+            sims = cv @ w / ((np.linalg.norm(cv, axis=1) * (np.linalg.norm(w) or 1.0)) + 1e-12)
+            ranked = sorted(zip(sims.tolist(), every), key=lambda x: -x[0])
+        except Exception:
+            pass
+    ranked = ranked[:INVENT_CANDIDATES]
+    things = seen["things"]
+    classes = {(est.docs.get(e).cls if est.docs.get(e) is not None else "") for e in things}
+    peers = [d.eid for d in list((est.docs or {}).values()) if d.cls in classes and d.eid not in things]
+    for score, meaning in ranked:
+        if not all(_holds(est, meaning, e) is True for e in things):
+            continue
+        if not any(_holds(est, meaning, e) is False for e in peers):
+            continue                             # true of every such thing: it can't fail, so it says nothing
+        eid = define_adjective(est, word.lower(), meaning)
         d = est.docs[eid]
         d.properties = {**(d.properties or {}), "invented": True, "invented_from": str(text)[:300],
                         "invented_score": round(float(score), 3), "invented_ts": time.time(),
-                        "candidates": [m for _, (_, m) in ranked]}
+                        "invented_seen": seen["n"], "candidates": [m for _, m in ranked]}
         est.upsert(d, embedder=None)
-        return {"word": word, "kind": kind, "meaning": meaning, "score": round(float(score), 3)}
+        return {"word": word, "kind": "adjective", "meaning": meaning, "score": round(float(score), 3),
+                "n": seen["n"]}
     return None
 
 
@@ -1067,15 +1113,27 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     if not gap_fill_on():
         return None
     est = srv.entity_store
+    later = []                                   # #891: asked before, nothing kept: the conversation may still tell
+    for w in dict.fromkeys(str(w).strip() for w in words):
+        g = (est.docs or {}).get(_gap_eid(w)) if w else None
+        if g is not None and not (g.properties or {}).get("kept"):
+            try:
+                inv = invent(srv, sid, text, w)
+            except Exception:
+                inv = None
+            if inv is not None:
+                _mark_asked(est, sid, w, inv["meaning"], True, invented=True)
+                later.append({"word": w, "answer": inv["meaning"], "kept": True, "meaning": inv["meaning"],
+                              "invented": True, "score": inv["score"]})
     wanted = [w for w in dict.fromkeys(str(w).strip() for w in words) if w and _gap_eid(w) not in (est.docs or {})]
     with _ASKING_LOCK:
         todo = [w for w in wanted if w.lower() not in _ASKING]
         _ASKING.update(w.lower() for w in todo)
     pending = [w for w in wanted if w not in todo]
     if not todo:
-        return {"words": [], "usage": {}, **({"pending": pending} if pending else {})}
+        return {"words": later, "usage": {}, **({"pending": pending} if pending else {})}
     try:
-        invented = []                            # #891: tensors first, the model only for the rest
+        invented = list(later)                   # #891: the conversation's associations first, the model for the rest
         for w in list(todo):
             try:
                 inv = invent(srv, sid, text, w)

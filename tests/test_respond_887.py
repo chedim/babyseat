@@ -92,7 +92,7 @@ class BeforeTheTurn(unittest.TestCase):
     def test_the_gaps_are_filled_then_membrane_answers_marked(self):
         srv, *_ = _world()
         ctx, posted, asked = self._ctx(srv, "is goal two shut?", reply="shut means closed")
-        self.assertEqual(len(asked), 0)              # #891: invented from goal two's own state, no model
+        self.assertEqual(len(asked), 1)              # a question invents nothing (Memo on #894): the model
         [(sid, text)] = posted
         self.assertTrue(text.startswith(MARK), text)
         self.assertIn("goal two is shut", text)
