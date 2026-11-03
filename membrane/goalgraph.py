@@ -655,12 +655,18 @@ def planner_claim(text: str) -> str | None:
     return hits[-1].strip()[:600] if hits else None
 
 
+STALL_S = 6 * 3600
+
+
 def _moving(d) -> bool:
     """A node that will still change by itself: a task open, owed or running, a wait open or
     armed, a card still open."""
     st = str((d.properties or {}).get("status") or OPEN)
     if d.cls == TASK:
-        return st in (OPEN, OWED, RUNNING)
+        if st == RUNNING:       # #837: stuck in running for hours = stalled, not moving
+            started = float((d.properties or {}).get("started_ts") or 0)
+            return not started or time.time() - started < STALL_S
+        return st in (OPEN, OWED)
     if d.cls == WAIT:
         return st in (OPEN, ARMED)
     return st not in CARD_ENDED
@@ -677,6 +683,11 @@ def send_back_of(srv, goal: str):
     """The goal's replan text when its last writer sent it back, else None."""
     p = ((srv.entity_store.docs or {}).get(goal) or QuantumEntity(eid="")).properties or {}
     return p.get("replan") if p.get("replan") and is_send_back(p.get("replan_by")) else None
+
+
+def _goal_chat(props) -> str:
+    from .chat_io import goal_chat
+    return goal_chat(props)
 
 
 def report(srv, goal: str, claim: str | None = None, sent_back: str | None = None) -> bool:
@@ -716,7 +727,7 @@ def report(srv, goal: str, claim: str | None = None, sent_back: str | None = Non
         from . import watch_agents as WA
         told = WA.escalate(srv, {"kind": "goal-ended", "entity": goal, "goal": goal,
                                  "title": (g.properties or {}).get("name") or goal, "ts": time.time()},
-                           goal, line)
+                           goal, line, chat=_goal_chat(g.properties))
     except Exception:
         return False
     if told:

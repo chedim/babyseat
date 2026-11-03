@@ -299,6 +299,29 @@ def _is_loop(r, sid: str) -> bool:
     return _loop(r, sid)
 
 
+_LOOP_PREFIXES = ("worker:", "planner:", "watch:")
+
+
+def conv_session(tag: str) -> str:
+    """#837: a goal's `convs` entry is a capture tag ('sid:<id>', 'sid:sid:<id>'); the
+    real session id, or '' for a 'head:' hash or a loop (worker/planner/watch) session."""
+    t = str(tag or "").strip()
+    while t.startswith("sid:"):
+        t = t[4:]
+    if not t or t.startswith("head:") or t.startswith(_LOOP_PREFIXES):
+        return ""
+    return t
+
+
+def goal_chat(props: dict) -> str:
+    """The goal's own person chat: the last of its `convs` that is a real session."""
+    for tag in reversed(list((props or {}).get("convs") or [])):
+        sid = conv_session(tag)
+        if sid:
+            return sid
+    return ""
+
+
 def _chats(srv) -> list:
     r = _runner(srv)
     if r is None or getattr(r, "sessions", None) is None:
