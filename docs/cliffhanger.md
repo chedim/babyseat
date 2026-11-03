@@ -129,9 +129,14 @@ membrane's **understanding** of the message, and the nodes that don't are its **
 news, and what the model will be asked to fill). `language.understand` scores it; the shadow keeps
 it as `shadow.understanding` (`nodes`, `mapped`, `share`, `surprise`), and `membrane shadow`
 prints the mean share and the most frequent surprise words. No sentence types: a reply, a report
-and a question are scored the same way. Next on the same issue: membrane asks the model about each
-surprise node only and keeps the answer as a definition, then generates the response from the
-filled message graph.
+and a question are scored the same way. **The model fills the surprise** (#887 B): after the turn, membrane
+itself asks the model (`GAP_MODEL`, Haiku: one small call per message, no chat, no history) what
+the surprise words mean, in the forms the field can keep (a verb it knows, an adjective, a
+property and a value, another name of a thing). What fits is taught at once (`language.teach`);
+every word asked is marked (`membrane::gap:<word>`) and never asked again, kept or not. Only the
+operator's chats teach (a guest's don't, #882); `shadow.filled` keeps what came back and the
+tokens; `MEMBRANE_GAP_FILL=0` turns it off. Next: the response generated from the filled
+message graph.
 
 **Stage 3: the model fills the gaps** (2026-11-02). A chat message that compiles except for
 words the field doesn't know is told to the model in the turn already running, with each word

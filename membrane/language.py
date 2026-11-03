@@ -267,7 +267,7 @@ def _members(est, lemma: str) -> list:
 
 
 _MACHINERY = tuple(MEMBRANE_NS + k for k in ("node:", "result:", "msg:", "register:", "bannerrule:",
-                                                 "verb:", "adjective:"))
+                                                 "verb:", "adjective:", "gap:"))
 
 
 def _by_name(est, name: str):
@@ -716,6 +716,92 @@ def understand(srv, sid: str, text: str) -> dict:
     n = len(nodes)
     return {"nodes": n, "mapped": n - len(surprise), "share": round((n - len(surprise)) / n, 3) if n else None,
             "surprise": surprise}
+
+
+# ---- filling the gaps (#887 B): membrane asks the model about the surprise words only ---------
+# One small call per message (not the chat turn), on GAP_MODEL; each answer the field can keep is
+# taught at once through the "X means Y" path, and every word asked is marked, never asked again.
+GAP_MODEL = "haiku"          # the operator, 2026-11-03
+GAP = MEMBRANE_NS + "gap:"
+_NONE = re.compile(r"^\s*[\"']?([\w' -]+?)[\"']?\s*:\s*none\b", re.I)
+
+
+def gap_fill_on() -> bool:
+    """On by default; MEMBRANE_GAP_FILL=0 turns it off."""
+    import os
+    return os.environ.get("MEMBRANE_GAP_FILL", "1").strip().lower() not in ("0", "off", "false", "no")
+
+
+def _gap_eid(word: str) -> str:
+    return GAP + re.sub(r"[^a-z0-9_-]+", "-", word.lower()).strip("-")
+
+
+def gap_prompt(est, text: str, words: list) -> str:
+    from . import verbs as V
+    docs = list((est.docs or {}).values())
+    verbs = sorted({str((d.properties or {}).get("name") or "") for d in docs if d.cls == V.CLASS_VERB} - {""})
+    adjs = sorted(n for n in _adjectives(est) if n)
+    return (f"A person wrote to an AI seat: {str(text)[:1500]!r}\n"
+            f"The seat could not understand these words: {', '.join(words)}.\n"
+            "For each word, answer on its own line in one of these forms, or \"<word>: none\" when none fits:\n"
+            f"  <word> means <a verb it knows>: {', '.join(verbs)}\n"
+            f"  <word> means <an adjective it knows>: {', '.join(adjs)}\n"
+            "  <word> means <property> <value>  (a condition on a thing, e.g. \"landed means status merged\")\n"
+            "  <word> means <the exact name of a thing the seat knows>\n"
+            "Answer only those lines.")
+
+
+def _ask_model(prompt: str):
+    """(the reply's text, its usage): one call on GAP_MODEL, no chat, no history."""
+    from . import claude_agent as CA
+    text, usage = [], {}
+    for kind, val in CA.iter_reply([{"role": "user", "content": prompt}], GAP_MODEL, stream=False):
+        if kind == "text":
+            text.append(str(val))
+        elif kind == "usage" and isinstance(val, dict):
+            usage = val
+    return "".join(text), usage
+
+
+def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
+    """Ask the model what this message's surprise words mean, keep what the field can, mark them
+    asked -> {words: [{word, answer, kept, meaning}], usage} ({error} when the call failed: then
+    nothing is marked); None when it's switched off."""
+    if not gap_fill_on():
+        return None
+    est = srv.entity_store
+    todo = [w for w in dict.fromkeys(str(w).strip() for w in words) if w and _gap_eid(w) not in (est.docs or {})]
+    if not todo:
+        return {"words": [], "usage": {}}
+    try:
+        reply, usage = (ask or _ask_model)(gap_prompt(est, text, todo))
+    except Exception as e:
+        return {"words": [], "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
+    answers: dict = {}
+    for line in str(reply or "").splitlines():
+        m = _NONE.match(line)
+        if m:
+            answers.setdefault(m.group(1).strip().lower(), None)
+            continue
+        m = _DEFINE.match(line.strip(" -*"))
+        if m:
+            answers.setdefault(m.group(1).strip().lower(), m.group(2).strip())
+    out = []
+    for w in todo:
+        meaning = answers.get(w.lower())
+        kept, shown = False, None
+        if meaning:
+            try:
+                step = _define_step(srv, est, w.lower(), meaning, f"{w} means {meaning}")
+                if step["mapped"]:
+                    shown, kept = teach(est, step), True
+            except Exception:
+                kept = False
+        est.upsert(QuantumEntity(eid=_gap_eid(w), cls="Gap", properties={
+            "name": w.lower(), "answer": meaning, "kept": kept, "asked_ts": time.time(), "sid": sid,
+            "silent_birth": True}), embedder=None)
+        out.append({"word": w, "answer": meaning, "kept": kept, "meaning": shown})
+    return {"words": out, "usage": usage}
 
 
 def shadow_report(rows: list[dict]) -> dict:
