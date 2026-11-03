@@ -62,6 +62,7 @@ def _seat_credential(request, monkeypatch):
         h = dict(headers or {})
         low = {k.lower() for k in h}
         if (os.environ.get("MEMBRANE_JWT", "0") in ("0", "", "false", "off")
+                and not os.environ.get("MEMBRANE_JWT_SECRET") and not os.environ.get("MEMBRANE_JWT_SECRET_FILE")
                 and "authorization" not in low and "cookie" not in low
                 and "x-forwarded-for" not in low
                 and str(getattr(self, "host", "")) in ("127.0.0.1", "localhost", "::1")):
