@@ -32,7 +32,7 @@ def seat(monkeypatch):
     monkeypatch.setattr(LLM, "request", lambda srv, prompt, about="", caller="", now=None, extra=None,
                         readonly=None: calls.append({"prompt": prompt, "about": about, "caller": caller,
                                                      "extra": extra or {}}) or {"rc": 0, "text": "queued"})
-    monkeypatch.setattr(WA, "escalate", lambda srv, ev, ent, line="": told.append((ent, line)) or True)
+    monkeypatch.setattr(WA, "escalate", lambda srv, ev, ent, line="", chat="": told.append((ent, line)) or True)
     est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
     srv = types.SimpleNamespace(entity_store=est, events_pool=WA.WatchEvents(), membrane=None)
     est._srv = srv
