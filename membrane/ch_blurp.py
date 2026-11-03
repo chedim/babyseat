@@ -475,12 +475,37 @@ def exchange(srv, report: dict | None) -> dict:
     p.awake = bool(report.get("awake")) and str(report.get("mode") or "") in ("on", "watch")
     pruned = []            # sleep keeps the learner's state: no prune on the awake->asleep edge
     stall = vm.learner.check_stall()
+    if stall:
+        _surface_stall(srv, stall)
     if p.awake:
         try:
             _show_body(srv, vm)
         except Exception:
             pass                                       # the body is display only: never the exchange's failure
     return {"energy_delta": p.take(), "pruned": len(pruned), "awake": p.awake, **({"stall": stall} if stall else {})}
+
+
+def _surface_stall(srv, line: str) -> None:
+    """#897: the learner's stall line is READ: one open Decision card per cause (the gate:
+    asleep / toys-only / no toy writes), merge-on-name so a repeat never doubles it."""
+    import re
+    est = getattr(srv, "entity_store", None)
+    m = re.search(r"stalled [\d.]+h: ([a-z\- ]+?)(?: \(|;|$)", line or "")
+    if est is None or not m:
+        return
+    gate = m.group(1).strip()
+    name = f"Blurp is not learning - {gate} - what should change"
+    try:
+        r = est.add("Decision", name, summary=line)
+        ent = est.docs.get((r or {}).get("eid") or "") if isinstance(r, dict) else None
+        if ent is None:
+            ent = next((d for d in est.docs.values() if (d.properties or {}).get("name") == name), None)
+        if ent is not None:
+            ent.properties.setdefault("status", "open")
+            ent.properties.setdefault("var", {"type": "option", "options": ["leave it", "wake Blurp", "enable commands"]})
+            ent.properties.setdefault("pick", "leave it")
+    except Exception:
+        pass                                           # display only: never the exchange's failure
 
 
 SEAT_FID = "seat:self"      # where the body rests before its first firing (the map's seat)

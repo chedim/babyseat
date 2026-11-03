@@ -244,3 +244,14 @@ def test_the_card_carries_the_learners_counts(seat):
     assert card["level"] == 0
     assert card["learner"]["seen"] >= 2 and card["learner"]["defined"] >= 1
     assert card["learner"]["candidates"] >= 1
+
+
+def test_stall_becomes_one_decision_card_naming_the_gate(seat):
+    """#897: the stall line is read by someone -- a Decision card per cause, once."""
+    est = seat.entity_store
+    seat.ch_vm.learner.check_stall = lambda: "learning stalled 3h: asleep (the purse cannot spend: Blurp is not awake); guess:asleep+4"
+    B.exchange(seat, {"awake": False, "mode": "on"})
+    B.exchange(seat, {"awake": False, "mode": "on"})
+    cards = [d for d in est.docs.values() if d.cls == "Decision" and "not learning" in (d.properties.get("name") or "")]
+    assert len(cards) == 1
+    assert "asleep" in cards[0].properties["name"] and cards[0].properties.get("status") == "open"
