@@ -46,8 +46,11 @@ off-box write gets `401` with `WWW-Authenticate: Bearer`.
 the [zoo](home-assistant.md#the-zoo-several-seats) carries its own). A seat Home Assistant runs
   itself listens on loopback and needs none.
   `OPENCODE_SERVER_PASSWORD=<seat token> opencode attach http://seat:4096`
-- **The web UI from another machine (:4096, standalone):** the page reads freely,
-  then asks for the seat token once. `POST /ui/login` turns it into the same
+- **The web UI from another machine (:4096, standalone):** the page shell loads,
+  then asks for the seat token once; GET reads need the token too, not only
+  writes (only the shell, `/ui/www/`, `/ui/conf` and health stay open). The
+  cookie is minted on loopback only, and the seat's internal readers send
+  loopback headers. `POST /ui/login` turns it into the same
   HttpOnly cookie JWT mode uses (`membrane_jwt`, SameSite=Strict, a 400-day life,
   Secure over https). The page then asks your name as usual.
 

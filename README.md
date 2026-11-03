@@ -128,8 +128,8 @@ You get membrane home:
   and it will ask.
 
 Other devices on your network open `http://<this machine>:4096/`. They can
-read freely, and they ask once for the seat token before writing
-(`membrane token seat` prints it). Callers from outside your network are
+ask once for the seat token (`membrane token seat` prints it): reads need it
+too, not only writes. The page's cookie is minted only on this machine. Callers from outside your network are
 refused: [JWT mode](docs/auth.md) is on by default (turn it off with `MEMBRANE_JWT=0`);
 this machine itself needs no token. The microphone needs
 `localhost` (a secure origin), and the first voice use downloads about 65 MB
