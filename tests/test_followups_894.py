@@ -10,6 +10,7 @@ os.environ.setdefault("MEMBRANE_RUN", "0")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from test_living_language import _add  # noqa: E402
 from test_invent_891 import HAVE, SID, Model, _learned, _say, _seat  # noqa: E402
 from membrane import language as LL  # noqa: E402
 
@@ -64,6 +65,46 @@ class Followups(unittest.TestCase):
         LL.fill_gaps(srv, SID, msg, ["landed"], ask=Model(""))
         self.assertNotIn(LL._adj_eid("landed"), est.docs)
         self.assertFalse(est.docs[LL._gap_eid("landed")].properties["kept"])
+
+    def _count(self, text):
+        srv, f, est, goal, *_ = _seat()
+        _add(est, "blocks panel", parents=[goal.eid], status="closed")
+        p = LL.observe(srv, SID, text, "landed")
+        return int((p or {}).get("seen") or 0)
+
+    def test_a_multi_word_name_counts_when_it_is_the_subject(self):
+        for text in ("blocks panel", "blocks panel landed", "the blocks panel landed",
+                     "blocks panel is landed", "goal two landed"):
+            if text == "blocks panel":
+                continue                          # no word to observe: covered below
+            with self.subTest(text=text):
+                self.assertEqual(self._count(text), 1)
+
+    def test_a_lead_word_before_a_name_is_not_a_statement(self):
+        for text in ("hope goal two landed", "wish goal two landed", "hope blocks panel landed",
+                     "hope the blocks panel landed", "hope panel landed", "blocks panel almost landed",
+                     "if blocks panel landed"):
+            with self.subTest(text=text):
+                self.assertEqual(self._count(text), 0)
+
+    def _unlearns(self, text):
+        srv, f, est, *_ = _seat()
+        _say(srv, "goal two landed", "landed", "landed means status closed")
+        _say(srv, "goal three landed", "landed")
+        self.assertTrue(_learned(est, "landed"))
+        return LL.observe_learned(srv, SID, text) == ["landed"]
+
+    def test_loose_unlearning_ignores_hedges_and_vague_subjects(self):
+        for text in ("hope goal one landed", "goal one almost landed", "goal one barely landed",
+                     "goal one probably landed", "goal one or goal two landed", "some goals landed"):
+            with self.subTest(text=text):
+                self.assertFalse(self._unlearns(text))
+
+    def test_loose_unlearning_still_takes_plain_contradictions(self):
+        for text in ("goal one landed today", "yes, goal one landed", "goal one just landed",
+                     "goal two and goal one landed", "goal one landed in prod"):
+            with self.subTest(text=text):
+                self.assertTrue(self._unlearns(text))
 
 
 if __name__ == "__main__":

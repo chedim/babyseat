@@ -1044,9 +1044,17 @@ def _states(tok, inside=()) -> bool:
             if c.dep_ == "conj" and c.pos_ in ("VERB", "AUX"):
                 return False                     # "landed, or did it": a second clause
     for subj in (c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")):
-        if any(c.dep_ == "compound" and c.pos_ == "PROPN" and c.text.islower() for c in subj.children):
+        if _glued_lead(subj, inside):
             return False                         # "hope goal two landed": a lead word the parse glued on
     return clause.dep_ in ("ROOT", "conj")
+
+
+def _glued_lead(subj, inside=()) -> bool:
+    """A lowercase proper-noun compound in the subject's subtree that is no part of the gap's own
+    words: the lead word ("hope", "wish") the small parser glued onto a name. The compound of a
+    multi-word name ("blocks panel") is a name's part, so a name's own words are passed in `inside`."""
+    return any(c.dep_ == "compound" and c.pos_ == "PROPN" and c.text.islower() and c not in inside
+               for c in subj.subtree)
 
 
 def observe(srv, sid: str, text: str, word: str) -> dict | None:
@@ -1085,7 +1093,7 @@ def observe(srv, sid: str, text: str, word: str) -> dict | None:
         if any(t.i in range(span.start, span.end) for t in (inside or (tok,))):
             continue
         how = _tie(tok, span)
-        if how == "state" and _states(tok, inside):
+        if how == "state" and _states(tok, tuple(inside) + tuple(span)):
             said += [e for e in _known_targets(srv, sid, est, span) if e not in said]
         elif how == "object" and not _asks_or_denies(tok):
             acted += [e for e in _known_targets(srv, sid, est, span) if e not in acted]
@@ -1164,7 +1172,21 @@ def _says_of(tok) -> bool:
         for c in t.children:
             if c.dep_ == "mark" or (c.dep_ == "aux" and c.tag_ == "MD"):
                 return False
+            if c.dep_ == "advmod" and c.lower_ in _HEDGES:
+                return False                     # "almost", "barely", "probably": not a plain fact
+    for subj in (c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")):
+        if _glued_lead(subj):
+            return False                         # "hope goal one landed"
+        if any(t.dep_ == "cc" and t.lower_ == "or" for t in subj.subtree):
+            return False                         # "goal one or goal two landed": which one?
+        if any(t.dep_ == "det" and t.lower_ in _VAGUE for t in subj.subtree):
+            return False                         # "some goals landed": no particular thing
     return clause.dep_ in ("ROOT", "conj")
+
+
+_HEDGES = {"almost", "nearly", "barely", "hardly", "probably", "possibly", "maybe", "perhaps", "likely",
+           "supposedly", "apparently", "seemingly", "mostly", "partly", "sort", "kinda"}
+_VAGUE = {"some", "any", "several", "many", "few", "most", "certain", "various", "other"}
 
 
 def _subjects(tok, est, srv, sid) -> list:
