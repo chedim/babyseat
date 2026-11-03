@@ -115,7 +115,7 @@ class MemosReview(unittest.TestCase):
         LL._ask_model = lambda prompt: gate.wait(5) and ("", {})
         try:
             t = time.monotonic()
-            got = LL.fill_gaps_before(srv, SID, "frobnicate goal one", ["frobnicate"], wait_s=0.2)
+            got = LL.fill_gaps_before(srv, SID, "zorblax goal one", ["zorblax"], wait_s=0.2)
             self.assertLess(time.monotonic() - t, 2.0)
             self.assertTrue(got["late"])
         finally:
@@ -147,6 +147,33 @@ class MemosReview(unittest.TestCase):
         t = time.monotonic()
         LL.understand(srv, SID, " ".join(["word"] * 1500))
         self.assertLess(time.monotonic() - t, 5.0)
+
+    def test_a_word_already_being_asked_is_not_asked_again(self):
+        import threading
+        srv, *_ = _world()
+        gate, calls = threading.Event(), []
+        old = LL._ask_model
+        LL._ask_model = lambda prompt: calls.append(prompt) or gate.wait(5) and ("", {})
+        try:
+            for _ in range(3):
+                LL.fill_gaps_before(srv, SID, "quuxify goal one", ["quuxify"], wait_s=0.2)
+            self.assertEqual(len(calls), 1)
+            got = LL.fill_gaps(srv, SID, "quuxify it", ["quuxify"])
+            self.assertEqual(got["pending"], ["quuxify"])
+        finally:
+            gate.set()
+            LL._ask_model = old
+
+    def test_the_switch_stops_stage_3s_posts_too(self):
+        from test_stage3_membrane_answers import _read_only_check
+        srv, f, est, goal, *_ = _world()
+        _read_only_check(srv, f, est, goal)
+        os.environ["MEMBRANE_ANSWER"] = "0"
+        try:
+            ctx, posted, asked = BeforeTheTurn()._ctx(srv, "check goal one")
+        finally:
+            del os.environ["MEMBRANE_ANSWER"]
+        self.assertEqual(posted, [])
 
     def test_the_switch_stops_the_posts(self):
         srv, *_ = _world()

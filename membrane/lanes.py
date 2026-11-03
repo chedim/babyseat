@@ -4264,6 +4264,7 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
                 elif _ran:
                     pass                          # #887: membrane's answer above already ran it
                 elif steps and all(s["mapped"] for s in steps) and not any(s.get("writes") for s in steps) \
+                        and _LL.answer_on() \
                         and getattr(getattr(srv, "_loop_runner", None), "post_line", None) is not None:
                     # stage 3 (#802): a read-only program membrane runs itself; its answer is posted,
                     # marked, before the model's turn, and the model is told so (it still answers)

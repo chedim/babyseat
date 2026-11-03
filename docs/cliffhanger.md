@@ -143,7 +143,10 @@ two isn't open (status closed)"), a thing's state, a group's count by state, a r
 program's result, and what it still doesn't know. A run of words that is a thing's whole name
 ("goal one") is one node; a Concept (a phrase kept for a pronoun) is not a meaning. Posted
 marked **🧩 membrane (no model):** whenever it has anything; the model still answers and is told
-what membrane said.
+what membrane said (that a program ran only when one did). The gap call is waited for at most
+`GAP_WAIT_S` (30 s): after that the turn goes on and a late answer is still kept, and a word
+already being asked is never asked again at the same time. `MEMBRANE_ANSWER=0` turns every 🧩
+post off, stage 3's too.
 
 **Stage 3: the model fills the gaps** (2026-11-02). A chat message that compiles except for
 words the field doesn't know is told to the model in the turn already running, with each word

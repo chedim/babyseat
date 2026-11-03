@@ -903,7 +903,9 @@ def _ask_model(prompt: str):
     return "".join(text), usage
 
 
-GAP_WAIT_S = 10.0       # #887 C: how long a person's turn waits for the gap call (flagged for approval)
+GAP_WAIT_S = 30.0       # #887 C: how long a person's turn waits for the gap call (the operator, 2026-11-03: 30 s)
+_ASKING: set = set()     # the words a gap call is out for now: never asked twice at once (Memo on #892)
+_ASKING_LOCK = threading.Lock()
 
 
 def fill_gaps_before(srv, sid: str, text: str, words: list, wait_s: float | None = None) -> dict | None:
@@ -927,13 +929,25 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     if not gap_fill_on():
         return None
     est = srv.entity_store
-    todo = [w for w in dict.fromkeys(str(w).strip() for w in words) if w and _gap_eid(w) not in (est.docs or {})]
+    wanted = [w for w in dict.fromkeys(str(w).strip() for w in words) if w and _gap_eid(w) not in (est.docs or {})]
+    with _ASKING_LOCK:
+        todo = [w for w in wanted if w.lower() not in _ASKING]
+        _ASKING.update(w.lower() for w in todo)
+    pending = [w for w in wanted if w not in todo]
     if not todo:
-        return {"words": [], "usage": {}}
+        return {"words": [], "usage": {}, **({"pending": pending} if pending else {})}
     try:
-        reply, usage = (ask or _ask_model)(gap_prompt(est, text, todo))
-    except Exception as e:
-        return {"words": [], "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
+        try:
+            reply, usage = (ask or _ask_model)(gap_prompt(est, text, todo))
+        except Exception as e:
+            return {"words": [], "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
+        return _keep_answers(srv, sid, est, todo, reply, usage, pending)
+    finally:
+        with _ASKING_LOCK:
+            _ASKING.difference_update(w.lower() for w in todo)
+
+
+def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list) -> dict:
     answers: dict = {}
     for line in str(reply or "").splitlines():
         m = _NONE.match(line)
@@ -958,7 +972,7 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
             "name": w.lower(), "answer": meaning, "kept": kept, "asked_ts": time.time(), "sid": sid,
             "silent_birth": True}), embedder=None)
         out.append({"word": w, "answer": meaning, "kept": kept, "meaning": shown})
-    return {"words": out, "usage": usage}
+    return {"words": out, "usage": usage, **({"pending": pending} if pending else {})}
 
 
 def shadow_report(rows: list[dict]) -> dict:
