@@ -126,11 +126,29 @@ class BothSignals(unittest.TestCase):
                      ("goal two almost landed", "goal three almost landed"),
                      ("no, goal two landed", "no, goal three landed"),
                      ("goal two probably landed", "goal three probably landed"),
-                     ("goal two has barely landed", "goal three has hardly landed")]:
+                     ("goal two has barely landed", "goal three has hardly landed"),
+                     ("hope goal two landed", "hope goal three landed"),
+                     ("goal two landed, or did it", "goal three landed, or did it"),
+                     ("goal two and not goal three landed", "goal three and not goal two landed")]:
             srv, f, est, *_ = _seat()
             _say(srv, a, "landed", "landed means status closed")
             _say(srv, b, "landed")
             self.assertFalse(_learned(est, "landed"), (a, b))
+
+    def test_a_multi_word_gap_is_confirmed(self):
+        """Memo on #894: observe returned None for "big thing", so its proposal was never confirmed."""
+        srv, f, est, *_ = _seat()
+        _say(srv, "goal two is a big thing", "big thing", "big thing means status closed")
+        _say(srv, "goal three is a big thing", "big thing")
+        self.assertTrue(_learned(est, "big thing"))
+
+    def test_a_correction_is_counted(self):
+        srv, f, est, *_ = _seat()
+        _say(srv, "goal two landed", "landed", "landed means status closed")
+        _say(srv, "goal three landed", "landed")
+        LL.teach(est, LL._define_step(srv, est, "landed", "status open", "landed means status open"))
+        self.assertTrue(est.docs[LL._adj_eid("landed")].properties.get("corrected"))
+        self.assertFalse(_learned(est, "landed"))
 
     def test_a_learned_word_never_picks_a_writes_targets(self):
         """Memo: "close the failed goals" would close every open goal."""

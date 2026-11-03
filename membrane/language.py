@@ -974,10 +974,7 @@ def _asks_or_denies(tok) -> bool:
     sent = tok.sent
     if sent.text.rstrip().endswith("?") or sent[0].pos_ == "AUX":     # "is goal one merged", "did it land"
         return True
-    for t in (tok, tok.head):
-        if any(c.dep_ == "neg" for c in t.children):
-            return True
-    return False
+    return any(t.dep_ == "neg" for t in sent)      # "goal two and not goal three landed": any negation in the sentence
 
 
 def _state_values(est, eid: str) -> list:
@@ -1008,7 +1005,7 @@ def _holds(est, expr: str, eid: str):
 _PLAIN = {"nsubj", "nsubjpass", "aux", "auxpass", "punct", "det", "cc", "conj", "acomp", "attr", "expl"}
 
 
-def _states(tok) -> bool:
+def _states(tok, inside=()) -> bool:
     """Does the word sit in a plain statement the field can check? An allowlist (Memo on #894: each
     round found more exceptions): the predicate's own parts may only be its subject, tense
     auxiliaries (not modals: "should be"), punctuation, and its complement -- no adverb ("almost",
@@ -1019,8 +1016,17 @@ def _states(tok) -> bool:
     clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
     for t in {tok, clause}:
         for c in t.children:
+            if c in inside:                      # the words of a multi-word gap itself ("big thing")
+                continue
             if c.dep_ not in _PLAIN or (c.dep_ == "aux" and c.tag_ == "MD"):
                 return False
+            if c.dep_ == "det" and c.lower_ in ("no", "neither", "never", "any"):
+                return False                     # "is no mess"
+            if c.dep_ == "conj" and c.pos_ in ("VERB", "AUX"):
+                return False                     # "landed, or did it": a second clause
+    for subj in (c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")):
+        if any(c.dep_ == "compound" and c.pos_ == "PROPN" and c.text.islower() for c in subj.children):
+            return False                         # "hope goal two landed": a lead word the parse glued on
     return clause.dep_ in ("ROOT", "conj")
 
 
@@ -1031,10 +1037,20 @@ def observe(srv, sid: str, text: str, word: str) -> dict | None:
     (`held`: condition -> those things), and the distinct things it acts on as a verb (`acted_on`).
     Kept on membrane::assoc:<chat>:<word>; a message is counted once. None: the word isn't in it."""
     est = srv.entity_store
-    if " " in word.strip():
-        return None
     doc = _doc(text)
-    tok = next((t for t in doc if t.text == word or t.lower_ == word.lower()), None)
+    parts = word.lower().split()
+    if not parts:
+        return None
+    inside: tuple = ()
+    if len(parts) == 1:
+        tok = next((t for t in doc if t.text == word or t.lower_ == word.lower()), None)
+    else:                                        # a phrase ("big thing"): its last word stands for it
+        tok = None
+        for i in range(len(doc) - len(parts) + 1):
+            if [t.lower_ for t in doc[i:i + len(parts)]] == parts:
+                inside = tuple(doc[i:i + len(parts)])
+                tok = inside[-1]
+                break
     if tok is None:
         return None
     eid = _assoc_eid(sid, word)
@@ -1047,10 +1063,10 @@ def observe(srv, sid: str, text: str, word: str) -> dict | None:
         return p
     said, acted = [], []
     for span, pos in _meaning_nodes(doc, _names(est)):
-        if tok.i in range(span.start, span.end):
+        if any(t.i in range(span.start, span.end) for t in (inside or (tok,))):
             continue
         how = _tie(tok, span)
-        if how == "state" and _states(tok):
+        if how == "state" and _states(tok, inside):
             said += [e for e in _known_targets(srv, sid, est, span) if e not in said]
         elif how == "object" and not _asks_or_denies(tok):
             acted += [e for e in _known_targets(srv, sid, est, span) if e not in acted]
