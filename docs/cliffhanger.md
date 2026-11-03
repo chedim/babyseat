@@ -128,7 +128,13 @@ object (`<word> means <the name of a thing it knows>`, the word as the lookup re
 means <meaning>')`), runs the message, or asks the person; taught once, the same message
 compiles next time. Gaps no definition fills (no object, a verb with no meaning on that thing,
 missing arguments) aren't told. Membrane still runs nothing on its own; the model decides.
-Not built yet: membrane running compiled actions itself, and narrow background turns that
+**Membrane answers a read-only message itself** (2026-11-02). A chat message that compiles fully
+to calls of read-only methods (`read_only` on the method; every call's `writes` is false) is run
+by membrane before the model's turn (`language.run`), and its result is posted in the chat
+marked **🧩 membrane (no model):** (`speech.say("membrane-ran")`), so the operator can tell it
+from the model's answer and judge it. The model still answers: it is told membrane already ran
+the message, not to run it again, and to add what it missed or correct it. A message that writes
+anything, or has a gap, is never run by membrane. Not built yet: narrow background turns that
 only propose definitions.
 
 **Membrane words the result itself** (`membrane/generate.py`): a run ends in a sentence built
