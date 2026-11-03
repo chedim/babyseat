@@ -748,7 +748,8 @@ def process(srv, root: str, ex: str, timeout_s=None) -> dict | None:
         doc.properties["last_run_ts"], doc.properties["executor"] = time.time(), ex   # collect()'s clock
     est.upsert(doc, embedder=None)
     res = f"{MEMBRANE_NS}result:{root.rsplit(':', 1)[-1]}:{n}"
-    keep = {k: run.get(k) for k in ("rc", "outcome", "head", "tail", "ms", "error") if run.get(k) is not None}
+    keep = {k: run.get(k) for k in ("rc", "outcome", "head", "tail", "ms", "error", "output", "output_len")
+            if run.get(k) is not None}               # the full output lives in the field (brief results)
     est.upsert(QuantumEntity(eid=res, cls=CLASS_COMPONENT, properties={
         "name": f"run {n} of {doc.properties.get('name') or root}"[:80], "root": root, "executor": ex,
         "text": code, "ts": time.time(), "silent_birth": True, **keep}), embedder=None)
