@@ -148,6 +148,34 @@ what membrane said (that a program ran only when one did). The gap call is waite
 already being asked is never asked again at the same time. `MEMBRANE_ANSWER=0` turns every 🧩
 post off, stage 3's too.
 
+**Novelty: a new meaning needs two signals** (#891, the operator 2026-11-03 after Memo's
+reviews). What's true of the things a word is said of is not what the word means: people talk
+about the goals still in play, so a rare state is the likeliest coincidence ("failed", "stuck",
+"a mess" all said of open goals). So **the model names the meaning, asked blind, and the chat's
+evidence must not rule it out**. Each chat keeps its surprise words' **association edges**
+(`language.observe`, on `membrane::assoc:<chat>:<word>`): the distinct things a plain statement
+says the word of (`said_of`), which of their one-word states held, and the things it acts on
+(`acts_on`). A plain statement is an allowlist (`_states`): the predicate's own parts may only be
+its subject, tense auxiliaries, its complement and punctuation, and its clause stands alone. A
+question, a negation, a modal, an adverb ("almost", "probably", "when"), an interjection
+("no, …"), "if" or "whether", or a clause under another verb counts nothing. The gap call is
+asked **blind**: it isn't shown the field (shown candidates, Haiku picked "failed = open" 1 time
+in 5; blind, never). Its answer ("landed means closed", or "landed: closed") is only a **proposal** on the word's gap mark; a reply that says nothing about a word leaves it unasked, to be asked again, and a phrase ("big thing") stays a proposal until something can read it, taught
+(`confirm_proposed`) once the chat's evidence (`_confirmed`) holds: true of **k ≥ 2 distinct
+things**, over at least `INVENT_MIN_SEEN` (2) messages, and able to fail (false for some other
+thing of their kind). There's no chance test: *p*ᵏ measured how rare a state is on the seat, not
+what the word means, and it blocked *landed* = closed on a seat where most goals are finished.
+The taught adjective is marked `learned`. A learned word **never picks what a write acts on**
+("close the landed goals" doesn't compile; name the things). Every learned word in a message is
+checked before membrane answers (`observe_learned`), so a statement that contradicts it
+**unlearns** it, back to a proposal. Unlearning uses a looser rule than teaching: "goal one
+landed today", "yes, goal one landed" and joined subjects count; a question, a negation, a modal
+or a conditional still don't. A definition the person teaches ("X means Y") is their own,
+never `learned`: no contradiction deletes it, and a write may use it. A verb synonym or another
+name from the model stays a proposal for the person to teach: there's no field evidence for a
+meaning like that, and recurrence isn't evidence. `membrane shadow` counts `novelty` (learned,
+proposed, none).
+
 **Stage 3: the model fills the gaps** (2026-11-02). A chat message that compiles except for
 words the field doesn't know is told to the model in the turn already running, with each word
 and the definition that fills it: an unknown verb (`<word> means <a verb it knows>`), an unknown

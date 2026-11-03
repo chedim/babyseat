@@ -268,7 +268,7 @@ def _members(est, lemma: str) -> list:
 
 
 _MACHINERY = tuple(MEMBRANE_NS + k for k in ("node:", "result:", "msg:", "register:", "bannerrule:",
-                                                 "verb:", "adjective:", "gap:"))
+                                                 "verb:", "adjective:", "gap:", "assoc:"))
 
 
 def _by_name(est, name: str):
@@ -338,10 +338,23 @@ def _define_step(srv, est, word: str, meaning: str, text: str) -> dict:
             "text": str(text).strip()}
 
 
+def _correct(est, word: str) -> None:
+    """A definition taught over a learned meaning corrects it (counted, never lost); the new
+    definition is the person's own (or the chat-confirmed one confirm_proposed marks after), so
+    it is not `learned` -- a contradiction never deletes it, and a write may use it (Memo on #894)."""
+    from . import verbs as V
+    for eid in (_adj_eid(word), V.verb_eid(word)):
+        d = (est.docs or {}).get(eid)
+        if d is not None and (d.properties or {}).get("learned"):
+            d.properties = {**d.properties, "learned": False, "corrected": True, "corrected_ts": time.time()}
+            est.upsert(d, embedder=None)
+
+
 def teach(est, step: dict) -> str:
     """Keep a definition step: the adjective, the verb synonym, the other name. -> what it means."""
     from . import verbs as V
     p, word = step["plan"], step["word"]
+    _correct(est, word)
     if p["kind"] == "adjective":
         define_adjective(est, word, p["filter"])
     elif p["kind"] == "verb":
@@ -438,6 +451,10 @@ def compile(srv, sid: str, text: str) -> list[dict]:
                 if c is not None:
                     calls.append(c)
         writes = any(c["writes"] for c in calls)
+        learned = names.pop("__learned__", [])
+        if writes and learned:                  # Memo on #894: "close the failed goals" -- a learned word
+            unmapped += [f'"{w}" is learned: name the things to change' for w in learned]
+            calls = []                          # never picks what a write acts on
         everyone = any(t.lower_ in _ALL for t in kept)
         steps.append({"verb": verb, "targets": targets, "options": options, "calls": calls, "names": names,
                       "mapped": not unmapped and bool(calls), "unmapped": unmapped,
@@ -534,6 +551,8 @@ def _span_targets(srv, sid: str, est, toks: list, unmapped: list, names: dict | 
         return []
     for a in adjs:
         adj = known.get(a.lemma_.lower()) or known.get(a.lower_)
+        if names is not None and (adj.properties or {}).get("learned"):
+            names.setdefault("__learned__", []).append(a.text)    # #894: noted, so a write can refuse it
         expr = (adj.properties or {}).get("filter") or "False"
         kept = []
         for m in members:
@@ -884,6 +903,7 @@ def answer(srv, sid: str, text: str) -> dict:
 GAP_MODEL = "haiku"          # the operator, 2026-11-03
 GAP = MEMBRANE_NS + "gap:"
 _NONE = re.compile(r"^\s*[\"']?([\w' -]+?)[\"']?\s*:\s*none\b", re.I)
+_COLON = re.compile(r"^\s*[\"']?([a-z][\w' -]*?)[\"']?\s*:\s*(?!none\b)(\S[^:]*?)\s*[.!]?\s*$", re.I)
 
 
 def gap_fill_on() -> bool:
@@ -897,6 +917,8 @@ def _gap_eid(word: str) -> str:
 
 
 def gap_prompt(est, text: str, words: list) -> str:
+    """The gap call's question -- blind: no field candidates in it (the operator, 2026-11-03, with
+    Memo: shown the candidates, Haiku picked "failed = open" 1 in 5; blind, never)."""
     from . import verbs as V
     docs = list((est.docs or {}).values())
     verbs = sorted({str((d.properties or {}).get("name") or "") for d in docs if d.cls == V.CLASS_VERB} - {""})
@@ -922,6 +944,292 @@ def _ask_model(prompt: str):
         elif kind == "usage" and isinstance(val, dict):
             usage = val
     return "".join(text), usage
+
+
+# ---- novelty (#891): a new meaning needs the model's word (asked blind) and the chat's evidence --
+_NOT_STATE = {"name", "summary", "title", "text", "sid", "mid", "role", "speaker", "word", "filter",
+              "method_name", "command", "same_as"}
+
+
+def _tie(tok, span) -> str | None:
+    """How the parse ties the word to this node: "state" (the node is its subject, or it is the
+    predicate about the node: "846 landed", "is goal one open"), "object" (it acts on the node:
+    "please peek goal one"), or None. Not a modifier: the small parser reads an unknown command
+    at a sentence's start as one ("scan goal one": scan -amod-> goal)."""
+    inside = range(span.start, span.end)
+    root = span.root
+    if root.head.i == tok.i and root.dep_ in ("dobj", "obj", "pobj", "dative"):
+        return "object"
+    if root.head.i == tok.i and root.dep_ in ("nsubj", "nsubjpass", "csubj"):
+        acts = [c for c in tok.children if c.dep_ in ("dobj", "obj", "dative", "prep", "xcomp", "ccomp")]
+        return None if acts else "state"         # "Claude will fix them": an action, not a state
+    if tok.head.i == root.head.i and tok.i not in inside and tok.dep_ in ("acomp", "attr", "oprd") \
+            and root.dep_ in ("nsubj", "nsubjpass"):
+        return "state"
+    return None
+
+
+def _asks_or_denies(tok) -> bool:
+    """A question or a negation asserts nothing the field can check the word against (Memo on
+    #894: "is goal one merged?" made merged = open; "goal two is not landed" made landed = closed)."""
+    sent = tok.sent
+    if sent.text.rstrip().endswith("?") or sent[0].pos_ == "AUX":     # "is goal one merged", "did it land"
+        return True
+    return any(t.dep_ == "neg" for t in sent)      # "goal two and not goal three landed": any negation in the sentence
+
+
+def _state_values(est, eid: str) -> list:
+    """(prop, value) of a thing's plain one-word states: the conditions it could mean."""
+    p = ((est.docs or {}).get(eid) or QuantumEntity(eid="", cls="")).properties or {}
+    return [(k, v) for k, v in p.items() if isinstance(v, str) and not k.startswith("_") and k not in _NOT_STATE
+            and k.isidentifier() and v and v.replace("-", "").replace("_", "").isalpha()]
+
+
+INVENT_MIN_SEEN = 2         # the operator, 2026-11-03: messages that must agree before an invention is used
+ASSOC = MEMBRANE_NS + "assoc:"
+
+
+def _assoc_eid(sid: str, word: str) -> str:
+    """Per chat (the operator: "unique to the convo associations"): a guest's words never mix in."""
+    return ASSOC + re.sub(r"[^a-z0-9_-]+", "-", f"{sid}:{word}".lower()).strip("-")
+
+
+def _holds(est, expr: str, eid: str):
+    """True / False, or None when it doesn't evaluate (never counted as a "no")."""
+    from .ch import EntityView, evaluate
+    try:
+        return bool(evaluate(expr, {"x": EntityView(est, eid)}))
+    except Exception:
+        return None
+
+
+_PLAIN = {"nsubj", "nsubjpass", "aux", "auxpass", "punct", "det", "cc", "conj", "acomp", "attr", "expl"}
+
+
+def _states(tok, inside=()) -> bool:
+    """Does the word sit in a plain statement the field can check? An allowlist (Memo on #894: each
+    round found more exceptions): the predicate's own parts may only be its subject, tense
+    auxiliaries (not modals: "should be"), punctuation, and its complement -- no adverb ("almost",
+    "probably", "when"), no interjection ("no, ..."), no mark ("if", "whether"), no negation -- and
+    its clause stands on its own (not under "I want", "check whether"). Not a question."""
+    if _asks_or_denies(tok):
+        return False
+    clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
+    for t in {tok, clause}:
+        for c in t.children:
+            if c in inside:                      # the words of a multi-word gap itself ("big thing")
+                continue
+            if c.dep_ not in _PLAIN or (c.dep_ == "aux" and c.tag_ == "MD"):
+                return False
+            if c.dep_ == "det" and c.lower_ in ("no", "neither", "never", "any"):
+                return False                     # "is no mess"
+            if c.dep_ == "conj" and c.pos_ in ("VERB", "AUX"):
+                return False                     # "landed, or did it": a second clause
+    for subj in (c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")):
+        if any(c.dep_ == "compound" and c.pos_ == "PROPN" and c.text.islower() for c in subj.children):
+            return False                         # "hope goal two landed": a lead word the parse glued on
+    return clause.dep_ in ("ROOT", "conj")
+
+
+def observe(srv, sid: str, text: str, word: str) -> dict | None:
+    """The word's association edges in this chat for this message (the operator, 2026-11-03: "unique
+    to the convo associations"): every message it appears in (`seen`), the distinct things a plain
+    statement says it of (`things`, a `said_of` edge each) with which of their one-word states held
+    (`held`: condition -> those things), and the distinct things it acts on as a verb (`acted_on`).
+    Kept on membrane::assoc:<chat>:<word>; a message is counted once. None: the word isn't in it."""
+    est = srv.entity_store
+    doc = _doc(text)
+    parts = word.lower().split()
+    if not parts:
+        return None
+    inside: tuple = ()
+    if len(parts) == 1:
+        tok = next((t for t in doc if t.text == word or t.lower_ == word.lower()), None)
+    else:                                        # a phrase ("big thing"): its last word stands for it
+        tok = None
+        for i in range(len(doc) - len(parts) + 1):
+            if [t.lower_ for t in doc[i:i + len(parts)]] == parts:
+                inside = tuple(doc[i:i + len(parts)])
+                tok = inside[-1]
+                break
+    if tok is None:
+        return None
+    eid = _assoc_eid(sid, word)
+    d = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls="Association", properties={
+        "name": word.lower(), "sid": sid, "seen": 0, "things": [], "held": {}, "acted_on": [],
+        "silent_birth": True})
+    p = dict(d.properties or {})
+    key = " ".join(str(text).split())[:200]
+    if p.get("last") == key:                     # the same message, before and after its turn: once
+        return p
+    said, acted = [], []
+    for span, pos in _meaning_nodes(doc, _names(est)):
+        if any(t.i in range(span.start, span.end) for t in (inside or (tok,))):
+            continue
+        how = _tie(tok, span)
+        if how == "state" and _states(tok, inside):
+            said += [e for e in _known_targets(srv, sid, est, span) if e not in said]
+        elif how == "object" and not _asks_or_denies(tok):
+            acted += [e for e in _known_targets(srv, sid, est, span) if e not in acted]
+    if not said and not acted:
+        return p                                 # nothing stated or acted on: not a message about it (Memo)
+    p["seen"] = int(p.get("seen") or 0) + 1
+    things, held = list(p.get("things") or []), {k: list(v) for k, v in (p.get("held") or {}).items()}
+    learned = _adjectives(est).get(word.lower())
+    if learned is not None and (learned.properties or {}).get("learned"):
+        expr = (learned.properties or {}).get("filter") or "False"
+        if any(_holds(est, expr, e) is False for e in said):      # the chat now says otherwise
+            _unlearn(est, word, said)
+    for e in said:
+        if e not in things:
+            things.append(e)
+        for k, v in _state_values(est, e):
+            c = f"x.{k} == {v!r}"
+            if e not in held.setdefault(c, []):
+                held[c].append(e)
+    p["acted_on"] = list(dict.fromkeys(list(p.get("acted_on") or []) + acted))
+    p.update(things=things, held=held, last=key, ts=time.time())
+    d.properties = p
+    est.upsert(d, embedder=None)
+    try:
+        from . import convgraph as CG
+        be, origin = CG._rel(srv)
+        for e in said:
+            CG._edge(be, origin, eid, "said_of", e)
+        for e in acted:
+            CG._edge(be, origin, eid, "acts_on", e)
+    except Exception:
+        pass
+    return p
+
+
+def _peers(est, things: list) -> list:
+    """The things' siblings (sharing a parent), or else their class: what a state's base rate is over."""
+    from .entities import MultiParentOps
+    docs = est.docs or {}
+    parents = {q for e in things if docs.get(e) is not None for q in MultiParentOps._parents_of(docs[e].properties or {})}
+    if parents:
+        return [d.eid for d in list(docs.values())
+                if set(MultiParentOps._parents_of(d.properties or {})) & parents]
+    classes = {docs[e].cls for e in things if docs.get(e) is not None}
+    return [d.eid for d in list(docs.values()) if d.cls in classes]
+
+
+def _confirmed(est, a: dict, cond: str, recorded: bool = True) -> dict | None:
+    """Does the chat's evidence carry `cond`: true of every one of k >= 2 distinct things the word
+    was said of, over at least INVENT_MIN_SEEN messages, and able to fail (false for some other
+    thing of their kind)? -> {k}. No chance test (the operator, 2026-11-03, with Memo): with the
+    model naming the meaning blind, the evidence only has to rule meanings out, and p ** k measured
+    how rare a state is on the seat, not what the word means."""
+    things = list(a.get("things") or [])
+    k = len(things)
+    if int(a.get("seen") or 0) < INVENT_MIN_SEEN or k < 2:
+        return None                              # one thing said twice is one thing (Memo on #894)
+    if recorded and set((a.get("held") or {}).get(cond) or []) != set(things):
+        return None
+    if not all(_holds(est, cond, e) is True for e in things):
+        return None
+    if not any(_holds(est, cond, e) is False for e in _peers(est, things)):
+        return None                              # true of every such thing: it can't fail, so it says nothing
+    return {"k": k}
+
+
+def _says_of(tok) -> bool:
+    """A looser test than _states, for unlearning only (Memo on #894): a statement still counts
+    with a time word, an adverb, a place or a "yes," ("goal one landed today", "yes, goal one just
+    landed"); a question, a negation, a modal, "if"/"whether", or a clause under another verb
+    still doesn't."""
+    if _asks_or_denies(tok):
+        return False
+    clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
+    for t in {tok, clause}:
+        for c in t.children:
+            if c.dep_ == "mark" or (c.dep_ == "aux" and c.tag_ == "MD"):
+                return False
+    return clause.dep_ in ("ROOT", "conj")
+
+
+def _subjects(tok, est, srv, sid) -> list:
+    """The things a statement says `tok` of: every thing named inside its subject's span, so
+    joined subjects count too ("goal two and goal one landed"; the parser's tree for those is
+    unreliable, the field's names aren't)."""
+    clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
+    subj = [c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")]
+    if not subj:
+        return []
+    lo = min(t.i for c in subj for t in c.subtree)
+    hi = max(t.i for c in subj for t in c.subtree)
+    hi = max(hi, max(t.i for t in tok.doc[lo:clause.i]) if clause.i > lo else hi)   # names the parse split off
+    out = []
+    for span, pos in _meaning_nodes(tok.doc, _names(est)):
+        if span.start >= lo and span.end <= hi + 1 and tok.i not in range(span.start, span.end):
+            for e in _known_targets(srv, sid, est, span):
+                if e not in out:
+                    out.append(e)
+    return out
+
+
+def observe_learned(srv, sid: str, text: str) -> list:
+    """Every learned word the message uses, in every sentence, is checked against what a
+    statement says it of, so a contradiction unlearns it before membrane answers (Memo on #894: a
+    learned word is no surprise, so nothing saw it; and natural statements -- "goal one landed
+    today", "yes, goal one landed" -- must count). -> the words unlearned."""
+    est = srv.entity_store
+    learned = {n: d for n, d in _adjectives(est).items() if (d.properties or {}).get("learned")}
+    if not learned:
+        return []
+    gone = []
+    for t in _doc(text):
+        w = t.lower_
+        if w not in learned or w in gone or not _says_of(t):
+            continue
+        expr = (learned[w].properties or {}).get("filter") or "False"
+        said = _subjects(t, est, srv, sid)
+        if any(_holds(est, expr, e) is False for e in said):
+            _unlearn(est, w, said)
+            gone.append(w)
+    return gone
+
+
+def _unlearn(est, word: str, said: list) -> None:
+    """A learned meaning the chat contradicts goes back to a proposal (Memo on #894)."""
+    eid = _adj_eid(word)
+    try:
+        est.remove(eid)
+    except Exception:
+        (est.docs or {}).pop(eid, None)
+    g = (est.docs or {}).get(_gap_eid(word))
+    if g is not None:
+        g.properties = {**g.properties, "kept": False, "contradicted_by": list(said), "contradicted_ts": time.time()}
+        est.upsert(g, embedder=None)
+
+
+def confirm_proposed(srv, sid: str, text: str, word: str) -> dict | None:
+    """The model's proposed meaning for `word`, taught once this chat's field evidence agrees
+    (the operator, 2026-11-03: a meaning needs both -- the model's word for it and the chat's
+    evidence, k >= 2 distinct things -- and never picks a write's targets). Only a condition has
+    field evidence (_confirmed); a verb synonym or another name stays a proposal for the person to
+    teach ("X means Y"): recurrence isn't evidence (Memo: "review means show" posted "Reviewed
+    goal two."). -> {word, meaning, p, k} when taught."""
+    est = srv.entity_store
+    g = (est.docs or {}).get(_gap_eid(word))
+    plan = ((g.properties or {}).get("proposed") or {}) if g is not None else {}
+    if not plan or (g.properties or {}).get("kept") or plan.get("kind") != "adjective":
+        return None
+    if " " in word.strip():                      # a phrase ("big thing"): nothing reads one as a word yet
+        return None                              # (Memo on #894), so it stays a proposal
+    a = observe(srv, sid, text, word)
+    ok = _confirmed(est, a, plan["filter"], recorded=False) if a else None
+    if ok is None:
+        return None
+    shown = teach(est, {"plan": plan, "word": word.lower()})
+    d = (est.docs or {}).get(_adj_eid(word))
+    if d is not None:
+        d.properties = {**d.properties, "learned": True, "learned_evidence": ok, "learned_ts": time.time()}
+        est.upsert(d, embedder=None)
+    g.properties = {**g.properties, "kept": True, "confirmed_ts": time.time()}
+    est.upsert(g, embedder=None)
+    return {"word": word, "meaning": shown, **ok}
 
 
 GAP_WAIT_S = 30.0       # #887 C: how long a person's turn waits for the gap call (the operator, 2026-11-03: 30 s)
@@ -950,49 +1258,76 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     if not gap_fill_on():
         return None
     est = srv.entity_store
+    later = []                                   # asked before, proposed: the chat may now back it up
+    for w in dict.fromkeys(str(w).strip() for w in words):
+        g = (est.docs or {}).get(_gap_eid(w)) if w else None
+        if g is not None and not (g.properties or {}).get("kept"):
+            try:
+                ok = confirm_proposed(srv, sid, text, w)
+            except Exception:
+                ok = None
+            if ok is not None:
+                later.append({"word": w, "answer": (g.properties or {}).get("answer"), "kept": True,
+                              "meaning": ok["meaning"], "confirmed": True})
     wanted = [w for w in dict.fromkeys(str(w).strip() for w in words) if w and _gap_eid(w) not in (est.docs or {})]
     with _ASKING_LOCK:
         todo = [w for w in wanted if w.lower() not in _ASKING]
         _ASKING.update(w.lower() for w in todo)
     pending = [w for w in wanted if w not in todo]
     if not todo:
-        return {"words": [], "usage": {}, **({"pending": pending} if pending else {})}
+        return {"words": later, "usage": {}, **({"pending": pending} if pending else {})}
     try:
+        ask_for = list(todo)
         try:
-            reply, usage = (ask or _ask_model)(gap_prompt(est, text, todo))
+            reply, usage = (ask or _ask_model)(gap_prompt(est, text, ask_for))   # blind (#894)
         except Exception as e:
-            return {"words": [], "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
-        return _keep_answers(srv, sid, est, todo, reply, usage, pending)
+            return {"words": later, "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
+        got = _keep_answers(srv, sid, est, ask_for, reply, usage, pending, text)
+        got["words"] = later + got["words"]
+        return got
     finally:
         with _ASKING_LOCK:
             _ASKING.difference_update(w.lower() for w in todo)
 
 
-def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list) -> dict:
+def _mark_asked(est, sid: str, w: str, answer, kept: bool, proposed=None) -> None:
+    est.upsert(QuantumEntity(eid=_gap_eid(w), cls="Gap", properties={
+        "name": w.lower(), "answer": answer, "kept": kept, "asked_ts": time.time(), "sid": sid,
+        "silent_birth": True, **({"proposed": proposed} if proposed else {})}), embedder=None)
+
+
+def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list, text: str = "") -> dict:
     answers: dict = {}
     for line in str(reply or "").splitlines():
+        line = line.replace("`", "").strip(" -*")
         m = _NONE.match(line)
         if m:
             answers.setdefault(m.group(1).strip().lower(), None)
             continue
-        m = _DEFINE.match(line.strip(" -*"))
+        m = _DEFINE.match(line)
+        if m:                                    # "landed means closed: closed" -> closed
+            answers.setdefault(m.group(1).strip().lower(), m.group(2).split(":", 1)[0].strip())
+            continue
+        m = _COLON.match(line)                   # "landed: closed" (Memo on #894: 13 of 33 right answers)
         if m:
             answers.setdefault(m.group(1).strip().lower(), m.group(2).strip())
     out = []
     for w in todo:
+        if w.lower() not in answers:             # the reply never said: not asked, so it's asked again
+            out.append({"word": w, "answer": None, "kept": False, "unparsed": True})
+            continue
         meaning = answers.get(w.lower())
-        kept, shown = False, None
+        plan = None
         if meaning:
             try:
                 step = _define_step(srv, est, w.lower(), meaning, f"{w} means {meaning}")
-                if step["mapped"]:
-                    shown, kept = teach(est, step), True
+                plan = step["plan"] if step["mapped"] else None
             except Exception:
-                kept = False
-        est.upsert(QuantumEntity(eid=_gap_eid(w), cls="Gap", properties={
-            "name": w.lower(), "answer": meaning, "kept": kept, "asked_ts": time.time(), "sid": sid,
-            "silent_birth": True}), embedder=None)
-        out.append({"word": w, "answer": meaning, "kept": kept, "meaning": shown})
+                plan = None
+        _mark_asked(est, sid, w, meaning, False, proposed=plan)  # proposed: taught once the chat backs it up
+        got = confirm_proposed(srv, sid, text, w) if plan else None
+        out.append({"word": w, "answer": meaning, "kept": got is not None, "proposed": plan is not None,
+                    "meaning": (got or {}).get("meaning")})
     return {"words": out, "usage": usage, **({"pending": pending} if pending else {})}
 
 
@@ -1007,9 +1342,19 @@ def shadow_report(rows: list[dict]) -> dict:
           if isinstance(r.get("understanding"), dict) and r["understanding"].get("share") is not None]
     words = Counter(str(w).lower() for u in us for w in (u.get("surprise") or []))
     return {"total": len(rows), "outcomes": dict(out), "gap_types": dict(gaps), "model_used_tools": dict(tools),
+            "novelty": _novelty(rows),
             "understanding": {"scored": len(us),
                               "mean_share": round(sum(u["share"] for u in us) / len(us), 3) if us else None,
                               "surprise_top": [[w, c] for w, c in words.most_common(20)]}}
+
+
+def _novelty(rows: list[dict]) -> dict:
+    """#891: how the filled words fared -- learned (the model's word, the chat's evidence),
+    proposed and waiting, none."""
+    ws = [w for r in rows for w in (((r.get("filled") or {}).get("words")) or []) if isinstance(w, dict)]
+    return {"learned": sum(1 for w in ws if w.get("kept")),
+            "proposed": sum(1 for w in ws if w.get("proposed") and not w.get("kept")),
+            "none": sum(1 for w in ws if not w.get("kept") and not w.get("proposed"))}
 
 
 def shadow_cli(argv=None) -> int:

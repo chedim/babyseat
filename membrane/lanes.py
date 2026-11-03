@@ -4233,6 +4233,7 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
         try:                                      # #887: fill the message's gaps, then membrane answers it
             from . import language as _LL
             if _LL.available():
+                _LL.observe_learned(srv, sid, said)           # #894: a contradiction unlearns, before any answer
                 _u = _LL.understand(srv, sid, said)
                 srv.__dict__.setdefault("_cg_understood", {})[sid] = _u     # the shadow keeps the before
                 if _u.get("surprise"):
