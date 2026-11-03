@@ -141,16 +141,34 @@ v._graph = {nodes: [], edges: []}; v._open = null;
 v._draw();
 v.onclick({target: {closest: (s) => s === ".ment" ? {getAttribute: () => "membrane::task:z"} : null}, preventDefault() {}});
 console.log(JSON.stringify(calls));''' % ((str(ROOT / "membrane" / "ui" / "fieldview.js"),) * 2))
-    assert out == [["open", "membrane::task:z"], ["select", "membrane::task:z"], ["onSelect", "membrane::task:z"]]
+    # home's onSelect is _select(node): it needs {id, work:true}, a bare string would close the card it opened
+    assert out == [["open", "membrane::task:z"], ["select", "membrane::task:z"],
+                   ["onSelect", {"id": "membrane::task:z", "work": True}]]
 
 
 def test_3d_title_resolves_field_mirror_ids():
-    from membrane.lanes import _field3d_title
+    from membrane.lanes import _field3d_title, _field3d_title_index
     from types import SimpleNamespace as NS
     docs = {"membrane::Goal:g1": NS(cls="Goal", properties={"title": "Ship it"}),
             "membrane::task:t1": NS(cls="Task", properties={"title": "Draft"}),
             "membrane::Note:n": NS(cls="Note", properties={"title": "no"})}
-    assert _field3d_title(docs, "m:goal:g1") == "Ship it"      # mirror id, case differs from the store eid
-    assert _field3d_title(docs, "m:task:t1") == "Draft"
-    assert _field3d_title(docs, "membrane::Goal:g1") == "Ship it"
-    assert _field3d_title(docs, "m:note:n") == "" and _field3d_title(docs, "m:task:none") == ""
+    idx = _field3d_title_index(docs)
+    assert _field3d_title(idx, "m:goal:g1") == "Ship it"      # mirror id, case differs from the store eid
+    assert _field3d_title(idx, "m:task:t1") == "Draft"
+    assert _field3d_title(idx, "membrane::Goal:g1") == "Ship it"
+    assert _field3d_title(idx, "m:note:n") == "" and _field3d_title(idx, "m:task:none") == ""
+
+
+def test_3d_title_index_is_a_snapshot_not_a_live_scan():
+    from membrane.lanes import _field3d_title, _field3d_title_index
+    from types import SimpleNamespace as NS
+
+    class Racy(dict):                    # a store other threads grow while it is iterated
+        def items(self):
+            it = super().items()
+            self["membrane::Task:late"] = NS(cls="Task", properties={"title": "L"})
+            return it
+    docs = Racy({"membrane::Goal:g1": NS(cls="Goal", properties={"title": "Ship it"})})
+    idx = _field3d_title_index(docs)     # must not raise "changed size during iteration"
+    assert _field3d_title(idx, "m:goal:g1") == "Ship it"
+    assert _field3d_title(idx, "m:nothing") == ""

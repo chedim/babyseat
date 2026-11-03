@@ -185,7 +185,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
         if (a) {
           if (e.preventDefault) e.preventDefault();
           const eid = a.getAttribute("data-eid"); this.open(eid);
-          const sc = this._scene; if (sc) { sc.select(eid); if (sc.api && sc.api.onSelect) sc.api.onSelect(eid); }
+          const sc = this._scene; if (sc) { sc.select(eid); if (sc.api && sc.api.onSelect) sc.api.onSelect({ id: eid, work: true }); }
           return;
         }
         if (e.target.closest(".x")) { this._open = null; this._run = null; this._draw(); const sc = this._scene; if (sc) { sc.select(null); if (sc.api && sc.api.onSelect) sc.api.onSelect(null); } return; }
