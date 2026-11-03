@@ -676,12 +676,46 @@ def teachable(steps: list[dict]) -> list[dict]:
 _GRAMMAR = {"ADP", "AUX", "CCONJ", "SCONJ", "DET", "PART", "PUNCT", "SYM", "SPACE"}   # closed-class (UD)
 
 
-def _meaning_nodes(doc) -> list:
-    """(span, part of speech) per meaning node, in order: the noun phrases, and every open-class
-    word outside one."""
-    chunks = list(doc.noun_chunks)
-    covered = {i for c in chunks for i in range(c.start, c.end)}
-    out = [(c, "NOUN") for c in chunks]
+def _names(est) -> dict:
+    """Every name and taught other name of a thing (lower case) -> its words' count."""
+    out = {}
+    for d in list((est.docs or {}).values()):
+        if d.eid.startswith(_MACHINERY):
+            continue
+        p = d.properties or {}
+        for n in [p.get("name")] + list(p.get("aliases") or []):
+            n = " ".join(str(n or "").lower().split())
+            if n:
+                out[n] = len(n.split())
+    return out
+
+
+def _named(doc, names: dict) -> list:
+    """The runs of two or more words that are a thing's whole name ("goal one"), longest first."""
+    longest = max((k for k in names.values()), default=0)
+    out, i = [], 0
+    while i < len(doc):
+        hit = None
+        for j in range(min(len(doc), i + longest), i + 1, -1):
+            if " ".join(t.lower_ for t in doc[i:j]) in names:
+                hit = doc[i:j]
+                break
+        if hit is not None:
+            out.append(hit)
+            i = hit.end
+        else:
+            i += 1
+    return out
+
+
+def _meaning_nodes(doc, names: dict | None = None) -> list:
+    """(span, part of speech) per meaning node, in order: the things named in full, the noun
+    phrases, and every open-class word outside one."""
+    named = _named(doc, names) if names else []
+    taken = {i for c in named for i in range(c.start, c.end)}
+    chunks = [c for c in doc.noun_chunks if not any(i in taken for i in range(c.start, c.end))]
+    covered = taken | {i for c in chunks for i in range(c.start, c.end)}
+    out = [(c, "NOUN") for c in named + chunks]
     out += [(doc[t.i:t.i + 1], t.pos_) for t in doc if t.i not in covered and t.pos_ not in _GRAMMAR
             and any(c.isalnum() for c in t.text)]          # a dash the tagger called a noun is not a word
     return sorted(out, key=lambda x: x[0].start)
@@ -691,18 +725,26 @@ def _means(srv, sid: str, est, doc, span, pos: str, adjectives: dict) -> bool:
     """Does this node mean something the field knows: a verb, an adjective, a run option, or the
     things it names (a register, a mention, a name, a class's members)."""
     t = span[0]
-    if pos == "VERB" and _verb_at(est, doc, t.i):
-        return True
-    if pos == "ADJ" and (t.lemma_.lower() in adjectives or t.lower_ in adjectives):
-        return True
-    if pos == "ADV" and t.lower_ in ADVERBS:
-        return True
+    if len(span) == 1 and (_verb_at(est, doc, t.i) or _adjective_of(t, adjectives) or t.lower_ in ADVERBS):
+        return True                    # what the field knows the word as, whatever the tagger called it
+    return bool(_known_targets(srv, sid, est, span))
+
+
+def _known_targets(srv, sid: str, est, span) -> list:
+    """What a node names, without the Concepts (a phrase membrane kept for a pronoun is not a
+    meaning it knows); [] when any of it doesn't map."""
     unmapped: list = []
     try:
         got = _span_targets(srv, sid, est, list(span), unmapped)
     except Exception:
-        return False
-    return bool(got) and not unmapped
+        return []
+    docs = est.docs or {}
+    got = [e for e in got if (docs.get(e) is None or docs[e].cls != CLASS_CONCEPT)]
+    return got if got and not unmapped else []
+
+
+def _adjective_of(t, adjectives: dict):
+    return adjectives.get(t.lemma_.lower()) or adjectives.get(t.lower_)
 
 
 def understand(srv, sid: str, text: str) -> dict:
@@ -711,11 +753,81 @@ def understand(srv, sid: str, text: str) -> dict:
     est = srv.entity_store
     doc = _doc(text)
     adjectives = _adjectives(est)
-    nodes = _meaning_nodes(doc)
+    nodes = _meaning_nodes(doc, _names(est))
     surprise = [span.text for span, pos in nodes if not _means(srv, sid, est, doc, span, pos, adjectives)]
     n = len(nodes)
     return {"nodes": n, "mapped": n - len(surprise), "share": round((n - len(surprise)) / n, 3) if n else None,
             "surprise": surprise}
+
+
+# ---- the response (#887 C): membrane words a reply from the message's filled graph ----------
+# What each condition the message names says about each thing it names (checked on the field),
+# a read-only program's result, and what it still doesn't know. No model writes it.
+
+def _state(est, eid: str) -> str:
+    return str(((est.docs or {}).get(eid) or QuantumEntity(eid="", cls="")).properties.get("status") or "")
+
+
+def respond(srv, sid: str, text: str) -> str:
+    """The reply membrane words itself from what it understood of `text`, or "" (nothing understood)."""
+    from collections import Counter
+    from . import generate as GEN
+    from .ch import EntityView, Refused, evaluate
+    est = srv.entity_store
+    doc = _doc(text)
+    adjectives = _adjectives(est)
+    groups, conds, unknown = [], [], []          # groups: (what the message called them, [eids])
+    for span, pos in _meaning_nodes(doc, _names(est)):
+        t = span[0]
+        adj = _adjective_of(t, adjectives) if len(span) == 1 else None
+        if adj is not None and not (t.pos_ == "VERB" and _verb_at(est, doc, t.i)):   # "opens it": the verb
+            conds.append((str((adj.properties or {}).get("name") or t.lower_),
+                          (adj.properties or {}).get("filter") or "False"))
+            continue
+        if len(span) == 1 and (_verb_at(est, doc, t.i) or t.lower_ in ADVERBS):
+            continue                              # a verb is the program's, below
+        got = _known_targets(srv, sid, est, span)
+        if got:
+            groups.append((span.text, list(dict.fromkeys(got))))
+        else:
+            unknown.append(span.text)
+    lines = []
+    try:
+        steps = compile(srv, sid, text)
+    except Exception:
+        steps = []
+    if steps and all(s["mapped"] and s.get("kind") != "define" and not s.get("writes") for s in steps):
+        ran = run(srv, text)                      # a read-only program: its result (stage 3)
+        out = str(ran.get("output") or ran.get("said") or "").strip()
+        if out:
+            lines.append(out)
+
+    def holds(expr, eid):
+        try:
+            return bool(evaluate(expr, {"x": EntityView(est, eid)}))
+        except Refused:
+            return False
+    for called, eids in groups:
+        if len(eids) == 1:
+            e = eids[0]
+            label, st = CG_label(est, e), _state(est, e)
+            for word, expr in conds:
+                lines.append(f"{label} is {word}" if holds(expr, e)
+                             else f"{label} isn't {word}" + (f" (status {st})" if st else ""))
+            if not conds and st:              # a name alone says nothing: only a state is an answer
+                lines.append(f"{label}: {st}")
+            continue
+        for word, expr in conds:
+            k = sum(1 for e in eids if holds(expr, e))
+            lines.append(f"{k} of {len(eids)} {called} {'is' if k == 1 else 'are'} {word}")
+        if not conds:
+            by = Counter(_state(est, e) or "no status" for e in eids)
+            lines.append(f"{called}: {len(eids)} ({', '.join(f'{n} {st}' for st, n in by.most_common())})")
+    if not lines:
+        return ""
+    if unknown:
+        lines.append("I don't know " + GEN.join([f'"{u}"' for u in unknown]))
+    return "; ".join(lines)
 
 
 # ---- filling the gaps (#887 B): membrane asks the model about the surprise words only ---------

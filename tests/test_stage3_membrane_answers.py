@@ -59,14 +59,15 @@ class MembraneAnswers(unittest.TestCase):
         srv, f, est, goal, g1, g2 = _world()
         _read_only_check(srv, f, est, goal)
         ctx, _ = _ctx(srv, "check goal one")
-        self.assertIn("membrane already ran", ctx)
+        self.assertIn("membrane already answered", ctx)          # #887 C words it
         self.assertIn("don't run it again", ctx.lower())
         self.assertNotIn("exec(action='run', lang='en', code='check goal one') runs it", ctx)
 
     def test_a_message_that_writes_is_never_run_by_membrane(self):
         srv, f, est, goal, g1, g2 = _world()               # close is a write method
         ctx, posted = _ctx(srv, "close goal one")
-        self.assertEqual(posted, [])
+        self.assertEqual(est.docs[g1.eid].properties.get("status"), "open")   # never run
+        self.assertEqual([t for _, t in posted], [MARK + " goal one: open"])    # #887 C: only what it knows
         self.assertIn("compiles to:", ctx)
 
     def test_a_message_with_gaps_is_not_run(self):

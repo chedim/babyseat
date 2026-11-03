@@ -4225,6 +4225,27 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     _owner = str((_sess.get(sid) or {}).get("owner") or "") if said and _sess is not None else ""
     if said and _owner and not _is_operator(_owner):
         said = None                               # a guest's chat (a token person, the HA relay): no program
+    _answered = False
+    if said and getattr(getattr(srv, "_loop_runner", None), "post_line", None) is not None:
+        try:                                      # #887: fill the message's gaps, then membrane answers it
+            from . import language as _LL
+            if _LL.available():
+                _u = _LL.understand(srv, sid, said)
+                srv.__dict__.setdefault("_cg_understood", {})[sid] = _u     # the shadow keeps the before
+                if _u.get("surprise"):
+                    _got = _LL.fill_gaps(srv, sid, said, _u["surprise"])
+                    if _got is not None:
+                        srv.__dict__.setdefault("_cg_filled", {})[sid] = _got
+                _reply = _LL.respond(srv, sid, said)
+                if _reply:
+                    from . import speech as _SP
+                    srv._loop_runner.post_line(sid, _SP.say("membrane-ran", text=_reply))
+                    adds.append(f"membrane already answered in the chat from what it understood of the person's "
+                                f"message (no model): {_reply[:600]!r}. Don't run it again or repeat it; add what "
+                                "it missed or correct it.")
+                    _answered = True
+        except Exception as e:
+            print(f"[language] {sid[:16]}: {e}", file=sys.stderr)
     if said:
         try:                                      # living language: what the message compiles to
             from . import language as _LL
@@ -4233,6 +4254,9 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
                 if steps and steps[0].get("kind") == "define" and steps[0]["mapped"]:
                     adds.append(f"The person's message {_LL.describe(srv.entity_store, steps)}. If they mean it, "
                                 f"exec(action='run', lang='en', code={said!r}) keeps it.")
+                elif _answered and steps and all(s["mapped"] for s in steps) \
+                        and not any(s.get("writes") for s in steps):
+                    pass                          # #887: membrane's answer above already ran it
                 elif steps and all(s["mapped"] for s in steps) and not any(s.get("writes") for s in steps) \
                         and getattr(getattr(srv, "_loop_runner", None), "post_line", None) is not None:
                     # stage 3 (#802): a read-only program membrane runs itself; its answer is posted,
