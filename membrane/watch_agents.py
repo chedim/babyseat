@@ -1819,7 +1819,7 @@ def notify_goal_fulfilled(est, pool, goal_eid: str, by: str = "",
     from . import speech as _SP
     line = _SP.say("goal-fulfilled", goal=ev["entity"], receipt=ev["evidence"])
     from . import chat_io as _CIO
-    chat = _CIO.goal_chat(props)
+    chat = _CIO.goal_chat(props, getattr(est, "_srv", None))
     if getattr(est, "_srv", None) is not None:
         sent = escalate(est._srv, ev, ev["entity"], line, chat)
     elif chat:

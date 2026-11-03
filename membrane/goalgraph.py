@@ -655,7 +655,7 @@ def planner_claim(text: str) -> str | None:
     return hits[-1].strip()[:600] if hits else None
 
 
-STALL_S = 6 * 3600
+STALL_S = 15 * 60
 
 
 def _moving(d) -> bool:
@@ -685,9 +685,9 @@ def send_back_of(srv, goal: str):
     return p.get("replan") if p.get("replan") and is_send_back(p.get("replan_by")) else None
 
 
-def _goal_chat(props) -> str:
+def _goal_chat(props, srv=None) -> str:
     from .chat_io import goal_chat
-    return goal_chat(props)
+    return goal_chat(props, srv)
 
 
 def report(srv, goal: str, claim: str | None = None, sent_back: str | None = None) -> bool:
@@ -727,7 +727,7 @@ def report(srv, goal: str, claim: str | None = None, sent_back: str | None = Non
         from . import watch_agents as WA
         told = WA.escalate(srv, {"kind": "goal-ended", "entity": goal, "goal": goal,
                                  "title": (g.properties or {}).get("name") or goal, "ts": time.time()},
-                           goal, line, chat=_goal_chat(g.properties))
+                           goal, line, chat=_goal_chat(g.properties, srv))
     except Exception:
         return False
     if told:

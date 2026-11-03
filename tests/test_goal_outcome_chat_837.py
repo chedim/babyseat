@@ -19,6 +19,12 @@ class _Srv:
     pass
 
 
+class _Runner:
+    """A runner with one registered loop session (a worker) -- as server.py keeps it."""
+    def __init__(self):
+        self._agents = {"ses_W": "worker", "ses_item": "triage"}
+
+
 def _seat(monkeypatch):
     d = Path(tempfile.mkdtemp())
     est = EntityStore(path=str(d / "e.json"), shared=False)
@@ -29,6 +35,7 @@ def _seat(monkeypatch):
     srv.entity_store = est
     est._srv = srv
     monkeypatch.setattr(CIO, "latest_chat", lambda s, p: "ses_latest")
+    srv._loop_runner = _Runner()
     return srv, est
 
 
@@ -51,9 +58,18 @@ def test_fulfilled_normalises_tag(monkeypatch):
 def test_report_goes_to_goal_person_chat_skipping_loop_sessions(monkeypatch):
     srv, est = _seat(monkeypatch)
     eid = est.add(cls="Goal", name="g", summary="x")["eid"]
-    est.edit(eid, properties={"convs": ["sid:ses_P", "sid:worker:ses_W", "planner:x"]})
+    # real tag shapes: every tag is sid:ses_...; the loop session is told apart by the registry
+    est.edit(eid, properties={"convs": ["sid:ses_P", "sid:ses_W", "sid:ses_item"]})
     assert GG.report(srv, eid, claim="done") is True
     assert est.sent and est.sent[0][0] == "ses_P"
+
+
+def test_goal_chat_registry_not_prefix(monkeypatch):
+    srv, _ = _seat(monkeypatch)
+    props = {"convs": ["sid:ses_P", "sid:ses_W"]}
+    assert CIO.goal_chat(props, srv) == "ses_P"
+    assert CIO.goal_chat({"convs": ["sid:ses_Q", "sid:ses_P"]}, srv) == "ses_P"
+    assert CIO.goal_chat({"convs": ["sid:ses_W"]}, srv) == ""
 
 
 def test_stalled_running_task_is_not_moving():

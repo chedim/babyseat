@@ -299,25 +299,23 @@ def _is_loop(r, sid: str) -> bool:
     return _loop(r, sid)
 
 
-_LOOP_PREFIXES = ("worker:", "planner:", "watch:")
-
-
 def conv_session(tag: str) -> str:
     """#837: a goal's `convs` entry is a capture tag ('sid:<id>', 'sid:sid:<id>'); the
-    real session id, or '' for a 'head:' hash or a loop (worker/planner/watch) session."""
+    session id, or '' for a 'head:' hash or an empty tag."""
     t = str(tag or "").strip()
     while t.startswith("sid:"):
         t = t[4:]
-    if not t or t.startswith("head:") or t.startswith(_LOOP_PREFIXES):
-        return ""
-    return t
+    return "" if not t or t.startswith("head:") else t
 
 
-def goal_chat(props: dict) -> str:
-    """The goal's own person chat: the last of its `convs` that is a real session."""
+def goal_chat(props: dict, srv=None) -> str:
+    """The goal's own person chat: the last of its `convs` that is a real session and
+    not a loop session (the registry, as `latest_chat` does). Without a runner the
+    registry is unknown: the last unwrapped tag."""
+    r = _runner(srv) if srv is not None else None
     for tag in reversed(list((props or {}).get("convs") or [])):
         sid = conv_session(tag)
-        if sid:
+        if sid and not (r is not None and _is_loop(r, sid)):
             return sid
     return ""
 
