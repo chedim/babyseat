@@ -30,6 +30,13 @@ class Respond(unittest.TestCase):
         self.assertIn("goal one is open", LL.respond(srv, SID, "is goal one open?"))
         self.assertIn("goal two isn't open", LL.respond(srv, SID, "goal two open?"))
 
+    def test_a_condition_said_of_nothing_is_checked_against_nothing(self):
+        """Live 2026-11-03: "make the blocked/blocks parts a link" got "0 of 386 tool are blocks"."""
+        srv, *_ = _world()
+        r = LL.respond(srv, SID, "show the goals, the window is open")
+        self.assertNotIn("goals are open", r)
+        self.assertNotIn("of 2 goals", r)
+
     def test_a_thing_alone_says_its_state(self):
         srv, *_ = _world()
         self.assertIn("goal two: closed", LL.respond(srv, SID, "what about goal two"))
