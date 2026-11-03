@@ -80,3 +80,87 @@ class TestGlueAtStepBoundary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGluedPersonMessagePipeline(unittest.TestCase):
+    """Review of #903: a glued person message is a fresh person round for the pre-turn
+    pipeline, never overwrites the running turn's state, leaves no text behind, and is minted."""
+
+    def _run(self, srv):
+        import types
+        seen, in_tool = {}, threading.Event()
+
+        def ladder(body):
+            seen.setdefault("n", 0)
+            seen["n"] += 1
+            if seen["n"] == 1:
+                return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "t1", "type": "function", "function": {"name": "find", "arguments": "{}"}}]},
+                    "finish_reason": "tool_calls"}]}
+            seen["fresh_at_round2"] = dict(srv.__dict__.get("_cg_fresh") or {})
+            seen["text_at_round2"] = dict(srv.__dict__.get("_cg_text") or {})
+            seen["turn_at_round2"] = dict(srv.__dict__.get("_cg_turn") or {})
+            return {"choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+
+        def tool(*a, **k):
+            srv._cg_turn["s1"] = {"resolved": "x"}      # the running turn's binding
+            in_tool.set()
+            time.sleep(0.8)                              # the person speaks meanwhile
+            seen["during_tool"] = (dict(srv.__dict__.get("_cg_turn") or {}), dict(srv.__dict__.get("_cg_text") or {}))
+            return "ok"
+
+        r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(), ladder, tool,
+                          system="", model="m", tools=[])
+        r.busy_wait_s = 15
+        r.srv = srv
+        r._turn_watchdog = lambda *a, **k: None
+        sid = "s1"
+        a = threading.Thread(target=r.run, args=(sid, "first message"), daemon=True)
+        a.start()
+        self.assertTrue(in_tool.wait(5))
+        b = threading.Thread(target=r.run, args=(sid, SAID), daemon=True)
+        b.start()
+        a.join(15); b.join(15)
+        return r, sid, seen
+
+    def test_door_does_not_overwrite_running_turn_and_round_is_fresh(self):
+        import types
+        srv = types.SimpleNamespace(entity_store=None)
+        srv._cg_turn, srv._cg_text = {"s1": {"resolved": "x"}}, {}
+        r, sid, seen = self._run(srv)
+        # while the first turn's tool ran, the glued message's door call left its binding alone
+        self.assertEqual(seen["during_tool"][0].get("s1"), {"resolved": "x"})
+        self.assertNotIn("garage", seen["during_tool"][1].get("s1", ""))   # not the glued words
+        # the glue made the next round a fresh person round carrying the glued words
+        self.assertTrue(seen["fresh_at_round2"].get("s1"))
+        self.assertIn("also check the garage", seen["text_at_round2"].get("s1", ""))
+
+    def test_text_does_not_leak_into_next_turn(self):
+        import types
+        from membrane import lanes
+        srv = types.SimpleNamespace(entity_store=None, _cg_text={"s1": "stale words"}, _cg_fresh={"s1": True},
+                                    _cg_turn={"s1": {}})
+        lanes._with_referent(srv, {"_turn_sid": "s1"}, [], True)    # the glued round consumes both
+        self.assertNotIn("s1", srv._cg_text)
+        self.assertNotIn("s1", srv._cg_fresh)
+        srv._cg_text["s1"] = "later"                                  # an ordinary tool round: untouched
+        lanes._with_referent(srv, {"_turn_sid": "s1"}, [], True)
+        self.assertEqual(srv._cg_text["s1"], "later")
+
+    def test_glued_message_is_minted_with_its_own_shadow(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_conversation_graph import _seat, SID as CSID
+        from membrane import convgraph as CG
+        from membrane import language as LL
+        if not LL.available():
+            self.skipTest("spaCy not installed")
+        srv, runner = _seat()
+        LL.seed(srv.entity_store)
+        u = runner.messages.add(CSID, "msg_u1", "user", "first")
+        g = runner.messages.add(CSID, "msg_g1", "user", "close goal one")
+        a = runner.messages.add(CSID, "msg_a1", "assistant", "done")
+        CG.on_glued(srv, runner, CSID, {"msgs": [(g, "[user: Dima]\nclose goal one")], "orig": {}}, a)
+        CG.on_turn_end(srv, runner, CSID, u, "first", a, "done")
+        d = srv.entity_store.docs[CG.msg_eid("msg_g1")]
+        self.assertIn("understanding", d.properties["shadow"])
+        self.assertIn(CG.msg_eid("msg_u1"), srv.entity_store.docs)

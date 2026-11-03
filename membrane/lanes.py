@@ -4193,9 +4193,11 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what
     this conversation is about now, walked off its graph) and what a pronoun in the person's
     message was resolved to (convgraph.before_turn), once."""
+    sid = str(body.get("_turn_sid") or "")
+    if is_tool_round and sid and (getattr(srv, "_cg_fresh", None) or {}).pop(sid, None):
+        is_tool_round = False       # a glued person message: this tool round is its first (fresh person round)
     if is_tool_round:
         return ctx
-    sid = str(body.get("_turn_sid") or "")
     adds = []
     if sid and sid in (getattr(srv, "_cg_turn", None) or {}):
         try:

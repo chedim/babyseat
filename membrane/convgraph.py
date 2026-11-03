@@ -387,6 +387,36 @@ def _link_pending_answers(srv, est, sid: str, u_mid: str, u: str, be, origin, pe
         _edge(be, origin, u, "answers", card)
 
 
+def on_glued(srv, runner, sid: str, glued: dict, a_info: dict) -> None:
+    """Person messages glued into the turn (#900): each gets a message entity, its answers and
+    its own shadow. The last one holds the compile state the glue round left; the turn's own
+    message gets back what it had before (run right before on_turn_end)."""
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return
+    be, origin = _rel(srv)
+    a_mid = str((a_info or {}).get("id") or "")
+    prev_u = None
+    for ui, text in glued.get("msgs") or []:
+        mid = str((ui or {}).get("id") or "")
+        if not mid or not a_mid:
+            continue
+        who, words = _words(text)
+        u = _mint(est, sid, mid, "user", words, speaker=who)
+        _link_pending_answers(srv, est, sid, mid, u, be, origin, True)
+        _shadow(srv, runner, sid, u, a_mid, words)
+        if prev_u is not None:
+            _edge(be, origin, u, "follows", prev_u)
+        prev_u = u
+        for t in _mentions(srv, words):
+            _edge(be, origin, u, "refers-to", t)
+    for k, v in (glued.get("orig") or {}).items():       # the turn's own message: its own pre-state back
+        if v is not None:
+            srv.__dict__.setdefault(k, {})[sid] = v
+        else:
+            (srv.__dict__.get(k) or {}).pop(sid, None)
+
+
 def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
                 a_info: dict, reply: str) -> None:
     """The finished chat turn into the graph (both messages, their edges, the answers to the
