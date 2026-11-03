@@ -120,6 +120,19 @@ entity, next to what the model then did (`model_tools`, the tool parts of its re
 `membrane shadow` prints the rates (read-only). Stage 2 (membrane answering
 questions itself) was dropped with the hardcoded question forms (2026-11-01).
 
+**Understanding: how much of a message compiles** (#887, 2026-11-03). Compile-first is not a
+command reader: every person message is scored, whatever it is. Each meaning node of its tree
+(a noun phrase, or an open-class word outside one; determiners, prepositions, auxiliaries,
+conjunctions, particles and punctuation are grammar, not nodes) tries to mean something the field
+knows: a verb, an adjective, a run option, or the things it names. The share that maps is
+membrane's **understanding** of the message, and the nodes that don't are its **surprise** (the
+news, and what the model will be asked to fill). `language.understand` scores it; the shadow keeps
+it as `shadow.understanding` (`nodes`, `mapped`, `share`, `surprise`), and `membrane shadow`
+prints the mean share and the most frequent surprise words. No sentence types: a reply, a report
+and a question are scored the same way. Next on the same issue: membrane asks the model about each
+surprise node only and keeps the answer as a definition, then generates the response from the
+filled message graph.
+
 **Stage 3: the model fills the gaps** (2026-11-02). A chat message that compiles except for
 words the field doesn't know is told to the model in the turn already running, with each word
 and the definition that fills it: an unknown verb (`<word> means <a verb it knows>`), an unknown
