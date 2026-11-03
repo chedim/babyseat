@@ -153,23 +153,24 @@ def test_sleep_prunes_the_negative(world):
 
 
 def test_sleep_prunes_only_below_minus_one_write_cost(world):
-    # Dima (PR 905): prune only below -1 x WRITE_COST; keep untested and in-flight
+    # Dima (PR 905): prune only below -1 x WRITE_COST; no exemption for in-flight ones
     from membrane.ch_learn import WRITE_COST
     est, vm, purse, _ = world
-    x = _ent(est, "x")
-    for i, ent in enumerate("pqrs"):
+    for i, ent in enumerate("pqrst"):
         _turn(est, vm, (_ent(est, ent), "a", i), (_ent(est, ent), "b", 10 + i))
-    c = _cands(vm)
-    assert len(c) >= 4
-    keep_half, drop, untested, flying = (t.eid for t in c[:4])
-    vm.learner._bal[keep_half] = -0.5 * WRITE_COST
+    c = [t.eid for t in _cands(vm)]
+    assert len(c) >= 5
+    half, exact, drop, untested, flying = c[:5]
+    vm.learner._bal[half] = -0.5 * WRITE_COST
+    vm.learner._bal[exact] = -1 * WRITE_COST
     vm.learner._bal[drop] = -1.5 * WRITE_COST
     vm.learner._bal[untested] = 0.0
     vm.learner._bal[flying] = -3 * WRITE_COST
     vm.learner._pending["chain"] = [(flying, "p", 1)]
     gone = vm.learner.prune()
-    assert gone == [drop]
-    assert keep_half in est.docs and untested in est.docs and flying in est.docs and drop not in est.docs
+    assert set(gone) == {drop, flying}
+    assert half in est.docs and exact in est.docs and untested in est.docs
+    assert drop not in est.docs and flying not in est.docs
 
 
 def test_a_proposal_never_acts_by_itself_it_suggests(world):
@@ -335,12 +336,12 @@ def test_sleep_edge_keeps_learner_state(world):
     x = _ent(est, "x")
     _turn(est, vm, (x, "a", 1), (x, "b", 2))
     c = _cands(vm)[0]
-    vm.learner._bal[c.eid] = -1.0
+    vm.learner._bal[c.eid] = -L.WRITE_COST
     vm.learner._hits[c.eid] = 2
     srv = types.SimpleNamespace(ch_purse=types.SimpleNamespace(awake=True, take=lambda: 0.0), ch_vm=vm)
     B.exchange(srv, {"awake": False, "asleep": True, "mode": "off"})
     assert c.eid in {t.eid for t in _cands(vm)}
-    assert vm.learner._bal[c.eid] == -1.0 and vm.learner._hits[c.eid] == 2
+    assert vm.learner._bal[c.eid] == -L.WRITE_COST and vm.learner._hits[c.eid] == 2
 
 
 def test_toy_writes_are_logged(world, monkeypatch):

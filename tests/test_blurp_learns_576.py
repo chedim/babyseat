@@ -83,17 +83,19 @@ def test_nothing_is_spent_until_blurp_says_it_is_awake(seat):
     assert B.exchange(seat, {"awake": True, "mode": "on"})["energy_delta"] == 0   # taken once
 
 
-def test_falling_asleep_keeps_the_negative(seat):
+def test_falling_asleep_prunes_below_minus_one_write_cost(seat):
     est = seat.entity_store
     B.exchange(seat, {"awake": True, "mode": "on"})
     x, y = _toy(est, "x"), _toy(est, "y")
     _turn(seat, (x, "a", 1, "person:op"), (x, "b", 2, "llm"))
     _turn(seat, (y, "a", 1, "person:op"), (y, "b", 7, "llm"))     # the "= 2" guess was wrong on y
-    bad = [t.eid for t in _cands(seat) if seat.ch_vm.learner.balance(t.eid) < 0]
-    assert bad
-    B.exchange(seat, {"awake": False, "asleep": True, "mode": "on"})
-    assert all(e in est.docs for e in bad)                        # sleep keeps the learner's state
-    assert all(seat.ch_vm.learner.balance(e) < 0 for e in bad)
+    cands = [t.eid for t in _cands(seat)]
+    assert len(cands) >= 2
+    drained, mild = cands[0], cands[1]
+    seat.ch_vm.learner._bal[drained] = -2 * L.WRITE_COST
+    seat.ch_vm.learner._bal[mild] = -0.5 * L.WRITE_COST
+    out = B.exchange(seat, {"awake": False, "asleep": True, "mode": "on"})
+    assert out["pruned"] >= 1 and drained not in est.docs and mild in est.docs
 
 
 def test_accept_grants_a_branch_and_only_then_a_proposal_suggests(seat):
@@ -246,12 +248,24 @@ def test_the_card_carries_the_learners_counts(seat):
     assert card["learner"]["candidates"] >= 1
 
 
-def test_stall_becomes_one_decision_card_naming_the_gate(seat):
-    """#897: the stall line is read by someone -- a Decision card per cause, once."""
+def test_stall_becomes_one_notice_card_naming_the_gate(seat):
+    """#897: the real check_stall line is read: one open Decision notice per cause, a closed one is replaced by a new notice."""
     est = seat.entity_store
-    seat.ch_vm.learner.check_stall = lambda: "learning stalled 3h: asleep (the purse cannot spend: Blurp is not awake); guess:asleep+4"
+    lr = seat.ch_vm.learner
+    lr.check_stall(now=0.0)                                       # the baseline
+    lr.counts["guess:asleep"] += 4
+    lr.check_stall(now=0.0)
+    lr._stall_at = 0.0
+    real = lr.check_stall
+    lr.check_stall = lambda: real(now=4 * 3600.0)
     B.exchange(seat, {"awake": False, "mode": "on"})
     B.exchange(seat, {"awake": False, "mode": "on"})
-    cards = [d for d in est.docs.values() if d.cls == "Decision" and "not learning" in (d.properties.get("name") or "")]
-    assert len(cards) == 1
-    assert "asleep" in cards[0].properties["name"] and cards[0].properties.get("status") == "open"
+    def cards():
+        return [d for d in est.docs.values() if d.cls == "Decision" and "not learning" in (d.properties.get("name") or "")]
+    assert len(cards()) == 1
+    c = cards()[0]
+    assert "asleep" in c.properties["name"] and c.properties.get("status") == "open"
+    c.properties["status"] = "closed"                             # the operator closed it
+    lr._stall_told = False
+    B.exchange(seat, {"awake": False, "mode": "on"})
+    assert len(cards()) == 2 and [d.properties.get("status") for d in cards()].count("open") == 1

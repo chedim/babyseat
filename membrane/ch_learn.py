@@ -444,13 +444,12 @@ class Learner:
 
     # -- sleep ------------------------------------------------------------------------------
     def prune(self) -> list[str]:
-        """Sleep: a candidate below -1 x WRITE_COST goes (most draining first); untested
-        (balance 0) and in-flight evidence (a pending prediction) are kept."""
+        """Sleep: a candidate whose balance is below -1 x WRITE_COST goes (most draining
+        first). Exactly -1 x (the birth charge), -0.5 x and untested ones are kept."""
         est = self.vm.est
-        flying = {c for pend in self._pending.values() for c, _p, _v in pend}
         bad = sorted((self.balance(t.eid), t.eid) for t in self.vm.triggers()
                      if (t.properties or {}).get("owner") == CH.SELF
-                     and self.balance(t.eid) < -WRITE_COST and t.eid not in flying)
+                     and self.balance(t.eid) < -WRITE_COST)
         gone = []
         for _b, eid in bad:
             if est.remove(eid):
