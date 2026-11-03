@@ -238,6 +238,10 @@ def _handler(fac: Facade):
             if ident is not None and not ident.internal:
                 self._out({"error": "for the seat's own token"}, 403)
                 return False
+            # B3 (#842): no address is a credential. JWT off, the writes (/control,
+            # /chat-in, /reach) need the seat token; JWT on, J.gate above was the door.
+            if self.command == "POST" and not _seatauth.gate(self, True):
+                return False
             return True
 
         def _body(self) -> dict:
