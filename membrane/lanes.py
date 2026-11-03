@@ -10,6 +10,7 @@ from __future__ import annotations
 from __future__ import annotations
 import hashlib
 import re
+import contextlib
 import json
 import copy
 import os
@@ -4146,6 +4147,33 @@ def _entity_points(srv, fld, m: int = 400) -> list[dict]:
 _CHAT_AGENTS = ("", "build", "plan", "phone", "speaker")     # a person's turn
 
 
+def _is_person_turn(srv, body: dict) -> bool:
+    """A person's chat turn: its session is a chat (build / plan / phone / speaker). A loop's turn,
+    or the seat's own call with no session, is not."""
+    sid = str((body or {}).get("_turn_sid") or "")
+    store = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
+    row = (getattr(store, "sessions", None) or {}).get(sid) if sid else None
+    return row is not None and str(row.get("agent") or "").strip().lower() in _CHAT_AGENTS
+
+
+from .cblite import TurnFirst as _TurnFirst
+_STAGING = _TurnFirst()     # the operator, 2026-11-03: a person's turn stages first (#756's door, for turns)
+
+
+@contextlib.contextmanager
+def staging_lane(srv, body: dict):
+    """While a person's turn stages it holds a foreground lane; every other turn (a loop's, the
+    seat's own) enters as background and parks at the door until no person's turn is staging --
+    on the event, not a clock. The 2026-11-03 gate: 86-91 s for the operator's turn while a planner
+    and three workers staged beside it in the same process."""
+    if _is_person_turn(srv, body):
+        with _STAGING.lane():
+            yield
+        return
+    with _STAGING.background(), _STAGING.lane():
+        yield
+
+
 def _is_loop_turn(srv, body: dict) -> bool:
     """#768 / #776: is this turn a loop's (a worker, the planner, a watch loop, a
     triage pass)? Its session (the body's `_turn_sid`) carries the agent
@@ -5361,6 +5389,16 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
 
     # ---- /v1/chat/completions: gate + RAG + learn; state turns internal ----
     def _v1_chat(self) -> None:
+        """The chat request: staged inside the person-first lane (staging_lane), released once
+        the turn is staged -- or in the finally, whatever path it returns by."""
+        import contextlib as _ctx
+        self._staging = _ctx.ExitStack()
+        try:
+            self._v1_chat_staged()
+        finally:
+            self._staging.close()
+
+    def _v1_chat_staged(self) -> None:
         srv = self.server
         mem = srv.membrane
         # THE DREAMER'S IDLE SIGNAL: every model-bound turn stamps the
@@ -5377,6 +5415,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             body = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
             self._forward_raw(raw); return
+        self._staging.enter_context(staging_lane(srv, body if isinstance(body, dict) else {}))
+        _st.mark("lane")                       # how long it waited at the person-first door
         # THE CONVERSATION KEY (#429): which chat this turn belongs to (the
         # client's session id, else the transcript-head hash); every capture
         # on this thread stamps it. Set on EVERY request: a kept-alive
@@ -5982,6 +6022,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
               file=sys.stderr)
         _st.keep(srv, _gate_s, tool_round=_is_tool_round)
         self._gate_s = _gate_s      # the injection card's time (#693)
+        self._staging.close()       # staged: the model call itself never holds the door
         try:
             _t_del = time.time()
             self._v1_deliver(up, raw, query, vec, verdict, ctx)
