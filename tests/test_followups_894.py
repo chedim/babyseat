@@ -102,7 +102,8 @@ class Followups(unittest.TestCase):
 
     def test_loose_unlearning_still_takes_plain_contradictions(self):
         for text in ("goal one landed today", "yes, goal one landed", "goal one just landed",
-                     "goal two and goal one landed", "goal one landed in prod"):
+                     "goal two and goal one landed", "goal one landed in prod",
+                     "goal one landed this afternoon", "goal one landed on monday", "goal one landed overnight"):
             with self.subTest(text=text):
                 self.assertTrue(self._unlearns(text))
 

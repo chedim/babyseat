@@ -1196,11 +1196,12 @@ def _says_of(tok, inside=()) -> bool:
                 if c.pos_ in ("VERB", "AUX"):
                     return False                 # "landed, or did it": a second clause
                 continue
-            if c.dep_ in ("advmod", "npadvmod") and all(w.lower_ in _CLAUSE_ADVERBS or w.i in names for w in c.subtree):
+            if c.dep_ in ("advmod", "npadvmod") and _plain_modifier(c, names):
                 continue
-            if c.dep_ == "intj" and c.lower_ in ("yes", "yeah", "yep"):
+            if c.dep_ == "intj" and c.lower_ == "yes":
                 continue
-            if c.dep_ == "prep" and c.lower_ in _PLACE_PREPS:
+            if c.dep_ == "prep" and any(o.dep_ == "pobj" and o.pos_ in ("NOUN", "PROPN", "NUM") for o in c.children) \
+                    and _plain_modifier(c, names):
                 continue
             return False
     for subj in (c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")):
@@ -1210,19 +1211,38 @@ def _says_of(tok, inside=()) -> bool:
 
 
 def _plain_subject_part(t, names) -> bool:
-    """May this word sit in a subject that says something of one thing: a name's own word, "the"/"this"/
-    "that", "and", punctuation, a number. Anything else ("hope", "no", "most", "neither", "or") may not."""
+    """May this word sit in a subject that says something of one thing: a name's own word, an article or
+    demonstrative (spaCy's PronType=Art|Dem), "and", punctuation, a number. Anything else ("hope", "no",
+    "most", "neither", "or") may not."""
     if t.i in names or t.dep_ == "punct" or t.pos_ == "NUM":
         return True
-    return (t.dep_ == "det" and t.lower_ in _SUBJECT_DETS) or (t.dep_ == "cc" and t.lower_ == "and")
+    return (t.dep_ == "det" and _art_or_dem(t)) or (t.dep_ == "cc" and t.lower_ == "and")
 
 
-_CLAUSE_ADVERBS = {"just", "today", "already", "definitely", "now", "yesterday", "again", "finally", "indeed",
-                   "really", "actually", "certainly", "surely", "recently", "earlier", "later", "there", "here",
-                   "successfully", "also", "too", "still", "tonight", "tomorrow", "this", "morning", "last",
-                   "night", "week"}
-_PLACE_PREPS = {"in", "on", "at", "by", "from", "to", "for", "after", "before", "during", "since", "into"}
-_SUBJECT_DETS = {"the", "this", "that", "these", "those"}
+def _art_or_dem(t) -> bool:
+    return bool({"Art", "Dem"} & set(t.morph.get("PronType")))
+
+
+def _plain_modifier(c, names) -> bool:
+    """A time, manner or place phrase hung on the predicate that adds nothing to what is said: structural,
+    not lexical. Its subtree carries no negative (`neg`), no determiner but an article or demonstrative
+    ("no", "any" are not), and no hedge-shaped adverb of its own ("almost certainly")."""
+    for w in c.subtree:
+        if w.i in names:
+            continue
+        if w.dep_ == "neg" or (w.dep_ == "det" and not _art_or_dem(w)):
+            return False
+        if w.dep_ in ("advmod", "npadvmod") and w.lower_ in _HEDGES:
+            return False
+    return True
+
+
+# The one word list left, for the operator to approve (Memo review on #911): adverbs of stance that
+# weaken a statement into a hope, a report or a degree. Structure cannot tell "hopefully" from
+# "definitely" (the same advmod); a nested modifier ("almost certainly") is caught structurally anyway.
+_HEDGES = {"hopefully", "presumably", "reportedly", "allegedly", "supposedly", "apparently", "seemingly",
+           "probably", "possibly", "perhaps", "maybe", "likely", "almost", "nearly", "barely", "hardly",
+           "mostly", "partly", "somewhat", "roughly"}
 
 
 def _subjects(tok, est, srv, sid) -> list:
