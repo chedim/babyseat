@@ -165,13 +165,16 @@ class BothSignals(unittest.TestCase):
 
     def test_natural_contradictions_unlearn(self):
         """Memo on #894: unlearning needs a looser rule than teaching."""
-        for msg in ("goal one landed today", "yes, goal one landed", "goal one just landed",
-                    "goal two and goal one landed"):
+        # only a sentence that compiles with no gap can contradict (#911 round 2): a word the meaning has
+        # never seen (today, yes, just, a hedge) leaves a surprise, and then nothing is unlearned
+        for msg, gone in (("goal one landed", ["landed"]), ("goal two and goal one landed", ["landed"]),
+                          ("goal one landed today", []), ("yes, goal one landed", []),
+                          ("goal one just landed", [])):
             srv, f, est, *_ = _seat()
             _say(srv, "goal two landed", "landed", "landed means status closed")
             _say(srv, "goal three landed", "landed")
             self.assertTrue(_learned(est, "landed"))
-            self.assertEqual(LL.observe_learned(srv, SID, msg), ["landed"], msg)
+            self.assertEqual(LL.observe_learned(srv, SID, msg), gone, msg)
 
     def test_a_question_or_denial_never_unlearns(self):
         for msg in ("is goal one landed?", "goal one is not landed", "if goal one landed, tell me"):
