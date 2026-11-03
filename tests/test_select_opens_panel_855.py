@@ -17,7 +17,7 @@ const fs = require('fs'); const L = require(process.argv[1]);
 const src = fs.readFileSync(process.argv[1], 'utf8');
 const a = src.indexOf('  _stepWork() {'), b = src.indexOf('  _stepWorkEdges() {');
 const body = src.slice(a, b).trim().replace(/^_stepWork\(\) \{/, '').replace(/\}\s*$/, '');
-const fn = new Function('document', 'workMarkers', 'WORK_GLYPH', body);
+const fn = new Function('document', 'workMarkers', 'WORK_GLYPH', 'markerZ', 'MARKER_Z_HOVER', body);
 const els = []; const doc = { createElement: () => { const h = {}; const el = { style: {}, h, remove() {},
   addEventListener(t, f) { h[t] = f; } }; els.push(el); return el; } };
 const log = { open: [], select: [], onSelect: [] };
@@ -25,7 +25,7 @@ const self = { _work: %s, _workEls: new Map(), _workPos: { t1: [0, 0, 0] }, slot
   labelLayer: { appendChild() {} }, _project: () => [1, 2], _stepWorkEdges() {},
   _workOpen: (id) => log.open.push(id), select: (id) => log.select.push(id),
   api: { onSelect: (m) => log.onSelect.push(m && m.id) } };
-fn.call(self, doc, L.workMarkers, L.WORK_GLYPH);
+fn.call(self, doc, L.workMarkers, L.WORK_GLYPH, L.markerZ, L.MARKER_Z_HOVER);
 els[0].h.click({});
 process.stdout.write(JSON.stringify({ log, hasDbl: !!els[0].h.dblclick }));
 """

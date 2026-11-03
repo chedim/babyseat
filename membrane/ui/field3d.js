@@ -844,7 +844,9 @@ function clickAction(sel, hit, flying) {
   return sel != null && flying ? "keep" : "unselect";
 }
 
-const F3Logic = { rocketZ, rocketGraph, rocketOrigin, ROCKET_NODE_CAP, ROCKET_SPEED, frameAround, camSave, camRestore, clickAction, selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+const MARKER_Z = { goal: 4, decision: 3, wait: 2, task: 1 }, MARKER_Z_HOVER = 10;
+function markerZ(kind) { return MARKER_Z[kind] || 1; }   // stacking: goal > decision > wait > task; hover (10) lifts above all
+const F3Logic = { markerZ, MARKER_Z_HOVER, rocketZ, rocketGraph, rocketOrigin, ROCKET_NODE_CAP, ROCKET_SPEED, frameAround, camSave, camRestore, clickAction, selectionScope, fadeFor, F3_FADE, frameSelection, workDashGroups, workShows, workMarkers, workEdges, WORK_GLYPH, blurpLayers, BLURP_STATES, faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
   currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
@@ -2566,6 +2568,7 @@ class Field3DView {
         this.labelLayer.appendChild(el); this._workEls.set(m.id, el);
       }
       el.title = (m.title || m.id) + (m.blocked ? " — blocked: " + m.why : "");
+      el.style.zIndex = String(this._workHover === m.id ? MARKER_Z_HOVER : markerZ(m.kind));
       el.style.filter = m.blocked ? "grayscale(1) drop-shadow(0 0 4px #e6194b)" : "";   // blocked looks different from plain open
       el.style.opacity = String((m.blocked ? 0.7 : 1) * (this._fadeOf ? this._fadeOf(m.id) : 1));
       const sc = this._project(m.p);
