@@ -449,6 +449,10 @@ def compile(srv, sid: str, text: str) -> list[dict]:
                 if c is not None:
                     calls.append(c)
         writes = any(c["writes"] for c in calls)
+        learned = names.pop("__learned__", [])
+        if writes and learned:                  # Memo on #894: "close the failed goals" -- a learned word
+            unmapped += [f'"{w}" is learned: name the things to change' for w in learned]
+            calls = []                          # never picks what a write acts on
         everyone = any(t.lower_ in _ALL for t in kept)
         steps.append({"verb": verb, "targets": targets, "options": options, "calls": calls, "names": names,
                       "mapped": not unmapped and bool(calls), "unmapped": unmapped,
@@ -545,6 +549,8 @@ def _span_targets(srv, sid: str, est, toks: list, unmapped: list, names: dict | 
         return []
     for a in adjs:
         adj = known.get(a.lemma_.lower()) or known.get(a.lower_)
+        if names is not None and (adj.properties or {}).get("learned"):
+            names.setdefault("__learned__", []).append(a.text)    # #894: noted, so a write can refuse it
         expr = (adj.properties or {}).get("filter") or "False"
         kept = []
         for m in members:
@@ -907,13 +913,18 @@ def _gap_eid(word: str) -> str:
     return GAP + re.sub(r"[^a-z0-9_-]+", "-", word.lower()).strip("-")
 
 
-def gap_prompt(est, text: str, words: list) -> str:
+def gap_prompt(est, text: str, words: list, facts: dict | None = None) -> str:
+    """The gap call's question. `facts`: word -> the field's candidates for it (conditions true of
+    what the message says it of, best first): the model picks one, says its own, or none (#894)."""
     from . import verbs as V
     docs = list((est.docs or {}).values())
     verbs = sorted({str((d.properties or {}).get("name") or "") for d in docs if d.cls == V.CLASS_VERB} - {""})
     adjs = sorted(n for n in _adjectives(est) if n)
+    told = "".join(f"  {w}: said of things where these hold: {'; '.join(c.replace('x.', '').replace(' == ', ' ').replace("'", '') for c in cs)}\n"
+                   for w, cs in (facts or {}).items() if cs)
     return (f"A person wrote to an AI seat: {str(text)[:1500]!r}\n"
             f"The seat could not understand these words: {', '.join(words)}.\n"
+            + (f"What the seat's field shows about them:\n{told}" if told else "") +
             "For each word, answer on its own line in one of these forms, or \"<word>: none\" when none fits:\n"
             f"  <word> means <a verb it knows>: {', '.join(verbs)}\n"
             f"  <word> means <an adjective it knows>: {', '.join(adjs)}\n"
@@ -997,17 +1008,23 @@ def _holds(est, expr: str, eid: str):
         return None
 
 
+_PLAIN = {"nsubj", "nsubjpass", "aux", "auxpass", "punct", "det", "cc", "conj", "acomp", "attr", "expl"}
+
+
 def _states(tok) -> bool:
-    """Does the word sit in a plain statement the field can check? Not a question, a negation, a
-    conditional or "whether" clause, a modal ("should be landed"), or a clause under another verb
-    ("I want goal two landed", "check whether it landed") (Memo on #894)."""
+    """Does the word sit in a plain statement the field can check? An allowlist (Memo on #894: each
+    round found more exceptions): the predicate's own parts may only be its subject, tense
+    auxiliaries (not modals: "should be"), punctuation, and its complement -- no adverb ("almost",
+    "probably", "when"), no interjection ("no, ..."), no mark ("if", "whether"), no negation -- and
+    its clause stands on its own (not under "I want", "check whether"). Not a question."""
     if _asks_or_denies(tok):
         return False
-    for t in (tok, tok.head):
-        if any(c.dep_ == "mark" or (c.dep_ == "aux" and c.tag_ == "MD") for c in t.children):
-            return False
     clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
-    return clause.dep_ not in ("xcomp", "ccomp", "advcl", "csubj")
+    for t in {tok, clause}:
+        for c in t.children:
+            if c.dep_ not in _PLAIN or (c.dep_ == "aux" and c.tag_ == "MD"):
+                return False
+    return clause.dep_ in ("ROOT", "conj")
 
 
 def observe(srv, sid: str, text: str, word: str) -> dict | None:
@@ -1040,8 +1057,15 @@ def observe(srv, sid: str, text: str, word: str) -> dict | None:
             said += [e for e in _known_targets(srv, sid, est, span) if e not in said]
         elif how == "object" and not _asks_or_denies(tok):
             acted += [e for e in _known_targets(srv, sid, est, span) if e not in acted]
+    if not said and not acted:
+        return p                                 # nothing stated or acted on: not a message about it (Memo)
     p["seen"] = int(p.get("seen") or 0) + 1
     things, held = list(p.get("things") or []), {k: list(v) for k, v in (p.get("held") or {}).items()}
+    learned = _adjectives(est).get(word.lower())
+    if learned is not None and (learned.properties or {}).get("learned"):
+        expr = (learned.properties or {}).get("filter") or "False"
+        if any(_holds(est, expr, e) is False for e in said):      # the chat now says otherwise
+            _unlearn(est, word, said)
     for e in said:
         if e not in things:
             things.append(e)
@@ -1083,8 +1107,8 @@ def _confirmed(est, a: dict, cond: str, recorded: bool = True) -> dict | None:
     peers: p ** k <= INVENT_ALPHA; 88 fulfilled of 98 goals would take ~29 things)? -> {p, k}."""
     things = list(a.get("things") or [])
     k = len(things)
-    if int(a.get("seen") or 0) < INVENT_MIN_SEEN or not k:
-        return None
+    if int(a.get("seen") or 0) < INVENT_MIN_SEEN or k < 2:
+        return None                              # one thing said twice is one thing (Memo on #894)
     if recorded and set((a.get("held") or {}).get(cond) or []) != set(things):
         return None                              # (a model's proposal is any expression: checked below)
     if not all(_holds(est, cond, e) is True for e in things):
@@ -1097,73 +1121,70 @@ def _confirmed(est, a: dict, cond: str, recorded: bool = True) -> dict | None:
     return {"p": round(pr, 3), "k": k} if pr ** k <= INVENT_ALPHA else None
 
 
-def invent(srv, sid: str, text: str, word: str, embed=None) -> dict | None:
-    """A meaning for `word` the chat's association edges confirm (see _confirmed) -> {word, kind,
-    meaning, score, p, k}, kept at once and marked invented; None otherwise (the model is asked
-    then). The word's vector ranks the candidates; the top INVENT_CANDIDATES are checked. No verb
-    is invented (Memo on #894: "please review goal one" made review = check)."""
+def candidates(srv, sid: str, text: str, word: str, embed=None) -> list:
+    """The field's candidates for `word` (#891, Memo on #894): the conditions still true of every
+    distinct thing this chat said it of, ranked by the word's vector, the top INVENT_CANDIDATES.
+    Never kept by themselves -- what's true of the things isn't what the word means -- they ride
+    the gap call, and the model picks one (or its own, or none)."""
     import numpy as np
     est = srv.entity_store
     a = observe(srv, sid, text, word)
     if not a:
-        return None
-    every = [c for c, ts in (a.get("held") or {}).items() if set(ts) == set(a.get("things") or [])
-             and all(_holds(est, c, e) is True for e in (a.get("things") or []))]   # and still true now
-    if not every:
-        return None                              # a mood word: no state held every time ("great")
+        return []
+    things = list(a.get("things") or [])
+    every = [c for c, ts in (a.get("held") or {}).items() if set(ts) == set(things)
+             and all(_holds(est, c, e) is True for e in things)]
     emb = embed or getattr(getattr(srv, "efield", None), "emb", None)
-    ranked = [(0.0, c) for c in every]
-    if emb is not None:
+    ranked = every
+    if emb is not None and every:
         try:
             vals = [c.split("==", 1)[1].strip().strip("'\"") for c in every]
             vecs = np.asarray(emb.embed([word] + vals), dtype=float)
             w, cv = vecs[0], vecs[1:]
             sims = cv @ w / ((np.linalg.norm(cv, axis=1) * (np.linalg.norm(w) or 1.0)) + 1e-12)
-            ranked = sorted(zip(sims.tolist(), every), key=lambda x: -x[0])
+            ranked = [c for _, c in sorted(zip(sims.tolist(), every), key=lambda x: -x[0])]
         except Exception:
             pass
-    for score, meaning in ranked[:INVENT_CANDIDATES]:
-        ok = _confirmed(est, a, meaning)
-        if ok is None:
-            continue
-        eid = define_adjective(est, word.lower(), meaning)
-        d = est.docs[eid]
-        d.properties = {**(d.properties or {}), "invented": True, "invented_from": str(text)[:300],
-                        "invented_score": round(float(score), 3), "invented_ts": time.time(),
-                        "invented_evidence": ok, "candidates": [m for _, m in ranked[:INVENT_CANDIDATES]]}
-        est.upsert(d, embedder=None)
-        return {"word": word, "kind": "adjective", "meaning": meaning, "score": round(float(score), 3), **ok}
-    return None
+    return ranked[:INVENT_CANDIDATES]
+
+
+def _unlearn(est, word: str, said: list) -> None:
+    """A learned meaning the chat contradicts goes back to a proposal (Memo on #894)."""
+    eid = _adj_eid(word)
+    try:
+        est.remove(eid)
+    except Exception:
+        (est.docs or {}).pop(eid, None)
+    g = (est.docs or {}).get(_gap_eid(word))
+    if g is not None:
+        g.properties = {**g.properties, "kept": False, "contradicted_by": list(said), "contradicted_ts": time.time()}
+        est.upsert(g, embedder=None)
 
 
 def confirm_proposed(srv, sid: str, text: str, word: str) -> dict | None:
-    """A meaning the model proposed for `word` (kept on its gap mark), taught once the chat backs it
-    up (the operator, 2026-11-03: the model's answers go through the same d-build): a condition by
-    _confirmed; a verb synonym once the word acted on things that verb applies to, read-only only,
-    in INVENT_MIN_SEEN messages (a write is never taught this way); another name once the word
-    recurs in INVENT_MIN_SEEN messages. -> {word, meaning} when taught."""
-    from . import verbs as V
+    """The model's proposed meaning for `word`, taught once this chat's field evidence agrees
+    (the operator, 2026-11-03: a meaning needs both -- the model's word for it and the chat's
+    evidence, k >= 2 distinct things -- and never picks a write's targets). Only a condition has
+    field evidence (_confirmed); a verb synonym or another name stays a proposal for the person to
+    teach ("X means Y"): recurrence isn't evidence (Memo: "review means show" posted "Reviewed
+    goal two."). -> {word, meaning, p, k} when taught."""
     est = srv.entity_store
     g = (est.docs or {}).get(_gap_eid(word))
     plan = ((g.properties or {}).get("proposed") or {}) if g is not None else {}
-    if not plan or (g.properties or {}).get("kept"):
+    if not plan or (g.properties or {}).get("kept") or plan.get("kind") != "adjective":
         return None
-    a = observe(srv, sid, text, word) or (est.docs or {}).get(_assoc_eid(sid, word))
-    a = a.properties if hasattr(a, "properties") else a
-    if not a or int(a.get("seen") or 0) < INVENT_MIN_SEEN:
+    a = observe(srv, sid, text, word)
+    ok = _confirmed(est, a, plan["filter"], recorded=False) if a else None
+    if ok is None:
         return None
-    if plan["kind"] == "adjective":
-        if _confirmed(est, a, plan["filter"], recorded=False) is None:
-            return None
-    elif plan["kind"] == "verb":
-        objs = list(a.get("acted_on") or [])
-        ms = [V.implementation(est, (est.docs or {}).get(e), plan["same_as"])[0] for e in objs]
-        if not objs or not all(m is not None and (m.properties or {}).get("read_only") for m in ms):
-            return None
     shown = teach(est, {"plan": plan, "word": word.lower()})
+    d = (est.docs or {}).get(_adj_eid(word))
+    if d is not None:
+        d.properties = {**d.properties, "learned": True, "learned_evidence": ok, "learned_ts": time.time()}
+        est.upsert(d, embedder=None)
     g.properties = {**g.properties, "kept": True, "confirmed_ts": time.time()}
     est.upsert(g, embedder=None)
-    return {"word": word, "meaning": shown}
+    return {"word": word, "meaning": shown, **ok}
 
 
 GAP_WAIT_S = 30.0       # #887 C: how long a person's turn waits for the gap call (the operator, 2026-11-03: 30 s)
@@ -1192,7 +1213,7 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     if not gap_fill_on():
         return None
     est = srv.entity_store
-    later = []                                   # #891: asked before, nothing kept: the conversation may still tell
+    later = []                                   # asked before, proposed: the chat may now back it up
     for w in dict.fromkeys(str(w).strip() for w in words):
         g = (est.docs or {}).get(_gap_eid(w)) if w else None
         if g is not None and not (g.properties or {}).get("kept"):
@@ -1200,18 +1221,9 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
                 ok = confirm_proposed(srv, sid, text, w)
             except Exception:
                 ok = None
-            if ok is not None:                   # the model's proposal, now backed by the chat
+            if ok is not None:
                 later.append({"word": w, "answer": (g.properties or {}).get("answer"), "kept": True,
                               "meaning": ok["meaning"], "confirmed": True})
-                continue
-            try:
-                inv = invent(srv, sid, text, w)
-            except Exception:
-                inv = None
-            if inv is not None:
-                _mark_asked(est, sid, w, inv["meaning"], True, invented=True)
-                later.append({"word": w, "answer": inv["meaning"], "kept": True, "meaning": inv["meaning"],
-                              "invented": True, "score": inv["score"]})
     wanted = [w for w in dict.fromkeys(str(w).strip() for w in words) if w and _gap_eid(w) not in (est.docs or {})]
     with _ASKING_LOCK:
         todo = [w for w in wanted if w.lower() not in _ASKING]
@@ -1220,25 +1232,19 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     if not todo:
         return {"words": later, "usage": {}, **({"pending": pending} if pending else {})}
     try:
-        invented = list(later)                   # #891: the conversation's associations first, the model for the rest
-        for w in list(todo):
+        facts = {}
+        for w in todo:                           # the field's candidates ride the question (#894)
             try:
-                inv = invent(srv, sid, text, w)
+                facts[w] = candidates(srv, sid, text, w)
             except Exception:
-                inv = None
-            if inv is not None:
-                _mark_asked(est, sid, w, inv["meaning"], True, invented=True)
-                invented.append({"word": w, "answer": inv["meaning"], "kept": True, "meaning": inv["meaning"],
-                                 "invented": True, "score": inv["score"]})
-        ask_for = [w for w in todo if w not in {i["word"] for i in invented}]
-        if not ask_for:
-            return {"words": invented, "usage": {}, **({"pending": pending} if pending else {})}
+                facts[w] = []
+        ask_for = list(todo)
         try:
-            reply, usage = (ask or _ask_model)(gap_prompt(est, text, ask_for))
+            reply, usage = (ask or _ask_model)(gap_prompt(est, text, ask_for, facts))
         except Exception as e:
-            return {"words": invented, "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
+            return {"words": later, "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
         got = _keep_answers(srv, sid, est, ask_for, reply, usage, pending, text)
-        got["words"] = invented + got["words"]
+        got["words"] = later + got["words"]
         return got
     finally:
         with _ASKING_LOCK:
@@ -1297,11 +1303,12 @@ def shadow_report(rows: list[dict]) -> dict:
 
 
 def _novelty(rows: list[dict]) -> dict:
-    """#891: how the filled words got their meaning -- invented by tensors, kept from the model, none."""
+    """#891: how the filled words fared -- learned (the model's word, the chat's evidence),
+    proposed and waiting, none."""
     ws = [w for r in rows for w in (((r.get("filled") or {}).get("words")) or []) if isinstance(w, dict)]
-    return {"invented": sum(1 for w in ws if w.get("invented")),
-            "model_kept": sum(1 for w in ws if w.get("kept") and not w.get("invented")),
-            "none": sum(1 for w in ws if not w.get("kept"))}
+    return {"learned": sum(1 for w in ws if w.get("kept")),
+            "proposed": sum(1 for w in ws if w.get("proposed") and not w.get("kept")),
+            "none": sum(1 for w in ws if not w.get("kept") and not w.get("proposed"))}
 
 
 def shadow_cli(argv=None) -> int:
