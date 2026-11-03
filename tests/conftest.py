@@ -50,6 +50,24 @@ import pytest as _pytest
 _REAL_REQUEST = None
 
 
+_PKG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "membrane")
+_PKG_DIR = os.path.normpath(_PKG_DIR) + os.sep
+
+
+def _called_by_seat_code() -> bool:
+    """True when the first frame above the stdlib http/urllib layers is seat code."""
+    import sys
+    f = sys._getframe(2)
+    while f is not None:
+        fn = os.path.normpath(f.f_code.co_filename)
+        if fn.startswith(_PKG_DIR):
+            return True
+        if os.sep + "tests" + os.sep in fn or "pytest" in fn:
+            return False
+        f = f.f_back
+    return False
+
+
 @_pytest.fixture(autouse=True)
 def _seat_credential(request, monkeypatch):
     import http.client as hc
@@ -60,6 +78,10 @@ def _seat_credential(request, monkeypatch):
 
     def request_(self, method, url, body=None, headers=None, *a, **kw):
         h = dict(headers or {})
+        if _called_by_seat_code():
+            # an internal caller (membrane/*) must carry its own credential
+            # (seatauth.loopback_headers); the hook only stands in for TEST clients
+            return real(self, method, url, body, h, *a, **kw)
         low = {k.lower() for k in h}
         if (os.environ.get("MEMBRANE_JWT", "0") in ("0", "", "false", "off")
                 and not os.environ.get("MEMBRANE_JWT_SECRET") and not os.environ.get("MEMBRANE_JWT_SECRET_FILE")
