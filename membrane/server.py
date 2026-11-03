@@ -4718,7 +4718,14 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             _ma = str(b.get("agent") or "").strip()
             if _ma in ("build", "plan"):
                 _row = (sessions.sessions or {}).get(sid)
-                if _row is not None and _row.get("agent") != _ma:
+                # a planner:/worker:/watch: loop session keeps its identity (#915)
+                _cur = str(_row.get("agent") or "") if _row is not None else ""
+                try:
+                    from .jobs import _is_loop as _jl
+                    _loop_row = _jl(type("_S", (), {"sessions": sessions, "_agents": {}})(), sid)
+                except Exception:
+                    _loop_row = False
+                if _row is not None and _row.get("agent") != _ma and not _loop_row:
                     _row["agent"] = _ma
                     sessions.flush()   # the public form (the lock's owned)
             # #337: Blurp's private chat -- no speaker lane, no model turn
