@@ -752,7 +752,7 @@ TOOLS_NOTE = _full_names(
     "reply on its own. No \"Open decisions\" footers: questions for the "
     "person are Decision cards. A turn ends after 5 minutes of silence and a "
     "running tool call is silent, so a command that may run longer than about "
-    "4 minutes is started detached (a method whose command is "
+    "4 minutes must start detached (a method whose command is "
     "'nohup <command> > <log> 2>&1 &') or as an entity script, and checked after.")
 
 
