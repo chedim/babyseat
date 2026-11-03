@@ -737,7 +737,12 @@ def _means(srv, sid: str, est, doc, span, pos: str, adjectives: dict) -> bool:
 
 def _known_targets(srv, sid: str, est, span) -> list:
     """What a node names, without the Concepts (a phrase membrane kept for a pronoun is not a
-    meaning it knows); [] when any of it doesn't map."""
+    meaning it knows); [] when any of it doesn't map. A pronoun means only what its register
+    holds, never a thing that happens to be named like it ("I": the predictor heartbeat)."""
+    from . import convgraph as CG
+    words = [t for t in span if t.pos_ != "DET"]
+    if len(words) == 1 and words[0].pos_ == "PRON" and words[0].lower_ not in CG.FORMS:
+        return []
     unmapped: list = []
     try:
         got = _span_targets(srv, sid, est, list(span), unmapped)
