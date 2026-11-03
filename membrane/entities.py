@@ -1715,16 +1715,23 @@ class EntityStore(MultiParentOps, TimelineOps):
             except Exception as e:
                 print(f"[entities] save after close failed ({e})", file=sys.stderr)
             return
-        if self._save_timer is None:
-            th = threading.Timer(self.SAVE_DEBOUNCE_S, self._flush_save)
-            th.daemon = True
-            self._save_timer = th
-            th.start()
+        if self._save_timer is None and not getattr(self, "_saving", False):
+            self._arm_save()
+
+    def _arm_save(self) -> None:
+        th = threading.Timer(self.SAVE_DEBOUNCE_S, self._flush_save)
+        th.daemon = True
+        self._save_timer = th
+        th.start()
 
     def _flush_save(self) -> None:
+        # ONE SAVE AT A TIME (2026-11-03: a drain found 150 save threads waiting on the database
+        # thread). A write during this save only marks the store dirty -- save_soon arms no timer
+        # while one runs -- and this save re-arms one timer when it ends.
         self._save_timer = None
         if not self._dirty:
             return
+        self._saving = True
         try:
             # THE LOST MARK (2026-10-11 sweep): clearing _dirty AFTER the save
             # erased the mark of a write that landed DURING it -- that write
@@ -1738,8 +1745,9 @@ class EntityStore(MultiParentOps, TimelineOps):
             # (the file never starves because poison exists)
             if not getattr(self, "_side_saved", True):
                 self._dirty = True
-                if self._save_timer is None:
-                    self.save_soon()
+            self._saving = False
+            if self._dirty and self._save_timer is None and not getattr(self, "_closed", False):
+                self._arm_save()                # what came in during the save, one interval later
 
     def flush(self) -> None:
         """Make pending store writes durable NOW (tests, shutdown)."""
