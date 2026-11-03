@@ -4181,6 +4181,14 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
     return recon
 
 
+
+def _is_operator(owner: str) -> bool:
+    """A chat owner who is the seat's operator: the tokenless `owner`, or MEMBRANE_OPERATOR's
+    sub (#797's one-chat migration reads the same). Its on/off values (0/1) are never a sub."""
+    from .server import OWNER_SUB
+    op = os.environ.get("MEMBRANE_OPERATOR", "").strip()
+    return owner == OWNER_SUB or (bool(op) and op not in ("0", "1", "false", "true") and owner == op)
+
 def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what
     this conversation is about now, walked off its graph) and what a pronoun in the person's
@@ -4214,7 +4222,8 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
         except Exception:
             pass
     _sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
-    if said and _sess is not None and ((_sess.get(sid) or {}).get("owner")):
+    _owner = str((_sess.get(sid) or {}).get("owner") or "") if said and _sess is not None else ""
+    if said and _owner and not _is_operator(_owner):
         said = None                               # a guest's chat (a token person, the HA relay): no program
     if said:
         try:                                      # living language: what the message compiles to
