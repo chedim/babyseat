@@ -31,14 +31,17 @@ class Fake:
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class GapFill(unittest.TestCase):
-    def test_a_kept_answer_is_understood_next_time(self):
+    def test_an_answer_is_proposed_and_a_write_synonym_never_taught(self):
+        """2026-11-03: the model's answers go through the d-build; "finish means close" maps onto a
+        write, so it is only ever a proposal."""
         srv, f, est, *_ = _world()
         ask = Fake("finish means close")
         got = LL.fill_gaps(srv, SID, "finish the goals", ["finish"], ask=ask)
-        self.assertEqual([(g["word"], g["kept"]) for g in got["words"]], [("finish", True)])
+        self.assertEqual([(g["word"], g["kept"], g["proposed"]) for g in got["words"]], [("finish", False, True)])
         self.assertIn("finish", ask.prompts[0])
         self.assertIn("close", ask.prompts[0])               # the verbs the field knows ride the question
-        self.assertEqual(LL.understand(srv, SID, "finish the goals")["share"], 1.0)
+        LL.fill_gaps(srv, SID, "finish goal one", ["finish"], ask=ask)
+        self.assertEqual(LL.understand(srv, SID, "finish the goals")["surprise"], ["finish"])
 
     def test_a_word_is_asked_once(self):
         srv, *_ = _world()

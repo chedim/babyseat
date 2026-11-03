@@ -95,7 +95,7 @@ class BeforeTheTurn(unittest.TestCase):
         self.assertEqual(len(asked), 1)              # a question invents nothing (Memo on #894): the model
         [(sid, text)] = posted
         self.assertTrue(text.startswith(MARK), text)
-        self.assertIn("goal two is shut", text)
+        self.assertIn("goal two: closed", text)          # "shut" is only proposed after one message
         self.assertIn("membrane already said", ctx)
         self.assertIn("it ran nothing", ctx)
 

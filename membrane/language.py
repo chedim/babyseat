@@ -979,11 +979,13 @@ def _state_values(est, eid: str) -> list:
 
 
 INVENT_MIN_SEEN = 2         # the operator, 2026-11-03: messages that must agree before an invention is used
+INVENT_ALPHA = 0.05         # the operator, 2026-11-03: the chance-agreement limit (p ** k, see _confirmed)
 ASSOC = MEMBRANE_NS + "assoc:"
 
 
-def _assoc_eid(word: str) -> str:
-    return ASSOC + re.sub(r"[^a-z0-9_-]+", "-", word.lower()).strip("-")
+def _assoc_eid(sid: str, word: str) -> str:
+    """Per chat (the operator: "unique to the convo associations"): a guest's words never mix in."""
+    return ASSOC + re.sub(r"[^a-z0-9_-]+", "-", f"{sid}:{word}".lower()).strip("-")
 
 
 def _holds(est, expr: str, eid: str):
@@ -995,65 +997,118 @@ def _holds(est, expr: str, eid: str):
         return None
 
 
+def _states(tok) -> bool:
+    """Does the word sit in a plain statement the field can check? Not a question, a negation, a
+    conditional or "whether" clause, a modal ("should be landed"), or a clause under another verb
+    ("I want goal two landed", "check whether it landed") (Memo on #894)."""
+    if _asks_or_denies(tok):
+        return False
+    for t in (tok, tok.head):
+        if any(c.dep_ == "mark" or (c.dep_ == "aux" and c.tag_ == "MD") for c in t.children):
+            return False
+    clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
+    return clause.dep_ not in ("xcomp", "ccomp", "advcl", "csubj")
+
+
 def observe(srv, sid: str, text: str, word: str) -> dict | None:
-    """The word's association edges for this message (the operator, 2026-11-03: "unique to the
-    convo associations"): the things the parse ties it to as a state, and which of their one-word
-    states held. Kept on membrane::assoc:<word> as counts ({n, held: {condition: messages}}) plus a
-    `said_of` edge to each thing; a message is counted once. None when the message ties it to
-    nothing it can be checked against (a question, a negation, an action, nothing named)."""
+    """The word's association edges in this chat for this message (the operator, 2026-11-03: "unique
+    to the convo associations"): every message it appears in (`seen`), the distinct things a plain
+    statement says it of (`things`, a `said_of` edge each) with which of their one-word states held
+    (`held`: condition -> those things), and the distinct things it acts on as a verb (`acted_on`).
+    Kept on membrane::assoc:<chat>:<word>; a message is counted once. None: the word isn't in it."""
     est = srv.entity_store
     if " " in word.strip():
         return None
     doc = _doc(text)
     tok = next((t for t in doc if t.text == word or t.lower_ == word.lower()), None)
-    if tok is None or _asks_or_denies(tok):
+    if tok is None:
         return None
-    things: list = []
-    for span, pos in _meaning_nodes(doc, _names(est)):
-        if tok.i not in range(span.start, span.end) and _tie(tok, span) == "state":
-            things += [e for e in _known_targets(srv, sid, est, span) if e not in things]
-    if not things:
-        return None
-    held = None                                  # the conditions true of every thing it was said of
-    for e in things:
-        here = {f"x.{k} == {v!r}" for k, v in _state_values(est, e)}
-        held = here if held is None else held & here
-    eid = _assoc_eid(word)
+    eid = _assoc_eid(sid, word)
     d = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls="Association", properties={
-        "name": word.lower(), "n": 0, "held": {}, "silent_birth": True})
+        "name": word.lower(), "sid": sid, "seen": 0, "things": [], "held": {}, "acted_on": [],
+        "silent_birth": True})
     p = dict(d.properties or {})
-    key = f"{sid}:{' '.join(str(text).split())[:200]}"
-    if p.get("last") != key:                     # the same message counted once (before and after its turn)
-        p["n"] = int(p.get("n") or 0) + 1
-        h = dict(p.get("held") or {})
-        for c in held or ():
-            h[c] = int(h.get(c) or 0) + 1
-        p["held"], p["last"], p["ts"] = h, key, time.time()
-        d.properties = p
-        est.upsert(d, embedder=None)
-        try:
-            from . import convgraph as CG
-            be, origin = CG._rel(srv)
-            for e in things:
-                CG._edge(be, origin, eid, "said_of", e)
-        except Exception:
-            pass
-    return {"n": int(p["n"]), "held": dict(p["held"]), "things": things}
+    key = " ".join(str(text).split())[:200]
+    if p.get("last") == key:                     # the same message, before and after its turn: once
+        return p
+    said, acted = [], []
+    for span, pos in _meaning_nodes(doc, _names(est)):
+        if tok.i in range(span.start, span.end):
+            continue
+        how = _tie(tok, span)
+        if how == "state" and _states(tok):
+            said += [e for e in _known_targets(srv, sid, est, span) if e not in said]
+        elif how == "object" and not _asks_or_denies(tok):
+            acted += [e for e in _known_targets(srv, sid, est, span) if e not in acted]
+    p["seen"] = int(p.get("seen") or 0) + 1
+    things, held = list(p.get("things") or []), {k: list(v) for k, v in (p.get("held") or {}).items()}
+    for e in said:
+        if e not in things:
+            things.append(e)
+        for k, v in _state_values(est, e):
+            c = f"x.{k} == {v!r}"
+            if e not in held.setdefault(c, []):
+                held[c].append(e)
+    p["acted_on"] = list(dict.fromkeys(list(p.get("acted_on") or []) + acted))
+    p.update(things=things, held=held, last=key, ts=time.time())
+    d.properties = p
+    est.upsert(d, embedder=None)
+    try:
+        from . import convgraph as CG
+        be, origin = CG._rel(srv)
+        for e in said:
+            CG._edge(be, origin, eid, "said_of", e)
+        for e in acted:
+            CG._edge(be, origin, eid, "acts_on", e)
+    except Exception:
+        pass
+    return p
+
+
+def _peers(est, things: list) -> list:
+    """The things' siblings (sharing a parent), or else their class: what a state's base rate is over."""
+    from .entities import MultiParentOps
+    docs = est.docs or {}
+    parents = {q for e in things if docs.get(e) is not None for q in MultiParentOps._parents_of(docs[e].properties or {})}
+    if parents:
+        return [d.eid for d in list(docs.values())
+                if set(MultiParentOps._parents_of(d.properties or {})) & parents]
+    classes = {docs[e].cls for e in things if docs.get(e) is not None}
+    return [d.eid for d in list(docs.values()) if d.cls in classes]
+
+
+def _confirmed(est, a: dict, cond: str, recorded: bool = True) -> dict | None:
+    """Does the chat's evidence carry `cond`: said of k distinct things, true of every one, over at
+    least INVENT_MIN_SEEN messages, and too rare to agree by chance (its base rate p over their
+    peers: p ** k <= INVENT_ALPHA; 88 fulfilled of 98 goals would take ~29 things)? -> {p, k}."""
+    things = list(a.get("things") or [])
+    k = len(things)
+    if int(a.get("seen") or 0) < INVENT_MIN_SEEN or not k:
+        return None
+    if recorded and set((a.get("held") or {}).get(cond) or []) != set(things):
+        return None                              # (a model's proposal is any expression: checked below)
+    if not all(_holds(est, cond, e) is True for e in things):
+        return None
+    vals = [_holds(est, cond, e) for e in _peers(est, things)]
+    vals = [v for v in vals if v is not None]
+    if not vals or all(vals):
+        return None                              # true of every such thing: it can't fail, so it says nothing
+    pr = sum(1 for v in vals if v) / len(vals)
+    return {"p": round(pr, 3), "k": k} if pr ** k <= INVENT_ALPHA else None
 
 
 def invent(srv, sid: str, text: str, word: str, embed=None) -> dict | None:
-    """A meaning for `word` the conversation's association edges confirm -> {word, kind, meaning,
-    score, n}, kept at once and marked invented; None otherwise (the model is asked then). The
-    candidates are the conditions that held every time the word was said of something, over at
-    least INVENT_MIN_SEEN messages, and that can fail (false for some other thing of the class).
-    The word's vector ranks them; the top INVENT_CANDIDATES are checked. No verb is invented (Memo
-    on #894: "please review goal one" made review = check, so a real command would only read)."""
+    """A meaning for `word` the chat's association edges confirm (see _confirmed) -> {word, kind,
+    meaning, score, p, k}, kept at once and marked invented; None otherwise (the model is asked
+    then). The word's vector ranks the candidates; the top INVENT_CANDIDATES are checked. No verb
+    is invented (Memo on #894: "please review goal one" made review = check)."""
     import numpy as np
     est = srv.entity_store
-    seen = observe(srv, sid, text, word)
-    if seen is None or seen["n"] < INVENT_MIN_SEEN:
+    a = observe(srv, sid, text, word)
+    if not a:
         return None
-    every = [c for c, k in seen["held"].items() if k >= seen["n"]]
+    every = [c for c, ts in (a.get("held") or {}).items() if set(ts) == set(a.get("things") or [])
+             and all(_holds(est, c, e) is True for e in (a.get("things") or []))]   # and still true now
     if not every:
         return None                              # a mood word: no state held every time ("great")
     emb = embed or getattr(getattr(srv, "efield", None), "emb", None)
@@ -1067,24 +1122,48 @@ def invent(srv, sid: str, text: str, word: str, embed=None) -> dict | None:
             ranked = sorted(zip(sims.tolist(), every), key=lambda x: -x[0])
         except Exception:
             pass
-    ranked = ranked[:INVENT_CANDIDATES]
-    things = seen["things"]
-    classes = {(est.docs.get(e).cls if est.docs.get(e) is not None else "") for e in things}
-    peers = [d.eid for d in list((est.docs or {}).values()) if d.cls in classes and d.eid not in things]
-    for score, meaning in ranked:
-        if not all(_holds(est, meaning, e) is True for e in things):
+    for score, meaning in ranked[:INVENT_CANDIDATES]:
+        ok = _confirmed(est, a, meaning)
+        if ok is None:
             continue
-        if not any(_holds(est, meaning, e) is False for e in peers):
-            continue                             # true of every such thing: it can't fail, so it says nothing
         eid = define_adjective(est, word.lower(), meaning)
         d = est.docs[eid]
         d.properties = {**(d.properties or {}), "invented": True, "invented_from": str(text)[:300],
                         "invented_score": round(float(score), 3), "invented_ts": time.time(),
-                        "invented_seen": seen["n"], "candidates": [m for _, m in ranked]}
+                        "invented_evidence": ok, "candidates": [m for _, m in ranked[:INVENT_CANDIDATES]]}
         est.upsert(d, embedder=None)
-        return {"word": word, "kind": "adjective", "meaning": meaning, "score": round(float(score), 3),
-                "n": seen["n"]}
+        return {"word": word, "kind": "adjective", "meaning": meaning, "score": round(float(score), 3), **ok}
     return None
+
+
+def confirm_proposed(srv, sid: str, text: str, word: str) -> dict | None:
+    """A meaning the model proposed for `word` (kept on its gap mark), taught once the chat backs it
+    up (the operator, 2026-11-03: the model's answers go through the same d-build): a condition by
+    _confirmed; a verb synonym once the word acted on things that verb applies to, read-only only,
+    in INVENT_MIN_SEEN messages (a write is never taught this way); another name once the word
+    recurs in INVENT_MIN_SEEN messages. -> {word, meaning} when taught."""
+    from . import verbs as V
+    est = srv.entity_store
+    g = (est.docs or {}).get(_gap_eid(word))
+    plan = ((g.properties or {}).get("proposed") or {}) if g is not None else {}
+    if not plan or (g.properties or {}).get("kept"):
+        return None
+    a = observe(srv, sid, text, word) or (est.docs or {}).get(_assoc_eid(sid, word))
+    a = a.properties if hasattr(a, "properties") else a
+    if not a or int(a.get("seen") or 0) < INVENT_MIN_SEEN:
+        return None
+    if plan["kind"] == "adjective":
+        if _confirmed(est, a, plan["filter"], recorded=False) is None:
+            return None
+    elif plan["kind"] == "verb":
+        objs = list(a.get("acted_on") or [])
+        ms = [V.implementation(est, (est.docs or {}).get(e), plan["same_as"])[0] for e in objs]
+        if not objs or not all(m is not None and (m.properties or {}).get("read_only") for m in ms):
+            return None
+    shown = teach(est, {"plan": plan, "word": word.lower()})
+    g.properties = {**g.properties, "kept": True, "confirmed_ts": time.time()}
+    est.upsert(g, embedder=None)
+    return {"word": word, "meaning": shown}
 
 
 GAP_WAIT_S = 30.0       # #887 C: how long a person's turn waits for the gap call (the operator, 2026-11-03: 30 s)
@@ -1118,6 +1197,14 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
         g = (est.docs or {}).get(_gap_eid(w)) if w else None
         if g is not None and not (g.properties or {}).get("kept"):
             try:
+                ok = confirm_proposed(srv, sid, text, w)
+            except Exception:
+                ok = None
+            if ok is not None:                   # the model's proposal, now backed by the chat
+                later.append({"word": w, "answer": (g.properties or {}).get("answer"), "kept": True,
+                              "meaning": ok["meaning"], "confirmed": True})
+                continue
+            try:
                 inv = invent(srv, sid, text, w)
             except Exception:
                 inv = None
@@ -1150,7 +1237,7 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
             reply, usage = (ask or _ask_model)(gap_prompt(est, text, ask_for))
         except Exception as e:
             return {"words": invented, "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
-        got = _keep_answers(srv, sid, est, ask_for, reply, usage, pending)
+        got = _keep_answers(srv, sid, est, ask_for, reply, usage, pending, text)
         got["words"] = invented + got["words"]
         return got
     finally:
@@ -1158,13 +1245,14 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
             _ASKING.difference_update(w.lower() for w in todo)
 
 
-def _mark_asked(est, sid: str, w: str, answer, kept: bool, invented: bool = False) -> None:
+def _mark_asked(est, sid: str, w: str, answer, kept: bool, invented: bool = False, proposed=None) -> None:
     est.upsert(QuantumEntity(eid=_gap_eid(w), cls="Gap", properties={
         "name": w.lower(), "answer": answer, "kept": kept, "asked_ts": time.time(), "sid": sid,
-        "silent_birth": True, **({"invented": True} if invented else {})}), embedder=None)
+        "silent_birth": True, **({"invented": True} if invented else {}),
+        **({"proposed": proposed} if proposed else {})}), embedder=None)
 
 
-def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list) -> dict:
+def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list, text: str = "") -> dict:
     answers: dict = {}
     for line in str(reply or "").splitlines():
         m = _NONE.match(line)
@@ -1177,16 +1265,17 @@ def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list) -
     out = []
     for w in todo:
         meaning = answers.get(w.lower())
-        kept, shown = False, None
+        plan = None
         if meaning:
             try:
                 step = _define_step(srv, est, w.lower(), meaning, f"{w} means {meaning}")
-                if step["mapped"]:
-                    shown, kept = teach(est, step), True
+                plan = step["plan"] if step["mapped"] else None
             except Exception:
-                kept = False
-        _mark_asked(est, sid, w, meaning, kept)
-        out.append({"word": w, "answer": meaning, "kept": kept, "meaning": shown})
+                plan = None
+        _mark_asked(est, sid, w, meaning, False, proposed=plan)  # proposed: taught once the chat backs it up
+        got = confirm_proposed(srv, sid, text, w) if plan else None
+        out.append({"word": w, "answer": meaning, "kept": got is not None, "proposed": plan is not None,
+                    "meaning": (got or {}).get("meaning")})
     return {"words": out, "usage": usage, **({"pending": pending} if pending else {})}
 
 

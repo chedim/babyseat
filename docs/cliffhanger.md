@@ -149,19 +149,26 @@ already being asked is never asked again at the same time. `MEMBRANE_ANSWER=0` t
 post off, stage 3's too.
 
 **Novelty: a meaning invented as code, confirmed by the conversation** (#891, 2026-11-03). Each
-person message keeps its surprise words' **association edges** (`language.observe`): the things
-the parse ties the word to as a state ("846 landed", "goal one is open"; never a question, a
-negation, or an action with its own object), a `said_of` edge to each, and which of their
-one-word states held, as counts on `membrane::assoc:<word>` (`n` messages, `held` per condition).
-An invention (`language.invent`) is used only when a condition held every time the word was said
-of something, over at least `INVENT_MIN_SEEN` (2) messages, and can fail (false for some other
-thing of the class): a mood word ("great", said of a closed goal and an open one) never gets one.
-The word's vector (the seat's embedder) ranks the confirmed conditions and the top
-`INVENT_CANDIDATES` (5) are checked; vectors alone can't decide, since "great ~ fulfilled" (0.70)
-scores above "landed ~ merged" (0.60). The first that passes is kept as an adjective marked
-`invented`. No verb is invented: a command must not become a read. A word asked before with
-nothing kept is still observed, and can be invented later. A later definition marks the invention
-`corrected`; `membrane shadow` counts `novelty` (invented, kept from the model, none).
+chat keeps its surprise words' **association edges** (`language.observe`, on
+`membrane::assoc:<chat>:<word>`): every message the word appears in, the distinct things a
+plain statement says it of (`said_of` edges, with which of their one-word states held), and the
+distinct things it acts on as a verb (`acts_on`). A question, a negation, a conditional or
+"whether" clause, a modal ("should be landed") or a clause under another verb ("I want goal two
+landed") states nothing, and counts nothing. A meaning is used only when the chat's evidence
+carries it (`_confirmed`): true of every distinct thing the word was said of, over at least
+`INVENT_MIN_SEEN` (2) messages, able to fail, and too rare among those things' siblings to agree
+by chance. For a state with base rate *p*, *k* things need *p*ᵏ ≤ `INVENT_ALPHA` (0.05). *open*
+(5 of 98 goals) needs 2 goals; *fulfilled* (88 of 98) would need ~29, so it never means a word.
+The same thing said twice is one thing. The word's vector (the seat's embedder) only ranks the
+still-true candidates, top `INVENT_CANDIDATES` (5), because vectors alone can't decide: "great ~
+fulfilled" (0.70) scores above "landed ~ merged" (0.60). An invention is kept as an adjective
+marked `invented` with its evidence; no verb is ever invented. **The model's answers go through
+the same rule** (`confirm_proposed`): Haiku's answer is kept as a `proposed` meaning on the
+word's gap mark and taught only once the chat backs it up. A condition is taught by the same
+evidence, a verb synonym once the word acted on things that verb applies to (read-only only: a
+write synonym, like the "keep = pause" Haiku taught on 2026-11-03, is never taught this way), and
+another name once the word recurs. A later definition marks an invention `corrected`;
+`membrane shadow` counts `novelty` (invented, kept from the model, none).
 
 **Stage 3: the model fills the gaps** (2026-11-02). A chat message that compiles except for
 words the field doesn't know is told to the model in the turn already running, with each word
