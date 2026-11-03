@@ -485,7 +485,15 @@ def work_graph(est) -> dict:
                                if b.eid in docs and GG._unfinished(b)]
     nodes.sort(key=lambda n: (("goal", "task", "wait", "decision").index(n["kind"]), n["title"]))
     return {"nodes": nodes, "edges": [e for e in raw if e["from"] in ids and e["to"] in ids],
-            "runs": _finished_runs(est)}
+            "runs": _finished_runs(est) if rocket_runs_on() else [],
+            "rocket": rocket_runs_on()}
+
+
+def rocket_runs_on() -> bool:
+    """#884: the rocket view of finished runs is OFF by default; MEMBRANE_ROCKET_RUNS=1 turns it on
+    (nothing is deleted -- the run results stay in the store, only the feed and the drawing are gated)."""
+    import os
+    return os.environ.get("MEMBRANE_ROCKET_RUNS", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 ROCKET_MAX_NODES = 12     # nodes kept per run's miniature graph (default until the operator answers the cap card)
