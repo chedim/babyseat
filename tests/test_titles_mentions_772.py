@@ -105,3 +105,52 @@ def test_rel_titles_are_escaped():
     assert "<A>" not in s and "B & co" not in s
     empty = _js('console.log(JSON.stringify(F.relHtml(%s,"membrane::task:c")))' % REFG)
     assert empty["waitingOn"] == ""
+
+
+@NODE
+def test_selected_entity_is_plain_in_text_chat_and_logs():
+    out = _js('const g=%s;const h={properties:{summary:"x membrane::task:a:k1"}};'
+              'console.log(JSON.stringify([F.mentionHtml(g,"membrane::task:a:k1 and membrane::goal:g","membrane::task:a:k1"),'
+              'F.windowInfo(g,"membrane::task:a:k1",h,[]).textHtml]))' % GRAPH)
+    assert 'data-eid="membrane::task:a:k1"' not in json.dumps(out)
+    assert "Find the issue" in out[0] and "Find the issue" in out[1]
+    other = _js('console.log(JSON.stringify(F.mentionHtml(%s,"membrane::task:a:k1","membrane::goal:g")))' % GRAPH)
+    assert 'data-eid="membrane::task:a:k1"' in other
+
+
+@NODE
+def test_goal_in_info_is_a_link():
+    g = ('{nodes:[{id:"t",kind:"task",title:"T",status:"open",waiting_on:[]},{id:"g",kind:"goal",title:"The <goal>",status:"open"}],'
+         'edges:[{from:"t",to:"g",rel:"of"}]}')
+    out = _js('console.log(JSON.stringify(F.relHtml(%s,"t")))' % g)
+    assert 'data-eid="g"' in out["goal"] and "The &lt;goal&gt;" in out["goal"]
+    assert _js('console.log(JSON.stringify(F.relHtml(%s,"g")))' % g)["goal"] == ""
+
+
+@NODE
+def test_mention_click_selects_the_entity_in_the_scene():
+    out = _js('''
+let Cls; global.HTMLElement = class {}; global.customElements = {get: () => null, define: (n, c) => { Cls = c; }};
+delete require.cache[require.resolve(%r)];
+const F2 = require(%r);
+const v = new Cls(); const calls = [];
+v.open = (id) => calls.push(["open", id]);
+v._scene = {select: (id) => calls.push(["select", id]), api: {onSelect: (id) => calls.push(["onSelect", id])}};
+v.querySelector = () => null; v.innerHTML = ""; v.style = {};
+v._graph = {nodes: [], edges: []}; v._open = null;
+v._draw();
+v.onclick({target: {closest: (s) => s === ".ment" ? {getAttribute: () => "membrane::task:z"} : null}, preventDefault() {}});
+console.log(JSON.stringify(calls));''' % ((str(ROOT / "membrane" / "ui" / "fieldview.js"),) * 2))
+    assert out == [["open", "membrane::task:z"], ["select", "membrane::task:z"], ["onSelect", "membrane::task:z"]]
+
+
+def test_3d_title_resolves_field_mirror_ids():
+    from membrane.lanes import _field3d_title
+    from types import SimpleNamespace as NS
+    docs = {"membrane::Goal:g1": NS(cls="Goal", properties={"title": "Ship it"}),
+            "membrane::task:t1": NS(cls="Task", properties={"title": "Draft"}),
+            "membrane::Note:n": NS(cls="Note", properties={"title": "no"})}
+    assert _field3d_title(docs, "m:goal:g1") == "Ship it"      # mirror id, case differs from the store eid
+    assert _field3d_title(docs, "m:task:t1") == "Draft"
+    assert _field3d_title(docs, "membrane::Goal:g1") == "Ship it"
+    assert _field3d_title(docs, "m:note:n") == "" and _field3d_title(docs, "m:task:none") == ""

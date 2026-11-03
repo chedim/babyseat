@@ -88,7 +88,7 @@ function linkify(text) {
 
 /** #772: entity ids in free text become clickable titles (data-eid); ids the graph does not know stay as escaped text */
 const EID_RE = /membrane::[A-Za-z0-9_.:-]*[A-Za-z0-9_]/g;
-function mentionHtml(graph, text) {
+function mentionHtml(graph, text, selId) {
   const byId = Object.fromEntries((((graph && graph.nodes) || [])).map((n) => [n.id, n]));
   const src = String(text == null ? "" : text);
   let out = "", at = 0, m;
@@ -96,7 +96,8 @@ function mentionHtml(graph, text) {
   while ((m = EID_RE.exec(src))) {
     const n = byId[m[0]];
     out += linkify(src.slice(at, m.index));
-    out += n ? `<a class="ment" data-eid="${esc(n.id)}" href="#" style="color:#8ab4ff;cursor:pointer">${esc(n.title)}</a>` : esc(m[0]);
+    out += n && n.id === selId ? esc(n.title)
+      : n ? `<a class="ment" data-eid="${esc(n.id)}" href="#" style="color:#8ab4ff;cursor:pointer">${esc(n.title)}</a>` : esc(m[0]);
     at = m.index + m[0].length;
   }
   return out + linkify(src.slice(at));
@@ -116,6 +117,7 @@ function relHtml(graph, id) {
   return {
     blocks: join(edges.filter((e) => e.from === id && e.rel === "blocks").map((e) => one(e.to))),
     blockedBy: join(edges.filter((e) => e.to === id && e.rel === "blocks").map((e) => one(e.from))),
+    goal: join(edges.filter((e) => e.from === id && e.rel === "of").slice(0, 1).map((e) => one(e.to))),
     waitingOn: join(((n && n.waiting_on) || []).map((w) => one(w.id, w.title, w.reason))),
   };
 }
@@ -125,8 +127,8 @@ function windowInfo(graph, id, history, chat) {
   const info = cardInfo(graph, id); if (!info) return null;
   const p = (history && history.properties) || {};
   const text = String(p.summary || p.text || p.description || info.title || "");
-  return { info, rel: relHtml(graph, id), text, textHtml: mentionHtml(graph, text), chat: chatRows(chat), logs: logRows(history),
-    chatHtml: chatRows(chat).map((r) => mentionHtml(graph, r)), logHtml: logRows(history).map((r) => mentionHtml(graph, r)) };
+  return { info, rel: relHtml(graph, id), text, textHtml: mentionHtml(graph, text, id), chat: chatRows(chat), logs: logRows(history),
+    chatHtml: chatRows(chat).map((r) => mentionHtml(graph, r, id)), logHtml: logRows(history).map((r) => mentionHtml(graph, r, id)) };
 }
 
 if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined") {
@@ -169,7 +171,7 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       const sec = (h) => `<b style="display:block;margin:10px 0 4px;opacity:.7">${h}</b>`;
       const html = w ? `<div class="fvwin" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b style="display:block;margin-bottom:6px">${GLYPH[w.info.kind]} ${esc(w.info.title)}</b>
           <div style="white-space:pre-wrap">${w.textHtml}</div>` +
-          sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${esc(w.info.of || "–")}<br>${w.info.waitingOn.length ? `<b style="color:#ff6b6b">blocked — waiting on: ${list(w.rel.waitingOn)}</b><br>` : ""}blocks: ${list(w.rel.blocks)}<br>blocked by: ${list(w.rel.blockedBy)}` +
+          sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${list(w.rel.goal)}<br>${w.rel.waitingOn ? `<b style="color:#ff6b6b">blocked — waiting on: ${list(w.rel.waitingOn)}</b><br>` : ""}blocks: ${list(w.rel.blocks)}<br>blocked by: ${list(w.rel.blockedBy)}` +
           sec("Chat") + w.chatHtml.map((r) => `<div>${r}</div>`).join("") + `<input class="say" placeholder="say…" style="width:100%">` +
           sec("Logs") + w.logHtml.map((r) => `<div style="font-size:12px">${r}</div>`).join("") + `</div>` : "";
       const r = this._run;
@@ -180,7 +182,12 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
       if (say) say.onkeydown = (e) => { if (e.key === "Enter") this._say(say.value.trim()); };
       this.onclick = (e) => {
         const a = e.target.closest && e.target.closest(".ment");
-        if (a) { if (e.preventDefault) e.preventDefault(); this.open(a.getAttribute("data-eid")); return; }
+        if (a) {
+          if (e.preventDefault) e.preventDefault();
+          const eid = a.getAttribute("data-eid"); this.open(eid);
+          const sc = this._scene; if (sc) { sc.select(eid); if (sc.api && sc.api.onSelect) sc.api.onSelect(eid); }
+          return;
+        }
         if (e.target.closest(".x")) { this._open = null; this._run = null; this._draw(); const sc = this._scene; if (sc) { sc.select(null); if (sc.api && sc.api.onSelect) sc.api.onSelect(null); } return; }
       };
       const c = this.querySelector && this.querySelector(".fvwin"); if (c) c.style.pointerEvents = "auto";

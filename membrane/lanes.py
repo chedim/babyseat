@@ -4097,14 +4097,30 @@ def field3d_projection(srv, axes: str = ""):
         docs = getattr(est, "docs", None) or {}
 
         def _title(eid):                 # #772: goals, tasks, waits and decisions show by title, never by id
-            ent = docs.get(eid)
-            p = (ent.properties or {}) if ent is not None else {}
-            return str(p.get("title") or "") if ent is not None and ent.cls in ("Goal", "Task", "Decision", "Wait") else ""
+            return _field3d_title(docs, eid)
         proj = _F3.build(rows, unpack_f16, key, ref_vec=lambda e: _field_vec(fld, e), rels=rels, titles=_title)
         by_pid[proj.pid] = proj
         for old in sorted(by_pid.values(), key=lambda p: p.ts)[:-FIELD3D_KEEP]:
             by_pid.pop(old.pid, None)
         return proj
+
+
+def _field3d_title(docs, eid) -> str:
+    """#772: the title of a goal/task/decision/wait for a field row id. Rows carry the field's mirror ids
+    (`m:goal:g1`) while `docs` is keyed by store eids (`membrane::Goal:g1`): map one to the other, as
+    convgraph._mentions does, falling back to a case-insensitive match."""
+    ent = docs.get(eid)
+    if ent is None and isinstance(eid, str) and eid.startswith("m:"):
+        want = eid[2:].lower()
+        ent = docs.get("membrane::" + eid[2:])
+        if ent is None:
+            for k, d in docs.items():
+                if isinstance(k, str) and k.startswith("membrane::") and k[10:].lower() == want:
+                    ent = d
+                    break
+    if ent is None or ent.cls not in ("Goal", "Task", "Decision", "Wait"):
+        return ""
+    return str((ent.properties or {}).get("title") or "")
 
 
 def field3d_answer(srv, axes: str = "") -> dict:
