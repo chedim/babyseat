@@ -72,3 +72,36 @@ def test_3d_label_prefers_title_over_surface_and_eid():
     lab = {p.ids[i]: p.labels[i] for i in range(len(p.ids))}
     assert lab["membrane::task:x0"] == "Audit the labels" and lab["membrane::task:x1"] == "Second title"
     assert lab["membrane::task:x2"] == "s2"
+
+
+REFG = ('{nodes:[{id:"membrane::task:a",kind:"task",title:"Task <A>",status:"open",waiting_on:[{id:"membrane::task:b",title:"Task B & co",reason:"stuck"},{id:"membrane::task:a",title:"Task <A>",reason:"self"}]},'
+        '{id:"membrane::task:b",kind:"task",title:"Task B & co",status:"stuck",waiting_on:[]},'
+        '{id:"membrane::task:c",kind:"task",title:"Task C",status:"open",waiting_on:[]}],'
+        'edges:[{from:"membrane::task:a",to:"membrane::task:b",rel:"blocks"},{from:"membrane::task:a",to:"membrane::task:a",rel:"blocks"},{from:"membrane::task:c",to:"membrane::task:a",rel:"blocks"}]}')
+
+
+@NODE
+def test_blocks_blocked_by_waiting_on_render_as_links():
+    out = _js('console.log(JSON.stringify(F.relHtml(%s,"membrane::task:a")))' % REFG)
+    for k in ("blocks", "blockedBy", "waitingOn"):
+        assert 'class="ment"' in out[k]
+    assert 'data-eid="membrane::task:b"' in out["blocks"] and ">Task B &amp; co</a>" in out["blocks"]
+    assert 'data-eid="membrane::task:c"' in out["blockedBy"] and ">Task C</a>" in out["blockedBy"]
+    assert 'data-eid="membrane::task:b"' in out["waitingOn"] and "stuck" in out["waitingOn"]
+    assert "membrane::task:b</a>" not in out["blocks"]
+
+
+@NODE
+def test_selected_entity_is_plain_title_not_a_link():
+    out = _js('console.log(JSON.stringify(F.relHtml(%s,"membrane::task:a")))' % REFG)
+    assert 'data-eid="membrane::task:a"' not in json.dumps(out)
+    assert "Task &lt;A&gt;" in out["blocks"] and "Task &lt;A&gt;" in out["waitingOn"]
+
+
+@NODE
+def test_rel_titles_are_escaped():
+    out = _js('console.log(JSON.stringify(F.relHtml(%s,"membrane::task:a")))' % REFG)
+    s = json.dumps(out)
+    assert "<A>" not in s and "B & co" not in s
+    empty = _js('console.log(JSON.stringify(F.relHtml(%s,"membrane::task:c")))' % REFG)
+    assert empty["waitingOn"] == ""

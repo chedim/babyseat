@@ -102,12 +102,30 @@ function mentionHtml(graph, text) {
   return out + linkify(src.slice(at));
 }
 
+/** #772: blocks / blocked by / waiting on as .ment links (data-eid); the selected entity stays plain title text */
+function relHtml(graph, id) {
+  const nodes = (graph && graph.nodes) || [], edges = (graph && graph.edges) || [];
+  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const n = byId[id];
+  const one = (eid, title, extra) => {
+    const t = esc(title != null ? title : (byId[eid] ? byId[eid].title : eid));
+    const x = extra ? " (" + esc(extra) + ")" : "";
+    return eid === id ? t + x : `<a class="ment" data-eid="${esc(eid)}" href="#" style="color:#8ab4ff;cursor:pointer">${t}</a>${x}`;
+  };
+  const join = (a) => a.join(", ");
+  return {
+    blocks: join(edges.filter((e) => e.from === id && e.rel === "blocks").map((e) => one(e.to))),
+    blockedBy: join(edges.filter((e) => e.to === id && e.rel === "blocks").map((e) => one(e.from))),
+    waitingOn: join(((n && n.waiting_on) || []).map((w) => one(w.id, w.title, w.reason))),
+  };
+}
+
 /** #772: everything the window shows: full text (links), info, chat rows, log rows */
 function windowInfo(graph, id, history, chat) {
   const info = cardInfo(graph, id); if (!info) return null;
   const p = (history && history.properties) || {};
   const text = String(p.summary || p.text || p.description || info.title || "");
-  return { info, text, textHtml: mentionHtml(graph, text), chat: chatRows(chat), logs: logRows(history),
+  return { info, rel: relHtml(graph, id), text, textHtml: mentionHtml(graph, text), chat: chatRows(chat), logs: logRows(history),
     chatHtml: chatRows(chat).map((r) => mentionHtml(graph, r)), logHtml: logRows(history).map((r) => mentionHtml(graph, r)) };
 }
 
@@ -147,11 +165,11 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
     disconnectedCallback() { clearTimeout(this._t); if (this._scene) this._scene.setWork(null); }
     _draw() {
       const w = this._open && windowInfo(this._graph, this._open, this._hist, this._chat);
-      const list = (l) => (l && l.length ? l.map(esc).join(", ") : "–");
+      const list = (h) => h || "–";
       const sec = (h) => `<b style="display:block;margin:10px 0 4px;opacity:.7">${h}</b>`;
       const html = w ? `<div class="fvwin" style="position:absolute;right:12px;top:12px;bottom:12px;width:${WINDOW.width}px;max-width:calc(100% - 24px);overflow-y:auto;padding:14px;border-radius:10px;background:rgba(20,20,30,.95);color:#eee;z-index:3;font:14px system-ui"><span class="x" style="float:right;cursor:pointer">✕</span><b style="display:block;margin-bottom:6px">${GLYPH[w.info.kind]} ${esc(w.info.title)}</b>
           <div style="white-space:pre-wrap">${w.textHtml}</div>` +
-          sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${esc(w.info.of || "–")}<br>${w.info.waitingOn.length ? `<b style="color:#ff6b6b">blocked — waiting on: ${list(w.info.waitingOn)}</b><br>` : ""}blocks: ${list(w.info.blocks)}<br>blocked by: ${list(w.info.blockedBy)}` +
+          sec("Info") + `${esc(w.info.kind)} · ${esc(w.info.status)}<br>goal: ${esc(w.info.of || "–")}<br>${w.info.waitingOn.length ? `<b style="color:#ff6b6b">blocked — waiting on: ${list(w.rel.waitingOn)}</b><br>` : ""}blocks: ${list(w.rel.blocks)}<br>blocked by: ${list(w.rel.blockedBy)}` +
           sec("Chat") + w.chatHtml.map((r) => `<div>${r}</div>`).join("") + `<input class="say" placeholder="say…" style="width:100%">` +
           sec("Logs") + w.logHtml.map((r) => `<div style="font-size:12px">${r}</div>`).join("") + `</div>` : "";
       const r = this._run;
@@ -171,6 +189,6 @@ if (typeof customElements !== "undefined" && typeof HTMLElement !== "undefined")
   if (!customElements.get("membrane-fieldview")) customElements.define("membrane-fieldview", MembraneFieldView);
 }
 
-const FieldViewLogic = { cardInfo, linkify, mentionHtml, windowInfo, WINDOW, edgeStyles, chatStep, GLYPH, TABS, chatRows, logRows };
+const FieldViewLogic = { cardInfo, linkify, mentionHtml, relHtml, windowInfo, WINDOW, edgeStyles, chatStep, GLYPH, TABS, chatRows, logRows };
 if (typeof window !== "undefined") window.FieldViewLogic = FieldViewLogic;
 if (typeof module !== "undefined" && module.exports) module.exports = FieldViewLogic;
