@@ -1548,10 +1548,21 @@ class TurnRunner:
         if resp is None:
             return
         try:
-            import socket as _socket
-            _sk = getattr(resp, "sock", None)       # a bare close() does not wake a read blocked in another thread; shutdown does
-            if _sk is not None:
-                _sk.shutdown(_socket.SHUT_RDWR)
+            if getattr(resp, "_in_gate", False):
+                import socket as _socket
+
+                def _wake(_c=resp, _s=getattr(resp, "sock", None)):
+                    # a bare close() does not wake a read blocked in another thread; shutdown does.
+                    # Only for a round STILL waiting for the proxy after a short grace: a reply
+                    # already streaming keeps the words it gave (#449).
+                    try:
+                        if getattr(_c, "_in_gate", False) and _s is not None:
+                            _s.shutdown(_socket.SHUT_RDWR)
+                    except Exception:
+                        pass
+                _t = threading.Timer(0.3, _wake)
+                _t.daemon = True
+                _t.start()
         except Exception:
             pass
         try:
@@ -3633,8 +3644,10 @@ def loopback_ladder(port: int, runner=None, cell=None):
         if isinstance(socks, dict):
             socks.setdefault(sid, conn)
         try:
+            conn._in_gate = True        # until the proxy answers: the kill must wake this read
             conn.request(req.get_method(), req.selector, body=req.data, headers=dict(req.header_items()))
             resp = conn.getresponse()
+            conn._in_gate = False
         except BaseException:
             conn.close()
             raise
