@@ -82,6 +82,7 @@ class NeverSilentlyCut(unittest.TestCase):
         self.assertIn("long lines cut", r)
         self.assertIn("shown: lines 1-1 and 40-40", r)
         self.assertIn("lines=2-39", r)
+        self.assertIn("prop=output", r)
 
     def test_a_single_long_line_says_what_is_shown(self):
         r = M._brief_output(_out("{" + "\"k\": 1, " * 3000 + "}"))
@@ -118,6 +119,39 @@ class NeverSilentlyCut(unittest.TestCase):
         r = self._page("\n".join(f"line {i}" for i in range(1, 401)), "900-950")
         self.assertIn("outside", r)
         self.assertIn("1-400", r)
+
+
+class MemosSecondRound(unittest.TestCase):
+    def test_past_the_cap_the_numbers_say_they_count_kept_lines(self):
+        """`seq 100000`: the kept text's line 5876 is the run's line 99986."""
+        from membrane.mcp_server import cut_middle
+        full = "\n".join(str(i) for i in range(1, 100001))
+        r = M._brief_output({**_out(cut_middle(full)), "output_len": len(full)})
+        self.assertIn("kept lines", r)
+        self.assertIn("not the run's own line numbers", r)
+
+    def test_a_cut_last_line_keeps_its_end_and_is_reachable(self):
+        text = "\n".join(f"line {i}" for i in range(1, 41)) + "\n" + "z" * 6000 + " FAILED: 3 tests"
+        r = M._brief_output(_out(text))
+        self.assertIn("FAILED: 3 tests", r)
+        self.assertIn("prop=output", r)
+
+    def test_two_long_lines_point_to_the_whole(self):
+        r = M._brief_output(_out("a" * 5000 + "\n" + "b" * 5000))
+        self.assertIn("prop=output", r)
+
+    def test_no_result_no_dead_pointer(self):
+        r = M._brief_output({**_out("{" + "x" * 9000 + "}"), "result": ""})
+        self.assertNotIn("spec=", r)
+
+    def test_lines_on_a_missing_property_says_so(self):
+        old = M._http
+        M._http = lambda port, method, path, body=None: {"ok": True, "eid": "e", "cls": "C", "properties": {"x": 1}}
+        try:
+            r = M.tool_entity_read({"spec": "e", "lines": "1-3"}, 1)
+        finally:
+            M._http = old
+        self.assertIn("no text property", r)
 
 
 class KeptInTheField(unittest.TestCase):

@@ -81,15 +81,16 @@ def cut_middle(text: str, cap: int = LINK_OUTPUT_CAP) -> str:
     return f"{text[:h]}\n… {len(text) - h - t} chars cut …\n{text[-t:]}"
 
 
-def _take(lines: list, budget: int) -> tuple[list, int, bool]:
-    """Up to BRIEF_LINES of `lines` within `budget` chars -> (shown, how many lines, a line was cut)."""
+def _take(lines: list, budget: int, from_end: bool = False) -> tuple[list, int, bool]:
+    """Up to BRIEF_LINES of `lines` within `budget` chars -> (shown, how many lines, a line was
+    cut). A line cut at the head keeps its start; at the tail its end (where "FAILED: 3" is)."""
     shown, used, cut = [], 0, False
     for ln in lines[:BRIEF_LINES]:
         room = budget - used
         if room <= 0:
             break
         if len(ln) > room:
-            shown.append(ln[:room] + " …[line cut]")
+            shown.append(("…[line cut] " + ln[-room:]) if from_end else (ln[:room] + " …[line cut]"))
             cut = True
             break
         shown.append(ln)
@@ -100,7 +101,7 @@ def _take(lines: list, budget: int) -> tuple[list, int, bool]:
 def _brief_output(r: dict) -> str:
     """A run's output for the tool reply, brief, and never silently cut (Memo on #912): whole when
     short, else its first and last lines within BRIEF_CAP, a header saying exactly what is shown,
-    what was not kept, and how to page the rest (the result entity keeps it)."""
+    what was not kept, and how to reach the rest (the result entity keeps it)."""
     out = r.get("output")
     if out is None:
         out = r.get("head") or ""
@@ -111,25 +112,32 @@ def _brief_output(r: dict) -> str:
     if n < BRIEF_WHOLE and len(out) == n:
         return f"output:\n{out}"
     res = r.get("result") or ""
-    lost = n > len(out) or n > LINK_OUTPUT_CAP
-    kept_note = (f"; only {len(out)} chars were kept (the middle of the run's output is gone: re-run "
-                 f"narrower -- sed -n 'A,Bp' / grep -- to see it)" if lost else "")
+    lost = n > len(out)
+    unit = "kept lines" if lost else "lines"     # past the cap, numbers count the KEPT text, not the run's
+    kept_note = (f"; only {len(out)} chars were kept, the middle of the run's output is gone, so the "
+                 f"{unit} numbered here are not the run's own line numbers -- re-run narrower (sed -n / grep) "
+                 f"to see the rest" if lost else "")
     lines = out.split("\n")
     total = len(lines)
+    whole = f"; whole: entity_read spec={res} prop=output" if res else ""
     if total <= 2 * BRIEF_LINES and len(out) <= BRIEF_CAP:
-        return f"output ({total} lines, {n} chars{kept_note}):\n{out}"
-    half = (BRIEF_CAP - 500) // 2                # the header's room: the whole reply stays within BRIEF_CAP
+        return f"output ({total} {unit}, {n} chars{kept_note}):\n{out}"
+    half = (BRIEF_CAP - 600) // 2                # the header's room: the whole reply stays within BRIEF_CAP
     if total == 1:                                # one long line (a JSON blob): its two ends
-        return (f"output (1 line, {n} chars{kept_note}; shown: its first and last {half} chars; whole: "
-                f"entity_read spec={res} prop=output):\n{out[:half]}\n… {len(out) - 2 * half} chars …\n{out[-half:]}")
+        return (f"output (1 line, {n} chars{kept_note}; shown: its first and last {half} chars{whole}):\n"
+                f"{out[:half]}\n… {len(out) - 2 * half} chars …\n{out[-half:]}")
     head, a, cut_a = _take(lines, half)
-    tail_r, b, cut_b = _take(list(reversed(lines[a:])), half)
+    tail_r, b, cut_b = _take(list(reversed(lines[a:])), half, from_end=True)
     tail = list(reversed(tail_r))
     gap = (a + 1, total - b) if total - b >= a + 1 else None
-    shown = f"lines 1-{a}" + (f" and {total - b + 1}-{total}" if b else "")
-    more = (f"; lines {gap[0]}-{gap[1]}: entity_read spec={res} lines={gap[0]}-{gap[1]}" if gap and res else "")
-    return (f"output ({total} lines, {n} chars{kept_note}; shown: {shown}"
-            f"{' (long lines cut)' if cut_a or cut_b else ''}{more}):\n"
+    shown = f"{unit} 1-{a}" + (f" and {total - b + 1}-{total}" if b else "")
+    if cut_a or cut_b:                            # a cut line is only whole in the kept output
+        more = f"; long lines cut{whole or ''}"
+    else:
+        more = ""
+    if gap and res:
+        more += f"; {unit} {gap[0]}-{gap[1]}: entity_read spec={res} lines={gap[0]}-{gap[1]}"
+    return (f"output ({total} {unit}, {n} chars{kept_note}; shown: {shown}{more}):\n"
             + "\n".join(head) + ("\n…\n" if gap else "\n") + "\n".join(tail))
 
 
@@ -1649,6 +1657,9 @@ def tool_entity_read(args: dict, port: int) -> str:
     if not out.get("ok"):
         return f"read failed: {out.get('error', 'unknown error')}"
     props = out.get("properties") or {}
+    if span and not isinstance(props.get(prop), str):
+        return (f"lines={span!r}: {out.get('eid')} has no text property {prop!r} to page"
+                + (f" (it is {type(props[prop]).__name__})" if prop in props else ""))
     if span and isinstance(props.get(prop), str):
         all_lines = props[prop].split("\n")
         total = len(all_lines)
@@ -1665,8 +1676,8 @@ def tool_entity_read(args: dict, port: int) -> str:
             ln = all_lines[i]
             room = BRIEF_CAP * 2 - used
             if len(ln) > room:
-                if not page:
-                    page.append(ln[:room] + " …[line cut]")
+                if not page:                       # one line longer than a page: say how to get it whole
+                    page.append(ln[:room] + f" …[line cut: {len(ln)} chars; whole: prop={prop}]")
                     last = i + 1
                 break
             page.append(ln)
