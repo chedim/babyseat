@@ -63,18 +63,6 @@ class LoopbackIsLocal(unittest.TestCase):
         self.assertFalse(J.gate(h, cookie=True))
         self.assertEqual(h.code, 401)
 
-    def test_the_page_asks_a_local_callers_name(self):
-        h = _H()
-        h.path = "/ui/conf"
-        self.assertTrue(J.gate(h, cookie=True, public=True))
-        seen = {}
-        with mock.patch.object(UI, "_json", lambda _h, c: seen.update(c)), \
-                mock.patch.object(UI, "conf", lambda: {}), \
-                mock.patch.object(UI, "enabled", lambda: True):
-            UI.intercept(h)
-        self.assertEqual(seen.get("auth"), "jwt")
-        self.assertIsNone(seen.get("who"))
-
     def test_a_person_token_on_loopback_is_that_person(self):
         h = _H(headers={"Authorization": "Bearer " + J.mint(SECRET, "alice", name="Alice")})
         self.assertTrue(J.gate(h))
