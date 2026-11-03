@@ -4093,7 +4093,14 @@ def field3d_projection(srv, axes: str = ""):
                         "entity_states", {"origin": fld.origin, "tier": "live"})
                     if d.get("state"))
         rels = [d for _, d in fld.b.scan("relations", {"origin": fld.origin, "superseded": False})]
-        proj = _F3.build(rows, unpack_f16, key, ref_vec=lambda e: _field_vec(fld, e), rels=rels)
+        est = getattr(srv, "entity_store", None)
+        docs = getattr(est, "docs", None) or {}
+
+        def _title(eid):                 # #772: goals, tasks, waits and decisions show by title, never by id
+            ent = docs.get(eid)
+            p = (ent.properties or {}) if ent is not None else {}
+            return str(p.get("title") or "") if ent is not None and ent.cls in ("Goal", "Task", "Decision", "Wait") else ""
+        proj = _F3.build(rows, unpack_f16, key, ref_vec=lambda e: _field_vec(fld, e), rels=rels, titles=_title)
         by_pid[proj.pid] = proj
         for old in sorted(by_pid.values(), key=lambda p: p.ts)[:-FIELD3D_KEEP]:
             by_pid.pop(old.pid, None)
