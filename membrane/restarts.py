@@ -571,15 +571,10 @@ def save_warm(srv) -> None:
         print(f"[seat] warm snapshot skipped ({e})", file=sys.stderr, flush=True)
 
 
-def reexec_if_requested(srv=None) -> None:
-    """The last line of the seat's teardown: a requested restart re-execs the
-    same command (same pid, same terminal -- ctrl+c still stops it; a
-    supervisor waiting on the process just sees it continue). The person's
-    pause rides along in the environment (#395); the battery's does not --
-    the new boot's battery guard re-derives it."""
-    if not RESTART["requested"]:
-        return
-    os.environ[REEXEC_ENV] = "1"           # the next boot skips the browser (#243)
+def _restart_env(srv) -> None:
+    """The next boot's environment for a requested restart: no new browser tab (#243), the
+    person's pause (#395), and what came in after the restart was asked (#711)."""
+    os.environ[REEXEC_ENV] = "1"
     carry = False
     try:
         from .lanes import person_paused
@@ -590,13 +585,42 @@ def reexec_if_requested(srv=None) -> None:
         os.environ[PAUSE_ENV] = "1"
     else:
         os.environ.pop(PAUSE_ENV, None)
-    if RESTART.get("since_ms"):            # #711: the next boot answers what came in after it
+    if RESTART.get("since_ms"):
         os.environ[SINCE_ENV] = str(int(RESTART["since_ms"]))
     else:
         os.environ.pop(SINCE_ENV, None)
-    os.execv(sys.executable,
-             [sys.executable, "-m", "membrane.opencode"]
-             + pin_ports(sys.argv[1:], *(RESTART.get("ports") or (None, None))))
+
+
+def _restart_argv() -> list:
+    return ([sys.executable, "-m", "membrane.opencode"]
+            + pin_ports(sys.argv[1:], *(RESTART.get("ports") or (None, None))))
+
+
+def relaunch_after_cut(srv=None, popen=None) -> bool:
+    """The teardown lease cut a requested restart before its re-exec (2026-11-03: 150 queued
+    entity saves held the drain past 90 s, and the seat stayed down): start the same command as a
+    fresh process -- detached, on the same output -- so the caller can exit and the seat still
+    comes back. Its locks free the moment this process exits. A plain stop: nothing. -> started."""
+    if not RESTART["requested"]:
+        return False
+    _restart_env(srv)
+    import subprocess
+    (popen or subprocess.Popen)(_restart_argv(), stdin=subprocess.DEVNULL, start_new_session=True,
+                                close_fds=True, env=dict(os.environ))
+    return True
+
+
+def reexec_if_requested(srv=None) -> None:
+    """The last line of the seat's teardown: a requested restart re-execs the
+    same command (same pid, same terminal -- ctrl+c still stops it; a
+    supervisor waiting on the process just sees it continue). The person's
+    pause rides along in the environment (#395); the battery's does not --
+    the new boot's battery guard re-derives it."""
+    if not RESTART["requested"]:
+        return
+    _restart_env(srv)
+    argv = _restart_argv()
+    os.execv(argv[0], argv)
 
 
 def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:

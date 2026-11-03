@@ -2495,10 +2495,17 @@ def main() -> None:
             faulthandler.dump_traceback_later(max(1.0, TEARDOWN_LEASE_S - 5), file=sys.__stderr__)
         except Exception:
             pass
-        _teardown_halt = threading.Timer(TEARDOWN_LEASE_S, lambda: (
+        def _lease_cut():
             print(f"\n[opencode] teardown lease ({TEARDOWN_LEASE_S:g}s) "
-                  "expired -- cutting the drain", file=sys.__stderr__),
-            os._exit(70))[-1])
+                  "expired -- cutting the drain", file=sys.__stderr__)
+            try:                                   # a requested restart still comes back (2026-11-03)
+                from . import restarts as _RS
+                if _RS.relaunch_after_cut(srv):
+                    print("[seat] restart cut by the lease: a fresh seat is starting", file=sys.__stderr__)
+            except Exception as e:
+                print(f"[seat] relaunch after the cut failed ({e})", file=sys.__stderr__)
+            os._exit(70)
+        _teardown_halt = threading.Timer(TEARDOWN_LEASE_S, _lease_cut)
         _teardown_halt.start()
         # each step's time into the log, so a slow one names itself (the 90 s hang, 2026-11-02)
         _td = {"t": time.monotonic()}
