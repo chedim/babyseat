@@ -37,7 +37,7 @@ def test_the_goals_help_carries_the_rule():
 def test_the_tools_note_points_work_at_a_goal():
     # the note is capped (test_the_note_stays_tight): a pointer, the doctrine has the rest
     t = " ".join(CA.TOOLS_NOTE.lower().split())
-    assert "work you are given goes to intend" in t
+    assert "work you are given goes to mcp__membrane__intend" in t   # #919: full tool names
     assert "instead of doing it in your own turn" in t
     assert "goal's id" in t
 

@@ -698,60 +698,62 @@ def build_mcp_server(sdk, port, answer=None):
                                      tools=tools)
 
 
+def _full_names(text: str) -> str:
+    """#919: the note writes a tool as @name, and Claude reads the name it must call --
+    the SDK knows only mcp__membrane__<name>, so a bare one in the note was a failed call."""
+    return re.sub(r"@(\w+)", lambda m: TOOL_PREFIX + m.group(1), text)
+
+
 # THE TOOLS NOTE (2026-10-23): the rung's built-in tools are off, and with
 # only tool names to go on Claude told the operator it had "no tools to work".
 # Fixed text, after the stable system prompt, so the prompt cache still holds.
-TOOLS_NOTE = (
-    "Your tools: Claude Code's own (Read, Edit, Bash...) are off; membrane's, "
-    "named " + TOOL_PREFIX + "<name> (no plain bash or query), are your hands, "
-    "and your work is programming the field. There are no one-shot "
-    "commands: program the field first, then use it. Before anything new, "
-    "find what you have (entity_query, graph, method_inspect) and call it. "
-    "To run code, code_run (or bash) it: it becomes a tree of entities in the field, "
+TOOLS_NOTE = _full_names(
+    "Claude Code's tools (Read, Edit, Bash...) are off; membrane's are your hands, "
+    "named " + TOOL_PREFIX + "<name>: call the full name, a bare one fails. "
+    "Your work is programming the field: no one-shot commands, program the field first. Before anything new, "
+    "find what you have (@entity_query, @graph, @method_inspect) and call it. "
+    "To run code, @code_run (or @bash) it: it becomes a tree of entities in the field, "
     "linked to its executor, and returns rc, output and a result entity; "
     "re-run a root with node=. For a step worth repeating, define a method "
-    "on the entity it belongs to or its class (method_define, {{name}} "
-    "params), then method_call it on one object or method_each over the "
-    "class; or write a property whose write is the effect. Keep each method small (a sensor reads "
-    "one thing, an actuator does one) and compose them through steps or "
+    "on the entity it belongs to or its class (@method_define, {{name}} "
+    "params), then @method_call it on one object or @method_each over the "
+    "class; or write a property whose write is the effect. Keep methods small (a sensor reads "
+    "one thing, an actuator does one), composed through steps or "
     "parents. A thing in the world is an entity that keeps itself current: "
-    "entity_edit with a getter_script (runs when read) or a tick_script "
-    "(paced by tick_every); read it back. Code work happens in a git "
-    "worktree in a temp folder, never the main checkout. query, entity_read "
-    "and graph read the field; intend "
-    "and fulfill keep goals; entity_add and entity_edit write entities. "
-    "Work you are given goes to intend (issue link, what done means) "
+    "@entity_edit with a getter_script (runs when read) or a tick_script "
+    "(paced by tick_every); read it back. Code work happens in a temp git "
+    "worktree, never the main checkout. "
+    "Work you are given goes to @intend (issue link, what done means) "
     "instead of doing it in your own turn; answer with the goal's id. "
-    "To ask the person for a decision, make it a card on their decision "
-    "board, not a list in chat, in one call, e.g. entity_add class='Decision' "
+    "Ask the person for a decision with a card on their decision "
+    "board, not a list in chat, in one call, e.g. @entity_add class='Decision' "
     "name='Which test runner' summary='pytest or unittest for the new suite' "
     "properties={'status': 'open', 'var': {'type': 'option', 'options': "
     "['pytest', 'unittest']}, 'pick': 'pytest'}. The name is the question, "
-    "with no quotes or apostrophes (they are refused); var.type is int, "
+    "with no quotes or apostrophes (refused); var.type is int, "
     "float, bool, string or option; pick is your recommendation; add 'blocks': "
-    "[<eids it blocks>] when it holds work up. One variable per card; only "
+    "[<eids>] when it holds work up. One variable per card; only "
     "the person answers.\n\n"
-    "The doctrine names the seat's tool families; here they are: "
+    "The doctrine names the seat's tool families: "
     "exec(action='run'/'call'/'inspect'/'define'/'each') -> "
-    "code_run/method_call/method_inspect/method_define/method_each; goal(action="
-    "'plant'/'list'/'close') -> intend/intents/fulfill; entity(action='add'/"
-    "'edit'/'read'/'remove'/'inherit') -> entity_add/entity_edit/entity_read/"
-    "entity_remove/entity_inherit; find(action='memory'/'query'/'graph'/"
-    "'related') -> query/entity_query/graph/entities_related; memory(action="
-    "'learn'/'forget') -> learn/forget; track(action='watch'/'unwatch'/'list') "
-    "-> entity_watch/entity_unwatch/entity_tracks; peer(action='post') -> "
-    "peer_post.\n\n"
+    "@code_run/@method_call/@method_inspect/@method_define/@method_each; goal(action="
+    "'plant'/'list'/'close') -> @intend/@intents/@fulfill; entity(action='add'/"
+    "'edit'/'read'/'remove'/'inherit') -> @entity_add/@entity_edit/@entity_read/"
+    "@entity_remove/@entity_inherit; find(action='memory'/'query'/'graph'/"
+    "'related') -> @query/@entity_query/@graph/@entities_related; memory(action="
+    "'learn'/'forget') -> @learn/@forget; track(action='watch'/'unwatch'/'list') "
+    "-> @entity_watch/@entity_unwatch/@entity_tracks; peer(action='post') -> "
+    "@peer_post.\n\n"
     "How you work: when the person gives you a task, carry it out to the end "
     "in this turn. Don't ask permission for steps that are part of the task, "
     "and don't end a reply with \"next I'll...\" -- do it. End your turn only "
     "when the task is done or when you are blocked. Say which. A status "
     "update goes in the same message as your next tool call, never as a "
     "reply on its own. No \"Open decisions\" footers: questions for the "
-    "person are Decision cards. The turn ends after 5 minutes with no "
-    "output, and a running tool call prints nothing until it returns, so a "
-    "command that may run longer than about 4 minutes must be started "
-    "detached (a method whose command is 'nohup <command> > <log> 2>&1 &') "
-    "or as an entity script, and its result checked afterwards.")
+    "person are Decision cards. A turn ends after 5 minutes of silence and a "
+    "running tool call is silent, so a command that may run longer than about "
+    "4 minutes is started detached (a method whose command is "
+    "'nohup <command> > <log> 2>&1 &') or as an entity script, and checked after.")
 
 
 # the seat card's lines this note replaces on the Claude rung: EXEC (the note
