@@ -7,6 +7,7 @@ on :4096, not the proxy where step 1 put the routes -- the live board said
 them, plus /membrane/decision/chat, which records the chat a card opened (the
 board's only other write; entity/edit is not a serve route)."""
 import json
+import pytest
 import os
 import tempfile
 from pathlib import Path
@@ -92,6 +93,7 @@ class TestTheBoardOnTheServePort(_Env):
                          [(g, "ship the cockpit", "the board turned 90 degrees")])
         self.assertIn("active", out["goals"][0])
 
+    @pytest.mark.tokenless
     def test_off_box_an_answer_needs_the_seat_token(self):
         SA.ensure()
         code, _ = self._go("POST", "/membrane/decision/answer", {"card": self.card, "value": 1800}, offbox=True)

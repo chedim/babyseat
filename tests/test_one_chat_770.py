@@ -127,7 +127,7 @@ class OwnerAndBoot(unittest.TestCase):
         finally:
             httpd.shutdown()
         self.assertEqual(a["id"], b["id"])
-        self.assertEqual(a["owner"], NS.OWNER_SUB)
+        self.assertEqual(a["owner"], os.environ.get("MEMBRANE_OPERATOR") or NS.OWNER_SUB)
 
     def test_boot_migration_reads_chat_and_person_from_config(self):
         s = NS.SessionStore()

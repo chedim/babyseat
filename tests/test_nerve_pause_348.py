@@ -193,6 +193,7 @@ class TestTheRoute(_Env):
         self.assertFalse(self.srv.paused)
         self.assertEqual(_audit(self.srv), [])
 
+    @pytest.mark.tokenless
     def test_off_box_the_toggle_needs_the_seat_token(self):
         tok = SA.ensure()
         code, _ = self._go("POST", {"paused": True}, offbox=True)

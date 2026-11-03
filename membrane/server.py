@@ -1548,6 +1548,13 @@ class TurnRunner:
         if resp is None:
             return
         try:
+            import socket as _socket
+            _sk = getattr(resp, "sock", None)       # a bare close() does not wake a read blocked in another thread; shutdown does
+            if _sk is not None:
+                _sk.shutdown(_socket.SHUT_RDWR)
+        except Exception:
+            pass
+        try:
             resp.close()
         except Exception:
             pass
@@ -3618,6 +3625,11 @@ def loopback_ladder(port: int, runner=None, cell=None):
         _r = runner if runner is not None else ((cell or {}).get("runner") if cell else None)
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=CLOUD_TIMEOUT_S)
         socks = getattr(_r, "_turn_sockets", None) if (_r is not None and sid) else None
+        try:
+            conn.connect()          # a socket to close BEFORE the kill can reach it (closing an unconnected conn cuts nothing)
+        except BaseException:
+            conn.close()
+            raise
         if isinstance(socks, dict):
             socks.setdefault(sid, conn)
         try:
