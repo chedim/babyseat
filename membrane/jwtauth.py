@@ -532,11 +532,6 @@ def gate(handler, cookie: bool = False, basic: bool = False, public: bool = Fals
         _write_json(handler, 503, {"error": {"message": "authentication is misconfigured",
                                              "type": "unavailable"}})
         return False
-    if ident is None and not _all(handler.headers, "Authorization") \
-            and not (cookie and any(COOKIE in str(v) for v in _all(handler.headers, "Cookie"))):
-        from .seatauth import is_loopback
-        if hasattr(handler, "client_address") and is_loopback(handler):
-            ident = LOOPBACK                 # this machine, no token: the seat itself, as with JWT off
     handler._identity = ident
     if ident is not None or public:
         return True
