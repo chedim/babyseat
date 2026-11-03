@@ -901,6 +901,7 @@ class Field3DView {
     this.slots = new Map(); this.free = []; this.meta = []; this.hidden = new Set();
     this.tweens = new Map(); this.pulses = new Map(); this.rings = [];
     this.avatars = new Map(); this.locateCache = new Map();
+    this.rocketRuns = false;   // #884: the finished-runs (rocket) view is off by default; set true (or the feed's rocket flag) to draw it
     this.ax = [{ kind: "pc", index: 1 }, { kind: "pc", index: 2 }, { kind: "pc", index: 3 }];
     this.sel = null; this._alive = false; this._edgesDirty = true; this._lastWant = 0; this._lastLabels = 0;
     this.live = false;
@@ -1612,11 +1613,12 @@ class Field3DView {
 
   async _locate(eid) {
     if (this.locateCache.has(eid)) return this.locateCache.get(eid);
-    let hit = null;
+    let hit = null, expired = false;
     for (const cand of locateCandidates(eid)) {
       try { hit = await this.api.get("/membrane/map/locate?pid=" + this.pid + "&eid=" + encodeURIComponent(cand)); break; }
-      catch (e) { hit = null; }
+      catch (e) { hit = null; if (/ 410 /.test(String(e.message || e))) expired = true; }
     }
+    if (!hit && expired) return null;   // #884: an expired projection (410) is not "not found" -- never cache it, the next ask retries
     this.locateCache.set(eid, hit);
     if (this.locateCache.size > LOCATE_CACHE_MAX) this.locateCache.delete(this.locateCache.keys().next().value);
     return hit;
@@ -2497,7 +2499,7 @@ class Field3DView {
 
   _stepRocket() {   // each finished run = one tiny glyph graph, flying back along +Z from the work origin
     this._rocketEls = this._rocketEls || new Map();
-    const runs = this._runs || [], now = Date.now() / 1000, seen = new Set();
+    const runs = (this.rocketRuns || this._rocketSrv) ? (this._runs || []) : [], now = Date.now() / 1000, seen = new Set();   // #884: off by default
     const posOf = (id) => {
       const s = this.slots.get(id);
       return (this._workPos || {})[id] || (s != null && this.sizeA[s] ? [this.posA[s * 3], this.posA[s * 3 + 1], this.posA[s * 3 + 2]] : null);
@@ -2529,11 +2531,13 @@ class Field3DView {
   /** the work graph (goals/tasks/decisions) as markers in the scene, each at its entity's field position */
   setWork(graph, onOpen) {
     this._work = graph || null; this._workOpen = onOpen || this._workOpen;
-    this._runs = (graph && graph.runs) || [];   // #843: the feed's finished runs, capped server-side (12)
+    this._rocketSrv = !!(graph && graph.rocket);
+    this._runs = (this.rocketRuns || this._rocketSrv) ? ((graph && graph.runs) || []) : [];   // #843: the feed's finished runs, capped server-side (12); #884: off unless switched on
     if (!graph && this._workLines) for (const k in this._workLines) this._workLines[k].geometry.setDrawRange(0, 0);   // the view closed: lines go too
     this._workPos = this._workPos || {};
     for (const n of workShows(graph)) {
       if (this._workPos[n.id]) continue;
+      if (this.locateCache.get(n.id) === null) this.locateCache.delete(n.id);   // #884: retry entities that failed to locate before
       this.placeOf(n.id).then((p) => { if (p) this._workPos[n.id] = p; }).catch(() => {});
     }
     this._workEls = this._workEls || new Map();
