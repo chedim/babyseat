@@ -44,7 +44,13 @@ def _reask(word, options) -> str:
     return f'"{word}": {_or(options)}?'
 
 
-TEMPLATES = {"decided": _decided, "dropped": _dropped, "goal-fulfilled": _goal_fulfilled,
+def _membrane_ran(text) -> str:
+    """Stage 3 (#802): membrane answered a read-only message itself -- marked, so the operator
+    can tell its answer from the model's and judge it."""
+    return f"🧩 membrane (no model): {text}"
+
+
+TEMPLATES = {"membrane-ran": _membrane_ran, "decided": _decided, "dropped": _dropped, "goal-fulfilled": _goal_fulfilled,
              "goal-ended": _goal_ended, "escalation": _escalation, "asks": _asks, "reask": _reask}
 
 

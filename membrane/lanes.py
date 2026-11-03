@@ -4233,6 +4233,17 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
                 if steps and steps[0].get("kind") == "define" and steps[0]["mapped"]:
                     adds.append(f"The person's message {_LL.describe(srv.entity_store, steps)}. If they mean it, "
                                 f"exec(action='run', lang='en', code={said!r}) keeps it.")
+                elif steps and all(s["mapped"] for s in steps) and not any(s.get("writes") for s in steps) \
+                        and getattr(getattr(srv, "_loop_runner", None), "post_line", None) is not None:
+                    # stage 3 (#802): a read-only program membrane runs itself; its answer is posted,
+                    # marked, before the model's turn, and the model is told so (it still answers)
+                    from . import speech as _SP
+                    _ran = _LL.run(srv, said)
+                    _words = str(_ran.get("output") or _ran.get("said") or "")
+                    srv._loop_runner.post_line(sid, _SP.say("membrane-ran", text=_words))
+                    adds.append(f"The person's message compiles to: {_LL.describe(srv.entity_store, steps)}, and "
+                                f"membrane already ran it itself (read-only) and answered in the chat: "
+                                f"{_words[:600]!r}. Don't run it again; add what it missed or correct it.")
                 elif steps and all(s["mapped"] for s in steps):
                     _many = [s for s in steps if s.get("needs_all")]
                     adds.append(f"The person's message compiles to: {_LL.describe(srv.entity_store, steps)}. "
