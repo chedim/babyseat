@@ -26,6 +26,7 @@ from __future__ import annotations
 import urllib.request as _urllib_request_ur
 
 from . import jwtauth as _JWT
+from . import seatauth as _SA
 from pathlib import Path
 
 
@@ -478,7 +479,7 @@ class PeerSubstrate:
         host = str(peer.get("host") or "127.0.0.1")
         url = f"http://{host}:{int(peer.get('port', 0))}/membrane/ask?q={q}"
         try:
-            with _urlopen(req := urllib.request.Request(url, headers=_JWT.internal_headers()), timeout) as r:
+            with _urlopen(req := urllib.request.Request(url, headers=_SA.loopback_headers(_JWT.internal_headers())), timeout) as r:
                 data = json.loads(r.read())
         except Exception:
             return None

@@ -396,9 +396,15 @@ class TestServeOffBox(_Serve):
             self.assertEqual(code, 401, (method, p))
             self.assertTrue(h.get("WWW-Authenticate", "").startswith("Bearer"))
 
-    def test_reads_stay_open(self):
-        for p in ("/session", "/global/health", "/ui/conf", "/", "/ui/serve/session", "/config"):
+    def test_reads_need_the_token_too(self):
+        for p in ("/session", "/ui/serve/session", "/config"):
+            self.assertEqual(self._req(p)[0], 401, p)
+            self.assertEqual(self._req(p, headers={"Authorization": f"Bearer {self.tok}"})[0], 200, p)
+        for p in ("/", "/global/health", "/ui/conf"):
             self.assertEqual(self._req(p)[0], 200, p)
+
+    def test_page_off_box_mints_no_cookie(self):
+        self.assertIsNone(self._req("/")[2].get("Set-Cookie"))
 
     def test_bearer_basic_and_cookie(self):
         self.assertEqual(self._req("/session", "POST", {}, {"Authorization": f"Bearer {self.tok}"})[0], 200)
@@ -451,6 +457,13 @@ class TestServeOffBox(_Serve):
 
 class TestServeLocal(_Serve):
     OFFBOX = False
+
+    def test_page_on_loopback_mints_the_cookie(self):
+        ck = self._req("/")[2].get("Set-Cookie", "")
+        self.assertTrue(ck.startswith(f"membrane_jwt={self.tok};"))
+        self.assertEqual(self._req("/session")[0], 401)
+        self.assertEqual(self._req("/session", headers={"Cookie": f"membrane_jwt={self.tok}"})[0], 200)
+        self.assertIsNone(self._req("/", headers={"X-Forwarded-For": "127.0.0.1"})[2].get("Set-Cookie"))
 
     def test_writes_need_the_token(self):      # #842
         self.assertEqual(self._req("/session", "POST", {})[0], 401)

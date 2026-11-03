@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from membrane import seatauth as SA
 
 from membrane import self_api as API
 from membrane import self_loop as SL
@@ -250,7 +251,9 @@ def _child_env(tmp):
            if not k.startswith("MEMBRANE_") and k not in ("PYTHONSTARTUP",)}
     env.update({"MEMBRANE_DATA_DIR": str(tmp / "data"), "MEMBRANE_STORE": "json", "MEMBRANE_RUN": "0", "MEMBRANE_JWT": "0",
                 "HOME": str(tmp / "home"), "PYTHONDONTWRITEBYTECODE": "1", SP.FLAG: "1",
-                "PYTHONPATH": str(Path(__file__).resolve().parent.parent)})
+                "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
+                "MEMBRANE_SEAT_TOKEN_FILE": str(SA.token_file())})      # the seat credential, as a real child inherits it
+    SA.ensure()
     (tmp / "home").mkdir(exist_ok=True)
     return env
 

@@ -199,6 +199,18 @@ def serve_is_write(method: str, path: str) -> bool:
     return path not in SERVE_OPEN_POSTS
 
 
+SERVE_OPEN_GETS = ("/", "/membrane", "/index.html", "/favicon.ico", "/global/health", "/ui/conf")
+
+
+def serve_needs_token(method: str, path: str) -> bool:
+    """:4096 -- every request but the UI's login pair and the page's shell
+    (+ health): a GET read needs the seat token too (#842); the page's own
+    reads carry the cookie it was minted on loopback."""
+    if method in ("GET", "HEAD"):
+        return not (path in SERVE_OPEN_GETS or path.startswith("/ui/www/"))
+    return path not in SERVE_OPEN_POSTS
+
+
 def gate(handler, write: bool, cookie: bool = False, basic: bool = False) -> bool:
     """The owner's door, after jwtauth.gate: True = carry on; False = 401
     answered here. JWT mode: that gate is the door (nothing more here)."""

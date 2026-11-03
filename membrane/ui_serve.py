@@ -452,7 +452,7 @@ def intercept(handler) -> bool:
         return True
     if path in ("/", "/membrane", "/index.html"):
         # the page arrives with the seat's cookie already minted (#842): no login prompt
-        _ck = "" if jwt else _SA.login_cookie(_SA.ensure(), _JWT.request_is_https(handler.headers))
+        _ck = "" if jwt or not _SA.is_loopback(handler) else _SA.login_cookie(_SA.ensure(), _JWT.request_is_https(handler.headers))
         _send_file(handler, UI_DIR / "index.html", _ck)
     elif path == "/favicon.ico":
         _send_file(handler, UI_DIR / "favicon.svg")

@@ -49,7 +49,8 @@ class TestUiServe(unittest.TestCase):
         r = urllib.request.Request(f"http://127.0.0.1:{self.port}{p}", method=method, data=data,
                                    headers={"Content-Type": "application/json", **(headers or {})})
         if auth:
-            r.add_header("Authorization", "Basic " + base64.b64encode(b"opencode:pw").decode())
+            from membrane import seatauth
+            r.add_header("Authorization", "Bearer " + seatauth.ensure())
         try:
             with urllib.request.urlopen(r, timeout=10) as resp:
                 b = resp.read()
@@ -124,7 +125,7 @@ class TestUiServe(unittest.TestCase):
         self.assertEqual(code, 403)
         self.assertIsNone(h.get("WWW-Authenticate"))           # never a login prompt
         # auth is gone: a stale basic-auth header changes nothing, the proxy stays refused
-        self.assertEqual(self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, auth=True)[0], 403)
+        self.assertEqual(self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8", "Authorization": "Basic " + base64.b64encode(b"opencode:pw").decode()})[0], 403)
 
     def test_keepalive_does_not_leak_lan_trust(self):
         import http.client

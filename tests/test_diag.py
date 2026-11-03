@@ -222,9 +222,9 @@ class TestServeEndpoints(_DiagCase):
     def test_localhost_only(self):
         far = {"X-Forwarded-For": "192.168.1.50"}      # a forwarded caller is off-box
         code, _ = _req(self.port, "/membrane/diag/timing", headers=far)
-        self.assertEqual(code, 403)
+        self.assertIn(code, (401, 403))                 # a bare read needs the token too (#842)
         code, _ = _req(self.port, "/membrane/diag/profile", headers=far)
-        self.assertEqual(code, 403)
+        self.assertIn(code, (401, 403))
         code, _ = _req(self.port, "/membrane/diag/timing", "POST", {"on": True}, headers=far)
         self.assertIn(code, (401, 403))
         self.assertFalse(D.timing_on())

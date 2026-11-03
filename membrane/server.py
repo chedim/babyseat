@@ -3902,7 +3902,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             # or the UI's cookie); reads and localhost stay open
             if self._jwt_person() is not None:      # a token that names a person is a credential
                 return True
-            return _SA.gate(self, _SA.serve_is_write(self.command, self.path.split("?", 1)[0]),
+            return _SA.gate(self, _SA.serve_needs_token(self.command, self.path.split("?", 1)[0]),
                             cookie=True, basic=True)
 
         def _jwt_person(self):
@@ -3955,7 +3955,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             if url is None:
                 return self._notfound()
             try:
-                with urllib.request.urlopen(urllib.request.Request(url, headers=_JWT.internal_headers()), timeout=45) as up:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=_SA.loopback_headers(_JWT.internal_headers())), timeout=45) as up:
                     body, status = up.read(), up.status
                     ctype = up.headers.get("Content-Type", "application/json")
             except urllib.error.HTTPError as e:
