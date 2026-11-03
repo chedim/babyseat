@@ -52,6 +52,9 @@ PROXY_READ_POSTS = frozenset({
 })
 # :11500's GETs that change state (an intent is created and announced)
 PROXY_WRITE_GETS = frozenset({"/membrane/intend"})
+# :11500's GETs that need the seat token though they only read (operator, #842:
+# the model list and the field's answers are not public; /api/tags stays open)
+PROXY_TOKEN_GETS = frozenset({"/v1/models", "/membrane/ask"})
 # :4096's non-GET routes that must stay reachable: the login pair
 SERVE_OPEN_POSTS = frozenset({"/ui/login", "/ui/logout"})
 
@@ -187,7 +190,7 @@ def proxy_is_write(method: str, path: str) -> bool:
     writes: every turn is captured into the field, its frames learn/forget/
     watch/intend, and its tool rounds reach the entity and script lanes."""
     if method in ("GET", "HEAD"):
-        return path in PROXY_WRITE_GETS
+        return path in PROXY_WRITE_GETS or path in PROXY_TOKEN_GETS
     return path not in PROXY_READ_POSTS
 
 

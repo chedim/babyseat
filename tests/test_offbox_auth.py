@@ -274,9 +274,13 @@ class TestProxyOffBox(_TokenFile):
         self.assertEqual(len(_canned_chat.bodies), 1)
 
     def test_reads_stay_open(self):
-        for p in ("/v1/models", "/api/tags", "/membrane/gate-stages"):
+        for p in ("/api/tags", "/membrane/gate-stages"):
             self.assertEqual(_req(self.port, p)[0], 200, p)
         self.assertEqual(_req(self.port, "/api/tags", "HEAD")[0], 200)
+        # operator (#842): the model list and the field's answers need the token
+        for p in ("/v1/models", "/membrane/ask?q=x"):
+            self.assertEqual(_req(self.port, p)[0], 401, p)
+            self.assertNotEqual(_req(self.port, p, headers=self._bearer())[0], 401, p)
         # the read-only POSTs are reads
         for p in sorted(SA.PROXY_READ_POSTS):
             self.assertFalse(SA.proxy_is_write("POST", p), p)
@@ -314,7 +318,7 @@ class TestProxyLocal(_TokenFile):
         self.assertEqual(_req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT, headers=h)[0], 401)
         self.assertEqual(_req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT,
                               headers={**h, "Authorization": f"Bearer {self.tok}"})[0], 200)
-        self.assertEqual(_req(self.port, "/v1/models", headers=h)[0], 200)         # reads stay open
+        self.assertEqual(_req(self.port, "/api/tags", headers=h)[0], 200)         # reads stay open
 
 
 class TestScriptBelt(unittest.TestCase):
