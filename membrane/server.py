@@ -4719,7 +4719,6 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             if _ma in ("build", "plan"):
                 _row = (sessions.sessions or {}).get(sid)
                 # a planner:/worker:/watch: loop session keeps its identity (#915)
-                _cur = str(_row.get("agent") or "") if _row is not None else ""
                 try:
                     from .jobs import _is_loop as _jl
                     _loop_row = _jl(type("_S", (), {"sessions": sessions, "_agents": {}})(), sid)
