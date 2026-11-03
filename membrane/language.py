@@ -795,6 +795,20 @@ def _group_name(span) -> str:
     return " ".join(words) or span.text
 
 
+def _said_of(tok, span) -> bool:
+    """Is the condition word said of this node: it modifies the node ("goal two open?"), the
+    node is its subject ("goal two landed"), or the node is the subject of the clause it completes
+    ("is goal one open")? A condition said of nothing in particular ("make the blocked parts
+    links") is checked against nothing."""
+    inside, root = range(span.start, span.end), span.root
+    if tok.head.i in inside:
+        return True
+    if root.head.i == tok.i and root.dep_ in ("nsubj", "nsubjpass"):
+        return True
+    return (tok.head.i == root.head.i and tok.dep_ in ("acomp", "attr", "oprd")
+            and root.dep_ in ("nsubj", "nsubjpass", "attr"))
+
+
 def answer(srv, sid: str, text: str) -> dict:
     """{text, ran}: the reply (see respond) and whether a read-only program ran for it."""
     from collections import Counter
@@ -809,13 +823,13 @@ def answer(srv, sid: str, text: str) -> dict:
         adj = _adjective_of(t, adjectives) if len(span) == 1 else None
         if adj is not None and not (t.pos_ == "VERB" and _verb_at(est, doc, t.i)):   # "opens it": the verb
             conds.append((str((adj.properties or {}).get("name") or t.lower_),
-                          (adj.properties or {}).get("filter") or "False"))
+                          (adj.properties or {}).get("filter") or "False", t))
             continue
         if len(span) == 1 and (_verb_at(est, doc, t.i) or t.lower_ in ADVERBS):
             continue                              # a verb is the program's, below
         got = _known_targets(srv, sid, est, span)
         if got:
-            groups.append((_group_name(span), list(dict.fromkeys(got))))
+            groups.append((_group_name(span), list(dict.fromkeys(got)), span))
         else:
             unknown.append(span.text)
     lines, ran = [], False
@@ -836,24 +850,25 @@ def answer(srv, sid: str, text: str) -> dict:
             return bool(evaluate(expr, {"x": EntityView(est, eid)}))
         except Exception:
             return None
-    for called, eids in groups:
+    for called, eids, span in groups:
+        mine = [(w, x) for w, x, tok in conds if _said_of(tok, span)]     # only what the sentence says of it
         if len(eids) == 1:
             e = eids[0]
             label, st = CG_label(est, e), _state(est, e)
-            for word, expr in conds:
+            for word, expr in mine:
                 h = holds(expr, e)
                 lines.append(f"can't tell whether {label} is {word}" if h is None else f"{label} is {word}" if h
                              else f"{label} isn't {word}" + (f" (status {st})" if st else ""))
-            if not conds and st:              # a name alone says nothing: only a state is an answer
+            if not mine and st:               # a name alone says nothing: only a state is an answer
                 lines.append(f"{label}: {st}")
             continue
-        for word, expr in conds:
+        for word, expr in mine:
             hs = [holds(expr, e) for e in eids]
             k = sum(1 for h in hs if h)
             unsure = sum(1 for h in hs if h is None)
             lines.append(f"{k} of {len(eids)} {called} {'is' if k == 1 else 'are'} {word}"
                          + (f" ({unsure} can't tell)" if unsure else ""))
-        if not conds:
+        if not mine:
             by = Counter(_state(est, e) or "no status" for e in eids)
             lines.append(f"{called}: {len(eids)} ({', '.join(f'{n} {st}' for st, n in by.most_common())})")
     if not lines:
@@ -893,6 +908,7 @@ def gap_prompt(est, text: str, words: list) -> str:
             f"  <word> means <an adjective it knows>: {', '.join(adjs)}\n"
             "  <word> means <property> <value>  (a condition on a thing, e.g. \"landed means status merged\")\n"
             "  <word> means <the exact name of a thing the seat knows>\n"
+            "Only when the word means exactly that in this message; when in doubt, \"<word>: none\". "
             "Answer only those lines.")
 
 
