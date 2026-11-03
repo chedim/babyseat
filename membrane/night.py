@@ -2357,6 +2357,45 @@ CALLS_RING = 12
 COMPOSITE_DEPTH = 3            # the seat: "composite depth <= 3" -- feed-forward, not Turing-complete
 
 
+def _owner_kind(est, d) -> str:
+    """'class' when the entity is a class (a c: eid, an interface, a parent of
+    others, or a method owner); else 'entity'."""
+    body = d.eid.removeprefix(MEMBRANE_NS)
+    ps = d.properties or {}
+    if body.startswith("c:") or ps.get("interface") or ps.get("is_class"):
+        return "class"
+    for q in list((est.docs or {}).values()):
+        qp = q.properties or {}
+        par = qp.get("parents") or []
+        par = par if isinstance(par, list) else [par]
+        if d.eid in par or d.eid in (qp.get("method_of") or []):
+            return "class"
+    return "entity"
+
+
+def _resolve_owner(est, on: str):
+    """(owner, refusal). An exact class-name match wins; a unique exact
+    eid/spelling hit binds; a name match that is only a non-class (or several
+    classes) is REFUSED with near candidates -- never a quiet bind to another kind."""
+    spec = (on or "").strip()
+    low = spec.lower()
+    hits = [q for q in list((est.docs or {}).values())
+            if q.eid.lower().endswith(":" + low) or str((q.properties or {}).get("name", "")).lower() == low]
+    classes = [q for q in hits if _owner_kind(est, q) == "class"]
+    if len(classes) == 1:
+        return est._follow_merges(classes[0]), ""
+    if len(classes) > 1:
+        return None, f"owner {on!r} is ambiguous between classes: " + ", ".join(q.eid for q in classes[:6])
+    exact = est._resolve_spec_raw(spec, fuzzy=False)
+    if exact is not None:
+        return est._follow_merges(exact), ""
+    if hits:
+        return None, (f"owner {on!r} matches no class, only other kinds: "
+                      + ", ".join(f"{q.eid} ({_owner_kind(est, q)})" for q in hits[:6])
+                      + " -- pass the exact eid, or name a class")
+    return None, ""
+
+
 def method_define(srv, est, fld, mem, on: str, method: str, command: str,
                   read_only: bool = False, guard: str = "", steps=None,
                   abstract: bool = False, params=None) -> dict:
@@ -2410,7 +2449,11 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
                 return {"ok": False, "error": f"step {st.get('name') or ''}: not a script: {e}"}
             if _LG.passthrough_refusal(st_tree):
                 return {"ok": False, "error": f"step {st.get('name') or ''}: {_LG.PASSTHROUGH}"}
-    owner = est._resolve_spec(on) if on else None
+    owner = None
+    if on:
+        owner, _why = (est._resolve_spec(on), "") if abstract else _resolve_owner(est, on)
+        if _why:
+            return {"ok": False, "error": _why}
     if on and owner is None:
         # a missing owner is minted as a class (the probe suite: 'ha light' existed,
         # 'ha sensor' did not -- define must not depend on which came first)
@@ -2489,7 +2532,9 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
     _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
                  "on": owner.eid if owner else "", "method": method, "ok": True})
     return {"ok": True, "eid": eid, "method": label, "created": created, "abstract": bool(abstract),
-            "params": p.get("params") if abstract else command_params(command), "read_only": bool(read_only)}
+            "params": p.get("params") if abstract else command_params(command), "read_only": bool(read_only),
+            "owner": ({"eid": owner.eid, "kind": _owner_kind(est, owner), "class": owner.cls,
+                       "name": (owner.properties or {}).get("name", "")} if owner else None)}
 
 
 def _node(est, method_eid: str, name: str, props: dict) -> str:
