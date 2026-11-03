@@ -3897,9 +3897,9 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             standalone page's shell (+ /ui/login) is public."""
             if not _JWT.gate(self, cookie=True, basic=True, public=_UI.public_path(self)):
                 return False
-            # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, an OFF-BOX
-            # caller's writes need the seat token (Bearer, Basic's password
-            # or the UI's cookie); reads and localhost stay open
+            # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, every
+            # caller (localhost too) needs the seat token (Bearer, Basic's password
+            # or the UI's cookie), reads included
             if self._jwt_person() is not None:      # a token that names a person is a credential
                 return True
             return _SA.gate(self, _SA.serve_needs_token(self.command, self.path.split("?", 1)[0]),

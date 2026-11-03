@@ -479,7 +479,10 @@ class PeerSubstrate:
         host = str(peer.get("host") or "127.0.0.1")
         url = f"http://{host}:{int(peer.get('port', 0))}/membrane/ask?q={q}"
         try:
-            with _urlopen(req := urllib.request.Request(url, headers=_SA.loopback_headers(_JWT.internal_headers())), timeout) as r:
+            _h = _JWT.internal_headers()
+            if host in ("127.0.0.1", "localhost", "::1"):
+                _h = _SA.loopback_headers(_h)   # our own credential only to ourselves
+            with _urlopen(req := urllib.request.Request(url, headers=_h), timeout) as r:
                 data = json.loads(r.read())
         except Exception:
             return None

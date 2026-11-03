@@ -4,12 +4,13 @@ A seat has two ports: the OpenAI proxy (:11500) and the serve API + UI (:4096).
 Both listen on every interface, so the phone and Home Assistant reach the seat
 over Wi-Fi. Two levels protect them:
 
-- **The seat token (only when JWT mode is off: `MEMBRANE_JWT=0`).** Reads are open on the
-  network; localhost needs nothing. From any other machine, every request that
-  changes something needs the seat token.
+- **The seat token (only when JWT mode is off: `MEMBRANE_JWT=0`).** Every request,
+  reads included, needs it, localhost too: an address is not a credential. The one
+  open read on the Ollama port is `GET /api/tags`. The page's cookie is minted only
+  on this machine.
 - **JWT mode (on by default).** Every request on both ports, reads included, needs
   a signed token, and the token says who is talking. A caller on this machine
-  needs none: a bare loopback request is the seat itself, as with JWT off. Use it to
+  needs a token too; the page served to this machine gets an owner cookie. Use it to
   put a seat behind an ingress or on a network other people share.
 
 ## The seat token

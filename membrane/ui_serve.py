@@ -16,9 +16,8 @@ THE LAN GUARD: standalone's pages answer a private, loopback or tailnet
 address (a person types their name in the page). Anything forwarded by a proxy
 (X-Forwarded-For, Forwarded) or from a public address gets a 403, never a login
 prompt -- unless it carries the seat token. THE OWNER'S DOOR (#253,
-seatauth.py) sits in front of every write: from another machine the page reads
-freely and asks once for the seat token (POST /ui/login sets the same HttpOnly
-cookie JWT mode uses); localhost needs nothing. /ui/conf says `auth: "seat"`
+seatauth.py) sits in front of every write: from every machine the page asks once for the seat token (POST /ui/login sets the same HttpOnly
+cookie JWT mode uses); localhost needs the token too. /ui/conf says `auth: "seat"`
 and whether this caller is the `owner`.
 
 JWT MODE (jwtauth.py, docs/auth.md; off unless MEMBRANE_JWT_SECRET[_FILE] is
