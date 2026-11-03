@@ -445,7 +445,15 @@ def intercept(handler) -> bool:
         handler._ui_trusted = True         # lan, or the token checked above
         handler._ui_relay = True           # the page's request: its person's sessions (server.py)
         _who = token_person(handler)
-        handler._ui_speaker = _who.sub if _who is not None else speaker_of(handler)
+        # S1: the CREDENTIAL decides who speaks, never the header. The seat token
+        # (cookie/basic/bearer) is the operator; only a tokenless LAN visitor
+        # keeps the name they gave.
+        if _who is not None:
+            handler._ui_speaker = _who.sub
+        elif not jwt and _SA.presented_seat_token(handler, cookie=True, basic=True):
+            handler._ui_speaker = str(os.environ.get("MEMBRANE_OPERATOR") or "owner")
+        else:
+            handler._ui_speaker = speaker_of(handler)
         return False
     if handler.command not in ("GET", "HEAD") and path not in ("/ui/stt", "/ui/log"):
         _json(handler, {"error": "method not allowed"}, 405)
