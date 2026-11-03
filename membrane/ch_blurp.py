@@ -473,16 +473,14 @@ def exchange(srv, report: dict | None) -> dict:
     report = report or {}
     was = p.awake
     p.awake = bool(report.get("awake")) and str(report.get("mode") or "") in ("on", "watch")
-    pruned = []
-    if was and not p.awake and report.get("asleep"):
-        with vm._run:                                  # sleep: stay positive (not mid-drain)
-            pruned = vm.learner.prune()
+    pruned = []            # sleep keeps the learner's state: no prune on the awake->asleep edge
+    stall = vm.learner.check_stall()
     if p.awake:
         try:
             _show_body(srv, vm)
         except Exception:
             pass                                       # the body is display only: never the exchange's failure
-    return {"energy_delta": p.take(), "pruned": len(pruned), "awake": p.awake}
+    return {"energy_delta": p.take(), "pruned": len(pruned), "awake": p.awake, **({"stall": stall} if stall else {})}
 
 
 SEAT_FID = "seat:self"      # where the body rests before its first firing (the map's seat)

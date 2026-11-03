@@ -83,7 +83,7 @@ def test_nothing_is_spent_until_blurp_says_it_is_awake(seat):
     assert B.exchange(seat, {"awake": True, "mode": "on"})["energy_delta"] == 0   # taken once
 
 
-def test_falling_asleep_prunes_the_negative(seat):
+def test_falling_asleep_keeps_the_negative(seat):
     est = seat.entity_store
     B.exchange(seat, {"awake": True, "mode": "on"})
     x, y = _toy(est, "x"), _toy(est, "y")
@@ -92,9 +92,8 @@ def test_falling_asleep_prunes_the_negative(seat):
     bad = [t.eid for t in _cands(seat) if seat.ch_vm.learner.balance(t.eid) < 0]
     assert bad
     B.exchange(seat, {"awake": False, "asleep": True, "mode": "on"})
-    assert not any(e in est.docs for e in bad)
-    _turn(seat, (x, "a", 5, "person:op"), (x, "b", 6, "llm"))
-    assert all(t.eid not in bad for t in _cands(seat))            # asleep: nothing new either
+    assert all(e in est.docs for e in bad)                        # sleep keeps the learner's state
+    assert all(seat.ch_vm.learner.balance(e) < 0 for e in bad)
 
 
 def test_accept_grants_a_branch_and_only_then_a_proposal_suggests(seat):

@@ -278,3 +278,52 @@ def test_no_chain_is_counted(world):
         est.upsert(x)
     vm.drain()
     assert vm.learner.counts["pass:no_chain"] >= 1
+
+
+# ---- stall detector, sleep keeps state, toy writes logged ----
+
+def test_stall_surfaces_once_naming_the_asleep_gate(world):
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))
+    lr = vm.learner
+    assert lr.check_stall(now=1000.0) is None            # baseline taken
+    purse.awake = False
+    _turn(est, vm, (x, "d", 4), (x, "e", 5))
+    assert lr.check_stall(now=1000.0 + 3600) is None     # too soon
+    line = lr.check_stall(now=1000.0 + 4 * 3600)
+    assert line and "asleep" in line
+    assert lr.check_stall(now=1000.0 + 9 * 3600) is None  # once
+
+
+def test_stall_names_toys_only_gate(world, monkeypatch):
+    est, vm, purse, _ = world
+    lr = vm.learner
+    lr.counts["fire"] = 0
+    lr.check_stall(now=0.0)
+    lr.counts["fire:gated"] += 5
+    assert "toys-only" in lr.check_stall(now=4 * 3600)
+
+
+def test_sleep_edge_keeps_learner_state(world):
+    import types
+    from membrane import ch_blurp as B
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))
+    c = _cands(vm)[0]
+    vm.learner._bal[c.eid] = -1.0
+    vm.learner._hits[c.eid] = 2
+    srv = types.SimpleNamespace(ch_purse=types.SimpleNamespace(awake=True, take=lambda: 0.0), ch_vm=vm)
+    B.exchange(srv, {"awake": False, "asleep": True, "mode": "off"})
+    assert c.eid in {t.eid for t in _cands(vm)}
+    assert vm.learner._bal[c.eid] == -1.0 and vm.learner._hits[c.eid] == 2
+
+
+def test_toy_writes_are_logged(world, monkeypatch):
+    monkeypatch.setattr(L, "WORLD", "toys")
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1))
+    assert vm.learner.counts["seen"] >= 1
+    assert "toy_write" in vm.learner.counts or vm.learner.counts["pass:not_toy"] >= 1

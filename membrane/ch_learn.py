@@ -29,6 +29,7 @@ every candidate whose balance is negative (prune())."""
 from __future__ import annotations
 
 import collections
+import time
 import hashlib
 import json
 
@@ -132,6 +133,11 @@ def _literal(v) -> str | None:
     return s if len(s) <= 200 else None
 
 
+STALL_HOURS = 3.0
+TOY_LOG = 200
+STALL_KEYS = ("guess:asleep", "fire:skip", "fire:gated", "pass:not_toy")
+
+
 class Learner:
     def __init__(self, vm, purse, granted=lambda path: False, suggest=None, adopted=None, toy_open=None,
                  moved=None):
@@ -151,6 +157,38 @@ class Learner:
         self._guessed: collections.OrderedDict = collections.OrderedDict()  # chain -> new guesses defined
         self._refused: collections.OrderedDict = collections.OrderedDict()  # guess eids the VM refused
         self.counts: collections.Counter = collections.Counter()   # what it saw and why it passed (the card shows it)
+        self.toy_log: collections.deque = collections.deque(maxlen=TOY_LOG)   # toy writes it saw (knowable)
+        self._stall_at = time.time()          # last time guesses/fires moved (or the window began)
+        self._stall_base: dict = {}           # counts when that was
+        self._stall_told = False
+        self.stall = None
+
+    # -- stall: why is it not learning? ----------------------------------------------------
+    def check_stall(self, now: float | None = None, hours: float = STALL_HOURS) -> str | None:
+        """Surface ONCE the gate that blocks learning when asleep / gated / skipped counts
+        climb for `hours` with no guesses or fires. Returns the line (once), else None."""
+        now = time.time() if now is None else now
+        n = self.counts
+        moved = n["fire"] + n["guess"] + n["hit"]
+        base = self._stall_base
+        if moved != base.get("moved", moved) or "moved" not in base:
+            self._stall_at, self._stall_told = now, False
+            self._stall_base = {"moved": moved, **{k: n[k] for k in STALL_KEYS}}
+            return None
+        if self._stall_told or now - self._stall_at < hours * 3600:
+            return None
+        climb = {k: n[k] - base.get(k, 0) for k in STALL_KEYS}
+        if not any(climb.values()):
+            return None
+        top = max(climb, key=climb.get)
+        why = {"guess:asleep": "asleep (the purse cannot spend: Blurp is not awake)",
+               "fire:skip": "asleep (fires skipped: the purse cannot spend)",
+               "fire:gated": "toys-only (commands are gated while toys are the world)",
+               "pass:not_toy": "no toy writes (writes seen, none from a toy)"}[top]
+        self._stall_told = True
+        line = f"learning stalled {hours:g}h: {why}; " + ", ".join(f"{k}+{v}" for k, v in climb.items() if v)
+        self.stall = line
+        return line
 
     # -- the account ------------------------------------------------------------------------
     def balance(self, cand: str) -> float:
@@ -276,6 +314,9 @@ class Learner:
             if why == "no_chain":                       # #721: who writes outside any chain (the writer's kind)
                 n["no_chain:" + (writer.split(":", 1)[0] or "?")] += 1
             return                                      # Blurp's own acts never confirm or teach themselves
+        if WORLD == "toys":
+            n["toy_write"] += 1
+            self.toy_log.append({"t": time.time(), "eid": w.get("eid"), "prop": w.get("prop"), "writer": writer})
         by_llm = writer == "llm" or writer.startswith("llm:")   # the LLM's actions: taught, and confirming
         n["by_llm" if by_llm else "by_other"] += 1
         teach = by_llm or WORLD == "toys"               # #727: a toy teaches and confirms whoever moved it
