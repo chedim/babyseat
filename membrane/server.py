@@ -1574,6 +1574,8 @@ class TurnRunner:
         rounds, reasoning -- never replays), bounded to the last
         HISTORY_MAX_MESSAGES rows, each text capped."""
         out: list[dict] = []
+        if str((self.sessions.get(sid) or {}).get("agent") or "").lower().startswith("worker"):
+            return out            # #857: a worker's task text carries what it needs; its earlier chunks' rows stay unreplayed
         for row in self.messages.list(sid):
             info = row.get("info") or {}
             if exclude_id and str(info.get("id") or "") == exclude_id:

@@ -994,7 +994,10 @@ class _LoopDrainer:
             _fp.focus(agent, ent, "start")       # #848: the lane's orb
         try:
             with _W.source(lane, ent):
-                sid = srv.create_loop_session(agent, agent)
+                _d0 = est.docs.get(ent) if lane == "worker" else None
+                _resumed = bool(_d0 is not None and (_d0.properties or {}).get("progress"))
+                sid = (srv.create_loop_session(agent, agent, keep=True) if _resumed      # #857: a re-owed task keeps its chunks
+                       else srv.create_loop_session(agent, agent))
                 if _fp is not None:
                     _fp.loop_session(agent, ent, sid)
                 if lane == "worker":
@@ -1003,7 +1006,8 @@ class _LoopDrainer:
                     taken = True
                     out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
                     from . import claude_agent as _CA
-                    _chunks = 1
+                    _chunks = 1 + len(((est.docs.get(ent) or QuantumEntity(eid="", cls="")).properties or {})
+                                      .get("progress") or [])      # a re-owed task counts on (Memo on #913)
                     while isinstance(out.get("capped"), dict) and not isinstance(out.get("quota"), dict):
                         # #857: a chunk hit the worker ceiling -- a NEW session, no resume,
                         # the task as the field has it; never past one answer's old ceiling in all
@@ -1021,10 +1025,7 @@ class _LoopDrainer:
                                   f"({_CA.MAX_TOOL_CALLS_PER_ANSWER} tool calls); stopping", file=sys.stderr)
                             break
                         _chunks += 1
-                        try:                          # the same session, its earlier chunks' rows kept (Memo on #913)
-                            sid = srv.create_loop_session(agent, agent, keep=True)
-                        except TypeError:
-                            sid = srv.create_loop_session(agent, agent)
+                        sid = srv.create_loop_session(agent, agent, keep=True)   # its earlier chunks' rows kept (Memo on #913)
                         if _fp is not None:
                             _fp.loop_session(agent, ent, sid)
                         out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}

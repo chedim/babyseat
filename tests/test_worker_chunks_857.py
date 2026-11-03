@@ -249,3 +249,31 @@ def test_loop_session_keeps_rows_only_when_asked():
     assert deleted == []
     assert OC.loop_session(srv, "worker: x") == "ses_t"
     assert deleted == ["ses_t"]
+
+
+def test_a_worker_session_replays_no_earlier_chunk():
+    """Memo on #913: with the rows kept, TurnRunner._prior_history replayed the previous chunk, so
+    chunk 3's prompt held the task twice. A worker's task text carries what it needs."""
+    import membrane.server as MS
+    r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(), None, None, system="", model="m")
+    w = r.sessions.create(title="worker: membrane::task:x:k1")
+    r.sessions.sessions[w["id"]]["agent"] = "worker: membrane::task:x:k1"
+    c = r.sessions.create(title="chat")
+    for sid in (w["id"], c["id"]):
+        r.messages.append(sid, {"id": "msg_u1", "role": "user"}, [{"type": "text", "text": "You are a WORKER on task x"}])
+        r.messages.append(sid, {"id": "msg_a1", "role": "assistant"}, [{"type": "text", "text": "working on it"}])
+    assert r._prior_history(w["id"], "") == []
+    assert r._prior_history(c["id"], "")                 # a person's chat still replays
+
+
+def test_a_re_owed_task_keeps_its_rows_and_counts_on(seat):
+    """Memo on #913: the first session of a re-owed task wiped its rows, and the count restarted."""
+    log = _chunked_turn(seat, total=25)
+    write(seat, GOAL, "plan", PLAN)
+    est = seat.entity_store
+    est.docs[A].properties["progress"] = ["session 1:\n- bash step -> completed: ok"]
+    ev = [e for e in seat.events_pool.take() if e.get("kind") == "task"][0]
+    WA._LoopDrainer(seat)._handle(ev)
+    settle(seat)
+    assert log["keeps"][0] is True                          # the re-owed task's first session keeps the rows
+    assert "earlier session" in log["turns"][0]["text"]
