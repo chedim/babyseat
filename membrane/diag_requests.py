@@ -59,6 +59,10 @@ def lane_of(srv, up: dict) -> str:
     loops' (fieldpulse), else "chat"."""
     sid = str((up or {}).get("_turn_sid") or "")
     if sid:
+        store = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
+        row = (getattr(store, "sessions", None) or {}).get(sid)
+        if str((row or {}).get("agent") or "").lower().startswith("worker"):
+            return "worker"                 # #857: a goal worker's chunked answer
         if sid.startswith("loop::"):
             return "loop"
         fp = getattr(srv, "_field_pulse", None)

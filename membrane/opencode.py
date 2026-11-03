@@ -1682,7 +1682,20 @@ def main() -> None:
                     if isinstance((out or {}).get("quota"), dict):
                         # out of tokens (quota.py): no verdict, the event waits
                         return {"text": "", "quota": out["quota"]}
+                    _cap = ((out or {}).get("info") or {}).get("claudeCapped")
+                    if isinstance(_cap, dict):          # #857: what the cut chunk did, for the next one
+                        _did = []
+                        for p in parts:
+                            if p.get("type") != "tool":
+                                continue
+                            st = p.get("state") or {}
+                            _in = " ".join(json.dumps(st.get("input") or {}, default=str).split())[:100]
+                            _res = " ".join(str(st.get("output") or st.get("error") or "").split())[:100]
+                            _did.append(f"- {p.get('tool')} {_in} -> {st.get('status', '')}: {_res}")
+                        _cap = {**_cap, "progress": ("\n".join(_did)[-3000:] + ("\nIts last words: " + txt[-800:]
+                                                                                  if txt.strip() else ""))}
                     return {"text": txt[-4000:], "verdict_text": txt[:200],
+                            **({"capped": _cap} if isinstance(_cap, dict) else {}),
                             "trail": trail[-6:],
                             # the turn's model (#254: self trusts an advisor per model)
                             "model": ((out or {}).get("info") or {}).get("modelID")}

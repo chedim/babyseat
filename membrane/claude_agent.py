@@ -114,6 +114,7 @@ MAX_TOOL_CALLS_PER_ANSWER = 2048    # the hard ceiling per answer; Continue
                                     # 2026-10-23, #467)
 MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: sized
                                     # never to bind before the ceiling (#425)
+WORKER_CEILING = 20                 # a goal worker's chunk: each its own session (#857)
 CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
                    f"person can press Continue.")
@@ -265,13 +266,16 @@ class _Answer:
     ceiling. It never refuses a call for silence (2026-10-23)."""
 
     def __init__(self):
+        from . import diag_requests as _DR
+        self.limit = WORKER_CEILING if _DR.current().get("lane") == "worker" \
+            else MAX_TOOL_CALLS_PER_ANSWER
         self.calls = 0                  # allowed calls in this answer
         self.denied: set = set()        # tool_use ids the hook refused
         self.ceiling = False
 
     async def hook(self, hook_input, tool_use_id=None, context=None):
         tid = str((hook_input or {}).get("tool_use_id") or tool_use_id or "")
-        if self.calls >= MAX_TOOL_CALLS_PER_ANSWER:
+        if self.calls >= self.limit:
             self.ceiling = True
             self.denied.add(tid)
             return {"continue_": False, "stopReason": CEILING_MESSAGE,
@@ -635,7 +639,7 @@ def tool_names() -> list[str]:
     from . import mcp_server as _mcp
     hide = _coproc_hidden()
     from . import diag_requests as _dr
-    if _dr.current().get("lane") == "loop":
+    if _dr.current().get("lane") in ("loop", "worker"):     # a worker is a field loop too (#857)
         hide = hide | _LOOP_HIDDEN
     return [TOOL_PREFIX + t["name"] for t in _mcp.TOOLS if t["name"] not in hide]
 
@@ -953,7 +957,7 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
             put(("usage", _usage(getattr(m, "usage", None))))
     if capped or answer.ceiling:
         _count("ceiling_hits")
-        put(("capped", {"session": session, "calls": MAX_TOOL_CALLS_PER_ANSWER}))
+        put(("capped", {"session": session, "calls": answer.limit}))
 
 
 def _quota_paused(model: str, why: str, until=None):

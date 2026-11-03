@@ -825,6 +825,12 @@ def worker_text(est, task: str) -> str:
     p = (d.properties or {}) if d is not None else {}
     done = [f"{b.eid}: {str((b.properties or {}).get('receipt') or (b.properties or {}).get('value') or '')[:160]}"
             for b in _blockers_of(est, task)]
-    return WORKER_TEXT.format(task=task, goal=p.get("goal"), title=p.get("title") or task,
+    text = WORKER_TEXT.format(task=task, goal=p.get("goal"), title=p.get("title") or task,
                               detail=p.get("detail") or "", done="; ".join(done) or "nothing")
+    progress = [str(x) for x in (p.get("progress") or []) if str(x).strip()]
+    if progress:                        # #857: an earlier session stopped at its tool budget
+        text += ("\n\nAn earlier session of this task stopped at its tool budget. What it did so far:\n"
+                 + "\n".join(progress)[-6000:]
+                 + "\nContinue from there; don't redo what's done.")
+    return text
 
