@@ -148,6 +148,20 @@ what membrane said (that a program ran only when one did). The gap call is waite
 already being asked is never asked again at the same time. `MEMBRANE_ANSWER=0` turns every 🧩
 post off, stage 3's too.
 
+**Novelty: a meaning invented as code** (#891, 2026-11-03). Before the model is asked about a
+surprise word, membrane tries to invent its meaning itself (`language.invent`). The parse has to
+tie the word to things the message names: as a predicate about a subject ("846 landed", "is goal
+one open"; never an action with its own object, "Claude will fix them"), or as a verb acting on
+an object ("please peek goal one"). The candidates are those things' own one-word states
+(`x.status == 'merged'`) and the read-only verbs that apply to all of them. They are ranked by
+the word's vector (the seat's embedder), and the top `INVENT_CANDIDATES` (5) are checked on the
+field: a condition must hold for the things and fail for at least one other thing of their class
+(one that can't fail says nothing). The first that passes is kept at once (an adjective, or a
+verb synonym) marked `invented` (its candidates, score and message kept); only the words left go
+to the model. A later definition of the word marks the invention `corrected`. `membrane shadow`
+counts `novelty`: invented, kept from the model, none. On the operator's 112 logged messages, 2
+of 547 words were invented (*landed* = `x.branch == 'main'`, *reviewed* = `checks`).
+
 **Stage 3: the model fills the gaps** (2026-11-02). A chat message that compiles except for
 words the field doesn't know is told to the model in the turn already running, with each word
 and the definition that fills it: an unknown verb (`<word> means <a verb it knows>`), an unknown

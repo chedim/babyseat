@@ -338,10 +338,21 @@ def _define_step(srv, est, word: str, meaning: str, text: str) -> dict:
             "text": str(text).strip()}
 
 
+def _correct(est, word: str) -> None:
+    """#891: a definition taught over an invented meaning corrects it (counted, never lost)."""
+    from . import verbs as V
+    for eid in (_adj_eid(word), V.verb_eid(word)):
+        d = (est.docs or {}).get(eid)
+        if d is not None and (d.properties or {}).get("invented"):
+            d.properties = {**d.properties, "invented": False, "corrected": True, "corrected_ts": time.time()}
+            est.upsert(d, embedder=None)
+
+
 def teach(est, step: dict) -> str:
     """Keep a definition step: the adjective, the verb synonym, the other name. -> what it means."""
     from . import verbs as V
     p, word = step["plan"], step["word"]
+    _correct(est, word)
     if p["kind"] == "adjective":
         define_adjective(est, word, p["filter"])
     elif p["kind"] == "verb":
@@ -924,6 +935,112 @@ def _ask_model(prompt: str):
     return "".join(text), usage
 
 
+# ---- novelty (#891): a meaning invented as code, proposed by tensors, checked on the field ------
+INVENT_CANDIDATES = 5       # the operator, 2026-11-03: the nearest candidates checked per word
+_NOT_STATE = {"name", "summary", "title", "text", "sid", "mid", "role", "speaker", "word", "filter",
+              "method_name", "command", "same_as"}
+
+
+def _tie(tok, span) -> str | None:
+    """How the parse ties the word to this node: "state" (the node is its subject, or it is the
+    predicate about the node: "846 landed", "is goal one open"), "object" (it acts on the node:
+    "please peek goal one"), or None. Not a modifier: the small parser reads an unknown command
+    at a sentence's start as one ("scan goal one": scan -amod-> goal)."""
+    inside = range(span.start, span.end)
+    root = span.root
+    if root.head.i == tok.i and root.dep_ in ("dobj", "obj", "pobj", "dative"):
+        return "object"
+    if root.head.i == tok.i and root.dep_ in ("nsubj", "nsubjpass", "csubj"):
+        acts = [c for c in tok.children if c.dep_ in ("dobj", "obj", "dative", "prep", "xcomp", "ccomp")]
+        return None if acts else "state"         # "Claude will fix them": an action, not a state
+    if tok.head.i == root.head.i and tok.i not in inside and tok.dep_ in ("acomp", "attr", "oprd") \
+            and root.dep_ in ("nsubj", "nsubjpass"):
+        return "state"
+    return None
+
+
+def _state_values(est, eid: str) -> list:
+    """(prop, value) of a thing's plain one-word states: the conditions it could mean."""
+    p = ((est.docs or {}).get(eid) or QuantumEntity(eid="", cls="")).properties or {}
+    return [(k, v) for k, v in p.items() if isinstance(v, str) and not k.startswith("_") and k not in _NOT_STATE
+            and k.isidentifier() and v and v.replace("-", "").replace("_", "").isalpha()]
+
+
+def invent(srv, sid: str, text: str, word: str, embed=None) -> dict | None:
+    """A meaning for `word` from what the message ties it to -> {word, kind, meaning, score}, kept
+    at once and marked invented; None when nothing holds (the model is asked then). Candidates: the
+    tied things' own states (x.status == 'merged') and the read-only verbs that apply to them,
+    ranked by the word's vector, the top INVENT_CANDIDATES checked on the field."""
+    import numpy as np
+    from . import verbs as V
+    from .ch import EntityView, evaluate
+    est = srv.entity_store
+    emb = embed or getattr(getattr(srv, "efield", None), "emb", None)
+    if emb is None or " " in word.strip():
+        return None
+    doc = _doc(text)
+    tok = next((t for t in doc if t.text == word or t.lower_ == word.lower()), None)
+    if tok is None:
+        return None
+    tied: dict = {"state": [], "object": []}
+    for span, pos in _meaning_nodes(doc, _names(est)):
+        how = None if tok.i in range(span.start, span.end) else _tie(tok, span)
+        if how:
+            tied[how] += [e for e in _known_targets(srv, sid, est, span) if e not in tied[how]]
+    if not tied["state"] and not tied["object"]:
+        return None
+    cands = {}                                   # (kind, meaning) -> the words its vector is read from
+    for e in tied["state"]:                      # a state of the things it's said about
+        for k, v in _state_values(est, e):
+            cands[("adjective", f"x.{k} == {v!r}")] = v
+    if tied["object"]:                           # a read-only verb on the things it acts on
+        for d in list((est.docs or {}).values()):
+            if d.cls == V.CLASS_VERB:
+                name = str((d.properties or {}).get("name") or "")
+                ms = [V.implementation(est, (est.docs or {}).get(e), name)[0] for e in tied["object"]]
+                if name and all(m is not None and (m.properties or {}).get("read_only") for m in ms):
+                    cands[("verb", name)] = name
+    things = tied["state"]
+    if not cands:
+        return None
+    keys = list(cands)
+    try:
+        vecs = np.asarray(emb.embed([word] + [cands[k] for k in keys]), dtype=float)
+    except Exception:
+        return None
+    w, cv = vecs[0], vecs[1:]
+    sims = cv @ w / ((np.linalg.norm(cv, axis=1) * (np.linalg.norm(w) or 1.0)) + 1e-12)
+    ranked = sorted(zip(sims.tolist(), keys), key=lambda x: -x[0])[:INVENT_CANDIDATES]
+    def holds(expr, e):
+        try:
+            return bool(evaluate(expr, {"x": EntityView(est, e)}))
+        except Exception:
+            return False
+    for score, (kind, meaning) in ranked:
+        if kind == "adjective":
+            if not all(holds(meaning, e) for e in things):
+                continue
+            classes = {(est.docs.get(e).cls if est.docs.get(e) is not None else "") for e in things}
+            peers = [d.eid for d in list((est.docs or {}).values()) if d.cls in classes and d.eid not in things]
+            if not any(not holds(meaning, e) for e in peers):
+                continue                         # true of every such thing: it can't fail, so it says nothing
+            eid = define_adjective(est, word.lower(), meaning)
+        else:
+            eid = V.verb_eid(word.lower())
+            d = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls=V.CLASS_VERB, properties={
+                "name": V.lemma(word.lower()), "word": "w:" + V.lemma(word.lower()), "implemented_by": [],
+                "silent_birth": True})
+            d.properties = {**(d.properties or {}), "same_as": meaning}
+            est.upsert(d, embedder=None)
+        d = est.docs[eid]
+        d.properties = {**(d.properties or {}), "invented": True, "invented_from": str(text)[:300],
+                        "invented_score": round(float(score), 3), "invented_ts": time.time(),
+                        "candidates": [m for _, (_, m) in ranked]}
+        est.upsert(d, embedder=None)
+        return {"word": word, "kind": kind, "meaning": meaning, "score": round(float(score), 3)}
+    return None
+
+
 GAP_WAIT_S = 30.0       # #887 C: how long a person's turn waits for the gap call (the operator, 2026-11-03: 30 s)
 _ASKING: set = set()     # the words a gap call is out for now: never asked twice at once (Memo on #892)
 _ASKING_LOCK = threading.Lock()
@@ -958,14 +1075,35 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     if not todo:
         return {"words": [], "usage": {}, **({"pending": pending} if pending else {})}
     try:
+        invented = []                            # #891: tensors first, the model only for the rest
+        for w in list(todo):
+            try:
+                inv = invent(srv, sid, text, w)
+            except Exception:
+                inv = None
+            if inv is not None:
+                _mark_asked(est, sid, w, inv["meaning"], True, invented=True)
+                invented.append({"word": w, "answer": inv["meaning"], "kept": True, "meaning": inv["meaning"],
+                                 "invented": True, "score": inv["score"]})
+        ask_for = [w for w in todo if w not in {i["word"] for i in invented}]
+        if not ask_for:
+            return {"words": invented, "usage": {}, **({"pending": pending} if pending else {})}
         try:
-            reply, usage = (ask or _ask_model)(gap_prompt(est, text, todo))
+            reply, usage = (ask or _ask_model)(gap_prompt(est, text, ask_for))
         except Exception as e:
-            return {"words": [], "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
-        return _keep_answers(srv, sid, est, todo, reply, usage, pending)
+            return {"words": invented, "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
+        got = _keep_answers(srv, sid, est, ask_for, reply, usage, pending)
+        got["words"] = invented + got["words"]
+        return got
     finally:
         with _ASKING_LOCK:
             _ASKING.difference_update(w.lower() for w in todo)
+
+
+def _mark_asked(est, sid: str, w: str, answer, kept: bool, invented: bool = False) -> None:
+    est.upsert(QuantumEntity(eid=_gap_eid(w), cls="Gap", properties={
+        "name": w.lower(), "answer": answer, "kept": kept, "asked_ts": time.time(), "sid": sid,
+        "silent_birth": True, **({"invented": True} if invented else {})}), embedder=None)
 
 
 def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list) -> dict:
@@ -989,9 +1127,7 @@ def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list) -
                     shown, kept = teach(est, step), True
             except Exception:
                 kept = False
-        est.upsert(QuantumEntity(eid=_gap_eid(w), cls="Gap", properties={
-            "name": w.lower(), "answer": meaning, "kept": kept, "asked_ts": time.time(), "sid": sid,
-            "silent_birth": True}), embedder=None)
+        _mark_asked(est, sid, w, meaning, kept)
         out.append({"word": w, "answer": meaning, "kept": kept, "meaning": shown})
     return {"words": out, "usage": usage, **({"pending": pending} if pending else {})}
 
@@ -1007,9 +1143,18 @@ def shadow_report(rows: list[dict]) -> dict:
           if isinstance(r.get("understanding"), dict) and r["understanding"].get("share") is not None]
     words = Counter(str(w).lower() for u in us for w in (u.get("surprise") or []))
     return {"total": len(rows), "outcomes": dict(out), "gap_types": dict(gaps), "model_used_tools": dict(tools),
+            "novelty": _novelty(rows),
             "understanding": {"scored": len(us),
                               "mean_share": round(sum(u["share"] for u in us) / len(us), 3) if us else None,
                               "surprise_top": [[w, c] for w, c in words.most_common(20)]}}
+
+
+def _novelty(rows: list[dict]) -> dict:
+    """#891: how the filled words got their meaning -- invented by tensors, kept from the model, none."""
+    ws = [w for r in rows for w in (((r.get("filled") or {}).get("words")) or []) if isinstance(w, dict)]
+    return {"invented": sum(1 for w in ws if w.get("invented")),
+            "model_kept": sum(1 for w in ws if w.get("kept") and not w.get("invented")),
+            "none": sum(1 for w in ws if not w.get("kept"))}
 
 
 def shadow_cli(argv=None) -> int:
