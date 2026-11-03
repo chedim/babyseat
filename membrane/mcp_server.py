@@ -81,9 +81,26 @@ def cut_middle(text: str, cap: int = LINK_OUTPUT_CAP) -> str:
     return f"{text[:h]}\n… {len(text) - h - t} chars cut …\n{text[-t:]}"
 
 
+def _take(lines: list, budget: int) -> tuple[list, int, bool]:
+    """Up to BRIEF_LINES of `lines` within `budget` chars -> (shown, how many lines, a line was cut)."""
+    shown, used, cut = [], 0, False
+    for ln in lines[:BRIEF_LINES]:
+        room = budget - used
+        if room <= 0:
+            break
+        if len(ln) > room:
+            shown.append(ln[:room] + " …[line cut]")
+            cut = True
+            break
+        shown.append(ln)
+        used += len(ln) + 1
+    return shown, len(shown), cut
+
+
 def _brief_output(r: dict) -> str:
-    """A run's output for the tool reply, brief: whole when short, else its head and tail lines
-    and where the rest is (the result entity keeps it)."""
+    """A run's output for the tool reply, brief, and never silently cut (Memo on #912): whole when
+    short, else its first and last lines within BRIEF_CAP, a header saying exactly what is shown,
+    what was not kept, and how to page the rest (the result entity keeps it)."""
     out = r.get("output")
     if out is None:
         out = r.get("head") or ""
@@ -93,19 +110,27 @@ def _brief_output(r: dict) -> str:
         return "output: (none)"
     if n < BRIEF_WHOLE and len(out) == n:
         return f"output:\n{out}"
+    res = r.get("result") or ""
+    lost = n > len(out) or n > LINK_OUTPUT_CAP
+    kept_note = (f"; only {len(out)} chars were kept (the middle of the run's output is gone: re-run "
+                 f"narrower -- sed -n 'A,Bp' / grep -- to see it)" if lost else "")
     lines = out.split("\n")
     total = len(lines)
-    res = r.get("result") or ""
     if total <= 2 * BRIEF_LINES and len(out) <= BRIEF_CAP:
-        return f"output ({total} lines, {n} chars):\n{out}"
-    head, tail = lines[:BRIEF_LINES], lines[-BRIEF_LINES:] if total > BRIEF_LINES else []
-    half = BRIEF_CAP // 2
-    head_s, tail_s = "\n".join(head)[:half], "\n".join(tail)[-half:]
-    more = (f"; lines {BRIEF_LINES + 1}-{total - BRIEF_LINES}: entity_read spec={res} "
-            f"lines={BRIEF_LINES + 1}-{total - BRIEF_LINES}" if res and total > 2 * BRIEF_LINES else
-            (f"; in full: entity_read spec={res} prop=output" if res else ""))
-    return (f"output ({total} lines, {n} chars; first and last {BRIEF_LINES} shown{more}):\n"
-            f"{head_s}\n…\n{tail_s}")
+        return f"output ({total} lines, {n} chars{kept_note}):\n{out}"
+    half = (BRIEF_CAP - 500) // 2                # the header's room: the whole reply stays within BRIEF_CAP
+    if total == 1:                                # one long line (a JSON blob): its two ends
+        return (f"output (1 line, {n} chars{kept_note}; shown: its first and last {half} chars; whole: "
+                f"entity_read spec={res} prop=output):\n{out[:half]}\n… {len(out) - 2 * half} chars …\n{out[-half:]}")
+    head, a, cut_a = _take(lines, half)
+    tail_r, b, cut_b = _take(list(reversed(lines[a:])), half)
+    tail = list(reversed(tail_r))
+    gap = (a + 1, total - b) if total - b >= a + 1 else None
+    shown = f"lines 1-{a}" + (f" and {total - b + 1}-{total}" if b else "")
+    more = (f"; lines {gap[0]}-{gap[1]}: entity_read spec={res} lines={gap[0]}-{gap[1]}" if gap and res else "")
+    return (f"output ({total} lines, {n} chars{kept_note}; shown: {shown}"
+            f"{' (long lines cut)' if cut_a or cut_b else ''}{more}):\n"
+            + "\n".join(head) + ("\n…\n" if gap else "\n") + "\n".join(tail))
 
 
 def _link_output(r: dict) -> str:
@@ -1626,13 +1651,29 @@ def tool_entity_read(args: dict, port: int) -> str:
     props = out.get("properties") or {}
     if span and isinstance(props.get(prop), str):
         all_lines = props[prop].split("\n")
+        total = len(all_lines)
         try:
             a, _, b = span.partition("-")
-            a, b = max(1, int(a)), min(len(all_lines), int(b or a))
+            a, b = int(a), int(b or a)
         except ValueError:
-            return f"lines={span!r}: give A-B, 1-based (it has {len(all_lines)} lines)"
-        return (f"{out.get('eid')} {prop}, lines {a}-{b} of {len(all_lines)}:\n"
-                + "\n".join(all_lines[a - 1:b])[:BRIEF_CAP * 2])
+            return f"lines={span!r}: give A-B, 1-based (it has {total} lines)"
+        if a < 1 or a > total or b < a:
+            return f"lines={span!r} is outside {prop}: it has lines 1-{total}"
+        b = min(b, total)
+        page, used, last = [], 0, a - 1
+        for i in range(a - 1, b):              # a page never stops silently (Memo on #912)
+            ln = all_lines[i]
+            room = BRIEF_CAP * 2 - used
+            if len(ln) > room:
+                if not page:
+                    page.append(ln[:room] + " …[line cut]")
+                    last = i + 1
+                break
+            page.append(ln)
+            used += len(ln) + 1
+            last = i + 1
+        more = (f"; cut at {BRIEF_CAP * 2} chars -- continue with lines={last + 1}-{b}" if last < b else "")
+        return f"{out.get('eid')} {prop}, lines {a}-{last} of {total}{more}:\n" + "\n".join(page)
     g = out.get("getter") or {}
     lines = [f"entity {out.get('eid')} [{out.get('cls')}] "
              f"(post-processing value):"]
