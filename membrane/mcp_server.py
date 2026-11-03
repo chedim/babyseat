@@ -57,6 +57,14 @@ HTTP_TIMEOUT_S = 120.0   # the relay headroom: a live turn's tool call may
 # run_head/run_tail residue. APPROVED by the operator 2026-10-24 (Claude
 # Code's default inline cap).
 LINK_OUTPUT_CAP = 30000
+# BRIEF RESULTS (the operator, 2026-11-03): inside one answer every old tool result is re-sent on
+# every later step, and code_run / bash were 53% of the result tokens. The full output is kept on
+# the run's result entity (the field); the reply is the output whole when shorter than BRIEF_WHOLE,
+# else the rc, its size, the first and last BRIEF_LINES lines (at most BRIEF_CAP chars) and how to
+# page the rest with entity_read lines=A-B.
+BRIEF_WHOLE = 256
+BRIEF_LINES = 15
+BRIEF_CAP = 4000
 # the local models' toolset path (server.mcp_executor) keeps the 600-char head
 # it always had: their context is small (a pre-existing value, unchanged)
 LOCAL_LINK_HEAD = 600
@@ -71,6 +79,33 @@ def cut_middle(text: str, cap: int = LINK_OUTPUT_CAP) -> str:
     h = cap * 2 // 3
     t = cap - h
     return f"{text[:h]}\n… {len(text) - h - t} chars cut …\n{text[-t:]}"
+
+
+def _brief_output(r: dict) -> str:
+    """A run's output for the tool reply, brief: whole when short, else its head and tail lines
+    and where the rest is (the result entity keeps it)."""
+    out = r.get("output")
+    if out is None:
+        out = r.get("head") or ""
+    out = str(out)
+    n = int(r.get("output_len") or len(out))
+    if not out:
+        return "output: (none)"
+    if n < BRIEF_WHOLE and len(out) == n:
+        return f"output:\n{out}"
+    lines = out.split("\n")
+    total = len(lines)
+    res = r.get("result") or ""
+    if total <= 2 * BRIEF_LINES and len(out) <= BRIEF_CAP:
+        return f"output ({total} lines, {n} chars):\n{out}"
+    head, tail = lines[:BRIEF_LINES], lines[-BRIEF_LINES:] if total > BRIEF_LINES else []
+    half = BRIEF_CAP // 2
+    head_s, tail_s = "\n".join(head)[:half], "\n".join(tail)[-half:]
+    more = (f"; lines {BRIEF_LINES + 1}-{total - BRIEF_LINES}: entity_read spec={res} "
+            f"lines={BRIEF_LINES + 1}-{total - BRIEF_LINES}" if res and total > 2 * BRIEF_LINES else
+            (f"; in full: entity_read spec={res} prop=output" if res else ""))
+    return (f"output ({total} lines, {n} chars; first and last {BRIEF_LINES} shown{more}):\n"
+            f"{head_s}\n…\n{tail_s}")
 
 
 def _link_output(r: dict) -> str:
@@ -243,20 +278,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_watch",
-        "description": (
-            "Plant a TRACK: an entity's live state shown in the WHERE WE "
-            "ARE header every turn; an optional count boundary ('enter N' / "
-            "'exit N') fires ONCE per transition. DELIVERY RIDES THE OWNER: "
-            "''/'operator' fires ride the banner as ALERT lines; a "
-            "listener's name ('watch:<eid>') delivers the crossing INTO "
-            "THE LISTENER'S NEXT TURN. Key forms: 'files:router.py', "
-            "'models:glm-5.3-flash:cloud', 'symbols:<qualname>'. "
-            "A track DISPLAYS; to WATCH the field use the senses: "
-            "field_watch (a topic region: every new memory landing near "
-            "it reports), entity_edit watch_ops (relational: near / away "
-            "/ around another entity) and watch_fields (an entity's own "
-            "motion: pos / align / vel) -- they share one attention "
-            "budget; at the limit drop what you no longer need."),
+        "description": ("Plant a TRACK: an entity's live state in the WHERE WE ARE header every turn. An optional boundary ('enter N' / 'exit N') fires once per crossing: into the banner (owner '') or into a listener's next turn (owner 'watch:<eid>'). Keys: 'files:router.py', 'models:<name>', 'symbols:<qualname>'. To watch the field instead: field_watch (a topic region), or entity_edit watch_ops / watch_fields (relational / motion) -- one shared attention budget."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -398,18 +420,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_add",
-        "description": (
-            "Add an abstract entity to the symbolic layer: a decision, "
-            "failure mode, component, or goal with a one-line summary. "
-            "Merge-on-collision: the same name updates the existing "
-            "entity instead of duplicating. For COMMAND entities (class "
-            "Tool + a `command` prop): the entity's ISA PARENTS (set via "
-            "entity_inherit) compose it into a PIPELINE -- a run "
-            "runs the parents first and feeds their outputs "
-            "into the child's command via {{parent.head}}/{{parent.tail}} "
-            "(the fan-in names a parent: {{parent:<eid>.head}}). Small "
-            "reusable steps + composed pipelines = the composition loop. "
-            "Audited to the operator."),
+        "description": ('Add an entity -- a decision, failure mode, component or goal -- with a one-line summary; the same name updates it. A COMMAND entity (class Tool + a `command` prop) composes with its ISA parents (entity_inherit) into a pipeline: the parents run first and feed the child through {{parent.head}} / {{parent.tail}} ({{parent:<eid>.head}} names one). Audited.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -438,20 +449,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_edit",
-        "description": (
-            "Edit an entity by eid or exact name; only provided fields "
-            "change. merged_into marks a subsumption (the source stays, "
-            "pointing at its survivor). PROGRAMMABLE ENTITIES: *_script "
-            "properties are python that reads `state` and sets a top-level "
-            "`result` dict ({render, patch: {script_data, position}, run, "
-            "delete, intent, chat, voice}; the engine applies it). "
-            "getter_script runs on read, tick_script on the heartbeat, "
-            "nudge_script at consolidation, the rest at their hooks. "
-            "Budgets: getter 10s, trigger scripts 0.25s-2s. A script's "
-            "read-only `membrane` object: field.recall/vitals, "
-            "entities.get, timeline.walk, intents.open, call_llm, wake, "
-            "speak. publish=True exports the entity. Full contract: "
-            "help('scripts')."),
+        "description": ("Edit an entity (eid or exact name); only the given fields change. merged_into marks a subsumption (the source stays, pointing at its survivor). *_script properties are python that reads `state` and sets `result` ({render, patch, run, delete, intent, chat, voice}): getter_script on a read, tick_script on the heartbeat, nudge_script at consolidation, the others at their hooks (budgets: getter 10s, triggers 0.25s-2s), with a read-only `membrane` object. publish=True exports it. Contract: help('scripts')."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -587,17 +585,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "method_define",
-        "description": (
-            "CLIFFHANGER DEFINE: give a class or object a METHOD once, then "
-            "call it on any object of that kind (method_call, or method_each "
-            "over every member). command is a shell template: {{name}} binds "
-            "a call's args, {{self.<prop>}} the object's own properties "
-            "(e.g. on='light', method='dim', command='curl ... "
-            "{{self.entity_id}} {{level}}'). Or steps: a composite of calls "
-            "and commands run in order. guard: a python check run first "
-            "(result = {'ok': bool, 'why': str}; false blocks the call). "
-            "A missing owner is created as a class; re-defining updates the "
-            "method. Owner only (a method's command is code)."),
+        "description": ("Give a class or object a METHOD once, then call it on any object of that kind (method_call, or method_each over every member). command: a shell template, {{arg}} for a call's args and {{self.<prop>}} for the object's (on='light', method='dim', command='curl ... {{self.entity_id}} {{level}}'); or steps, a composite run in order. guard: a python check first (result = {'ok': bool, 'why': str}). A missing owner becomes a class; re-defining updates. Owner only."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -738,16 +726,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_read",
-        "description": (
-            "READ an entity and get its value AFTER processing: a dynamic "
-            "entity's getter_script fires (the 5s LRU is bypassed with "
-            "run=true) and the return carries the entity's current "
-            "properties + script_data + any {run: true} result the getter "
-            "triggered. The general rule: entity tools answer with the "
-            "entity's post-processing value. The whole-properties blob is "
-            "clipped at ~800 chars, so a ring-backed property (voice "
-            "heard/said) loses its newest entries to that cut -- read it "
-            "fully with prop=..., tail=N."),
+        "description": ("READ an entity's value after processing: a getter_script fires (run=true bypasses its 5s cache), and the reply carries the current properties, script_data and any run the getter triggered. The properties blob is clipped at ~800 chars: read one in full with prop= (tail=N pages a list from its newest end; lines=A-B pages text, such as a run's kept output)."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -766,6 +745,8 @@ TOOLS: list[dict] = [
                                         "property from its NEWEST end, "
                                         "returning the last N items (e.g. "
                                         "prop=heard, tail=5)."},
+                "lines": {"type": "string",
+                          "description": "A-B: lines of a run's kept output (or of prop)."},
             },
             "required": ["spec"],
         },
@@ -1553,7 +1534,7 @@ def tool_code_run(args: dict, port: int, head_cap: int | None = None) -> str:
     out = _http(port, "POST", "/membrane/code/run", body)
     if not out.get("root") or (not out.get("ok") and out.get("rc") is None):
         return f"run refused: {out.get('error', 'unknown error')}" + (f" [root {out['root']}]" if out.get("root") else "")
-    shown = (f"head: {str(out.get('head') or '')[:head_cap]}" if head_cap is not None else _link_output(out))
+    shown = (f"head: {str(out.get('head') or '')[:head_cap]}" if head_cap is not None else _brief_output(out))
     return (f"[{out.get('outcome') or ('ok' if out.get('ok') else 'failed')}] {out.get('text') or ''}\n"
             f"root {out['root']} on {out.get('executor')} -> result {out.get('result')}: rc={out.get('rc')}\n{shown}")
 
@@ -1636,10 +1617,22 @@ def tool_entity_read(args: dict, port: int) -> str:
             tail = max(1, int(args.get("tail")))
         except (TypeError, ValueError):
             tail = None
+    span = str(args.get("lines") or "").strip()
+    if span and not prop:
+        prop = "output"                          # a run's kept output (brief results)
     out = _http(port, "GET", qs)
     if not out.get("ok"):
         return f"read failed: {out.get('error', 'unknown error')}"
     props = out.get("properties") or {}
+    if span and isinstance(props.get(prop), str):
+        all_lines = props[prop].split("\n")
+        try:
+            a, _, b = span.partition("-")
+            a, b = max(1, int(a)), min(len(all_lines), int(b or a))
+        except ValueError:
+            return f"lines={span!r}: give A-B, 1-based (it has {len(all_lines)} lines)"
+        return (f"{out.get('eid')} {prop}, lines {a}-{b} of {len(all_lines)}:\n"
+                + "\n".join(all_lines[a - 1:b])[:BRIEF_CAP * 2])
     g = out.get("getter") or {}
     lines = [f"entity {out.get('eid')} [{out.get('cls')}] "
              f"(post-processing value):"]
