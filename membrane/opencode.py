@@ -687,6 +687,21 @@ def _build_ap():
     return ap
 
 
+
+def _close_listeners(servers) -> None:
+    """The teardown's first close (2026-11-02): each listener stops accepting -- its
+    serve_forever loop ends (`looping`), then its socket closes. A request already running
+    finishes on its own (daemon) thread; no new one starts while the stores close."""
+    for h, looping in servers:
+        if h is None:
+            continue
+        try:
+            if looping:
+                h.shutdown()
+            h.server_close()
+        except Exception:
+            pass
+
 def main() -> None:
     args = _build_ap().parse_args()
     # JWT MODE (jwtauth.py, docs/auth.md): off unless a secret is set; a bad
@@ -2155,8 +2170,8 @@ def main() -> None:
             runner._audit_mem = srv.membrane   # the lane-refusal audits
             _ladder_cell["runner"] = runner   # the runner's late binding
 
-            start(serve_port or 4096, surf_host, cfg, runner,
-                  sess_store, msg_store)
+            runner._httpd, _ = start(serve_port or 4096, surf_host, cfg, runner,
+                                     sess_store, msg_store)   # kept: the teardown closes it first
             native_up = True
             if naming_on:
                 try:                       # the entity `name`: agreed with the operator, never picked alone
@@ -2492,7 +2507,12 @@ def main() -> None:
             now = time.monotonic()
             print(f"[teardown] {step} {now - _td['t']:.1f}s", file=sys.__stderr__, flush=True)
             _td["t"] = now
-        # capture stops first: what it holds is written, then it no longer writes into the
+        # the listeners close first: the loops' requests kept being served through the
+        # teardown, each saving the whole entity store after its close (the 90 s cut, 2026-11-02)
+        _close_listeners([(getattr(getattr(srv, "_loop_runner", None), "_httpd", None), True),
+                          (srv, getattr(srv, "_th", None) is not None)])
+        _td_mark("listeners closed")
+        # capture stops next: what it holds is written, then it no longer writes into the
         # field the steps below flush and close
         try:
             _cap = getattr(srv, "capturer", None)
