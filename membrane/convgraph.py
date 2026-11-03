@@ -316,6 +316,10 @@ def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
         sh = LL.classify(srv, sid, text)
     except Exception:
         return
+    try:
+        sh["understanding"] = LL.understand(srv, sid, text)     # #887: the share that compiles, the surprise
+    except Exception:
+        pass
     rows = runner.messages.list(sid) if runner is not None else []
     row = next((r for r in rows if (r.get("info") or {}).get("id") == a_mid), None)
     sh["model_tools"] = [p.get("tool") for p in ((row or {}).get("parts") or [])

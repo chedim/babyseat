@@ -669,13 +669,69 @@ def teachable(steps: list[dict]) -> list[dict]:
     return [{**g, "word": names.get(g["what"], g["what"])} for g in out]
 
 
+# ---- understanding (#887): how much of a message compiles ------------------------------------
+# Every meaning node of the tree tries to mean something the field knows; the share that does is
+# membrane's understanding of the message, the rest is its surprise (what the model would fill).
+# No sentence types: a reply, a report and a question are scored the same way.
+_GRAMMAR = {"ADP", "AUX", "CCONJ", "SCONJ", "DET", "PART", "PUNCT", "SYM", "SPACE"}   # closed-class (UD)
+
+
+def _meaning_nodes(doc) -> list:
+    """(span, part of speech) per meaning node, in order: the noun phrases, and every open-class
+    word outside one."""
+    chunks = list(doc.noun_chunks)
+    covered = {i for c in chunks for i in range(c.start, c.end)}
+    out = [(c, "NOUN") for c in chunks]
+    out += [(doc[t.i:t.i + 1], t.pos_) for t in doc if t.i not in covered and t.pos_ not in _GRAMMAR
+            and any(c.isalnum() for c in t.text)]          # a dash the tagger called a noun is not a word
+    return sorted(out, key=lambda x: x[0].start)
+
+
+def _means(srv, sid: str, est, doc, span, pos: str, adjectives: dict) -> bool:
+    """Does this node mean something the field knows: a verb, an adjective, a run option, or the
+    things it names (a register, a mention, a name, a class's members)."""
+    t = span[0]
+    if pos == "VERB" and _verb_at(est, doc, t.i):
+        return True
+    if pos == "ADJ" and (t.lemma_.lower() in adjectives or t.lower_ in adjectives):
+        return True
+    if pos == "ADV" and t.lower_ in ADVERBS:
+        return True
+    unmapped: list = []
+    try:
+        got = _span_targets(srv, sid, est, list(span), unmapped)
+    except Exception:
+        return False
+    return bool(got) and not unmapped
+
+
+def understand(srv, sid: str, text: str) -> dict:
+    """{nodes, mapped, share, surprise}: the message's meaning nodes, how many the field knows,
+    their share (None with nothing to score), and the words of the ones it doesn't -- read only."""
+    est = srv.entity_store
+    doc = _doc(text)
+    adjectives = _adjectives(est)
+    nodes = _meaning_nodes(doc)
+    surprise = [span.text for span, pos in nodes if not _means(srv, sid, est, doc, span, pos, adjectives)]
+    n = len(nodes)
+    return {"nodes": n, "mapped": n - len(surprise), "share": round((n - len(surprise)) / n, 3) if n else None,
+            "surprise": surprise}
+
+
 def shadow_report(rows: list[dict]) -> dict:
-    """The shadow's rates: how many messages compiled, had gaps (by type), needed thinking."""
+    """The shadow's rates: how many messages compiled, had gaps (by type), needed thinking; and
+    how much of them membrane understood, with the words that surprised it most (#887)."""
     from collections import Counter
     out = Counter(r.get("outcome") for r in rows)
     gaps = Counter(g.get("type") for r in rows for g in (r.get("gaps") or []))
     tools = Counter(r.get("outcome") for r in rows if r.get("model_tools"))
-    return {"total": len(rows), "outcomes": dict(out), "gap_types": dict(gaps), "model_used_tools": dict(tools)}
+    us = [r["understanding"] for r in rows
+          if isinstance(r.get("understanding"), dict) and r["understanding"].get("share") is not None]
+    words = Counter(str(w).lower() for u in us for w in (u.get("surprise") or []))
+    return {"total": len(rows), "outcomes": dict(out), "gap_types": dict(gaps), "model_used_tools": dict(tools),
+            "understanding": {"scored": len(us),
+                              "mean_share": round(sum(u["share"] for u in us) / len(us), 3) if us else None,
+                              "surprise_top": [[w, c] for w, c in words.most_common(20)]}}
 
 
 def shadow_cli(argv=None) -> int:
