@@ -1232,17 +1232,7 @@ def _plain_modifier(c, names) -> bool:
             continue
         if w.dep_ == "neg" or (w.dep_ == "det" and not _art_or_dem(w)):
             return False
-        if w.dep_ in ("advmod", "npadvmod") and w.lower_ in _HEDGES:
-            return False
     return True
-
-
-# The one word list left, for the operator to approve (Memo review on #911): adverbs of stance that
-# weaken a statement into a hope, a report or a degree. Structure cannot tell "hopefully" from
-# "definitely" (the same advmod); a nested modifier ("almost certainly") is caught structurally anyway.
-_HEDGES = {"hopefully", "presumably", "reportedly", "allegedly", "supposedly", "apparently", "seemingly",
-           "probably", "possibly", "perhaps", "maybe", "likely", "almost", "nearly", "barely", "hardly",
-           "mostly", "partly", "somewhat", "roughly"}
 
 
 def _subjects(tok, est, srv, sid) -> list:
@@ -1287,12 +1277,21 @@ def observe_learned(srv, sid: str, text: str) -> list:
                        for x in span)               # the words of the things the field names, no lead word
         if not _says_of(t, inside):
             continue
+        if _gap_in(srv, sid, text):              # a word the field does not know (a hedge too): no contradiction
+            continue
         expr = (learned[w].properties or {}).get("filter") or "False"
         said = _subjects(t, est, srv, sid)
         if any(_holds(est, expr, e) is False for e in said):
             _unlearn(est, w, said, text)
             gone.append(w)
     return gone
+
+
+def _gap_in(srv, sid: str, text: str) -> bool:
+    """Did the sentence compile with a gap (#887)? A word the meaning has never seen leaves a surprise in
+    its understanding, so the sentence cannot contradict anything (Memo on #911: no hedge list)."""
+    u = understand(srv, sid, text)
+    return bool(u.get("surprise")) or (u.get("share") is not None and u["share"] < 1.0)
 
 
 def _unlearn(est, word: str, said: list, text: str = "") -> None:
