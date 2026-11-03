@@ -31,6 +31,10 @@ open tab's `/event` stream retries every ≤5 s), no new tab opens, otherwise on
 A restart the seat asked for (`presence.restart`) re-execs with
 `MEMBRANE_REEXEC=1` and never opens a tab: the open page reconnects and resyncs on
 its own. `--no-browser` or `MEMBRANE_NO_BROWSER=1` turns it off entirely.
+The shutdown before it has 90 s (the teardown lease); if the drain overruns, the
+lease cuts the process. A restart that was asked for still comes back: on the cut,
+the same command starts as a fresh process, then the old one exits. A plain stop
+just stops.
 
 **New page code after a restart.** `/ui/conf` carries `build`, a hash of the files
 under `membrane/ui/` taken at boot. On every reconnect the open tab compares it with
