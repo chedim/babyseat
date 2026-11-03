@@ -3547,7 +3547,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         data = _json.dumps(body).encode()
         req = urllib.request.Request(
             url, data=data, method="POST",
-            headers={"Content-Type": "application/json", **_JWT.internal_headers(),
+            headers={"Content-Type": "application/json", **_SA.loopback_headers(_JWT.internal_headers()),
                      **_W.headers()})          # the turn's chain + writer: the handler resumes them (Blurp's learner links writes by chain)
         try:
             with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
@@ -3594,7 +3594,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
     def _stream_once(body: dict, on_event):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/chat/completions", data=_json.dumps(body).encode(),
-            method="POST", headers={"Content-Type": "application/json", **_JWT.internal_headers(),
+            method="POST", headers={"Content-Type": "application/json", **_SA.loopback_headers(_JWT.internal_headers()),
                                     **_W.headers()})       # as the buffered call: the turn's chain + writer
         seen: dict = {}                      # this round's last usage (#472)
         try:

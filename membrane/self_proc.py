@@ -39,6 +39,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+
+from . import seatauth as _seatauth
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -77,7 +79,7 @@ class SeatClient:
 
     def _call(self, path: str, body=None) -> dict:
         from . import jwtauth as J
-        h = {"Content-Type": "application/json", **J.client_headers()}
+        h = {"Content-Type": "application/json", **_seatauth.loopback_headers(J.client_headers())}
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(self.url + path, data=data, headers=h,
                                      method="GET" if body is None else "POST")

@@ -37,3 +37,41 @@ def ollama_alive() -> bool:
         return True
     except OSError:
         return False
+
+# -- the seat credential for test clients (#842) ------------------------------------
+# No address is a credential any more: a tokenless write to a test seat gets 401,
+# loopback or not. The suite's HTTP clients (urllib, http.client) reach in-process
+# seats on 127.0.0.1, so one shared hook presents the seat token for them -- the way a
+# real caller does. It adds nothing when the request already carries its own
+# Authorization/Cookie, when JWT mode is on (that has its own tokens), and for a test
+# marked `tokenless` (the ones that PROVE the 401).
+import pytest as _pytest
+
+_REAL_REQUEST = None
+
+
+@_pytest.fixture(autouse=True)
+def _seat_credential(request, monkeypatch):
+    import http.client as hc
+    if request.node.get_closest_marker("tokenless"):
+        yield
+        return
+    real = hc.HTTPConnection.request
+
+    def request_(self, method, url, body=None, headers=None, *a, **kw):
+        h = dict(headers or {})
+        low = {k.lower() for k in h}
+        if (os.environ.get("MEMBRANE_JWT", "0") in ("0", "", "false", "off")
+                and "authorization" not in low and "cookie" not in low
+                and str(getattr(self, "host", "")) in ("127.0.0.1", "localhost", "::1")):
+            try:
+                from membrane import seatauth
+                tok = seatauth.ensure()
+                if tok:
+                    h["Authorization"] = f"Bearer {tok}"
+            except Exception:
+                pass
+        return real(self, method, url, body, h, *a, **kw)
+
+    monkeypatch.setattr(hc.HTTPConnection, "request", request_)
+    yield

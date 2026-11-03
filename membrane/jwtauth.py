@@ -406,7 +406,18 @@ def child_env(env: dict) -> dict:
     except JWTConfigError:
         cfg = None
     if cfg is None:
-        return env
+        # JWT off: the children still need the seat token -- no address is a credential (#842)
+        try:
+            from . import seatauth as _sa
+            st = _sa.seat_token()
+        except Exception:
+            st = None
+        if not st:
+            return env
+        out = dict(env)
+        out["MEMBRANE_JWT_TOKEN"] = st
+        out["OPENCODE_SERVER_PASSWORD"] = st
+        return out
     tok = mint(cfg.secret if _explicit() else _machine_secret(), INTERNAL_SUB, ttl=CHILD_TTL, issuer=cfg.issuer, audience=cfg.audience)
     out = dict(env)
     out["MEMBRANE_JWT_TOKEN"] = tok
@@ -417,7 +428,13 @@ def child_env(env: dict) -> dict:
 def provider_options(opts: dict) -> dict:
     """The generated opencode config's provider options: in JWT mode the
     apiKey is opencode's env placeholder for the child's token; off = as is."""
-    return dict(opts, apiKey="{env:MEMBRANE_JWT_TOKEN}") if enabled() else opts
+    if enabled():
+        return dict(opts, apiKey="{env:MEMBRANE_JWT_TOKEN}")
+    try:                         # off: the child's env carries the seat token (child_env, #842)
+        from . import seatauth as _sa
+        return dict(opts, apiKey="{env:MEMBRANE_JWT_TOKEN}") if _sa.seat_token() else opts
+    except Exception:
+        return opts
 
 
 # -- reading a request ----------------------------------------------------------

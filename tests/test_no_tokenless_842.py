@@ -5,6 +5,7 @@ the pre-minted HttpOnly cookie."""
 import json
 import os
 import sys
+import pytest
 import tempfile
 import threading
 import types
@@ -22,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import membrane.server as NS  # noqa: E402
 from membrane import seatauth as SA  # noqa: E402
 from membrane import ui_serve as UI  # noqa: E402
+
+pytestmark = pytest.mark.tokenless
 
 _CFG = {"provider": {"membrane": {"models": {"m": {"name": "m"}}}}}
 

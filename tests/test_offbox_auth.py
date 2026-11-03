@@ -9,6 +9,7 @@ the accepted socket's peer address for a LAN one, so the handler sees exactly
 what a phone on the Wi-Fi would give it (`client_address`), with no header
 involved."""
 import base64
+import pytest
 import http.client
 import json
 import os
@@ -25,6 +26,8 @@ from unittest import mock
 from membrane import jwtauth as J
 from membrane import seatauth as SA
 from tests.test_jwt_auth import SECRET, _StubBackend, _canned_chat, _jwt_env
+
+pytestmark = pytest.mark.tokenless
 
 LAN = "192.168.1.50"
 

@@ -126,6 +126,19 @@ def seat_token() -> str | None:
         return None
 
 
+def loopback_headers(jwt_headers: dict | None = None) -> dict:
+    """The credential for a call from this seat (or its children) to its own
+    loopback door (#842: no address is a credential). JWT mode: the token the
+    caller already holds (`jwt_headers`, jwtauth.internal_headers/client_headers);
+    off: the seat token. NEVER for a call to another host."""
+    if jwt_headers:
+        return jwt_headers
+    if _JWT.enabled():
+        return {}
+    tok = seat_token()
+    return {"Authorization": f"Bearer {tok}"} if tok else {}
+
+
 def matches(presented) -> bool:
     want = seat_token()
     return bool(want and isinstance(presented, str) and presented
