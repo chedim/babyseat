@@ -309,7 +309,31 @@ from .lanes import (  # noqa: E402,F401
 )
 
 
-def loop_session(srv, agent: str) -> str:
+def _head_tail(text: str, cap: int) -> str:
+    """`text` within `cap`: its head and its tail -- a chunk's first calls (the worktree, the
+    branch) matter as much as its last (Memo on #913)."""
+    if len(text) <= cap:
+        return text
+    h = cap // 2
+    return text[:h] + f"\n… {len(text) - cap} chars …\n" + text[-(cap - h):]
+
+
+def chunk_progress(parts: list, text: str = "") -> str:
+    """#857: what a worker's capped chunk did -- each tool call, its input and result in short --
+    for the next chunk's task text (the field carries it, not the old transcript)."""
+    did = []
+    for p in parts or []:
+        if p.get("type") != "tool":
+            continue
+        st = p.get("state") or {}
+        _in = " ".join(json.dumps(st.get("input") or {}, default=str).split())[:100]
+        _res = " ".join(str(st.get("output") or st.get("error") or "").split())[:100]
+        did.append(f"- {p.get('tool')} {_in} -> {st.get('status', '')}: {_res}")
+    out = _head_tail("\n".join(did), 3000)
+    return out + ("\nIts last words: " + str(text)[-800:] if str(text).strip() else "")
+
+
+def loop_session(srv, agent: str, keep: bool = False) -> str:
     """A watch loop's child session (the drainer's create_loop_session).
 
     With the serve runner wired (srv._loop_runner) the loop gets a REAL
@@ -332,7 +356,8 @@ def loop_session(srv, agent: str) -> str:
                 mine = [x for x in store.sessions.values() if x.get("agent") == agent]
             if mine:
                 s = max(mine, key=lambda x: (x.get("time") or {}).get("updated") or 0)
-                runner.messages.delete(s["id"])
+                if not keep:                     # #857: a task's next chunk keeps the earlier chunks' rows
+                    runner.messages.delete(s["id"])
                 store.touch(s["id"])
                 return s["id"]
             s = store.create(title=agent)
@@ -1656,8 +1681,8 @@ def main() -> None:
         # the ladder's body json died with 'Object of type function is
         # not JSON serializable' => every loop turn = 'model ladder
         # failed' = the executor 'not executing'). One plain function.
-        def _make_loop_session(agent, title=None):
-            return loop_session(srv, agent)
+        def _make_loop_session(agent, title=None, keep=False):
+            return loop_session(srv, agent, keep=keep)
         srv.create_loop_session = _make_loop_session
         srv._loop_runner = None        # wired by the serve boot below
 
@@ -1682,7 +1707,11 @@ def main() -> None:
                     if isinstance((out or {}).get("quota"), dict):
                         # out of tokens (quota.py): no verdict, the event waits
                         return {"text": "", "quota": out["quota"]}
+                    _cap = ((out or {}).get("info") or {}).get("claudeCapped")
+                    if isinstance(_cap, dict):          # #857: what the cut chunk did, for the next one
+                        _cap = {**_cap, "progress": chunk_progress(parts, txt)}
                     return {"text": txt[-4000:], "verdict_text": txt[:200],
+                            **({"capped": _cap} if isinstance(_cap, dict) else {}),
                             "trail": trail[-6:],
                             # the turn's model (#254: self trusts an advisor per model)
                             "model": ((out or {}).get("info") or {}).get("modelID")}

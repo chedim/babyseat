@@ -994,7 +994,10 @@ class _LoopDrainer:
             _fp.focus(agent, ent, "start")       # #848: the lane's orb
         try:
             with _W.source(lane, ent):
-                sid = srv.create_loop_session(agent, agent)
+                _d0 = est.docs.get(ent) if lane == "worker" else None
+                _resumed = bool(_d0 is not None and (_d0.properties or {}).get("progress"))
+                sid = (srv.create_loop_session(agent, agent, keep=True) if _resumed      # #857: a re-owed task keeps its chunks
+                       else srv.create_loop_session(agent, agent))
                 if _fp is not None:
                     _fp.loop_session(agent, ent, sid)
                 if lane == "worker":
@@ -1002,6 +1005,30 @@ class _LoopDrainer:
                         return "skip"
                     taken = True
                     out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
+                    from . import claude_agent as _CA
+                    _chunks = 1 + len(((est.docs.get(ent) or QuantumEntity(eid="", cls="")).properties or {})
+                                      .get("progress") or [])      # a re-owed task counts on (Memo on #913)
+                    while isinstance(out.get("capped"), dict) and not isinstance(out.get("quota"), dict):
+                        # #857: a chunk hit the worker ceiling -- a NEW session, no resume,
+                        # the task as the field has it; never past one answer's old ceiling in all
+                        _note = str((out.get("capped") or {}).get("progress") or "").strip()
+                        _d = est.docs.get(ent)
+                        if _note and _d is not None:  # the field carries it -- written before a restart can cut in
+                            _d.properties = {**(_d.properties or {}), "progress":
+                                             list((_d.properties or {}).get("progress") or [])
+                                             + [f"session {_chunks}:\n{_note}"]}
+                            est.upsert(_d, embedder=None)
+                        if _restarting():
+                            return "restart"
+                        if _chunks * _CA.WORKER_CEILING >= _CA.MAX_TOOL_CALLS_PER_ANSWER:
+                            print(f"[worker] {ent}: {_chunks} chunks reached the answer ceiling "
+                                  f"({_CA.MAX_TOOL_CALLS_PER_ANSWER} tool calls); stopping", file=sys.stderr)
+                            break
+                        _chunks += 1
+                        sid = srv.create_loop_session(agent, agent, keep=True)   # its earlier chunks' rows kept (Memo on #913)
+                        if _fp is not None:
+                            _fp.loop_session(agent, ent, sid)
+                        out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
                     if isinstance(out.get("quota"), dict):
                         d = est.docs.get(ent)
                         if d is not None:
