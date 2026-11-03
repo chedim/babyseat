@@ -106,6 +106,35 @@ class Followups(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertTrue(self._unlearns(text))
 
+    def test_loose_unlearning_is_default_deny(self):
+        for text in ("no goals landed", "neither goal one nor goal two landed", "most goals landed",
+                     "goal one hopefully landed", "goal one presumably landed", "goal one reportedly landed",
+                     "goal one allegedly landed", "goal one almost certainly landed", "goal one seems landed"):
+            with self.subTest(text=text):
+                self.assertFalse(self._unlearns(text))
+
+    def test_loose_unlearning_keeps_plain_adverbs_and_determiners(self):
+        for text in ("goal one definitely landed", "the goal one landed", "goal one landed today",
+                     "goal one already landed", "goal one is landed"):
+            with self.subTest(text=text):
+                self.assertTrue(self._unlearns(text))
+
+    def _unlearns_named(self, text):
+        srv, f, est, goal, *_ = _seat()
+        _add(est, "field ui", parents=[goal.eid], status="open")
+        _say(srv, "goal two landed", "landed", "landed means status closed")
+        _say(srv, "goal three landed", "landed")
+        self.assertTrue(_learned(est, "landed"))
+        return LL.observe_learned(srv, SID, text) == ["landed"]
+
+    def test_a_multi_word_name_unlearns_and_a_lead_word_still_blocks(self):
+        for text in ("field ui landed", "the field ui landed", "field ui landed today", "field ui definitely landed"):
+            with self.subTest(text=text):
+                self.assertTrue(self._unlearns_named(text))
+        for text in ("hope field ui landed", "field ui almost landed", "no field ui landed"):
+            with self.subTest(text=text):
+                self.assertFalse(self._unlearns_named(text))
+
     def test_a_persons_definition_is_not_replaced_by_a_proposal(self):
         srv, f, est, *_ = _seat()
         _say(srv, "goal two landed", "landed", "landed means status closed")

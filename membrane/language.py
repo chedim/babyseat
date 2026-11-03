@@ -1160,33 +1160,69 @@ def _confirmed(est, a: dict, cond: str, recorded: bool = True) -> dict | None:
     return {"k": k}
 
 
-def _says_of(tok) -> bool:
+def _says_of(tok, inside=()) -> bool:
     """A looser test than _states, for unlearning only (Memo on #894): a statement still counts
-    with a time word, an adverb, a place or a "yes," ("goal one landed today", "yes, goal one just
-    landed"); a question, a negation, a modal, "if"/"whether", or a clause under another verb
-    still doesn't."""
+    with a time word, a plain adverb, a place or a "yes," ("goal one landed today", "yes, goal one
+    just landed"). Default-deny, an allowlist (each round of exceptions found more): anything the
+    parse hangs on the predicate or its subject that is not allowed makes it not a statement --
+    hedges ("hopefully", "almost certainly"), "seems", quantifiers ("most"), and any negative in the
+    subject ("no", "neither", "nor"). `inside`: the words of the names the field knows, which are
+    the subject's own ("field ui"), not lead words."""
     if _asks_or_denies(tok):
         return False
     clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
+    if clause is not tok and clause.lemma_ != "be":
+        return False                             # "seems landed", "looks landed": a report, not a fact
+    names = {t.i for t in inside}
     for t in {tok, clause}:
         for c in t.children:
-            if c.dep_ == "mark" or (c.dep_ == "aux" and c.tag_ == "MD"):
+            if c is tok or c is clause:
+                continue
+            if c.i in names:                     # a name the parse hung on the verb ("field" of "field ui"):
+                if all(_plain_subject_part(w, names) for w in c.subtree):     # its own words only, no lead
+                    continue
                 return False
-            if c.dep_ == "advmod" and c.lower_ in _HEDGES:
-                return False                     # "almost", "barely", "probably": not a plain fact
+            if c.dep_ in ("nsubj", "nsubjpass", "punct", "acomp", "attr", "expl", "auxpass"):
+                continue
+            if c.dep_ == "aux":
+                if c.tag_ == "MD":
+                    return False
+                continue
+            if c.dep_ == "cc":
+                if c.lower_ in ("and", "&"):
+                    continue
+                return False
+            if c.dep_ == "conj":
+                if c.pos_ in ("VERB", "AUX"):
+                    return False                 # "landed, or did it": a second clause
+                continue
+            if c.dep_ in ("advmod", "npadvmod") and all(w.lower_ in _CLAUSE_ADVERBS or w.i in names for w in c.subtree):
+                continue
+            if c.dep_ == "intj" and c.lower_ in ("yes", "yeah", "yep"):
+                continue
+            if c.dep_ == "prep" and c.lower_ in _PLACE_PREPS:
+                continue
+            return False
     for subj in (c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")):
-        if _glued_lead(subj):
-            return False                         # "hope goal one landed"
-        if any(t.dep_ == "cc" and t.lower_ == "or" for t in subj.subtree):
-            return False                         # "goal one or goal two landed": which one?
-        if any(t.dep_ == "det" and t.lower_ in _VAGUE for t in subj.subtree):
-            return False                         # "some goals landed": no particular thing
+        if not all(_plain_subject_part(t, names) for t in subj.subtree):
+            return False                         # a lead word, a quantifier, a negative, "or": not a plain subject
     return clause.dep_ in ("ROOT", "conj")
 
 
-_HEDGES = {"almost", "nearly", "barely", "hardly", "probably", "possibly", "maybe", "perhaps", "likely",
-           "supposedly", "apparently", "seemingly", "mostly", "partly", "sort", "kinda"}
-_VAGUE = {"some", "any", "several", "many", "few", "most", "certain", "various", "other"}
+def _plain_subject_part(t, names) -> bool:
+    """May this word sit in a subject that says something of one thing: a name's own word, "the"/"this"/
+    "that", "and", punctuation, a number. Anything else ("hope", "no", "most", "neither", "or") may not."""
+    if t.i in names or t.dep_ == "punct" or t.pos_ == "NUM":
+        return True
+    return (t.dep_ == "det" and t.lower_ in _SUBJECT_DETS) or (t.dep_ == "cc" and t.lower_ == "and")
+
+
+_CLAUSE_ADVERBS = {"just", "today", "already", "definitely", "now", "yesterday", "again", "finally", "indeed",
+                   "really", "actually", "certainly", "surely", "recently", "earlier", "later", "there", "here",
+                   "successfully", "also", "too", "still", "tonight", "tomorrow", "this", "morning", "last",
+                   "night", "week"}
+_PLACE_PREPS = {"in", "on", "at", "by", "from", "to", "for", "after", "before", "during", "since", "into"}
+_SUBJECT_DETS = {"the", "this", "that", "these", "those"}
 
 
 def _subjects(tok, est, srv, sid) -> list:
@@ -1200,8 +1236,12 @@ def _subjects(tok, est, srv, sid) -> list:
     lo = min(t.i for c in subj for t in c.subtree)
     hi = max(t.i for c in subj for t in c.subtree)
     hi = max(hi, max(t.i for t in tok.doc[lo:clause.i]) if clause.i > lo else hi)   # names the parse split off
+    nodes = _meaning_nodes(tok.doc, _names(est))
+    for span, pos in nodes:                      # a multi-word name the parse split ("field" off "ui") is whole
+        if span.end > lo and span.start <= hi and tok.i not in range(span.start, span.end) and _known_targets(srv, sid, est, span):
+            lo, hi = min(lo, span.start), max(hi, span.end - 1)
     out = []
-    for span, pos in _meaning_nodes(tok.doc, _names(est)):
+    for span, pos in nodes:
         if span.start >= lo and span.end <= hi + 1 and tok.i not in range(span.start, span.end):
             for e in _known_targets(srv, sid, est, span):
                 if e not in out:
@@ -1221,7 +1261,11 @@ def observe_learned(srv, sid: str, text: str) -> list:
     gone = []
     for t in _doc(text):
         w = t.lower_
-        if w not in learned or w in gone or not _says_of(t):
+        if w not in learned or w in gone:
+            continue
+        inside = tuple(x for span in _named(t.doc, _names(est)) if t.i not in range(span.start, span.end)
+                       for x in span)               # the words of the things the field names, no lead word
+        if not _says_of(t, inside):
             continue
         expr = (learned[w].properties or {}).get("filter") or "False"
         said = _subjects(t, est, srv, sid)
