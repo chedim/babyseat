@@ -36,11 +36,11 @@ fallback uses, so the −51% is conservative.
 **Background calls are counted separately.** The numbers above are serve
 turns only (chat, watch loops, `llm.call` wakes). Model calls the seat makes
 outside a serve turn — the thinker, the proxy-only watch degrade, the claim
-judge, the router's boot interview, `/delegate` — tally per lane and model
+judge, the router's boot interview, `/delegate`, the compile-first gap call (lane `gap`, #887) — tally per lane and model
 into `.membrane/bg-usage.json` (persisted across restarts), and
 `membrane stats` prints them as a `background model calls` section with
 their share of all tokens (`--bg PATH` to point elsewhere). Tallying began
-with #200, so a seat's file starts empty and its `since` says from when. The file also
+with #200, so a seat's file starts empty and its `since` says from when. A Claude-rung answer whose final result never came (the run ended first) is tallied as the sum of its steps, as its streaming reply already reports (#472). The file also
 keeps the calls in 10-minute slots for about a day, which membrane home's 📊
 stats window reads for today and the last hour
 ([standalone.md](standalone.md#the-stats-window-)).
