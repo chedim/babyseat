@@ -317,11 +317,15 @@ def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
         sh = LL.classify(srv, sid, text)
     except Exception:
         return
+    pre = (getattr(srv, "_cg_understood", None) or {}).pop(sid, None)    # #887 C: scored before its fill
     try:
-        sh["understanding"] = LL.understand(srv, sid, text)     # #887: the share that compiles, the surprise
+        sh["understanding"] = pre or LL.understand(srv, sid, text)   # #887: the share that compiles, the surprise
     except Exception:
         pass
     surprise = list((sh.get("understanding") or {}).get("surprise") or [])
+    filled = (getattr(srv, "_cg_filled", None) or {}).pop(sid, None)
+    if filled is not None:                    # filled before the turn: kept, not asked again
+        sh["filled"], surprise = filled, []
     rows = runner.messages.list(sid) if runner is not None else []
     row = next((r for r in rows if (r.get("info") or {}).get("id") == a_mid), None)
     sh["model_tools"] = [p.get("tool") for p in ((row or {}).get("parts") or [])

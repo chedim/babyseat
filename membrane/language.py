@@ -22,6 +22,7 @@ that") becomes a Concept entity, so the registers can hold it.
 from __future__ import annotations
 
 import re
+import threading
 import time
 
 from .entities import CLASS_CONCEPT, MEMBRANE_NS, QuantumEntity
@@ -676,12 +677,50 @@ def teachable(steps: list[dict]) -> list[dict]:
 _GRAMMAR = {"ADP", "AUX", "CCONJ", "SCONJ", "DET", "PART", "PUNCT", "SYM", "SPACE"}   # closed-class (UD)
 
 
-def _meaning_nodes(doc) -> list:
-    """(span, part of speech) per meaning node, in order: the noun phrases, and every open-class
-    word outside one."""
-    chunks = list(doc.noun_chunks)
-    covered = {i for c in chunks for i in range(c.start, c.end)}
-    out = [(c, "NOUN") for c in chunks]
+def _names(est) -> dict:
+    """Every name and taught other name of a thing (lower case) -> its words' count."""
+    out = {}
+    for d in list((est.docs or {}).values()):
+        if d.eid.startswith(_MACHINERY):
+            continue
+        p = d.properties or {}
+        for n in [p.get("name")] + list(p.get("aliases") or []):
+            n = " ".join(str(n or "").lower().split())
+            if n:
+                out[n] = len(n.split())
+    return out
+
+
+def _named(doc, names: dict) -> list:
+    """The runs of two or more words that are a thing's whole name ("goal one"), longest first."""
+    by_first: dict = {}                          # first word -> the lengths of the names it starts
+    for n, k in names.items():
+        if k > 1:
+            by_first.setdefault(n.split(" ", 1)[0], set()).add(k)
+    out, i = [], 0
+    while i < len(doc):
+        hit = None
+        for k in sorted(by_first.get(doc[i].lower_, ()), reverse=True):
+            j = i + k
+            if j <= len(doc) and " ".join(t.lower_ for t in doc[i:j]) in names:
+                hit = doc[i:j]
+                break
+        if hit is not None:
+            out.append(hit)
+            i = hit.end
+        else:
+            i += 1
+    return out
+
+
+def _meaning_nodes(doc, names: dict | None = None) -> list:
+    """(span, part of speech) per meaning node, in order: the things named in full, the noun
+    phrases, and every open-class word outside one."""
+    named = _named(doc, names) if names else []
+    taken = {i for c in named for i in range(c.start, c.end)}
+    chunks = [c for c in doc.noun_chunks if not any(i in taken for i in range(c.start, c.end))]
+    covered = taken | {i for c in chunks for i in range(c.start, c.end)}
+    out = [(c, "NOUN") for c in named + chunks]
     out += [(doc[t.i:t.i + 1], t.pos_) for t in doc if t.i not in covered and t.pos_ not in _GRAMMAR
             and any(c.isalnum() for c in t.text)]          # a dash the tagger called a noun is not a word
     return sorted(out, key=lambda x: x[0].start)
@@ -691,18 +730,26 @@ def _means(srv, sid: str, est, doc, span, pos: str, adjectives: dict) -> bool:
     """Does this node mean something the field knows: a verb, an adjective, a run option, or the
     things it names (a register, a mention, a name, a class's members)."""
     t = span[0]
-    if pos == "VERB" and _verb_at(est, doc, t.i):
-        return True
-    if pos == "ADJ" and (t.lemma_.lower() in adjectives or t.lower_ in adjectives):
-        return True
-    if pos == "ADV" and t.lower_ in ADVERBS:
-        return True
+    if len(span) == 1 and (_verb_at(est, doc, t.i) or _adjective_of(t, adjectives) or t.lower_ in ADVERBS):
+        return True                    # what the field knows the word as, whatever the tagger called it
+    return bool(_known_targets(srv, sid, est, span))
+
+
+def _known_targets(srv, sid: str, est, span) -> list:
+    """What a node names, without the Concepts (a phrase membrane kept for a pronoun is not a
+    meaning it knows); [] when any of it doesn't map."""
     unmapped: list = []
     try:
         got = _span_targets(srv, sid, est, list(span), unmapped)
     except Exception:
-        return False
-    return bool(got) and not unmapped
+        return []
+    docs = est.docs or {}
+    got = [e for e in got if (docs.get(e) is None or docs[e].cls != CLASS_CONCEPT)]
+    return got if got and not unmapped else []
+
+
+def _adjective_of(t, adjectives: dict):
+    return adjectives.get(t.lemma_.lower()) or adjectives.get(t.lower_)
 
 
 def understand(srv, sid: str, text: str) -> dict:
@@ -711,11 +758,104 @@ def understand(srv, sid: str, text: str) -> dict:
     est = srv.entity_store
     doc = _doc(text)
     adjectives = _adjectives(est)
-    nodes = _meaning_nodes(doc)
+    nodes = _meaning_nodes(doc, _names(est))
     surprise = [span.text for span, pos in nodes if not _means(srv, sid, est, doc, span, pos, adjectives)]
     n = len(nodes)
     return {"nodes": n, "mapped": n - len(surprise), "share": round((n - len(surprise)) / n, 3) if n else None,
             "surprise": surprise}
+
+
+# ---- the response (#887 C): membrane words a reply from the message's filled graph ----------
+# What each condition the message names says about each thing it names (checked on the field),
+# a read-only program's result, and what it still doesn't know. No model writes it.
+
+def _state(est, eid: str) -> str:
+    return str(((est.docs or {}).get(eid) or QuantumEntity(eid="", cls="")).properties.get("status") or "")
+
+
+def answer_on() -> bool:
+    """Membrane's own 🧩 answers: on by default; MEMBRANE_ANSWER=0 turns them off."""
+    import os
+    return os.environ.get("MEMBRANE_ANSWER", "1").strip().lower() not in ("0", "off", "false", "no")
+
+
+def respond(srv, sid: str, text: str) -> str:
+    """The reply membrane words itself from what it understood of `text`, or "" (nothing understood)."""
+    return answer(srv, sid, text)["text"]
+
+
+def _group_name(span) -> str:
+    """What the message called a group: its nouns ("how many goals" -> "goals")."""
+    words = [t.text for t in span if t.pos_ in ("NOUN", "PROPN", "NUM")]
+    return " ".join(words) or span.text
+
+
+def answer(srv, sid: str, text: str) -> dict:
+    """{text, ran}: the reply (see respond) and whether a read-only program ran for it."""
+    from collections import Counter
+    from . import generate as GEN
+    from .ch import EntityView, Refused, evaluate
+    est = srv.entity_store
+    doc = _doc(text)
+    adjectives = _adjectives(est)
+    groups, conds, unknown = [], [], []          # groups: (what the message called them, [eids])
+    for span, pos in _meaning_nodes(doc, _names(est)):
+        t = span[0]
+        adj = _adjective_of(t, adjectives) if len(span) == 1 else None
+        if adj is not None and not (t.pos_ == "VERB" and _verb_at(est, doc, t.i)):   # "opens it": the verb
+            conds.append((str((adj.properties or {}).get("name") or t.lower_),
+                          (adj.properties or {}).get("filter") or "False"))
+            continue
+        if len(span) == 1 and (_verb_at(est, doc, t.i) or t.lower_ in ADVERBS):
+            continue                              # a verb is the program's, below
+        got = _known_targets(srv, sid, est, span)
+        if got:
+            groups.append((_group_name(span), list(dict.fromkeys(got))))
+        else:
+            unknown.append(span.text)
+    lines, ran = [], False
+    try:
+        steps = compile(srv, sid, text)
+    except Exception:
+        steps = []
+    if steps and all(s["mapped"] and s.get("kind") != "define" and not s.get("writes") for s in steps):
+        got_run = run(srv, text)                  # a read-only program: its result (stage 3)
+        ran = True
+        out = str(got_run.get("output") or got_run.get("said") or "").strip()
+        if out:
+            lines.append(out)
+
+    def holds(expr, eid):
+        """True / False, or None when the field can't tell (the condition doesn't evaluate)."""
+        try:
+            return bool(evaluate(expr, {"x": EntityView(est, eid)}))
+        except Exception:
+            return None
+    for called, eids in groups:
+        if len(eids) == 1:
+            e = eids[0]
+            label, st = CG_label(est, e), _state(est, e)
+            for word, expr in conds:
+                h = holds(expr, e)
+                lines.append(f"can't tell whether {label} is {word}" if h is None else f"{label} is {word}" if h
+                             else f"{label} isn't {word}" + (f" (status {st})" if st else ""))
+            if not conds and st:              # a name alone says nothing: only a state is an answer
+                lines.append(f"{label}: {st}")
+            continue
+        for word, expr in conds:
+            hs = [holds(expr, e) for e in eids]
+            k = sum(1 for h in hs if h)
+            unsure = sum(1 for h in hs if h is None)
+            lines.append(f"{k} of {len(eids)} {called} {'is' if k == 1 else 'are'} {word}"
+                         + (f" ({unsure} can't tell)" if unsure else ""))
+        if not conds:
+            by = Counter(_state(est, e) or "no status" for e in eids)
+            lines.append(f"{called}: {len(eids)} ({', '.join(f'{n} {st}' for st, n in by.most_common())})")
+    if not lines:
+        return {"text": "", "ran": ran}
+    if unknown:
+        lines.append("I don't know " + GEN.join([f'"{u}"' for u in unknown]))
+    return {"text": "Now: " + "; ".join(lines), "ran": ran}       # the field as it is now, whatever the tense
 
 
 # ---- filling the gaps (#887 B): membrane asks the model about the surprise words only ---------
@@ -763,6 +903,25 @@ def _ask_model(prompt: str):
     return "".join(text), usage
 
 
+GAP_WAIT_S = 30.0       # #887 C: how long a person's turn waits for the gap call (the operator, 2026-11-03: 30 s)
+_ASKING: set = set()     # the words a gap call is out for now: never asked twice at once (Memo on #892)
+_ASKING_LOCK = threading.Lock()
+
+
+def fill_gaps_before(srv, sid: str, text: str, words: list, wait_s: float | None = None) -> dict | None:
+    """fill_gaps on its own thread, waited for at most GAP_WAIT_S: a slow or hung call never
+    holds the person's turn. Late -> {words: [], late: True}; its answers are still kept when
+    they come (the words are marked then)."""
+    box: dict = {}
+    th = threading.Thread(target=lambda: box.update(r=fill_gaps(srv, sid, text, words)), daemon=True,
+                          name="gap-fill")
+    th.start()
+    th.join(GAP_WAIT_S if wait_s is None else wait_s)
+    if th.is_alive():
+        return {"words": [], "usage": {}, "late": True}
+    return box.get("r")
+
+
 def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     """Ask the model what this message's surprise words mean, keep what the field can, mark them
     asked -> {words: [{word, answer, kept, meaning}], usage} ({error} when the call failed: then
@@ -770,13 +929,25 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     if not gap_fill_on():
         return None
     est = srv.entity_store
-    todo = [w for w in dict.fromkeys(str(w).strip() for w in words) if w and _gap_eid(w) not in (est.docs or {})]
+    wanted = [w for w in dict.fromkeys(str(w).strip() for w in words) if w and _gap_eid(w) not in (est.docs or {})]
+    with _ASKING_LOCK:
+        todo = [w for w in wanted if w.lower() not in _ASKING]
+        _ASKING.update(w.lower() for w in todo)
+    pending = [w for w in wanted if w not in todo]
     if not todo:
-        return {"words": [], "usage": {}}
+        return {"words": [], "usage": {}, **({"pending": pending} if pending else {})}
     try:
-        reply, usage = (ask or _ask_model)(gap_prompt(est, text, todo))
-    except Exception as e:
-        return {"words": [], "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
+        try:
+            reply, usage = (ask or _ask_model)(gap_prompt(est, text, todo))
+        except Exception as e:
+            return {"words": [], "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
+        return _keep_answers(srv, sid, est, todo, reply, usage, pending)
+    finally:
+        with _ASKING_LOCK:
+            _ASKING.difference_update(w.lower() for w in todo)
+
+
+def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list) -> dict:
     answers: dict = {}
     for line in str(reply or "").splitlines():
         m = _NONE.match(line)
@@ -801,7 +972,7 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
             "name": w.lower(), "answer": meaning, "kept": kept, "asked_ts": time.time(), "sid": sid,
             "silent_birth": True}), embedder=None)
         out.append({"word": w, "answer": meaning, "kept": kept, "meaning": shown})
-    return {"words": out, "usage": usage}
+    return {"words": out, "usage": usage, **({"pending": pending} if pending else {})}
 
 
 def shadow_report(rows: list[dict]) -> dict:
