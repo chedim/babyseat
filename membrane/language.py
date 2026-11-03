@@ -339,12 +339,14 @@ def _define_step(srv, est, word: str, meaning: str, text: str) -> dict:
 
 
 def _correct(est, word: str) -> None:
-    """#891: a definition taught over an invented meaning corrects it (counted, never lost)."""
+    """A definition taught over a learned meaning corrects it (counted, never lost); the new
+    definition is the person's own (or the chat-confirmed one confirm_proposed marks after), so
+    it is not `learned` -- a contradiction never deletes it, and a write may use it (Memo on #894)."""
     from . import verbs as V
     for eid in (_adj_eid(word), V.verb_eid(word)):
         d = (est.docs or {}).get(eid)
-        if d is not None and (d.properties or {}).get("invented"):
-            d.properties = {**d.properties, "invented": False, "corrected": True, "corrected_ts": time.time()}
+        if d is not None and (d.properties or {}).get("learned"):
+            d.properties = {**d.properties, "learned": False, "corrected": True, "corrected_ts": time.time()}
             est.upsert(d, embedder=None)
 
 
@@ -913,18 +915,15 @@ def _gap_eid(word: str) -> str:
     return GAP + re.sub(r"[^a-z0-9_-]+", "-", word.lower()).strip("-")
 
 
-def gap_prompt(est, text: str, words: list, facts: dict | None = None) -> str:
-    """The gap call's question. `facts`: word -> the field's candidates for it (conditions true of
-    what the message says it of, best first): the model picks one, says its own, or none (#894)."""
+def gap_prompt(est, text: str, words: list) -> str:
+    """The gap call's question -- blind: no field candidates in it (the operator, 2026-11-03, with
+    Memo: shown the candidates, Haiku picked "failed = open" 1 in 5; blind, never)."""
     from . import verbs as V
     docs = list((est.docs or {}).values())
     verbs = sorted({str((d.properties or {}).get("name") or "") for d in docs if d.cls == V.CLASS_VERB} - {""})
     adjs = sorted(n for n in _adjectives(est) if n)
-    told = "".join(f"  {w}: said of things where these hold: {'; '.join(c.replace('x.', '').replace(' == ', ' ').replace("'", '') for c in cs)}\n"
-                   for w, cs in (facts or {}).items() if cs)
     return (f"A person wrote to an AI seat: {str(text)[:1500]!r}\n"
             f"The seat could not understand these words: {', '.join(words)}.\n"
-            + (f"What the seat's field shows about them:\n{told}" if told else "") +
             "For each word, answer on its own line in one of these forms, or \"<word>: none\" when none fits:\n"
             f"  <word> means <a verb it knows>: {', '.join(verbs)}\n"
             f"  <word> means <an adjective it knows>: {', '.join(adjs)}\n"
@@ -946,8 +945,7 @@ def _ask_model(prompt: str):
     return "".join(text), usage
 
 
-# ---- novelty (#891): a meaning invented as code, proposed by tensors, checked on the field ------
-INVENT_CANDIDATES = 5       # the operator, 2026-11-03: the nearest candidates checked per word
+# ---- novelty (#891): a new meaning needs the model's word (asked blind) and the chat's evidence --
 _NOT_STATE = {"name", "summary", "title", "text", "sid", "mid", "role", "speaker", "word", "filter",
               "method_name", "command", "same_as"}
 
@@ -990,7 +988,6 @@ def _state_values(est, eid: str) -> list:
 
 
 INVENT_MIN_SEEN = 2         # the operator, 2026-11-03: messages that must agree before an invention is used
-INVENT_ALPHA = 0.05         # the operator, 2026-11-03: the chance-agreement limit (p ** k, see _confirmed)
 ASSOC = MEMBRANE_NS + "assoc:"
 
 
@@ -1102,50 +1099,40 @@ def _peers(est, things: list) -> list:
 
 
 def _confirmed(est, a: dict, cond: str, recorded: bool = True) -> dict | None:
-    """Does the chat's evidence carry `cond`: said of k distinct things, true of every one, over at
-    least INVENT_MIN_SEEN messages, and too rare to agree by chance (its base rate p over their
-    peers: p ** k <= INVENT_ALPHA; 88 fulfilled of 98 goals would take ~29 things)? -> {p, k}."""
+    """Does the chat's evidence carry `cond`: true of every one of k >= 2 distinct things the word
+    was said of, over at least INVENT_MIN_SEEN messages, and able to fail (false for some other
+    thing of their kind)? -> {k}. No chance test (the operator, 2026-11-03, with Memo): with the
+    model naming the meaning blind, the evidence only has to rule meanings out, and p ** k measured
+    how rare a state is on the seat, not what the word means."""
     things = list(a.get("things") or [])
     k = len(things)
     if int(a.get("seen") or 0) < INVENT_MIN_SEEN or k < 2:
         return None                              # one thing said twice is one thing (Memo on #894)
     if recorded and set((a.get("held") or {}).get(cond) or []) != set(things):
-        return None                              # (a model's proposal is any expression: checked below)
+        return None
     if not all(_holds(est, cond, e) is True for e in things):
         return None
-    vals = [_holds(est, cond, e) for e in _peers(est, things)]
-    vals = [v for v in vals if v is not None]
-    if not vals or all(vals):
+    if not any(_holds(est, cond, e) is False for e in _peers(est, things)):
         return None                              # true of every such thing: it can't fail, so it says nothing
-    pr = sum(1 for v in vals if v) / len(vals)
-    return {"p": round(pr, 3), "k": k} if pr ** k <= INVENT_ALPHA else None
+    return {"k": k}
 
 
-def candidates(srv, sid: str, text: str, word: str, embed=None) -> list:
-    """The field's candidates for `word` (#891, Memo on #894): the conditions still true of every
-    distinct thing this chat said it of, ranked by the word's vector, the top INVENT_CANDIDATES.
-    Never kept by themselves -- what's true of the things isn't what the word means -- they ride
-    the gap call, and the model picks one (or its own, or none)."""
-    import numpy as np
+def observe_learned(srv, sid: str, text: str) -> list:
+    """Every learned word the message uses is observed like a surprise word, so a plain statement
+    that contradicts it unlearns it (Memo on #894: a learned word is no surprise, so nothing saw
+    it). -> the words unlearned."""
     est = srv.entity_store
-    a = observe(srv, sid, text, word)
-    if not a:
+    learned = {n for n, d in _adjectives(est).items() if (d.properties or {}).get("learned")}
+    if not learned:
         return []
-    things = list(a.get("things") or [])
-    every = [c for c, ts in (a.get("held") or {}).items() if set(ts) == set(things)
-             and all(_holds(est, c, e) is True for e in things)]
-    emb = embed or getattr(getattr(srv, "efield", None), "emb", None)
-    ranked = every
-    if emb is not None and every:
-        try:
-            vals = [c.split("==", 1)[1].strip().strip("'\"") for c in every]
-            vecs = np.asarray(emb.embed([word] + vals), dtype=float)
-            w, cv = vecs[0], vecs[1:]
-            sims = cv @ w / ((np.linalg.norm(cv, axis=1) * (np.linalg.norm(w) or 1.0)) + 1e-12)
-            ranked = [c for _, c in sorted(zip(sims.tolist(), every), key=lambda x: -x[0])]
-        except Exception:
-            pass
-    return ranked[:INVENT_CANDIDATES]
+    gone = []
+    for t in _doc(text):
+        w = t.lower_
+        if w in learned and w not in gone:
+            observe(srv, sid, text, w)
+            if _adj_eid(w) not in (est.docs or {}):
+                gone.append(w)
+    return gone
 
 
 def _unlearn(est, word: str, said: list) -> None:
@@ -1232,15 +1219,9 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
     if not todo:
         return {"words": later, "usage": {}, **({"pending": pending} if pending else {})}
     try:
-        facts = {}
-        for w in todo:                           # the field's candidates ride the question (#894)
-            try:
-                facts[w] = candidates(srv, sid, text, w)
-            except Exception:
-                facts[w] = []
         ask_for = list(todo)
         try:
-            reply, usage = (ask or _ask_model)(gap_prompt(est, text, ask_for, facts))
+            reply, usage = (ask or _ask_model)(gap_prompt(est, text, ask_for))   # blind (#894)
         except Exception as e:
             return {"words": later, "usage": {}, "error": f"{type(e).__name__}: {e}"[:200]}
         got = _keep_answers(srv, sid, est, ask_for, reply, usage, pending, text)
@@ -1251,11 +1232,10 @@ def fill_gaps(srv, sid: str, text: str, words: list, ask=None) -> dict | None:
             _ASKING.difference_update(w.lower() for w in todo)
 
 
-def _mark_asked(est, sid: str, w: str, answer, kept: bool, invented: bool = False, proposed=None) -> None:
+def _mark_asked(est, sid: str, w: str, answer, kept: bool, proposed=None) -> None:
     est.upsert(QuantumEntity(eid=_gap_eid(w), cls="Gap", properties={
         "name": w.lower(), "answer": answer, "kept": kept, "asked_ts": time.time(), "sid": sid,
-        "silent_birth": True, **({"invented": True} if invented else {}),
-        **({"proposed": proposed} if proposed else {})}), embedder=None)
+        "silent_birth": True, **({"proposed": proposed} if proposed else {})}), embedder=None)
 
 
 def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list, text: str = "") -> dict:

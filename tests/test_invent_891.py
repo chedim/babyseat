@@ -1,12 +1,12 @@
-"""NOVELTY (#891) as the operator decided after Memo's third review (2026-11-03): a new meaning needs
-BOTH the model's word for it and this chat's field evidence (k >= 2 distinct things, p ** k <=
-INVENT_ALPHA), and a learned word never picks what a write acts on.
+"""NOVELTY (#891) as the operator decided after Memo's reviews (2026-11-03): a new meaning needs
+BOTH the model's word for it, asked blind, and this chat's field evidence (k >= 2 distinct things,
+true of all, able to fail); a contradiction unlearns it; a learned word never picks what a write
+acts on; a person's own definition is never "learned". No chance test.
 
-The field proposes: the conditions true of what the chat said the word of ride the gap call as
-candidates (tensors rank them). The model picks one, says its own, or none; its answer is only a
-proposal until the chat's evidence carries it. What's true of the things is not what the word
-means (Memo: people talk about the open goals, so a rare state is the likeliest coincidence), so
-the field alone never teaches; recurrence alone never teaches a verb or another name.
+What's true of the things is not what the word means (Memo: people talk about the open goals, so a
+rare state is the likeliest coincidence), so the field alone never teaches, and the model isn't
+shown the field (shown candidates, Haiku picked "failed = open" 1 in 5). Recurrence alone never
+teaches a verb or another name.
 """
 import os
 import sys
@@ -67,11 +67,19 @@ def _learned(est, word):
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class BothSignals(unittest.TestCase):
-    def test_the_field_candidates_ride_the_gap_call(self):
+    def test_the_model_is_asked_blind(self):
         srv, *_ = _seat()
         ask = Model("landed: none")
         LL.fill_gaps(srv, SID, "goal two landed", ["landed"], ask=ask)
-        self.assertIn("status closed", ask.prompts[0])
+        LL.fill_gaps(srv, SID, "goal three landed", ["shipped"], ask=ask)
+        self.assertTrue(all("status closed" not in p and "field shows" not in p for p in ask.prompts))
+
+    def test_a_common_state_can_be_learned(self):
+        """No chance test: on a seat where most goals are closed, landed = closed is learnable."""
+        srv, f, est, *_ = _seat(open_goals=0)              # goal one open, two and three closed
+        _say(srv, "goal two landed", "landed", "landed means status closed")
+        _say(srv, "goal three landed", "landed")
+        self.assertTrue(_learned(est, "landed"))
 
     def test_the_models_word_and_the_chats_evidence_teach_it(self):
         srv, f, est, *_ = _seat()
@@ -134,14 +142,36 @@ class BothSignals(unittest.TestCase):
         self.assertFalse(step["mapped"])
         self.assertEqual(step["calls"], [])
 
-    def test_a_contradiction_unlearns_it(self):
+    def test_a_contradiction_unlearns_it_on_the_messages_own_path(self):
+        """Memo: a learned word is no surprise, so the old path never saw it again."""
+        from membrane import lanes as L
         srv, f, est, goal, g1, g2, g3 = _seat()
         _say(srv, "goal two landed", "landed", "landed means status closed")
         _say(srv, "goal three landed", "landed")
         self.assertTrue(_learned(est, "landed"))
-        LL.observe(srv, SID, "goal one landed", "landed")         # goal one is open
+        srv._loop_runner = type("R", (), {"sessions": None, "post_line": lambda self, sid, t: None})()
+        srv._cg_turn, srv._cg_text = {SID: {}}, {SID: "goal one landed"}     # goal one is open
+        old = LL._ask_model
+        LL._ask_model = lambda prompt: ("", {})
+        try:
+            L._with_referent(srv, {"_turn_sid": SID}, "BANNER", False)
+        finally:
+            LL._ask_model = old
         self.assertNotIn(LL._adj_eid("landed"), est.docs)
         self.assertFalse(est.docs[LL._gap_eid("landed")].properties["kept"])
+
+    def test_a_persons_own_definition_is_not_learned_and_survives(self):
+        """Memo: after the person defines it, writes still refused; and a contradiction would delete it."""
+        srv, f, est, *_ = _seat()
+        _say(srv, "goal two landed", "landed", "landed means status closed")
+        _say(srv, "goal three landed", "landed")
+        [step] = LL.compile(srv, SID, "landed means status closed")
+        LL.teach(est, step)
+        self.assertFalse(_learned(est, "landed"))
+        LL.observe_learned(srv, SID, "goal one landed")           # would contradict a learned one
+        self.assertIn(LL._adj_eid("landed"), est.docs)
+        [step] = LL.compile(srv, SID, "close the landed goals")
+        self.assertTrue(step["calls"])                            # the person's word may pick targets
 
     def test_a_verb_synonym_is_never_taught_by_recurrence(self):
         """Memo: "review means show" posted "Reviewed goal two." with nothing reviewed."""
@@ -168,14 +198,6 @@ class BothSignals(unittest.TestCase):
         a = est.docs[LL._assoc_eid(SID, "landed")].properties
         self.assertEqual((a["seen"], a["things"]), (1, [g2.eid]))
         self.assertEqual(a["held"]["x.status == 'closed'"], [g2.eid])
-
-    def test_only_the_top_candidates_ride(self):
-        srv, f, est, goal, g1, g2, g3 = _seat()
-        for d in (g2, g3):
-            for i in range(LL.INVENT_CANDIDATES + 3):
-                d.properties[f"tag{i}"] = "word"
-        LL.observe(srv, SID, "goal two landed", "landed")
-        self.assertLessEqual(len(LL.candidates(srv, SID, "goal three landed", "landed")), LL.INVENT_CANDIDATES)
 
     def test_the_report(self):
         rows = [{"filled": {"words": [{"word": "landed", "kept": True},
