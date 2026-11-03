@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 import time
 
 from .entities import CLASS_DECISION, MEMBRANE_NS, QuantumEntity
@@ -320,6 +321,7 @@ def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
         sh["understanding"] = LL.understand(srv, sid, text)     # #887: the share that compiles, the surprise
     except Exception:
         pass
+    surprise = list((sh.get("understanding") or {}).get("surprise") or [])
     rows = runner.messages.list(sid) if runner is not None else []
     row = next((r for r in rows if (r.get("info") or {}).get("id") == a_mid), None)
     sh["model_tools"] = [p.get("tool") for p in ((row or {}).get("parts") or [])
@@ -330,6 +332,39 @@ def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
     if d is not None:
         d.properties = {**(d.properties or {}), "shadow": sh}
         srv.entity_store.upsert(d, embedder=None)
+    if surprise and _operators_chat(runner, sid):
+        _spawn(lambda: _fill(srv, sid, u, text, surprise))
+
+
+def _operators_chat(runner, sid: str) -> bool:
+    """A chat with no owner, or the operator's: a guest's words don't teach the field (#882)."""
+    from .lanes import _is_operator
+    sess = getattr(runner, "sessions", None)
+    try:
+        owner = str((sess.get(sid) or {}).get("owner") or "") if sess is not None else ""
+    except Exception:
+        owner = ""
+    return not owner or _is_operator(owner)
+
+
+def _spawn(fn) -> None:
+    threading.Thread(target=fn, daemon=True, name="gap-fill").start()
+
+
+def _fill(srv, sid: str, u: str, text: str, surprise: list) -> None:
+    """#887 B: the model fills the message's surprise words; what came back is kept on its shadow."""
+    from . import language as LL
+    try:
+        got = LL.fill_gaps(srv, sid, text, surprise)
+    except Exception as e:
+        got = {"words": [], "error": f"{type(e).__name__}: {e}"[:200]}
+    d = srv.entity_store.docs.get(u)
+    if got is None or d is None:
+        return
+    sh = dict((d.properties or {}).get("shadow") or {})
+    sh["filled"] = got
+    d.properties = {**(d.properties or {}), "shadow": sh}
+    srv.entity_store.upsert(d, embedder=None)
 
 def _link_pending_answers(srv, est, sid: str, u_mid: str, u: str, be, origin, person: bool) -> None:
     """#865: cards the agent answered with answer_card in this turn (decision_map.relay) get
