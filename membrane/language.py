@@ -903,6 +903,7 @@ def answer(srv, sid: str, text: str) -> dict:
 GAP_MODEL = "haiku"          # the operator, 2026-11-03
 GAP = MEMBRANE_NS + "gap:"
 _NONE = re.compile(r"^\s*[\"']?([\w' -]+?)[\"']?\s*:\s*none\b", re.I)
+_COLON = re.compile(r"^\s*[\"']?([a-z][\w' -]*?)[\"']?\s*:\s*(?!none\b)(\S[^:]*?)\s*[.!]?\s*$", re.I)
 
 
 def gap_fill_on() -> bool:
@@ -1133,21 +1134,60 @@ def _confirmed(est, a: dict, cond: str, recorded: bool = True) -> dict | None:
     return {"k": k}
 
 
+def _says_of(tok) -> bool:
+    """A looser test than _states, for unlearning only (Memo on #894): a statement still counts
+    with a time word, an adverb, a place or a "yes," ("goal one landed today", "yes, goal one just
+    landed"); a question, a negation, a modal, "if"/"whether", or a clause under another verb
+    still doesn't."""
+    if _asks_or_denies(tok):
+        return False
+    clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
+    for t in {tok, clause}:
+        for c in t.children:
+            if c.dep_ == "mark" or (c.dep_ == "aux" and c.tag_ == "MD"):
+                return False
+    return clause.dep_ in ("ROOT", "conj")
+
+
+def _subjects(tok, est, srv, sid) -> list:
+    """The things a statement says `tok` of: every thing named inside its subject's span, so
+    joined subjects count too ("goal two and goal one landed"; the parser's tree for those is
+    unreliable, the field's names aren't)."""
+    clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
+    subj = [c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")]
+    if not subj:
+        return []
+    lo = min(t.i for c in subj for t in c.subtree)
+    hi = max(t.i for c in subj for t in c.subtree)
+    hi = max(hi, max(t.i for t in tok.doc[lo:clause.i]) if clause.i > lo else hi)   # names the parse split off
+    out = []
+    for span, pos in _meaning_nodes(tok.doc, _names(est)):
+        if span.start >= lo and span.end <= hi + 1 and tok.i not in range(span.start, span.end):
+            for e in _known_targets(srv, sid, est, span):
+                if e not in out:
+                    out.append(e)
+    return out
+
+
 def observe_learned(srv, sid: str, text: str) -> list:
-    """Every learned word the message uses is observed like a surprise word, so a plain statement
-    that contradicts it unlearns it (Memo on #894: a learned word is no surprise, so nothing saw
-    it). -> the words unlearned."""
+    """Every learned word the message uses, in every sentence, is checked against what a
+    statement says it of, so a contradiction unlearns it before membrane answers (Memo on #894: a
+    learned word is no surprise, so nothing saw it; and natural statements -- "goal one landed
+    today", "yes, goal one landed" -- must count). -> the words unlearned."""
     est = srv.entity_store
-    learned = {n for n, d in _adjectives(est).items() if (d.properties or {}).get("learned")}
+    learned = {n: d for n, d in _adjectives(est).items() if (d.properties or {}).get("learned")}
     if not learned:
         return []
     gone = []
     for t in _doc(text):
         w = t.lower_
-        if w in learned and w not in gone:
-            observe(srv, sid, text, w)
-            if _adj_eid(w) not in (est.docs or {}):
-                gone.append(w)
+        if w not in learned or w in gone or not _says_of(t):
+            continue
+        expr = (learned[w].properties or {}).get("filter") or "False"
+        said = _subjects(t, est, srv, sid)
+        if any(_holds(est, expr, e) is False for e in said):
+            _unlearn(est, w, said)
+            gone.append(w)
     return gone
 
 
@@ -1176,6 +1216,8 @@ def confirm_proposed(srv, sid: str, text: str, word: str) -> dict | None:
     plan = ((g.properties or {}).get("proposed") or {}) if g is not None else {}
     if not plan or (g.properties or {}).get("kept") or plan.get("kind") != "adjective":
         return None
+    if " " in word.strip():                      # a phrase ("big thing"): nothing reads one as a word yet
+        return None                              # (Memo on #894), so it stays a proposal
     a = observe(srv, sid, text, word)
     ok = _confirmed(est, a, plan["filter"], recorded=False) if a else None
     if ok is None:
@@ -1257,15 +1299,23 @@ def _mark_asked(est, sid: str, w: str, answer, kept: bool, proposed=None) -> Non
 def _keep_answers(srv, sid: str, est, todo: list, reply, usage, pending: list, text: str = "") -> dict:
     answers: dict = {}
     for line in str(reply or "").splitlines():
+        line = line.replace("`", "").strip(" -*")
         m = _NONE.match(line)
         if m:
             answers.setdefault(m.group(1).strip().lower(), None)
             continue
-        m = _DEFINE.match(line.strip(" -*"))
+        m = _DEFINE.match(line)
+        if m:                                    # "landed means closed: closed" -> closed
+            answers.setdefault(m.group(1).strip().lower(), m.group(2).split(":", 1)[0].strip())
+            continue
+        m = _COLON.match(line)                   # "landed: closed" (Memo on #894: 13 of 33 right answers)
         if m:
             answers.setdefault(m.group(1).strip().lower(), m.group(2).strip())
     out = []
     for w in todo:
+        if w.lower() not in answers:             # the reply never said: not asked, so it's asked again
+            out.append({"word": w, "answer": None, "kept": False, "unparsed": True})
+            continue
         meaning = answers.get(w.lower())
         plan = None
         if meaning:

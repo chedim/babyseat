@@ -160,15 +160,17 @@ its subject, tense auxiliaries, its complement and punctuation, and its clause s
 question, a negation, a modal, an adverb ("almost", "probably", "when"), an interjection
 ("no, …"), "if" or "whether", or a clause under another verb counts nothing. The gap call is
 asked **blind**: it isn't shown the field (shown candidates, Haiku picked "failed = open" 1 time
-in 5; blind, never). Its answer is only a **proposal** on the word's gap mark, taught
+in 5; blind, never). Its answer ("landed means closed", or "landed: closed") is only a **proposal** on the word's gap mark; a reply that says nothing about a word leaves it unasked, to be asked again, and a phrase ("big thing") stays a proposal until something can read it, taught
 (`confirm_proposed`) once the chat's evidence (`_confirmed`) holds: true of **k ≥ 2 distinct
 things**, over at least `INVENT_MIN_SEEN` (2) messages, and able to fail (false for some other
 thing of their kind). There's no chance test: *p*ᵏ measured how rare a state is on the seat, not
 what the word means, and it blocked *landed* = closed on a seat where most goals are finished.
 The taught adjective is marked `learned`. A learned word **never picks what a write acts on**
 ("close the landed goals" doesn't compile; name the things). Every learned word in a message is
-observed before membrane answers (`observe_learned`), so a plain statement that contradicts it
-**unlearns** it, back to a proposal. A definition the person teaches ("X means Y") is their own,
+checked before membrane answers (`observe_learned`), so a statement that contradicts it
+**unlearns** it, back to a proposal. Unlearning uses a looser rule than teaching: "goal one
+landed today", "yes, goal one landed" and joined subjects count; a question, a negation, a modal
+or a conditional still don't. A definition the person teaches ("X means Y") is their own,
 never `learned`: no contradiction deletes it, and a write may use it. A verb synonym or another
 name from the model stays a proposal for the person to teach: there's no field evidence for a
 meaning like that, and recurrence isn't evidence. `membrane shadow` counts `novelty` (learned,

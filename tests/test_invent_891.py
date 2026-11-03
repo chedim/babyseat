@@ -135,12 +135,50 @@ class BothSignals(unittest.TestCase):
             _say(srv, b, "landed")
             self.assertFalse(_learned(est, "landed"), (a, b))
 
-    def test_a_multi_word_gap_is_confirmed(self):
-        """Memo on #894: observe returned None for "big thing", so its proposal was never confirmed."""
+    def test_a_multi_word_gap_stays_a_proposal(self):
+        """Memo on #894: a learned phrase is stored but nothing can read it (still a surprise, no
+        answer, no unlearning), so it stays a proposal until something can use it."""
         srv, f, est, *_ = _seat()
         _say(srv, "goal two is a big thing", "big thing", "big thing means status closed")
         _say(srv, "goal three is a big thing", "big thing")
-        self.assertTrue(_learned(est, "big thing"))
+        self.assertFalse(_learned(est, "big thing"))
+        self.assertTrue(est.docs[LL._gap_eid("big thing")].properties["proposed"])
+
+    def test_the_models_reply_formats_are_read(self):
+        """Memo on #894: "landed: closed" mirrored the prompt's "<word>: none" and was thrown away
+        (13 of 33 right answers), and the word was never asked again."""
+        for reply in ("landed: closed", "landed means closed: closed", "landed means closed",
+                      "- `landed`: status closed"):
+            srv, f, est, *_ = _seat()
+            _say(srv, "goal two landed", "landed", reply)
+            _say(srv, "goal three landed", "landed")
+            self.assertTrue(_learned(est, "landed"), reply)
+
+    def test_a_reply_that_says_nothing_of_a_word_leaves_it_unasked(self):
+        srv, f, est, *_ = _seat()
+        got = _say(srv, "goal two landed", "landed", "I am not sure what you mean.")
+        self.assertTrue(got["words"][0]["unparsed"])
+        self.assertNotIn(LL._gap_eid("landed"), est.docs)          # asked again next time
+        ask = Model("landed means status closed")
+        LL.fill_gaps(srv, SID, "goal three landed", ["landed"], ask=ask)
+        self.assertEqual(len(ask.prompts), 1)
+
+    def test_natural_contradictions_unlearn(self):
+        """Memo on #894: unlearning needs a looser rule than teaching."""
+        for msg in ("goal one landed today", "yes, goal one landed", "goal one just landed",
+                    "goal two and goal one landed"):
+            srv, f, est, *_ = _seat()
+            _say(srv, "goal two landed", "landed", "landed means status closed")
+            _say(srv, "goal three landed", "landed")
+            self.assertTrue(_learned(est, "landed"))
+            self.assertEqual(LL.observe_learned(srv, SID, msg), ["landed"], msg)
+
+    def test_a_question_or_denial_never_unlearns(self):
+        for msg in ("is goal one landed?", "goal one is not landed", "if goal one landed, tell me"):
+            srv, f, est, *_ = _seat()
+            _say(srv, "goal two landed", "landed", "landed means status closed")
+            _say(srv, "goal three landed", "landed")
+            self.assertEqual(LL.observe_learned(srv, SID, msg), [], msg)
 
     def test_a_correction_is_counted(self):
         srv, f, est, *_ = _seat()
