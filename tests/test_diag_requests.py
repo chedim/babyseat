@@ -239,7 +239,7 @@ class TestEndpoint(_Case):
     def test_off_box_is_refused(self):
         DR.record("a", "http://x/v1/chat/completions", _body("a"), lane="chat")
         code, out = _req(self.port, "/membrane/diag/requests", headers={"X-Forwarded-For": "192.168.1.50"})
-        self.assertEqual(code, 403)
+        self.assertIn(code, (401, 403))   # tokenless is 401 first (#842)
         self.assertNotIn("requests", out)
 
 

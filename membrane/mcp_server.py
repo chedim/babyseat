@@ -800,8 +800,12 @@ def _jwt_headers() -> dict:
     """JWT MODE (jwtauth.py): the relay presents a token -- an explicit
     MEMBRANE_JWT_TOKEN, else the internal one minted from the secret this
     child inherited from the seat; {} when the seat runs open."""
-    from membrane import jwtauth
-    return jwtauth.client_headers()
+    from membrane import jwtauth, seatauth
+    h = jwtauth.client_headers()
+    if h or jwtauth.enabled():
+        return h
+    tok = seatauth.seat_token()          # JWT off: the seat's own token is the credential (#842)
+    return {"Authorization": f"Bearer {tok}"} if tok else {}
 
 
 from membrane import writes as _W   # noqa: E402  (#576: the relay carries the chain)

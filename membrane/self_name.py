@@ -121,7 +121,7 @@ def _post_json(url: str, body: dict, headers: dict) -> tuple[int, dict]:
 
 def _auth_headers() -> dict:
     """JWT mode: the client token; else the seat token when this machine has
-    one (an off-box --url needs it; localhost needs nothing). Never minted here."""
+    one (any --url needs it, localhost too). Never minted here."""
     from . import jwtauth as _JWT
     h = _JWT.client_headers()
     if h:

@@ -63,10 +63,10 @@ def _post(port: int, payload: dict, timeout: float) -> dict:
     """POST /membrane/rerank on a same-host seat (the tests swap it)."""
     import json
     import urllib.request
-    from . import jwtauth
+    from . import jwtauth, seatauth
     req = urllib.request.Request(
         f"http://127.0.0.1:{int(port)}/membrane/rerank", data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", **jwtauth.internal_headers()})
+        headers={"Content-Type": "application/json", **seatauth.loopback_headers(jwtauth.internal_headers())})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
 

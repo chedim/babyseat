@@ -329,15 +329,16 @@ def route():
 
 
 def test_the_route_tags_the_pages_person(route, _data):
-    with _jwt_env(MEMBRANE_STANDALONE="1", MEMBRANE_DATA_DIR=str(_data)):
+    with _jwt_env(MEMBRANE_STANDALONE="1", MEMBRANE_OPERATOR="test-operator", MEMBRANE_DATA_DIR=str(_data)):
         code, body = route.post("/ui/serve/membrane/toybox/poke", {"toy": "toy:tower", "action": "knock", "arg": 4},
                                 headers={"X-Membrane-Speaker": "alice"})
         assert code == 200 and body["ok"], body
-        assert _log("toy:tower")[-1]["by"] == "alice"
+        # S1 (#842): the owner is decided by the credential (loopback = the owner), never the header
+        assert _log("toy:tower")[-1]["by"] == "test-operator"
         assert _standing("toy:tower") == [True, True, True, False, False]
         code, body = route.post("/ui/serve/membrane/toybox/poke", {"toy": "toy:die", "action": "roll",
                                                                    "person": "mallory"})
-        assert code == 200 and _log("toy:die")[-1]["by"] == "guest"     # the page's line, never the body's
+        assert code == 200 and _log("toy:die")[-1]["by"] == "test-operator"      # the credential decides, never the body
 
 
 def test_the_route_is_toybox_actions_only(route):

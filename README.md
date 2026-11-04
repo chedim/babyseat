@@ -128,10 +128,10 @@ You get membrane home:
   and it will ask.
 
 Other devices on your network open `http://<this machine>:4096/`. They can
-read freely, and they ask once for the seat token before writing
-(`membrane token seat` prints it). Callers from outside your network are
+ask once for the seat token (`membrane token seat` prints it): reads need it
+too, not only writes. The page's cookie is minted only on this machine. Callers from outside your network are
 refused: [JWT mode](docs/auth.md) is on by default (turn it off with `MEMBRANE_JWT=0`);
-this machine itself needs no token. The microphone needs
+this machine needs the seat token too (the page served here carries it). The microphone needs
 `localhost` (a secure origin), and the first voice use downloads about 65 MB
 of speech models.
 
@@ -378,7 +378,7 @@ pass through to Ollama unchanged.
 | `membrane ingest` | cold start: absorb docs/README into the field (DOC events; a second ingest is a no-op) |
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running + the field's vitals |
-| `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): from another machine, every write to either port needs it (Bearer, Basic's password, or the web UI's one-time prompt); reads and localhost need none; see [docs/auth.md](docs/auth.md) |
+| `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): every request to either port needs it, localhost and reads included (Bearer, Basic's password, or the web UI's one-time prompt; only `GET /api/tags` is open); see [docs/auth.md](docs/auth.md) |
 | `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running JWT mode (on by default; off with `MEMBRANE_JWT=0`); see [docs/auth.md](docs/auth.md) |
 | `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads the chat message store (`serve-msgs.json`, or the seat's Couchbase Lite store once it has migrated there), plus the background model calls from `bg-usage.json`; no model call) |
 | `membrane shadow` | compile-first routing, shadow stage: how many person messages living language compiled, had gaps in (by type) or left to thinking, and whether the model then used tools (read-only, no model call). See [docs/cliffhanger.md](docs/cliffhanger.md#living-language-2026-11-01-on-by-default) |
@@ -402,8 +402,8 @@ appear to the client as ordinary tool parts riding `message.part.updated`
 (pending → completed), so you can watch what it's doing from the room.
 `--serve-port` (default 4096, walks up if busy) and `--listen` (the proxy,
 default 11500) are independent. The proxy binds all interfaces by default:
-reads are open on the LAN, and an off-box caller's writes (chat turns included)
-need the seat token; `--listen-host 127.0.0.1` (or
+only `GET /api/tags` is open; every other call (reads under `/v1/` and `/membrane/` included, chat turns included)
+needs the seat token; `--listen-host 127.0.0.1` (or
 `MEMBRANE_LISTEN_HOST=127.0.0.1`) keeps it on this machine. Exposure is LAN-only by design:
 reach the server only from a network you own; JWT mode is on by default (`MEMBRANE_JWT=0` turns it off),
 so hand each client a token ([docs/auth.md](docs/auth.md)).

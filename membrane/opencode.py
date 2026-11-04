@@ -410,7 +410,7 @@ def proxy_bind_host(args) -> str:
     --listen-host / MEMBRANE_LISTEN_HOST bind it back to 127.0.0.1. Reads
     are open on the LAN; an off-box caller's writes (the field, entities,
     scripts, methods, models, /v1 and Ollama turns) need the seat token or,
-    in JWT mode, a JWT (#253, seatauth.py); localhost needs nothing."""
+    in JWT mode, a JWT (#253, seatauth.py); localhost needs it too."""
     return (getattr(args, "listen_host", None)
             or os.environ.get("MEMBRANE_LISTEN_HOST") or "0.0.0.0")
 

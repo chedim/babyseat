@@ -4469,9 +4469,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         from . import seatauth as _SA
         if not _JWT.gate(self):
             return False
-        # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, an OFF-BOX
-        # caller's writes (/v1 + /api/chat|generate turns included) need the
-        # seat token; reads and localhost stay open
+        # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, every
+        # caller (localhost too) needs the seat token; only GET /api/tags is open
         return _SA.gate(self, _SA.proxy_is_write(self.command, self.path.split("?")[0]))
 
     def _stamp_chat_identity(self) -> None:

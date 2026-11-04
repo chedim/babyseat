@@ -1548,6 +1548,24 @@ class TurnRunner:
         if resp is None:
             return
         try:
+            if getattr(resp, "_in_gate", False):
+                import socket as _socket
+
+                def _wake(_c=resp, _s=getattr(resp, "sock", None)):
+                    # a bare close() does not wake a read blocked in another thread; shutdown does.
+                    # Only for a round STILL waiting for the proxy after a short grace: a reply
+                    # already streaming keeps the words it gave (#449).
+                    try:
+                        if getattr(_c, "_in_gate", False) and _s is not None:
+                            _s.shutdown(_socket.SHUT_RDWR)
+                    except Exception:
+                        pass
+                _t = threading.Timer(0.3, _wake)
+                _t.daemon = True
+                _t.start()
+        except Exception:
+            pass
+        try:
             resp.close()
         except Exception:
             pass
@@ -3547,7 +3565,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         data = _json.dumps(body).encode()
         req = urllib.request.Request(
             url, data=data, method="POST",
-            headers={"Content-Type": "application/json", **_JWT.internal_headers(),
+            headers={"Content-Type": "application/json", **_SA.loopback_headers(_JWT.internal_headers()),
                      **_W.headers()})          # the turn's chain + writer: the handler resumes them (Blurp's learner links writes by chain)
         try:
             with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
@@ -3594,7 +3612,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
     def _stream_once(body: dict, on_event):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/chat/completions", data=_json.dumps(body).encode(),
-            method="POST", headers={"Content-Type": "application/json", **_JWT.internal_headers(),
+            method="POST", headers={"Content-Type": "application/json", **_SA.loopback_headers(_JWT.internal_headers()),
                                     **_W.headers()})       # as the buffered call: the turn's chain + writer
         seen: dict = {}                      # this round's last usage (#472)
         try:
@@ -3618,11 +3636,18 @@ def loopback_ladder(port: int, runner=None, cell=None):
         _r = runner if runner is not None else ((cell or {}).get("runner") if cell else None)
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=CLOUD_TIMEOUT_S)
         socks = getattr(_r, "_turn_sockets", None) if (_r is not None and sid) else None
+        try:
+            conn.connect()          # a socket to close BEFORE the kill can reach it (closing an unconnected conn cuts nothing)
+        except BaseException:
+            conn.close()
+            raise
         if isinstance(socks, dict):
             socks.setdefault(sid, conn)
         try:
+            conn._in_gate = True        # until the proxy answers: the kill must wake this read
             conn.request(req.get_method(), req.selector, body=req.data, headers=dict(req.header_items()))
             resp = conn.getresponse()
+            conn._in_gate = False
         except BaseException:
             conn.close()
             raise
@@ -3872,10 +3897,12 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             standalone page's shell (+ /ui/login) is public."""
             if not _JWT.gate(self, cookie=True, basic=True, public=_UI.public_path(self)):
                 return False
-            # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, an OFF-BOX
-            # caller's writes need the seat token (Bearer, Basic's password
-            # or the UI's cookie); reads and localhost stay open
-            return _SA.gate(self, _SA.serve_is_write(self.command, self.path.split("?", 1)[0]),
+            # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, every
+            # caller (localhost too) needs the seat token (Bearer, Basic's password
+            # or the UI's cookie), reads included
+            if self._jwt_person() is not None:      # a token that names a person is a credential
+                return True
+            return _SA.gate(self, _SA.serve_needs_token(self.command, self.path.split("?", 1)[0]),
                             cookie=True, basic=True)
 
         def _jwt_person(self):
@@ -3928,7 +3955,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             if url is None:
                 return self._notfound()
             try:
-                with urllib.request.urlopen(urllib.request.Request(url, headers=_JWT.internal_headers()), timeout=45) as up:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=_SA.loopback_headers(_JWT.internal_headers())), timeout=45) as up:
                     body, status = up.read(), up.status
                     ctype = up.headers.get("Content-Type", "application/json")
             except urllib.error.HTTPError as e:
@@ -4650,7 +4677,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 _w = self._jwt_person()
                 _me = _w.sub if _w is not None else (
                     str(getattr(self, "_ui_speaker", "") or "") if getattr(self, "_ui_relay", False)
-                    else OWNER_SUB)                 # tokenless loopback = the seat owner
+                    else str(os.environ.get("MEMBRANE_OPERATOR") or OWNER_SUB))   # the seat token = the operator (#842)
                 if _me and not b.get("parentID"):       # #770: one chat per person
                     _mine = [x for x in sessions.list() if str(x.get("owner") or "") == _me
                              and not x.get("readonly") and not x.get("parentID")]
