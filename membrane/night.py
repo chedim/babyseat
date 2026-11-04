@@ -2357,43 +2357,43 @@ CALLS_RING = 12
 COMPOSITE_DEPTH = 3            # the seat: "composite depth <= 3" -- feed-forward, not Turing-complete
 
 
-def _owner_kind(est, d) -> str:
-    """'class' when the entity is a class (a c: eid, an interface, a parent of
-    others, or a method owner); else 'entity'."""
-    body = d.eid.removeprefix(MEMBRANE_NS)
-    ps = d.properties or {}
-    if body.startswith("c:") or ps.get("interface") or ps.get("is_class"):
+def _class_names(est) -> set:
+    """Lower-cased names some entity declares as its class (its `cls`):
+    the evidence that a name is a CLASS. Computed once per define."""
+    return {str(q.cls).lower() for q in list((est.docs or {}).values()) if q.cls}
+
+
+def _owner_kind(est, d, names=None) -> str:
+    """'class' only on evidence: the entity is an interface, or its name is
+    some other entity's cls. Owning a method is NOT evidence."""
+    if (d.properties or {}).get("interface"):
         return "class"
-    for q in list((est.docs or {}).values()):
-        qp = q.properties or {}
-        par = qp.get("parents") or []
-        par = par if isinstance(par, list) else [par]
-        if d.eid in par or d.eid in (qp.get("method_of") or []):
-            return "class"
-    return "entity"
+    names = _class_names(est) if names is None else names
+    nm = str((d.properties or {}).get("name", "")).lower()
+    tail = d.eid.removeprefix(MEMBRANE_NS).rpartition(":")[2].lower()
+    return "class" if (nm and nm in names) or (tail and tail in names) else "entity"
 
 
-def _resolve_owner(est, on: str):
-    """(owner, refusal). An exact class-name match wins; a unique exact
-    eid/spelling hit binds; a name match that is only a non-class (or several
-    classes) is REFUSED with near candidates -- never a quiet bind to another kind."""
+def _resolve_owner(est, on: str, names=None):
+    """(owner, refusal). Main's resolution (est._resolve_spec) stands unless
+    the name is evidenced to be a class (it equals other entities' cls) and
+    the only match is a fuzzy hit on another entity: an exact hit binds,
+    otherwise the define is REFUSED naming the near candidates -- never a
+    quiet bind to another kind."""
     spec = (on or "").strip()
-    low = spec.lower()
-    hits = [q for q in list((est.docs or {}).values())
-            if q.eid.lower().endswith(":" + low) or str((q.properties or {}).get("name", "")).lower() == low]
-    classes = [q for q in hits if _owner_kind(est, q) == "class"]
-    if len(classes) == 1:
-        return est._follow_merges(classes[0]), ""
-    if len(classes) > 1:
-        return None, f"owner {on!r} is ambiguous between classes: " + ", ".join(q.eid for q in classes[:6])
+    main = est._resolve_spec(spec)
+    names = _class_names(est) if names is None else names
+    low = spec.removeprefix(MEMBRANE_NS).lower()
+    if main is None or low not in names:
+        return main, ""
     exact = est._resolve_spec_raw(spec, fuzzy=False)
     if exact is not None:
-        return est._follow_merges(exact), ""
-    if hits:
-        return None, (f"owner {on!r} matches no class, only other kinds: "
-                      + ", ".join(f"{q.eid} ({_owner_kind(est, q)})" for q in hits[:6])
-                      + " -- pass the exact eid, or name a class")
-    return None, ""
+        ce = canon_eid(exact.eid)
+        return est._follow_merges((est.docs or {}).get(ce) or exact), ""
+    near = est.near_specs(spec)
+    return None, (f"owner {on!r} names a class (other entities have cls={on!r}) but matches only "
+                  f"{main.eid}: pass the exact eid of the entity you mean"
+                  + (" -- near: " + ", ".join(near) if near else ""))
 
 
 def method_define(srv, est, fld, mem, on: str, method: str, command: str,
@@ -2450,8 +2450,9 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
             if _LG.passthrough_refusal(st_tree):
                 return {"ok": False, "error": f"step {st.get('name') or ''}: {_LG.PASSTHROUGH}"}
     owner = None
+    _names = _class_names(est) if on else None
     if on:
-        owner, _why = (est._resolve_spec(on), "") if abstract else _resolve_owner(est, on)
+        owner, _why = (est._resolve_spec(on), "") if abstract else _resolve_owner(est, on, _names)
         if _why:
             return {"ok": False, "error": _why}
     if on and owner is None:
@@ -2533,7 +2534,7 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
                  "on": owner.eid if owner else "", "method": method, "ok": True})
     return {"ok": True, "eid": eid, "method": label, "created": created, "abstract": bool(abstract),
             "params": p.get("params") if abstract else command_params(command), "read_only": bool(read_only),
-            "owner": ({"eid": owner.eid, "kind": _owner_kind(est, owner), "class": owner.cls,
+            "owner": ({"eid": owner.eid, "kind": _owner_kind(est, owner, _names), "class": owner.cls,
                        "name": (owner.properties or {}).get("name", "")} if owner else None)}
 
 
