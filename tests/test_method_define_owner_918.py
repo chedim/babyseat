@@ -82,7 +82,7 @@ class Regress923(unittest.TestCase):
         thing = d1["owner"]["eid"]
         self.assertIn("thing", thing.lower())
         est.upsert(QuantumEntity(eid=MEMBRANE_NS + "dev:t1", cls="Thing", properties={"name": "t1"}))
-        d2 = N.method_define(None, est, None, None, "Thing", "second923", "true")
+        d2 = N.method_define(None, est, None, None, "Thing", "second923", "echo second923")
         self.assertTrue(d2["ok"], d2)
         self.assertEqual(d2["owner"]["eid"], thing, d2)
         m, _via = N.resolve_method(est, est.docs[MEMBRANE_NS + "dev:t1"], "second923")

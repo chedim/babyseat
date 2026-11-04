@@ -2374,6 +2374,24 @@ def _owner_kind(est, d, names=None) -> str:
     return "class" if (nm and nm in names) or (tail and tail in names) else "entity"
 
 
+def _is_class_owner(q) -> bool:
+    """A class-kind owner: an interface, or a Component minted as a class
+    (eid Component:<name>) -- never a gap:/dev:/shell: entity that merely
+    shares the name."""
+    return bool((q.properties or {}).get("interface")) or q.eid.startswith(MEMBRANE_NS + "Component:")
+
+
+def _cls_owners(est, obj) -> list:
+    """Class owners an entity belongs to by its `cls` name (cls='Pump' ->
+    the class Component:pump), so cls-only members reach class methods."""
+    c = str(getattr(obj, "cls", "") or "").lower()
+    if not c:
+        return []
+    return [q for q in list((est.docs or {}).values()) if _is_class_owner(q) and q.eid != obj.eid
+            and (str((q.properties or {}).get("name", "")).lower() == c
+                 or q.eid.removeprefix(MEMBRANE_NS).rpartition(":")[2].lower() == c)]
+
+
 def _resolve_owner(est, on: str, names=None):
     """(owner, refusal). Main's resolution (est._resolve_spec) stands unless
     the name is evidenced to be a class (it equals other entities' cls) and
@@ -2387,13 +2405,24 @@ def _resolve_owner(est, on: str, names=None):
     if main is None or low not in names:
         return main, ""
     exact = est._resolve_spec_raw(spec, fuzzy=False)
+    if exact is None:
+        # a NAME match counts as exact when the entity is itself a class-kind
+        # owner (a Component minted as a class, or an interface): same-name
+        # class owners bind. A different kind (gap:register for 'Register')
+        # does not.
+        cands = [q for q in list((est.docs or {}).values())
+                 if (_is_class_owner(q))
+                 and (str((q.properties or {}).get("name", "")).lower() == low
+                      or q.eid.removeprefix(MEMBRANE_NS).rpartition(":")[2].lower() == low)]
+        if cands:
+            exact = cands[0]
     if exact is not None:
         ce = canon_eid(exact.eid)
         return est._follow_merges((est.docs or {}).get(ce) or exact), ""
-    near = est.near_specs(spec)
-    return None, (f"owner {on!r} names a class (other entities have cls={on!r}) but matches only "
-                  f"{main.eid}: pass the exact eid of the entity you mean"
-                  + (" -- near: " + ", ".join(near) if near else ""))
+    # (ii-by-(i)) no class owner exists, only a different entity: MINT the
+    # class (method_define mints a Component named `on`) rather than refuse;
+    # members with cls=<on> then reach its methods via resolve_method.
+    return None, ""
 
 
 def method_define(srv, est, fld, mem, on: str, method: str, command: str,
@@ -2565,6 +2594,7 @@ def resolve_method(est, obj, method: str):
     if not named:
         return None, None
     order = [obj] + ancestors(est, obj)
+    order += [q for q in _cls_owners(est, obj) if q.eid not in {o.eid for o in order}]
     for owner in order:
         for d in named:
             if owner.eid in ((d.properties or {}).get("method_of") or []):
@@ -2578,7 +2608,7 @@ def resolve_method(est, obj, method: str):
 def methods_of(est, obj) -> list[str]:
     """The method names an object answers to (for the refusal's hint) --
     implemented ones only: an interface's abstract method is not an answer."""
-    owners = {obj.eid} | {a.eid for a in ancestors(est, obj)}
+    owners = {obj.eid} | {a.eid for a in ancestors(est, obj)} | {q.eid for q in _cls_owners(est, obj)}
     out = []
     for d in list((est.docs or {}).values()):
         pp = d.properties or {}
