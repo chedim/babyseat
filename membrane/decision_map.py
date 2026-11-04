@@ -317,10 +317,13 @@ def _person_said(srv, quote: str, since: float) -> dict | None:
     if not q:
         return None
     holds = lambda text: f" {q} " in f" {CG._norm(text)} "
-    for src in ("_cg_text", "_cg_said_now"):       # #865: lanes moves the words to _cg_said_now at the banner
-        for sid, text in (getattr(srv, src, None) or {}).items():
+    for sid, text in (getattr(srv, "_cg_text", None) or {}).items():
+        if holds(text):
+            return {"sid": sid, "mid": "", "eid": "", "pending": True}
+    for sid, kept in (getattr(srv, "_cg_said_now", None) or {}).items():   # #865: every person message of the turn
+        for mid, text in reversed(list(kept or [])):
             if holds(text):
-                return {"sid": sid, "mid": "", "eid": "", "pending": True}
+                return {"sid": sid, "mid": "", "eid": "", "pending": True, "pending_mid": mid}
     est = srv.entity_store
     said = [d for d in list((est.docs or {}).values()) if d.cls == CG.CLASS_MESSAGE
             and (d.properties or {}).get("role") == "user"
@@ -351,11 +354,12 @@ def relay(srv, spec: str, value, quote: str) -> dict:
         return {"ok": False, "error": "no message of the person's since this card was made says "
                                       "those words: quote them word for word, or ask them"}
     pending = said.pop("pending", False)
+    pending_mid = said.pop("pending_mid", "")
     res = answer(est, getattr(srv, "user_ledger", None), ent.eid, value, tell=not p.get("chat"),
                  relayed={"quote": quote, **said})
     if res.get("ok") and pending:
         # #865: the turn's message is minted at its end (convgraph.on_turn_end): it links the card then
-        srv.__dict__.setdefault("_cg_pending_answers", {}).setdefault(said["sid"], []).append(ent.eid)
+        srv.__dict__.setdefault("_cg_pending_answers", {}).setdefault(said["sid"], []).append((ent.eid, pending_mid))
     if res.get("ok") and said["eid"]:
         from . import convgraph as CG
         be, origin = CG._rel(srv)

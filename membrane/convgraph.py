@@ -307,7 +307,7 @@ def _ask(srv, runner, sid: str, a_eid: str, reply: str, be, origin) -> None:
 
 # ---- the turn ------------------------------------------------------------------------------
 
-def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
+def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str, *, pre=None, filled=None, explicit=False) -> None:
     """Compile-first routing, shadow stage: what living language made of the person's message
     (compiled / gaps / thinking), kept on its message next to what the model then did."""
     try:
@@ -317,13 +317,15 @@ def _shadow(srv, runner, sid: str, u: str, a_mid: str, text: str) -> None:
         sh = LL.classify(srv, sid, text)
     except Exception:
         return
-    pre = (getattr(srv, "_cg_understood", None) or {}).pop(sid, None)    # #887 C: scored before its fill
+    if not explicit:      # the turn's own message: the session slots; a glued one gets its own passed in
+        pre = (getattr(srv, "_cg_understood", None) or {}).pop(sid, None)    # #887 C: scored before its fill
     try:
         sh["understanding"] = pre or LL.understand(srv, sid, text)   # #887: the share that compiles, the surprise
     except Exception:
         pass
     surprise = list((sh.get("understanding") or {}).get("surprise") or [])
-    filled = (getattr(srv, "_cg_filled", None) or {}).pop(sid, None)
+    if not explicit:
+        filled = (getattr(srv, "_cg_filled", None) or {}).pop(sid, None)
     if filled is not None:                    # filled before the turn: kept, not asked again
         sh["filled"], surprise = filled, []
     rows = runner.messages.list(sid) if runner is not None else []
@@ -370,13 +372,20 @@ def _fill(srv, sid: str, u: str, text: str, surprise: list) -> None:
     d.properties = {**(d.properties or {}), "shadow": sh}
     srv.entity_store.upsert(d, embedder=None)
 
-def _link_pending_answers(srv, est, sid: str, u_mid: str, u: str, be, origin, person: bool) -> None:
+def _link_pending_answers(srv, est, sid: str, u_mid: str, u: str, be, origin, person: bool, own: bool = True) -> None:
     """#865: cards the agent answered with answer_card in this turn (decision_map.relay) get
     their link to the person's message now that it exists: properties.message + an `answers` edge.
     The turn's kept words go with it."""
     d = getattr(srv, "__dict__", {})
-    (d.get("_cg_said_now") or {}).pop(sid, None)
-    for card in (d.get("_cg_pending_answers") or {}).pop(sid, []):
+    if own:
+        (d.get("_cg_said_now") or {}).pop(sid, None)
+    keep = []
+    pend = (d.get("_cg_pending_answers") or {}).pop(sid, [])
+    for item in pend:
+        card, qmid = item if isinstance(item, tuple) else (item, "")
+        if (qmid or "") != str(u_mid) and not (own and not qmid):
+            keep.append(item)            # quoted another message: it links when that one is minted
+            continue
         ent = (est.docs or {}).get(card)
         if ent is None or not person:
             continue
@@ -385,6 +394,43 @@ def _link_pending_answers(srv, est, sid: str, u_mid: str, u: str, be, origin, pe
         ent.properties = p
         est.upsert(ent)
         _edge(be, origin, u, "answers", card)
+    if keep:
+        d.setdefault("_cg_pending_answers", {}).setdefault(sid, []).extend(keep)
+
+
+def on_glued(srv, runner, sid: str, glued: dict, a_info: dict) -> None:
+    """Person messages glued into the turn (#900): each gets a message entity, its answers and
+    its own shadow. The last one holds the compile state the glue round left; the turn's own
+    message gets back what it had before (run right before on_turn_end)."""
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return
+    be, origin = _rel(srv)
+    a_mid = str((a_info or {}).get("id") or "")
+    prev_u = None
+    for ui, text in glued.get("msgs") or []:
+        mid = str((ui or {}).get("id") or "")
+        if not mid or not a_mid:
+            continue
+        who, words = _words(text)
+        u = _mint(est, sid, mid, "user", words, speaker=who)
+        _link_pending_answers(srv, est, sid, mid, u, be, origin, True, own=False)
+        per = (srv.__dict__.get("_cg_by_msg") or {}).pop(mid, None) or {}
+        if mid == str((srv.__dict__.get("_cg_cur_mid") or {}).get(sid) or ""):   # the last one: still in the slots
+            per = {"understood": (srv.__dict__.get("_cg_understood") or {}).pop(sid, None),
+                   "filled": (srv.__dict__.get("_cg_filled") or {}).pop(sid, None)}
+        _shadow(srv, runner, sid, u, a_mid, words, pre=per.get("understood"), filled=per.get("filled"), explicit=True)
+        if prev_u is not None:
+            _edge(be, origin, u, "follows", prev_u)
+        prev_u = u
+        for t in _mentions(srv, words):
+            _edge(be, origin, u, "refers-to", t)
+    (srv.__dict__.get("_cg_cur_mid") or {}).pop(sid, None)
+    for k, v in (glued.get("orig") or {}).items():       # the turn's own message: its own pre-state back
+        if v is not None:
+            srv.__dict__.setdefault(k, {})[sid] = v
+        else:
+            (srv.__dict__.get(k) or {}).pop(sid, None)
 
 
 def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,

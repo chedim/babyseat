@@ -4255,9 +4255,11 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what
     this conversation is about now, walked off its graph) and what a pronoun in the person's
     message was resolved to (convgraph.before_turn), once."""
+    sid = str(body.get("_turn_sid") or "")
+    if is_tool_round and sid and (getattr(srv, "_cg_fresh", None) or {}).pop(sid, None):
+        is_tool_round = False       # a glued person message: this tool round is its first (fresh person round)
     if is_tool_round:
         return ctx
-    sid = str(body.get("_turn_sid") or "")
     adds = []
     if sid and sid in (getattr(srv, "_cg_turn", None) or {}):
         try:
@@ -4280,7 +4282,9 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     said = (getattr(srv, "_cg_text", None) or {}).pop(sid, None) if sid else None
     if said and srv is not None:                  # #865: the turn's words stay for answer_card until its message is minted
         try:
-            srv.__dict__.setdefault("_cg_said_now", {})[sid] = said
+            _sn = srv.__dict__.setdefault("_cg_said_now", {}).setdefault(sid, [])
+            if not any(t == said for _m, t in _sn):          # the glue may have noted these words already
+                _sn.append(("", said))
         except Exception:
             pass
     _sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)

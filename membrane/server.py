@@ -1385,6 +1385,9 @@ DELTA_COALESCE_S = 0.25   # a streaming part's text goes out at most this often 
 HEARTBEAT_S = 15.0    # busy-heartbeat cadence while a turn runs
 QUEUE_DEPTH_MAX = 8   # queued turns per session beyond which POSTs refuse fast (the flood guard)
 
+_NOKEY = object()
+
+
 class TurnRunner:
     """THE TURN LOOP: client text -> the seat's own /v1 (all of the
     proxy's machinery, in-process, via loopback) -> tool_calls executed
@@ -1506,15 +1509,24 @@ class TurnRunner:
         self.hub.publish({"type": "message.part.updated", "part": dict(_ip),
                           "time": _now, "sessionID": sid})
 
-    def preempt(self, sid: str) -> bool:
+    def preempt(self, sid: str, glue: bool = False) -> bool:
         """A PERSON SPOKE (2026-10-10, the operator: "interrupt the chat loop
         whenever there is a message"): the running turn of this session is cut
         now -- the abort flag (between rounds) + its model socket (a round
         blocked in the model) -- and its finally drains the queue, so the
-        person's message runs next. False when nothing runs."""
+        person's message runs next. False when nothing runs.
+
+        GLUE AT THE STEP BOUNDARY (glue=True, a person's message): nothing is
+        cut -- no abort flag, no socket kill; the running tool call finishes
+        and the message, already queued by the door, joins the SAME turn at
+        its next round top (`_take_interjections`). Stop/pause/operator
+        cancel call without glue: unchanged. No running turn: False, and the
+        door takes its old path."""
         running = sid in (getattr(self, "_turn_stops", None) or {}) or sid in (getattr(self, "_busy", None) or {})
         if not running:
             return False
+        if glue:
+            return True
         self._aborting = getattr(self, "_aborting", None) or set()
         self._aborting.add(sid)
         self._preempted = getattr(self, "_preempted", None) or set()
@@ -1875,14 +1887,31 @@ class TurnRunner:
         try:
             _psrv = getattr(self, "srv", None)
             from . import convgraph as _CG
-            if _psrv is not None and not _drained and _CG.is_chat((self.sessions.get(sid) or {}).get("agent")):
+            _chat = _psrv is not None and _CG.is_chat((self.sessions.get(sid) or {}).get("agent"))
+            _running = (not _drained) and sid in self._busy and _CG.from_person(text)
+            if _chat and _drained:                     # a drained turn takes what its door stashed
+                self._apply_glue_pre(sid, user_info)
+            if _chat and not _drained:
+                # A PERSON'S MESSAGE TO A RUNNING TURN (glue, #900) must not overwrite the
+                # running turn's referent binding or words: its pre-turn result is stashed
+                # by message id; the glue point (or the drain) applies it
+                _D = _psrv.__dict__
+                _keep = {k: (_D.get(k) or {}).get(sid, _NOKEY) for k in ("_cg_turn", "_cg_text", "_cg_said_now")} if _running else None
                 _ref = _CG.before_turn(_psrv, self, sid, user_info, text)
-                _psrv.__dict__.setdefault("_cg_turn", {})[sid] = _ref or {}   # the capture binding reads it
-                (_psrv.__dict__.get("_cg_said_now") or {}).pop(sid, None)       # #865: a new message ends the last one's words
+                _D.setdefault("_cg_turn", {})[sid] = _ref or {}   # the capture binding reads it
+                (_D.get("_cg_said_now") or {}).pop(sid, None)       # #865: a new message ends the last one's words
                 if _CG.from_person(text):                                      # living language compiles it
-                    _psrv.__dict__.setdefault("_cg_text", {})[sid] = _CG._words(text)[1]
+                    _D.setdefault("_cg_text", {})[sid] = _CG._words(text)[1]
                 else:
-                    (_psrv.__dict__.get("_cg_text") or {}).pop(sid, None)
+                    (_D.get("_cg_text") or {}).pop(sid, None)
+                if _running:
+                    _pre = (_D["_cg_turn"].get(sid), (_D.get("_cg_text") or {}).get(sid))
+                    for k, v in _keep.items():
+                        if v is _NOKEY:
+                            (_D.get(k) or {}).pop(sid, None)
+                        else:
+                            _D.setdefault(k, {})[sid] = v
+                    self.__dict__.setdefault("_glue_pre", {})[str((user_info or {}).get("id") or "")] = _pre
                 if _ref and _ref.get("reask"):
                     return {"info": user_info, "parts": [], "reask": _ref["reask"]}
         except Exception as e:
@@ -1904,8 +1933,8 @@ class TurnRunner:
             # a PERSON's message does not wait behind a running turn: that
             # turn is cut and this one goes next (loops and goals still wait)
             if _from_person(text, user_parts):
-                if self.preempt(sid):
-                    print(f"[serve] {sid}: a person spoke -- the running turn is cut, theirs is next",
+                if self.preempt(sid, glue=True):
+                    print(f"[serve] {sid}: a person spoke -- glued into the running turn at its next round",
                           file=sys.stderr)
             depth = self._queued_depth(sid)
             if depth >= self.queue_depth_max:
@@ -2130,8 +2159,59 @@ class TurnRunner:
                 self._start_next(sid)
         return True
 
+    def _apply_glue_pre(self, sid: str, user_info: dict) -> bool:
+        """Make a stashed door result (referent binding, words) the session's current one."""
+        pre = self.__dict__.setdefault("_glue_pre", {}).pop(str((user_info or {}).get("id") or ""), None)
+        psrv = getattr(self, "srv", None)
+        if pre is None or psrv is None:
+            return False
+        ref, words = pre
+        psrv.__dict__.setdefault("_cg_turn", {})[sid] = ref or {}
+        D = psrv.__dict__
+        cur = D.setdefault("_cg_cur_mid", {}).get(sid)
+        if cur:             # the slots hold the previous glued message's state: file it under that message
+            D.setdefault("_cg_by_msg", {})[cur] = {"understood": (D.get("_cg_understood") or {}).pop(sid, None),
+                                                   "filled": (D.get("_cg_filled") or {}).pop(sid, None)}
+        mid_now = str((user_info or {}).get("id") or "")
+        D["_cg_cur_mid"][sid] = mid_now
+        if words:                                   # every person message of the turn stays quotable
+            _sn = D.setdefault("_cg_said_now", {}).setdefault(sid, [])
+            if not any(t == words for _m, t in _sn):
+                _sn.append((mid_now, words))
+        if words:
+            psrv.__dict__.setdefault("_cg_text", {})[sid] = words
+        else:
+            (psrv.__dict__.get("_cg_text") or {}).pop(sid, None)
+        return True
+
+    def _glue_fresh_round(self, sid: str, said: list, a_info: dict) -> None:
+        """A person's message glued into the running turn is a fresh person round for the
+        pre-turn pipeline: its referent/words become current (the original's compile
+        state is kept for the turn's own message), the next round runs recall/compile/
+        answer for it (lanes._with_referent), and turn end mints it with its own shadow."""
+        psrv = getattr(self, "srv", None)
+        try:
+            from . import convgraph as _CG
+            if psrv is None or not _CG.is_chat((self.sessions.get(sid) or {}).get("agent")):
+                return
+            people = [(t, ui) for t, ui in said if _CG.from_person(t)]
+            if not people:
+                return
+            D = psrv.__dict__
+            g = self.__dict__.setdefault("_glued", {}).setdefault(sid, {"msgs": [], "orig": None})
+            if g["orig"] is None:           # the turn's own message keeps its compile state
+                g["orig"] = {k: (D.get(k) or {}).pop(sid, None) for k in ("_cg_understood", "_cg_filled")}
+            for t, ui in people:
+                self._apply_glue_pre(sid, ui)
+                g["msgs"].append((dict(ui or {}), t))
+            D.setdefault("_cg_fresh", {})[sid] = True
+        except Exception as e:
+            print(f"[convgraph] glue {sid[:16]}: {e}", file=sys.stderr)
+
     def _take_interjections(self, sid: str, aid: str) -> list:
-        """Pop every queued message of this session for the RUNNING turn:
+        """Pop every queued message of this session for the RUNNING turn.
+        (A glued person's message waits for the running step: a step that hangs holds the
+        person until its own timeout / the turn watchdog, where the old cut freed them at once.)
         their rows are stored + announced already (the door); their
         waiters are released with a 'merged' result."""
         with self._queue_lock:
@@ -2637,6 +2717,7 @@ class TurnRunner:
                                       "sessionID": sid, "info": dict(a_info)})
                     for _t, _ui in _said:
                         history.append({"role": "user", "content": _t})
+                    self._glue_fresh_round(sid, _said, a_info)
                     _last = _said[-1][1] or {}
                     _after = int(((_last.get("time") or {}).get("created"))
                                  or 0) + 1
@@ -3417,7 +3498,9 @@ class TurnRunner:
                 _reply = "\n".join(p.get("text") or "" for p in parts
                                    if isinstance(p, dict) and p.get("type") == "text")
                 _ui, _ai = dict(user_info), dict(a_info)
-                threading.Thread(target=_W.carry(lambda: _CG.on_turn_end(_psrv, self, sid, _ui, text, _ai, _reply)),
+                _gl = (self.__dict__.get("_glued") or {}).pop(sid, None)
+                (_psrv.__dict__.get("_cg_fresh") or {}).pop(sid, None)
+                threading.Thread(target=_W.carry(lambda: (_CG.on_glued(_psrv, self, sid, _gl, _ai) if _gl else None, _CG.on_turn_end(_psrv, self, sid, _ui, text, _ai, _reply))),
                                  daemon=True, name="convgraph").start()
         except Exception as e:
             print(f"[convgraph] turn {sid[:16]}: {e}", file=sys.stderr)
