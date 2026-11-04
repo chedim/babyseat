@@ -664,7 +664,8 @@ def _blurp(srv) -> str | None:
         return None
 
 
-def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = None) -> list[str]:
+def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = None,
+                 sid: str = "") -> list[str]:
     """#668: the banner is recall -- the top rows for the person's message
     (a no-topic message keeps this chat's previous set). Never breaks the banner."""
     if fld is None or not latest:
@@ -681,6 +682,11 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
         t = state["timing"]
         print("[recall-banner] " + " ".join(f"{k} {v:.2f}s" for k, v in t.items() if k != "rows")
               + f" (pool {t['rows']})", file=sys.stderr)
+    try:                                  # #934: measured when the turn's reply lands
+        from . import banneruse as _BU
+        _BU.shown_recall(srv, sid or conv, lines)
+    except Exception:
+        pass
     if state is not None:
         memo[conv] = state
         while len(memo) > _MARKS_KEPT:
@@ -711,6 +717,7 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
         "blurp": _blurp(srv),
         "suggest": _suggestions(srv, conv),
         "more": bool((body or {}).get("tools")),
-        "recall": recall_lines(srv, fld, conv, events, latest, now),
+        "recall": recall_lines(srv, fld, conv, events, latest, now,
+                               str((body or {}).get("_turn_sid") or "")),
     }
     return render(sec, now, tz)
