@@ -1,4 +1,5 @@
 """LEARNING LIVES IN THE VM (#576 part C): Blurp's plasticity, as field physics.
+#935 HABITS read the balance below; no second scorer is imported.
 
 GUESS. A write W (by anyone but a trigger) is explained by a cause C: one of the
 last LOOK_BACK writes before it in the SAME chain. The guess is a trigger owned
@@ -35,6 +36,7 @@ import hashlib
 import json
 
 from . import ch as CH
+from . import score as S
 from .energy import BASAL_PER_S
 
 WRITE_COST = BASAL_PER_S          # every Blurp write: one awake second (approved)
@@ -127,6 +129,13 @@ def _same(a, b) -> bool:
     return _scalar(a) and type(a) is type(b) and a == b
 
 
+def reversible(trigger) -> bool:
+    """#935: only a plain field write can be undone; a method call (`.invoke`) never graduates."""
+    w = (getattr(trigger, "properties", None) or {}).get("write")
+    path = str(w[0]) if isinstance(w, (list, tuple)) and w else ""
+    return bool(path) and not path.endswith(".invoke")
+
+
 def _literal(v) -> str | None:
     if not _scalar(v):
         return None
@@ -152,6 +161,7 @@ class Learner:
         self._recent: collections.OrderedDict = collections.OrderedDict()   # chain -> its last writes
         self._pending: collections.OrderedDict = collections.OrderedDict()  # chain -> [(cand, path, value)]
         self._bal: dict[str, float] = {}
+        self._habits: set[str] = set()       # #935: graduated candidates, run without a model round
         self._hits: dict[str, int] = {}
         self._adopt: dict[str, int] = {}     # #751: adopted suggestions per candidate (speak)
         self._on_toy: collections.OrderedDict = collections.OrderedDict()   # toy -> (chain, writer, link)
@@ -194,6 +204,26 @@ class Learner:
     # -- the account ------------------------------------------------------------------------
     def balance(self, cand: str) -> float:
         return self._bal.get(cand, 0.0)
+
+    def graduate(self, cand: str, *, threshold: float) -> bool:
+        """#935: a reversible candidate whose ch_learn balance reached the operator's line
+        becomes a habit. The line is required: no default."""
+        tr = self.vm.est.docs.get(cand)
+        if tr is None or not reversible(tr) or self.balance(cand) < threshold:
+            return False
+        self._habits.add(cand)
+        return True
+
+    def habits(self) -> list[str]:
+        return sorted(self._habits)
+
+    def is_habit(self, cand: str) -> bool:
+        return cand in self._habits
+
+    def consequence(self, cand: str, bad: bool) -> None:
+        """One bad consequence demotes a habit back to a candidate (kept, not deleted)."""
+        if bad:
+            self._habits.discard(cand)
 
     def _hit(self, cand: str) -> None:
         self.counts["hit"] += 1
@@ -247,6 +277,10 @@ class Learner:
     def on_fire(self, tr, target_path: str, value) -> str:
         """A candidate fires: 'live' (write the real path), 'shadow' (write the
         prediction onto itself) or 'skip' (asleep, or a command's while toys are the world)."""
+        if tr.eid in self._habits:
+            S.note("answer", lane="habit")             # #935: field work, no model round
+            self.counts["fire:habit"] += 1
+            return "live"
         if WORLD == "toys" and not (tr.properties or {}).get("toy"):
             self.counts["fire:gated"] += 1             # #727: commands come later -- kept, never fired
             return "skip"
