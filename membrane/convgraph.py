@@ -5,8 +5,10 @@ Every chat turn mints both messages as `msg:<message id>` entities and writes th
 (relations rows) that tie the talk to the rest of the field:
 
   person msg -follows->   the reply before it        reply -follows-> its person msg
-  either     -refers-to-> the specific entities it names (files, commands, store
-                          entities by name: eids.mentions_of)
+  either     -refers-to-> everything it names (#932, the operator: entities are everything --
+                          ideas, things, knowledge): files, commands, store entities by name
+                          (eids.mentions_of), and each noun phrase's thing or Concept
+                          (language.things)
   person msg -led-to->    every program root its turn ran (lang.run -> note_root)
   reply      -asks:N->    the Decision card of its N-th open decision
   person msg -answers->   the card its "N. value" answers (decision_map.answer)
@@ -36,6 +38,7 @@ import time
 from .entities import CLASS_DECISION, MEMBRANE_NS, QuantumEntity
 
 MSG = MEMBRANE_NS + "msg:"
+CONCEPT = MEMBRANE_NS + "concept:"     # language.CONCEPT (a phrase as an entity)
 CLASS_MESSAGE = "Message"
 SOURCE = "chat"
 TEXT_MAX = 4000
@@ -188,6 +191,18 @@ def _mentions(srv, text: str) -> list[str]:
 
 
 # ---- decisions -----------------------------------------------------------------------------
+
+def _named_things(srv, sid: str, text: str) -> list[str]:
+    """Everything a message names (#932): the specific entities it mentions, then each noun
+    phrase's thing (language.things), so ordinary talk links to its ideas and things too."""
+    out = _mentions(srv, text)
+    try:
+        from . import language as LL
+        out += LL.things(srv, sid, text)
+    except Exception:
+        pass
+    return list(dict.fromkeys(out))
+
 
 def asked_items(text: str) -> list[tuple[int, str]] | None:
     """The numbered items under the reply's last "Open decisions" header; None when it has
@@ -423,7 +438,7 @@ def on_glued(srv, runner, sid: str, glued: dict, a_info: dict) -> None:
         if prev_u is not None:
             _edge(be, origin, u, "follows", prev_u)
         prev_u = u
-        for t in _mentions(srv, words):
+        for t in _named_things(srv, sid, words):
             _edge(be, origin, u, "refers-to", t)
     (srv.__dict__.get("_cg_cur_mid") or {}).pop(sid, None)
     for k, v in (glued.get("orig") or {}).items():       # the turn's own message: its own pre-state back
@@ -457,7 +472,7 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
         _edge(be, origin, u, "follows", msg_eid(prev.get("id")))
     _edge(be, origin, a, "follows", u)
     for eid, text in ((u, user_text), (a, reply)):
-        for t in _mentions(srv, text):
+        for t in _named_things(srv, sid, text):
             _edge(be, origin, eid, "refers-to", t)
     for root in (getattr(runner, "_cg_roots", None) or {}).pop(sid, []) if runner is not None else []:
         _edge(be, origin, u, "led-to", root)
@@ -683,8 +698,9 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
             est.upsert(d, embedder=None)
         return None          # its own words name what it means (unnamed in the field): borrow nothing
     prev_a = _row_before(runner, sid, mid, "assistant")
-    fresh = list(dict.fromkeys(r["obj"] for r in _out(be, origin, msg_eid(prev_a.get("id")), "refers-to"))) \
-        if prev_a is not None else []
+    fresh = list(dict.fromkeys(r["obj"] for r in _out(be, origin, msg_eid(prev_a.get("id")), "refers-to")
+                               if not str(r["obj"]).startswith(CONCEPT))) \
+        if prev_a is not None else []      # #932: a phrase's Concept is the register's (concept_before), not a reading
     cands = _applicable(est, fresh, verb) or _applicable(est, _held(be, origin, register_eid(sid, word)), verb)
     if not cands:
         return None

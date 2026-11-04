@@ -219,6 +219,58 @@ def concept(est, phrase: str) -> str:
     return eid
 
 
+def things(srv, sid: str, text: str) -> list[str]:
+    """#932 (the operator, 2026-11-04: entities are everything -- ideas, things, knowledge): what
+    each noun phrase of `text` names, as entities -- a pronoun's register, a thing by its name or
+    other name, else its Concept, made on first use. The words of a specific mention (a path, a
+    command, #803) are that mention's (convgraph._mentions), never a phrase of their own.
+    A class word is its Concept ("the goals": goal), never every member of the class; a pronoun
+    nothing holds names nothing."""
+    if not available() or not str(text or "").strip():
+        return []
+    from . import convgraph as CG
+    est = srv.entity_store
+    by_name = {}
+    for d in list((est.docs or {}).values()):
+        if d.eid.startswith(_MACHINERY):
+            continue
+        p = d.properties or {}
+        for n in [p.get("name")] + list(p.get("aliases") or []):
+            by_name.setdefault(" ".join(str(n or "").lower().split()), d.eid)
+    by_name.pop("", None)
+    from . import eids as E
+    doc = _doc(str(text)[:CG.TEXT_MAX])
+    covered = set()               # a path, a command, a PR: the specific mention's (convgraph), never its words
+    for eid, surface in E.mentions_of(doc.text):
+        if E.is_specific(eid) and surface:
+            for m in re.finditer(re.escape(surface), doc.text):
+                covered.update(range(m.start(), m.end()))
+    for m in CG._HASH_N.finditer(doc.text):
+        covered.update(range(m.start(), m.end()))
+    out = []
+    for span, pos in _meaning_nodes(doc, {n: len(n.split()) for n in by_name}):
+        if pos not in ("NOUN", "PROPN"):
+            continue
+        span = [t for t in span if not covered.intersection(range(t.idx, t.idx + len(t.text)))]
+        words = [t for t in span if t.pos_ != "DET" and t.tag_ != "PRP$" and t.lower_ not in _ALL]
+        if not words:
+            continue
+        if len(words) == 1 and words[0].pos_ == "PRON":
+            held = CG.register(srv, sid, words[0].lower_) if sid and words[0].lower_ in CG.FORMS else None
+            out += [held] if isinstance(held, str) else list(held or [])
+            continue
+        if not any(t.pos_ in ("NOUN", "PROPN") for t in words):
+            continue
+        name = " ".join(t.text for t in words).lower()
+        if name in by_name:
+            out.append(by_name[name])
+            continue
+        kind = [t for t in words[:-1] if t.pos_ != "NUM" and t.ent_type_ not in ("CARDINAL", "ORDINAL")]
+        name = " ".join([t.text for t in kind] + [words[-1].lemma_]).lower()   # "two projects": project
+        out.append(by_name.get(name) or concept(est, name))
+    return list(dict.fromkeys(out))
+
+
 def concept_before(est, text: str, pos: int) -> str | None:
     """The noun phrase a pronoun at `pos` points back to, as a Concept, or None: the nearest
     run of nouns before it that agrees in number ("them" wants a plural, "that" a singular),
