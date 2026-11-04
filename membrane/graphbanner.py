@@ -181,21 +181,23 @@ def _fill(est, show: str, b: dict) -> str:
     return " ".join(line.split())
 
 
-def lines(srv, sid: str) -> list[str]:
-    """This chat's graph-walk lines: every rule's, in order, unique, at most LINES."""
+def walk(srv, sid: str) -> list[tuple]:
+    """This chat's graph-walk lines with where each came from: [(rule eid, show template, line)],
+    every rule's, in order, unique, at most LINES."""
     from .ch import VM
     est = getattr(srv, "entity_store", None)
     if est is None or not sid:
         return []
     vm = VM(est)
-    atoms, out, memo = _atoms(srv, sid), [], {}
+    atoms, out, memo, seen = _atoms(srv, sid), [], {}, set()
     for rule in _rules(est):
         p = rule.properties or {}
         try:
             for b in vm._bindings({"where": p.get("where") or []}, memo, atoms=atoms, env={"chat": sid}):
                 ln = _fill(est, str(p.get("show") or ""), b)
-                if ln and ln not in out:
-                    out.append(ln)
+                if ln and ln not in seen:
+                    seen.add(ln)
+                    out.append((rule.eid, str(p.get("show") or ""), ln))
                 if len(out) >= LINES:
                     return out
         except Exception:
@@ -203,6 +205,31 @@ def lines(srv, sid: str) -> list[str]:
     return out
 
 
+def lines(srv, sid: str) -> list[str]:
+    """This chat's graph-walk lines: every rule's, in order, unique, at most LINES."""
+    return [ln for _r, _t, ln in walk(srv, sid)]
+
+
 def block(srv, sid: str) -> str | None:
-    got = lines(srv, sid)
-    return (HEADER + "\n" + "\n".join("- " + ln for ln in got)) if got else None
+    got = walk(srv, sid)
+    try:
+        from . import banneruse as BU
+        BU.shown_walk(srv, sid, got)          # #934: measured when the turn's reply lands
+    except Exception:
+        pass
+    return (HEADER + "\n" + "\n".join("- " + ln for _r, _t, ln in got)) if got else None
+
+
+def listing(est) -> list[dict]:
+    """The rules as listed, each with how often its lines were used (#934: measured, not acted on)."""
+    from .banneruse import counts
+    rows = []
+    for d in sorted((d for d in list((est.docs or {}).values()) if d.cls == CLASS_RULE),
+                    key=lambda d: (int((d.properties or {}).get("order") or 100), d.eid)):
+        c = counts(d)
+        rows.append({"eid": d.eid, "name": (d.properties or {}).get("name"),
+                     "order": (d.properties or {}).get("order"),
+                     "retired": bool((d.properties or {}).get("retired")),
+                     "shown": c["shown"], "used": c["used"],
+                     "use_rate": c["rate"]})
+    return rows
