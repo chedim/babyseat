@@ -329,7 +329,7 @@ def route():
 
 
 def test_the_route_tags_the_pages_person(route, _data):
-    with _jwt_env(MEMBRANE_STANDALONE="1", MEMBRANE_DATA_DIR=str(_data)):
+    with _jwt_env(MEMBRANE_STANDALONE="1", MEMBRANE_OPERATOR="Dima", MEMBRANE_DATA_DIR=str(_data)):
         code, body = route.post("/ui/serve/membrane/toybox/poke", {"toy": "toy:tower", "action": "knock", "arg": 4},
                                 headers={"X-Membrane-Speaker": "alice"})
         assert code == 200 and body["ok"], body
