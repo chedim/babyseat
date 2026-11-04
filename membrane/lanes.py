@@ -4094,11 +4094,45 @@ def field3d_projection(srv, axes: str = ""):
                         "entity_states", {"origin": fld.origin, "tier": "live"})
                     if d.get("state"))
         rels = [d for _, d in fld.b.scan("relations", {"origin": fld.origin, "superseded": False})]
-        proj = _F3.build(rows, unpack_f16, key, ref_vec=lambda e: _field_vec(fld, e), rels=rels)
+        est = getattr(srv, "entity_store", None)
+        docs = getattr(est, "docs", None) or {}
+        tindex = _field3d_title_index(docs)
+
+        def _title(eid):                 # #772: goals, tasks, waits and decisions show by title, never by id
+            return _field3d_title(tindex, eid)
+        proj = _F3.build(rows, unpack_f16, key, ref_vec=lambda e: _field_vec(fld, e), rels=rels, titles=_title)
         by_pid[proj.pid] = proj
         for old in sorted(by_pid.values(), key=lambda p: p.ts)[:-FIELD3D_KEEP]:
             by_pid.pop(old.pid, None)
         return proj
+
+
+def _field3d_title_index(docs) -> dict:
+    """#772: one lowercase map {eid-without-`membrane::`: title} of the goals, tasks, decisions and waits,
+    built once per projection build from a snapshot (`list(docs.items())`: other threads change the live
+    store in place), so a row's title is a dict lookup, never a scan."""
+    out = {}
+    for k, d in list(docs.items()):
+        if not (isinstance(k, str) and k.startswith("membrane::")):
+            continue
+        if getattr(d, "cls", None) not in ("Goal", "Task", "Decision", "Wait"):
+            continue
+        t = str((getattr(d, "properties", None) or {}).get("title") or "")
+        if t:
+            out[k[10:].lower()] = t
+    return out
+
+
+def _field3d_title(index, eid) -> str:
+    """#772: the title of a goal/task/decision/wait for a field row id: rows carry the field's mirror ids
+    (`m:goal:g1`), the index is keyed by the lowercased store eid tail (`goal:g1`)."""
+    if not isinstance(eid, str):
+        return ""
+    if eid.startswith("m:"):
+        return index.get(eid[2:].lower(), "")
+    if eid.startswith("membrane::"):
+        return index.get(eid[10:].lower(), "")
+    return ""
 
 
 def field3d_answer(srv, axes: str = "") -> dict:

@@ -240,7 +240,7 @@ class Projection:
 def build(rows_factory, unpack, axes_spec: str = "", ref_vec=None, rels=(),
           tile_k: int = TILE_K, sample_top: int = SAMPLE_TOP,
           sample_rand: int = SAMPLE_RAND, chunk: int = CHUNK,
-          seed: int = 0) -> Projection:
+          seed: int = 0, titles=None) -> Projection:
     """rows_factory() -> a FRESH iterator of row dicts (eid, kind, surface,
     accr, conflicts, recent, state=packed); unpack(packed) -> vector;
     ref_vec(eid) -> an entity's state (for e: axes)."""
@@ -275,7 +275,7 @@ def build(rows_factory, unpack, axes_spec: str = "", ref_vec=None, rels=(),
                 j = rnd.randint(0, n)
                 if j < sample_rand:
                     res[j] = low[2]
-        label = str(r.get("surface") or r["eid"]).replace("\n", " ").strip()[:LABEL_MAX]
+        label = str((titles(r["eid"]) if titles else None) or r.get("surface") or r["eid"]).replace("\n", " ").strip()[:LABEL_MAX]
         meta.append((str(r["eid"]), kd, label, mass, len(r.get("conflicts") or []),
                      list(r.get("recent") or [])))
         n += 1

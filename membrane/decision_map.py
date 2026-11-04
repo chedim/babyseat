@@ -425,7 +425,7 @@ def goals(est, active=()) -> dict:
 def _wait_on(d, reason: str) -> dict:
     p = d.properties or {}
     return {"id": d.eid, "kind": {"Task": "task", "Wait": "wait"}.get(d.cls, "decision"),
-            "title": p.get("name") or p.get("title") or d.eid, "reason": reason}
+            "title": p.get("title") or p.get("name") or d.eid, "reason": reason}
 
 
 def _goal_waiting_on(docs, goal: str, GG) -> list:
@@ -466,7 +466,7 @@ def work_graph(est) -> dict:
         if kind == "wait" and not GG._unfinished(ent):
             continue                      # only unfinished waits are drawn
         docs[ent.eid] = ent
-        nodes.append({"id": ent.eid, "kind": kind, "title": p.get("name") or p.get("title") or ent.eid,
+        nodes.append({"id": ent.eid, "kind": kind, "title": p.get("title") or p.get("name") or ent.eid,
                       "status": _status(p) if kind == "decision" else p.get("status", "open"),
                       "goal": p.get("goal") if kind != "goal" else None})
         if kind != "goal":
