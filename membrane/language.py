@@ -250,6 +250,20 @@ def concept_before(est, text: str, pos: int) -> str | None:
 
 # ---- compiling --------------------------------------------------------------------------------
 
+def is_learned(est, d) -> bool:
+    """A meaning the person did not give: flagged `learned`, or a LEGACY guess -- no `learned`
+    flag at all, not seeded, and the model's gap answer was kept for the word (before #894 those
+    counted as the owner's definitions, so a contradiction could not remove them). A definition
+    taught by the person carries learned=False, and a seed carries `seeded`: never a guess."""
+    p = (d.properties or {}) if d is not None else {}
+    if "learned" in p:
+        return bool(p["learned"])
+    if p.get("seeded") or p.get("corrected"):
+        return False
+    g = (est.docs or {}).get(_gap_eid(str(p.get("name") or "")))
+    return bool(g is not None and (g.properties or {}).get("kept"))
+
+
 def _adjectives(est) -> dict:
     return {(d.properties or {}).get("name"): d for d in list((est.docs or {}).values())
             if d.cls == CLASS_ADJECTIVE}
@@ -345,7 +359,7 @@ def _correct(est, word: str) -> None:
     from . import verbs as V
     for eid in (_adj_eid(word), V.verb_eid(word)):
         d = (est.docs or {}).get(eid)
-        if d is not None and (d.properties or {}).get("learned"):
+        if d is not None and is_learned(est, d):
             d.properties = {**d.properties, "learned": False, "corrected": True, "corrected_ts": time.time()}
             est.upsert(d, embedder=None)
 
@@ -356,7 +370,11 @@ def teach(est, step: dict) -> str:
     p, word = step["plan"], step["word"]
     _correct(est, word)
     if p["kind"] == "adjective":
-        define_adjective(est, word, p["filter"])
+        eid = define_adjective(est, word, p["filter"])
+        d = est.docs[eid]
+        if "learned" not in d.properties:        # the person's own definition: never a guess (legacy-safe)
+            d.properties = {**d.properties, "learned": False}
+            est.upsert(d, embedder=None)
     elif p["kind"] == "verb":
         eid = V.verb_eid(word)
         d = (est.docs or {}).get(eid) or QuantumEntity(eid=eid, cls=V.CLASS_VERB, properties={
@@ -551,7 +569,7 @@ def _span_targets(srv, sid: str, est, toks: list, unmapped: list, names: dict | 
         return []
     for a in adjs:
         adj = known.get(a.lemma_.lower()) or known.get(a.lower_)
-        if names is not None and (adj.properties or {}).get("learned"):
+        if names is not None and is_learned(est, adj):
             names.setdefault("__learned__", []).append(a.text)    # #894: noted, so a write can refuse it
         expr = (adj.properties or {}).get("filter") or "False"
         kept = []
@@ -1026,9 +1044,17 @@ def _states(tok, inside=()) -> bool:
             if c.dep_ == "conj" and c.pos_ in ("VERB", "AUX"):
                 return False                     # "landed, or did it": a second clause
     for subj in (c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")):
-        if any(c.dep_ == "compound" and c.pos_ == "PROPN" and c.text.islower() for c in subj.children):
+        if _glued_lead(subj, inside):
             return False                         # "hope goal two landed": a lead word the parse glued on
     return clause.dep_ in ("ROOT", "conj")
+
+
+def _glued_lead(subj, inside=()) -> bool:
+    """A lowercase proper-noun compound in the subject's subtree that is no part of the gap's own
+    words: the lead word ("hope", "wish") the small parser glued onto a name. The compound of a
+    multi-word name ("blocks panel") is a name's part, so a name's own words are passed in `inside`."""
+    return any(c.dep_ == "compound" and c.pos_ == "PROPN" and c.text.islower() and c not in inside
+               for c in subj.subtree)
 
 
 def observe(srv, sid: str, text: str, word: str) -> dict | None:
@@ -1067,7 +1093,7 @@ def observe(srv, sid: str, text: str, word: str) -> dict | None:
         if any(t.i in range(span.start, span.end) for t in (inside or (tok,))):
             continue
         how = _tie(tok, span)
-        if how == "state" and _states(tok, inside):
+        if how == "state" and _states(tok, tuple(inside) + tuple(span)):
             said += [e for e in _known_targets(srv, sid, est, span) if e not in said]
         elif how == "object" and not _asks_or_denies(tok):
             acted += [e for e in _known_targets(srv, sid, est, span) if e not in acted]
@@ -1076,10 +1102,10 @@ def observe(srv, sid: str, text: str, word: str) -> dict | None:
     p["seen"] = int(p.get("seen") or 0) + 1
     things, held = list(p.get("things") or []), {k: list(v) for k, v in (p.get("held") or {}).items()}
     learned = _adjectives(est).get(word.lower())
-    if learned is not None and (learned.properties or {}).get("learned"):
+    if learned is not None and is_learned(est, learned):
         expr = (learned.properties or {}).get("filter") or "False"
         if any(_holds(est, expr, e) is False for e in said):      # the chat now says otherwise
-            _unlearn(est, word, said)
+            _unlearn(est, word, said, text)
     for e in said:
         if e not in things:
             things.append(e)
@@ -1134,19 +1160,79 @@ def _confirmed(est, a: dict, cond: str, recorded: bool = True) -> dict | None:
     return {"k": k}
 
 
-def _says_of(tok) -> bool:
+def _says_of(tok, inside=()) -> bool:
     """A looser test than _states, for unlearning only (Memo on #894): a statement still counts
-    with a time word, an adverb, a place or a "yes," ("goal one landed today", "yes, goal one just
-    landed"); a question, a negation, a modal, "if"/"whether", or a clause under another verb
-    still doesn't."""
+    with a time word, a plain adverb, a place or a "yes," ("goal one landed today", "yes, goal one
+    just landed"). Default-deny, an allowlist (each round of exceptions found more): anything the
+    parse hangs on the predicate or its subject that is not allowed makes it not a statement --
+    hedges ("hopefully", "almost certainly"), "seems", quantifiers ("most"), and any negative in the
+    subject ("no", "neither", "nor"). `inside`: the words of the names the field knows, which are
+    the subject's own ("field ui"), not lead words."""
     if _asks_or_denies(tok):
         return False
     clause = tok.head if tok.dep_ in ("acomp", "attr", "oprd") else tok
+    if clause is not tok and clause.lemma_ != "be":
+        return False                             # "seems landed", "looks landed": a report, not a fact
+    names = {t.i for t in inside}
     for t in {tok, clause}:
         for c in t.children:
-            if c.dep_ == "mark" or (c.dep_ == "aux" and c.tag_ == "MD"):
+            if c is tok or c is clause:
+                continue
+            if c.i in names:                     # a name the parse hung on the verb ("field" of "field ui"):
+                if all(_plain_subject_part(w, names) for w in c.subtree):     # its own words only, no lead
+                    continue
                 return False
+            if c.dep_ in ("nsubj", "nsubjpass", "punct", "acomp", "attr", "expl", "auxpass"):
+                continue
+            if c.dep_ == "aux":
+                if c.tag_ == "MD":
+                    return False
+                continue
+            if c.dep_ == "cc":
+                if c.lower_ in ("and", "&"):
+                    continue
+                return False
+            if c.dep_ == "conj":
+                if c.pos_ in ("VERB", "AUX"):
+                    return False                 # "landed, or did it": a second clause
+                continue
+            if c.dep_ in ("advmod", "npadvmod") and _plain_modifier(c, names):
+                continue
+            if c.dep_ == "intj" and c.lower_ == "yes":
+                continue
+            if c.dep_ == "prep" and any(o.dep_ == "pobj" and o.pos_ in ("NOUN", "PROPN", "NUM") for o in c.children) \
+                    and _plain_modifier(c, names):
+                continue
+            return False
+    for subj in (c for c in clause.children if c.dep_ in ("nsubj", "nsubjpass")):
+        if not all(_plain_subject_part(t, names) for t in subj.subtree):
+            return False                         # a lead word, a quantifier, a negative, "or": not a plain subject
     return clause.dep_ in ("ROOT", "conj")
+
+
+def _plain_subject_part(t, names) -> bool:
+    """May this word sit in a subject that says something of one thing: a name's own word, an article or
+    demonstrative (spaCy's PronType=Art|Dem), "and", punctuation, a number. Anything else ("hope", "no",
+    "most", "neither", "or") may not."""
+    if t.i in names or t.dep_ == "punct" or t.pos_ == "NUM":
+        return True
+    return (t.dep_ == "det" and _art_or_dem(t)) or (t.dep_ == "cc" and t.lower_ == "and")
+
+
+def _art_or_dem(t) -> bool:
+    return bool({"Art", "Dem"} & set(t.morph.get("PronType")))
+
+
+def _plain_modifier(c, names) -> bool:
+    """A time, manner or place phrase hung on the predicate that adds nothing to what is said: structural,
+    not lexical. Its subtree carries no negative (`neg`), no determiner but an article or demonstrative
+    ("no", "any" are not), and no hedge-shaped adverb of its own ("almost certainly")."""
+    for w in c.subtree:
+        if w.i in names:
+            continue
+        if w.dep_ == "neg" or (w.dep_ == "det" and not _art_or_dem(w)):
+            return False
+    return True
 
 
 def _subjects(tok, est, srv, sid) -> list:
@@ -1160,8 +1246,12 @@ def _subjects(tok, est, srv, sid) -> list:
     lo = min(t.i for c in subj for t in c.subtree)
     hi = max(t.i for c in subj for t in c.subtree)
     hi = max(hi, max(t.i for t in tok.doc[lo:clause.i]) if clause.i > lo else hi)   # names the parse split off
+    nodes = _meaning_nodes(tok.doc, _names(est))
+    for span, pos in nodes:                      # a multi-word name the parse split ("field" off "ui") is whole
+        if span.end > lo and span.start <= hi and tok.i not in range(span.start, span.end) and _known_targets(srv, sid, est, span):
+            lo, hi = min(lo, span.start), max(hi, span.end - 1)
     out = []
-    for span, pos in _meaning_nodes(tok.doc, _names(est)):
+    for span, pos in nodes:
         if span.start >= lo and span.end <= hi + 1 and tok.i not in range(span.start, span.end):
             for e in _known_targets(srv, sid, est, span):
                 if e not in out:
@@ -1175,23 +1265,36 @@ def observe_learned(srv, sid: str, text: str) -> list:
     learned word is no surprise, so nothing saw it; and natural statements -- "goal one landed
     today", "yes, goal one landed" -- must count). -> the words unlearned."""
     est = srv.entity_store
-    learned = {n: d for n, d in _adjectives(est).items() if (d.properties or {}).get("learned")}
+    learned = {n: d for n, d in _adjectives(est).items() if is_learned(est, d)}
     if not learned:
         return []
     gone = []
     for t in _doc(text):
         w = t.lower_
-        if w not in learned or w in gone or not _says_of(t):
+        if w not in learned or w in gone:
+            continue
+        inside = tuple(x for span in _named(t.doc, _names(est)) if t.i not in range(span.start, span.end)
+                       for x in span)               # the words of the things the field names, no lead word
+        if not _says_of(t, inside):
+            continue
+        if _gap_in(srv, sid, text):              # a word the field does not know (a hedge too): no contradiction
             continue
         expr = (learned[w].properties or {}).get("filter") or "False"
         said = _subjects(t, est, srv, sid)
         if any(_holds(est, expr, e) is False for e in said):
-            _unlearn(est, w, said)
+            _unlearn(est, w, said, text)
             gone.append(w)
     return gone
 
 
-def _unlearn(est, word: str, said: list) -> None:
+def _gap_in(srv, sid: str, text: str) -> bool:
+    """Did the sentence compile with a gap (#887)? A word the meaning has never seen leaves a surprise in
+    its understanding, so the sentence cannot contradict anything (Memo on #911: no hedge list)."""
+    u = understand(srv, sid, text)
+    return bool(u.get("surprise")) or (u.get("share") is not None and u["share"] < 1.0)
+
+
+def _unlearn(est, word: str, said: list, text: str = "") -> None:
     """A learned meaning the chat contradicts goes back to a proposal (Memo on #894)."""
     eid = _adj_eid(word)
     try:
@@ -1200,7 +1303,8 @@ def _unlearn(est, word: str, said: list) -> None:
         (est.docs or {}).pop(eid, None)
     g = (est.docs or {}).get(_gap_eid(word))
     if g is not None:
-        g.properties = {**g.properties, "kept": False, "contradicted_by": list(said), "contradicted_ts": time.time()}
+        g.properties = {**g.properties, "kept": False, "contradicted_by": list(said), "contradicted_ts": time.time(),
+                        "contradicted_text": " ".join(str(text).split())[:200]}
         est.upsert(g, embedder=None)
 
 
@@ -1210,12 +1314,17 @@ def confirm_proposed(srv, sid: str, text: str, word: str) -> dict | None:
     evidence, k >= 2 distinct things -- and never picks a write's targets). Only a condition has
     field evidence (_confirmed); a verb synonym or another name stays a proposal for the person to
     teach ("X means Y"): recurrence isn't evidence (Memo: "review means show" posted "Reviewed
-    goal two."). -> {word, meaning, p, k} when taught."""
+    goal two."). A person's own definition is never replaced. -> {word, meaning, k} when taught."""
     est = srv.entity_store
     g = (est.docs or {}).get(_gap_eid(word))
     plan = ((g.properties or {}).get("proposed") or {}) if g is not None else {}
     if not plan or (g.properties or {}).get("kept") or plan.get("kind") != "adjective":
         return None
+    if (g.properties or {}).get("contradicted_text") == " ".join(str(text).split())[:200]:
+        return None                              # this very message just unlearned it: not taught back by it
+    d0 = (est.docs or {}).get(_adj_eid(word))
+    if d0 is not None and not is_learned(est, d0):
+        return None                              # the person defined it: a proposal never replaces that (Memo on #894)
     if " " in word.strip():                      # a phrase ("big thing"): nothing reads one as a word yet
         return None                              # (Memo on #894), so it stays a proposal
     a = observe(srv, sid, text, word)
