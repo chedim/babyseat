@@ -487,13 +487,24 @@ Every chat turn mints both messages as entities (`membrane::msg:<message id>`, c
 | edge | from → to |
 |---|---|
 | `follows` | a person's message → the reply before it; a reply → the person's message |
-| `refers-to` | a message → the specific entities it names (files, commands, store entities by name, `eids.mentions_of`) |
+| `refers-to` | a message → everything it names (#932: entities are everything, ideas, things and knowledge): the specific entities (files, commands, PRs, store entities by name, `eids.mentions_of`), and each noun phrase's thing, the entity by that name or else its `Concept` (`language.things`) |
 | `led-to` | a person's message → every program root its turn ran (`lang.run` notes them by the turn's sid) |
 | `asks:N` | a reply → the Decision card of its N-th open decision |
 | `answers` | a person's message → the card it answered |
 
 Only person chats are graphed (agents `build`, `plan`, `speaker`), never a loop's session.
 The work runs after the turn, on its own thread.
+
+**Things are entities (#932).** Every noun phrase a message says links to what it names: a
+pronoun's register, the entity with that name or other name, or else the phrase's `Concept`,
+made on first use. So "my bedside lamp" in one session and "the bedside lamp" in another are
+one entity, linked from both messages.
+- A Concept is named without articles, possessives or counts, with its last word's lemma:
+  "two projects" and "the project" are both `project`.
+- A class word is its Concept ("the goals": `goal`), never every member of the class.
+- The words of a path, a command or a PR number are that mention's, never phrases of their own.
+- The pronoun resolver below reads only the field's own entities from the reply before. A
+  Concept is a register's reading, through the person's own words.
 
 **Decisions in the chat.** The numbered items under a reply's `Open decisions:` are
 Decision cards in that chat (`asked_from: chat-text`). The same question is the same card;
