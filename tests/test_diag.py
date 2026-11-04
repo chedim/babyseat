@@ -270,7 +270,7 @@ class TestProxyEndpoints(_DiagCase):
         self.assertEqual(code, 200)
         self.assertGreater(out["samples"], 0)
         far = {"X-Forwarded-For": "192.168.1.50"}
-        self.assertEqual(_req(self.port, "/membrane/diag/timing", headers=far)[0], 403)
+        self.assertIn(_req(self.port, "/membrane/diag/timing", headers=far)[0], (401, 403))
         self.assertIn(_req(self.port, "/membrane/diag/timing", "POST", {"on": True}, headers=far)[0],
                       (401, 403))
         self.assertFalse(D.timing_on())

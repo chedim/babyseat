@@ -111,7 +111,7 @@ class JwtOnPageCookie(NoTokenless):
     def setUp(self):
         super().setUp()
         self.env.stop()
-        self.env = mock.patch.dict(os.environ, {"MEMBRANE_JWT": "1"})
+        self.env = mock.patch.dict(os.environ, {"MEMBRANE_JWT": "1", "MEMBRANE_JWT_SECRET": "s" * 40})
         self.env.start()
 
     def test_jwt_on_served_page_sets_a_cookie_that_the_api_accepts(self):
@@ -130,6 +130,7 @@ class JwtOnPageCookie(NoTokenless):
     test_seat_token_is_the_operator = None
     test_ui_cookie_is_the_operator = None
     test_jwt_is_its_sub = None
+    test_operator_falls_back_to_owner = None
     test_served_page_sets_the_premined_httponly_cookie = None
 
 

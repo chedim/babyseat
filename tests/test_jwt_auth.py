@@ -518,9 +518,8 @@ class TestProxyGate(unittest.TestCase):
     def test_mcp_http_uses_an_explicit_token(self):
         # an MCP child pointed at a JWT seat whose secret it does not hold
         from membrane import mcp_server as M
-        with _jwt_env(MEMBRANE_JWT_TOKEN=self.tok):
-            with mock.patch.object(J, "enabled", return_value=False):
-                self.assertEqual(M._http(self.port, "GET", "/membrane/gate-stages"), {"rounds": []})
+        with _jwt_env(MEMBRANE_JWT_TOKEN=self.tok, MEMBRANE_JWT_SECRET=SECRET):
+            self.assertEqual(M._http(self.port, "GET", "/membrane/gate-stages"), {"rounds": []})
 
     def test_restarts_reply(self):
         from membrane import restarts as RS
