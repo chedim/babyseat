@@ -1691,6 +1691,17 @@ class TurnRunner:
         refused, the HA seat's commands never ran)."""
         a = str((user_info or {}).get("agent") or "")
         if a:
+            # #915: a plain 'build'/'plan' post onto a planner:/worker:/watch: loop
+            # session must not demote it to a person chat (latest_chat would pick it
+            # and goal-ended would land there): the loop's own stamp holds.
+            if a in ("build", "plan"):
+                try:
+                    _own = str((((getattr(self, "sessions", None) or object()).sessions) or {})
+                               .get(sid, {}).get("agent") or "")
+                except Exception:
+                    _own = ""
+                if _own and _own not in ("build", "plan") and _lane_of(_own) in ("listener", "plan"):
+                    return _own
             return a
         try:
             _docs = getattr(getattr(self, "sessions", None), "sessions",
@@ -4707,7 +4718,13 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             _ma = str(b.get("agent") or "").strip()
             if _ma in ("build", "plan"):
                 _row = (sessions.sessions or {}).get(sid)
-                if _row is not None and _row.get("agent") != _ma:
+                # a planner:/worker:/watch: loop session keeps its identity (#915)
+                try:
+                    from .jobs import _is_loop as _jl
+                    _loop_row = _jl(type("_S", (), {"sessions": sessions, "_agents": {}})(), sid)
+                except Exception:
+                    _loop_row = False
+                if _row is not None and _row.get("agent") != _ma and not _loop_row:
                     _row["agent"] = _ma
                     sessions.flush()   # the public form (the lock's owned)
             # #337: Blurp's private chat -- no speaker lane, no model turn
