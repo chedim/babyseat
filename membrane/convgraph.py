@@ -437,6 +437,11 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
                 a_info: dict, reply: str) -> None:
     """The finished chat turn into the graph (both messages, their edges, the answers to the
     reply before and the decisions this reply asks)."""
+    try:                                  # #934: what the banner showed this turn, used or not
+        from . import banneruse as _BU
+        _BU.settle(srv, sid, reply)
+    except Exception:
+        pass
     est = getattr(srv, "entity_store", None)
     if est is None:
         return
