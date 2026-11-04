@@ -42,19 +42,12 @@ PRINT_ENV = "MEMBRANE_SEAT_TOKEN_PRINT"       # the container's entrypoint sets 
 COOKIE_AGE = 400 * 86400                      # the browsers' own cap on a cookie's life
 FORWARD_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP")
 
-# :11500's POSTs that only read (a query, a listing, an inspection): open on
-# the LAN like the GET reads. Everything else that is not GET/HEAD is a write.
-PROXY_READ_POSTS = frozenset({
-    "/membrane/entity-query",
-    "/membrane/entity-track/list",
-    "/membrane/method/inspect",
-    "/membrane/codegraph",
-})
 # :11500's GETs that change state (an intent is created and announced)
 PROXY_WRITE_GETS = frozenset({"/membrane/intend"})
-# :11500's GETs that need the seat token though they only read (operator, #842:
-# the model list and the field's answers are not public; /api/tags stays open)
-PROXY_TOKEN_GETS = frozenset({"/v1/models", "/membrane/ask"})
+# :11500's GET/HEAD reads that need the seat token (operator, #842): by prefix,
+# so /v1/ and /membrane/ (and /state) are not public; only /api/ (GET /api/tags) is open
+PROXY_TOKEN_PREFIXES = ("/v1/", "/membrane/", "/state")
+PROXY_TOKEN_GETS = frozenset({"/v1", "/membrane", "/state"})
 # :4096's non-GET routes that must stay reachable: the login pair
 SERVE_OPEN_POSTS = frozenset({"/ui/login", "/ui/logout"})
 
@@ -185,13 +178,14 @@ def owner(handler, cookie: bool = False, basic: bool = False) -> bool:
 # -- which requests are writes ------------------------------------------------------
 
 def proxy_is_write(method: str, path: str) -> bool:
-    """:11500 -- every non-GET/HEAD but the read-only POSTs, plus the GETs
-    that change state. /v1/chat/completions and /api/chat|generate are
+    """:11500 -- every non-GET/HEAD (no POST is open), plus the GETs under
+    /v1/ and /membrane/ and /state; only GET /api/tags is open. /v1/chat/completions and /api/chat|generate are
     writes: every turn is captured into the field, its frames learn/forget/
     watch/intend, and its tool rounds reach the entity and script lanes."""
     if method in ("GET", "HEAD"):
-        return path in PROXY_WRITE_GETS or path in PROXY_TOKEN_GETS
-    return path not in PROXY_READ_POSTS
+        return (path in PROXY_WRITE_GETS or path in PROXY_TOKEN_GETS
+                or path.startswith(PROXY_TOKEN_PREFIXES))
+    return True
 
 
 def serve_is_write(method: str, path: str) -> bool:

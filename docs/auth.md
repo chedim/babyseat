@@ -7,7 +7,7 @@ over Wi-Fi. Two levels protect them:
 - **The seat token (only when JWT mode is off: `MEMBRANE_JWT=0`).** Every request,
   reads included, needs it, localhost too: an address is not a credential. The one
   open read on the Ollama port is `GET /api/tags`. The page's cookie is minted only
-  on this machine.
+  on this machine (in JWT mode it carries an owner JWT).
 - **JWT mode (on by default).** Every request on both ports, reads included, needs
   a signed token, and the token says who is talking. A caller on this machine
   needs a token too; the page served to this machine gets an owner cookie. Use it to
@@ -59,7 +59,7 @@ the [zoo](home-assistant.md#the-zoo-several-seats) carries its own). A seat Home
 
 | Port | Needs the token | Open |
 |---|---|---|
-| :11500 | every `POST`/`PUT`/`PATCH`/`DELETE`: `/v1/chat/completions`, Ollama's `/api/chat` and `/api/generate`, `/v1/embeddings`, every `/membrane/*` write (entity add/edit/remove/inherit, method define/call/each, filetool, learn/forget, intend/fulfill, watch, attention, entity-track, junk-cut, delegate, peer/post), and every other `/api/*` write passed to Ollama (pull, delete, create, ...); also `GET /membrane/intend`, which creates an intent | every other `GET`/`HEAD`; the read-only `POST`s `/membrane/entity-query`, `/membrane/entity-track/list`, `/membrane/method/inspect`, `/membrane/codegraph` |
+| :11500 | every `POST`/`PUT`/`PATCH`/`DELETE`: `/v1/chat/completions`, Ollama's `/api/chat` and `/api/generate`, `/v1/embeddings`, every `/membrane/*` write (entity add/edit/remove/inherit, method define/call/each, filetool, learn/forget, intend/fulfill, watch, attention, entity-track, junk-cut, delegate, peer/post), and every other `/api/*` write passed to Ollama (pull, delete, create, ...); also `GET /membrane/intend`, which creates an intent; every `GET`/`HEAD` under `/v1/`, `/membrane/` and `/state` needs the token too | only `GET /api/tags` (and other `/api/*` reads); no `POST` is open: the queries (`/membrane/entity-query`, `/membrane/codegraph`, ...) read the field and need the token, as does every `GET`/`HEAD` under `/v1/` and `/membrane/` and `/state` |
 | :4096 | every `POST`/`PATCH`/`DELETE`: sessions and their messages and prompts, `/membrane/*` (toybox poke, models, seat control and restart asks, field purge, voice, HA token and states, the JS executor), `/tui/*`, `/log`, `/instance/dispose`, the page's `/ui/serve/*`, `/ui/stt`, `/ui/log` | every `GET`; `POST /ui/login` and `/ui/logout` |
 
 The chat routes count as writes: every turn is captured into the field, its

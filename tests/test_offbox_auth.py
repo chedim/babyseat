@@ -274,17 +274,24 @@ class TestProxyOffBox(_TokenFile):
         self.assertEqual(len(_canned_chat.bodies), 1)
 
     def test_reads_stay_open(self):
-        for p in ("/api/tags", "/membrane/gate-stages"):
-            self.assertEqual(_req(self.port, p)[0], 200, p)
+        self.assertEqual(_req(self.port, "/api/tags")[0], 200)
         self.assertEqual(_req(self.port, "/api/tags", "HEAD")[0], 200)
         # operator (#842): the model list and the field's answers need the token
         for p in ("/v1/models", "/membrane/ask?q=x"):
             self.assertEqual(_req(self.port, p)[0], 401, p)
             self.assertNotEqual(_req(self.port, p, headers=self._bearer())[0], 401, p)
-        # the read-only POSTs are reads
-        for p in sorted(SA.PROXY_READ_POSTS):
-            self.assertFalse(SA.proxy_is_write("POST", p), p)
-        self.assertEqual(_req(self.port, "/membrane/entity-track/list", "POST", {})[0], 200)
+        # #842 review: by prefix, /v1/ and /membrane/ reads need the token, /api/ stays open
+        for p in ("/membrane/entity/read", "/membrane/decisions", "/membrane/item-chat",
+                  "/membrane/state", "/state", "/membrane/entity-history", "/v1/models/",
+                  "/membrane/gate-stages"):
+            self.assertTrue(SA.proxy_is_write("GET", p), p)
+            self.assertEqual(_req(self.port, p)[0], 401, p)
+        self.assertFalse(SA.proxy_is_write("GET", "/api/tags"))
+        # no POST is open: the queries read the field
+        for p in ("/membrane/entity-query", "/membrane/codegraph",
+                  "/membrane/entity-track/list", "/membrane/method/inspect"):
+            self.assertTrue(SA.proxy_is_write("POST", p), p)
+            self.assertEqual(_req(self.port, p, "POST", {})[0], 401, p)
 
 
 class TestProxyLocal(_TokenFile):

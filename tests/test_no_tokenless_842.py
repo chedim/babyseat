@@ -105,5 +105,33 @@ class NoTokenless(unittest.TestCase):
         self.assertIn("HttpOnly", ck)
 
 
+class JwtOnPageCookie(NoTokenless):
+    """JWT mode (the default): the page served to loopback carries a cookie
+    that /ui/conf and /session accept (#842 review)."""
+    def setUp(self):
+        super().setUp()
+        self.env.stop()
+        self.env = mock.patch.dict(os.environ, {"MEMBRANE_JWT": "1"})
+        self.env.start()
+
+    def test_jwt_on_served_page_sets_a_cookie_that_the_api_accepts(self):
+        with mock.patch.object(UI, "enabled", lambda: True):
+            code, _, hdr = self._req("/")
+            ck = hdr.get("Set-Cookie") or ""
+            self.assertEqual(code, 200)
+            self.assertIn(UI._JWT.COOKIE + "=", ck)
+            self.assertIn("HttpOnly", ck)
+            cookie = {"Cookie": ck.split(";")[0]}
+            self.assertEqual(self._req("/ui/conf", headers=cookie)[0], 200)
+            self.assertEqual(self._req("/session", "POST", {}, cookie)[0], 200)
+
+    # the inherited tests assume JWT off
+    test_tokenless_loopback_post_session_is_401 = None
+    test_seat_token_is_the_operator = None
+    test_ui_cookie_is_the_operator = None
+    test_jwt_is_its_sub = None
+    test_served_page_sets_the_premined_httponly_cookie = None
+
+
 if __name__ == "__main__":
     unittest.main()

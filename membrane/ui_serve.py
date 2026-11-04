@@ -459,7 +459,18 @@ def intercept(handler) -> bool:
         return True
     if path in ("/", "/membrane", "/index.html"):
         # the page arrives with the seat's cookie already minted (#842): no login prompt
-        _ck = "" if jwt or not _SA.is_loopback(handler) else _SA.login_cookie(_SA.ensure(), _JWT.request_is_https(handler.headers))
+        _ck = ""
+        if _SA.is_loopback(handler):
+            if not jwt:
+                _ck = _SA.login_cookie(_SA.ensure(), _JWT.request_is_https(handler.headers))
+            else:                          # JWT mode: an owner token, minted for this machine's page
+                _cfg = _JWT.config()
+                if _cfg is not None:
+                    _who = str(os.environ.get("MEMBRANE_OPERATOR") or "owner")
+                    _tok = _JWT.mint(_cfg.secret, _who, name=_who, ttl=7 * 86400,
+                                     issuer=_cfg.issuer, audience=_cfg.audience)
+                    _ck = _JWT.login_cookie(_tok, _JWT.verify_configured(_tok, _cfg),
+                                            _JWT.request_is_https(handler.headers))
         _send_file(handler, UI_DIR / "index.html", _ck)
     elif path == "/favicon.ico":
         _send_file(handler, UI_DIR / "favicon.svg")

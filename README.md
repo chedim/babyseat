@@ -402,8 +402,8 @@ appear to the client as ordinary tool parts riding `message.part.updated`
 (pending → completed), so you can watch what it's doing from the room.
 `--serve-port` (default 4096, walks up if busy) and `--listen` (the proxy,
 default 11500) are independent. The proxy binds all interfaces by default:
-reads are open on the LAN, and an off-box caller's writes (chat turns included)
-need the seat token; `--listen-host 127.0.0.1` (or
+only `GET /api/tags` is open; every other call (reads under `/v1/` and `/membrane/` included, chat turns included)
+needs the seat token; `--listen-host 127.0.0.1` (or
 `MEMBRANE_LISTEN_HOST=127.0.0.1`) keeps it on this machine. Exposure is LAN-only by design:
 reach the server only from a network you own; JWT mode is on by default (`MEMBRANE_JWT=0` turns it off),
 so hand each client a token ([docs/auth.md](docs/auth.md)).
