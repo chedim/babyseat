@@ -219,6 +219,16 @@ def concept(est, phrase: str) -> str:
     return eid
 
 
+def _as_written(toks: list, last: str | None = None) -> str:
+    """The words as the message wrote them ("refers-to edge", "results/lme"), the last one
+    replaced by `last` when given (its lemma)."""
+    out = ""
+    for i, t in enumerate(toks):
+        end = i == len(toks) - 1
+        out += (last if end and last is not None else t.text) + ("" if end else t.whitespace_)
+    return out
+
+
 def things(srv, sid: str, text: str) -> list[str]:
     """#932 (the operator, 2026-11-04: entities are everything -- ideas, things, knowledge): what
     each noun phrase of `text` names, as entities -- a pronoun's register, a thing by its name or
@@ -261,12 +271,12 @@ def things(srv, sid: str, text: str) -> list[str]:
             continue
         if not any(t.pos_ in ("NOUN", "PROPN") for t in words):
             continue
-        name = " ".join(t.text for t in words).lower()
+        name = " ".join(_as_written(words).lower().split())
         if name in by_name:
             out.append(by_name[name])
             continue
         kind = [t for t in words[:-1] if t.pos_ != "NUM" and t.ent_type_ not in ("CARDINAL", "ORDINAL")]
-        name = " ".join([t.text for t in kind] + [words[-1].lemma_]).lower()   # "two projects": project
+        name = " ".join(_as_written(kind + [words[-1]], words[-1].lemma_).lower().split())   # "two projects": project
         out.append(by_name.get(name) or concept(est, name))
     return list(dict.fromkeys(out))
 

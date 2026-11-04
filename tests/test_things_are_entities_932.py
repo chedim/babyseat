@@ -71,6 +71,14 @@ class ThingsAreEntities(unittest.TestCase):
         self.assertIn("f:membrane/a.py", refs)
         self.assertFalse({o for o in refs if o.startswith(LL.CONCEPT + "membrane") or o.endswith("~a.py")})
 
+    def test_a_name_keeps_its_own_spelling(self):
+        srv, runner = _seat()
+        u, _ = _turn(srv, runner, 1, "The graph walk follows refers-to edges, and the run writes to results/lme-graphwalk.", "ok")
+        names = _things(srv, u)
+        self.assertIn("refers-to edge", names)
+        self.assertIn("results/lme-graphwalk", names)
+        self.assertFalse({n for n in names if n and (" - " in n or " / " in n)})
+
     def test_a_bare_pronoun_names_no_thing(self):
         srv, runner = _seat()
         u, _ = _turn(srv, runner, 1, "I think you know it.", "I do.")
