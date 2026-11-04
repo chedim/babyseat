@@ -474,15 +474,40 @@ def exchange(srv, report: dict | None) -> dict:
     was = p.awake
     p.awake = bool(report.get("awake")) and str(report.get("mode") or "") in ("on", "watch")
     pruned = []
-    if was and not p.awake and report.get("asleep"):
-        with vm._run:                                  # sleep: stay positive (not mid-drain)
+    if was and not p.awake and report.get("asleep"):    # the awake->asleep edge only: sleep prunes (below -1 x WRITE_COST)
+        with vm._run:                                  # not mid-drain
             pruned = vm.learner.prune()
+    stall = vm.learner.check_stall()
+    if stall:
+        _surface_stall(srv, stall)
     if p.awake:
         try:
             _show_body(srv, vm)
         except Exception:
             pass                                       # the body is display only: never the exchange's failure
-    return {"energy_delta": p.take(), "pruned": len(pruned), "awake": p.awake}
+    return {"energy_delta": p.take(), "pruned": len(pruned), "awake": p.awake, **({"stall": stall} if stall else {})}
+
+
+def _surface_stall(srv, line: str) -> None:
+    """#897: the learner's stall line is READ: one open Decision card per cause (the gate:
+    asleep / toys-only / no toy writes), merge-on-name; a plain notice (no options); a closed one is replaced by a dated new one."""
+    import re
+    est = getattr(srv, "entity_store", None)
+    m = re.search(r"stalled [\d.]+h: ([a-z\- ]+?)(?: \(|;|$)", line or "")
+    if est is None or not m:
+        return
+    gate = m.group(1).strip()
+    name = f"Blurp is not learning - {gate} - what should change"
+    try:
+        old = next((d for d in est.docs.values() if d.cls == "Decision" and (d.properties or {}).get("name") == name), None)
+        if old is not None and (old.properties or {}).get("status") not in (None, "open"):
+            name += time.strftime(" (%Y-%m-%d %H:%M)")   # the operator closed the last one (agents never reopen): a new notice
+        r = est.add("Decision", name, summary=line)
+        eid = (r or {}).get("eid") if isinstance(r, dict) else None
+        if eid:
+            est.edit(eid, properties={"status": "open"})
+    except Exception:
+        pass                                           # display only: never the exchange's failure
 
 
 SEAT_FID = "seat:self"      # where the body rests before its first firing (the map's seat)

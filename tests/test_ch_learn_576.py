@@ -143,10 +143,34 @@ def test_sleep_prunes_the_negative(world):
     x, y = _ent(est, "x"), _ent(est, "y")
     _turn(est, vm, (x, "a", 1), (x, "b", 2))
     _turn(est, vm, (y, "a", 1), (y, "b", 7))                   # the "= 2" guess was wrong on y
+    from membrane.ch_learn import WRITE_COST
     bad = [t.eid for t in _cands(vm) if vm.learner.balance(t.eid) < 0]
     assert bad
+    for e in bad:                                              # drained past -1 x WRITE_COST
+        vm.learner._bal[e] = -2 * WRITE_COST
     gone = vm.learner.prune()
     assert set(bad) <= set(gone) and not any(e in est.docs for e in gone)
+
+
+def test_sleep_prunes_only_below_minus_one_write_cost(world):
+    # Dima (PR 905): prune only below -1 x WRITE_COST; no exemption for in-flight ones
+    from membrane.ch_learn import WRITE_COST
+    est, vm, purse, _ = world
+    for i, ent in enumerate("pqrst"):
+        _turn(est, vm, (_ent(est, ent), "a", i), (_ent(est, ent), "b", 10 + i))
+    c = [t.eid for t in _cands(vm)]
+    assert len(c) >= 5
+    half, exact, drop, untested, flying = c[:5]
+    vm.learner._bal[half] = -0.5 * WRITE_COST
+    vm.learner._bal[exact] = -1 * WRITE_COST
+    vm.learner._bal[drop] = -1.5 * WRITE_COST
+    vm.learner._bal[untested] = 0.0
+    vm.learner._bal[flying] = -3 * WRITE_COST
+    vm.learner._pending["chain"] = [(flying, "p", 1)]
+    gone = vm.learner.prune()
+    assert set(gone) == {drop, flying}
+    assert half in est.docs and exact in est.docs and untested in est.docs
+    assert drop not in est.docs and flying not in est.docs
 
 
 def test_a_proposal_never_acts_by_itself_it_suggests(world):
@@ -278,3 +302,96 @@ def test_no_chain_is_counted(world):
         est.upsert(x)
     vm.drain()
     assert vm.learner.counts["pass:no_chain"] >= 1
+
+
+# ---- stall detector, sleep keeps state, toy writes logged ----
+
+def test_stall_surfaces_once_naming_the_asleep_gate(world):
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))
+    lr = vm.learner
+    assert lr.check_stall(now=1000.0) is None            # baseline taken
+    purse.awake = False
+    _turn(est, vm, (x, "d", 4), (x, "e", 5))
+    assert lr.check_stall(now=1000.0 + 3600) is None     # too soon
+    line = lr.check_stall(now=1000.0 + 4 * 3600)
+    assert line and "asleep" in line
+    assert lr.check_stall(now=1000.0 + 9 * 3600) is None  # once
+
+
+def test_stall_names_toys_only_gate(world, monkeypatch):
+    est, vm, purse, _ = world
+    lr = vm.learner
+    lr.counts["fire"] = 0
+    lr.check_stall(now=0.0)
+    lr.counts["fire:gated"] += 5
+    assert "toys-only" in lr.check_stall(now=4 * 3600)
+
+
+def test_sleep_edge_keeps_learner_state(world):
+    import types
+    from membrane import ch_blurp as B
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))
+    c = _cands(vm)[0]
+    vm.learner._bal[c.eid] = -L.WRITE_COST
+    vm.learner._hits[c.eid] = 2
+    srv = types.SimpleNamespace(ch_purse=types.SimpleNamespace(awake=True, take=lambda: 0.0), ch_vm=vm)
+    B.exchange(srv, {"awake": False, "asleep": True, "mode": "off"})
+    assert c.eid in {t.eid for t in _cands(vm)}
+    assert vm.learner._bal[c.eid] == -L.WRITE_COST and vm.learner._hits[c.eid] == 2
+
+
+def test_toy_writes_are_logged(world, monkeypatch):
+    monkeypatch.setattr(L, "WORLD", "toys")
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1))
+    assert vm.learner.counts["seen"] >= 1
+    assert "toy_write" in vm.learner.counts or vm.learner.counts["pass:not_toy"] >= 1
+
+
+def _edge_srv(vm):
+    import types
+    return types.SimpleNamespace(ch_purse=types.SimpleNamespace(awake=True, take=lambda: 0.0), ch_vm=vm)
+
+
+def test_awake_to_off_without_asleep_does_not_prune(world):
+    from membrane import ch_blurp as B
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))
+    c = _cands(vm)[0]
+    vm.learner._bal[c.eid] = -3 * L.WRITE_COST
+    B.exchange(_edge_srv(vm), {"awake": False, "mode": "off"})
+    assert c.eid in {t.eid for t in _cands(vm)}
+
+
+def test_asleep_edge_prunes_under_the_run_lock(world):
+    from membrane import ch_blurp as B
+    est, vm, purse, _ = world
+    x = _ent(est, "x")
+    _turn(est, vm, (x, "a", 1), (x, "b", 2))
+    c = _cands(vm)[0]
+    vm.learner._bal[c.eid] = -3 * L.WRITE_COST
+    held = []
+
+    class Spy:
+        depth = 0
+
+        def __enter__(self):
+            Spy.depth += 1
+
+        def __exit__(self, *a):
+            Spy.depth -= 1
+    real = vm.learner.prune
+
+    def spy():
+        held.append(Spy.depth)
+        return real()
+    vm._run = Spy()
+    vm.learner.prune = spy
+    B.exchange(_edge_srv(vm), {"awake": False, "asleep": True, "mode": "off"})
+    assert held == [1]

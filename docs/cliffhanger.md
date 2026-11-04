@@ -368,7 +368,7 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
 - **Shadow.** A candidate's firing writes its prediction onto itself (`predicted` = {path, value, chain}), never onto the real path.
 - **Score.** A later write in the same chain to the predicted path, with the predicted value, by anyone but the candidate, is a hit. Nothing else is refunded, so no timer is needed. A live firing is confirmed the same way.
 - **Energy.** Every Blurp write costs `WRITE_COST` (= `BASAL_PER_S`, one awake second): defining a candidate, and each shadow or live firing. A hit refunds 2× to Blurp's purse and to the candidate's balance. The definition counts against the candidate, so it needs two hits to become a proposal: it has to earn back its own birth. Asleep (`purse.can_spend()` false), nothing is spent, guessed or fired.
-- **Stay positive.** A candidate with a balance above 0 is a proposal. On a granted branch (`granted(path)`, the skill tree's Accept) a proposal is suggested to the LLM, never acted (part H). Below 0 it is back in shadow. Sleep prunes every candidate whose balance is negative (`prune()`).
+- **Stay positive.** A candidate with a balance above 0 is a proposal. On a granted branch (`granted(path)`, the skill tree's Accept) a proposal is suggested to the LLM, never acted (part H). Below 0 it is back in shadow. Sleep prunes (`prune()`, on the awake→asleep edge) only a candidate below -1 × WRITE_COST; one at exactly -1 ×, at -0.5 × or untested is kept.
 - **Bounds:**
   - at most 3 new guesses per chain and 256 live candidates; at the cap, a new guess replaces the most negative one (operator);
   - a refused guess is remembered and never charged or retried;
@@ -382,7 +382,7 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
 - **The purse.** The learner charges each Blurp write and refunds each hit into the seat's purse.
   - Blurp's loop (its own process, or the seat's thread) exchanges with the purse on **every** step, through the context call `context(only="learn", report={awake, asleep, mode})`. It reports whether it is awake, takes the net energy, and applies it (`energy.apply_delta`).
   - Until Blurp has said it is awake, nothing is spent, so nothing is guessed or fired.
-  - When it reports falling asleep, the learner prunes every negative candidate.
+  - When it reports falling asleep, the learner prunes every candidate below -1 × WRITE_COST.
 - **Branches and grants.**
   - A skill is a **branch**: the kind + type a candidate's target belongs to (`Component:toy`, `Component:chat`, `ha:light`, `ha:lock`…; the operator's grain, so lights are not locks). For a learned call, it's the called object's branch. Each candidate records its branch.
   - Grants are saved first and live after; one Accept at a time. Revoking a grant comes later.
