@@ -78,7 +78,7 @@ def test_the_note_keeps_detach_and_the_decision_card():
 
 
 def test_the_note_stays_tight():
-    assert len(CA.TOOLS_NOTE) <= 3320, len(CA.TOOLS_NOTE)  # +#766 work-to-goal line
+    assert len(CA.TOOLS_NOTE) <= 3560, len(CA.TOOLS_NOTE)  # +#766 work-to-goal line, +#919 full tool names (operator: ok)
 
 
 def test_the_name_map_carries_define_and_each():
@@ -169,7 +169,7 @@ def _name_map():
     seg = note[start:note.index("\n", start) if "\n" in note[start:] else None]
     out = []
     for fam, acts, names in re.findall(r"(\w+)(?:\(action=([^)]*)\))? -> ([\w/]+)", seg):
-        names = names.split("/")
+        names = [n.removeprefix(CA.TOOL_PREFIX) for n in names.split("/")]   # #919: full names
         acts = [a.strip("'") for a in acts.split("/")] if acts else [None] * len(names)
         assert len(acts) == len(names), (fam, acts, names)
         out += [(fam, a, n) for a, n in zip(acts, names)]
@@ -199,7 +199,7 @@ def test_the_note_names_the_real_tools():
     from membrane import claude_agent as CA
     head = CA.TOOLS_NOTE[:600]
     assert CA.TOOL_PREFIX + "<name>" in head
-    assert "no plain bash or query" in head
+    assert "a bare one fails" in head          # #919: and every tool after it is named in full
 
 
 
