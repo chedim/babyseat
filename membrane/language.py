@@ -961,6 +961,11 @@ def _ask_model(prompt: str):
             text.append(str(val))
         elif kind == "usage" and isinstance(val, dict):
             usage = val
+    try:
+        from . import bgusage
+        bgusage.from_openai("gap", GAP_MODEL, {"usage": usage})   # no stored row holds it: the tally does
+    except Exception:
+        pass
     return "".join(text), usage
 
 

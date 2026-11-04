@@ -1153,7 +1153,7 @@ class JSONReply:
         pass
 
     def read(self) -> bytes:
-        text, reasoning, usage = [], [], None
+        text, reasoning, usage, so_far = [], [], None, None
         try:
             for kind, val in iter_reply(self.messages, self.model, False, self.sdk,
                                         self.port, self.resume, self.auth):
@@ -1169,6 +1169,8 @@ class JSONReply:
                     self.tools.append(dict(val, at=len("".join(text))))
                 elif kind == "usage":
                     usage = val
+                elif kind == "progress":
+                    so_far = val                 # its steps' usage so far (#472)
         except _Q.QuotaPaused:
             self.failed = True
             raise                            # the proxy / the caller answers it (quota.py)
@@ -1183,6 +1185,8 @@ class JSONReply:
                "created": int(time.time()), "model": self.model,
                RESP_KEY: PROVIDER,
                "choices": [{"index": 0, "message": msg, "finish_reason": "stop"}]}
+        if usage is None:
+            usage = so_far                       # no final result came: what its steps cost
         if usage is not None:
             obj["usage"] = usage
         if self.tools:
