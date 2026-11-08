@@ -129,12 +129,27 @@ def _same(a, b) -> bool:
     return _scalar(a) and type(a) is type(b) and a == b
 
 
+_ACTING_VERBS = ("say", "poke", "invoke", "replan", "plan", "restart", "call", "wake", "unwake",
+                 "list", "add", "remove", "reset")
+
+
 def reversible(trigger) -> bool:
     """#935: only a plain field write can be undone; a method call (`.invoke`) never graduates."""
     from . import adapters as _AD              # the one table of what acts beyond a field write
     w = (getattr(trigger, "properties", None) or {}).get("write")
     path = str(w[0]) if isinstance(w, (list, tuple)) and w else ""
-    return bool(path) and _AD._branch(path) is None
+    if not path:
+        return False
+    eid, _, prop = path.rpartition(".")
+    if eid.startswith("?"):                    # a variable entity: ANY entity may be the target, so
+        probe = _AD._branch("x:probe." + prop)  # test the verb on a stand-in, and on the known acting objects
+        if probe is not None or prop in _ACTING_VERBS:
+            return False
+        from .entities import MEMBRANE_NS
+        for e in (MEMBRANE_NS + "llm", MEMBRANE_NS + "presence", MEMBRANE_NS + "toybox"):
+            if _AD._branch(e + "." + prop) is not None:
+                return False
+    return _AD._branch(path) is None
 
 
 def _literal(v) -> str | None:
