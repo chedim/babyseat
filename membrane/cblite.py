@@ -74,8 +74,13 @@ def S(s) -> FLSlice:
     return sl
 
 
+BUSY_CODE = 16                                     # kCBLErrorBusy: the only error worth retrying
+
+
 class CBLException(Exception):
-    pass
+    def __init__(self, *a, code=None):
+        super().__init__(*a)
+        self.code = code
 
 
 def is_android() -> bool:
@@ -232,7 +237,7 @@ class Lib:
     def check(self, ok, err: CBLError, what: str):
         if not ok and err.code:
             msg = self.take(self.L.CBLError_Message(C.byref(err))).decode(errors="replace")
-            raise CBLException(f"{what}: {msg} (domain {err.domain} code {err.code})")
+            raise CBLException(f"{what}: {msg} (domain {err.domain} code {err.code})", code=err.code)
         return ok
 
 
