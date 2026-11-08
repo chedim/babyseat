@@ -167,6 +167,7 @@ class CBLiteBackend(MemBackend):
         if journal_dir is not None and self._meta("migrated") is None:
             self.migrate_from(Path(journal_dir))
         self._ensure_vector_indexes()              # after the import: sized for what came in
+        self._reapply_unsaved()                    # #927: the last shutdown's unsaved writes, before the load
         self._load_hot()
         self._load_warm()                          # #748: before any write of this boot
         if journal_dir is not None:
@@ -672,6 +673,63 @@ class CBLiteBackend(MemBackend):
         """The pending hot writes, saved now."""
         self.drain()
 
+    def _unsaved_path(self) -> Path:
+        return self.path.parent / f"{self.path.name}.unsaved.json"
+
+    def _reapply_unsaved(self) -> None:
+        """Issue #927: the record a cut-off shutdown left beside the database
+        carries the unsaved (o, d) values. Put them back -- a row already on
+        disk with a greater `o` is newer and wins. The record is marked
+        `reapplied` (never applied twice: a later edit must not be clobbered)
+        and stays for `restarts.boot_text` to announce."""
+        self.recovered_at_boot = None
+        rp = self._unsaved_path()
+        try:
+            rec = json.loads(rp.read_text())
+        except Exception:
+            return
+        if not isinstance(rec, dict) or rec.get("reapplied"):
+            return
+        applied = stale = 0
+        todo = []
+        for it in rec.get("items") or []:
+            try:
+                c, k, o, d = it["c"], it["k"], it.get("o"), it.get("d")
+            except (KeyError, TypeError):
+                continue
+            if c not in COLLECTIONS or c in COLD:
+                continue
+            disk = None
+            try:
+                js = self.db.get_json(c, k)
+                disk = json.loads(js).get("o") if js else None
+            except Exception:
+                pass
+            if d is not None and disk is not None and o is not None and disk > o:
+                stale += 1
+                continue
+            todo.append((c, k, o, d))
+        try:
+            self.db.begin()
+            try:
+                for c, k, o, d in todo:
+                    if d is None:
+                        self.db.purge(c, k)
+                    else:
+                        self.db.put_json(c, k, dumps({"o": o, "d": d}))
+                    applied += 1
+            finally:
+                self.db.end()
+        except Exception as e:
+            print(f"[efield] could not re-apply the unsaved record ({e})", file=sys.stderr)
+            return                                  # the record stays; the next boot tries again
+        self.recovered_at_boot = {"applied": applied, "stale": stale}
+        rec.update(self.recovered_at_boot, reapplied=True)
+        try:
+            rp.write_text(json.dumps(rec))
+        except Exception:
+            pass
+
     def _record_unsaved(self) -> None:
         """Issue #927: a shutdown whose last drain still left writes pending
         must not lose them silently -- write what was left to a record file
@@ -679,6 +737,8 @@ class CBLiteBackend(MemBackend):
         the list in `unsaved_at_close`."""
         with self._pend_lock:
             left = sorted(f"{c}/{k}" for (c, k) in self._pending)
+            items = [{"c": c, "k": k, "o": v[0], "d": v[1]}
+                     for (c, k), v in sorted(self._pending.items())]
         self.unsaved_at_close = left
         if not left:
             return
@@ -687,9 +747,8 @@ class CBLiteBackend(MemBackend):
                + (" ..." if len(left) > 10 else ""))
         print(msg, file=sys.stderr)
         try:
-            rec = self.path.parent / f"{self.path.name}.unsaved.json"
-            rec.write_text(json.dumps({"ts": time.time(), "count": len(left),
-                                       "keys": left}))
+            self._unsaved_path().write_text(json.dumps(
+                {"ts": time.time(), "count": len(left), "keys": left, "items": items}))
         except Exception as e:
             print(f"[efield] could not write the unsaved record ({e})", file=sys.stderr)
 

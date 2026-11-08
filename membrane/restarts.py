@@ -101,7 +101,36 @@ def boot_text(srv, now: float | None = None) -> str:
     why = (f"Why: {reason}." if reason else
            "Why: not announced -- no deploy asked for it (a crash, the memory killer, or the phone itself).")
     return (f"{SIGN} The seat (membrane serve) restarted at {_clock(now)}{down}. {why} "
-            "Your loops, watches, goals and the field are back; anything you were doing mid-turn was cut off.")
+            "Your loops, watches, goals and the field are back; anything you were doing mid-turn was cut off."
+            + _unsaved_text(d))
+
+
+def _unsaved_text(d: str) -> str:
+    """Issue #927: the last shutdown's unsaved-writes record(s) beside the
+    database (`<db>.unsaved.json`), told once and consumed."""
+    out = ""
+    try:
+        names = sorted(n for n in os.listdir(d) if n.endswith(".unsaved.json"))
+    except OSError:
+        return ""
+    for n in names:
+        p = os.path.join(d, n)
+        try:
+            with open(p) as f:
+                rec = json.load(f)
+            cnt = int(rec.get("count") or len(rec.get("keys") or []))
+        except Exception:
+            continue
+        s = f" The last shutdown left {cnt} write{'s' if cnt != 1 else ''} unsaved (busy database)"
+        if rec.get("reapplied"):
+            s += f"; {int(rec.get('applied') or 0)} re-applied now, {int(rec.get('stale') or 0)} skipped as older than what is on disk"
+        s += "."
+        out += s
+        try:
+            os.replace(p, p[:-len(".json")] + ".reported.json")
+        except OSError:
+            pass
+    return out
 
 
 def ha_text(now: float | None = None, detail: str = "") -> str:
