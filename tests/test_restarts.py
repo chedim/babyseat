@@ -50,7 +50,7 @@ class TestTheNotices(unittest.TestCase):
     def test_boot_reports_the_unsaved_writes_of_the_last_shutdown(self):
         srv = _Srv()
         Path(srv.data_dir, "x.cblite.unsaved.json").write_text(json.dumps(
-            {"ts": 1, "count": 3, "keys": ["a/1", "a/2", "a/3"], "applied": 2, "stale": 1}))
+            {"ts": 1, "count": 3, "keys": ["a/1", "a/2", "a/3"], "applied": 2, "stale": 1, "reapplied": True}))
         t = RS.boot_text(srv, now=1e9)
         self.assertIn("3 writes unsaved", t)
         self.assertIn("2 re-applied", t)
