@@ -1,7 +1,7 @@
 /* k6: THE FIELD VIEW -- goals, tasks and decisions are objects IN the field3d scene (field3d.js workMarkers,
  * at their entity positions). This element only fetches GET /membrane/work-graph, hands it to the scene and
  * shows the clicked item's card. The real chat stays the chat. */
-const GLYPH = { goal: "🎯", task: "🔧", decision: "❓", wait: "⏳" };
+const GLYPH = { goal: "🎯", task: "🔧", decision: "❓", wait: "⏳", watch: "👁" };
 
 /** what a clicked icon's card shows */
 function cardInfo(graph, id) {
@@ -12,6 +12,9 @@ function cardInfo(graph, id) {
   const of = edges.find((e) => e.from === id && e.rel === "of");
   return { id, kind: n.kind, title: n.title, status: n.status,
     of: of ? t(of.to) : null,
+    watching: edges.filter((e) => e.from === id && e.rel === "watches").map((e) => t(e.to)),
+    triggers: edges.filter((e) => e.from === id && e.rel === "triggers").map((e) => t(e.to)),
+    setBy: n.set_by || n.owner || null, lastFired: n.last_fired || null,
     waitingOn: (n.waiting_on || []).map((w) => w.title + " (" + w.reason + ")"),
     blocks: edges.filter((e) => e.from === id && e.rel === "blocks").map((e) => t(e.to)),
     blockedBy: edges.filter((e) => e.to === id && e.rel === "blocks").map((e) => t(e.from)) };

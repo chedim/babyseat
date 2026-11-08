@@ -450,6 +450,36 @@ def _goal_waiting_on(docs, goal: str, GG) -> list:
     return out
 
 
+def _watch_nodes(est):
+    """#960: live watches set on purpose (owner Memo / a goal worker ``watch:<eid>``) as kind ``watch``
+    nodes: a ``watches`` edge to the watched entity, a ``triggers`` edge to the task/goal firing starts.
+    Finished (done), dispatch and any other owner (operator, persons, Blurp/self) are left out.
+    Scope: only ``watch_ops`` are drawn; ``watch_fields`` and field watches are out of scope here."""
+    nodes, edges = [], []
+    for ent in list((getattr(est, "docs", None) or {}).values()):
+        p = ent.properties or {}
+        ops = p.get("watch_ops")
+        if not isinstance(ops, list) or p.get("merged_into"):
+            continue
+        trig = str(p.get("trigger") or "")
+        for i, op in enumerate(ops):
+            if not isinstance(op, dict) or op.get("done") or op.get("sense") == "dispatch":
+                continue
+            owner = str(op.get("owner") or "").strip()
+            if not (owner.lower() in ("memo", "assistant") or owner.startswith("watch:")):
+                continue                  # only the assistant or a goal worker; not operator, other persons, Blurp/self
+            wid = "%s#watch%d" % (ent.eid, i)
+            nodes.append({"id": wid, "kind": "watch", "owner": owner, "status": "open", "goal": None,
+                          "title": "%s watches %s%s" % (owner, p.get("name") or ent.eid,
+                                   (": " + str(p["escalate_when"])) if p.get("escalate_when") else ""),
+                          "escalate_when": p.get("escalate_when"), "watching": ent.eid,
+                          "triggers": trig or None, "set_by": owner, "last_fired": op.get("last_fired") or op.get("ts")})
+            edges.append({"from": wid, "to": ent.eid, "rel": "watches"})
+            if trig:
+                edges.append({"from": wid, "to": trig, "rel": "triggers"})
+    return nodes, edges
+
+
 def work_graph(est) -> dict:
     """THE ONE GRAPH CALL (k4): {nodes: [goals, tasks, decisions], edges}. A node is
     {id, kind: goal|task|decision, title, status, goal}; an edge is {from, to, rel}:
@@ -487,8 +517,10 @@ def work_graph(est) -> dict:
                                "blocker task" if b.cls == GG.TASK else "decision"))
                                for b in GG._blockers_of(est, n["id"])
                                if b.eid in docs and GG._unfinished(b)]
-    nodes.sort(key=lambda n: (("goal", "task", "wait", "decision").index(n["kind"]), n["title"]))
-    return {"nodes": nodes, "edges": [e for e in raw if e["from"] in ids and e["to"] in ids],
+    wnodes, wedges = _watch_nodes(est)
+    nodes.extend(wnodes)
+    nodes.sort(key=lambda n: (("goal", "task", "wait", "decision", "watch").index(n["kind"]), n["title"]))
+    return {"nodes": nodes, "edges": [e for e in raw if e["from"] in ids and e["to"] in ids] + wedges,
             "runs": _finished_runs(est) if rocket_runs_on() else [],
             "rocket": rocket_runs_on()}
 
