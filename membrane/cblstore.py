@@ -153,6 +153,8 @@ class CBLiteBackend(MemBackend):
         self._pending: dict[tuple[str, str], tuple] = {}
         self._pend_lock = threading.Lock()
         self._wflush = threading.Event()
+        self._retry_at = 0
+        self._fails = 0
         self._writer = None
         if readonly:
             # a snapshot: load the hot rows (the collections already exist --
@@ -386,25 +388,56 @@ class CBLiteBackend(MemBackend):
         with self._pend_lock:
             self._pending[(coll, key)] = (None, None)
 
+    RETRY_MIN_S = 0.5
+    RETRY_MAX_S = 30.0
+
+    def _requeue(self, items) -> None:
+        """Put unsaved writes back (issue #927): a key written again since
+        the batch was taken is newer -- it stays; the failed one never
+        overwrites it. The writer loop backs off (doubling) before retrying."""
+        with self._pend_lock:
+            for key, val in items:
+                self._pending.setdefault(key, val)
+        self._fails = getattr(self, "_fails", 0) + 1
+        self._retry_at = time.monotonic() + min(self.RETRY_MAX_S, self.RETRY_MIN_S * 2 ** (self._fails - 1))
+
     def drain(self) -> int:
-        """Save every pending hot write now (one transaction)."""
+        """Save every pending hot write now (one transaction). A failed
+        save re-queues its key (unless a newer write arrived); a failed
+        begin/purge/commit re-queues the whole batch -- nothing is lost."""
         with self._pend_lock:
             todo, self._pending = self._pending, {}
         if not todo:
             return 0
-        self.db.begin()
+        failed: list = []
+        try:
+            self.db.begin()
+        except Exception as e:
+            print(f"[efield] cbl begin failed ({e}); {len(todo)} writes re-queued", file=sys.stderr)
+            self._requeue(todo.items())
+            return 0
         try:
             for (c, k), (o, d) in todo.items():
-                if d is None:
-                    self.db.purge(c, k)
-                else:
-                    try:
+                try:
+                    if d is None:
+                        self.db.purge(c, k)
+                    else:
                         self.db.put_json(c, k, dumps({"o": o, "d": d}))
-                    except CB.CBLException as e:
-                        print(f"[efield] cbl save {c}/{k} failed ({e})", file=sys.stderr)
+                except CB.CBLException as e:
+                    print(f"[efield] cbl save {c}/{k} failed ({e}); re-queued", file=sys.stderr)
+                    failed.append(((c, k), (o, d)))
         finally:
-            self.db.end()
-        return len(todo)
+            try:
+                self.db.end()
+            except Exception as e:
+                print(f"[efield] cbl commit failed ({e}); {len(todo)} writes re-queued", file=sys.stderr)
+                failed = list(todo.items())
+        if failed:
+            self._requeue(failed)
+        else:
+            self._fails = 0
+            self._retry_at = 0
+        return len(todo) - len(failed)
 
     def _writer_loop(self) -> None:
         with CB.background():                      # its operations queue behind turns'
@@ -414,6 +447,8 @@ class CBLiteBackend(MemBackend):
         while not self._stop:
             self._wflush.wait(self.WRITE_BEHIND_S)
             self._wflush.clear()
+            if self._retry_at and time.monotonic() < self._retry_at:
+                continue                           # backing off after a failed save
             try:
                 self.drain()
             except Exception as e:
@@ -637,6 +672,27 @@ class CBLiteBackend(MemBackend):
         """The pending hot writes, saved now."""
         self.drain()
 
+    def _record_unsaved(self) -> None:
+        """Issue #927: a shutdown whose last drain still left writes pending
+        must not lose them silently -- write what was left to a record file
+        beside the database, say so on stderr (the operator's log), and keep
+        the list in `unsaved_at_close`."""
+        with self._pend_lock:
+            left = sorted(f"{c}/{k}" for (c, k) in self._pending)
+        self.unsaved_at_close = left
+        if not left:
+            return
+        msg = (f"[efield] SHUTDOWN LEFT {len(left)} WRITE(S) UNSAVED "
+               f"(busy database): {', '.join(left[:10])}"
+               + (" ..." if len(left) > 10 else ""))
+        print(msg, file=sys.stderr)
+        try:
+            rec = self.path.parent / f"{self.path.name}.unsaved.json"
+            rec.write_text(json.dumps({"ts": time.time(), "count": len(left),
+                                       "keys": left}))
+        except Exception as e:
+            print(f"[efield] could not write the unsaved record ({e})", file=sys.stderr)
+
     def close(self) -> None:
         self._stop = True
         self._wake.set()
@@ -648,6 +704,7 @@ class CBLiteBackend(MemBackend):
             except Exception:
                 pass
         self.drain()
+        self._record_unsaved()
         self.db.close()
         if self._lock_fd is not None:            # the lock rode the fd;
             os.close(self._lock_fd)              # released, the next writer may enter

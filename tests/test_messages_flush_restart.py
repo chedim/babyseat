@@ -75,3 +75,38 @@ class TheTeardownClosesTheChatFirst(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SaveFailuresRetry(unittest.TestCase):
+    """A failed save is re-queued, never dropped (audit of the silent-drop class)."""
+
+    def test_messages_file_journal_failure_requeues(self):
+        from unittest import mock
+        path = os.path.join(tempfile.mkdtemp(), "serve-msgs.json")
+        st = MessageStore(path)
+        st.append(SID, _info("m1"), _text("hello"))
+        os.remove(path + ".jnl") if os.path.exists(path + ".jnl") else None
+        st.msgs[SID][0]["parts"][0]["text"] = "changed"
+        st._dirty_rows = {(SID, "m1")}              # a changed row waiting for its journal write
+        with mock.patch("os.write", side_effect=OSError("disk full")):
+            st.flush()
+        st.flush()                                  # the retry lands
+        self.assertEqual(_reloaded(path), ["changed"])
+
+    def test_sessions_db_failure_rides_next_save(self):
+        from membrane.server import SessionStore
+        st = SessionStore(None)
+
+        class Boom:
+            CBL_COLL = "sessions"
+            def __init__(self): self.fail, self.docs = True, {}
+            def put_json(self, c, k, v):
+                if self.fail: raise OSError("busy")
+                self.docs[k] = v
+            def purge(self, c, k): self.docs.pop(k, None)
+        st._cbl = Boom()
+        st.sessions = {"a": {"id": "a", "time": {"updated": 1}}, "b": {"id": "b", "time": {"updated": 1}}}
+        self.assertFalse(st._save_cbl("a"))
+        st._cbl.fail = False
+        self.assertTrue(st._save_cbl("b"))          # a different session's save carries a along
+        self.assertEqual(len(st._cbl.docs), 2)
