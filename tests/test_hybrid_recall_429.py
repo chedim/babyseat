@@ -108,7 +108,7 @@ class TestExactWords(unittest.TestCase):
         self.assertIn("MEMBRANE_JWT_SECRET", _texts(EB.recall_answers(f, "MEMBRANE_JWT_SECRET", k=3)))
         self.assertIn("MEMBRANE_JWT_SECRET", EB.render_for(f, "MEMBRANE_JWT_SECRET") or "")
 
-    def test_never_a_person_a_receipt_or_reasoning(self):
+    def test_a_persons_line_but_never_a_receipt_or_reasoning(self):
         f = _field()
         f.write_events([ST.Event(stream="discourse", role="user", ts=T0,
                                  text="please set MEMBRANE_JWT_SECRET on the box today.")],
@@ -121,7 +121,8 @@ class TestExactWords(unittest.TestCase):
                        session="s:1:2")
         f.process()
         direct = [r for r in EB.recall_answers(f, ASK, k=8, sim_min=0) if r.get("via") == "direct"]
-        self.assertEqual(direct, [])
+        # 2026-11-08 (operator): a person's own line is a direct answer; a receipt and reasoning never are
+        self.assertEqual([r["role"] for r in direct], ["user"])
 
     def test_ordinary_words_alone_are_the_embeddings_job(self):
         f = _field()

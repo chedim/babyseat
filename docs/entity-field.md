@@ -125,9 +125,12 @@ instructions":
   answering event; each row says `how` it was found (`ask`, `vector`,
   `words`, `entity`). The ask path finds a person's earlier asks like this one and what
   was worked out after them. The direct path (#429) searches model
-  replies, learn notes, ingested docs and code by similarity to the ask
-  itself, because most facts were never the answer to an earlier ask like
-  this one. A person's lines, receipts, notifications and sensor readings
+  replies, learn notes, ingested docs, code and a person's own lines
+  (2026-11-08: what someone said is where their facts live; shown as
+  `person`, and only in this lane, not the word or entity lanes) by
+  similarity to the ask itself, because most facts were never the answer to
+  an earlier ask like this one. A person's line that restates the ask is the
+  ask asked again, not an answer. Receipts, notifications and sensor readings
   are never a direct answer; a reply to a receipt, a watch reading or the
   seat's restart notice (`[membrane seat notice]`) is skipped (a reply to a
   task notification stays: it reports a background task's result to the

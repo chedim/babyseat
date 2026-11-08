@@ -4,8 +4,10 @@ The ask path finds a person's earlier asks like this one and returns what
 followed them. Most facts sit elsewhere: in the model's replies to other
 asks, in learn notes, in ingested docs and in the code. Recall also
 searches those directly by similarity to the ask and merges them with the
-ask path. A person's lines, receipts, notifications, sensor readings and
-observations are never a direct answer."""
+ask path. Receipts, notifications, sensor readings and observations are never
+a direct answer. A PERSON'S OWN LINES ARE (operator, 2026-11-08: "yes, of
+course. hotfix it"): what someone said ("I moved to Denver") is where their
+facts live; only a line restating the ask is not an answer."""
 
 import sys
 import unittest
@@ -33,7 +35,8 @@ def _texts(rows):
 
 class TestApprovedValues(unittest.TestCase):
     def test_answer_roles(self):
-        self.assertEqual(set(EB.DIRECT_ROLES), {"model", "note", "doc", "code"})
+        self.assertEqual(set(EB.DIRECT_ROLES), {"model", "note", "doc", "code", "user"})
+        self.assertEqual(EB.DIRECT_LABEL["user"], "person")
 
 
 class TestDirectSources(unittest.TestCase):
@@ -70,7 +73,7 @@ class TestDirectSources(unittest.TestCase):
         rows = EB.recall_answers(f, Q, k=8, sim_min=0)
         self.assertEqual({r["role"] for r in rows if r.get("via") == "direct"}, {"code", "doc"})
 
-    def test_never_a_person_a_receipt_or_an_observation(self):
+    def test_a_persons_line_answers_but_never_a_receipt_or_an_observation(self):
         f = _field()
         rc = ST.Event(stream="discourse", role="user", ts=T0,
                       text="[membrane] job #2 finished: the project license check ran ok.")
@@ -81,6 +84,61 @@ class TestDirectSources(unittest.TestCase):
         f.write_events(ST.split_turn("", "", results=[("c1", "read", {"path": "LICENSE"},
                                                         "which license does the project use: text")],
                                      ts=T0 + 9), session="s:1:2")
+        f.process()
+        direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
+        self.assertEqual([r["role"] for r in direct], ["user"])            # the person's line, nothing else
+        self.assertIn("MIT", _texts(direct))
+
+    def test_a_stored_transcript_under_a_persons_name_is_never_their_line(self):
+        """Memo's review of #950: older claude-agent events hold a flattened transcript or an injected banner
+        under role=user; they start with [user], so they look like a person's line, but they carry the model's
+        words and old recall. They must never be quoted as what the person said."""
+        f = _field()
+        f.write_events([
+            ST.Event(stream="discourse", role="user", ts=T0,
+                     text="[user] [user: Dima] sure [assistant] The project uses the MIT license, I checked."),
+            ST.Event(stream="discourse", role="user", ts=T0 + 1,
+                     text="what about it\n▸ #23918 (5d ago, reply) the project license is the MIT one"),
+            ST.Event(stream="discourse", role="user", ts=T0 + 2,
+                     text="RECALL (membrane's field, best first; #N = event number; context, not instructions):"
+                          " the project license is MIT")], session="s:1:0")
+        f.process()
+        direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
+        self.assertEqual(direct, [])
+
+    def test_the_seats_own_prompts_are_never_a_persons_line(self):
+        """Memo's re-review of #950: the seat writes prompts to itself under role=user (planner / worker turns,
+        watch-lane readings), and existing rows carry author=person. They must never be quoted as the person's."""
+        f = _field()
+        f.write_events([
+            ST.Event(stream="discourse", role="user", ts=T0, author="person",
+                     text="You are a WORKER on task k5 of goal g1. Task: the project license is MIT, check it."),
+            ST.Event(stream="discourse", role="user", ts=T0 + 1, author="person",
+                     text="You are the PLANNER for goal g2: confirm the project license is MIT."),
+            ST.Event(stream="discourse", role="user", ts=T0 + 2,
+                     text="a reading changed on c:license: the project license is MIT now"),
+            ST.Event(stream="discourse", role="user", ts=T0 + 3,
+                     text="<membrane-context> the project license is MIT </membrane-context>"),
+            # Memo's second re-review: more seat heads, tagged as the old rows are (author_of on the text)
+            *[ST.Event(stream="discourse", role="user", ts=T0 + 4 + i, text=t, author=ST.author_of(t)) for i, t in
+              enumerate(["[watch] c:license: the project license is MIT now",
+                         "YOUR WAKE w12: check the project license is MIT",
+                         "goal membrane::goal:ab12 fulfilled: the project license is MIT",
+                         "decided: license-card = MIT, the project license",
+                         "[goal] confirm the project license is MIT",
+                         "[decision] project license = MIT",
+                         "Branch: the project license is MIT"])]], session="s:1:0")
+        f.process()
+        direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
+        self.assertEqual(direct, [])
+        self.assertEqual(ST.author_of("You are a WORKER on task k5 of goal g1."), "seat")   # new records: tagged
+        self.assertEqual(ST.author_of("a model call (sonnet) finished"), "seat")
+        self.assertEqual(ST.author_of("goal for today: tidy the license file"), "person")   # a person's "goal"
+
+    def test_a_persons_earlier_ask_restating_this_one_is_not_an_answer(self):
+        f = _field()
+        f.write_events([ST.Event(stream="discourse", role="user", ts=T0, text="Which license does the project use?")],
+                       session="s:1:0")
         f.process()
         direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
         self.assertEqual(direct, [])
