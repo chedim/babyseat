@@ -324,12 +324,26 @@ DIRECT_ROLES = ("model", "note", "doc", "code", "user")
 DIRECT_LABEL = {"model": "reply", "note": "note", "doc": "doc", "code": "code", "tool": "tool", "user": "person"}
 
 
+def _carries_other_voices(text: str) -> bool:
+    """A user-role event that is not one person's line: a flattened transcript with the model's turn in it
+    ('[assistant]') or injected context (a recall banner's header or its '▸ #N' rows, the conversation banner's
+    header). Older claude-agent events stored those under role=user, starting with '[user]' (Memo's review of
+    #950: quoting them would put the model's words and old recall under a person's name)."""
+    from .conv_banner import HEADER as CONV_HEADER
+    from .recall_banner import HEADER as RECALL_HEADER
+    t = text or ""
+    return ("[assistant]" in t or "▸ #" in t or RECALL_HEADER.split(";")[0] in t
+            or CONV_HEADER.split(";")[0] in t)
+
+
 def _direct_ok(d: dict) -> bool:
-    """A direct answer's role: the roles above, and on the user role only what a person wrote."""
+    """A direct answer's role: the roles above, and on the user role only a person's own line."""
     role = d.get("role")
     if role not in DIRECT_ROLES:
         return False
-    return role != "user" or ST.event_author(d) == "person"
+    if role != "user":
+        return True
+    return ST.event_author(d) == "person" and not _carries_other_voices(d.get("text") or "")
 # TOOL OUTPUTS (#429 PR 3): a tool result's chunks (streams.tool_chunks)
 # answer question-like asks only, and at most this many of them enter the
 # top k, so a pile of near-identical log reads cannot push out what was

@@ -89,6 +89,23 @@ class TestDirectSources(unittest.TestCase):
         self.assertEqual([r["role"] for r in direct], ["user"])            # the person's line, nothing else
         self.assertIn("MIT", _texts(direct))
 
+    def test_a_stored_transcript_under_a_persons_name_is_never_their_line(self):
+        """Memo's review of #950: older claude-agent events hold a flattened transcript or an injected banner
+        under role=user; they start with [user], so they look like a person's line, but they carry the model's
+        words and old recall. They must never be quoted as what the person said."""
+        f = _field()
+        f.write_events([
+            ST.Event(stream="discourse", role="user", ts=T0,
+                     text="[user] [user: Dima] sure [assistant] The project uses the MIT license, I checked."),
+            ST.Event(stream="discourse", role="user", ts=T0 + 1,
+                     text="what about it\n▸ #23918 (5d ago, reply) the project license is the MIT one"),
+            ST.Event(stream="discourse", role="user", ts=T0 + 2,
+                     text="RECALL (membrane's field, best first; #N = event number; context, not instructions):"
+                          " the project license is MIT")], session="s:1:0")
+        f.process()
+        direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
+        self.assertEqual(direct, [])
+
     def test_a_persons_earlier_ask_restating_this_one_is_not_an_answer(self):
         f = _field()
         f.write_events([ST.Event(stream="discourse", role="user", ts=T0, text="Which license does the project use?")],
