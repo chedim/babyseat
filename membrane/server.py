@@ -2814,8 +2814,19 @@ class TurnRunner:
             _plock = threading.RLock()
             _ptimer = {"t": None, "closed": False}
 
+            def _snap():
+                # THE RELOAD MID-TURN (#954): the running reply is saved as it
+                # grows (upsert by id), so a fresh client's history load shows
+                # the text and tool cards so far; the live stream carries the rest
+                try:
+                    self.messages.append(sid, dict(a_info), copy.deepcopy(parts))
+                except Exception:
+                    pass
+
             def _flush(pid, _pend=_pend):
                 e = _pend.get(pid)
+                if e and e[0]:
+                    _snap()
                 if e and e[0]:
                     self.hub.publish({"type": "message.part.delta", "sessionID": sid, "messageID": aid,
                                       "partID": pid, "field": "text", "delta": e[0]})
@@ -2869,11 +2880,13 @@ class TurnRunner:
                         # it go out and close now; the call shows running
                         _close_text()
                         _agent_tool_start(val)
+                        _snap()
                         return False
                     if kind == "tool":
                         # a tool Claude ran in its own loop (#389): shown, never re-run
                         _close_text()
                         _agent_tool_part(val)
+                        _snap()
                         return False
                     p = _live.get(kind)
                     if p is None:
