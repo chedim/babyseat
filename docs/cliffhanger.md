@@ -337,6 +337,27 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
   - The entity API never edits a trigger, and only this seat's triggers run; an imported one never does.
   - A chain arriving over the relay cannot claim `self`.
 
+## Calls are writes (#956, stage 2)
+
+A call is a write of a request to the object's call path: `<obj>.call:<method> = {id, args}`.
+
+- **Dispatch:** each method's dispatch trigger watches the call path of the objects it serves:
+  `WHEN changed(?x.call:<m>) WHERE dispatches(?x, <m>, <method eid>): <method eid>.invoke = {'object': x.eid, 'call': 'call:<m>', 'request': new}`.
+  `dispatches` is a binder that holds only for the method `resolve_method` picks for that entity (own, then
+  classes, then global), so exactly one method's trigger matches a call. (Stage 5 defines these triggers for
+  every method; until then a dispatch trigger is defined by hand.)
+- **The request comes from the event:** a `changed` trigger's write reads the written value as `new` and the
+  one it replaced as `old` (the spec's `$THIS` / `$OLD`), so two quick calls never read each other's request.
+  `prop(x, 'call:m')` reads a property whose name isn't an identifier.
+- **The method runs exactly once, as given:** the `invoke` adapter runs that method entity (no second lookup by
+  name) and leaves the receipt on the object, with the request's id: `<obj>.call:<m>_result =
+  {id, status, rc, head[, result]}` and `<obj>.call:<m>_rc`. One slot per call path: a writer that wants its
+  own receipt checks the id.
+- **Refused, with a receipt:** a request that isn't `{id, args}`; secret-named args (a written call's args are
+  stored, so a secret can't be both redacted and used); a call on the executor (as on the model's route).
+- **Method names:** a name with `.`, or ending in `_result` / `_rc`, is refused at define (they would collide
+  with call paths and receipts).
+
 ## Program the field first (#576, part F)
 
 The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be done by programming the field first and then using it." The model does something in one of three ways: it **runs code**, which becomes a tree kept in the field and re-runnable (#614, 2026-10-27: "executors work as blurp's chat works"); it **defines a method** on the entity the work belongs to (or its class) and **calls** it; or it **writes a property** whose write is the effect (above).

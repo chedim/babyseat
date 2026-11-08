@@ -210,13 +210,16 @@ class TestConfig(unittest.TestCase):
     def test_provider_options(self):
         o = {"baseURL": "http://127.0.0.1:1/v1"}
         with self._env():
-            self.assertIs(J.provider_options(o), o)                        # off: the same dict
+            # off: the child's env carries the seat token (#842), so the key is the placeholder too
+            self.assertEqual(J.provider_options(o), dict(o, apiKey="{env:MEMBRANE_JWT_TOKEN}"))
         with self._env(MEMBRANE_JWT_SECRET=SECRET):
             self.assertEqual(J.provider_options(o), dict(o, apiKey="{env:MEMBRANE_JWT_TOKEN}"))
 
     def test_child_env(self):
         with self._env():
-            self.assertEqual(J.child_env({"A": "1"}), {"A": "1"})        # off: untouched
+            from membrane import seatauth as SAU
+            st = SAU.ensure()                                              # off: the seat token, no address is a credential (#842)
+            self.assertEqual(J.child_env({"A": "1"}), {"A": "1", "MEMBRANE_JWT_TOKEN": st, "OPENCODE_SERVER_PASSWORD": st})
         with self._env(MEMBRANE_JWT_SECRET=SECRET):
             e = J.child_env({"A": "1"})
             self.assertTrue(J.verify(e["MEMBRANE_JWT_TOKEN"], SECRET).internal)
@@ -515,9 +518,8 @@ class TestProxyGate(unittest.TestCase):
     def test_mcp_http_uses_an_explicit_token(self):
         # an MCP child pointed at a JWT seat whose secret it does not hold
         from membrane import mcp_server as M
-        with _jwt_env(MEMBRANE_JWT_TOKEN=self.tok):
-            with mock.patch.object(J, "enabled", return_value=False):
-                self.assertEqual(M._http(self.port, "GET", "/membrane/gate-stages"), {"rounds": []})
+        with _jwt_env(MEMBRANE_JWT_TOKEN=self.tok, MEMBRANE_JWT_SECRET=SECRET):
+            self.assertEqual(M._http(self.port, "GET", "/membrane/gate-stages"), {"rounds": []})
 
     def test_restarts_reply(self):
         from membrane import restarts as RS

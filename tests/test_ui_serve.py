@@ -6,6 +6,7 @@ import os
 import tempfile
 import threading
 import unittest
+import pytest as _pytest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -49,7 +50,8 @@ class TestUiServe(unittest.TestCase):
         r = urllib.request.Request(f"http://127.0.0.1:{self.port}{p}", method=method, data=data,
                                    headers={"Content-Type": "application/json", **(headers or {})})
         if auth:
-            r.add_header("Authorization", "Basic " + base64.b64encode(b"opencode:pw").decode())
+            from membrane import seatauth
+            r.add_header("Authorization", "Bearer " + seatauth.ensure())
         try:
             with urllib.request.urlopen(r, timeout=10) as resp:
                 b = resp.read()
@@ -110,11 +112,18 @@ class TestUiServe(unittest.TestCase):
         self.assertEqual(rest.strip(), "hi")
 
     def test_a_person_sees_their_own_chats_not_the_loops(self):
+        # S1: a person is known by their CREDENTIAL (a person JWT), never by the header;
+        # the stand-in below reads the person from a header the real code ignores.
+        import types
+        _p = mock.patch("membrane.ui_serve.token_person", lambda h: (
+            types.SimpleNamespace(sub=h.headers["X-Test-Person"]) if h.headers.get("X-Test-Person") else None))
+        _p.start()
+        self.addCleanup(_p.stop)
         self.sessions.create(title="watch: session:now")            # a loop's, made by the seat
-        A = {"X-Membrane-Speaker": "Ann"}
+        A = {"X-Test-Person": "Ann"}
         code, mine, _ = self._req("/ui/serve/session", "POST", {"title": "hi"}, headers=A)
         self.assertEqual(mine["owner"], "Ann")
-        self._req("/ui/serve/session", "POST", {"title": "bob's"}, headers={"X-Membrane-Speaker": "Bob"})
+        self._req("/ui/serve/session", "POST", {"title": "bob's"}, headers={"X-Test-Person": "Bob"})
         lst = self._req("/ui/serve/session", headers=A)[1]
         self.assertEqual([x["id"] for x in lst], [mine["id"]])
         self.assertGreaterEqual(len(self._req("/session")[1]), 3)  # the seat's own list is whole
@@ -124,7 +133,7 @@ class TestUiServe(unittest.TestCase):
         self.assertEqual(code, 403)
         self.assertIsNone(h.get("WWW-Authenticate"))           # never a login prompt
         # auth is gone: a stale basic-auth header changes nothing, the proxy stays refused
-        self.assertEqual(self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, auth=True)[0], 403)
+        self.assertEqual(self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8", "Authorization": "Basic " + base64.b64encode(b"opencode:pw").decode()})[0], 403)
 
     def test_keepalive_does_not_leak_lan_trust(self):
         import http.client

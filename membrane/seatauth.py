@@ -42,16 +42,12 @@ PRINT_ENV = "MEMBRANE_SEAT_TOKEN_PRINT"       # the container's entrypoint sets 
 COOKIE_AGE = 400 * 86400                      # the browsers' own cap on a cookie's life
 FORWARD_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP")
 
-# :11500's POSTs that only read (a query, a listing, an inspection): open on
-# the LAN like the GET reads. Everything else that is not GET/HEAD is a write.
-PROXY_READ_POSTS = frozenset({
-    "/membrane/entity-query",
-    "/membrane/entity-track/list",
-    "/membrane/method/inspect",
-    "/membrane/codegraph",
-})
 # :11500's GETs that change state (an intent is created and announced)
 PROXY_WRITE_GETS = frozenset({"/membrane/intend"})
+# :11500's GET/HEAD reads that need the seat token (operator, #842): by prefix,
+# so /v1/ and /membrane/ (and /state) are not public; only /api/ (GET /api/tags) is open
+PROXY_TOKEN_PREFIXES = ("/v1/", "/membrane/", "/state")
+PROXY_TOKEN_GETS = frozenset({"/v1", "/membrane", "/state"})
 # :4096's non-GET routes that must stay reachable: the login pair
 SERVE_OPEN_POSTS = frozenset({"/ui/login", "/ui/logout"})
 
@@ -126,6 +122,19 @@ def seat_token() -> str | None:
         return None
 
 
+def loopback_headers(jwt_headers: dict | None = None) -> dict:
+    """The credential for a call from this seat (or its children) to its own
+    loopback door (#842: no address is a credential). JWT mode: the token the
+    caller already holds (`jwt_headers`, jwtauth.internal_headers/client_headers);
+    off: the seat token. NEVER for a call to another host."""
+    if jwt_headers:
+        return jwt_headers
+    if _JWT.enabled():
+        return {}
+    tok = seat_token()
+    return {"Authorization": f"Bearer {tok}"} if tok else {}
+
+
 def matches(presented) -> bool:
     want = seat_token()
     return bool(want and isinstance(presented, str) and presented
@@ -156,25 +165,27 @@ def presented_seat_token(handler, cookie: bool = False, basic: bool = False) -> 
 
 def owner(handler, cookie: bool = False, basic: bool = False) -> bool:
     """Is this request the seat's owner? JWT mode: it carried a valid token
-    (jwtauth.gate set handler._identity). Off: loopback, or the seat token.
+    (jwtauth.gate set handler._identity). Off: the seat token -- no address is
+    a credential (#842).
     An in-process call (no socket at all) is the seat itself."""
     if _JWT.enabled():
         return getattr(handler, "_identity", None) is not None
     if not hasattr(handler, "client_address"):
         return True
-    return is_loopback(handler) or presented_seat_token(handler, cookie=cookie, basic=basic)
+    return presented_seat_token(handler, cookie=cookie, basic=basic)
 
 
 # -- which requests are writes ------------------------------------------------------
 
 def proxy_is_write(method: str, path: str) -> bool:
-    """:11500 -- every non-GET/HEAD but the read-only POSTs, plus the GETs
-    that change state. /v1/chat/completions and /api/chat|generate are
+    """:11500 -- every non-GET/HEAD (no POST is open), plus the GETs under
+    /v1/ and /membrane/ and /state; only GET /api/tags is open. /v1/chat/completions and /api/chat|generate are
     writes: every turn is captured into the field, its frames learn/forget/
     watch/intend, and its tool rounds reach the entity and script lanes."""
     if method in ("GET", "HEAD"):
-        return path in PROXY_WRITE_GETS
-    return path not in PROXY_READ_POSTS
+        return (path in PROXY_WRITE_GETS or path in PROXY_TOKEN_GETS
+                or path.startswith(PROXY_TOKEN_PREFIXES))
+    return True
 
 
 def serve_is_write(method: str, path: str) -> bool:
@@ -182,6 +193,18 @@ def serve_is_write(method: str, path: str) -> bool:
     the seat's controls, voice, HA's token, /tui/*) but the UI's login pair."""
     if method in ("GET", "HEAD"):
         return False
+    return path not in SERVE_OPEN_POSTS
+
+
+SERVE_OPEN_GETS = ("/", "/membrane", "/index.html", "/favicon.ico", "/global/health", "/ui/conf")
+
+
+def serve_needs_token(method: str, path: str) -> bool:
+    """:4096 -- every request but the UI's login pair and the page's shell
+    (+ health): a GET read needs the seat token too (#842); the page's own
+    reads carry the cookie it was minted on loopback."""
+    if method in ("GET", "HEAD"):
+        return not (path in SERVE_OPEN_GETS or path.startswith("/ui/www/"))
     return path not in SERVE_OPEN_POSTS
 
 
@@ -223,7 +246,7 @@ def boot() -> None:
               "off-box writes are refused until it can", file=sys.stderr)
         return
     print(f"[auth] off-box writes need the seat token ({token_file()}; "
-          "`membrane token seat` prints it); localhost needs none", file=sys.stderr)
+          "`membrane token seat` prints it); every write needs it", file=sys.stderr)
     if os.environ.get(PRINT_ENV) == "1":
         print(f"[auth] seat token: {tok}", file=sys.stderr)
 

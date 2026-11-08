@@ -41,6 +41,11 @@ from pathlib import Path
 
 from . import self_proc as SP
 
+
+def _seat_headers(h: dict) -> dict:
+    from . import seatauth
+    return seatauth.loopback_headers(h)
+
 FLAG = SP.FLAG
 BACKOFF_START_S = 2.0       # #440 constant 2, approved: the first restart's wait after a crash...
 BACKOFF_MAX_S = 60.0        # ...doubling per crash in the window, capped here
@@ -361,7 +366,7 @@ class Supervisor:
 
     def _http(self, port: int, path: str, body=None):
         from . import jwtauth as J
-        h = {"Content-Type": "application/json", **J.client_headers()}
+        h = {"Content-Type": "application/json", **_seat_headers(J.client_headers())}
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers=h,
                                      method="GET" if body is None else "POST")

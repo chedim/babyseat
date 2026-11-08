@@ -247,6 +247,7 @@ def test_a_chat_round_trip_through_the_relay_to_a_real_seat(relay):
 
     from aiohttp.test_utils import make_mocked_request
 
+    from membrane import seatauth as _SA
     from membrane import server as NS
 
     sessions = NS.SessionStore(None)
@@ -255,6 +256,7 @@ def test_a_chat_round_trip_through_the_relay_to_a_real_seat(relay):
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     comp = {"serve_url": f"http://127.0.0.1:{httpd.server_address[1]}", "serve_ready": True,
+            "serve_user": "membrane", "serve_pass": _SA.seat_token(),
             "owners": {}, "owners_store": types.SimpleNamespace(async_delay_save=lambda *a, **k: None)}
 
     async def call(method, rest, body=b""):
@@ -306,6 +308,7 @@ def test_the_owners_load_once_when_the_first_requests_race(relay):
 
     from aiohttp.test_utils import make_mocked_request
 
+    from membrane import seatauth as _SA
     from membrane import server as NS
 
     FakeStore.disk.clear()
@@ -314,7 +317,8 @@ def test_the_owners_load_once_when_the_first_requests_race(relay):
                               config={}, runner=None)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    comp = {"serve_url": f"http://127.0.0.1:{httpd.server_address[1]}", "serve_ready": True}
+    comp = {"serve_url": f"http://127.0.0.1:{httpd.server_address[1]}", "serve_ready": True,
+            "serve_user": "membrane", "serve_pass": _SA.seat_token()}
     hass = types.SimpleNamespace(data={"membrane": comp})
 
     async def call(method, rest, body=b""):

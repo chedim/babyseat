@@ -1,53 +1,69 @@
 ---
 name: membrane-restart
-description: Restart membrane safely (the operator asks for a restart, "bounce the proxy", "load new code", "did my edit take effect"). Encodes the safe procedure and the never-do list: never re-exec the running process from within itself, never restart mid-edit.
+description: Restart membrane safely (the operator asks for a restart, "bounce the seat", "load new code", "did my edit take effect"). The planned restart is presence.restart; a cold start is only for a seat that is down.
 ---
 
 # Membrane restart
 
-Membrane is a long-running proxy process. Restarting loads code changed on
-disk and re-hydrates the field from its backend (Couchbase or JSON). The
-FIELD IS DURABLE: a restart loses nothing except in-flight turns, so there
-is no reason to fear one -- and no reason to improvise one.
+Membrane is a long-running seat. A restart loads code changed on disk and
+re-hydrates the field from its backend. The FIELD IS DURABLE: a restart loses
+nothing except a turn cut off mid-flight -- and the planned restart below
+never cuts a person's turn off.
 
-## The safe procedure
+## The planned restart: presence.restart
 
-From a shell (Bash tool) in the project root:
+Call the `restart` method on `presence`, with the reason as `why`:
 
-    ./run.sh restart          # or: membrane reset
+- from the model: `exec(action="call", object="presence", method="restart", args={"why": "..."})`
+- from a shell, against a running seat (port = its `--listen`, 11500 by default):
 
-That kills whatever listens on the opencode seat's port (:11500, or the
-`--listen` you pass), then boots a fresh `membrane opencode` with the same
-flags.
+      ~/.membrane/venv/bin/python - <<'EOF'
+      import json, urllib.request
+      from membrane import jwtauth as J
+      h = dict(J.client_headers(), **{"Content-Type": "application/json"})
+      body = {"object": "presence", "method": "restart", "args": {"why": "load #NNN"}}
+      req = urllib.request.Request("http://127.0.0.1:11500/membrane/method/call",
+                                   data=json.dumps(body).encode(), headers=h)
+      print(json.load(urllib.request.urlopen(req, timeout=30))["status"])
+      EOF
 
-If ONLY a boot smoke on a spare port is wanted (never disturb the live one):
+  `J.client_headers()` carries the seat's credential (a minted JWT in JWT
+  mode, the seat token otherwise); a bare `Authorization: Bearer
+  $(cat ~/.membrane/seat-token)` is refused when the seat runs in JWT mode.
 
-    .venv/bin/python -m membrane.opencode --listen 18787 --no-launch --field .membrane/field.json ...
+What it does (`restarts.do_restart`): it waits until no PERSON turn is busy
+(loops never hold it; their work is re-queued at boot), writes the reason for
+the next boot's notice, sends itself a clean SIGTERM so the usual drain runs,
+and the teardown's end re-execs the same command in the same PID. A person's
+pause is carried across. Only one restart waits at a time.
 
-Then verify with `field state` (the membrane-state skill) that the field
-re-hydrated: exemplar count in the expected range, safe_frac sane.
+Before calling it, you can check `GET /session/status` on the seat's serve
+port (4097) with the same headers: every session should be `idle`.
 
-## The NEVER list (disaster routes)
+## A cold start (the seat is down)
 
-- NEVER re-exec or `os.execv` the RUNNING membrane from inside itself (no
-  watcher, no self-restart on file change). A membrane must not restart
-  while it is running -- and never while IT is being edited. Restarts are
-  operator-initiated, from the shell, at rest.
-- Never kill the proxy mid-write of the field. Membrane saves are atomic
-  (temp + rename), but a kill during a CAS/arbitration pass can leave a
-  retryable -- not corrupt -- remote state. Check no learn/compactor cycle
-  is mid-flight (quiet stderr) before bouncing.
-- Never restart to "fix" a confused field. Restart reloads code; it does
+    ./run.sh restart          # kills whatever listens on :11500, starts it fresh
+
+or start it the way it was started, e.g.
+`membrane standalone --serve-port 4097 --listen 11500 --no-browser`.
+Use this only when the seat is not running or does not answer; on a live seat
+it cuts in-flight turns off.
+
+## Never
+
+- Never kill the seat mid-write of the field to "speed up" a restart; use
+  presence.restart and let it drain.
+- Never restart to "fix" a confused field. A restart reloads code; it does
   not clean state. Use `membrane: forget ...` for content, not a reboot.
 - A dirty git tree + `membrane update` is a no-op by design (it refuses to
-  force-merge). Commit or stash first; do not work around it.
+  force-merge). Commit first; do not work around it.
 
 ## After a restart
 
-1. Post-boot, run `field state` once and READ it (one honest read beats
-   trusting the prep).
+1. The boot log shows `[seat] restarting (re-exec)`, then the field load
+   (`couchbase lite: N hot rows loaded in Ns`) and `[replies] built from N
+   messages`. Then run `field state` (the membrane-state skill) once and read it.
 2. If code changed, the boot update check may print a changelog + prompt:
    answer it in the terminal, or run `membrane update` explicitly.
-3. The schema sliding window makes old/new mixed-version state safe; if a
-   migration warning appears at boot (`field file vN envelope -> ...`),
-   that is normal and one-line -- note it, do not hand-edit the field.
+3. A migration warning at boot (`field file vN envelope -> ...`) is normal
+   and one line -- note it, do not hand-edit the field.

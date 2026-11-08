@@ -36,6 +36,11 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if not (entry.data.get(CONF_SERVE_PASS) or DEFAULT_SERVE_PASS):
+        _LOGGER.warning(
+            "membrane_ai: no seat token configured; the serve now requires it on every "
+            "request (even from localhost). Open Settings > Devices > Membrane AI > "
+            "Configure and enter the seat token, or the assistant will get 401.")
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "name": entry.data.get(CONF_NAME) or DEFAULT_NAME,
         "serve_url": entry.data.get(CONF_SERVE_URL) or DEFAULT_SERVE_URL,

@@ -145,6 +145,23 @@ def migrate_one_chat(sessions, keep: str, operator: str) -> None:
 # The seat owner's identity for a tokenless loopback caller (#770): one person,
 # one chat, and the owner is a person too.
 OWNER_SUB = "owner"
+OPERATOR_SUBS: set = set()   # token subs of the person named MEMBRANE_OPERATOR (#842)
+
+
+def _op_name() -> str:
+    op = str(os.environ.get("MEMBRANE_OPERATOR") or "").strip()
+    return "" if op in ("0", "1", "false", "true") else op
+
+
+def note_operator_person(who) -> None:
+    """A token person named MEMBRANE_OPERATOR is the operator: their sub joins that identity."""
+    sub, op = str(getattr(who, "sub", "") or ""), _op_name()
+    if sub and op and str(getattr(who, "name", "")) == op:
+        OPERATOR_SUBS.add(sub)
+
+
+def _is_op(owner) -> bool:
+    return owner == OWNER_SUB or owner in OPERATOR_SUBS or (bool(_op_name()) and owner == _op_name())
 
 
 def boot_migrate_one_chat(sessions, env=None) -> None:
@@ -1548,6 +1565,24 @@ class TurnRunner:
         if resp is None:
             return
         try:
+            if getattr(resp, "_in_gate", False):
+                import socket as _socket
+
+                def _wake(_c=resp, _s=getattr(resp, "sock", None)):
+                    # a bare close() does not wake a read blocked in another thread; shutdown does.
+                    # Only for a round STILL waiting for the proxy after a short grace: a reply
+                    # already streaming keeps the words it gave (#449).
+                    try:
+                        if getattr(_c, "_in_gate", False) and _s is not None:
+                            _s.shutdown(_socket.SHUT_RDWR)
+                    except Exception:
+                        pass
+                _t = threading.Timer(0.3, _wake)
+                _t.daemon = True
+                _t.start()
+        except Exception:
+            pass
+        try:
             resp.close()
         except Exception:
             pass
@@ -2814,9 +2849,45 @@ class TurnRunner:
             _plock = threading.RLock()
             _ptimer = {"t": None, "closed": False}
 
+            def _snap():
+                # THE RELOAD MID-TURN (#954): the running reply is saved as it
+                # grows (upsert by id), so a fresh client's history load shows
+                # the text and tool cards so far; the live stream carries the rest
+                # the snapshot holds only words already PUBLISHED: text still
+                # held in _pend goes out as a delta later, and a history that
+                # already had it would show it twice
+                try:
+                    # shallow-copy each part (only "text" is rewritten below):
+                    # a deepcopy of every tool output per flush was O(turn)
+                    snap = [dict(sp) for sp in parts]
+                    # parts injected into this row by append_part (post_line,
+                    # the watchdog error part) live only in the stored row:
+                    # keep them, as the final merge does, or this upsert
+                    # erases them
+                    have = {sp.get("id") for sp in snap}
+                    stored = self.messages.get_msg(sid, aid) or {}
+                    snap.extend(dict(x) for x in stored.get("parts") or []
+                                if x.get("id") not in have)
+                    for sp in snap:
+                        held = (_pend.get(sp.get("id")) or ["", 0.0])[0]
+                        if held and str(sp.get("text") or "").endswith(held):
+                            sp["text"] = sp["text"][:len(sp["text"]) - len(held)]
+                    self.messages.append(sid, dict(a_info), snap)
+                except Exception:
+                    pass
+
             def _flush(pid, _pend=_pend):
                 e = _pend.get(pid)
                 if e and e[0]:
+                    # the snapshot is saved BEFORE the delta goes out. This
+                    # assumes a reloading client loads history FIRST and
+                    # subscribes after: it then gets this batch from the
+                    # delta, never twice. The history lags the stream by at
+                    # most this one batch (and a paused model leaves it
+                    # unshown until the part ends) -- saving after publishing
+                    # would instead drop the batch for a client that
+                    # loaded history between the two.
+                    _snap()
                     self.hub.publish({"type": "message.part.delta", "sessionID": sid, "messageID": aid,
                                       "partID": pid, "field": "text", "delta": e[0]})
                     e[0] = ""
@@ -2869,11 +2940,13 @@ class TurnRunner:
                         # it go out and close now; the call shows running
                         _close_text()
                         _agent_tool_start(val)
+                        _snap()
                         return False
                     if kind == "tool":
                         # a tool Claude ran in its own loop (#389): shown, never re-run
                         _close_text()
                         _agent_tool_part(val)
+                        _snap()
                         return False
                     p = _live.get(kind)
                     if p is None:
@@ -3547,7 +3620,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         data = _json.dumps(body).encode()
         req = urllib.request.Request(
             url, data=data, method="POST",
-            headers={"Content-Type": "application/json", **_JWT.internal_headers(),
+            headers={"Content-Type": "application/json", **_SA.loopback_headers(_JWT.internal_headers()),
                      **_W.headers()})          # the turn's chain + writer: the handler resumes them (Blurp's learner links writes by chain)
         try:
             with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
@@ -3594,7 +3667,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
     def _stream_once(body: dict, on_event):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/chat/completions", data=_json.dumps(body).encode(),
-            method="POST", headers={"Content-Type": "application/json", **_JWT.internal_headers(),
+            method="POST", headers={"Content-Type": "application/json", **_SA.loopback_headers(_JWT.internal_headers()),
                                     **_W.headers()})       # as the buffered call: the turn's chain + writer
         seen: dict = {}                      # this round's last usage (#472)
         try:
@@ -3618,11 +3691,18 @@ def loopback_ladder(port: int, runner=None, cell=None):
         _r = runner if runner is not None else ((cell or {}).get("runner") if cell else None)
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=CLOUD_TIMEOUT_S)
         socks = getattr(_r, "_turn_sockets", None) if (_r is not None and sid) else None
+        try:
+            conn.connect()          # a socket to close BEFORE the kill can reach it (closing an unconnected conn cuts nothing)
+        except BaseException:
+            conn.close()
+            raise
         if isinstance(socks, dict):
             socks.setdefault(sid, conn)
         try:
+            conn._in_gate = True        # until the proxy answers: the kill must wake this read
             conn.request(req.get_method(), req.selector, body=req.data, headers=dict(req.header_items()))
             resp = conn.getresponse()
+            conn._in_gate = False
         except BaseException:
             conn.close()
             raise
@@ -3872,15 +3952,20 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             standalone page's shell (+ /ui/login) is public."""
             if not _JWT.gate(self, cookie=True, basic=True, public=_UI.public_path(self)):
                 return False
-            # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, an OFF-BOX
-            # caller's writes need the seat token (Bearer, Basic's password
-            # or the UI's cookie); reads and localhost stay open
-            return _SA.gate(self, _SA.serve_is_write(self.command, self.path.split("?", 1)[0]),
+            # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, every
+            # caller (localhost too) needs the seat token (Bearer, Basic's password
+            # or the UI's cookie), reads included
+            if self._jwt_person() is not None:      # a token that names a person is a credential
+                return True
+            return _SA.gate(self, _SA.serve_needs_token(self.command, self.path.split("?", 1)[0]),
                             cookie=True, basic=True)
 
         def _jwt_person(self):
             """The token's person (None: open mode, or the seat's own token)."""
-            return _UI.token_person(self)
+            who = _UI.token_person(self)
+            if who is not None:
+                note_operator_person(who)
+            return who
 
         def _visible(self, sid: str) -> bool:
             """May this caller see session `sid`? Open mode and the seat's own
@@ -3895,7 +3980,9 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if row is None:
                     return False
                 if row.get("owner"):
-                    return row.get("owner") == who.sub
+                    ow = row.get("owner")
+                    # the operator's chat and the operator's token sub are one person (#842)
+                    return ow == who.sub or (_is_op(ow) and _is_op(who.sub))
                 cur = row.get("parentID")
             return False
 
@@ -3928,7 +4015,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             if url is None:
                 return self._notfound()
             try:
-                with urllib.request.urlopen(urllib.request.Request(url, headers=_JWT.internal_headers()), timeout=45) as up:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=_SA.loopback_headers(_JWT.internal_headers())), timeout=45) as up:
                     body, status = up.read(), up.status
                     ctype = up.headers.get("Content-Type", "application/json")
             except urllib.error.HTTPError as e:
@@ -4650,9 +4737,10 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 _w = self._jwt_person()
                 _me = _w.sub if _w is not None else (
                     str(getattr(self, "_ui_speaker", "") or "") if getattr(self, "_ui_relay", False)
-                    else OWNER_SUB)                 # tokenless loopback = the seat owner
+                    else str(os.environ.get("MEMBRANE_OPERATOR") or OWNER_SUB))   # the seat token = the operator (#842)
                 if _me and not b.get("parentID"):       # #770: one chat per person
-                    _mine = [x for x in sessions.list() if str(x.get("owner") or "") == _me
+                    _mine = [x for x in sessions.list() if (str(x.get("owner") or "") == _me
+                                 or (_is_op(x.get("owner")) and _is_op(_me)))     # one operator (#842)
                              and not x.get("readonly") and not x.get("parentID")]
                     if _mine:
                         return self._json_out(_mine[-1])
