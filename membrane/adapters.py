@@ -176,42 +176,66 @@ def _call_receipt(est, obj_eid: str, call: str, rid, rc, head: str, result=None)
     est.upsert(obj, embedder=None)
 
 
+def _secret_args(v, path: str = "") -> list[str]:
+    """Secret-named keys anywhere in a call's arguments, as dotted paths (`conf.password`)."""
+    from . import writes as WR
+    out: list[str] = []
+    if isinstance(v, dict):
+        for k, x in v.items():
+            p = f"{path}.{k}" if path else str(k)
+            out += [p] if WR._SECRET.search(str(k)) else _secret_args(x, p)
+    elif isinstance(v, list):
+        for x in v:
+            out += _secret_args(x, path)
+    return out
+
+
 def _written_call(srv, est, ent, prop, new, by) -> None:
     """#956: `<method>.invoke = {object, call, request: {id, args}}` -- a dispatch trigger's write for a
-    request on `<object>.<call>`. Runs THIS method entity (no second lookup by name); a malformed request
-    runs nothing; secret-named args are refused (a written call's args are stored, so a secret can't be
-    both redacted and used). The receipt goes on the object, with the request's id."""
+    request on `<object>.<call>`. Runs THIS method entity (no second lookup by name). The invoke slot is
+    consumed on every path. An empty request (a cleared call path) does nothing and keeps the last
+    receipt; a malformed or refused one runs nothing and leaves a refusal receipt. Secret-named args, at
+    any depth, are refused (a written call's args are stored, so a secret can't be both redacted and
+    used), and the refused request is cleared from the call path so the secret is stored nowhere."""
     from . import night as N
-    from . import writes as WR
-    name = (ent.properties or {}).get("method_name")
-    obj, call, req = str(new.get("object") or ""), str(new.get("call") or ""), new.get("request")
-    if not name or not obj or not call.startswith("call:"):
-        return
-    if not isinstance(req, dict) or not str(req.get("id") or "").strip() or not isinstance(req.get("args", {}), dict):
-        _call_receipt(est, obj, call, (req or {}).get("id") if isinstance(req, dict) else "", 2,
-                      "a call request is {id, args}: nothing ran")
-        return
-    args = dict(req.get("args") or {})
-    secret = sorted(k for k in args if WR._SECRET.search(str(k)))
-    if secret:
-        _call_receipt(est, obj, call, req["id"], 2,
-                      f"refused: a written call can't carry secret-named args ({', '.join(secret)}); "
-                      "pass secrets through the model's own call instead")
-        return
-    why = N.direct_exec_refusal(est, obj, str(name))
-    if why:
-        _call_receipt(est, obj, call, req["id"], 2, why)
-        return
-    r = N.method_call(srv, est, getattr(srv, "efield", None), getattr(srv, "membrane", None),
-                      obj, str(name), args, method_eid=ent.eid)
-    head = (r.get("head") or r.get("error") or r.get("status") or "") if isinstance(r, dict) else str(r)
-    res = r.get("result") if isinstance(r, dict) else None
-    _call_receipt(est, obj, call, req["id"], _rc(r), head, result=res)
-    pp = ent.properties or {}
-    if pp.get(prop) == new:                      # the method's own invoke slot, consumed
-        pp[prop] = ""
-        ent.properties = pp
-        est.upsert(ent, embedder=None)
+    try:
+        name = (ent.properties or {}).get("method_name")
+        obj, call, req = str(new.get("object") or ""), str(new.get("call") or ""), new.get("request")
+        if not name or not obj or not call.startswith("call:") or req in ("", None):
+            return
+        rid = req.get("id") if isinstance(req, dict) else ""
+        if isinstance(req, dict) and req.get("refused"):
+            _call_receipt(est, obj, call, rid, 2, f"refused: {req['refused']}: nothing ran")
+            return
+        if not isinstance(req, dict) or not str(rid or "").strip() or not isinstance(req.get("args", {}), dict):
+            _call_receipt(est, obj, call, rid, 2, "a call request is {id, args}: nothing ran")
+            return
+        args = dict(req.get("args") or {})
+        secret = _secret_args(args)
+        if secret:
+            o = (est.docs or {}).get(obj)
+            if o is not None and (o.properties or {}).get(call) not in ("", None):
+                o.properties[call] = ""             # an empty request: the dispatch that follows is a no-op
+                est.upsert(o, embedder=None)
+            _call_receipt(est, obj, call, rid, 2,
+                          f"refused: a written call can't carry secret-named args ({', '.join(secret)}); "
+                          "pass secrets through the model's own call instead")
+            return
+        why = N.direct_exec_refusal(est, obj, str(name))
+        if why:
+            _call_receipt(est, obj, call, rid, 2, why)
+            return
+        r = N.method_call(srv, est, getattr(srv, "efield", None), getattr(srv, "membrane", None),
+                          obj, str(name), args, method_eid=ent.eid)
+        head = (r.get("head") or r.get("error") or r.get("status") or "") if isinstance(r, dict) else str(r)
+        res = r.get("result") if isinstance(r, dict) else None
+        _call_receipt(est, obj, call, rid, _rc(r), head, result=res)
+    finally:
+        pp = ent.properties or {}
+        if pp.get(prop) == new:                  # the method's own invoke slot, consumed
+            pp[prop] = ""
+            ent.properties = pp
+            est.upsert(ent, embedder=None)
 
 
 def _methods(srv, est, ent, prop, new, by) -> None:

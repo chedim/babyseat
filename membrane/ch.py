@@ -304,12 +304,31 @@ def _writable_inner(v, _depth: int = 3):
         return v
     if isinstance(v, list) and all(isinstance(x, (int, float)) and not isinstance(x, bool)
                                    and math.isfinite(float(x)) for x in v):
-        return [float(x) for x in v]
+        return list(v)                               # ints stay ints (Memo's review of #959)
     if isinstance(v, dict) and all(isinstance(k, str) for k in v) and _depth > 0:
         return {k: _writable_inner(x, _depth - 1) for k, x in v.items()}      # a call's arguments
     if isinstance(v, list) and _depth > 0:
         return [_writable_inner(x, _depth - 1) for x in v]
     raise Refused(f"cannot write a {type(v).__name__}")
+
+
+def _call_envelope(v: dict) -> dict:
+    """#956: a dispatch trigger's `<method>.invoke = {object, call, request}`. The envelope is not part
+    of the call's arguments, so it doesn't use their depth: object/call are scalars, and the request's
+    own fields get the full depth. A request that can't be written is not dropped into vm.errors (its
+    caller would wait on the id forever): it goes on as `{id, refused}` and the adapter leaves the
+    refusal's receipt."""
+    out = {k: _writable(x, 0) for k, x in v.items() if k != "request"}
+    req = v.get("request")
+    if isinstance(req, dict):
+        try:
+            req = {k: _writable(x) for k, x in req.items()}
+        except Refused as e:
+            req = {"id": str(req.get("id") or ""), "refused": str(e)}
+    else:
+        req = _writable(req, 0)
+    out["request"] = req
+    return out
 
 
 # ---- definitions -----------------------------------------------------------------------------
@@ -779,7 +798,9 @@ class VM:
             self.errors[tr.eid] = f"no target {tgt!r}"
             return
         try:
-            value = _writable(evaluate(expr, env))
+            value = evaluate(expr, env)
+            value = (_call_envelope(value) if prop == "invoke" and isinstance(value, dict) and "request" in value
+                     else _writable(value))
             if prop == "position" and (not isinstance(value, list) or
                                        (ent.position is not None and len(value) != len(ent.position))):
                 raise Refused("a position is a list of the field's dimension")

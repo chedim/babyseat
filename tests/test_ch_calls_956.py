@@ -146,6 +146,60 @@ def test_secret_named_args_are_refused_on_a_written_call(world):
     assert rec["id"] == "s1" and rec["rc"] == 2 and "secret" in rec["head"]
     assert not m.properties.get("runs")
     assert "abc123" not in str(g.properties.get("call:login_result"))
+    # Memo's review of 3c8f84f: the refused secret is stored nowhere, and the invoke slot is consumed
+    assert "abc123" not in str(g.properties.get("call:login"))
+    assert "abc123" not in str(m.properties.get("invoke")) and not m.properties.get("invoke")
+
+
+def test_a_secret_nested_inside_an_arg_is_refused_and_scrubbed(world):
+    est, vm = world
+    g = QuantumEntity(eid=MEMBRANE_NS + "Component:greeter", cls="Component", properties={"name": "greeter"})
+    est.upsert(g)
+    g = est.docs[g.eid]
+    m = _method(est, g.eid, "login", "echo {{conf}}")
+    _dispatch(vm, m, "login")
+    vm.drain()
+    _run(est, vm, g, "call:login", {"id": "s2", "args": {"conf": {"user": "bob", "password": "hunter2"}}})
+    rec = g.properties["call:login_result"]
+    assert rec["id"] == "s2" and rec["rc"] == 2 and "conf.password" in rec["head"]
+    assert not m.properties.get("runs")
+    assert "hunter2" not in str(g.properties) and "hunter2" not in str(m.properties)
+
+
+def test_a_call_with_an_object_argument_runs_or_gets_a_receipt(world):
+    """Memo's review: `args: {conf: {a: 1}}` used up the write depth (invoke -> request -> args) and
+    vanished into vm.errors -- no run, no receipt. The envelope doesn't count against the args' depth."""
+    est, vm = world
+    g = QuantumEntity(eid=MEMBRANE_NS + "Component:greeter", cls="Component", properties={"name": "greeter"})
+    est.upsert(g)
+    g = est.docs[g.eid]
+    m = _method(est, g.eid, "go", "echo {{conf}} {{nums}}")
+    _dispatch(vm, m, "go")
+    vm.drain()
+    _run(est, vm, g, "call:go", {"id": "d1", "args": {"conf": {"a": 1}, "nums": [1, 2]}})
+    rec = g.properties.get("call:go_result")
+    assert isinstance(rec, dict) and rec["id"] == "d1" and rec["rc"] == 0, (rec, vm.errors)
+    assert "1.0" not in rec["head"]                          # integers in lists stay integers
+    # too deep for the args' own limit: refused WITH a receipt, never silently
+    deep = {"a": {"b": {"c": {"d": 1}}}}
+    _run(est, vm, g, "call:go", {"id": "d2", "args": {"conf": deep}})
+    rec = g.properties.get("call:go_result")
+    assert isinstance(rec, dict) and rec["id"] == "d2" and rec["rc"] == 2, (rec, vm.errors)
+
+
+def test_clearing_a_call_path_keeps_the_last_receipt(world):
+    est, vm = world
+    g = QuantumEntity(eid=MEMBRANE_NS + "Component:greeter", cls="Component", properties={"name": "greeter"})
+    est.upsert(g)
+    g = est.docs[g.eid]
+    m = _method(est, g.eid, "go", "echo ok")
+    _dispatch(vm, m, "go")
+    vm.drain()
+    _run(est, vm, g, "call:go", {"id": "e1", "args": {}})
+    assert g.properties["call:go_result"]["rc"] == 0
+    _run(est, vm, g, "call:go", "")
+    assert g.properties["call:go_result"]["id"] == "e1" and g.properties["call:go_result"]["rc"] == 0
+    assert not m.properties.get("invoke")
 
 
 @pytest.mark.parametrize("bad", ["a.b", "x_result", "x_rc"])
