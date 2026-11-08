@@ -13,7 +13,7 @@ class TestUnsavedRecord(unittest.TestCase):
         b = object.__new__(CBLiteBackend)
         b.path = Path(tmp) / "db"
         b._pend_lock = threading.Lock()
-        b._pending = {k: () for k in pending}
+        b._pending = {k: (1, {"v": 1}) for k in pending}
         return b
 
     def test_left_writes_are_recorded_and_announced(self):
