@@ -371,6 +371,51 @@ class TestDrainFailures(unittest.TestCase):
         finally:
             b.close()
 
+    def _shut_unsaved(self, tmp, b, coll, key, doc):
+        from membrane import cblite as CB
+        b.upsert(coll, key, doc)
+        with mock.patch.object(b.db, "put_json", side_effect=CB.CBLException("busy")), \
+                mock.patch("sys.stderr", __import__("io").StringIO()):
+            b.close()
+
+    def test_the_record_keeps_the_values(self):
+        import json as _j
+        tmp, b = self._held()
+        self._shut_unsaved(tmp, b, "entity_states", "e9", {"origin": "o", "mass": 2.0})
+        rec = _j.loads((Path(tmp) / "db.unsaved.json").read_text())
+        it = rec["items"][0]
+        self.assertEqual((it["c"], it["k"], it["d"]["mass"]), ("entity_states", "e9", 2.0))
+        self.assertIsNotNone(it["o"])
+
+    def test_the_next_boot_reapplies_the_unsaved_values(self):
+        tmp, b = self._held()
+        self._shut_unsaved(tmp, b, "entity_states", "e9", {"origin": "o", "mass": 2.0})
+        b2 = CBLiteBackend(Path(tmp) / "db")
+        try:
+            self.assertEqual(b2.get("entity_states", "e9")["mass"], 2.0)
+            self.assertEqual(b2.recovered_at_boot["applied"], 1)
+        finally:
+            b2.close()
+
+    def test_a_newer_row_on_disk_beats_the_record(self):
+        import json as _j
+        tmp, b = self._held()
+        self._shut_unsaved(tmp, b, "entity_states", "e9", {"origin": "o", "mass": 2.0})
+        rp = Path(tmp) / "db.unsaved.json"
+        rec = _j.loads(rp.read_text())
+        old_o = rec["items"][0]["o"]
+        b0 = CBLiteBackend(Path(tmp) / "db")          # boot 1 applies it ...
+        b0.close()
+        rec["items"][0]["o"] = old_o - 1              # ... a record older than the disk row
+        rec["items"][0]["d"]["mass"] = 99.0
+        rp.write_text(_j.dumps(rec))
+        b2 = CBLiteBackend(Path(tmp) / "db")
+        try:
+            self.assertEqual(b2.get("entity_states", "e9")["mass"], 2.0)
+            self.assertEqual(b2.recovered_at_boot["stale"], 1)
+        finally:
+            b2.close()
+
     def test_a_newer_write_beats_the_requeued_one(self):
         from membrane import cblite as CB
         tmp, b = self._held()

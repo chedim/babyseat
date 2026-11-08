@@ -47,6 +47,14 @@ class TestTheNotices(unittest.TestCase):
         self.assertTrue(t.startswith(RS.SIGN))
         self.assertFalse(Path(srv.data_dir, RS.REASON_FILE).exists())        # consumed
 
+    def test_boot_reports_the_unsaved_writes_of_the_last_shutdown(self):
+        srv = _Srv()
+        Path(srv.data_dir, "x.cblite.unsaved.json").write_text(json.dumps(
+            {"ts": 1, "count": 3, "keys": ["a/1", "a/2", "a/3"], "applied": 2, "stale": 1}))
+        t = RS.boot_text(srv, now=1e9)
+        self.assertIn("3 writes unsaved", t)
+        self.assertIn("2 re-applied", t)
+
     def test_no_reason_is_unexpected(self):
         self.assertIn("not announced", RS.boot_text(_Srv(), now=1e9))
 

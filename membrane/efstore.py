@@ -1005,12 +1005,12 @@ class FileBackend(MemBackend):
         self._load_warm()
 
     def _load(self) -> None:
-        self.skipped_docs = {}      # coll -> corrupt journal lines dropped on replay (counted, not silent)
         """THE MIGRATION + REPLAY: a collection's .jsonl journal
         replays (last-line-wins); a legacy .json snapshot (no journal)
         loads AND MIGRATES on the first flush (the snapshot renamed
         .migrated -- its bytes survive). The events lane keeps its own
         log shape."""
+        self.skipped_docs = {}      # coll -> corrupt journal lines dropped on replay (counted, not silent)
         # 1. the events log (the original pattern) + its snapshot migration
         self._events_log = self.dir / "events.jsonl"
         events_snap = self.dir / "events.json"
