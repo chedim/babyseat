@@ -326,6 +326,7 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
 - **The VM.**
   - It hears every write (part A) and only queues it.
   - One worker thread drains the queue: the `changed` triggers on the written path, and level triggers re-read for every variable the written entity can bind.
+  - **Indexed by property (#956 stage 1):** a write on `<eid>.<prop>` visits only the `changed` triggers watching `<prop>` (plus every level trigger; `every` triggers are the sweep's). The index is rebuilt only when a trigger entity is written. With 1,000 `changed` triggers a write costs about 0.1 ms instead of about 11 ms.
   - The same worker runs the sweeps the thinker requests (`request_sweep`) for the geometric and timed watchers. All evaluation happens on one thread, under one lock.
   - One failing trigger never stops the others (`vm.errors`), and nothing runs while the seat is paused.
   - A firing writes through the store as `trigger:<eid>`, in the chain that caused it. A sweep starts a fresh chain per firing.
