@@ -57,6 +57,40 @@ class TestReloadMidTurn(unittest.TestCase):
             t.join(10)
         self.assertFalse(t.is_alive())
 
+        # the live stream keeps going: drain q, reduce like panel.js does
+        tp = [p for p in parts if p.get("type") == "text"]
+        self.assertGreaterEqual(len(tp), 1)
+        last = tp[-1]                       # the part still open: it gets the tail
+        hist = {p["id"]: p["text"] for p in tp}   # ordered by part
+        seen_tail = False
+        while True:
+            try:
+                ev = q.get(timeout=0.5)
+            except Exception:
+                break
+            if ev.get("type") == "message.part.delta" and ev.get("field", "text") == "text":
+                if ev["partID"] in hist:
+                    hist[ev["partID"]] += ev["delta"]
+                if " THE TAIL" in ev["delta"]:
+                    seen_tail = True
+                    self.assertEqual((ev["messageID"], ev["partID"]),
+                                     (last["messageID"], last["id"]))
+            elif ev.get("type") == "message.part.updated":
+                part = ev["part"]
+                if part.get("type") == "text":
+                    hist[part["id"]] = part["text"]     # updated replaces the part
+                    if " THE TAIL" in part["text"]:
+                        seen_tail = True
+                        self.assertEqual((part["messageID"], part["id"]),
+                                         (last["messageID"], last["id"]))
+        self.assertTrue(seen_tail, "no event carried the tail")
+        # the server trims the edges of each text part, so the two parts
+        # (before / after the tool card) meet without the space: compare the
+        # words, which still catches any duplicated or missing text
+        final = " ".join(v.strip() for v in hist.values())
+        self.assertEqual(final, "looking at the logs and then more THE TAIL")
+        self.assertEqual(final.count("THE TAIL"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

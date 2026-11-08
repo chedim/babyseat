@@ -2818,8 +2818,16 @@ class TurnRunner:
                 # THE RELOAD MID-TURN (#954): the running reply is saved as it
                 # grows (upsert by id), so a fresh client's history load shows
                 # the text and tool cards so far; the live stream carries the rest
+                # the snapshot holds only words already PUBLISHED: text still
+                # held in _pend goes out as a delta later, and a history that
+                # already had it would show it twice
                 try:
-                    self.messages.append(sid, dict(a_info), copy.deepcopy(parts))
+                    snap = copy.deepcopy(parts)
+                    for sp in snap:
+                        held = (_pend.get(sp.get("id")) or ["", 0.0])[0]
+                        if held and str(sp.get("text") or "").endswith(held):
+                            sp["text"] = sp["text"][:len(sp["text"]) - len(held)]
+                    self.messages.append(sid, dict(a_info), snap)
                 except Exception:
                     pass
 
