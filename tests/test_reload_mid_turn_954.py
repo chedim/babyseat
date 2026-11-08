@@ -92,5 +92,36 @@ class TestReloadMidTurn(unittest.TestCase):
         self.assertEqual(final.count("THE TAIL"), 1)
 
 
+class TestMidTurnLineSurvivesSnap(unittest.TestCase):
+    def test_post_line_mid_turn_survives_later_snapshots_and_the_end(self):
+        mid_turn, release = threading.Event(), threading.Event()
+
+        def ladder(body):
+            raise AssertionError("buffered fallback unexpected")
+
+        def stream(body, on_event):
+            on_event("text", "first words")
+            mid_turn.set()
+            release.wait(10)
+            on_event("text", " and more words")
+            return {"choices": [{"message": {"content": "first words and more words"}}]}
+        ladder.stream = stream
+
+        hub = MS.SSEHub()
+        r = MS.TurnRunner(hub, MS.SessionStore(), MS.MessageStore(), ladder,
+                          lambda *a: "ok", system="", model="m", tools=[])
+        sid = r.sessions.create(title="t")["id"]
+        t = threading.Thread(target=r.run, args=(sid, "go"), daemon=True)
+        t.start()
+        self.assertTrue(mid_turn.wait(10))
+        MS.post_line(r, sid, "MEMBRANE LINE")
+        release.set()
+        t.join(10)
+        self.assertFalse(t.is_alive())
+        texts = [p.get("text", "") for row in r.messages.list(sid)
+                 for p in row.get("parts") or [] if p.get("type") == "text"]
+        self.assertTrue(any("MEMBRANE LINE" in x for x in texts), texts)
+
+
 if __name__ == "__main__":
     unittest.main()
