@@ -338,9 +338,26 @@ def note(field, ev: dict) -> None:
             st["pending"].append({k: ev.get(k) for k in NOTE_KEYS})
 
 
-def reset(field) -> None:
-    """Forget the models (efield.forget / rebuild): the next of() builds them again from what is left."""
+_HELD: dict = {}
+
+
+def hold(field) -> None:
+    """A forget / rebuild is running (they may nest): no build until all are done; a banner meanwhile keeps the
+    pre-#942 order."""
     with _LOCK:
+        _HELD[id(field)] = _HELD.get(id(field), 0) + 1
+        _OF.pop(id(field), None)
+
+
+def reset(field) -> None:
+    """A forget / rebuild is done: drop the models; once none runs, the next of() builds them again from what
+    is left."""
+    with _LOCK:
+        d = _HELD.get(id(field), 0) - 1
+        if d > 0:
+            _HELD[id(field)] = d
+        else:
+            _HELD.pop(id(field), None)
         _OF.pop(id(field), None)
 
 
@@ -396,6 +413,8 @@ def of(field, wait: bool = True) -> Replies | None:
     """The field's reply models. The first build reads the history (counted) and the saved ledger; with wait=False it
     runs in the background and None comes back until it is done. After that each call adds only the messages
     the field handed over (note), never a scan. None after a failed build (tried again at the next call)."""
+    if _HELD.get(id(field)):
+        return None
     st = _state(field)
     if not st["done"].is_set():
         if not wait:
@@ -420,10 +439,10 @@ def annotate(field, rows: list, text: str, wait: bool = False) -> list:
     the three keys, so the banner uses its pre-#942 weights -- while the models are building, after a failed
     build, or on any error."""
     try:
-        st = _state(field)
         R = of(field, wait=wait)
         if R is None:
             return rows
+        st = _OF[id(field)]
         out = []
         with st["lock"]:
             for r in rows:

@@ -165,7 +165,8 @@ def rank(rows: list[dict], text: str, weights: dict | None = None, rerank: bool 
     Rows without the reply models' scores (#942: still building, or a failed
     build) are ordered by the pre-#942 pair, which was fitted without them."""
     scored_by_replies = any(any(k in r for k in REPLY_KEYS) for r in rows)
-    if not scored_by_replies and (weights is None or weights is DEFAULT_WEIGHTS):
+    fitted_with_replies = all(k in (weights or DEFAULT_WEIGHTS) for k in REPLY_KEYS)
+    if not scored_by_replies and fitted_with_replies:  # whatever object the caller passes (load_weights copies)
         weights, rr_weights = LEGACY_WEIGHTS, LEGACY_RERANK_WEIGHTS
     else:
         rr_weights = RERANK_WEIGHTS

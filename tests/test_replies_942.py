@@ -193,6 +193,25 @@ class TestReview(unittest.TestCase):
         RP.reset(f)                                                   # a restart
         self.assertEqual(dict(RP.of(f).ledger.c), live)               # the record comes back from the field
 
+    def test_2b_no_rebuild_while_a_forget_runs(self):
+        f = field_with(TALK)
+        RP.of(f)
+        seen = []
+        real = RP._read
+
+        def spy(field, st):
+            seen.append(any(t == "the party was at the lake house" for _k, d in field.b.scan("events", {})
+                            for t in [d.get("text")]))
+            return real(field, st)
+        RP._read = spy
+        try:
+            num = next(d["n"] for _k, d in f.b.scan("events", {}) if "lake house" in (d.get("text") or ""))
+            f.forget(num)
+            RP.of(f)
+        finally:
+            RP._read = real
+        self.assertEqual(seen, [False])                               # rebuilt once, after the delete
+
     def test_2_forget_drops_the_models_so_they_count_what_is_left(self):
         f = field_with(TALK)
         n0 = RP.of(f).n
@@ -204,8 +223,13 @@ class TestReview(unittest.TestCase):
         rows = [{"sim": 0.62, "answer": ["The sky is blue today."], "a_n": [1], "q_n": 1, "speaker": "Melanie"},
                 {"sim": 0.60, "answer": ["Caroline adopted a dog named Max, a rescue dog."], "a_n": [50], "q_n": 50,
                  "speaker": "Caroline"}]
-        got = RB.rank(rows, "what dog did Caroline adopt?", rerank=False)
-        self.assertEqual(got[0]["a_n"][0], 50)
+        f = field_with([("Ann", "hello there friend")])
+        for w in (None, RB.load_weights(f)):                         # the banner passes load_weights' copy
+            got = RB.rank(rows, "what dog did Caroline adopt?", w, rerank=False)
+            self.assertEqual(got[0]["a_n"][0], 50)
+            self.assertAlmostEqual(got[0]["score"], RB.score(got[0]["feat"], RB.LEGACY_WEIGHTS))
+        RB.save_weights(f, {**RB.DEFAULT_WEIGHTS, "overlap": 5.0})   # a seat's own full refit: still legacy here
+        got = RB.rank(rows, "what dog did Caroline adopt?", RB.load_weights(f), rerank=False)
         self.assertAlmostEqual(got[0]["score"], RB.score(got[0]["feat"], RB.LEGACY_WEIGHTS))
 
     def test_4_scoring_and_a_drain_never_overlap(self):
