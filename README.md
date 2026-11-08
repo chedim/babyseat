@@ -608,7 +608,7 @@ fit on conversations 2-9 (`DEFAULT_WEIGHTS` comment in `recall_banner.py`), so
 **Reply models (#942, 2026-11-08).** The scorer and the reranker were refit
 with three more features from per-person reply models (`replies.py`) on the
 same cached pools: on conversations 0-1 (230 questions), the full order goes
-hit@1 73 -> 84, hit@8 173 -> 177, hit@20 187 -> 187.
+hit@1 73 -> 83, hit@8 173 -> 173, hit@20 187 -> 190.
 
 On the held-out conversations the reranker lifts hit@8 from 168 to 179 of 231
 (+4.8 points), same code and questions, rerank on against off; median ask

@@ -894,6 +894,11 @@ class EntityField:
             else:
                 ev["status"] = "embedded"
             self.b.upsert("events", key, ev)
+            try:                                      # #942: the reply models hear each message as it is written
+                from . import replies as _RP          # (no scan of the events later: cold collections read every row)
+                _RP.note(self, ev)
+            except Exception:
+                pass
             if sids:
                 try:                                  # the word index (#429), if live
                     from . import lexical as LX

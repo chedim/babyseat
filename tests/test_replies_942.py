@@ -25,8 +25,17 @@ TALK = [("Ann", "where did you go camping"), ("Bob", "we went camping at the lak
         ("Ann", "where did you hike"), ("Bob", "we hiked at the lake trail")]
 
 
+# everyday talk in another chat, so the toy's content words are rarer than the talk's typical word (keywords),
+# as they are on a real seat
+FILLER = [(("Ann", "Bob")[i % 2], f"i think it is a good day and you know the {w} was fine for me")
+          for i, w in enumerate("game film book song walk lunch bus train tea class show park call nap ride meal "
+                                "news shop show trip".split() * 2)]
+
+
 def replies(talk=TALK, session="chat-1"):
     R = RP.Replies()
+    for who, text in FILLER:
+        R.add("chat-0", who, text)
     for who, text in talk:
         R.add(session, who, text)
     return R
@@ -72,7 +81,9 @@ class TestLedger(unittest.TestCase):
     def test_every_prediction_is_recorded_hits_and_misses_alike(self):
         R = replies()
         # a prediction needs something else the speaker said to rank against: every reply but Bob's first
-        predicted = sum(1 for i, (w, _t) in enumerate(TALK) if i > 0 and any(x == w for x, _ in TALK[:i]))
+        seq = [("chat-0", w) for w, _t in FILLER] + [("chat-1", w) for w, _t in TALK]
+        predicted = sum(1 for i, (c, w) in enumerate(seq)
+                        if i > 0 and seq[i - 1][0] == c and any(x == w for _c, x in seq[:i]))
         steps = R.ledger.c[()][2]
         self.assertEqual(steps, predicted)                           # one record per prediction, misses included
         self.assertLess(R.ledger.c[()][1], steps)                    # ... and some of them are misses, kept
@@ -127,6 +138,25 @@ class TestField(unittest.TestCase):
         RP.ready(f, timeout=10)
         self.assertIn("listener", RP.annotate(f, rows, "where did you hike", wait=False)[0])
 
+    def test_after_the_first_build_new_messages_arrive_without_scanning_the_field(self):
+        f = field_with(TALK[:4])
+        R = RP.of(f)
+        n0 = R.n
+        real_scan = f.b.scan
+
+        def no_events_scan(coll, *a, **k):
+            if coll == "events":
+                raise AssertionError("a banner must not scan the field's events (cold collections read every row)")
+            return real_scan(coll, *a, **k)
+        f.write_events([ST.Event(stream="discourse", role="user", ts=1_800_000_200.0, text="where is the beach")],
+                       session="s:1:a")
+        f.process()                                   # the field tells the models (replies.note) as it writes
+        f.b.scan = no_events_scan
+        try:
+            self.assertEqual(RP.of(f).n, n0 + 1)
+        finally:
+            f.b.scan = real_scan
+
     def test_banner_rows_carry_the_three_features(self):
         f = field_with(TALK)
         rows = [{"sim": 0.6, "answer": ["we hiked at the lake trail"], "a_n": [1], "q_n": 1, "speaker": "model"},
@@ -140,7 +170,7 @@ class TestField(unittest.TestCase):
         for w in (RB.DEFAULT_WEIGHTS, RB.RERANK_WEIGHTS):
             self.assertTrue(w["listener"] > 0 and w["about"] > 0 and w["said"] > 0)
         same = {"sim": 0.6, "answer": ["I painted a lake."], "q_n": None, "speaker": "Caroline"}
-        rows = [dict(same, a_n=[1]), dict(same, a_n=[2], listener=1.0, about=1.0)]
+        rows = [dict(same, a_n=[1]), dict(same, a_n=[2], listener=3.0, about=3.0)]
         self.assertEqual(RB.rank(rows, "what did Caroline paint?", rerank=False)[0]["a_n"][0], 2)
 
 

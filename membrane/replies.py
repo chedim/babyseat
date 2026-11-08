@@ -81,6 +81,7 @@ class Replies:
         self._co: dict = {}                  # a -> Counter of words sharing a message
         self.ledger = Ledger()
         self.rng = random.Random(seed)
+        self._cut_v, self._cut_n = 0, -1
 
     # --- counting -----------------------------------------------------------------------------------------
     @property
@@ -178,9 +179,25 @@ class Replies:
             t = (self._rev_of(b, who)[a] + t) / (self.nb[who][b] + 1)
         return t
 
+    def _cut(self) -> int:
+        """KEYWORDS (the reader's keyword() rule): a word is a keyword when fewer messages hold it than hold the
+        talk's typical word by occurrence (the occurrence-weighted median). Recomputed as the talk grows."""
+        if self._cut_n != self.n:
+            dfs = sorted(len(v) for v in self.post.values())
+            tot, acc, cut = sum(dfs), 0, 0
+            for d in reversed(dfs):
+                acc += d
+                if acc >= tot / 2:
+                    cut = d
+                    break
+            self._cut_v, self._cut_n = cut, self.n
+        return self._cut_v
+
     def _known(self, ws) -> set:
-        """Words the talk has seen: a word never seen carries no evidence either way and stays out of the means."""
-        return {w for w in ws if w in self.post}
+        """The words a score reads: seen in the talk (a word never seen carries no evidence) and keywords. Common
+        words sit near chance and would cost a walk over thousands of messages each (#942: 88 s banners)."""
+        cut = self._cut()
+        return {w for w in ws if w in self.post and len(self.post[w]) < cut}
 
     def _listen(self, q: set, who, m: set) -> float:
         q, m = self._known(q), self._known(m)
@@ -212,7 +229,7 @@ class Replies:
     def about(self, q: str, text: str) -> float:
         """What gets said where q's things are named (people's names left out). Positive log lift."""
         names = {x.lower() for w in self.people for x in TOK.findall(w.lower())}
-        qa = [a for a in words(q) if a not in names and a in self.post]
+        qa = [a for a in self._known(words(q)) if a not in names]
         m = self._known(words(text))
         if not qa or not m:
             return 0.0
@@ -282,6 +299,28 @@ def _read(field, st) -> None:
         R.add(str(ev.get("session") or ""), _who(ev), ev.get("text") or "", predict=st["built"])
 
 
+def note(field, ev: dict) -> None:
+    """The field calls this as it writes an event (efield.process): queued, read at the next of(). Before the
+    first build starts nothing is kept -- the build reads the history itself."""
+    st = _OF.get(id(field))
+    if st is not None and ev.get("stream") in TALK_STREAMS:
+        with st["plock"]:
+            st["pending"].append(dict(ev))
+
+
+def _drain(st) -> None:
+    """The queued messages after the last one read, in order; each counted once (the build's watermark)."""
+    with st["plock"]:
+        q, st["pending"] = st["pending"], []
+    R = st["R"]
+    for ev in sorted(q, key=lambda e: int(e.get("seq") or 0)):
+        sq = int(ev.get("seq") or 0)
+        if sq <= st["seq"] or not (ev.get("text") or "").strip():
+            continue
+        st["seq"] = sq
+        R.add(str(ev.get("session") or ""), _who(ev), ev.get("text") or "", predict=True)
+
+
 def of(field, wait: bool = True) -> Replies | None:
     """The field's reply models. The first build reads the history (counted, not predicted); with wait=False it
     runs in the background and None comes back until it is done (the banner keeps today's order meanwhile).
@@ -291,7 +330,8 @@ def of(field, wait: bool = True) -> Replies | None:
     with _LOCK:
         st = _OF.get(id(field))
         if st is None:
-            st = {"R": Replies(), "seq": -1, "field": field, "built": False, "thread": None, "done": threading.Event()}
+            st = {"R": Replies(), "seq": -1, "field": field, "built": False, "thread": None, "done": threading.Event(),
+                  "pending": [], "plock": threading.Lock()}
             _OF[id(field)] = st
 
             def build():
@@ -312,7 +352,7 @@ def of(field, wait: bool = True) -> Replies | None:
             return None
         st["done"].wait()
     with st["lock"]:
-        _read(field, st)
+        _drain(st)                                  # never a scan after the build: the field tells us (note)
     return st["R"]
 
 

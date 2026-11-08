@@ -238,10 +238,14 @@ field holds for the person's **latest message** (no model call, no new lane).
    discourse message as the reply to the one before it in its chat, per speaker,
    backing off to everyone's counts; a failure ledger records which model
    predicted each live message right and weighs the two by it (misses kept, never
-   pruned; predicted messages are never counted). They are built from the field's
-   history in the background at first use; until then the banner keeps the six
-   older features. On LoCoMo conversations 0-1 (held out, 230 questions) the full
-   order went hit@1/@3/@8/@20 73/137/173/187 -> 84/147/177/187.
+   pruned; predicted messages are never counted). The scores read keywords only
+   (words rarer than the talk's typical word): common words sit near chance and
+   would cost a walk over thousands of messages each. The models are built from the
+   field's history in the background at first use (until then the banner keeps the
+   six older features); after that the field hands each new message over as it is
+   written (`replies.note`), never a scan of the events. On LoCoMo conversations
+   0-1 (held out, 230 questions) the full order went hit@1/@3/@8/@20
+   73/137/173/187 -> 83/140/173/190.
    No length feature (on a seat long rows are tool dumps). The weights live in the field, not in code:
    collection `config`, key `recall_scorer` (`recall_banner.load_weights` /
    `save_weights`). The starting weights are #664's arm 4 (pointwise logistic regression, fit
