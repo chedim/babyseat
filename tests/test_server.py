@@ -634,8 +634,8 @@ class TestHttpSurface(unittest.TestCase):
             data=json.dumps(body).encode() if body is not None else None,
             headers={"Content-Type": "application/json"})
         if auth:
-            r.add_header("Authorization",
-                         "Basic " + base64.b64encode(b"opencode:pw").decode())
+            from membrane import seatauth
+            r.add_header("Authorization", "Bearer " + seatauth.ensure())
         try:
             with urllib.request.urlopen(r, timeout=10) as resp:
                 return resp.status, json.loads(resp.read())
@@ -711,8 +711,7 @@ class TestHttpSurface(unittest.TestCase):
     def test_sse_first_event_server_connected(self):
         r = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/event",
-            headers={"Authorization": "Basic " + base64.b64encode(
-                b"opencode:pw").decode()})
+            headers={"Authorization": "Bearer " + __import__("membrane.seatauth", fromlist=["x"]).ensure()})
         resp = urllib.request.urlopen(r, timeout=5)
         try:
             buf = ""
@@ -769,8 +768,7 @@ class TestHttpSurface(unittest.TestCase):
     def _first_sse_frame(self, route: str) -> str:
         r = urllib.request.Request(
             f"http://127.0.0.1:{self.port}{route}",
-            headers={"Authorization": "Basic " + base64.b64encode(
-                b"opencode:pw").decode()})
+            headers={"Authorization": "Bearer " + __import__("membrane.seatauth", fromlist=["x"]).ensure()})
         resp = urllib.request.urlopen(r, timeout=5)
         try:
             buf = ""

@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from membrane import seatauth as SA
 
 from membrane import self_api as API
 from membrane import self_loop as SL
@@ -250,8 +251,13 @@ def _child_env(tmp):
            if not k.startswith("MEMBRANE_") and k not in ("PYTHONSTARTUP",)}
     env.update({"MEMBRANE_DATA_DIR": str(tmp / "data"), "MEMBRANE_STORE": "json", "MEMBRANE_RUN": "0", "MEMBRANE_JWT": "0",
                 "HOME": str(tmp / "home"), "PYTHONDONTWRITEBYTECODE": "1", SP.FLAG: "1",
-                "PYTHONPATH": str(Path(__file__).resolve().parent.parent)})
+                "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
+                "MEMBRANE_SEAT_TOKEN_FILE": str(SA.token_file())})      # the seat credential, as a real child inherits it
+    SA.ensure()
     (tmp / "home").mkdir(exist_ok=True)
+    from membrane import seatauth as _SA        # one seat: the child shares the parent's seat token
+    _SA.ensure()
+    env[_SA.FILE_ENV] = str(_SA.token_file())
     return env
 
 
@@ -334,3 +340,28 @@ def test_a_reach_posted_to_the_child_is_on_its_record_its_recent_and_through_a_s
             finally:
                 httpd.shutdown()
                 httpd.server_close()
+
+
+@pytest.mark.tokenless
+def test_the_control_server_writes_need_the_seat_credential(tmp_path):
+    """B3 (#842): JWT off, a bare loopback POST to /control, /chat-in, /reach is 401; the seat token passes."""
+    from membrane import seatauth as SA
+    with _open_env():
+        os.environ["MEMBRANE_DATA_DIR"] = str(tmp_path / "d")
+        srv = _felt()
+        fac = SP.Facade(SP.SeatClient("http://127.0.0.1:9"), Path(srv._models_path).parent)
+        SL._rt(fac)["mode"] = "on"
+        httpd = SP.serve(fac)
+        try:
+            port = httpd.server_address[1]
+            tok = SA.seat_token()
+            assert tok
+            for p, b in (("/control", {"mode": "watch"}), ("/chat-in", {"person": "p1"}),
+                         ("/reach", {"eid": "x"})):
+                assert _call(port, p, b)[0] == 401, p
+                assert _call(port, p, b, tok="wrong")[0] == 401, p
+            assert _call(port, "/control", {"mode": "watch"}, tok=tok)[0] == 200
+            assert _call(port, "/reach", {"eid": "x"}, tok=tok)[0] == 200
+        finally:
+            httpd.shutdown()
+            httpd.server_close()

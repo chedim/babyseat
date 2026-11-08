@@ -16,9 +16,8 @@ THE LAN GUARD: standalone's pages answer a private, loopback or tailnet
 address (a person types their name in the page). Anything forwarded by a proxy
 (X-Forwarded-For, Forwarded) or from a public address gets a 403, never a login
 prompt -- unless it carries the seat token. THE OWNER'S DOOR (#253,
-seatauth.py) sits in front of every write: from another machine the page reads
-freely and asks once for the seat token (POST /ui/login sets the same HttpOnly
-cookie JWT mode uses); localhost needs nothing. /ui/conf says `auth: "seat"`
+seatauth.py) sits in front of every write: from every machine the page asks once for the seat token (POST /ui/login sets the same HttpOnly
+cookie JWT mode uses); localhost needs the token too. /ui/conf says `auth: "seat"`
 and whether this caller is the `owner`.
 
 JWT MODE (jwtauth.py, docs/auth.md; off unless MEMBRANE_JWT_SECRET[_FILE] is
@@ -184,12 +183,14 @@ def find_file(name: str) -> Path | None:
     return assets.ensure(name, S.data_dir() / "assets")
 
 
-def _send_file(handler, p: Path) -> None:
+def _send_file(handler, p: Path, cookie: str = "") -> None:
     size = p.stat().st_size
     handler.send_response(200)
     handler.send_header("Content-Type", TYPES.get(p.suffix, "application/octet-stream"))
     handler.send_header("Content-Length", str(size))
     handler.send_header("Cache-Control", "public, max-age=604800" if p.suffix in BIG else "no-cache")
+    if cookie:
+        handler.send_header("Set-Cookie", cookie)
     handler.end_headers()
     if handler.command == "HEAD":
         return
@@ -443,13 +444,34 @@ def intercept(handler) -> bool:
         handler._ui_trusted = True         # lan, or the token checked above
         handler._ui_relay = True           # the page's request: its person's sessions (server.py)
         _who = token_person(handler)
-        handler._ui_speaker = _who.sub if _who is not None else speaker_of(handler)
+        # S1: the CREDENTIAL decides who speaks, never the header. The seat token
+        # (cookie/basic/bearer) is the operator; only a tokenless LAN visitor
+        # keeps the name they gave.
+        if _who is not None:
+            handler._ui_speaker = _who.sub
+        elif not jwt and _SA.presented_seat_token(handler, cookie=True, basic=True):
+            handler._ui_speaker = str(os.environ.get("MEMBRANE_OPERATOR") or "owner")
+        else:
+            handler._ui_speaker = speaker_of(handler)
         return False
     if handler.command not in ("GET", "HEAD") and path not in ("/ui/stt", "/ui/log"):
         _json(handler, {"error": "method not allowed"}, 405)
         return True
     if path in ("/", "/membrane", "/index.html"):
-        _send_file(handler, UI_DIR / "index.html")
+        # the page arrives with the seat's cookie already minted (#842): no login prompt
+        _ck = ""
+        if _SA.is_loopback(handler):
+            if not jwt:
+                _ck = _SA.login_cookie(_SA.ensure(), _JWT.request_is_https(handler.headers))
+            else:                          # JWT mode: an owner token, minted for this machine's page
+                _cfg = _JWT.config()
+                if _cfg is not None:
+                    _who = str(os.environ.get("MEMBRANE_OPERATOR") or "owner")
+                    _tok = _JWT.mint(_cfg.secret, _who, name=_who, ttl=7 * 86400,
+                                     issuer=_cfg.issuer, audience=_cfg.audience)
+                    _ck = _JWT.login_cookie(_tok, _JWT.verify_configured(_tok, _cfg),
+                                            _JWT.request_is_https(handler.headers))
+        _send_file(handler, UI_DIR / "index.html", _ck)
     elif path == "/favicon.ico":
         _send_file(handler, UI_DIR / "favicon.svg")
     elif path == "/ui/conf":

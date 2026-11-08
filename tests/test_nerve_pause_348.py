@@ -193,12 +193,14 @@ class TestTheRoute(_Env):
         self.assertFalse(self.srv.paused)
         self.assertEqual(_audit(self.srv), [])
 
+    @pytest.mark.tokenless
     def test_off_box_the_toggle_needs_the_seat_token(self):
         tok = SA.ensure()
         code, _ = self._go("POST", {"paused": True}, offbox=True)
         self.assertEqual(code, 401)
         self.assertFalse(self.srv.paused)
-        self.assertEqual(self._go("GET", offbox=True)[0], 200)                 # a read stays open
+        self.assertEqual(self._go("GET", offbox=True)[0], 401)                 # a read needs the token too (#842)
+        self.assertEqual(self._go("GET", offbox=True, headers={"Authorization": f"Bearer {tok}"})[0], 200)
         code, out = self._go("POST", {"paused": True}, offbox=True, headers={"Authorization": f"Bearer {tok}"})
         self.assertEqual((code, out["paused"]), (200, True))
         self.assertTrue(self.srv.paused)

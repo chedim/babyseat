@@ -4247,9 +4247,10 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
 def _is_operator(owner: str) -> bool:
     """A chat owner who is the seat's operator: the tokenless `owner`, or MEMBRANE_OPERATOR's
     sub (#797's one-chat migration reads the same). Its on/off values (0/1) are never a sub."""
-    from .server import OWNER_SUB
-    op = os.environ.get("MEMBRANE_OPERATOR", "").strip()
-    return owner == OWNER_SUB or (bool(op) and op not in ("0", "1", "false", "true") and owner == op)
+    from .server import _is_op
+    return _is_op(owner)
+
+
 
 def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what
@@ -4469,9 +4470,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         from . import seatauth as _SA
         if not _JWT.gate(self):
             return False
-        # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, an OFF-BOX
-        # caller's writes (/v1 + /api/chat|generate turns included) need the
-        # seat token; reads and localhost stay open
+        # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, every
+        # caller (localhost too) needs the seat token; only GET /api/tags is open
         return _SA.gate(self, _SA.proxy_is_write(self.command, self.path.split("?")[0]))
 
     def _stamp_chat_identity(self) -> None:

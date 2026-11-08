@@ -1,5 +1,4 @@
-"""JWT mode: a bare loopback caller (this machine, no forwarding header, no
-token) is the seat itself, as with JWT off; anything else still needs a token."""
+"""JWT mode: a bare loopback caller with no token is refused like any other."""
 import io
 import os
 import unittest
@@ -36,13 +35,12 @@ class LoopbackIsLocal(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def test_a_bare_loopback_caller_passes_as_the_seat(self):
+    def test_a_bare_loopback_caller_needs_a_token(self):
         for ip in ("127.0.0.1", "::1"):
             h = _H(ip)
-            self.assertTrue(J.gate(h))
-            self.assertTrue(h._identity.internal)
-            self.assertTrue(SA.owner(h))
-            self.assertIsNone(UI.token_person(h))     # keeps its own speaker line
+            self.assertFalse(J.gate(h))
+            self.assertEqual(h.code, 401)
+            self.assertIsNone(h._identity)
 
     def test_a_forwarded_loopback_caller_needs_a_token(self):
         h = _H(headers={"X-Forwarded-For": "10.0.0.5"})
@@ -64,18 +62,6 @@ class LoopbackIsLocal(unittest.TestCase):
         h = _H(headers={"Cookie": f"membrane_jwt={a}; membrane_jwt={b}"})
         self.assertFalse(J.gate(h, cookie=True))
         self.assertEqual(h.code, 401)
-
-    def test_the_page_asks_a_local_callers_name(self):
-        h = _H()
-        h.path = "/ui/conf"
-        self.assertTrue(J.gate(h, cookie=True))
-        seen = {}
-        with mock.patch.object(UI, "_json", lambda _h, c: seen.update(c)), \
-                mock.patch.object(UI, "conf", lambda: {}), \
-                mock.patch.object(UI, "enabled", lambda: True):
-            UI.intercept(h)
-        self.assertEqual(seen.get("auth"), "jwt")
-        self.assertIsNone(seen.get("who"))
 
     def test_a_person_token_on_loopback_is_that_person(self):
         h = _H(headers={"Authorization": "Bearer " + J.mint(SECRET, "alice", name="Alice")})

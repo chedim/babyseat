@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 from . import jwtauth as _JWT
+from . import seatauth as _SA
 
 
 def field_id_for(field_path: str | Path) -> str:
@@ -172,7 +173,7 @@ class Peers:
         q = urllib.parse.quote(situation[:400])
         url = f"http://127.0.0.1:{int(peer.get('port', 0))}/membrane/ask?q={q}"
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=_JWT.internal_headers()), timeout=timeout) as r:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=_SA.loopback_headers(_JWT.internal_headers())), timeout=timeout) as r:
                 data = json.loads(r.read())
         except Exception:
             return None
