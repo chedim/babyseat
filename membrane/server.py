@@ -2814,9 +2814,45 @@ class TurnRunner:
             _plock = threading.RLock()
             _ptimer = {"t": None, "closed": False}
 
+            def _snap():
+                # THE RELOAD MID-TURN (#954): the running reply is saved as it
+                # grows (upsert by id), so a fresh client's history load shows
+                # the text and tool cards so far; the live stream carries the rest
+                # the snapshot holds only words already PUBLISHED: text still
+                # held in _pend goes out as a delta later, and a history that
+                # already had it would show it twice
+                try:
+                    # shallow-copy each part (only "text" is rewritten below):
+                    # a deepcopy of every tool output per flush was O(turn)
+                    snap = [dict(sp) for sp in parts]
+                    # parts injected into this row by append_part (post_line,
+                    # the watchdog error part) live only in the stored row:
+                    # keep them, as the final merge does, or this upsert
+                    # erases them
+                    have = {sp.get("id") for sp in snap}
+                    stored = self.messages.get_msg(sid, aid) or {}
+                    snap.extend(dict(x) for x in stored.get("parts") or []
+                                if x.get("id") not in have)
+                    for sp in snap:
+                        held = (_pend.get(sp.get("id")) or ["", 0.0])[0]
+                        if held and str(sp.get("text") or "").endswith(held):
+                            sp["text"] = sp["text"][:len(sp["text"]) - len(held)]
+                    self.messages.append(sid, dict(a_info), snap)
+                except Exception:
+                    pass
+
             def _flush(pid, _pend=_pend):
                 e = _pend.get(pid)
                 if e and e[0]:
+                    # the snapshot is saved BEFORE the delta goes out. This
+                    # assumes a reloading client loads history FIRST and
+                    # subscribes after: it then gets this batch from the
+                    # delta, never twice. The history lags the stream by at
+                    # most this one batch (and a paused model leaves it
+                    # unshown until the part ends) -- saving after publishing
+                    # would instead drop the batch for a client that
+                    # loaded history between the two.
+                    _snap()
                     self.hub.publish({"type": "message.part.delta", "sessionID": sid, "messageID": aid,
                                       "partID": pid, "field": "text", "delta": e[0]})
                     e[0] = ""
@@ -2869,11 +2905,13 @@ class TurnRunner:
                         # it go out and close now; the call shows running
                         _close_text()
                         _agent_tool_start(val)
+                        _snap()
                         return False
                     if kind == "tool":
                         # a tool Claude ran in its own loop (#389): shown, never re-run
                         _close_text()
                         _agent_tool_part(val)
+                        _snap()
                         return False
                     p = _live.get(kind)
                     if p is None:
