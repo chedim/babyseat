@@ -277,7 +277,8 @@ def attach(srv) -> None:
     vm.learner = L.Learner(vm, srv.ch_purse, granted=lambda path: granted(srv, path),
                            suggest=lambda tr, path, value: _suggest(srv, tr, path, value),
                            adopted=lambda w: adopted(srv, w), toy_open=lambda name: toy_open(srv, name),
-                           moved=lambda eid: _reached(srv, eid))
+                           moved=lambda eid: _reached(srv, eid),
+                           llm_works=llm_works)
 
 
 def _reached(srv, eid: str) -> None:
@@ -364,6 +365,13 @@ TURNS_KEPT = 512                    # turns / chats remembered (a buffer bound)
 SUGGEST_VALUE_MAX = 60              # a suggested string value shown inline up to this; longer: as data
 _TURNS: "collections.OrderedDict[str, str]" = collections.OrderedDict()
 _LK = threading.Lock()
+
+
+def llm_works(chain_id) -> bool:
+    """#576 H: True while the chain is an LLM turn's (noted by TurnRunner.run): a habit
+    then only suggests, it does not act."""
+    with _LK:
+        return bool(chain_id) and chain_id in _TURNS
 
 
 def note_turn(chain_id: str, conv: str) -> None:
