@@ -118,12 +118,22 @@ class TestDirectSources(unittest.TestCase):
             ST.Event(stream="discourse", role="user", ts=T0 + 2,
                      text="a reading changed on c:license: the project license is MIT now"),
             ST.Event(stream="discourse", role="user", ts=T0 + 3,
-                     text="<membrane-context> the project license is MIT </membrane-context>")], session="s:1:0")
+                     text="<membrane-context> the project license is MIT </membrane-context>"),
+            # Memo's second re-review: more seat heads, tagged as the old rows are (author_of on the text)
+            *[ST.Event(stream="discourse", role="user", ts=T0 + 4 + i, text=t, author=ST.author_of(t)) for i, t in
+              enumerate(["[watch] c:license: the project license is MIT now",
+                         "YOUR WAKE w12: check the project license is MIT",
+                         "goal membrane::goal:ab12 fulfilled: the project license is MIT",
+                         "decided: license-card = MIT, the project license",
+                         "[goal] confirm the project license is MIT",
+                         "[decision] project license = MIT",
+                         "Branch: the project license is MIT"])]], session="s:1:0")
         f.process()
         direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
         self.assertEqual(direct, [])
         self.assertEqual(ST.author_of("You are a WORKER on task k5 of goal g1."), "seat")   # new records: tagged
         self.assertEqual(ST.author_of("a model call (sonnet) finished"), "seat")
+        self.assertEqual(ST.author_of("goal for today: tidy the license file"), "person")   # a person's "goal"
 
     def test_a_persons_earlier_ask_restating_this_one_is_not_an_answer(self):
         f = _field()

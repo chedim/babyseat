@@ -79,6 +79,12 @@ SEAT_PREFIXES = {
     "goal planted": "seat", "the field moved": "seat", "watch event (": "seat",
     "watch attached:": "seat", "watch detached:": "seat", "REMINDER": "seat",
     "a seat restart": "seat", "[speaker lane]": "seat",
+    # Memo's second re-review of #950: the speech lane's and watch agents' heads
+    # (speech.py _escalation / _goal_fulfilled / [decision], watch_agents wakes and
+    # decision cards, thinker branches). `goal membrane::` (not a bare `goal `) so a
+    # person's "goal for today ..." stays theirs.
+    "[watch] ": "seat", "YOUR WAKE": "seat", "goal membrane::": "seat",
+    "decided: ": "seat", "[goal]": "seat", "[decision]": "seat", "Branch: ": "seat",
 }
 # On a question-like turn, observation evidence (tool results, readings,
 # receipts) ranks this much below what was said and decided (approved).
