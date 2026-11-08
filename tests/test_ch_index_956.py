@@ -95,3 +95,65 @@ def test_a_literal_dotted_eid_is_indexed_by_its_property(vm):
     seen = _visits(vm)
     f.properties["a"] = 2; vm.est.upsert(f); vm.drain()
     assert seen == ["lit"] and f.properties.get("b") == 1
+
+
+def _scenario(vm, steps, index_on=True):
+    """Run steps on a toy and return whether the mixed trigger fired, index on or off."""
+    if not index_on:
+        vm._relevant = lambda prop: vm.triggers()
+    out = []
+    for s in steps:
+        s(vm)
+        vm.drain()
+    return out
+
+
+def _mixed_run(index_on, steps):
+    est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
+    v = CH.VM(est)
+    v.attach()
+    if not index_on:
+        v._relevant = lambda prop, v=v: v.triggers()
+    t = QuantumEntity(eid=MEMBRANE_NS + "toy:die", cls="toy", properties={"name": "die", "a": 1, "z": 0})
+    t.position = [0.0, 0.0, 1.0]
+    est.upsert(t)
+    die = est.docs[t.eid]
+    v.define("mix", when=[["changed", "?x.a"], ["pos", "?x", 0.1]], where=[["isa", "?x", "toy"]],
+             write=["?x.fired", "1 + (x.fired or 0)"])
+    v.sweep(); v.drain()
+    for step in steps:
+        if step == "move":
+            die.position = [float(len(die.properties)), 0.0, 0.0]
+        elif step == "a":
+            die.properties["a"] = int(die.properties.get("a") or 0) + 1
+        else:
+            die.properties["z"] = int(die.properties.get("z") or 0) + 1
+        est.upsert(die)
+        v.drain()
+    v.detach()
+    return die.properties.get("fired")
+
+
+@pytest.mark.parametrize("steps", [["z", "move", "a"], ["a", "move", "z", "a"]])
+def test_a_changed_trigger_with_pos_keeps_todays_firings(steps):
+    """Memo's review: `pos` / `around` are pulses that advance per-binding state when evaluated, and before
+    the index every write evaluated them. A trigger mixing `changed` with one of them stays always-visited,
+    so its firings are the same with and without the index."""
+    assert _mixed_run(True, steps) == _mixed_run(False, steps)
+
+
+def test_triggers_on_one_write_run_in_definition_order(vm):
+    """Memo's review: a `changed` trigger defined before a level trigger reads the value before the
+    level trigger writes it, as before the index."""
+    s = _ent(vm.est, "s", cls="sensor", temp=10, note=0)
+    vm.define("first_changed", when=[["changed", "?x.temp"]], where=[["isa", "?x", "sensor"]],
+              write=["?x.seen", "x.note"])
+    vm.define("then_level", when=[["above", "x.temp", 25]], where=[["isa", "?x", "sensor"]],
+              write=["?x.note", "99"])
+    vm.sweep(); vm.drain()
+    seen = _visits(vm)
+    s.properties["temp"] = 30
+    vm.est.upsert(s)
+    vm.drain()
+    assert seen[:2] == ["first_changed", "then_level"]
+    assert s.properties.get("seen") == 0                       # read before the level trigger wrote 99
