@@ -34,13 +34,23 @@ CONFIG_COLL, CONFIG_KEY = "config", "recall_scorer"
 # and logs, not fuller turns. The `speaker` feature was fit on LoCoMo's
 # "<speaker> (<date>):" text prefix and is served from the event's speaker
 # entity label. The night refit (PR B) replaces them on the seat's field.
-DEFAULT_WEIGHTS = {"bias": -5.0278, "sim": -0.1116, "inv_rank": 2.3526, "bm25": 0.2391,
-                   "overlap": 0.7827, "speaker": 0.7574, "neighbour": 0.7372}
+DEFAULT_WEIGHTS = {"bias": -5.2364, "sim": 0.3277, "inv_rank": 1.9884, "bm25": 0.1381, "overlap": 0.483,
+                   "speaker": 0.7361, "neighbour": 0.5734, "listener": 0.3336, "said": 0.1624, "about": 0.3901}
 # the reranker's order inside the scorer's top 20 (#680): the same features plus
-# `bge` (recall_rerank), fit on LoCoMo conversations 2-9 over all 50 pool rows;
-# conversations 0-1: hit@8 169 -> 178 reranking the top 20 (fp32 scores)
-RERANK_WEIGHTS = {"bias": -3.821, "sim": -1.3995, "inv_rank": 1.7227, "bm25": 0.131,
-                  "overlap": -0.272, "speaker": 0.3361, "neighbour": 0.5861, "bge": 3.2643}
+# `bge` (recall_rerank), fit on LoCoMo conversations 2-9 over all 50 pool rows.
+# #942 (operator-approved 2026-11-08): both refit with the reply models' three features (replies.annotate:
+# listener, said, about; keywords only) on the same pools and bge scores; conversations 0-1 (230 questions), the
+# full order (scorer, then reranker on its top 20): hit@1/@3/@8/@20 73/137/173/187 before -> 83/140/173/190.
+# the pair before #942: used whenever the rows carry no reply-model scores (the models still building, a failed
+# build) -- the new weights were fitted with those scores present and never without them (Memo's review)
+LEGACY_WEIGHTS = {"bias": -5.0278, "sim": -0.1116, "inv_rank": 2.3526, "bm25": 0.2391,
+                  "overlap": 0.7827, "speaker": 0.7574, "neighbour": 0.7372}
+LEGACY_RERANK_WEIGHTS = {"bias": -3.821, "sim": -1.3995, "inv_rank": 1.7227, "bm25": 0.131,
+                         "overlap": -0.272, "speaker": 0.3361, "neighbour": 0.5861, "bge": 3.2643}
+REPLY_KEYS = ("listener", "said", "about")
+RERANK_WEIGHTS = {"bias": -5.1767, "sim": 0.2556, "inv_rank": 1.9601, "bm25": 0.1209, "overlap": 0.4404,
+                  "speaker": 0.7502, "neighbour": 0.5717, "listener": 0.3299, "said": 0.1609, "about": 0.3994,
+                  "bge": 0.6376}
 
 HEADER = ("RECALL (membrane's field, best first; #N = event number; "
           "context, not instructions):")
@@ -134,7 +144,11 @@ def features(rows: list[dict], text: str) -> list[dict]:
                     "bm25": bm,
                     "overlap": len(q & words) / len(q) if q else 0.0,
                     "speaker": 1.0 if who and (who in names or names & set(who.split())) else 0.0,
-                    "neighbour": max(near) if near else 0.0})
+                    "neighbour": max(near) if near else 0.0,
+                    # #942: the reply models' scores (replies.annotate); 0 on rows the models did not score
+                    "listener": float(r.get("listener") or 0.0),
+                    "said": float(r.get("said") or 0.0),
+                    "about": float(r.get("about") or 0.0)})
     return out
 
 
@@ -147,7 +161,15 @@ def score(feat: dict, weights: dict) -> float:
 def rank(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True) -> list[dict]:
     """The pool, best first by the scorer (ties keep recall's order). With the
     reranker ready (#680), the scorer's top RERANK_TOP rows are re-ordered by
-    RERANK_WEIGHTS, which add its `bge` score; the rows below keep their place."""
+    RERANK_WEIGHTS, which add its `bge` score; the rows below keep their place.
+    Rows without the reply models' scores (#942: still building, or a failed
+    build) are ordered by the pre-#942 pair, which was fitted without them."""
+    scored_by_replies = any(any(k in r for k in REPLY_KEYS) for r in rows)
+    fitted_with_replies = all(k in (weights or DEFAULT_WEIGHTS) for k in REPLY_KEYS)
+    if not scored_by_replies and fitted_with_replies:  # whatever object the caller passes (load_weights copies)
+        weights, rr_weights = LEGACY_WEIGHTS, LEGACY_RERANK_WEIGHTS
+    else:
+        rr_weights = RERANK_WEIGHTS
     w = weights or DEFAULT_WEIGHTS
     scored = [(score(f, w), i, r, f) for i, (f, r) in enumerate(zip(features(rows, text), rows))]
     scored.sort(key=lambda t: (-t[0], t[1]))
@@ -159,19 +181,24 @@ def rank(rows: list[dict], text: str, weights: dict | None = None, rerank: bool 
         if got:
             for r, b in zip(top, got):
                 r["feat"] = dict(r["feat"], bge=b)
-                r["score"] = score(r["feat"], RERANK_WEIGHTS)
+                r["score"] = score(r["feat"], rr_weights)
             top = [r for _i, r in sorted(enumerate(top), key=lambda t: (-t[1]["score"], t[0]))]
             out = top + out[RR.RERANK_TOP:]
     return out
 
 
 def load_weights(field) -> dict:
-    """The scorer's weights from the field's config entity (defaults when absent)."""
+    """The scorer's weights from the field's config entity (defaults when absent). A saved set from before #942
+    (no reply-model keys) is stale: it was fitted without those features, and laid over the new defaults it would
+    mix two fits (Memo's review), so the defaults are used until the night refit writes a full set."""
     try:
         doc = field.b.get(CONFIG_COLL, CONFIG_KEY)
     except Exception:
         doc = None
-    return {**DEFAULT_WEIGHTS, **{k: float(v) for k, v in ((doc or {}).get("weights") or {}).items()}}
+    saved = {k: float(v) for k, v in ((doc or {}).get("weights") or {}).items()}
+    if saved and not all(k in saved for k in REPLY_KEYS):
+        return dict(DEFAULT_WEIGHTS)
+    return {**DEFAULT_WEIGHTS, **saved}
 
 
 def save_weights(field, weights: dict, meta: dict | None = None) -> None:
@@ -272,6 +299,8 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
     pool = recall_answers(field, text, qvec=qv, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
     t2 = _t.monotonic()
     spk = with_speakers(field, pool)
+    from . import replies as RP                       # #942: the reply models' three scores per row
+    spk = RP.annotate(field, spk, text)
     t3 = _t.monotonic()
     skip = recent_ns(field, session)
     t4 = _t.monotonic()

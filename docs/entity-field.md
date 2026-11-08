@@ -230,7 +230,27 @@ field holds for the person's **latest message** (no model call, no new lane).
 3. **Order:** a pointwise logistic scorer over features recall already has:
    cosine, 1/rank, BM25 and content-word overlap with the message, speaker
    (the row's event was said by a person the message names: the event's own
-   speaker entity), the best similarity among neighbouring turns in the pool.
+   speaker entity), the best similarity among neighbouring turns in the pool,
+   and (#942) the reply models' three scores (`replies.py`): `listener` (would
+   the row's speaker's message be heard as the reply to this message), `said`
+   (how close the row is to its speaker's predicted reply) and `about` (what gets
+   said where the message's things are named). The reply models count every
+   discourse message as the reply to the one before it in its chat, per speaker,
+   backing off to everyone's counts; a failure ledger records which model
+   predicted each live message right and weighs the two by it (misses kept, never
+   pruned; predicted messages are never counted; the record is saved in the field,
+   `config/replies_ledger`, so it survives restarts, and `listener` and `said` keep
+   separate records). The scores read keywords only
+   (words rarer than the talk's typical word): common words sit near chance and
+   would cost a walk over thousands of messages each. The models are built from the
+   field's history in the background at first use (until then the banner keeps the
+   pre-#942 weights, fitted without these scores, and so does a failed build,
+   which is tried again at the next banner); after that the field hands each new
+   message over as it is embedded (`replies.note`), never a scan of the events;
+   `forget` and `rebuild` drop the models so they count what is left. Saved
+   weights from before #942 (no reply-model keys) are treated as stale. On LoCoMo conversations
+   0-1 (held out, 230 questions) the full order went hit@1/@3/@8/@20
+   73/137/173/187 -> 83/140/173/190.
    No length feature (on a seat long rows are tool dumps). The weights live in the field, not in code:
    collection `config`, key `recall_scorer` (`recall_banner.load_weights` /
    `save_weights`). The starting weights are #664's arm 4 (pointwise logistic regression, fit

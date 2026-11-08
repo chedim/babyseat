@@ -605,6 +605,11 @@ fit on conversations 2-9 (`DEFAULT_WEIGHTS` comment in `recall_banner.py`), so
 | conversations 2-9, in-sample (1,305) | 968 / 1,305 = 74.2% | not run | not re-run |
 | all conversations (1,536) | 1,136 / 1,536 = 74.0% | not run | 65.4% |
 
+**Reply models (#942, 2026-11-08).** The scorer and the reranker were refit
+with three more features from per-person reply models (`replies.py`) on the
+same cached pools: on conversations 0-1 (230 questions), the full order goes
+hit@1 73 -> 83, hit@8 173 -> 173, hit@20 187 -> 190.
+
 On the held-out conversations the reranker lifts hit@8 from 168 to 179 of 231
 (+4.8 points), same code and questions, rerank on against off; median ask
 latency 401 ms against 118 ms. At hit@20 it does not help (175 on, 176 off,

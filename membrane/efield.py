@@ -894,6 +894,11 @@ class EntityField:
             else:
                 ev["status"] = "embedded"
             self.b.upsert("events", key, ev)
+            try:                                      # #942: the reply models hear each message as it is embedded
+                from . import replies as _RP          # (so no banner scans the events for new ones)
+                _RP.note(self, ev)
+            except Exception:
+                pass
             if sids:
                 try:                                  # the word index (#429), if live
                     from . import lexical as LX
@@ -1599,6 +1604,11 @@ class EntityField:
     def rebuild(self) -> int:
         """Wipe this origin's states and deltas and re-apply its events in
         seq order: the escape hatch for any parameter change (no re-embed)."""
+        try:                                          # #942: no reply-model build while this runs
+            from . import replies as _RP
+            _RP.hold(self)
+        except Exception:
+            pass
         for coll in ("entity_states", "entity_deltas"):
             for k, _ in list(self.b.scan(coll, {"origin": self.origin})):
                 self.b.delete(coll, k)
@@ -1932,6 +1942,11 @@ class EntityField:
         claims, and recompute the entities it touched from their remaining
         deltas. The recompute uses today's stream backgrounds (rebuild() is
         the exact path)."""
+        try:                                          # #942: no reply-model build while this runs
+            from . import replies as _RP
+            _RP.hold(self)
+        except Exception:
+            pass
         hit = self.event_by_number(n)
         if hit is None:
             return None
@@ -2031,6 +2046,11 @@ class EntityField:
     def forget_many(self, nums: list[int], rebuild_over: int = 200) -> list[dict]:
         """forget() for several events; past rebuild_over it tombstones them
         all and rebuilds the origin once (cheaper than per-entity recomputes)."""
+        try:                                          # #942: no reply-model build while this runs
+            from . import replies as _RP
+            _RP.hold(self)
+        except Exception:
+            pass
         if len(nums) <= rebuild_over:
             return [self.forget(n) or {"n": n, "missing": True} for n in nums]
         out = []
@@ -2713,3 +2733,25 @@ def write_soon(fld, evs: list, session: str = "") -> None:
     fld.write_events(evs, session=session)
     if getattr(getattr(fld, "emb", None), "model", "?") != "?" or not hasattr(fld, "emb"):
         fld.process(limit=8)
+
+
+def _replies_reset_after(fn):
+    """#942: forget / forget_many / rebuild hold the reply models while they run (EntityField's own first lines)
+    and drop them when done, so the next build counts only what is left."""
+    import functools
+
+    @functools.wraps(fn)
+    def run(self, *a, **k):
+        try:
+            return fn(self, *a, **k)
+        finally:
+            try:
+                from . import replies as _RP
+                _RP.reset(self)
+            except Exception:
+                pass
+    return run
+
+
+for _name in ("forget", "forget_many", "rebuild"):
+    setattr(EntityField, _name, _replies_reset_after(getattr(EntityField, _name)))
