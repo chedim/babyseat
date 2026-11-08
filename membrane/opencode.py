@@ -2533,6 +2533,13 @@ def main() -> None:
                     print("[seat] restart cut by the lease: a fresh seat is starting", file=sys.__stderr__)
             except Exception as e:
                 print(f"[seat] relaunch after the cut failed ({e})", file=sys.__stderr__)
+            try:                                   # the cut loses the drain's last writes: record them (PR 948)
+                _b = getattr(getattr(srv, "efield", None), "b", None)
+                _rec = getattr(_b, "_record_unsaved", None)
+                if _rec is not None:
+                    _rec(lock_timeout=2.0)
+            except Exception as e:
+                print(f"[seat] unsaved record at the cut failed ({e})", file=sys.__stderr__)
             os._exit(70)
         _teardown_halt = threading.Timer(TEARDOWN_LEASE_S, _lease_cut)
         _teardown_halt.start()
