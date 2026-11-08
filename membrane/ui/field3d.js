@@ -794,7 +794,7 @@ function rocketOrigin(run, posOf) { return (run && posOf && posOf(run.root)) || 
 function rocketZ(run, now) { return Math.max(0, now - ((run && run.ts) || now)) * ROCKET_SPEED; }
 const WORK_ANSWERED = new Set(["decided", "closed"]);
 const WORK_FINISHED = new Set(["fulfilled", "done", "dropped", "cancelled"]);
-const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓", wait: "⏳" };
+const WORK_GLYPH = { goal: "🎯", task: "🔧", decision: "❓", wait: "⏳", watch: "👁" };
 
 /** #772: route work edges by e.dash -- one line object per dash pattern ("" = solid), so goals sharing a colour still differ on screen */
 function workDashGroups(edges) {
