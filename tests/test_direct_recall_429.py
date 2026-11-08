@@ -4,8 +4,10 @@ The ask path finds a person's earlier asks like this one and returns what
 followed them. Most facts sit elsewhere: in the model's replies to other
 asks, in learn notes, in ingested docs and in the code. Recall also
 searches those directly by similarity to the ask and merges them with the
-ask path. A person's lines, receipts, notifications, sensor readings and
-observations are never a direct answer."""
+ask path. Receipts, notifications, sensor readings and observations are never
+a direct answer. A PERSON'S OWN LINES ARE (operator, 2026-11-08: "yes, of
+course. hotfix it"): what someone said ("I moved to Denver") is where their
+facts live; only a line restating the ask is not an answer."""
 
 import sys
 import unittest
@@ -33,7 +35,8 @@ def _texts(rows):
 
 class TestApprovedValues(unittest.TestCase):
     def test_answer_roles(self):
-        self.assertEqual(set(EB.DIRECT_ROLES), {"model", "note", "doc", "code"})
+        self.assertEqual(set(EB.DIRECT_ROLES), {"model", "note", "doc", "code", "user"})
+        self.assertEqual(EB.DIRECT_LABEL["user"], "person")
 
 
 class TestDirectSources(unittest.TestCase):
@@ -70,7 +73,7 @@ class TestDirectSources(unittest.TestCase):
         rows = EB.recall_answers(f, Q, k=8, sim_min=0)
         self.assertEqual({r["role"] for r in rows if r.get("via") == "direct"}, {"code", "doc"})
 
-    def test_never_a_person_a_receipt_or_an_observation(self):
+    def test_a_persons_line_answers_but_never_a_receipt_or_an_observation(self):
         f = _field()
         rc = ST.Event(stream="discourse", role="user", ts=T0,
                       text="[membrane] job #2 finished: the project license check ran ok.")
@@ -81,6 +84,15 @@ class TestDirectSources(unittest.TestCase):
         f.write_events(ST.split_turn("", "", results=[("c1", "read", {"path": "LICENSE"},
                                                         "which license does the project use: text")],
                                      ts=T0 + 9), session="s:1:2")
+        f.process()
+        direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
+        self.assertEqual([r["role"] for r in direct], ["user"])            # the person's line, nothing else
+        self.assertIn("MIT", _texts(direct))
+
+    def test_a_persons_earlier_ask_restating_this_one_is_not_an_answer(self):
+        f = _field()
+        f.write_events([ST.Event(stream="discourse", role="user", ts=T0, text="Which license does the project use?")],
+                       session="s:1:0")
         f.process()
         direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
         self.assertEqual(direct, [])

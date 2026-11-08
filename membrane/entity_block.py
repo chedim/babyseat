@@ -316,11 +316,20 @@ def past_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAST_
 # THE DIRECT PATH (#429): most facts were never the answer to an earlier
 # ask like this one -- they sit in a reply to some other ask, a learn note,
 # an ingested doc or the code. These roles are searched by similarity to
-# the ask itself. A person's lines (the ask path's), the receipts,
-# notifications and sensor readings that ride the user role, and
-# observations are never a direct answer.
-DIRECT_ROLES = ("model", "note", "doc", "code")
-DIRECT_LABEL = {"model": "reply", "note": "note", "doc": "doc", "code": "code", "tool": "tool"}
+# the ask itself. A PERSON'S OWN LINES are searched too (operator, 2026-11-08:
+# what someone said is where their facts live); the receipts, notifications
+# and sensor readings that ride the user role, and observations, are never a
+# direct answer, and a person's line restating the ask is the ask, not an answer.
+DIRECT_ROLES = ("model", "note", "doc", "code", "user")
+DIRECT_LABEL = {"model": "reply", "note": "note", "doc": "doc", "code": "code", "tool": "tool", "user": "person"}
+
+
+def _direct_ok(d: dict) -> bool:
+    """A direct answer's role: the roles above, and on the user role only what a person wrote."""
+    role = d.get("role")
+    if role not in DIRECT_ROLES:
+        return False
+    return role != "user" or ST.event_author(d) == "person"
 # TOOL OUTPUTS (#429 PR 3): a tool result's chunks (streams.tool_chunks)
 # answer question-like asks only, and at most this many of them enter the
 # top k, so a pile of near-identical log reads cannot push out what was
@@ -375,7 +384,7 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
     # near any ask naming her and outranked the turn that held the answer.
     machine_cache: dict = {}
     live = [(key, d) for key, d in evs.items()
-            if d.get("role") in DIRECT_ROLES and d.get("status") == "applied"
+            if _direct_ok(d) and d.get("status") == "applied"
             and not _title_like(d) and not _to_a_machine(field, d, machine_cache)]
     vecs = G.event_vecs(field, live)            # stored (#690), else one batch (hotfix)
     for key, d in live:
@@ -394,6 +403,7 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
         sids = list(dict.fromkeys(d.get("sids") or []))
         got = field.b.get_multi("sentences", sids)
         reply = d.get("role") == "model"
+        person = d.get("role") == "user"
         scored = []
         for order, sid in enumerate(sids):
             x = str((got.get(sid) or {}).get("text") or "")
@@ -402,6 +412,8 @@ def direct_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAS
             sc = float(unit(got[sid]["vec"]) @ qv)
             if reply and (len(x.split()) < 5 or sc >= ECHO_COS or _RESTATE.match(x)):
                 continue                        # the ask restated, not answered
+            if person and sc >= ECHO_COS:
+                continue                        # the person asking it again, not an answer
             scored.append((sc, order, x))
         top = sorted(sorted(scored, key=lambda t: -t[0])[:n_sent], key=lambda t: t[1])
         if not top or max(_best, max(t[0] for t in top)) < sim_min:
@@ -487,8 +499,9 @@ def _answer_role(field, d: dict | None, tools_ok: bool) -> str | None:
         return None
     if d.get("stream") == "observation":
         return "tool" if tools_ok and d.get("outcome") != "call-only" else None
-    if d.get("role") in DIRECT_ROLES and d.get("status") == "applied" and not _title_like(d):
-        return d["role"]
+    if d.get("role") in DIRECT_ROLES and d.get("role") != "user" and d.get("status") == "applied" \
+            and not _title_like(d):                  # a person's lines join the direct lane only (2026-11-08):
+        return d["role"]                             # here they would crowd the newest-24 entity pool
     return None
 
 
