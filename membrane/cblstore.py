@@ -408,6 +408,7 @@ class CBLiteBackend(MemBackend):
         begin/purge/commit re-queues the whole batch -- nothing is lost."""
         with self._pend_lock:
             todo, self._pending = self._pending, {}
+            self._inflight = todo                  # the lease cut records the batch being saved too (PR 948)
         if not todo:
             return 0
         failed: list = []
@@ -435,7 +436,9 @@ class CBLiteBackend(MemBackend):
                 failed = list(todo.items())
         if failed:
             self._requeue(failed)
+            self._inflight = {}
         else:
+            self._inflight = {}
             self._fails = 0
             self._retry_at = 0
         return len(todo) - len(failed)
@@ -730,15 +733,23 @@ class CBLiteBackend(MemBackend):
         except Exception:
             pass
 
-    def _record_unsaved(self) -> None:
+    def _record_unsaved(self, lock_timeout=None) -> None:
         """Issue #927: a shutdown whose last drain still left writes pending
         must not lose them silently -- write what was left to a record file
         beside the database, say so on stderr (the operator's log), and keep
         the list in `unsaved_at_close`."""
-        with self._pend_lock:
-            left = sorted(f"{c}/{k}" for (c, k) in self._pending)
-            items = [{"c": c, "k": k, "o": v[0], "d": v[1]}
-                     for (c, k), v in sorted(self._pending.items())]
+        # the lease cut passes a bound: a drain hung on the lock must not hang the record too
+        got = self._pend_lock.acquire() if lock_timeout is None \
+            else self._pend_lock.acquire(timeout=lock_timeout)
+        try:
+            snap = dict(getattr(self, "_inflight", None) or {})
+            snap.update(self._pending)             # a newer pending write wins over the batch in flight
+        finally:
+            if got:
+                self._pend_lock.release()
+        left = sorted(f"{c}/{k}" for (c, k) in snap)
+        items = [{"c": c, "k": k, "o": v[0], "d": v[1]}
+                 for (c, k), v in sorted(snap.items())]
         self.unsaved_at_close = left
         if not left:
             return
