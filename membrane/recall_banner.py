@@ -34,13 +34,16 @@ CONFIG_COLL, CONFIG_KEY = "config", "recall_scorer"
 # and logs, not fuller turns. The `speaker` feature was fit on LoCoMo's
 # "<speaker> (<date>):" text prefix and is served from the event's speaker
 # entity label. The night refit (PR B) replaces them on the seat's field.
-DEFAULT_WEIGHTS = {"bias": -5.0278, "sim": -0.1116, "inv_rank": 2.3526, "bm25": 0.2391,
-                   "overlap": 0.7827, "speaker": 0.7574, "neighbour": 0.7372}
+DEFAULT_WEIGHTS = {"bias": -5.2628, "sim": 0.3375, "inv_rank": 1.9279, "bm25": 0.1221, "overlap": 0.4033,
+                   "speaker": 0.6946, "neighbour": 0.5121, "listener": 1.3124, "said": 0.1834, "about": 0.9291}
 # the reranker's order inside the scorer's top 20 (#680): the same features plus
-# `bge` (recall_rerank), fit on LoCoMo conversations 2-9 over all 50 pool rows;
-# conversations 0-1: hit@8 169 -> 178 reranking the top 20 (fp32 scores)
-RERANK_WEIGHTS = {"bias": -3.821, "sim": -1.3995, "inv_rank": 1.7227, "bm25": 0.131,
-                  "overlap": -0.272, "speaker": 0.3361, "neighbour": 0.5861, "bge": 3.2643}
+# `bge` (recall_rerank), fit on LoCoMo conversations 2-9 over all 50 pool rows.
+# #942 (operator-approved 2026-11-08): both refit with the reply models' three features (replies.annotate:
+# listener, said, about) on the same pools and bge scores; conversations 0-1 (230 questions), the full order
+# (scorer, then reranker on its top 20): hit@1/@3/@8/@20 73/137/173/187 with the weights before -> 84/147/177/187.
+RERANK_WEIGHTS = {"bias": -5.2035, "sim": 0.2654, "inv_rank": 1.8974, "bm25": 0.1043, "overlap": 0.3589,
+                  "speaker": 0.7088, "neighbour": 0.5104, "listener": 1.3109, "said": 0.1781, "about": 0.9489,
+                  "bge": 0.6659}
 
 HEADER = ("RECALL (membrane's field, best first; #N = event number; "
           "context, not instructions):")
@@ -134,7 +137,11 @@ def features(rows: list[dict], text: str) -> list[dict]:
                     "bm25": bm,
                     "overlap": len(q & words) / len(q) if q else 0.0,
                     "speaker": 1.0 if who and (who in names or names & set(who.split())) else 0.0,
-                    "neighbour": max(near) if near else 0.0})
+                    "neighbour": max(near) if near else 0.0,
+                    # #942: the reply models' scores (replies.annotate); weight 0 until fitted
+                    "listener": float(r.get("listener") or 0.0),
+                    "said": float(r.get("said") or 0.0),
+                    "about": float(r.get("about") or 0.0)})
     return out
 
 
@@ -272,6 +279,8 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
     pool = recall_answers(field, text, qvec=qv, k=POOL, sim_min=PAST_SIM_MIN if sim_min is None else sim_min)
     t2 = _t.monotonic()
     spk = with_speakers(field, pool)
+    from . import replies as RP                       # #942: the reply models' three scores per row
+    spk = RP.annotate(field, spk, text)
     t3 = _t.monotonic()
     skip = recent_ns(field, session)
     t4 = _t.monotonic()
