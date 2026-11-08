@@ -190,13 +190,22 @@ def _secret_args(v, path: str = "") -> list[str]:
     return out
 
 
+def _clear_call(est, obj_eid: str, call: str) -> None:
+    """#956: empty a refused request from the call path: the dispatch that follows is a no-op."""
+    o = (est.docs or {}).get(obj_eid)
+    if o is not None and (o.properties or {}).get(call) not in ("", None):
+        o.properties[call] = ""
+        est.upsert(o, embedder=None)
+
+
 def _written_call(srv, est, ent, prop, new, by) -> None:
     """#956: `<method>.invoke = {object, call, request: {id, args}}` -- a dispatch trigger's write for a
     request on `<object>.<call>`. Runs THIS method entity (no second lookup by name). The invoke slot is
     consumed on every path. An empty request (a cleared call path) does nothing and keeps the last
     receipt; a malformed or refused one runs nothing and leaves a refusal receipt. Secret-named args, at
     any depth, are refused (a written call's args are stored, so a secret can't be both redacted and
-    used), and the refused request is cleared from the call path so the secret is stored nowhere."""
+    used), and the refused request is cleared from the call path so the secret is stored nowhere; so is
+    any request refused before that check (too deep to write, malformed), which may hold one too."""
     from . import night as N
     try:
         name = (ent.properties or {}).get("method_name")
@@ -205,18 +214,17 @@ def _written_call(srv, est, ent, prop, new, by) -> None:
             return
         rid = req.get("id") if isinstance(req, dict) else ""
         if isinstance(req, dict) and req.get("refused"):
+            _clear_call(est, obj, call)         # unwritable, so never secret-checked: it may hold one
             _call_receipt(est, obj, call, rid, 2, f"refused: {req['refused']}: nothing ran")
             return
         if not isinstance(req, dict) or not str(rid or "").strip() or not isinstance(req.get("args", {}), dict):
+            _clear_call(est, obj, call)         # malformed, so never secret-checked: it may hold one
             _call_receipt(est, obj, call, rid, 2, "a call request is {id, args}: nothing ran")
             return
         args = dict(req.get("args") or {})
         secret = _secret_args(args)
         if secret:
-            o = (est.docs or {}).get(obj)
-            if o is not None and (o.properties or {}).get(call) not in ("", None):
-                o.properties[call] = ""             # an empty request: the dispatch that follows is a no-op
-                est.upsert(o, embedder=None)
+            _clear_call(est, obj, call)
             _call_receipt(est, obj, call, rid, 2,
                           f"refused: a written call can't carry secret-named args ({', '.join(secret)}); "
                           "pass secrets through the model's own call instead")

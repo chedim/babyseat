@@ -166,6 +166,24 @@ def test_a_secret_nested_inside_an_arg_is_refused_and_scrubbed(world):
     assert "hunter2" not in str(g.properties) and "hunter2" not in str(m.properties)
 
 
+@pytest.mark.parametrize("req", [
+    {"id": "s3", "args": {"conf": {"x": {"y": {"z": {"password": "hunter2"}}}}}},   # too deep to write
+    {"args": {"password": "hunter2"}},                                              # malformed: no id
+    {"id": "s4", "args": [{"password": "hunter2"}]},                                # malformed: args not a dict
+])
+def test_a_request_refused_before_the_secret_check_is_scrubbed_too(world, req):
+    est, vm = world
+    g = QuantumEntity(eid=MEMBRANE_NS + "Component:greeter", cls="Component", properties={"name": "greeter"})
+    est.upsert(g)
+    g = est.docs[g.eid]
+    m = _method(est, g.eid, "go", "echo ok")
+    _dispatch(vm, m, "go")
+    vm.drain()
+    _run(est, vm, g, "call:go", req)
+    assert g.properties["call:go_result"]["rc"] == 2, vm.errors
+    assert "hunter2" not in repr(g.properties) and "hunter2" not in repr(m.properties)
+
+
 def test_a_call_with_an_object_argument_runs_or_gets_a_receipt(world):
     """Memo's review: `args: {conf: {a: 1}}` used up the write depth (invoke -> request -> args) and
     vanished into vm.errors -- no run, no receipt. The envelope doesn't count against the args' depth."""
