@@ -106,6 +106,25 @@ class TestDirectSources(unittest.TestCase):
         direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
         self.assertEqual(direct, [])
 
+    def test_the_seats_own_prompts_are_never_a_persons_line(self):
+        """Memo's re-review of #950: the seat writes prompts to itself under role=user (planner / worker turns,
+        watch-lane readings), and existing rows carry author=person. They must never be quoted as the person's."""
+        f = _field()
+        f.write_events([
+            ST.Event(stream="discourse", role="user", ts=T0, author="person",
+                     text="You are a WORKER on task k5 of goal g1. Task: the project license is MIT, check it."),
+            ST.Event(stream="discourse", role="user", ts=T0 + 1, author="person",
+                     text="You are the PLANNER for goal g2: confirm the project license is MIT."),
+            ST.Event(stream="discourse", role="user", ts=T0 + 2,
+                     text="a reading changed on c:license: the project license is MIT now"),
+            ST.Event(stream="discourse", role="user", ts=T0 + 3,
+                     text="<membrane-context> the project license is MIT </membrane-context>")], session="s:1:0")
+        f.process()
+        direct = [r for r in EB.recall_answers(f, Q, k=8, sim_min=0) if r.get("via") == "direct"]
+        self.assertEqual(direct, [])
+        self.assertEqual(ST.author_of("You are a WORKER on task k5 of goal g1."), "seat")   # new records: tagged
+        self.assertEqual(ST.author_of("a model call (sonnet) finished"), "seat")
+
     def test_a_persons_earlier_ask_restating_this_one_is_not_an_answer(self):
         f = _field()
         f.write_events([ST.Event(stream="discourse", role="user", ts=T0, text="Which license does the project use?")],

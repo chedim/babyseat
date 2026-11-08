@@ -68,6 +68,18 @@ RECEIPT_PREFIXES = {
 # /v1 door like a person's turn; it is the seat's notice, never a person's
 # (#429 PR 3, for approval). Kept apart from the five approved prefixes.
 NOTICE_PREFIXES = {"[membrane seat notice]": "notice"}
+# The SEAT'S OWN PROMPTS (#949, Memo's review of #950): the planner / worker turns
+# (goalgraph), the watch lane's and watch agents' turns and the speaker lane reach
+# the field as user turns, written by the seat to itself, never by a person. Their
+# heads (outcomes._HEAD lists the watch ones); kept apart from the approved
+# prefixes, for the operator's approval like NOTICE_PREFIXES.
+SEAT_PREFIXES = {
+    "You are the PLANNER": "seat", "You are a WORKER": "seat",
+    "a reading changed": "seat", "a model call": "seat", "goal still open": "seat",
+    "goal planted": "seat", "the field moved": "seat", "watch event (": "seat",
+    "watch attached:": "seat", "watch detached:": "seat", "REMINDER": "seat",
+    "a seat restart": "seat", "[speaker lane]": "seat",
+}
 # On a question-like turn, observation evidence (tool results, readings,
 # receipts) ranks this much below what was said and decided (approved).
 OBSERVATION_PENALTY = 0.10
@@ -81,9 +93,9 @@ _FIRST_WORD = re.compile(r"[a-z]+")
 
 def author_of(text: str) -> str:
     """'receipt' | 'notification' | 'sensor' by RECEIPT_PREFIXES, 'notice' by
-    NOTICE_PREFIXES, else 'person'."""
+    NOTICE_PREFIXES, 'seat' by SEAT_PREFIXES, else 'person'."""
     t = (text or "").lstrip()
-    for p, who in (*RECEIPT_PREFIXES.items(), *NOTICE_PREFIXES.items()):
+    for p, who in (*RECEIPT_PREFIXES.items(), *NOTICE_PREFIXES.items(), *SEAT_PREFIXES.items()):
         if t.startswith(p):
             return who
     return "person"

@@ -332,8 +332,8 @@ def _carries_other_voices(text: str) -> bool:
     from .conv_banner import HEADER as CONV_HEADER
     from .recall_banner import HEADER as RECALL_HEADER
     t = text or ""
-    return ("[assistant]" in t or "▸ #" in t or RECALL_HEADER.split(";")[0] in t
-            or CONV_HEADER.split(";")[0] in t)
+    return ("[assistant]" in t or "▸ #" in t or "<membrane-context>" in t
+            or RECALL_HEADER.split(";")[0] in t or CONV_HEADER.split(";")[0] in t)
 
 
 def _direct_ok(d: dict) -> bool:
@@ -343,7 +343,10 @@ def _direct_ok(d: dict) -> bool:
         return False
     if role != "user":
         return True
-    return ST.event_author(d) == "person" and not _carries_other_voices(d.get("text") or "")
+    text = d.get("text") or ""
+    # the stored tag AND the text's own head: rows written before SEAT_PREFIXES carry author=person
+    return (ST.event_author(d) == "person" and ST.author_of(text) == "person"
+            and not _carries_other_voices(text))
 # TOOL OUTPUTS (#429 PR 3): a tool result's chunks (streams.tool_chunks)
 # answer question-like asks only, and at most this many of them enter the
 # top k, so a pile of near-identical log reads cannot push out what was
