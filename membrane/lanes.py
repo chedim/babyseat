@@ -4247,9 +4247,10 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
 def _is_operator(owner: str) -> bool:
     """A chat owner who is the seat's operator: the tokenless `owner`, or MEMBRANE_OPERATOR's
     sub (#797's one-chat migration reads the same). Its on/off values (0/1) are never a sub."""
-    from .server import OWNER_SUB
-    op = os.environ.get("MEMBRANE_OPERATOR", "").strip()
-    return owner == OWNER_SUB or (bool(op) and op not in ("0", "1", "false", "true") and owner == op)
+    from .server import _is_op
+    return _is_op(owner)
+
+
 
 def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what

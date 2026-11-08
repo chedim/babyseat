@@ -145,6 +145,23 @@ def migrate_one_chat(sessions, keep: str, operator: str) -> None:
 # The seat owner's identity for a tokenless loopback caller (#770): one person,
 # one chat, and the owner is a person too.
 OWNER_SUB = "owner"
+OPERATOR_SUBS: set = set()   # token subs of the person named MEMBRANE_OPERATOR (#842)
+
+
+def _op_name() -> str:
+    op = str(os.environ.get("MEMBRANE_OPERATOR") or "").strip()
+    return "" if op in ("0", "1", "false", "true") else op
+
+
+def note_operator_person(who) -> None:
+    """A token person named MEMBRANE_OPERATOR is the operator: their sub joins that identity."""
+    sub, op = str(getattr(who, "sub", "") or ""), _op_name()
+    if sub and op and str(getattr(who, "name", "")) == op:
+        OPERATOR_SUBS.add(sub)
+
+
+def _is_op(owner) -> bool:
+    return owner == OWNER_SUB or owner in OPERATOR_SUBS or (bool(_op_name()) and owner == _op_name())
 
 
 def boot_migrate_one_chat(sessions, env=None) -> None:
@@ -3907,7 +3924,10 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
 
         def _jwt_person(self):
             """The token's person (None: open mode, or the seat's own token)."""
-            return _UI.token_person(self)
+            who = _UI.token_person(self)
+            if who is not None:
+                note_operator_person(who)
+            return who
 
         def _visible(self, sid: str) -> bool:
             """May this caller see session `sid`? Open mode and the seat's own
@@ -3922,7 +3942,9 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if row is None:
                     return False
                 if row.get("owner"):
-                    return row.get("owner") == who.sub
+                    ow = row.get("owner")
+                    # the operator's chat and the operator's token sub are one person (#842)
+                    return ow == who.sub or (_is_op(ow) and _is_op(who.sub))
                 cur = row.get("parentID")
             return False
 
@@ -4679,7 +4701,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     str(getattr(self, "_ui_speaker", "") or "") if getattr(self, "_ui_relay", False)
                     else str(os.environ.get("MEMBRANE_OPERATOR") or OWNER_SUB))   # the seat token = the operator (#842)
                 if _me and not b.get("parentID"):       # #770: one chat per person
-                    _mine = [x for x in sessions.list() if str(x.get("owner") or "") == _me
+                    _mine = [x for x in sessions.list() if (str(x.get("owner") or "") == _me
+                                 or (_is_op(x.get("owner")) and _is_op(_me)))     # one operator (#842)
                              and not x.get("readonly") and not x.get("parentID")]
                     if _mine:
                         return self._json_out(_mine[-1])
