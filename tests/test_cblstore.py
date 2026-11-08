@@ -325,6 +325,94 @@ class TestWriteBehind(unittest.TestCase):
         finally:
             b.close()
 
+    def test_a_shutdown_that_cannot_save_records_and_tells(self):
+        import io, json as _j
+        tmp, b = self._held()
+        b.upsert("entity_states", "e9", {"origin": "o", "mass": 2.0})
+        buf = io.StringIO()
+        with mock.patch.object(b.db, "put_json", side_effect=CB.CBLException("busy")), \
+                mock.patch("sys.stderr", buf):
+            b.close()
+        self.assertEqual(b.unsaved_at_close, ["entity_states/e9"])
+        self.assertIn("UNSAVED", buf.getvalue())
+        rec = _j.loads((Path(tmp) / "db.unsaved.json").read_text())
+        self.assertEqual(rec["keys"], ["entity_states/e9"])
+
+
+@unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
+class TestDrainFailures(unittest.TestCase):
+    """issue #927: a busy-DB save must not lose the seat's write."""
+    def _held(self):
+        tmp = tempfile.mkdtemp()
+        b = CBLiteBackend(Path(tmp) / "db")
+        b._stop = True                           # hold the writer: drain by hand
+        b._wflush.set()
+        b._writer.join(timeout=5)
+        return tmp, b
+
+    def test_a_busy_save_requeues_the_failed_key_with_backoff(self):
+        from membrane import cblite as CB
+        tmp, b = self._held()
+        try:
+            b.upsert("entity_states", "e1", {"origin": "o", "mass": 1.0})
+            with mock.patch.object(b.db, "put_json", side_effect=CB.CBLException("busy")):
+                b.drain()
+            self.assertIn(("entity_states", "e1"), b._pending)
+            self.assertGreater(b._retry_at, 0)
+            b._retry_at = 0
+            b.drain()
+            self.assertEqual(b._pending, {})
+            self.assertEqual(b._retry_at, 0)
+        finally:
+            b.close()
+        b = CBLiteBackend(Path(tmp) / "db")
+        try:
+            self.assertEqual(b.get("entity_states", "e1")["mass"], 1.0)
+        finally:
+            b.close()
+
+    def test_a_newer_write_beats_the_requeued_one(self):
+        from membrane import cblite as CB
+        tmp, b = self._held()
+        try:
+            b.upsert("entity_states", "e1", {"origin": "o", "mass": 1.0})
+
+            def fail_after_newer(*a, **k):
+                b.upsert("entity_states", "e1", {"origin": "o", "mass": 2.0})
+                raise CB.CBLException("busy")
+            with mock.patch.object(b.db, "put_json", side_effect=fail_after_newer):
+                b.drain()
+            self.assertEqual(b._pending[("entity_states", "e1")][1]["mass"], 2.0)
+        finally:
+            b.close()
+
+    def test_begin_and_purge_failures_do_not_lose_the_batch(self):
+        from membrane import cblite as CB
+        tmp, b = self._held()
+        try:
+            b.upsert("entity_states", "e1", {"origin": "o", "mass": 1.0})
+            b.drain()
+            b.upsert("entity_states", "e2", {"origin": "o", "mass": 2.0})
+            b.delete("entity_states", "e1")
+            with mock.patch.object(b.db, "begin", side_effect=CB.CBLException("busy")):
+                b.drain()
+            self.assertEqual(set(b._pending), {("entity_states", "e1"), ("entity_states", "e2")})
+            b._retry_at = 0
+            with mock.patch.object(b.db, "purge", side_effect=CB.CBLException("busy")):
+                b.drain()
+            self.assertEqual(set(b._pending), {("entity_states", "e1")})   # e2 saved; the failed purge stays
+            b._retry_at = 0
+            b.drain()
+            self.assertEqual(b._pending, {})
+        finally:
+            b.close()
+        b = CBLiteBackend(Path(tmp) / "db")
+        try:
+            self.assertIsNone(b.get("entity_states", "e1"))
+            self.assertEqual(b.get("entity_states", "e2")["mass"], 2.0)
+        finally:
+            b.close()
+
 
 @unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
 class TestWriterLockAndEmptyKeys(unittest.TestCase):

@@ -327,6 +327,8 @@ class SessionStore:
         """-> True when every changed session was written."""
         from .cblite import doc_key
         ids = [sid] if sid is not None else list(dict.fromkeys(list(self.sessions) + list(self._sig)))
+        failed = getattr(self, "_failed_ids", set())
+        ids = list(dict.fromkeys(ids + sorted(failed)))     # a session whose save failed rides the next one
         put, gone = [], []
         for k in ids:
             s = self.sessions.get(k)
@@ -345,10 +347,14 @@ class SessionStore:
             for k, s, sg in put:
                 self._cbl.put_json(self.CBL_COLL, doc_key(k), json.dumps({"s": s}, default=str))
                 self._sig[k] = sg
+                failed.discard(k)
             for k in gone:
                 self._cbl.purge(self.CBL_COLL, doc_key(k))
                 self._sig.pop(k, None)
+                failed.discard(k)
+            self._failed_ids = failed
         except Exception as e:
+            self._failed_ids = failed | {k for k, _s, sg in put if self._sig.get(k) != sg} | {k for k in gone if k in self._sig}
             print(f"[serve] sessions: database save failed ({e})", file=sys.stderr)
             return False
         return True
@@ -631,8 +637,10 @@ class MessageStore:
                     bsize = 0
                 if jsize > bsize:           # the journal outgrew the snapshot
                     self._compact_locked()
-        except Exception:
-            pass
+        except Exception as e:
+            if dirty:                       # the rows were not journaled: the next flush retries
+                self._dirty_rows = (self._dirty_rows or set()) | set(dirty)
+            print(f"[serve] messages: file save failed ({e})", file=sys.stderr)
 
     _dirty_rows: set | None = None
 
