@@ -97,7 +97,8 @@ def seed(est) -> int:
 
 def _rules(est) -> list:
     rows = [d for d in list((est.docs or {}).values()) if d.cls == CLASS_RULE
-            and not (d.properties or {}).get("retired")]
+            and not (d.properties or {}).get("retired")
+            and (d.properties or {}).get("kind") != "recall"]
     return sorted(rows, key=lambda d: (int((d.properties or {}).get("order") or 100), d.eid))
 
 
@@ -230,6 +231,7 @@ def listing(est) -> list[dict]:
         rows.append({"eid": d.eid, "name": (d.properties or {}).get("name"),
                      "order": (d.properties or {}).get("order"),
                      "retired": bool((d.properties or {}).get("retired")),
+                     "kind": (d.properties or {}).get("kind") or "rule",
                      "shown": c["shown"], "used": c["used"],
                      "use_rate": c["rate"]})
     return rows

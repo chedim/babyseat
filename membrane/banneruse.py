@@ -21,7 +21,13 @@ from .entities import MEMBRANE_NS, QuantumEntity
 
 RECALL_EID = MEMBRANE_NS + "bannerrule:recall"
 _WORD = re.compile(r"[a-z0-9][a-z0-9_'-]*")
-_lock = threading.Lock()
+_PREFIX = re.compile(r"^\W*#\d+\s*\([^)]*\)\s*")
+_lock = threading.RLock()
+
+
+def _body(line: str) -> str:
+    """A recall row without its '#N (age, label)' prefix: that is the banner's own wording."""
+    return _PREFIX.sub("", line or "", count=1)
 
 
 def _words(text: str) -> set[str]:
@@ -67,7 +73,7 @@ def _entity(srv, eid: str):
     if ent is None and eid == RECALL_EID:
         from .graphbanner import CLASS_RULE
         ent = QuantumEntity(eid=eid, cls=CLASS_RULE, properties={
-            "name": "recall", "retired": True, "silent_birth": True,
+            "name": "recall", "kind": "recall", "silent_birth": True,
             "summary": "the recall rows of the banner (not a walk rule): use counts only"})
         est.docs[eid] = ent
     return ent
@@ -77,33 +83,35 @@ def _add(srv, eid: str, shown: int, used: int, ts: float) -> None:
     ent = _entity(srv, eid)
     if ent is None:
         return
-    pp = dict(ent.properties or {})
-    hours = {k: dict(v) for k, v in (pp.get("use_hours") or {}).items()}
-    hb = hours.setdefault(_hour(ts), {})
-    hb["shown"] = int(hb.get("shown", 0)) + shown
-    hb["used"] = int(hb.get("used", 0)) + used
     try:
         from .score import HOURS_KEEP
     except Exception:
         HOURS_KEEP = 48
-    cut = float(_hour(ts)) - (HOURS_KEEP - 1) * 3600
-    pp["use_hours"] = {h: b for h, b in hours.items() if float(h) >= cut}
-    ent.properties = pp
-    try:
-        srv.entity_store.upsert(ent, embedder=None)
-    except Exception:
-        pass
+    with _lock:                      # the whole read-modify-write: two settles must not lose a count
+        pp = dict(ent.properties or {})
+        hours = {k: dict(v) for k, v in (pp.get("use_hours") or {}).items()}
+        hb = hours.setdefault(_hour(ts), {})
+        hb["shown"] = int(hb.get("shown", 0)) + shown
+        hb["used"] = int(hb.get("used", 0)) + used
+        cut = float(_hour(ts)) - (HOURS_KEEP - 1) * 3600
+        pp["use_hours"] = {h: b for h, b in hours.items() if float(h) >= cut}
+        ent.properties = pp
+        try:
+            srv.entity_store.upsert(ent, embedder=None)
+        except Exception:
+            pass
 
 
 def _content(held: dict, others: list[dict]) -> set[str]:
     """The words a line is about: for a walk line, those its template did not supply; for a
     recall line, those no other recall line shown carries."""
-    mine = _words(held["line"])
     if held["rule"] == RECALL_EID:
+        mine = _words(_body(held["line"]))
         for o in others:
             if o is not held:
-                mine -= _words(o["line"])
+                mine -= _words(_body(o["line"]))
         return mine
+    mine = _words(held["line"])
     return mine - _words(re.sub(r"\{\w+\.\w+\}", " ", held.get("template") or ""))
 
 

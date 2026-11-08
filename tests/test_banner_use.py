@@ -74,6 +74,32 @@ class Use(Seeded):
         c = BU.counts(self.srv.entity_store.docs[BU.RECALL_EID])
         self.assertEqual((c["shown"], c["used"]), (2, 1))
 
+    def test_the_recall_prefix_is_not_content(self):
+        line = "\u25b8 #12 (3 min ago, earlier answer) the zebra crossing plan"
+        BU.shown_recall(self.srv, SID, [line])
+        BU.settle(self.srv, SID, "Earlier answer, a while ago: nothing to add.")
+        c = BU.counts(self.srv.entity_store.docs[BU.RECALL_EID])
+        self.assertEqual((c["shown"], c["used"]), (1, 0))
+
+    def test_the_recall_entity_is_listed_as_recall_not_retired(self):
+        BU.shown_recall(self.srv, SID, ["the zebra plan"])
+        BU.settle(self.srv, SID, "zebra")
+        ent = self.srv.entity_store.docs[BU.RECALL_EID]
+        self.assertFalse((ent.properties or {}).get("retired"))
+        self.assertNotIn(ent, GB._rules(self.srv.entity_store))
+        row = next(r for r in GB.listing(self.srv.entity_store) if r["eid"] == BU.RECALL_EID)
+        self.assertEqual(row["kind"], "recall")
+
+    def test_concurrent_adds_lose_nothing(self):
+        import threading
+        BU.shown_recall(self.srv, SID, ["x"])
+        BU.settle(self.srv, SID, "")
+        ts = [threading.Thread(target=lambda: [BU._add(self.srv, BU.RECALL_EID, 1, 1, 5000.0) for _ in range(50)]) for _ in range(4)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        c = BU.counts(self.srv.entity_store.docs[BU.RECALL_EID])
+        self.assertEqual(c["shown"], 1 + 200)
+
 
 if __name__ == "__main__":
     unittest.main()
