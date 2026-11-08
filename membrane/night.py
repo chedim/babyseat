@@ -2357,6 +2357,74 @@ CALLS_RING = 12
 COMPOSITE_DEPTH = 3            # the seat: "composite depth <= 3" -- feed-forward, not Turing-complete
 
 
+def _class_names(est) -> set:
+    """Lower-cased names some entity declares as its class (its `cls`):
+    the evidence that a name is a CLASS. Computed once per define."""
+    return {str(q.cls).lower() for q in list((est.docs or {}).values()) if q.cls}
+
+
+def _owner_kind(est, d, names=None) -> str:
+    """'class' only on evidence: the entity is an interface, or its name is
+    some other entity's cls. Owning a method is NOT evidence."""
+    if (d.properties or {}).get("interface"):
+        return "class"
+    names = _class_names(est) if names is None else names
+    nm = str((d.properties or {}).get("name", "")).lower()
+    tail = d.eid.removeprefix(MEMBRANE_NS).rpartition(":")[2].lower()
+    return "class" if (nm and nm in names) or (tail and tail in names) else "entity"
+
+
+def _is_class_owner(q) -> bool:
+    """A class-kind owner: an interface, or a Component minted as a class
+    (eid Component:<name>) -- never a gap:/dev:/shell: entity that merely
+    shares the name."""
+    return bool((q.properties or {}).get("interface")) or q.eid.startswith(MEMBRANE_NS + "Component:")
+
+
+def _cls_owners(est, obj) -> list:
+    """Class owners an entity belongs to by its `cls` name (cls='Pump' ->
+    the class Component:pump), so cls-only members reach class methods."""
+    c = str(getattr(obj, "cls", "") or "").lower()
+    if not c:
+        return []
+    return [q for q in list((est.docs or {}).values()) if _is_class_owner(q) and q.eid != obj.eid
+            and (str((q.properties or {}).get("name", "")).lower() == c
+                 or q.eid.removeprefix(MEMBRANE_NS).rpartition(":")[2].lower() == c)]
+
+
+def _resolve_owner(est, on: str, names=None):
+    """(owner, refusal). Main's resolution (est._resolve_spec) stands unless
+    the name is evidenced to be a class (it equals other entities' cls) and
+    the only match is a fuzzy hit on another entity: an exact hit binds,
+    otherwise the define is REFUSED naming the near candidates -- never a
+    quiet bind to another kind."""
+    spec = (on or "").strip()
+    main = est._resolve_spec(spec)
+    names = _class_names(est) if names is None else names
+    low = spec.removeprefix(MEMBRANE_NS).lower()
+    if main is None or low not in names:
+        return main, ""
+    exact = est._resolve_spec_raw(spec, fuzzy=False)
+    if exact is None:
+        # a NAME match counts as exact when the entity is itself a class-kind
+        # owner (a Component minted as a class, or an interface): same-name
+        # class owners bind. A different kind (gap:register for 'Register')
+        # does not.
+        cands = [q for q in list((est.docs or {}).values())
+                 if (_is_class_owner(q))
+                 and (str((q.properties or {}).get("name", "")).lower() == low
+                      or q.eid.removeprefix(MEMBRANE_NS).rpartition(":")[2].lower() == low)]
+        if cands:
+            exact = cands[0]
+    if exact is not None:
+        ce = canon_eid(exact.eid)
+        return est._follow_merges((est.docs or {}).get(ce) or exact), ""
+    # (ii-by-(i)) no class owner exists, only a different entity: MINT the
+    # class (method_define mints a Component named `on`) rather than refuse;
+    # members with cls=<on> then reach its methods via resolve_method.
+    return None, ""
+
+
 def method_define(srv, est, fld, mem, on: str, method: str, command: str,
                   read_only: bool = False, guard: str = "", steps=None,
                   abstract: bool = False, params=None) -> dict:
@@ -2410,7 +2478,12 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
                 return {"ok": False, "error": f"step {st.get('name') or ''}: not a script: {e}"}
             if _LG.passthrough_refusal(st_tree):
                 return {"ok": False, "error": f"step {st.get('name') or ''}: {_LG.PASSTHROUGH}"}
-    owner = est._resolve_spec(on) if on else None
+    owner = None
+    _names = _class_names(est) if on else None
+    if on:
+        owner, _why = (est._resolve_spec(on), "") if abstract else _resolve_owner(est, on, _names)
+        if _why:
+            return {"ok": False, "error": _why}
     if on and owner is None:
         # a missing owner is minted as a class (the probe suite: 'ha light' existed,
         # 'ha sensor' did not -- define must not depend on which came first)
@@ -2489,7 +2562,9 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
     _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
                  "on": owner.eid if owner else "", "method": method, "ok": True})
     return {"ok": True, "eid": eid, "method": label, "created": created, "abstract": bool(abstract),
-            "params": p.get("params") if abstract else command_params(command), "read_only": bool(read_only)}
+            "params": p.get("params") if abstract else command_params(command), "read_only": bool(read_only),
+            "owner": ({"eid": owner.eid, "kind": _owner_kind(est, owner, _names), "class": owner.cls,
+                       "name": (owner.properties or {}).get("name", "")} if owner else None)}
 
 
 def _node(est, method_eid: str, name: str, props: dict) -> str:
@@ -2519,6 +2594,7 @@ def resolve_method(est, obj, method: str):
     if not named:
         return None, None
     order = [obj] + ancestors(est, obj)
+    order += [q for q in _cls_owners(est, obj) if q.eid not in {o.eid for o in order}]
     for owner in order:
         for d in named:
             if owner.eid in ((d.properties or {}).get("method_of") or []):
@@ -2532,7 +2608,7 @@ def resolve_method(est, obj, method: str):
 def methods_of(est, obj) -> list[str]:
     """The method names an object answers to (for the refusal's hint) --
     implemented ones only: an interface's abstract method is not an answer."""
-    owners = {obj.eid} | {a.eid for a in ancestors(est, obj)}
+    owners = {obj.eid} | {a.eid for a in ancestors(est, obj)} | {q.eid for q in _cls_owners(est, obj)}
     out = []
     for d in list((est.docs or {}).values()):
         pp = d.properties or {}
