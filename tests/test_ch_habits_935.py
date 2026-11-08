@@ -84,10 +84,15 @@ def test_no_parallel_scorer_it_reads_the_ch_learn_balance(world):
     assert vm.learner.graduate(c.eid, threshold=LINE) is False
     vm.learner._bal[c.eid] = LINE                           # the only input is the balance
     assert vm.learner.graduate(c.eid, threshold=LINE) is True
-    for mod in ("predict", "outcomes"):                     # no second scorer imported
-        assert mod not in (inspect.getsource(L).split("import")[0] or "")
-    src = inspect.getsource(L)
-    assert "from . import predict" not in src and "from . import outcomes" not in src
+    import ast                                              # no second scorer imported, anywhere in the module
+    names = set()
+    for node in ast.walk(ast.parse(inspect.getsource(L))):
+        if isinstance(node, ast.ImportFrom):
+            names.add((node.module or "").split(".")[-1])
+            names.update(a.name for a in node.names)
+        elif isinstance(node, ast.Import):
+            names.update(a.name.split(".")[-1] for a in node.names)
+    assert not names & {"predict", "outcomes"}
 
 
 def test_one_bad_consequence_demotes_to_candidate(world, monkeypatch):
@@ -126,3 +131,129 @@ def test_a_field_write_is_reversible(world):
     est, vm = world
     c = _proven(est, vm)
     assert L.reversible(c) is True
+
+
+# ---- review of PR 939 (red first) ----------------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+from membrane import toybox as TBX  # noqa: E402
+from membrane.entities import MEMBRANE_NS  # noqa: E402
+
+
+def _trig(path):
+    return SimpleNamespace(properties={"write": [path, "1"]})
+
+
+@pytest.mark.parametrize("path", [
+    "chat:operator.say",
+    MEMBRANE_NS + "presence.restart",
+    MEMBRANE_NS + "llm.call",
+    MEMBRANE_NS + "llm.wake",
+    "toy:tower.poke",
+    TBX._eid() + ".reset",
+    TBX._eid() + ".remove",
+    "membrane::goal:g1.plan",
+    "membrane::goal:g1.replan",
+])
+def test_every_adapter_branch_is_irreversible(path):
+    assert L.reversible(_trig(path)) is False
+
+
+def test_reversible_reuses_the_adapter_branch_table(monkeypatch):
+    from membrane import adapters as AD
+    seen = []
+    real = AD._branch
+    monkeypatch.setattr(AD, "_branch", lambda p: (seen.append(p), real(p))[1])
+    L.reversible(_trig("x.a"))
+    assert seen == ["x.a"]
+
+
+def _grant(vm, granted=True):
+    vm.learner.granted = lambda path: granted
+
+
+def test_habit_in_toys_world_does_not_fire_on_a_command(world, monkeypatch):
+    est, vm = world
+    monkeypatch.setattr(L, "WORLD", "toys")                  # the real gate (#727), not forced to commands
+    c = _proven(est, vm)
+    assert "toy" not in c.properties
+    vm.learner._habits.add(c.eid)
+    _grant(vm)
+    z = _ent(est, "z")
+    _turn(est, vm, (z, "a", 1), writer="person")
+    assert est.docs[z.eid].properties.get("b") is None
+
+
+def test_habit_needs_a_grant_to_go_live(world):
+    est, vm = world
+    c = _proven(est, vm)
+    vm.learner.graduate(c.eid, threshold=LINE)
+    _grant(vm, False)
+    z = _ent(est, "z")
+    _turn(est, vm, (z, "a", 1), writer="person")
+    assert est.docs[z.eid].properties.get("b") is None
+
+
+def test_habit_pays_the_purse_when_it_fires(world):
+    est, vm = world
+    c = _proven(est, vm)
+    vm.learner.graduate(c.eid, threshold=LINE)
+    _grant(vm)
+    before = vm.learner.balance(c.eid)
+    z = _ent(est, "z")
+    _turn(est, vm, (z, "a", 1), writer="person")
+    assert est.docs[z.eid].properties.get("b") == 2
+    assert vm.learner.balance(c.eid) == before - L.WRITE_COST
+
+
+def test_habit_does_not_fire_without_funds(world):
+    est, vm = world
+    c = _proven(est, vm)
+    vm.learner.graduate(c.eid, threshold=LINE)
+    _grant(vm)
+    vm.learner.purse.can_spend = lambda: False
+    z = _ent(est, "z")
+    _turn(est, vm, (z, "a", 1), writer="person")
+    assert est.docs[z.eid].properties.get("b") is None
+
+
+def test_habit_never_acts_while_the_llm_works(world):
+    est, vm = world
+    c = _proven(est, vm)
+    vm.learner.graduate(c.eid, threshold=LINE)
+    _grant(vm)
+    vm.learner.llm_works = lambda chain: True               # #576 H: a proposal only suggests then
+    z = _ent(est, "z")
+    _turn(est, vm, (z, "a", 1), writer="person")
+    assert est.docs[z.eid].properties.get("b") is None
+
+
+def test_live_habit_fire_enters_pending_to_be_rescored(world):
+    est, vm = world
+    c = _proven(est, vm)
+    vm.learner.graduate(c.eid, threshold=LINE)
+    _grant(vm)
+    z = _ent(est, "z")
+    _turn(est, vm, (z, "a", 1), writer="person")
+    assert est.docs[z.eid].properties.get("b") == 2
+    assert any(cand == c.eid for rows in vm.learner._pending.values() for cand, _p, _v in rows)
+
+
+def test_room_removing_a_candidate_drops_its_habit(world, monkeypatch):
+    est, vm = world
+    c = _proven(est, vm)
+    vm.learner.graduate(c.eid, threshold=LINE)
+    vm.learner._bal[c.eid] = -1.0
+    monkeypatch.setattr(L, "CANDIDATES_MAX", 1)
+    assert vm.learner._room() is True
+    assert c.eid not in est.docs and c.eid not in vm.learner.habits()
+
+
+def test_prune_drops_the_habit_too(world):
+    est, vm = world
+    c = _proven(est, vm)
+    vm.learner.graduate(c.eid, threshold=LINE)
+    vm.learner._bal[c.eid] = -5 * L.WRITE_COST
+    assert c.eid in vm.learner.prune()
+    assert c.eid not in vm.learner.habits()
