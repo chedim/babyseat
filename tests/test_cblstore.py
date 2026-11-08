@@ -325,20 +325,6 @@ class TestWriteBehind(unittest.TestCase):
         finally:
             b.close()
 
-    def test_a_shutdown_that_cannot_save_records_and_tells(self):
-        import io, json as _j
-        tmp, b = self._held()
-        b.upsert("entity_states", "e9", {"origin": "o", "mass": 2.0})
-        buf = io.StringIO()
-        with mock.patch.object(b.db, "put_json", side_effect=CB.CBLException("busy")), \
-                mock.patch("sys.stderr", buf):
-            b.close()
-        self.assertEqual(b.unsaved_at_close, ["entity_states/e9"])
-        self.assertIn("UNSAVED", buf.getvalue())
-        rec = _j.loads((Path(tmp) / "db.unsaved.json").read_text())
-        self.assertEqual(rec["keys"], ["entity_states/e9"])
-
-
 @unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
 class TestDrainFailures(unittest.TestCase):
     """issue #927: a busy-DB save must not lose the seat's write."""
@@ -349,6 +335,20 @@ class TestDrainFailures(unittest.TestCase):
         b._wflush.set()
         b._writer.join(timeout=5)
         return tmp, b
+
+    def test_a_shutdown_that_cannot_save_records_and_tells(self):
+        import io, json as _j
+        from membrane import cblite as CB
+        tmp, b = self._held()
+        b.upsert("entity_states", "e9", {"origin": "o", "mass": 2.0})
+        buf = io.StringIO()
+        with mock.patch.object(b.db, "put_json", side_effect=CB.CBLException("busy")), \
+                mock.patch("sys.stderr", buf):
+            b.close()
+        self.assertEqual(b.unsaved_at_close, ["entity_states/e9"])
+        self.assertIn("UNSAVED", buf.getvalue())
+        rec = _j.loads((Path(tmp) / "db.unsaved.json").read_text())
+        self.assertEqual(rec["keys"], ["entity_states/e9"])
 
     def test_a_busy_save_requeues_the_failed_key_with_backoff(self):
         from membrane import cblite as CB
