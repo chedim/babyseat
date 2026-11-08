@@ -738,7 +738,7 @@ function workShows(graph) {
     return linked.length > 0 && linked.every((o) => WORK_FINISHED.has(o.status));
   };
   for (const n of nodes) {
-    if (!(n.kind === "goal" || n.kind === "task" || n.kind === "decision" || n.kind === "wait")) continue;
+    if (!(n.kind === "goal" || n.kind === "task" || n.kind === "decision" || n.kind === "wait" || n.kind === "watch")) continue;
     if (n.kind === "decision" ? (n.status === "dropped" || decisionDone(n)) : WORK_FINISHED.has(n.status)) continue;
     out.push(n);
   }
@@ -747,7 +747,7 @@ function workShows(graph) {
 function workMarkers(graph, pos) {
   const out = [];
   for (const n of workShows(graph)) {
-    const p = pos && pos[n.id];
+    const p = pos && (pos[n.id] || (n.kind === "watch" && n.watching ? pos[n.watching] : null));   // #960: a watch sits at the watched entity
     if (p) {
       const w = n.waiting_on || [];   // blocked = waiting on something unfinished; why = what and why
       out.push({ id: n.id, kind: n.kind, title: n.title, status: n.status, p: p.slice(0, 3), blocked: w.length > 0,
@@ -765,7 +765,9 @@ function workEdges(graph, pos, styles, hover) {
   const hn = hover != null ? byId.get(hover) : null;   // hovering a goal or one of its items lights that goal's lines
   const hg = hn ? (hn.kind === "goal" ? hn.id : hn.goal || null) : null;
   for (const e of (graph && graph.edges) || []) {
-    const a = marks.get(e.from), b = marks.get(e.to);
+    const a = marks.get(e.from) || (e.rel === "watches" && pos && pos[e.from] ? { p: pos[e.from] } : null);
+    // #960: the watched entity is usually no work-graph node: a watches edge ends at its own position
+    const b = marks.get(e.to) || (e.rel === "watches" && pos && pos[e.to] ? { p: pos[e.to] } : null);
     if (!a || !b) continue;
     const gid = kinds.get(e.from) === "goal" ? e.from : kinds.get(e.to) === "goal" ? e.to : ((byId.get(e.from) || {}).goal || (byId.get(e.to) || {}).goal || null);
     const st = (gid && styles && styles[gid]) || null;
@@ -2540,7 +2542,8 @@ class Field3DView {
     for (const n of workShows(graph)) {
       if (this._workPos[n.id]) continue;
       if (this.locateCache.get(n.id) === null) this.locateCache.delete(n.id);   // #884: retry entities that failed to locate before
-      this.placeOf(n.id).then((p) => { if (p) this._workPos[n.id] = p; }).catch(() => {});
+      const at = n.kind === "watch" && n.watching ? n.watching : n.id;   // #960: "<eid>#watch<i>" is no entity: place the watched one
+      this.placeOf(at).then((p) => { if (p) { this._workPos[n.id] = p; if (at !== n.id) this._workPos[at] = p; } }).catch(() => {});
     }
     this._workEls = this._workEls || new Map();
     const ids = new Set(workMarkers(graph, this._workPos).map((m) => m.id));

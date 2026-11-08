@@ -453,7 +453,8 @@ def _goal_waiting_on(docs, goal: str, GG) -> list:
 def _watch_nodes(est):
     """#960: live watches set on purpose (owner Memo / a goal worker ``watch:<eid>``) as kind ``watch``
     nodes: a ``watches`` edge to the watched entity, a ``triggers`` edge to the task/goal firing starts.
-    Finished (done), dispatch, ownerless and Blurp/self ops are left out."""
+    Finished (done), dispatch and any other owner (operator, persons, Blurp/self) are left out.
+    Scope: only ``watch_ops`` are drawn; ``watch_fields`` and field watches are out of scope here."""
     nodes, edges = [], []
     for ent in list((getattr(est, "docs", None) or {}).values()):
         p = ent.properties or {}
@@ -465,8 +466,8 @@ def _watch_nodes(est):
             if not isinstance(op, dict) or op.get("done") or op.get("sense") == "dispatch":
                 continue
             owner = str(op.get("owner") or "").strip()
-            if not owner or owner.lower() == "blurp" or owner == "membrane::self":
-                continue
+            if not (owner.lower() in ("memo", "assistant") or owner.startswith("watch:")):
+                continue                  # only the assistant or a goal worker; not operator, other persons, Blurp/self
             wid = "%s#watch%d" % (ent.eid, i)
             nodes.append({"id": wid, "kind": "watch", "owner": owner, "status": "open", "goal": None,
                           "title": "%s watches %s%s" % (owner, p.get("name") or ent.eid,
