@@ -238,12 +238,17 @@ field holds for the person's **latest message** (no model call, no new lane).
    discourse message as the reply to the one before it in its chat, per speaker,
    backing off to everyone's counts; a failure ledger records which model
    predicted each live message right and weighs the two by it (misses kept, never
-   pruned; predicted messages are never counted). The scores read keywords only
+   pruned; predicted messages are never counted; the record is saved in the field,
+   `config/replies_ledger`, so it survives restarts, and `listener` and `said` keep
+   separate records). The scores read keywords only
    (words rarer than the talk's typical word): common words sit near chance and
    would cost a walk over thousands of messages each. The models are built from the
    field's history in the background at first use (until then the banner keeps the
-   six older features); after that the field hands each new message over as it is
-   written (`replies.note`), never a scan of the events. On LoCoMo conversations
+   pre-#942 weights, fitted without these scores, and so does a failed build,
+   which is tried again at the next banner); after that the field hands each new
+   message over as it is embedded (`replies.note`), never a scan of the events;
+   `forget` and `rebuild` drop the models so they count what is left. Saved
+   weights from before #942 (no reply-model keys) are treated as stale. On LoCoMo conversations
    0-1 (held out, 230 questions) the full order went hit@1/@3/@8/@20
    73/137/173/187 -> 83/140/173/190.
    No length feature (on a seat long rows are tool dumps). The weights live in the field, not in code:

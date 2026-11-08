@@ -894,8 +894,8 @@ class EntityField:
             else:
                 ev["status"] = "embedded"
             self.b.upsert("events", key, ev)
-            try:                                      # #942: the reply models hear each message as it is written
-                from . import replies as _RP          # (no scan of the events later: cold collections read every row)
+            try:                                      # #942: the reply models hear each message as it is embedded
+                from . import replies as _RP          # (so no banner scans the events for new ones)
                 _RP.note(self, ev)
             except Exception:
                 pass
@@ -1604,6 +1604,11 @@ class EntityField:
     def rebuild(self) -> int:
         """Wipe this origin's states and deltas and re-apply its events in
         seq order: the escape hatch for any parameter change (no re-embed)."""
+        try:                                          # #942: the reply models count what is left
+            from . import replies as _RP
+            _RP.reset(self)
+        except Exception:
+            pass
         for coll in ("entity_states", "entity_deltas"):
             for k, _ in list(self.b.scan(coll, {"origin": self.origin})):
                 self.b.delete(coll, k)
@@ -1937,6 +1942,11 @@ class EntityField:
         claims, and recompute the entities it touched from their remaining
         deltas. The recompute uses today's stream backgrounds (rebuild() is
         the exact path)."""
+        try:                                          # #942: the reply models count what is left
+            from . import replies as _RP
+            _RP.reset(self)
+        except Exception:
+            pass
         hit = self.event_by_number(n)
         if hit is None:
             return None
@@ -2036,6 +2046,11 @@ class EntityField:
     def forget_many(self, nums: list[int], rebuild_over: int = 200) -> list[dict]:
         """forget() for several events; past rebuild_over it tombstones them
         all and rebuilds the origin once (cheaper than per-entity recomputes)."""
+        try:                                          # #942: the reply models count what is left
+            from . import replies as _RP
+            _RP.reset(self)
+        except Exception:
+            pass
         if len(nums) <= rebuild_over:
             return [self.forget(n) or {"n": n, "missing": True} for n in nums]
         out = []

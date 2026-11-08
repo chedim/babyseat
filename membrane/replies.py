@@ -35,31 +35,35 @@ def words(text: str) -> set:
 
 
 class Ledger:
-    """Which model predicted the next message right: key -> [everyone right, person right, steps]."""
+    """Which model predicted the next message right, for each score:
+    key -> [everyone right (listener), person right (listener), everyone right (said), person right (said), steps]."""
+
+    SLOT = {"listen": (0, 1), "say": (2, 3)}
 
     def __init__(self):
-        self.c: dict = defaultdict(lambda: [0, 0, 0])
+        self.c: dict = defaultdict(lambda: [0, 0, 0, 0, 0])
 
     @staticmethod
     def keys(who: str, asks: bool) -> list:
         return [(who, asks), (who,), ()]
 
-    def add(self, who: str, asks: bool, shared_hit: bool, person_hit: bool) -> None:
+    def add(self, who: str, asks: bool, hits: tuple) -> None:
+        """hits = (everyone, person) for listener, then (everyone, person) for said -- misses included."""
         for k in self.keys(who, asks):
             v = self.c[k]
-            v[0] += bool(shared_hit)
-            v[1] += bool(person_hit)
-            v[2] += 1
+            for j, h in enumerate(hits):
+                v[j] += bool(h)
+            v[4] += 1
 
-    def rates(self, who: str, asks: bool) -> tuple[float, float]:
-        """(everyone's hit rate, the person's), coarse to fine, each level the prior worth one sample."""
+    def rates(self, who: str, asks: bool, score: str = "listen") -> tuple[float, float]:
+        """(everyone's hit rate, the person's) for one score, coarse to fine, each level the prior worth one sample."""
         out = []
-        for j in (0, 1):
+        for j in self.SLOT[score]:
             r = 0.5
             for k in reversed(self.keys(who, asks)):
                 v = self.c.get(k)
                 if v is not None:
-                    r = (v[j] + r) / (v[2] + 1)
+                    r = (v[j] + r) / (v[4] + 1)
             out.append(r)
         return out[0], out[1]
 
@@ -82,6 +86,8 @@ class Replies:
         self.ledger = Ledger()
         self.rng = random.Random(seed)
         self._cut_v, self._cut_n = 0, -1
+        self.df_hist: Counter = Counter()      # how many words are held by d messages (the cutoff, kept exact)
+        self.occ = 0                           # word occurrences over all messages
 
     # --- counting -----------------------------------------------------------------------------------------
     @property
@@ -99,12 +105,17 @@ class Replies:
         if predict and p is not None and w:
             self._predict(p, who, w)
         i = len(self.msgs)
+        self.occ += len(w)
         self.msgs.append((session, who, w))
         self.asks.append(_asks(text))
         self.prev.append(p)
         self.last[session] = i
         self.by[who].append(i)
         for x in w:
+            d = len(self.post[x])
+            if d:
+                self.df_hist[d] -= 1
+            self.df_hist[d + 1] += 1
             self.post[x].append(i)
             co = self._co.get(x)
             if co is not None:
@@ -181,13 +192,13 @@ class Replies:
 
     def _cut(self) -> int:
         """KEYWORDS (the reader's keyword() rule): a word is a keyword when fewer messages hold it than hold the
-        talk's typical word by occurrence (the occurrence-weighted median). Recomputed as the talk grows."""
+        talk's typical word by occurrence (the occurrence-weighted median), from a running histogram (exact, no
+        re-sort of the vocabulary)."""
         if self._cut_n != self.n:
-            dfs = sorted(len(v) for v in self.post.values())
-            tot, acc, cut = sum(dfs), 0, 0
-            for d in reversed(dfs):
-                acc += d
-                if acc >= tot / 2:
+            acc, cut = 0, 0
+            for d in sorted((d for d, k in self.df_hist.items() if k > 0), reverse=True):
+                acc += d * self.df_hist[d]
+                if acc >= self.occ / 2:
                     cut = d
                     break
             self._cut_v, self._cut_n = cut, self.n
@@ -212,7 +223,7 @@ class Replies:
         return sum(math.log(sum(self.t(a, b, who) for a in q) / len(q) / self.P(b)) for b in m) / len(m)
 
     def _mixed(self, f, q: set, who: str, m: set, asks: bool) -> float:
-        rs, rp = self.ledger.rates(who, asks)
+        rs, rp = self.ledger.rates(who, asks, "listen" if f == self._listen else "say")
         return (rs * f(q, None, m) + rp * f(q, who, m)) / (rs + rp)
 
     def listener(self, q: str, who: str, text: str) -> float:
@@ -247,14 +258,13 @@ class Replies:
         cands = [real] + self.rng.sample(others, min(9, len(others)))
         if len(cands) < 2:
             return
-        asks = self.asks[p]
 
-        def hit(f):
-            sc = [f(pw, x) for x in cands]
+        def hit(f, model):
+            sc = [f(pw, model, x) for x in cands]
             top = max(sc)
             return sc[0] == top and sum(v == top for v in sc) == 1
-        self.ledger.add(who, asks, hit(lambda a, b: self._listen(a, None, b)),
-                        hit(lambda a, b: self._listen(a, who, b)))
+        self.ledger.add(who, self.asks[p], (hit(self._listen, None), hit(self._listen, who),
+                                            hit(self._say, None), hit(self._say, who)))
 
     def dream(self, session: str, who: str, texts: list) -> list:
         """Rank possible next messages by `who` in this chat, best first: (score, text). Read-only: no table, no
@@ -272,6 +282,7 @@ def _asks(text: str) -> bool:
 # --- the field ------------------------------------------------------------------------------------------------
 _OF: dict = {}
 TALK_STREAMS = ("discourse",)
+NOTE_KEYS = ("seq", "session", "speaker", "role", "text", "stream")
 
 
 def _who(ev: dict) -> str:
@@ -282,56 +293,85 @@ def _who(ev: dict) -> str:
 _LOCK = __import__("threading").Lock()
 
 
-def _read(field, st) -> None:
-    """Add the messages after the last one read (live ones through the ledger once the history is in)."""
-    R = st["R"]
+LEDGER_COLL, LEDGER_KEY = "config", "replies_ledger"
+
+
+def _load_ledger(field, R) -> None:
+    """The ledger saved in the field: it survives restarts (replaying predictions over the history instead costs
+    minutes of CPU on a seat-sized talk)."""
     try:
-        rows = field.b.scan("events", {"origin": field.origin, "seq": {"gt": st["seq"]}}, order=("seq",))
-    except TypeError:
-        rows = sorted(field.b.scan("events", {"origin": field.origin}), key=lambda kd: kd[1].get("seq") or 0)
-        rows = [kd for kd in rows if (kd[1].get("seq") or 0) > st["seq"]]
+        doc = field.b.get(LEDGER_COLL, LEDGER_KEY) or {}
+        for k, v in doc.get("c") or []:
+            R.ledger.c[tuple(k)] = [int(x) for x in v]
+    except Exception:
+        pass
+
+
+def _save_ledger(field, R) -> None:
+    try:
+        field.b.upsert(LEDGER_COLL, LEDGER_KEY, {"c": [[list(k), list(v)] for k, v in R.ledger.c.items()]})
+    except Exception:
+        pass
+
+
+def _read(field, st) -> None:
+    """The history, once, at the first build: every talk message in event order, counted (not predicted: the
+    ledger comes from the field, where every live prediction is saved)."""
+    R = st["R"]
+    _load_ledger(field, R)
+    rows = sorted(field.b.scan("events", {"origin": field.origin}), key=lambda kd: kd[1].get("seq") or 0)
     for _k, ev in rows:
         if ev.get("status") == "pending":
-            break                                   # not read yet: come back to it next time
-        st["seq"] = max(st["seq"], int(ev.get("seq") or 0))
+            continue                                # not embedded yet: it arrives through note() when it is
         if ev.get("stream") not in TALK_STREAMS or not (ev.get("text") or "").strip():
             continue
-        R.add(str(ev.get("session") or ""), _who(ev), ev.get("text") or "", predict=st["built"])
+        st["seq"] = max(st["seq"], int(ev.get("seq") or 0))
+        R.add(str(ev.get("session") or ""), _who(ev), ev.get("text") or "", predict=False)
 
 
 def note(field, ev: dict) -> None:
-    """The field calls this as it writes an event (efield.process): queued, read at the next of(). Before the
-    first build starts nothing is kept -- the build reads the history itself."""
+    """efield.embed_pending calls this as it writes an embedded event: queued (only the fields used), read at
+    the next of(). Before the first build starts nothing is kept -- the build reads the history itself."""
     st = _OF.get(id(field))
     if st is not None and ev.get("stream") in TALK_STREAMS:
         with st["plock"]:
-            st["pending"].append(dict(ev))
+            st["pending"].append({k: ev.get(k) for k in NOTE_KEYS})
+
+
+def reset(field) -> None:
+    """Forget the models (efield.forget / rebuild): the next of() builds them again from what is left."""
+    with _LOCK:
+        _OF.pop(id(field), None)
 
 
 def _drain(st) -> None:
-    """The queued messages after the last one read, in order; each counted once (the build's watermark)."""
+    """The queued messages after the last one read, in order; each predicted (the ledger), then counted, once
+    (the build's watermark). The ledger is saved when it changed."""
     with st["plock"]:
         q, st["pending"] = st["pending"], []
     R = st["R"]
+    before = R.ledger.c.get((), [0, 0, 0, 0, 0])[4]
     for ev in sorted(q, key=lambda e: int(e.get("seq") or 0)):
         sq = int(ev.get("seq") or 0)
         if sq <= st["seq"] or not (ev.get("text") or "").strip():
             continue
         st["seq"] = sq
         R.add(str(ev.get("session") or ""), _who(ev), ev.get("text") or "", predict=True)
+    if R.ledger.c.get((), [0, 0, 0, 0, 0])[4] != before:
+        _save_ledger(st["field"], R)
 
 
-def of(field, wait: bool = True) -> Replies | None:
-    """The field's reply models. The first build reads the history (counted, not predicted); with wait=False it
-    runs in the background and None comes back until it is done (the banner keeps today's order meanwhile).
-    After that each call adds only the messages after the last one read."""
+def _state(field) -> dict:
     import threading
     import time
     with _LOCK:
         st = _OF.get(id(field))
+        if st is not None and st.get("failed"):
+            _OF.pop(id(field), None)                # a failed build is tried again
+            st = None
         if st is None:
-            st = {"R": Replies(), "seq": -1, "field": field, "built": False, "thread": None, "done": threading.Event(),
-                  "pending": [], "plock": threading.Lock()}
+            st = {"R": Replies(), "seq": -1, "field": field, "built": False, "failed": False,
+                  "done": threading.Event(), "pending": [], "plock": threading.Lock(), "lock": threading.Lock()}
             _OF[id(field)] = st
 
             def build():
@@ -342,41 +382,55 @@ def of(field, wait: bool = True) -> Replies | None:
                         st["built"] = True
                     import sys
                     print(f"[replies] built from {st['R'].n} messages in {time.monotonic() - t0:.1f} s", file=sys.stderr)
+                except Exception as e:                   # never serve partial tables: try again next time
+                    st["failed"] = True
+                    import sys
+                    print(f"[replies] build failed ({e}); trying again at the next banner", file=sys.stderr)
                 finally:
                     st["done"].set()
-            st["lock"] = threading.Lock()
-            st["thread"] = threading.Thread(target=build, name="replies-build", daemon=True)
-            st["thread"].start()
+            threading.Thread(target=build, name="replies-build", daemon=True).start()
+    return st
+
+
+def of(field, wait: bool = True) -> Replies | None:
+    """The field's reply models. The first build reads the history (counted) and the saved ledger; with wait=False it
+    runs in the background and None comes back until it is done. After that each call adds only the messages
+    the field handed over (note), never a scan. None after a failed build (tried again at the next call)."""
+    st = _state(field)
     if not st["done"].is_set():
         if not wait:
             return None
         st["done"].wait()
+    if not st["built"]:
+        return None
     with st["lock"]:
-        _drain(st)                                  # never a scan after the build: the field tells us (note)
+        _drain(st)
     return st["R"]
 
 
 def ready(field, timeout: float | None = None) -> bool:
     """Start the first build if needed and wait up to `timeout` for it."""
-    of(field, wait=False)
-    st = _OF.get(id(field))
-    return bool(st and st["done"].wait(timeout))
+    st = _state(field)
+    return bool(st["done"].wait(timeout) and st["built"])
 
 
 def annotate(field, rows: list, text: str, wait: bool = False) -> list:
-    """The banner's rows with the three scores (listener, said, about) against the incoming message. Never blocks
-    a turn on the first build (wait=False: today's rows until it is done) and never breaks recall: on any error the
-    rows come back as they were."""
+    """The banner's rows with the three scores (listener, said, about) against the incoming message, scored
+    under the models' lock (a drain can't change the tables mid-score). Rows come back unchanged -- without
+    the three keys, so the banner uses its pre-#942 weights -- while the models are building, after a failed
+    build, or on any error."""
     try:
+        st = _state(field)
         R = of(field, wait=wait)
         if R is None:
             return rows
         out = []
-        for r in rows:
-            ans = " ".join(" ".join(x.split()) for x in (r.get("answer") or []))
-            who = str(r.get("speaker") or "")
-            out.append(dict(r, listener=R.listener(text, who, ans), said=R.said(text, who, ans),
-                            about=R.about(text, ans)))
+        with st["lock"]:
+            for r in rows:
+                ans = " ".join(" ".join(x.split()) for x in (r.get("answer") or []))
+                who = str(r.get("speaker") or "")
+                out.append(dict(r, listener=R.listener(text, who, ans), said=R.said(text, who, ans),
+                                about=R.about(text, ans)))
         return out
     except Exception as e:                          # the models never break recall
         import sys

@@ -84,18 +84,20 @@ class TestLedger(unittest.TestCase):
         seq = [("chat-0", w) for w, _t in FILLER] + [("chat-1", w) for w, _t in TALK]
         predicted = sum(1 for i, (c, w) in enumerate(seq)
                         if i > 0 and seq[i - 1][0] == c and any(x == w for _c, x in seq[:i]))
-        steps = R.ledger.c[()][2]
+        steps = R.ledger.c[()][4]
         self.assertEqual(steps, predicted)                           # one record per prediction, misses included
         self.assertLess(R.ledger.c[()][1], steps)                    # ... and some of them are misses, kept
 
     def test_the_record_weighs_the_two_models(self):
         R = RP.Replies()
         for _ in range(6):
-            R.ledger.add("Bob", False, shared_hit=False, person_hit=True)
-        rs, rp = R.ledger.rates("Bob", False)
+            R.ledger.add("Bob", False, (False, True, True, False))
+        rs, rp = R.ledger.rates("Bob", False, "listen")
         self.assertGreater(rp, rs)
-        rs2, rp2 = R.ledger.rates("Carol", False)                    # unknown person: backs off to everyone's record
+        rs2, rp2 = R.ledger.rates("Carol", False, "listen")          # unknown person: backs off to everyone's record
         self.assertGreater(rp2, rs2)
+        ss, sp = R.ledger.rates("Bob", False, "say")                  # said has its own record (Memo's review, 7)
+        self.assertGreater(ss, sp)
 
 
 class TestDreams(unittest.TestCase):
@@ -173,6 +175,86 @@ class TestField(unittest.TestCase):
         rows = [dict(same, a_n=[1]), dict(same, a_n=[2], listener=3.0, about=3.0)]
         self.assertEqual(RB.rank(rows, "what did Caroline paint?", rerank=False)[0]["a_n"][0], 2)
 
+
+
+class TestReview(unittest.TestCase):
+    """Memo's review of #944."""
+
+    def test_1_the_ledger_survives_a_restart(self):
+        f = field_with(TALK[:4])
+        RP.reset(f)
+        RP.of(f)
+        for i, (who, text) in enumerate(TALK[4:]):                   # live messages: predicted, then counted
+            f.write_events([ST.Event(stream="discourse", role="user" if who == "Ann" else "model",
+                                     ts=1_800_000_300.0 + i, text=text)], session="s:1:a")
+            f.process()
+        live = dict(RP.of(f).ledger.c)
+        self.assertGreater(live[()][4], 0)
+        RP.reset(f)                                                   # a restart
+        self.assertEqual(dict(RP.of(f).ledger.c), live)               # the record comes back from the field
+
+    def test_2_forget_drops_the_models_so_they_count_what_is_left(self):
+        f = field_with(TALK)
+        n0 = RP.of(f).n
+        num = next(d["n"] for _k, d in f.b.scan("events", {}) if "lake house" in (d.get("text") or ""))
+        f.forget(num)
+        self.assertEqual(RP.of(f).n, n0 - 1)
+
+    def test_3_rows_without_reply_scores_use_the_weights_fitted_without_them(self):
+        rows = [{"sim": 0.62, "answer": ["The sky is blue today."], "a_n": [1], "q_n": 1, "speaker": "Melanie"},
+                {"sim": 0.60, "answer": ["Caroline adopted a dog named Max, a rescue dog."], "a_n": [50], "q_n": 50,
+                 "speaker": "Caroline"}]
+        got = RB.rank(rows, "what dog did Caroline adopt?", rerank=False)
+        self.assertEqual(got[0]["a_n"][0], 50)
+        self.assertAlmostEqual(got[0]["score"], RB.score(got[0]["feat"], RB.LEGACY_WEIGHTS))
+
+    def test_4_scoring_and_a_drain_never_overlap(self):
+        f = field_with(TALK)
+        RP.of(f)
+        st = RP._OF[id(f)]
+        self.assertTrue(st["lock"].acquire(timeout=1))
+        st["lock"].release()                                          # annotate scores under this same lock
+        got = RP.annotate(f, [{"sim": 0.5, "answer": ["we hiked at the lake trail"], "a_n": [1], "q_n": 1,
+                                "speaker": "model"}], "where did you hike")
+        self.assertIn("listener", got[0])
+
+    def test_5_saved_weights_from_before_942_are_stale(self):
+        f = field_with([("Ann", "hello there friend")])
+        RB.save_weights(f, {**RB.LEGACY_WEIGHTS, "overlap": 5.0})
+        self.assertEqual(RB.load_weights(f), RB.DEFAULT_WEIGHTS)      # not mixed with the new defaults
+        RB.save_weights(f, {**RB.DEFAULT_WEIGHTS, "overlap": 5.0})
+        self.assertEqual(RB.load_weights(f)["overlap"], 5.0)          # a full set is the seat's own
+
+    def test_8_a_failed_build_is_tried_again(self):
+        f = field_with(TALK)
+        RP.reset(f)
+        real = RP._read
+        RP._read = lambda field, st: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            self.assertIsNone(RP.of(f))                               # failed: no partial tables served
+        finally:
+            RP._read = real
+        self.assertIsNotNone(RP.of(f))                                # the next call builds again
+
+    def test_the_keyword_cut_is_exact(self):
+        R = replies()
+        dfs = sorted((len(v) for v in R.post.values()), reverse=True)
+        tot, acc, want = sum(dfs), 0, 0
+        for d in dfs:
+            acc += d
+            if acc >= tot / 2:
+                want = d
+                break
+        self.assertEqual(R._cut(), want)
+
+    def test_note_keeps_only_what_it_reads(self):
+        f = field_with(TALK[:2])
+        RP.of(f)
+        RP.note(f, {"stream": "discourse", "seq": 999, "session": "s", "text": "hi there", "wvec": [0.1] * 512,
+                    "speaker": ["e", "Ann"], "role": "user", "sids": [1, 2]})
+        q = RP._OF[id(f)]["pending"][-1]
+        self.assertNotIn("wvec", q)
+        self.assertNotIn("sids", q)
 
 if __name__ == "__main__":
     unittest.main()
