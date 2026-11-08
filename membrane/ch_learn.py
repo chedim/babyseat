@@ -131,9 +131,10 @@ def _same(a, b) -> bool:
 
 def reversible(trigger) -> bool:
     """#935: only a plain field write can be undone; a method call (`.invoke`) never graduates."""
+    from . import adapters as _AD              # the one table of what acts beyond a field write
     w = (getattr(trigger, "properties", None) or {}).get("write")
     path = str(w[0]) if isinstance(w, (list, tuple)) and w else ""
-    return bool(path) and not path.endswith(".invoke")
+    return bool(path) and _AD._branch(path) is None
 
 
 def _literal(v) -> str | None:
@@ -150,8 +151,9 @@ STALL_KEYS = ("guess:asleep", "fire:skip", "fire:gated", "pass:not_toy")
 
 class Learner:
     def __init__(self, vm, purse, granted=lambda path: False, suggest=None, adopted=None, toy_open=None,
-                 moved=None):
+                 moved=None, llm_works=None):
         self.vm = vm
+        self.llm_works = llm_works       # (chain) -> True while the LLM works that chain (#576 H: then only suggest)
         self.toy_open = toy_open or (lambda name: True)   # #727: the toys Blurp may learn on now
         self.purse = purse
         self.granted = granted
@@ -277,10 +279,6 @@ class Learner:
     def on_fire(self, tr, target_path: str, value) -> str:
         """A candidate fires: 'live' (write the real path), 'shadow' (write the
         prediction onto itself) or 'skip' (asleep, or a command's while toys are the world)."""
-        if tr.eid in self._habits:
-            S.note("answer", lane="habit")             # #935: field work, no model round
-            self.counts["fire:habit"] += 1
-            return "live"
         if WORLD == "toys" and not (tr.properties or {}).get("toy"):
             self.counts["fire:gated"] += 1             # #727: commands come later -- kept, never fired
             return "skip"
@@ -290,6 +288,10 @@ class Learner:
         kind = (tr.properties or {}).get("kind")         # its skill's Accept grants it too (the child tree)
         suggests = self.state(tr.eid) == "proposal" and (
             self.granted(grant_path) or bool(kind and self.granted(f"skill:{kind}")))   # as it stood before this write
+        habit = tr.eid in self._habits
+        if habit and not (self.granted(grant_path) or bool(kind and self.granted(f"skill:{kind}"))):
+            self.counts["fire:skip"] += 1              # #935: a habit still needs the operator's grant
+            return "skip"
         if not self._spend(tr.eid, "fire"):
             self.counts["fire:skip"] += 1
             return "skip"
@@ -297,6 +299,11 @@ class Learner:
         ch = (CH.W.current() or {}).get("id")
         if ch:                                  # no chain, nothing can confirm it: no prediction kept
             self._remember(self._pending, ch, list).append((tr.eid, self._expected(target_path), value))
+        if habit and not (self.llm_works(ch) if self.llm_works else False):
+            S.note("answer", lane="habit")             # #935: field work, no model round
+            self.counts["fire:habit"] += 1
+            self.counts["fire:live"] += 1
+            return "live"                              # pending above: it is re-scored like any live fire
         if suggests and target_path == f"{CH.SELF}.{SELF_MOVE}":
             self.counts["fire:live"] += 1           # #732: Blurp's own move -- a granted look moves its body
             return "live"
@@ -467,6 +474,7 @@ class Learner:
             return False                                # every candidate pays for itself: no room
         self.vm.est.remove(worst.eid)
         self._bal.pop(worst.eid, None)
+        self._habits.discard(worst.eid)
         return True
 
     @staticmethod
@@ -489,4 +497,5 @@ class Learner:
             if est.remove(eid):
                 gone.append(eid)
             self._bal.pop(eid, None)
+            self._habits.discard(eid)
         return gone

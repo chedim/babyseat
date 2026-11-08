@@ -64,6 +64,7 @@ def test_over_the_line_runs_with_no_model_round_and_counts_as_field_work(world, 
     c = _proven(est, vm)
     assert vm.learner.graduate(c.eid, threshold=LINE) is True
     assert c.eid in vm.learner.habits()
+    _grant(vm)
     seen = _answers(monkeypatch)
     z = _ent(est, "z")
     _turn(est, vm, (z, "a", 1), writer="person")            # no model wrote b: the habit does
@@ -175,8 +176,8 @@ def _grant(vm, granted=True):
 
 def test_habit_in_toys_world_does_not_fire_on_a_command(world, monkeypatch):
     est, vm = world
+    c = _proven(est, vm)                                     # learned while commands were the world
     monkeypatch.setattr(L, "WORLD", "toys")                  # the real gate (#727), not forced to commands
-    c = _proven(est, vm)
     assert "toy" not in c.properties
     vm.learner._habits.add(c.eid)
     _grant(vm)
