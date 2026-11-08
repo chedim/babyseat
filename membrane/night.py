@@ -2438,7 +2438,11 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
     blocked with what is missing."""
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
+    if "." in (method or ""):                    # #956: a call path is call:<name>, split on '.'
+        return {"ok": False, "error": f"a method name can't contain '.': {method!r}"}
     method = re.sub(r"[^A-Za-z0-9_]+", "_", (method or "").strip()).strip("_")
+    if method.endswith(("_result", "_rc")):      # #956: those are a call's receipt properties
+        return {"ok": False, "error": f"a method name can't end in _result or _rc (a call's receipt): {method!r}"}
     steps = list(steps or [])
     if abstract:
         if (command or "").strip() or steps or (guard or "").strip():
@@ -2762,7 +2766,7 @@ def _bind_args(m, args):
     return args, None
 
 
-def _prepare_call(est, obj_spec: str, method: str, args=None, _depth: int = 0) -> dict:
+def _prepare_call(est, obj_spec: str, method: str, args=None, _depth: int = 0, method_eid: str | None = None) -> dict:
     """Everything a call decides BEFORE anything runs -- the object, the method it
     resolves to, the bound args, the filled context -- or the refusal it gives.
     method_call and method_inspect share it, so a dry run never disagrees with the
@@ -2773,7 +2777,13 @@ def _prepare_call(est, obj_spec: str, method: str, args=None, _depth: int = 0) -
     if obj is None:
         return {"blocked": {"ok": False, "status": "blocked",
                             "error": f"no object matches {obj_spec!r} -- a call names its object"}}
-    m, via = resolve_method(est, obj, (method or "").strip())
+    if method_eid:                                # #956: a dispatch trigger's call runs THAT method, no second lookup
+        m = (est.docs or {}).get(method_eid)
+        if m is None or (m.properties or {}).get("method_name") != (method or "").strip():
+            return {"blocked": _blocked(obj, method, f"no method {method_eid!r} named {method!r}")}
+        via = "dispatch"
+    else:
+        m, via = resolve_method(est, obj, (method or "").strip())
     mro = [short_name_of(a) for a in [obj] + ancestors(est, obj)][:8]
     if m is None:
         req = next((x for x in abstract_methods(est, obj) if x["name"] == (method or "").strip()), None)
@@ -2926,8 +2936,8 @@ def direct_each_refusal(est, over: str, method: str) -> str | None:
 
 
 def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None,
-                _depth: int = 0) -> dict:
-    prep = _prepare_call(est, obj_spec, method, args, _depth)
+                _depth: int = 0, method_eid: str | None = None) -> dict:
+    prep = _prepare_call(est, obj_spec, method, args, _depth, method_eid=method_eid)
     if "blocked" in prep:
         return prep["blocked"]
     obj, m, via, mro, full, template, ctx, args = (prep[k] for k in (
