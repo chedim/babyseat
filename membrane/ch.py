@@ -441,6 +441,7 @@ class VM:
         self._state: dict[str, dict] = {}         # trigger -> binding -> {lv, every, stamp, within}
         self._thread = None
         self._trig: tuple | None = None            # (version, eids)
+        self._index: tuple | None = None           # #956: (fingerprint, changed-by-prop, level)
         self._trig_v = 0
         self._spec: dict[str, tuple] = {}          # trigger -> (definition fingerprint, spec or None)
         self._seq = itertools.count()
@@ -517,6 +518,41 @@ class VM:
             self._trig = hit
         docs = self.est.docs or {}
         return [docs[e] for e in hit[1] if e in docs]
+
+    def _relevant(self, prop: str) -> list:
+        """#956 stage 1: the triggers a write on <eid>.<prop> can concern, in definition order (a
+        firing writes at once, so a later trigger on the same write reads what an earlier one
+        wrote, as before the index):
+        - the `changed` triggers watching <prop> (the watched path's last segment, as _on_write
+          reads it);
+        - every level trigger (any write can change their bindings);
+        - every trigger with a `pos` or `around` atom: they are pulses whose per-binding state
+          advances each time they are evaluated, and before the index every write evaluated them.
+        `every` triggers are the sweep's. Rebuilt when a trigger entity is written through the
+        store (the VM's trigger version); a definition edited in place without a store write is
+        not seen until then."""
+        trs = self.triggers()
+        fp = self._trig[0] if self._trig else None   # bumped on every write to a trigger entity
+        idx = self._index
+        if idx is None or idx[0] != fp:
+            by_prop: dict[str, set] = {}
+            always: set = set()
+            for t in trs:
+                spec = self._valid(t)
+                if spec is None:
+                    continue
+                kinds = {a[0] for a in spec["when"]}
+                if "every" in kinds:
+                    continue
+                if "changed" in kinds and not kinds & {"pos", "around"}:
+                    a = next(a for a in spec["when"] if a[0] == "changed")
+                    by_prop.setdefault(str(a[1]).rpartition(".")[2], set()).add(t.eid)
+                else:
+                    always.add(t.eid)
+            idx = (fp, by_prop, always)
+            self._index = idx
+        want = idx[2] | idx[1].get(prop, set())
+        return [t for t in trs if t.eid in want]          # definition order, as triggers() lists them
 
     def _valid(self, tr) -> dict | None:
         """A trigger's spec, validated when first used or changed -- an entity of class
@@ -779,10 +815,10 @@ class VM:
                     break
                 w = self._q.popleft()
             n += 1
-            eid, _prop = self._split(w)
+            eid, prop = self._split(w)
             with self._run:
                 ent = (self.est.docs or {}).get(eid)
-                trs = [t for t in self.triggers() if t.eid != eid]
+                trs = [t for t in self._relevant(prop) if t.eid != eid]   # #956: indexed by property
                 if trs and ent is not None and ent.cls != CLASS:
                     now = float(self.clock())
                     memo: dict = {}
