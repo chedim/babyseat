@@ -1,0 +1,7031 @@
+[
+{
+"text": "How did Alice fix the cache?",
+"rows": [
+{
+"answer": [
+"Alice tested membrane explained banner tested. reranker Alice banner goal field!",
+"another note about weights."
+],
+"a_n": [
+100
+],
+"q_n": 50,
+"sim": 0.7355,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000000.0,
+"listener": 0.712,
+"said": 0.81,
+"about": 0.146
+},
+{
+"answer": [
+"membrane explained membrane broke weights tested. weights recall Alice seed pack store!",
+"another note about planner."
+],
+"a_n": [
+102
+],
+"q_n": null,
+"sim": 0.8787,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000001.0,
+"listener": 0.471,
+"said": 0.332,
+"about": 0.01
+},
+{
+"answer": [
+"weights explained seed pack measured recall tested. deploy reranker goal weights planner!",
+"another note about membrane."
+],
+"a_n": [
+104
+],
+"q_n": null,
+"sim": 0.8355,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000002.0,
+"listener": 0.322,
+"said": 0.818,
+"about": 0.592
+},
+{
+"answer": [
+"store reverted reranker reverted executor tested. reranker Alice recall weights executor!",
+"another note about reranker."
+],
+"a_n": [
+106
+],
+"q_n": 53,
+"sim": 0.9407,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000003.0,
+"listener": 0.7,
+"said": 0.643,
+"about": 0.574
+},
+{
+"answer": [
+"goal fixed weights changed banner shipped. reranker cache seed pack Alice executor!",
+"another note about Alice."
+],
+"a_n": [
+108
+],
+"q_n": null,
+"sim": 0.8207,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000004.0,
+"listener": 0.48,
+"said": 0.39,
+"about": 0.253
+},
+{
+"answer": [
+"planner explained cache reverted banner reverted. seed pack executor membrane seed pack cache!",
+"another note about weights."
+],
+"a_n": [
+110
+],
+"q_n": null,
+"sim": 0.7533,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000005.0,
+"listener": 0.717,
+"said": 0.26,
+"about": 0.558
+},
+{
+"answer": [
+"goal reverted deploy tested cache explained. Alice cache cache recall deploy!",
+"another note about seed pack."
+],
+"a_n": [
+112
+],
+"q_n": 56,
+"sim": 0.7878,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000006.0,
+"listener": 0.295,
+"said": 0.293,
+"about": 0.778
+},
+{
+"answer": [
+"store explained field tested weights shipped. cache planner deploy cache executor!",
+"another note about cache."
+],
+"a_n": [
+114
+],
+"q_n": null,
+"sim": 0.8403,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000007.0,
+"listener": 0.842,
+"said": 0.624,
+"about": 0.309
+},
+{
+"answer": [
+"Alice broke recall tested Bob fixed. planner weights reranker planner reranker!",
+"another note about field."
+],
+"a_n": [
+116
+],
+"q_n": null,
+"sim": 0.9546,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000008.0,
+"listener": 0.407,
+"said": 0.903,
+"about": 0.636
+},
+{
+"answer": [
+"executor reverted Bob broke store explained. Bob weights deploy planner weights!",
+"another note about Bob."
+],
+"a_n": [
+118
+],
+"q_n": 59,
+"sim": 0.8324,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000009.0,
+"listener": 0.605,
+"said": 0.396,
+"about": 0.813
+},
+{
+"answer": [
+"executor measured store tested field changed. planner executor seed pack Alice recall!",
+"another note about seed pack."
+],
+"a_n": [
+120
+],
+"q_n": null,
+"sim": 0.7633,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000010.0,
+"listener": 0.067,
+"said": 0.365,
+"about": 0.481
+},
+{
+"answer": [
+"weights fixed deploy tested cache fixed. reranker Bob weights Alice banner!",
+"another note about reranker."
+],
+"a_n": [
+122
+],
+"q_n": null,
+"sim": 0.9369,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000011.0,
+"listener": 0.555,
+"said": 0.035,
+"about": 0.988
+},
+{
+"answer": [
+"executor measured field broke recall fixed. cache banner weights Alice banner!",
+"another note about reranker."
+],
+"a_n": [
+124
+],
+"q_n": 62,
+"sim": 0.9411,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000012.0,
+"listener": 0.786,
+"said": 0.526,
+"about": 0.006
+},
+{
+"answer": [
+"weights fixed seed pack measured planner changed. recall banner goal cache reranker!",
+"another note about goal."
+],
+"a_n": [
+126
+],
+"q_n": null,
+"sim": 0.9416,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000013.0,
+"listener": 0.627,
+"said": 0.602,
+"about": 0.618
+},
+{
+"answer": [
+"Bob explained planner changed membrane reverted. seed pack field deploy seed pack cache!",
+"another note about planner."
+],
+"a_n": [
+128
+],
+"q_n": null,
+"sim": 0.735,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000014.0,
+"listener": 0.809,
+"said": 0.595,
+"about": 0.562
+},
+{
+"answer": [
+"weights tested deploy shipped deploy explained. store goal store field membrane!",
+"another note about field."
+],
+"a_n": [
+130
+],
+"q_n": 65,
+"sim": 0.9913,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000015.0,
+"listener": 0.622,
+"said": 0.53,
+"about": 0.892
+},
+{
+"answer": [
+"planner fixed recall broke seed pack measured. banner goal seed pack planner banner!",
+"another note about store."
+],
+"a_n": [
+132
+],
+"q_n": null,
+"sim": 0.7243,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000016.0,
+"listener": 0.718,
+"said": 0.399,
+"about": 0.315
+},
+{
+"answer": [
+"field explained weights explained planner broke. weights membrane membrane Alice executor!",
+"another note about planner."
+],
+"a_n": [
+134
+],
+"q_n": null,
+"sim": 0.9965,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000017.0,
+"listener": 0.129,
+"said": 0.887,
+"about": 0.371
+},
+{
+"answer": [
+"field broke executor fixed Bob tested. membrane executor deploy cache deploy!",
+"another note about banner."
+],
+"a_n": [
+136
+],
+"q_n": 68,
+"sim": 0.9705,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000018.0,
+"listener": 0.39,
+"said": 0.295,
+"about": 0.487
+},
+{
+"answer": [
+"banner shipped cache fixed seed pack explained. reranker Alice executor field weights!",
+"another note about cache."
+],
+"a_n": [
+138
+],
+"q_n": null,
+"sim": 0.9485,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000019.0,
+"listener": 0.601,
+"said": 0.346,
+"about": 0.315
+},
+{
+"answer": [
+"cache broke recall reverted planner tested. Alice executor membrane reranker membrane!",
+"another note about banner."
+],
+"a_n": [
+140
+],
+"q_n": null,
+"sim": 0.7177,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000020.0,
+"listener": 0.508,
+"said": 0.322,
+"about": 0.627
+},
+{
+"answer": [
+"planner shipped store broke cache fixed. Alice banner Bob deploy goal!",
+"another note about deploy."
+],
+"a_n": [
+142
+],
+"q_n": 71,
+"sim": 0.8574,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000021.0,
+"listener": 0.835,
+"said": 0.462,
+"about": 0.731
+},
+{
+"answer": [
+"recall reverted cache measured banner reverted. reranker executor reranker banner seed pack!",
+"another note about goal."
+],
+"a_n": [
+144
+],
+"q_n": null,
+"sim": 0.9405,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000022.0,
+"listener": 0.195,
+"said": 0.435,
+"about": 0.075
+},
+{
+"answer": [
+"membrane explained field explained goal broke. seed pack goal banner weights weights!",
+"another note about membrane."
+],
+"a_n": [
+146
+],
+"q_n": null,
+"sim": 0.9508,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000023.0,
+"listener": 0.409,
+"said": 0.767,
+"about": 0.373
+},
+{
+"answer": [
+"banner fixed recall shipped planner fixed. Bob store goal weights cache!",
+"another note about Alice."
+],
+"a_n": [
+148
+],
+"q_n": 74,
+"sim": 0.7803,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000024.0,
+"listener": 0.828,
+"said": 0.527,
+"about": 0.595
+},
+{
+"answer": [
+"Bob explained banner changed banner broke. executor goal store cache deploy!",
+"another note about Alice."
+],
+"a_n": [
+150
+],
+"q_n": null,
+"sim": 0.9409,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000025.0,
+"listener": 0.999,
+"said": 0.023,
+"about": 0.891
+},
+{
+"answer": [
+"Bob shipped weights tested Alice broke. Bob Alice store deploy goal!",
+"another note about executor."
+],
+"a_n": [
+152
+],
+"q_n": null,
+"sim": 0.8916,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000026.0,
+"listener": 0.68,
+"said": 0.868,
+"about": 0.934
+},
+{
+"answer": [
+"seed pack fixed goal tested store fixed. planner Bob banner seed pack executor!",
+"another note about reranker."
+],
+"a_n": [
+154
+],
+"q_n": 77,
+"sim": 0.991,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000027.0,
+"listener": 0.787,
+"said": 0.074,
+"about": 0.599
+},
+{
+"answer": [
+"weights reverted reranker fixed recall fixed. planner recall Bob field executor!",
+"another note about seed pack."
+],
+"a_n": [
+156
+],
+"q_n": null,
+"sim": 0.8817,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000028.0,
+"listener": 0.786,
+"said": 0.903,
+"about": 0.784
+},
+{
+"answer": [
+"executor reverted store fixed planner reverted. planner Alice cache seed pack membrane!",
+"another note about planner."
+],
+"a_n": [
+158
+],
+"q_n": null,
+"sim": 0.7763,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000029.0,
+"listener": 0.746,
+"said": 0.747,
+"about": 0.938
+}
+],
+"skip": [
+102,
+108
+]
+},
+{
+"text": "what changed in the recall banner",
+"rows": [
+{
+"answer": [
+"membrane shipped membrane reverted Alice shipped. cache membrane goal seed pack planner!",
+"another note about Alice."
+],
+"a_n": [
+101
+],
+"q_n": 50,
+"sim": 0.9419,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000000.0
+},
+{
+"answer": [
+"recall broke membrane measured banner tested. planner recall weights field seed pack!",
+"another note about field."
+],
+"a_n": [
+103
+],
+"q_n": null,
+"sim": 0.7224,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000001.0
+},
+{
+"answer": [
+"Alice shipped cache tested cache tested. field cache store membrane Alice!",
+"another note about goal."
+],
+"a_n": [
+105
+],
+"q_n": null,
+"sim": 0.7543,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000002.0
+},
+{
+"answer": [
+"executor changed reranker shipped field measured. store banner field membrane deploy!",
+"another note about cache."
+],
+"a_n": [
+107
+],
+"q_n": 53,
+"sim": 0.9747,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000003.0
+},
+{
+"answer": [
+"field fixed seed pack broke executor broke. cache reranker reranker reranker deploy!",
+"another note about reranker."
+],
+"a_n": [
+109
+],
+"q_n": null,
+"sim": 0.7986,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000004.0
+},
+{
+"answer": [
+"goal measured store reverted store broke. store reranker deploy membrane reranker!",
+"another note about seed pack."
+],
+"a_n": [
+111
+],
+"q_n": null,
+"sim": 0.7852,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000005.0
+},
+{
+"answer": [
+"Alice broke cache tested store shipped. banner recall Alice field store!",
+"another note about banner."
+],
+"a_n": [
+113
+],
+"q_n": 56,
+"sim": 0.9031,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000006.0
+},
+{
+"answer": [
+"cache measured executor measured executor measured. weights deploy store deploy cache!",
+"another note about store."
+],
+"a_n": [
+115
+],
+"q_n": null,
+"sim": 0.7031,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000007.0
+},
+{
+"answer": [
+"banner shipped banner changed recall broke. banner membrane cache recall Bob!",
+"another note about banner."
+],
+"a_n": [
+117
+],
+"q_n": null,
+"sim": 0.7018,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000008.0
+},
+{
+"answer": [
+"membrane changed executor tested deploy reverted. field goal cache Alice membrane!",
+"another note about Alice."
+],
+"a_n": [
+119
+],
+"q_n": 59,
+"sim": 0.7602,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000009.0
+},
+{
+"answer": [
+"Bob reverted banner broke store fixed. goal store store weights field!",
+"another note about weights."
+],
+"a_n": [
+121
+],
+"q_n": null,
+"sim": 0.7479,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000010.0
+},
+{
+"answer": [
+"banner shipped field tested seed pack fixed. planner weights goal goal cache!",
+"another note about field."
+],
+"a_n": [
+123
+],
+"q_n": null,
+"sim": 0.9748,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000011.0
+},
+{
+"answer": [
+"reranker measured reranker explained membrane changed. Alice seed pack deploy deploy planner!",
+"another note about recall."
+],
+"a_n": [
+125
+],
+"q_n": 62,
+"sim": 0.9013,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000012.0
+},
+{
+"answer": [
+"store tested weights changed field changed. Bob field reranker store field!",
+"another note about planner."
+],
+"a_n": [
+127
+],
+"q_n": null,
+"sim": 0.7537,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000013.0
+},
+{
+"answer": [
+"field fixed planner fixed planner explained. weights Bob Bob planner Alice!",
+"another note about seed pack."
+],
+"a_n": [
+129
+],
+"q_n": null,
+"sim": 0.712,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000014.0
+},
+{
+"answer": [
+"membrane explained Alice shipped executor changed. banner banner Alice executor Bob!",
+"another note about banner."
+],
+"a_n": [
+131
+],
+"q_n": 65,
+"sim": 0.749,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000015.0
+},
+{
+"answer": [
+"seed pack shipped Alice fixed planner explained. Bob recall Bob reranker banner!",
+"another note about membrane."
+],
+"a_n": [
+133
+],
+"q_n": null,
+"sim": 0.7526,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000016.0
+},
+{
+"answer": [
+"cache changed recall reverted seed pack tested. reranker field Bob executor deploy!",
+"another note about store."
+],
+"a_n": [
+135
+],
+"q_n": null,
+"sim": 0.7495,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000017.0
+},
+{
+"answer": [
+"goal fixed Bob shipped Bob fixed. seed pack recall Bob goal deploy!",
+"another note about membrane."
+],
+"a_n": [
+137
+],
+"q_n": 68,
+"sim": 0.7433,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000018.0
+},
+{
+"answer": [
+"planner reverted banner tested field shipped. goal deploy planner Alice Bob!",
+"another note about planner."
+],
+"a_n": [
+139
+],
+"q_n": null,
+"sim": 0.7662,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000019.0
+},
+{
+"answer": [
+"recall shipped field broke cache measured. field reranker reranker reranker membrane!",
+"another note about weights."
+],
+"a_n": [
+141
+],
+"q_n": null,
+"sim": 0.9676,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000020.0
+},
+{
+"answer": [
+"recall broke planner changed planner explained. field banner membrane recall executor!",
+"another note about deploy."
+],
+"a_n": [
+143
+],
+"q_n": 71,
+"sim": 0.7624,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000021.0
+},
+{
+"answer": [
+"reranker broke seed pack tested weights changed. field cache seed pack field deploy!",
+"another note about cache."
+],
+"a_n": [
+145
+],
+"q_n": null,
+"sim": 0.7058,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000022.0
+},
+{
+"answer": [
+"deploy reverted Bob changed goal tested. reranker executor membrane goal membrane!",
+"another note about recall."
+],
+"a_n": [
+147
+],
+"q_n": null,
+"sim": 0.7907,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000023.0
+},
+{
+"answer": [
+"recall shipped executor tested planner fixed. cache goal deploy reranker Alice!",
+"another note about executor."
+],
+"a_n": [
+149
+],
+"q_n": 74,
+"sim": 0.8382,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000024.0
+},
+{
+"answer": [
+"executor changed membrane measured banner fixed. reranker seed pack planner reranker banner!",
+"another note about field."
+],
+"a_n": [
+151
+],
+"q_n": null,
+"sim": 0.7244,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000025.0
+},
+{
+"answer": [
+"banner tested seed pack measured recall broke. executor executor store weights cache!",
+"another note about planner."
+],
+"a_n": [
+153
+],
+"q_n": null,
+"sim": 0.8555,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000026.0
+},
+{
+"answer": [
+"weights tested field measured Bob tested. planner planner seed pack Alice banner!",
+"another note about recall."
+],
+"a_n": [
+155
+],
+"q_n": 77,
+"sim": 0.8497,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000027.0
+},
+{
+"answer": [
+"banner tested executor shipped recall reverted. reranker goal recall cache Alice!",
+"another note about seed pack."
+],
+"a_n": [
+157
+],
+"q_n": null,
+"sim": 0.719,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000028.0
+},
+{
+"answer": [
+"Alice broke membrane changed field fixed. seed pack seed pack executor recall cache!",
+"another note about Bob."
+],
+"a_n": [
+159
+],
+"q_n": null,
+"sim": 0.7251,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000029.0
+}
+],
+"skip": []
+},
+{
+"text": "ok",
+"rows": [
+{
+"answer": [
+"reranker changed field tested store changed. field goal weights executor seed pack!",
+"another note about banner."
+],
+"a_n": [
+102
+],
+"q_n": 50,
+"sim": 0.7268,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000000.0,
+"listener": 0.02,
+"said": 0.26,
+"about": 0.671
+},
+{
+"answer": [
+"reranker shipped field fixed goal measured. planner goal reranker banner weights!",
+"another note about membrane."
+],
+"a_n": [
+104
+],
+"q_n": null,
+"sim": 0.8231,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000001.0,
+"listener": 0.017,
+"said": 0.992,
+"about": 0.032
+},
+{
+"answer": [
+"cache fixed cache shipped field explained. weights weights recall deploy reranker!",
+"another note about membrane."
+],
+"a_n": [
+106
+],
+"q_n": null,
+"sim": 0.984,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000002.0,
+"listener": 0.985,
+"said": 0.667,
+"about": 0.524
+},
+{
+"answer": [
+"Bob measured deploy tested seed pack measured. membrane membrane membrane planner cache!",
+"another note about cache."
+],
+"a_n": [
+108
+],
+"q_n": 53,
+"sim": 0.7867,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000003.0,
+"listener": 0.887,
+"said": 0.959,
+"about": 0.208
+},
+{
+"answer": [
+"Bob explained membrane changed banner measured. seed pack goal recall goal cache!",
+"another note about cache."
+],
+"a_n": [
+110
+],
+"q_n": null,
+"sim": 0.9319,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000004.0,
+"listener": 0.342,
+"said": 0.903,
+"about": 0.414
+},
+{
+"answer": [
+"Alice explained field changed planner shipped. planner seed pack seed pack goal field!",
+"another note about recall."
+],
+"a_n": [
+112
+],
+"q_n": null,
+"sim": 0.8758,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000005.0,
+"listener": 0.356,
+"said": 0.221,
+"about": 0.834
+},
+{
+"answer": [
+"weights broke goal explained planner tested. cache executor deploy reranker membrane!",
+"another note about field."
+],
+"a_n": [
+114
+],
+"q_n": 56,
+"sim": 0.7127,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000006.0,
+"listener": 0.528,
+"said": 0.135,
+"about": 0.348
+},
+{
+"answer": [
+"deploy measured seed pack fixed cache measured. planner deploy field deploy recall!",
+"another note about field."
+],
+"a_n": [
+116
+],
+"q_n": null,
+"sim": 0.7407,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000007.0,
+"listener": 0.491,
+"said": 0.587,
+"about": 0.222
+},
+{
+"answer": [
+"seed pack shipped planner reverted reranker tested. recall cache field planner seed pack!",
+"another note about Alice."
+],
+"a_n": [
+118
+],
+"q_n": null,
+"sim": 0.8516,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000008.0,
+"listener": 0.552,
+"said": 0.077,
+"about": 0.392
+},
+{
+"answer": [
+"cache changed banner shipped cache tested. cache deploy Alice reranker membrane!",
+"another note about store."
+],
+"a_n": [
+120
+],
+"q_n": 59,
+"sim": 0.9735,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000009.0,
+"listener": 0.965,
+"said": 0.886,
+"about": 0.864
+},
+{
+"answer": [
+"membrane tested Bob shipped Alice explained. goal field goal seed pack Bob!",
+"another note about weights."
+],
+"a_n": [
+122
+],
+"q_n": null,
+"sim": 0.8205,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000010.0,
+"listener": 0.925,
+"said": 0.769,
+"about": 0.269
+},
+{
+"answer": [
+"cache tested seed pack tested goal changed. planner field recall weights cache!",
+"another note about banner."
+],
+"a_n": [
+124
+],
+"q_n": null,
+"sim": 0.9144,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000011.0,
+"listener": 0.242,
+"said": 0.256,
+"about": 0.874
+},
+{
+"answer": [
+"weights changed store shipped store fixed. reranker weights banner reranker Bob!",
+"another note about recall."
+],
+"a_n": [
+126
+],
+"q_n": 62,
+"sim": 0.9528,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000012.0,
+"listener": 0.944,
+"said": 0.26,
+"about": 0.702
+},
+{
+"answer": [
+"membrane measured weights shipped Alice tested. banner goal seed pack executor executor!",
+"another note about recall."
+],
+"a_n": [
+128
+],
+"q_n": null,
+"sim": 0.8866,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000013.0,
+"listener": 0.534,
+"said": 0.833,
+"about": 0.08
+},
+{
+"answer": [
+"weights tested membrane tested goal broke. deploy reranker planner cache deploy!",
+"another note about store."
+],
+"a_n": [
+130
+],
+"q_n": null,
+"sim": 0.9625,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000014.0,
+"listener": 0.672,
+"said": 0.175,
+"about": 0.749
+},
+{
+"answer": [
+"Bob measured deploy fixed deploy shipped. goal goal deploy recall weights!",
+"another note about reranker."
+],
+"a_n": [
+132
+],
+"q_n": 65,
+"sim": 0.7681,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000015.0,
+"listener": 0.464,
+"said": 0.217,
+"about": 0.455
+},
+{
+"answer": [
+"seed pack reverted banner changed executor explained. planner recall reranker goal banner!",
+"another note about cache."
+],
+"a_n": [
+134
+],
+"q_n": null,
+"sim": 0.9323,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000016.0,
+"listener": 0.739,
+"said": 0.39,
+"about": 0.081
+},
+{
+"answer": [
+"deploy tested weights explained seed pack tested. banner seed pack seed pack goal Alice!",
+"another note about store."
+],
+"a_n": [
+136
+],
+"q_n": null,
+"sim": 0.7749,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000017.0,
+"listener": 0.545,
+"said": 0.969,
+"about": 0.953
+},
+{
+"answer": [
+"store tested planner measured Alice measured. executor field banner Alice recall!",
+"another note about banner."
+],
+"a_n": [
+138
+],
+"q_n": 68,
+"sim": 0.984,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000018.0,
+"listener": 0.3,
+"said": 0.263,
+"about": 0.279
+},
+{
+"answer": [
+"deploy shipped planner reverted membrane changed. field store weights executor Alice!",
+"another note about store."
+],
+"a_n": [
+140
+],
+"q_n": null,
+"sim": 0.7917,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000019.0,
+"listener": 0.884,
+"said": 0.827,
+"about": 0.23
+},
+{
+"answer": [
+"deploy reverted Alice shipped seed pack explained. goal goal Bob recall store!",
+"another note about deploy."
+],
+"a_n": [
+142
+],
+"q_n": null,
+"sim": 0.7604,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000020.0,
+"listener": 0.239,
+"said": 0.003,
+"about": 0.694
+},
+{
+"answer": [
+"deploy reverted store changed reranker fixed. cache weights cache field goal!",
+"another note about Bob."
+],
+"a_n": [
+144
+],
+"q_n": 71,
+"sim": 0.7237,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000021.0,
+"listener": 0.012,
+"said": 0.408,
+"about": 0.93
+},
+{
+"answer": [
+"cache reverted membrane shipped store fixed. cache reranker banner weights Alice!",
+"another note about recall."
+],
+"a_n": [
+146
+],
+"q_n": null,
+"sim": 0.8345,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000022.0,
+"listener": 0.555,
+"said": 0.519,
+"about": 0.921
+},
+{
+"answer": [
+"field explained reranker changed field explained. planner Bob Bob membrane Alice!",
+"another note about reranker."
+],
+"a_n": [
+148
+],
+"q_n": null,
+"sim": 0.8936,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000023.0,
+"listener": 0.559,
+"said": 0.632,
+"about": 0.264
+},
+{
+"answer": [
+"cache reverted planner broke field fixed. Bob deploy field seed pack field!",
+"another note about planner."
+],
+"a_n": [
+150
+],
+"q_n": 74,
+"sim": 0.9558,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000024.0,
+"listener": 0.243,
+"said": 0.785,
+"about": 0.952
+},
+{
+"answer": [
+"planner broke store shipped Bob broke. goal reranker deploy planner Bob!",
+"another note about field."
+],
+"a_n": [
+152
+],
+"q_n": null,
+"sim": 0.9728,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000025.0,
+"listener": 0.875,
+"said": 0.874,
+"about": 0.845
+},
+{
+"answer": [
+"recall shipped Bob tested Alice shipped. field cache planner membrane goal!",
+"another note about goal."
+],
+"a_n": [
+154
+],
+"q_n": null,
+"sim": 0.9841,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000026.0,
+"listener": 0.491,
+"said": 0.605,
+"about": 0.815
+},
+{
+"answer": [
+"weights reverted reranker explained executor broke. cache membrane cache recall planner!",
+"another note about weights."
+],
+"a_n": [
+156
+],
+"q_n": 77,
+"sim": 0.8569,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000027.0,
+"listener": 0.18,
+"said": 0.196,
+"about": 0.252
+},
+{
+"answer": [
+"reranker fixed seed pack broke Alice broke. store weights planner Bob membrane!",
+"another note about store."
+],
+"a_n": [
+158
+],
+"q_n": null,
+"sim": 0.8024,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000028.0,
+"listener": 0.847,
+"said": 0.973,
+"about": 0.021
+},
+{
+"answer": [
+"banner explained reranker fixed planner measured. membrane executor Bob reranker seed pack!",
+"another note about store."
+],
+"a_n": [
+160
+],
+"q_n": null,
+"sim": 0.7911,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000029.0,
+"listener": 0.811,
+"said": 0.205,
+"about": 0.042
+}
+],
+"skip": []
+},
+{
+"text": "Did Bob ship the seed pack",
+"rows": [
+{
+"answer": [
+"goal fixed goal fixed field fixed. executor banner cache cache Alice!",
+"another note about deploy."
+],
+"a_n": [
+103
+],
+"q_n": 50,
+"sim": 0.9677,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000000.0
+},
+{
+"answer": [
+"weights broke planner fixed banner changed. reranker weights field weights Alice!",
+"another note about deploy."
+],
+"a_n": [
+105
+],
+"q_n": null,
+"sim": 0.7718,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000001.0
+},
+{
+"answer": [
+"field changed field broke recall broke. deploy weights goal banner executor!",
+"another note about banner."
+],
+"a_n": [
+107
+],
+"q_n": null,
+"sim": 0.9155,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000002.0
+},
+{
+"answer": [
+"goal measured goal changed deploy changed. executor goal goal Bob cache!",
+"another note about field."
+],
+"a_n": [
+109
+],
+"q_n": 53,
+"sim": 0.9086,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000003.0
+},
+{
+"answer": [
+"store changed reranker tested executor shipped. seed pack Bob field executor membrane!",
+"another note about executor."
+],
+"a_n": [
+111
+],
+"q_n": null,
+"sim": 0.9264,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000004.0
+},
+{
+"answer": [
+"store broke store fixed Alice shipped. seed pack store executor Bob weights!",
+"another note about weights."
+],
+"a_n": [
+113
+],
+"q_n": null,
+"sim": 0.9245,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000005.0
+},
+{
+"answer": [
+"membrane measured cache shipped cache fixed. weights executor field membrane deploy!",
+"another note about banner."
+],
+"a_n": [
+115
+],
+"q_n": 56,
+"sim": 0.9556,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000006.0
+},
+{
+"answer": [
+"executor explained membrane tested Alice tested. store seed pack planner executor deploy!",
+"another note about deploy."
+],
+"a_n": [
+117
+],
+"q_n": null,
+"sim": 0.8488,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000007.0
+},
+{
+"answer": [
+"field reverted deploy changed membrane shipped. executor field cache Alice weights!",
+"another note about recall."
+],
+"a_n": [
+119
+],
+"q_n": null,
+"sim": 0.8462,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000008.0
+},
+{
+"answer": [
+"deploy changed cache shipped Alice fixed. cache recall reranker field recall!",
+"another note about deploy."
+],
+"a_n": [
+121
+],
+"q_n": 59,
+"sim": 0.7141,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000009.0
+},
+{
+"answer": [
+"seed pack changed field changed cache fixed. field field store executor planner!",
+"another note about executor."
+],
+"a_n": [
+123
+],
+"q_n": null,
+"sim": 0.7696,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000010.0
+},
+{
+"answer": [
+"planner shipped cache tested cache tested. Bob cache banner executor reranker!",
+"another note about reranker."
+],
+"a_n": [
+125
+],
+"q_n": null,
+"sim": 0.9515,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000011.0
+},
+{
+"answer": [
+"field measured seed pack fixed field tested. membrane seed pack field banner seed pack!",
+"another note about executor."
+],
+"a_n": [
+127
+],
+"q_n": 62,
+"sim": 0.9136,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000012.0
+},
+{
+"answer": [
+"goal measured field broke goal broke. weights Alice store banner Bob!",
+"another note about executor."
+],
+"a_n": [
+129
+],
+"q_n": null,
+"sim": 0.718,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000013.0
+},
+{
+"answer": [
+"Bob explained weights tested field changed. Bob planner reranker weights store!",
+"another note about deploy."
+],
+"a_n": [
+131
+],
+"q_n": null,
+"sim": 0.7442,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000014.0
+},
+{
+"answer": [
+"cache tested cache shipped store measured. deploy executor Alice executor executor!",
+"another note about goal."
+],
+"a_n": [
+133
+],
+"q_n": 65,
+"sim": 0.9861,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000015.0
+},
+{
+"answer": [
+"recall reverted membrane fixed membrane reverted. membrane field banner field reranker!",
+"another note about reranker."
+],
+"a_n": [
+135
+],
+"q_n": null,
+"sim": 0.7418,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000016.0
+},
+{
+"answer": [
+"seed pack broke planner tested store tested. Bob cache goal field planner!",
+"another note about Alice."
+],
+"a_n": [
+137
+],
+"q_n": null,
+"sim": 0.9459,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000017.0
+},
+{
+"answer": [
+"membrane tested reranker fixed Bob tested. cache recall cache executor cache!",
+"another note about Alice."
+],
+"a_n": [
+139
+],
+"q_n": 68,
+"sim": 0.7917,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000018.0
+},
+{
+"answer": [
+"reranker broke executor fixed membrane reverted. field planner planner banner goal!",
+"another note about reranker."
+],
+"a_n": [
+141
+],
+"q_n": null,
+"sim": 0.9728,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000019.0
+},
+{
+"answer": [
+"executor tested executor fixed seed pack explained. field Bob store field Alice!",
+"another note about deploy."
+],
+"a_n": [
+143
+],
+"q_n": null,
+"sim": 0.8549,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000020.0
+},
+{
+"answer": [
+"field tested Alice changed reranker shipped. Bob planner goal store planner!",
+"another note about goal."
+],
+"a_n": [
+145
+],
+"q_n": 71,
+"sim": 0.8906,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000021.0
+},
+{
+"answer": [
+"seed pack broke reranker reverted Alice tested. Bob store planner cache banner!",
+"another note about planner."
+],
+"a_n": [
+147
+],
+"q_n": null,
+"sim": 0.8427,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000022.0
+},
+{
+"answer": [
+"Alice reverted store changed membrane measured. Bob store executor store weights!",
+"another note about planner."
+],
+"a_n": [
+149
+],
+"q_n": null,
+"sim": 0.9936,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000023.0
+},
+{
+"answer": [
+"goal broke executor reverted recall shipped. field reranker Bob executor goal!",
+"another note about cache."
+],
+"a_n": [
+151
+],
+"q_n": 74,
+"sim": 0.8012,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000024.0
+},
+{
+"answer": [
+"seed pack measured cache changed reranker shipped. executor recall deploy cache recall!",
+"another note about field."
+],
+"a_n": [
+153
+],
+"q_n": null,
+"sim": 0.7716,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000025.0
+},
+{
+"answer": [
+"cache reverted banner tested Bob reverted. membrane cache Bob field goal!",
+"another note about reranker."
+],
+"a_n": [
+155
+],
+"q_n": null,
+"sim": 0.8566,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000026.0
+},
+{
+"answer": [
+"planner measured weights measured planner explained. cache recall weights deploy store!",
+"another note about executor."
+],
+"a_n": [
+157
+],
+"q_n": 77,
+"sim": 0.9838,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000027.0
+},
+{
+"answer": [
+"Alice explained store tested cache measured. Alice Alice cache cache banner!",
+"another note about goal."
+],
+"a_n": [
+159
+],
+"q_n": null,
+"sim": 0.835,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000028.0
+},
+{
+"answer": [
+"banner broke executor measured planner changed. weights Bob planner Bob Bob!",
+"another note about goal."
+],
+"a_n": [
+161
+],
+"q_n": null,
+"sim": 0.8961,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000029.0
+}
+],
+"skip": [
+105,
+111
+]
+},
+{
+"text": "explain the reranker weights",
+"rows": [
+{
+"answer": [
+"deploy broke seed pack shipped Alice broke. goal executor cache seed pack planner!",
+"another note about reranker."
+],
+"a_n": [
+104
+],
+"q_n": 50,
+"sim": 0.7754,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000000.0,
+"listener": 0.631,
+"said": 0.727,
+"about": 0.709
+},
+{
+"answer": [
+"recall changed reranker broke seed pack reverted. banner Alice recall planner weights!",
+"another note about recall."
+],
+"a_n": [
+106
+],
+"q_n": null,
+"sim": 0.7845,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000001.0,
+"listener": 0.138,
+"said": 0.748,
+"about": 0.576
+},
+{
+"answer": [
+"planner explained goal broke goal tested. Alice reranker field store Alice!",
+"another note about banner."
+],
+"a_n": [
+108
+],
+"q_n": null,
+"sim": 0.7889,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000002.0,
+"listener": 0.432,
+"said": 0.688,
+"about": 0.178
+},
+{
+"answer": [
+"Bob tested deploy explained Bob reverted. Alice store cache planner planner!",
+"another note about membrane."
+],
+"a_n": [
+110
+],
+"q_n": 53,
+"sim": 0.9216,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000003.0,
+"listener": 0.52,
+"said": 0.335,
+"about": 0.417
+},
+{
+"answer": [
+"recall reverted field reverted membrane fixed. reranker reranker executor weights recall!",
+"another note about store."
+],
+"a_n": [
+112
+],
+"q_n": null,
+"sim": 0.9791,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000004.0,
+"listener": 0.9,
+"said": 0.117,
+"about": 0.656
+},
+{
+"answer": [
+"recall changed Bob measured Bob explained. deploy goal executor Bob weights!",
+"another note about cache."
+],
+"a_n": [
+114
+],
+"q_n": null,
+"sim": 0.8561,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000005.0,
+"listener": 0.676,
+"said": 0.554,
+"about": 0.367
+},
+{
+"answer": [
+"Bob measured recall measured weights tested. weights reranker executor seed pack membrane!",
+"another note about field."
+],
+"a_n": [
+116
+],
+"q_n": 56,
+"sim": 0.718,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000006.0,
+"listener": 0.885,
+"said": 0.839,
+"about": 0.944
+},
+{
+"answer": [
+"seed pack changed membrane shipped weights measured. executor goal goal Bob weights!",
+"another note about deploy."
+],
+"a_n": [
+118
+],
+"q_n": null,
+"sim": 0.7828,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000007.0,
+"listener": 0.553,
+"said": 0.785,
+"about": 0.873
+},
+{
+"answer": [
+"membrane measured weights fixed membrane broke. seed pack goal goal recall membrane!",
+"another note about Bob."
+],
+"a_n": [
+120
+],
+"q_n": null,
+"sim": 0.8577,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000008.0,
+"listener": 0.215,
+"said": 0.658,
+"about": 0.452
+},
+{
+"answer": [
+"store changed goal changed Alice reverted. membrane seed pack reranker planner goal!",
+"another note about cache."
+],
+"a_n": [
+122
+],
+"q_n": 59,
+"sim": 0.88,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000009.0,
+"listener": 0.077,
+"said": 0.488,
+"about": 0.953
+},
+{
+"answer": [
+"store shipped banner reverted cache fixed. Alice weights store goal membrane!",
+"another note about Bob."
+],
+"a_n": [
+124
+],
+"q_n": null,
+"sim": 0.7991,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000010.0,
+"listener": 0.616,
+"said": 0.929,
+"about": 0.088
+},
+{
+"answer": [
+"deploy explained membrane explained field broke. reranker field executor weights membrane!",
+"another note about planner."
+],
+"a_n": [
+126
+],
+"q_n": null,
+"sim": 0.8004,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000011.0,
+"listener": 0.813,
+"said": 0.514,
+"about": 0.276
+},
+{
+"answer": [
+"recall reverted Bob explained deploy changed. deploy reranker recall store Bob!",
+"another note about weights."
+],
+"a_n": [
+128
+],
+"q_n": 62,
+"sim": 0.8438,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000012.0,
+"listener": 0.281,
+"said": 0.153,
+"about": 0.807
+},
+{
+"answer": [
+"membrane broke deploy fixed executor shipped. Bob reranker Alice field recall!",
+"another note about reranker."
+],
+"a_n": [
+130
+],
+"q_n": null,
+"sim": 0.8519,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000013.0,
+"listener": 0.0,
+"said": 0.505,
+"about": 0.768
+},
+{
+"answer": [
+"executor shipped cache explained recall tested. cache seed pack goal goal reranker!",
+"another note about recall."
+],
+"a_n": [
+132
+],
+"q_n": null,
+"sim": 0.8141,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000014.0,
+"listener": 0.719,
+"said": 0.888,
+"about": 0.599
+},
+{
+"answer": [
+"seed pack tested weights measured membrane broke. reranker banner cache seed pack Bob!",
+"another note about Bob."
+],
+"a_n": [
+134
+],
+"q_n": 65,
+"sim": 0.7096,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000015.0,
+"listener": 0.989,
+"said": 0.252,
+"about": 0.456
+},
+{
+"answer": [
+"Bob explained goal fixed Alice reverted. membrane planner Bob goal field!",
+"another note about membrane."
+],
+"a_n": [
+136
+],
+"q_n": null,
+"sim": 0.8852,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000016.0,
+"listener": 0.162,
+"said": 0.311,
+"about": 0.176
+},
+{
+"answer": [
+"membrane shipped banner measured reranker tested. membrane goal deploy recall banner!",
+"another note about store."
+],
+"a_n": [
+138
+],
+"q_n": null,
+"sim": 0.7754,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000017.0,
+"listener": 0.607,
+"said": 0.958,
+"about": 0.983
+},
+{
+"answer": [
+"store fixed seed pack changed recall fixed. recall membrane weights planner seed pack!",
+"another note about cache."
+],
+"a_n": [
+140
+],
+"q_n": 68,
+"sim": 0.7268,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000018.0,
+"listener": 0.749,
+"said": 0.424,
+"about": 0.807
+},
+{
+"answer": [
+"weights measured executor fixed banner reverted. store Alice Bob cache Alice!",
+"another note about reranker."
+],
+"a_n": [
+142
+],
+"q_n": null,
+"sim": 0.8599,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000019.0,
+"listener": 0.733,
+"said": 0.457,
+"about": 0.897
+},
+{
+"answer": [
+"field changed field tested reranker changed. membrane planner recall reranker planner!",
+"another note about field."
+],
+"a_n": [
+144
+],
+"q_n": null,
+"sim": 0.9715,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000020.0,
+"listener": 0.968,
+"said": 0.526,
+"about": 0.953
+},
+{
+"answer": [
+"recall fixed Alice measured reranker reverted. goal membrane seed pack store Bob!",
+"another note about recall."
+],
+"a_n": [
+146
+],
+"q_n": 71,
+"sim": 0.9239,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000021.0,
+"listener": 0.954,
+"said": 0.432,
+"about": 0.409
+},
+{
+"answer": [
+"executor broke cache tested Bob broke. field reranker deploy cache goal!",
+"another note about planner."
+],
+"a_n": [
+148
+],
+"q_n": null,
+"sim": 0.9565,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000022.0,
+"listener": 0.517,
+"said": 0.208,
+"about": 0.049
+},
+{
+"answer": [
+"seed pack explained reranker broke membrane explained. Alice store banner planner Alice!",
+"another note about banner."
+],
+"a_n": [
+150
+],
+"q_n": null,
+"sim": 0.892,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000023.0,
+"listener": 0.657,
+"said": 0.369,
+"about": 0.323
+},
+{
+"answer": [
+"deploy measured Bob broke banner measured. banner reranker Bob goal store!",
+"another note about field."
+],
+"a_n": [
+152
+],
+"q_n": 74,
+"sim": 0.7942,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000024.0,
+"listener": 0.842,
+"said": 0.752,
+"about": 0.697
+},
+{
+"answer": [
+"executor reverted executor fixed cache broke. planner deploy cache Bob reranker!",
+"another note about seed pack."
+],
+"a_n": [
+154
+],
+"q_n": null,
+"sim": 0.9126,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000025.0,
+"listener": 0.556,
+"said": 0.413,
+"about": 0.835
+},
+{
+"answer": [
+"banner broke Alice shipped cache broke. planner store store banner weights!",
+"another note about seed pack."
+],
+"a_n": [
+156
+],
+"q_n": null,
+"sim": 0.8279,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000026.0,
+"listener": 0.028,
+"said": 0.129,
+"about": 0.995
+},
+{
+"answer": [
+"executor changed Bob shipped goal reverted. Bob deploy executor goal store!",
+"another note about goal."
+],
+"a_n": [
+158
+],
+"q_n": 77,
+"sim": 0.7718,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000027.0,
+"listener": 0.198,
+"said": 0.531,
+"about": 0.543
+},
+{
+"answer": [
+"Alice broke planner measured field measured. field Alice membrane reranker reranker!",
+"another note about store."
+],
+"a_n": [
+160
+],
+"q_n": null,
+"sim": 0.7927,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000028.0,
+"listener": 0.871,
+"said": 0.918,
+"about": 0.071
+},
+{
+"answer": [
+"seed pack broke reranker tested Alice measured. recall weights banner Bob membrane!",
+"another note about reranker."
+],
+"a_n": [
+162
+],
+"q_n": null,
+"sim": 0.9071,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000029.0,
+"listener": 0.435,
+"said": 0.927,
+"about": 0.33
+}
+],
+"skip": []
+},
+{
+"text": "when was the store migrated",
+"rows": [
+{
+"answer": [
+"Bob measured planner broke deploy explained. Bob planner weights seed pack cache!",
+"another note about recall."
+],
+"a_n": [
+105
+],
+"q_n": 50,
+"sim": 0.909,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000000.0
+},
+{
+"answer": [
+"Bob reverted deploy shipped seed pack fixed. seed pack store recall goal membrane!",
+"another note about Alice."
+],
+"a_n": [
+107
+],
+"q_n": null,
+"sim": 0.9534,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000001.0
+},
+{
+"answer": [
+"planner fixed field measured deploy changed. recall Alice recall deploy weights!",
+"another note about seed pack."
+],
+"a_n": [
+109
+],
+"q_n": null,
+"sim": 0.8996,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000002.0
+},
+{
+"answer": [
+"planner shipped seed pack measured store reverted. banner deploy Alice Bob deploy!",
+"another note about field."
+],
+"a_n": [
+111
+],
+"q_n": 53,
+"sim": 0.9696,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000003.0
+},
+{
+"answer": [
+"executor changed recall changed Bob explained. membrane executor banner planner weights!",
+"another note about deploy."
+],
+"a_n": [
+113
+],
+"q_n": null,
+"sim": 0.876,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000004.0
+},
+{
+"answer": [
+"reranker measured executor fixed recall explained. weights field field field executor!",
+"another note about executor."
+],
+"a_n": [
+115
+],
+"q_n": null,
+"sim": 0.8618,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000005.0
+},
+{
+"answer": [
+"recall changed executor shipped executor reverted. deploy reranker banner reranker membrane!",
+"another note about reranker."
+],
+"a_n": [
+117
+],
+"q_n": 56,
+"sim": 0.7268,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000006.0
+},
+{
+"answer": [
+"banner shipped Alice shipped field tested. store field planner deploy Bob!",
+"another note about planner."
+],
+"a_n": [
+119
+],
+"q_n": null,
+"sim": 0.8701,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000007.0
+},
+{
+"answer": [
+"deploy shipped recall tested planner tested. goal banner deploy recall weights!",
+"another note about cache."
+],
+"a_n": [
+121
+],
+"q_n": null,
+"sim": 0.867,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000008.0
+},
+{
+"answer": [
+"field reverted membrane fixed store explained. executor reranker Bob field field!",
+"another note about Alice."
+],
+"a_n": [
+123
+],
+"q_n": 59,
+"sim": 0.8037,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000009.0
+},
+{
+"answer": [
+"seed pack shipped store shipped recall measured. executor recall Bob Alice goal!",
+"another note about executor."
+],
+"a_n": [
+125
+],
+"q_n": null,
+"sim": 0.985,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000010.0
+},
+{
+"answer": [
+"seed pack changed planner broke goal changed. cache goal executor banner deploy!",
+"another note about membrane."
+],
+"a_n": [
+127
+],
+"q_n": null,
+"sim": 0.7345,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000011.0
+},
+{
+"answer": [
+"goal explained Bob tested planner reverted. banner goal goal Alice field!",
+"another note about deploy."
+],
+"a_n": [
+129
+],
+"q_n": 62,
+"sim": 0.7156,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000012.0
+},
+{
+"answer": [
+"weights shipped executor changed weights tested. field store banner deploy store!",
+"another note about recall."
+],
+"a_n": [
+131
+],
+"q_n": null,
+"sim": 0.9004,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000013.0
+},
+{
+"answer": [
+"Bob explained membrane measured executor explained. weights seed pack field Bob recall!",
+"another note about recall."
+],
+"a_n": [
+133
+],
+"q_n": null,
+"sim": 0.917,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000014.0
+},
+{
+"answer": [
+"seed pack shipped seed pack fixed seed pack broke. Bob membrane Alice cache store!",
+"another note about deploy."
+],
+"a_n": [
+135
+],
+"q_n": 65,
+"sim": 0.8988,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000015.0
+},
+{
+"answer": [
+"cache explained banner shipped executor changed. recall deploy reranker membrane store!",
+"another note about executor."
+],
+"a_n": [
+137
+],
+"q_n": null,
+"sim": 0.7462,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000016.0
+},
+{
+"answer": [
+"deploy broke Alice tested reranker broke. banner weights store Bob cache!",
+"another note about banner."
+],
+"a_n": [
+139
+],
+"q_n": null,
+"sim": 0.938,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000017.0
+},
+{
+"answer": [
+"field broke reranker broke reranker tested. cache executor planner reranker cache!",
+"another note about planner."
+],
+"a_n": [
+141
+],
+"q_n": 68,
+"sim": 0.9212,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000018.0
+},
+{
+"answer": [
+"deploy tested seed pack fixed cache changed. store banner executor deploy executor!",
+"another note about field."
+],
+"a_n": [
+143
+],
+"q_n": null,
+"sim": 0.9406,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000019.0
+},
+{
+"answer": [
+"recall reverted goal fixed field changed. executor field planner store goal!",
+"another note about weights."
+],
+"a_n": [
+145
+],
+"q_n": null,
+"sim": 0.9334,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000020.0
+},
+{
+"answer": [
+"weights tested executor measured planner broke. weights Bob Alice weights Bob!",
+"another note about cache."
+],
+"a_n": [
+147
+],
+"q_n": 71,
+"sim": 0.7238,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000021.0
+},
+{
+"answer": [
+"Bob shipped planner changed weights shipped. seed pack cache goal membrane membrane!",
+"another note about reranker."
+],
+"a_n": [
+149
+],
+"q_n": null,
+"sim": 0.981,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000022.0
+},
+{
+"answer": [
+"deploy broke planner reverted goal measured. goal field deploy cache banner!",
+"another note about seed pack."
+],
+"a_n": [
+151
+],
+"q_n": null,
+"sim": 0.8777,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000023.0
+},
+{
+"answer": [
+"field explained store broke executor tested. deploy store deploy goal membrane!",
+"another note about banner."
+],
+"a_n": [
+153
+],
+"q_n": 74,
+"sim": 0.8703,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000024.0
+},
+{
+"answer": [
+"field explained Bob tested seed pack measured. Alice seed pack Bob recall banner!",
+"another note about recall."
+],
+"a_n": [
+155
+],
+"q_n": null,
+"sim": 0.8275,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000025.0
+},
+{
+"answer": [
+"store shipped planner shipped Bob measured. deploy planner executor banner goal!",
+"another note about Alice."
+],
+"a_n": [
+157
+],
+"q_n": null,
+"sim": 0.8457,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000026.0
+},
+{
+"answer": [
+"membrane explained banner fixed goal changed. weights store seed pack banner deploy!",
+"another note about deploy."
+],
+"a_n": [
+159
+],
+"q_n": 77,
+"sim": 0.7407,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000027.0
+},
+{
+"answer": [
+"Alice measured reranker tested weights reverted. goal planner deploy deploy planner!",
+"another note about reranker."
+],
+"a_n": [
+161
+],
+"q_n": null,
+"sim": 0.8777,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000028.0
+},
+{
+"answer": [
+"Alice broke weights fixed store measured. reranker weights deploy store planner!",
+"another note about reranker."
+],
+"a_n": [
+163
+],
+"q_n": null,
+"sim": 0.8487,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000029.0
+}
+],
+"skip": []
+},
+{
+"text": "why does the planner split goals",
+"rows": [
+{
+"answer": [
+"seed pack explained field reverted Bob measured. seed pack weights recall goal goal!",
+"another note about recall."
+],
+"a_n": [
+106
+],
+"q_n": 50,
+"sim": 0.9004,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000000.0,
+"listener": 0.3,
+"said": 0.517,
+"about": 0.601
+},
+{
+"answer": [
+"seed pack broke membrane tested cache tested. deploy Alice Alice banner goal!",
+"another note about seed pack."
+],
+"a_n": [
+108
+],
+"q_n": null,
+"sim": 0.903,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000001.0,
+"listener": 0.51,
+"said": 0.736,
+"about": 0.323
+},
+{
+"answer": [
+"goal measured executor measured membrane broke. store field Alice store seed pack!",
+"another note about reranker."
+],
+"a_n": [
+110
+],
+"q_n": null,
+"sim": 0.8748,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000002.0,
+"listener": 0.549,
+"said": 0.223,
+"about": 0.728
+},
+{
+"answer": [
+"planner measured membrane broke membrane shipped. planner field cache cache planner!",
+"another note about executor."
+],
+"a_n": [
+112
+],
+"q_n": 53,
+"sim": 0.7301,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000003.0,
+"listener": 0.041,
+"said": 0.79,
+"about": 0.18
+},
+{
+"answer": [
+"Bob changed membrane explained goal broke. store seed pack recall reranker cache!",
+"another note about deploy."
+],
+"a_n": [
+114
+],
+"q_n": null,
+"sim": 0.773,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000004.0,
+"listener": 0.383,
+"said": 0.912,
+"about": 0.741
+},
+{
+"answer": [
+"Alice measured deploy changed store fixed. deploy recall weights executor reranker!",
+"another note about Bob."
+],
+"a_n": [
+116
+],
+"q_n": null,
+"sim": 0.9736,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000005.0,
+"listener": 0.79,
+"said": 0.782,
+"about": 0.417
+},
+{
+"answer": [
+"membrane shipped Alice tested executor reverted. Bob deploy recall field Bob!",
+"another note about goal."
+],
+"a_n": [
+118
+],
+"q_n": 56,
+"sim": 0.8781,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000006.0,
+"listener": 0.219,
+"said": 0.137,
+"about": 0.025
+},
+{
+"answer": [
+"goal fixed field explained banner shipped. store recall membrane seed pack banner!",
+"another note about seed pack."
+],
+"a_n": [
+120
+],
+"q_n": null,
+"sim": 0.9702,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000007.0,
+"listener": 0.719,
+"said": 0.478,
+"about": 0.775
+},
+{
+"answer": [
+"cache tested recall tested cache broke. Alice reranker executor banner recall!",
+"another note about store."
+],
+"a_n": [
+122
+],
+"q_n": null,
+"sim": 0.9697,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000008.0,
+"listener": 0.43,
+"said": 0.626,
+"about": 0.679
+},
+{
+"answer": [
+"seed pack measured seed pack broke Alice measured. cache executor seed pack seed pack weights!",
+"another note about deploy."
+],
+"a_n": [
+124
+],
+"q_n": 59,
+"sim": 0.7171,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000009.0,
+"listener": 0.133,
+"said": 0.697,
+"about": 0.976
+},
+{
+"answer": [
+"store fixed recall broke recall shipped. weights Bob executor Bob banner!",
+"another note about banner."
+],
+"a_n": [
+126
+],
+"q_n": null,
+"sim": 0.7865,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000010.0,
+"listener": 0.483,
+"said": 0.531,
+"about": 0.353
+},
+{
+"answer": [
+"Alice explained membrane tested membrane broke. Alice seed pack recall weights goal!",
+"another note about seed pack."
+],
+"a_n": [
+128
+],
+"q_n": null,
+"sim": 0.8978,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000011.0,
+"listener": 0.854,
+"said": 0.278,
+"about": 0.846
+},
+{
+"answer": [
+"Bob tested field changed store shipped. field executor planner executor store!",
+"another note about banner."
+],
+"a_n": [
+130
+],
+"q_n": 62,
+"sim": 0.7967,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000012.0,
+"listener": 0.408,
+"said": 0.867,
+"about": 0.604
+},
+{
+"answer": [
+"Bob measured field fixed recall fixed. seed pack executor Bob weights Alice!",
+"another note about membrane."
+],
+"a_n": [
+132
+],
+"q_n": null,
+"sim": 0.969,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000013.0,
+"listener": 0.454,
+"said": 0.287,
+"about": 0.295
+},
+{
+"answer": [
+"planner explained seed pack fixed executor broke. deploy membrane Alice planner store!",
+"another note about membrane."
+],
+"a_n": [
+134
+],
+"q_n": null,
+"sim": 0.9322,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000014.0,
+"listener": 0.75,
+"said": 0.94,
+"about": 0.831
+},
+{
+"answer": [
+"planner broke Bob fixed field changed. planner cache cache membrane goal!",
+"another note about goal."
+],
+"a_n": [
+136
+],
+"q_n": 65,
+"sim": 0.9568,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000015.0,
+"listener": 0.123,
+"said": 0.096,
+"about": 0.246
+},
+{
+"answer": [
+"planner changed goal tested Bob fixed. deploy field goal goal Bob!",
+"another note about Alice."
+],
+"a_n": [
+138
+],
+"q_n": null,
+"sim": 0.7551,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000016.0,
+"listener": 0.467,
+"said": 0.259,
+"about": 0.169
+},
+{
+"answer": [
+"executor reverted Bob reverted membrane explained. reranker planner membrane executor membrane!",
+"another note about field."
+],
+"a_n": [
+140
+],
+"q_n": null,
+"sim": 0.9601,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000017.0,
+"listener": 0.937,
+"said": 0.447,
+"about": 0.921
+},
+{
+"answer": [
+"Alice broke Bob broke recall reverted. seed pack weights field goal reranker!",
+"another note about field."
+],
+"a_n": [
+142
+],
+"q_n": 68,
+"sim": 0.9576,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000018.0,
+"listener": 0.991,
+"said": 0.464,
+"about": 0.13
+},
+{
+"answer": [
+"Alice fixed weights broke membrane broke. deploy cache seed pack seed pack seed pack!",
+"another note about recall."
+],
+"a_n": [
+144
+],
+"q_n": null,
+"sim": 0.8143,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000019.0,
+"listener": 0.996,
+"said": 0.841,
+"about": 0.778
+},
+{
+"answer": [
+"field tested planner fixed cache explained. goal reranker reranker Bob reranker!",
+"another note about goal."
+],
+"a_n": [
+146
+],
+"q_n": null,
+"sim": 0.9472,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000020.0,
+"listener": 0.813,
+"said": 0.507,
+"about": 0.323
+},
+{
+"answer": [
+"field tested Alice fixed executor shipped. field goal weights store field!",
+"another note about membrane."
+],
+"a_n": [
+148
+],
+"q_n": 71,
+"sim": 0.7874,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000021.0,
+"listener": 0.841,
+"said": 0.165,
+"about": 0.698
+},
+{
+"answer": [
+"goal measured Alice broke deploy reverted. deploy goal deploy field store!",
+"another note about recall."
+],
+"a_n": [
+150
+],
+"q_n": null,
+"sim": 0.8844,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000022.0,
+"listener": 0.521,
+"said": 0.318,
+"about": 0.435
+},
+{
+"answer": [
+"executor tested reranker fixed banner fixed. deploy deploy goal store membrane!",
+"another note about planner."
+],
+"a_n": [
+152
+],
+"q_n": null,
+"sim": 0.7064,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000023.0,
+"listener": 0.237,
+"said": 0.62,
+"about": 0.842
+},
+{
+"answer": [
+"store fixed seed pack reverted cache broke. banner membrane membrane goal executor!",
+"another note about store."
+],
+"a_n": [
+154
+],
+"q_n": 74,
+"sim": 0.7103,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000024.0,
+"listener": 0.159,
+"said": 0.948,
+"about": 0.249
+},
+{
+"answer": [
+"executor changed planner shipped executor fixed. seed pack weights membrane deploy weights!",
+"another note about membrane."
+],
+"a_n": [
+156
+],
+"q_n": null,
+"sim": 0.9624,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000025.0,
+"listener": 0.951,
+"said": 0.853,
+"about": 0.918
+},
+{
+"answer": [
+"membrane explained deploy tested deploy broke. reranker Alice deploy goal Alice!",
+"another note about Bob."
+],
+"a_n": [
+158
+],
+"q_n": null,
+"sim": 0.9391,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000026.0,
+"listener": 0.256,
+"said": 0.847,
+"about": 0.087
+},
+{
+"answer": [
+"membrane changed recall measured Bob shipped. banner reranker Bob planner Alice!",
+"another note about reranker."
+],
+"a_n": [
+160
+],
+"q_n": 77,
+"sim": 0.7933,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000027.0,
+"listener": 0.565,
+"said": 0.105,
+"about": 0.031
+},
+{
+"answer": [
+"weights explained planner broke membrane changed. weights banner deploy banner Alice!",
+"another note about weights."
+],
+"a_n": [
+162
+],
+"q_n": null,
+"sim": 0.8738,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000028.0,
+"listener": 0.784,
+"said": 0.004,
+"about": 0.848
+},
+{
+"answer": [
+"reranker reverted deploy shipped goal explained. seed pack seed pack seed pack weights Alice!",
+"another note about executor."
+],
+"a_n": [
+164
+],
+"q_n": null,
+"sim": 0.815,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000029.0,
+"listener": 0.484,
+"said": 0.419,
+"about": 0.842
+}
+],
+"skip": [
+108,
+114
+]
+},
+{
+"text": "Alice deploy status",
+"rows": [
+{
+"answer": [
+"goal tested executor changed membrane measured. planner deploy weights goal seed pack!",
+"another note about Alice."
+],
+"a_n": [
+107
+],
+"q_n": 50,
+"sim": 0.8455,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000000.0
+},
+{
+"answer": [
+"store broke Alice broke membrane shipped. banner Bob weights recall Alice!",
+"another note about reranker."
+],
+"a_n": [
+109
+],
+"q_n": null,
+"sim": 0.8065,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000001.0
+},
+{
+"answer": [
+"membrane fixed membrane measured deploy changed. membrane Bob seed pack store Bob!",
+"another note about planner."
+],
+"a_n": [
+111
+],
+"q_n": null,
+"sim": 0.991,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000002.0
+},
+{
+"answer": [
+"membrane fixed recall changed field shipped. field cache field membrane recall!",
+"another note about planner."
+],
+"a_n": [
+113
+],
+"q_n": 53,
+"sim": 0.8092,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000003.0
+},
+{
+"answer": [
+"weights broke cache broke Alice changed. deploy planner executor reranker field!",
+"another note about recall."
+],
+"a_n": [
+115
+],
+"q_n": null,
+"sim": 0.7728,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000004.0
+},
+{
+"answer": [
+"reranker measured weights measured goal measured. goal planner executor deploy weights!",
+"another note about planner."
+],
+"a_n": [
+117
+],
+"q_n": null,
+"sim": 0.9708,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000005.0
+},
+{
+"answer": [
+"store changed reranker changed weights reverted. goal planner membrane goal field!",
+"another note about goal."
+],
+"a_n": [
+119
+],
+"q_n": 56,
+"sim": 0.7718,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000006.0
+},
+{
+"answer": [
+"planner tested Bob measured field broke. deploy banner Alice seed pack cache!",
+"another note about Bob."
+],
+"a_n": [
+121
+],
+"q_n": null,
+"sim": 0.9887,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000007.0
+},
+{
+"answer": [
+"recall tested deploy measured Alice changed. membrane weights Alice Alice field!",
+"another note about reranker."
+],
+"a_n": [
+123
+],
+"q_n": null,
+"sim": 0.7851,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000008.0
+},
+{
+"answer": [
+"weights tested deploy broke banner changed. field store seed pack goal Bob!",
+"another note about cache."
+],
+"a_n": [
+125
+],
+"q_n": 59,
+"sim": 0.9003,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000009.0
+},
+{
+"answer": [
+"deploy broke Bob shipped planner tested. reranker Bob Bob recall Bob!",
+"another note about reranker."
+],
+"a_n": [
+127
+],
+"q_n": null,
+"sim": 0.8836,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000010.0
+},
+{
+"answer": [
+"executor shipped executor fixed membrane shipped. executor goal executor store recall!",
+"another note about field."
+],
+"a_n": [
+129
+],
+"q_n": null,
+"sim": 0.9777,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000011.0
+},
+{
+"answer": [
+"planner fixed recall broke executor broke. recall planner goal seed pack goal!",
+"another note about membrane."
+],
+"a_n": [
+131
+],
+"q_n": 62,
+"sim": 0.9033,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000012.0
+},
+{
+"answer": [
+"weights measured reranker shipped Alice tested. store recall cache recall Bob!",
+"another note about Alice."
+],
+"a_n": [
+133
+],
+"q_n": null,
+"sim": 0.8738,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000013.0
+},
+{
+"answer": [
+"weights shipped executor tested Alice broke. weights seed pack Alice weights store!",
+"another note about membrane."
+],
+"a_n": [
+135
+],
+"q_n": null,
+"sim": 0.9653,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000014.0
+},
+{
+"answer": [
+"weights explained reranker measured executor fixed. banner recall banner Bob deploy!",
+"another note about Alice."
+],
+"a_n": [
+137
+],
+"q_n": 65,
+"sim": 0.8423,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000015.0
+},
+{
+"answer": [
+"field explained field changed banner reverted. membrane seed pack membrane executor Bob!",
+"another note about Bob."
+],
+"a_n": [
+139
+],
+"q_n": null,
+"sim": 0.8476,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000016.0
+},
+{
+"answer": [
+"reranker shipped planner reverted field shipped. weights planner Alice seed pack recall!",
+"another note about seed pack."
+],
+"a_n": [
+141
+],
+"q_n": null,
+"sim": 0.9114,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000017.0
+},
+{
+"answer": [
+"weights reverted Bob measured weights shipped. cache recall Alice Bob store!",
+"another note about recall."
+],
+"a_n": [
+143
+],
+"q_n": 68,
+"sim": 0.711,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000018.0
+},
+{
+"answer": [
+"deploy broke cache changed recall reverted. planner goal store field seed pack!",
+"another note about executor."
+],
+"a_n": [
+145
+],
+"q_n": null,
+"sim": 0.7327,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000019.0
+},
+{
+"answer": [
+"executor tested field shipped goal shipped. field goal weights Alice Alice!",
+"another note about Alice."
+],
+"a_n": [
+147
+],
+"q_n": null,
+"sim": 0.7261,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000020.0
+},
+{
+"answer": [
+"banner broke reranker changed membrane tested. planner seed pack cache seed pack weights!",
+"another note about executor."
+],
+"a_n": [
+149
+],
+"q_n": 71,
+"sim": 0.9941,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000021.0
+},
+{
+"answer": [
+"weights explained store fixed field fixed. deploy deploy membrane seed pack reranker!",
+"another note about executor."
+],
+"a_n": [
+151
+],
+"q_n": null,
+"sim": 0.9933,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000022.0
+},
+{
+"answer": [
+"Alice measured seed pack fixed goal broke. reranker reranker banner planner goal!",
+"another note about store."
+],
+"a_n": [
+153
+],
+"q_n": null,
+"sim": 0.9555,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000023.0
+},
+{
+"answer": [
+"planner changed store tested banner broke. goal membrane Alice recall seed pack!",
+"another note about reranker."
+],
+"a_n": [
+155
+],
+"q_n": 74,
+"sim": 0.7805,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000024.0
+},
+{
+"answer": [
+"reranker fixed Alice reverted planner explained. seed pack goal cache recall field!",
+"another note about store."
+],
+"a_n": [
+157
+],
+"q_n": null,
+"sim": 0.7608,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000025.0
+},
+{
+"answer": [
+"membrane changed Alice changed Alice measured. field seed pack weights executor deploy!",
+"another note about planner."
+],
+"a_n": [
+159
+],
+"q_n": null,
+"sim": 0.9537,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000026.0
+},
+{
+"answer": [
+"planner measured goal explained Alice fixed. reranker recall seed pack deploy executor!",
+"another note about store."
+],
+"a_n": [
+161
+],
+"q_n": 77,
+"sim": 0.8279,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000027.0
+},
+{
+"answer": [
+"Bob explained deploy tested planner changed. planner Alice membrane planner planner!",
+"another note about membrane."
+],
+"a_n": [
+163
+],
+"q_n": null,
+"sim": 0.9597,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000028.0
+},
+{
+"answer": [
+"seed pack reverted cache changed membrane changed. field seed pack goal field field!",
+"another note about Bob."
+],
+"a_n": [
+165
+],
+"q_n": null,
+"sim": 0.8334,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000029.0
+}
+],
+"skip": []
+},
+{
+"text": "what did the executor measure",
+"rows": [
+{
+"answer": [
+"Alice measured store tested recall explained. weights Bob membrane Bob cache!",
+"another note about Bob."
+],
+"a_n": [
+108
+],
+"q_n": 50,
+"sim": 0.8526,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000000.0,
+"listener": 0.809,
+"said": 0.869,
+"about": 0.212
+},
+{
+"answer": [
+"banner fixed deploy tested seed pack tested. field goal cache weights planner!",
+"another note about recall."
+],
+"a_n": [
+110
+],
+"q_n": null,
+"sim": 0.7415,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000001.0,
+"listener": 0.099,
+"said": 0.826,
+"about": 0.667
+},
+{
+"answer": [
+"cache tested reranker tested goal shipped. banner recall seed pack membrane cache!",
+"another note about store."
+],
+"a_n": [
+112
+],
+"q_n": null,
+"sim": 0.9376,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000002.0,
+"listener": 0.023,
+"said": 0.559,
+"about": 0.427
+},
+{
+"answer": [
+"Alice shipped Alice broke executor explained. deploy field banner membrane store!",
+"another note about seed pack."
+],
+"a_n": [
+114
+],
+"q_n": 53,
+"sim": 0.7277,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000003.0,
+"listener": 0.617,
+"said": 0.85,
+"about": 0.548
+},
+{
+"answer": [
+"recall shipped store explained planner broke. field Bob cache weights executor!",
+"another note about goal."
+],
+"a_n": [
+116
+],
+"q_n": null,
+"sim": 0.8196,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000004.0,
+"listener": 0.378,
+"said": 0.828,
+"about": 0.308
+},
+{
+"answer": [
+"membrane reverted store explained planner measured. recall store goal seed pack field!",
+"another note about reranker."
+],
+"a_n": [
+118
+],
+"q_n": null,
+"sim": 0.8167,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000005.0,
+"listener": 0.709,
+"said": 0.434,
+"about": 0.432
+},
+{
+"answer": [
+"recall fixed cache tested seed pack reverted. cache field field store planner!",
+"another note about recall."
+],
+"a_n": [
+120
+],
+"q_n": 56,
+"sim": 0.8024,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000006.0,
+"listener": 0.717,
+"said": 0.38,
+"about": 0.349
+},
+{
+"answer": [
+"goal shipped reranker changed recall explained. membrane cache planner seed pack membrane!",
+"another note about executor."
+],
+"a_n": [
+122
+],
+"q_n": null,
+"sim": 0.8623,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000007.0,
+"listener": 0.043,
+"said": 0.294,
+"about": 0.378
+},
+{
+"answer": [
+"executor changed deploy reverted Alice shipped. reranker executor cache executor membrane!",
+"another note about executor."
+],
+"a_n": [
+124
+],
+"q_n": null,
+"sim": 0.9132,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000008.0,
+"listener": 0.279,
+"said": 0.994,
+"about": 0.592
+},
+{
+"answer": [
+"deploy fixed membrane shipped Alice shipped. field cache weights membrane Alice!",
+"another note about Bob."
+],
+"a_n": [
+126
+],
+"q_n": 59,
+"sim": 0.9306,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000009.0,
+"listener": 0.532,
+"said": 0.446,
+"about": 0.986
+},
+{
+"answer": [
+"weights explained goal changed weights reverted. deploy deploy Alice cache membrane!",
+"another note about membrane."
+],
+"a_n": [
+128
+],
+"q_n": null,
+"sim": 0.8861,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000010.0,
+"listener": 0.454,
+"said": 0.954,
+"about": 0.566
+},
+{
+"answer": [
+"planner changed deploy broke weights explained. weights store Bob recall store!",
+"another note about reranker."
+],
+"a_n": [
+130
+],
+"q_n": null,
+"sim": 0.8504,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000011.0,
+"listener": 0.219,
+"said": 0.645,
+"about": 0.703
+},
+{
+"answer": [
+"executor reverted store fixed planner tested. cache deploy goal recall membrane!",
+"another note about weights."
+],
+"a_n": [
+132
+],
+"q_n": 62,
+"sim": 0.7989,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000012.0,
+"listener": 0.211,
+"said": 0.648,
+"about": 0.286
+},
+{
+"answer": [
+"Alice explained goal fixed store broke. weights goal store deploy Bob!",
+"another note about cache."
+],
+"a_n": [
+134
+],
+"q_n": null,
+"sim": 0.9632,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000013.0,
+"listener": 0.244,
+"said": 0.123,
+"about": 0.822
+},
+{
+"answer": [
+"Bob reverted seed pack shipped field shipped. goal Alice weights store membrane!",
+"another note about reranker."
+],
+"a_n": [
+136
+],
+"q_n": null,
+"sim": 0.9413,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000014.0,
+"listener": 0.6,
+"said": 0.43,
+"about": 0.732
+},
+{
+"answer": [
+"Bob reverted goal fixed recall tested. field seed pack seed pack recall deploy!",
+"another note about goal."
+],
+"a_n": [
+138
+],
+"q_n": 65,
+"sim": 0.9404,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000015.0,
+"listener": 0.021,
+"said": 0.806,
+"about": 0.957
+},
+{
+"answer": [
+"deploy broke Alice reverted planner measured. planner store membrane deploy field!",
+"another note about Bob."
+],
+"a_n": [
+140
+],
+"q_n": null,
+"sim": 0.9464,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000016.0,
+"listener": 0.777,
+"said": 0.229,
+"about": 0.799
+},
+{
+"answer": [
+"cache explained field explained recall shipped. field reranker Bob deploy deploy!",
+"another note about seed pack."
+],
+"a_n": [
+142
+],
+"q_n": null,
+"sim": 0.8253,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000017.0,
+"listener": 0.599,
+"said": 0.274,
+"about": 0.795
+},
+{
+"answer": [
+"field explained executor measured cache shipped. executor planner banner banner planner!",
+"another note about seed pack."
+],
+"a_n": [
+144
+],
+"q_n": 68,
+"sim": 0.7818,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000018.0,
+"listener": 0.518,
+"said": 0.642,
+"about": 0.314
+},
+{
+"answer": [
+"seed pack reverted planner changed membrane fixed. membrane weights goal cache seed pack!",
+"another note about seed pack."
+],
+"a_n": [
+146
+],
+"q_n": null,
+"sim": 0.9696,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000019.0,
+"listener": 0.967,
+"said": 0.114,
+"about": 0.129
+},
+{
+"answer": [
+"weights broke recall reverted reranker changed. recall banner cache executor executor!",
+"another note about field."
+],
+"a_n": [
+148
+],
+"q_n": null,
+"sim": 0.7934,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000020.0,
+"listener": 0.814,
+"said": 0.996,
+"about": 0.484
+},
+{
+"answer": [
+"store reverted goal changed deploy measured. store recall planner store field!",
+"another note about deploy."
+],
+"a_n": [
+150
+],
+"q_n": 71,
+"sim": 0.7984,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000021.0,
+"listener": 0.366,
+"said": 0.491,
+"about": 0.504
+},
+{
+"answer": [
+"cache broke planner fixed recall fixed. planner seed pack banner executor Alice!",
+"another note about reranker."
+],
+"a_n": [
+152
+],
+"q_n": null,
+"sim": 0.72,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000022.0,
+"listener": 0.419,
+"said": 0.314,
+"about": 0.862
+},
+{
+"answer": [
+"deploy fixed store tested seed pack reverted. membrane recall field membrane field!",
+"another note about seed pack."
+],
+"a_n": [
+154
+],
+"q_n": null,
+"sim": 0.8685,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000023.0,
+"listener": 0.346,
+"said": 0.826,
+"about": 0.625
+},
+{
+"answer": [
+"deploy tested recall explained seed pack reverted. planner Alice Bob membrane deploy!",
+"another note about recall."
+],
+"a_n": [
+156
+],
+"q_n": 74,
+"sim": 0.897,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000024.0,
+"listener": 0.544,
+"said": 0.418,
+"about": 0.356
+},
+{
+"answer": [
+"store measured weights shipped deploy changed. goal Bob banner membrane cache!",
+"another note about goal."
+],
+"a_n": [
+158
+],
+"q_n": null,
+"sim": 0.8343,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000025.0,
+"listener": 0.437,
+"said": 0.437,
+"about": 0.657
+},
+{
+"answer": [
+"Bob tested membrane broke deploy explained. Bob Alice planner membrane seed pack!",
+"another note about deploy."
+],
+"a_n": [
+160
+],
+"q_n": null,
+"sim": 0.8214,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000026.0,
+"listener": 0.603,
+"said": 0.921,
+"about": 0.9
+},
+{
+"answer": [
+"planner shipped Bob tested reranker reverted. Alice recall planner store weights!",
+"another note about reranker."
+],
+"a_n": [
+162
+],
+"q_n": 77,
+"sim": 0.7531,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000027.0,
+"listener": 0.855,
+"said": 0.932,
+"about": 0.532
+},
+{
+"answer": [
+"banner tested deploy broke store broke. banner banner planner store field!",
+"another note about reranker."
+],
+"a_n": [
+164
+],
+"q_n": null,
+"sim": 0.9319,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000028.0,
+"listener": 0.794,
+"said": 0.119,
+"about": 0.367
+},
+{
+"answer": [
+"cache broke membrane changed Alice shipped. field field Bob weights Alice!",
+"another note about Bob."
+],
+"a_n": [
+166
+],
+"q_n": null,
+"sim": 0.8128,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000029.0,
+"listener": 0.944,
+"said": 0.609,
+"about": 0.405
+}
+],
+"skip": []
+},
+{
+"text": "remind me about the field goal",
+"rows": [
+{
+"answer": [
+"field measured recall broke Alice broke. banner field field deploy executor!",
+"another note about membrane."
+],
+"a_n": [
+109
+],
+"q_n": 50,
+"sim": 0.7131,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000000.0
+},
+{
+"answer": [
+"field broke weights explained weights broke. reranker weights cache membrane membrane!",
+"another note about deploy."
+],
+"a_n": [
+111
+],
+"q_n": null,
+"sim": 0.7674,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000001.0
+},
+{
+"answer": [
+"seed pack reverted goal shipped store broke. Alice reranker deploy reranker goal!",
+"another note about field."
+],
+"a_n": [
+113
+],
+"q_n": null,
+"sim": 0.8509,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000002.0
+},
+{
+"answer": [
+"store explained seed pack fixed executor changed. banner weights seed pack cache Alice!",
+"another note about Alice."
+],
+"a_n": [
+115
+],
+"q_n": 53,
+"sim": 0.7912,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000003.0
+},
+{
+"answer": [
+"Alice tested Alice reverted seed pack explained. membrane weights store membrane goal!",
+"another note about Alice."
+],
+"a_n": [
+117
+],
+"q_n": null,
+"sim": 0.7644,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000004.0
+},
+{
+"answer": [
+"goal broke store shipped cache changed. recall planner banner planner deploy!",
+"another note about cache."
+],
+"a_n": [
+119
+],
+"q_n": null,
+"sim": 0.9919,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000005.0
+},
+{
+"answer": [
+"banner reverted cache tested membrane reverted. reranker field Bob recall membrane!",
+"another note about banner."
+],
+"a_n": [
+121
+],
+"q_n": 56,
+"sim": 0.7708,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000006.0
+},
+{
+"answer": [
+"planner explained goal changed Alice tested. membrane reranker deploy store Alice!",
+"another note about seed pack."
+],
+"a_n": [
+123
+],
+"q_n": null,
+"sim": 0.9472,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000007.0
+},
+{
+"answer": [
+"executor measured deploy fixed goal measured. Alice planner reranker reranker store!",
+"another note about banner."
+],
+"a_n": [
+125
+],
+"q_n": null,
+"sim": 0.777,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000008.0
+},
+{
+"answer": [
+"Bob explained field broke seed pack explained. weights field weights reranker planner!",
+"another note about banner."
+],
+"a_n": [
+127
+],
+"q_n": 59,
+"sim": 0.9101,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000009.0
+},
+{
+"answer": [
+"reranker broke deploy measured deploy broke. store reranker goal store weights!",
+"another note about seed pack."
+],
+"a_n": [
+129
+],
+"q_n": null,
+"sim": 0.8525,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000010.0
+},
+{
+"answer": [
+"store reverted store reverted goal tested. planner cache banner deploy cache!",
+"another note about recall."
+],
+"a_n": [
+131
+],
+"q_n": null,
+"sim": 0.8001,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000011.0
+},
+{
+"answer": [
+"membrane measured cache reverted store reverted. recall deploy membrane weights membrane!",
+"another note about executor."
+],
+"a_n": [
+133
+],
+"q_n": 62,
+"sim": 0.9625,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000012.0
+},
+{
+"answer": [
+"reranker shipped field changed Alice fixed. reranker goal deploy planner field!",
+"another note about planner."
+],
+"a_n": [
+135
+],
+"q_n": null,
+"sim": 0.8497,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000013.0
+},
+{
+"answer": [
+"reranker explained Alice shipped field reverted. reranker goal weights goal membrane!",
+"another note about store."
+],
+"a_n": [
+137
+],
+"q_n": null,
+"sim": 0.747,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000014.0
+},
+{
+"answer": [
+"recall tested cache fixed Bob fixed. goal executor field planner field!",
+"another note about seed pack."
+],
+"a_n": [
+139
+],
+"q_n": 65,
+"sim": 0.8894,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000015.0
+},
+{
+"answer": [
+"Bob fixed Bob measured executor shipped. membrane field Alice seed pack seed pack!",
+"another note about executor."
+],
+"a_n": [
+141
+],
+"q_n": null,
+"sim": 0.8583,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000016.0
+},
+{
+"answer": [
+"recall measured goal changed goal measured. reranker banner banner banner reranker!",
+"another note about recall."
+],
+"a_n": [
+143
+],
+"q_n": null,
+"sim": 0.7417,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000017.0
+},
+{
+"answer": [
+"Alice shipped Bob changed weights shipped. store recall Bob recall executor!",
+"another note about field."
+],
+"a_n": [
+145
+],
+"q_n": 68,
+"sim": 0.74,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000018.0
+},
+{
+"answer": [
+"seed pack shipped reranker reverted planner fixed. Bob reranker goal executor executor!",
+"another note about goal."
+],
+"a_n": [
+147
+],
+"q_n": null,
+"sim": 0.8448,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000019.0
+},
+{
+"answer": [
+"planner shipped cache explained executor tested. seed pack membrane goal executor field!",
+"another note about recall."
+],
+"a_n": [
+149
+],
+"q_n": null,
+"sim": 0.7436,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000020.0
+},
+{
+"answer": [
+"membrane changed deploy shipped membrane measured. goal store store Alice weights!",
+"another note about Bob."
+],
+"a_n": [
+151
+],
+"q_n": 71,
+"sim": 0.8176,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000021.0
+},
+{
+"answer": [
+"seed pack measured field fixed reranker changed. seed pack recall executor recall Alice!",
+"another note about cache."
+],
+"a_n": [
+153
+],
+"q_n": null,
+"sim": 0.834,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000022.0
+},
+{
+"answer": [
+"cache measured goal measured banner tested. goal Alice Alice planner banner!",
+"another note about recall."
+],
+"a_n": [
+155
+],
+"q_n": null,
+"sim": 0.8614,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000023.0
+},
+{
+"answer": [
+"goal broke weights shipped deploy explained. goal reranker recall seed pack cache!",
+"another note about membrane."
+],
+"a_n": [
+157
+],
+"q_n": 74,
+"sim": 0.9534,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000024.0
+},
+{
+"answer": [
+"planner explained recall explained goal explained. field weights cache store Alice!",
+"another note about field."
+],
+"a_n": [
+159
+],
+"q_n": null,
+"sim": 0.9214,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000025.0
+},
+{
+"answer": [
+"field fixed reranker changed planner fixed. recall membrane cache Bob Alice!",
+"another note about recall."
+],
+"a_n": [
+161
+],
+"q_n": null,
+"sim": 0.8154,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000026.0
+},
+{
+"answer": [
+"membrane tested Bob fixed goal measured. goal reranker deploy banner deploy!",
+"another note about reranker."
+],
+"a_n": [
+163
+],
+"q_n": 77,
+"sim": 0.7295,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000027.0
+},
+{
+"answer": [
+"banner explained store tested weights tested. store Alice seed pack planner Alice!",
+"another note about field."
+],
+"a_n": [
+165
+],
+"q_n": null,
+"sim": 0.9993,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000028.0
+},
+{
+"answer": [
+"cache reverted field measured field explained. Bob Alice planner field reranker!",
+"another note about field."
+],
+"a_n": [
+167
+],
+"q_n": null,
+"sim": 0.8187,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000029.0
+}
+],
+"skip": [
+111,
+117
+]
+},
+{
+"text": "how are the banner rows chosen",
+"rows": [
+{
+"answer": [
+"reranker broke goal broke goal measured. recall weights membrane planner seed pack!",
+"another note about Bob."
+],
+"a_n": [
+110
+],
+"q_n": 50,
+"sim": 0.9693,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000000.0,
+"listener": 0.643,
+"said": 0.608,
+"about": 0.415
+},
+{
+"answer": [
+"cache explained banner shipped deploy reverted. membrane membrane membrane cache store!",
+"another note about cache."
+],
+"a_n": [
+112
+],
+"q_n": null,
+"sim": 0.7684,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000001.0,
+"listener": 0.326,
+"said": 0.223,
+"about": 0.279
+},
+{
+"answer": [
+"deploy tested recall tested banner explained. weights deploy field Bob cache!",
+"another note about reranker."
+],
+"a_n": [
+114
+],
+"q_n": null,
+"sim": 0.7494,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000002.0,
+"listener": 0.207,
+"said": 0.333,
+"about": 0.251
+},
+{
+"answer": [
+"membrane explained weights changed reranker explained. reranker store planner store deploy!",
+"another note about Alice."
+],
+"a_n": [
+116
+],
+"q_n": 53,
+"sim": 0.8651,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000003.0,
+"listener": 0.271,
+"said": 0.52,
+"about": 0.847
+},
+{
+"answer": [
+"Alice shipped Bob changed weights measured. Bob executor Bob Bob deploy!",
+"another note about planner."
+],
+"a_n": [
+118
+],
+"q_n": null,
+"sim": 0.9498,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000004.0,
+"listener": 0.555,
+"said": 0.82,
+"about": 0.222
+},
+{
+"answer": [
+"recall fixed recall broke deploy broke. executor banner goal membrane field!",
+"another note about goal."
+],
+"a_n": [
+120
+],
+"q_n": null,
+"sim": 0.8676,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000005.0,
+"listener": 0.886,
+"said": 0.493,
+"about": 0.622
+},
+{
+"answer": [
+"field explained weights measured planner tested. deploy store executor cache planner!",
+"another note about planner."
+],
+"a_n": [
+122
+],
+"q_n": 56,
+"sim": 0.9368,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000006.0,
+"listener": 0.267,
+"said": 0.38,
+"about": 0.56
+},
+{
+"answer": [
+"planner broke deploy broke banner explained. Alice banner seed pack weights store!",
+"another note about Alice."
+],
+"a_n": [
+124
+],
+"q_n": null,
+"sim": 0.8505,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000007.0,
+"listener": 0.712,
+"said": 0.213,
+"about": 0.473
+},
+{
+"answer": [
+"banner explained cache measured deploy broke. banner recall cache weights goal!",
+"another note about cache."
+],
+"a_n": [
+126
+],
+"q_n": null,
+"sim": 0.9266,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000008.0,
+"listener": 0.039,
+"said": 0.941,
+"about": 0.015
+},
+{
+"answer": [
+"field measured recall shipped membrane explained. store membrane membrane membrane field!",
+"another note about weights."
+],
+"a_n": [
+128
+],
+"q_n": 59,
+"sim": 0.721,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000009.0,
+"listener": 0.322,
+"said": 0.288,
+"about": 0.417
+},
+{
+"answer": [
+"store shipped Bob explained seed pack changed. banner Bob recall banner planner!",
+"another note about goal."
+],
+"a_n": [
+130
+],
+"q_n": null,
+"sim": 0.8099,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000010.0,
+"listener": 0.249,
+"said": 0.615,
+"about": 0.015
+},
+{
+"answer": [
+"reranker broke Bob tested weights changed. executor banner membrane reranker goal!",
+"another note about executor."
+],
+"a_n": [
+132
+],
+"q_n": null,
+"sim": 0.9071,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000011.0,
+"listener": 0.119,
+"said": 0.108,
+"about": 0.506
+},
+{
+"answer": [
+"Alice fixed executor fixed reranker tested. planner Alice Bob recall recall!",
+"another note about field."
+],
+"a_n": [
+134
+],
+"q_n": 62,
+"sim": 0.9958,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000012.0,
+"listener": 0.938,
+"said": 0.629,
+"about": 0.365
+},
+{
+"answer": [
+"deploy broke Alice tested Bob broke. membrane banner deploy cache banner!",
+"another note about store."
+],
+"a_n": [
+136
+],
+"q_n": null,
+"sim": 0.9083,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000013.0,
+"listener": 0.215,
+"said": 0.573,
+"about": 0.009
+},
+{
+"answer": [
+"banner reverted banner measured planner fixed. deploy deploy recall recall Bob!",
+"another note about banner."
+],
+"a_n": [
+138
+],
+"q_n": null,
+"sim": 0.7774,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000014.0,
+"listener": 0.126,
+"said": 0.404,
+"about": 0.04
+},
+{
+"answer": [
+"membrane tested reranker measured banner tested. recall planner reranker seed pack executor!",
+"another note about field."
+],
+"a_n": [
+140
+],
+"q_n": 65,
+"sim": 0.9874,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000015.0,
+"listener": 0.515,
+"said": 0.428,
+"about": 0.727
+},
+{
+"answer": [
+"field broke reranker fixed banner changed. planner field store executor executor!",
+"another note about recall."
+],
+"a_n": [
+142
+],
+"q_n": null,
+"sim": 0.8116,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000016.0,
+"listener": 0.216,
+"said": 0.426,
+"about": 0.941
+},
+{
+"answer": [
+"executor broke deploy fixed cache changed. Bob recall membrane store planner!",
+"another note about weights."
+],
+"a_n": [
+144
+],
+"q_n": null,
+"sim": 0.7937,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000017.0,
+"listener": 0.493,
+"said": 0.723,
+"about": 0.942
+},
+{
+"answer": [
+"deploy broke reranker broke Alice fixed. store seed pack banner field Bob!",
+"another note about seed pack."
+],
+"a_n": [
+146
+],
+"q_n": 68,
+"sim": 0.923,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000018.0,
+"listener": 0.209,
+"said": 0.174,
+"about": 0.639
+},
+{
+"answer": [
+"store changed field changed goal changed. recall seed pack membrane seed pack Bob!",
+"another note about membrane."
+],
+"a_n": [
+148
+],
+"q_n": null,
+"sim": 0.8176,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000019.0,
+"listener": 0.666,
+"said": 0.825,
+"about": 0.931
+},
+{
+"answer": [
+"Alice fixed planner changed Alice broke. recall reranker store membrane deploy!",
+"another note about weights."
+],
+"a_n": [
+150
+],
+"q_n": null,
+"sim": 0.7268,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000020.0,
+"listener": 0.703,
+"said": 0.069,
+"about": 0.1
+},
+{
+"answer": [
+"Alice measured reranker broke planner explained. goal seed pack membrane executor planner!",
+"another note about deploy."
+],
+"a_n": [
+152
+],
+"q_n": 71,
+"sim": 0.752,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000021.0,
+"listener": 0.693,
+"said": 0.394,
+"about": 0.563
+},
+{
+"answer": [
+"field broke store fixed executor tested. weights deploy store weights planner!",
+"another note about reranker."
+],
+"a_n": [
+154
+],
+"q_n": null,
+"sim": 0.8074,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000022.0,
+"listener": 0.612,
+"said": 0.561,
+"about": 0.878
+},
+{
+"answer": [
+"recall shipped executor measured seed pack changed. deploy goal Bob Bob recall!",
+"another note about weights."
+],
+"a_n": [
+156
+],
+"q_n": null,
+"sim": 0.7885,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000023.0,
+"listener": 0.847,
+"said": 0.22,
+"about": 0.386
+},
+{
+"answer": [
+"Alice broke store tested goal broke. executor field banner reranker deploy!",
+"another note about membrane."
+],
+"a_n": [
+158
+],
+"q_n": 74,
+"sim": 0.8163,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000024.0,
+"listener": 0.565,
+"said": 0.45,
+"about": 0.852
+},
+{
+"answer": [
+"weights broke Alice reverted planner reverted. recall store weights weights Alice!",
+"another note about seed pack."
+],
+"a_n": [
+160
+],
+"q_n": null,
+"sim": 0.965,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000025.0,
+"listener": 0.934,
+"said": 0.682,
+"about": 0.009
+},
+{
+"answer": [
+"recall explained store changed Bob changed. membrane recall field reranker field!",
+"another note about deploy."
+],
+"a_n": [
+162
+],
+"q_n": null,
+"sim": 0.7592,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000026.0,
+"listener": 0.348,
+"said": 0.969,
+"about": 0.396
+},
+{
+"answer": [
+"membrane broke field measured planner measured. weights banner field banner store!",
+"another note about weights."
+],
+"a_n": [
+164
+],
+"q_n": 77,
+"sim": 0.9862,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000027.0,
+"listener": 0.244,
+"said": 0.414,
+"about": 0.594
+},
+{
+"answer": [
+"banner changed reranker fixed membrane fixed. deploy membrane deploy weights store!",
+"another note about cache."
+],
+"a_n": [
+166
+],
+"q_n": null,
+"sim": 0.8424,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000028.0,
+"listener": 0.748,
+"said": 0.834,
+"about": 0.205
+},
+{
+"answer": [
+"membrane changed goal explained seed pack reverted. deploy banner reranker weights recall!",
+"another note about Alice."
+],
+"a_n": [
+168
+],
+"q_n": null,
+"sim": 0.8367,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000029.0,
+"listener": 0.136,
+"said": 0.925,
+"about": 0.661
+}
+],
+"skip": []
+},
+{
+"text": "Bob reverted the cache change?",
+"rows": [
+{
+"answer": [
+"reranker measured Bob broke recall reverted. recall planner planner Alice recall!",
+"another note about Alice."
+],
+"a_n": [
+111
+],
+"q_n": 50,
+"sim": 0.9199,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000000.0
+},
+{
+"answer": [
+"banner reverted Alice reverted Alice tested. planner recall field deploy Alice!",
+"another note about executor."
+],
+"a_n": [
+113
+],
+"q_n": null,
+"sim": 0.928,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000001.0
+},
+{
+"answer": [
+"Alice broke store measured executor changed. cache seed pack executor goal Alice!",
+"another note about weights."
+],
+"a_n": [
+115
+],
+"q_n": null,
+"sim": 0.9671,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000002.0
+},
+{
+"answer": [
+"executor shipped Bob explained Bob shipped. weights weights cache goal weights!",
+"another note about planner."
+],
+"a_n": [
+117
+],
+"q_n": 53,
+"sim": 0.8762,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000003.0
+},
+{
+"answer": [
+"goal broke Alice reverted cache fixed. planner banner banner executor Alice!",
+"another note about seed pack."
+],
+"a_n": [
+119
+],
+"q_n": null,
+"sim": 0.8338,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000004.0
+},
+{
+"answer": [
+"field shipped seed pack broke seed pack fixed. field planner field Alice seed pack!",
+"another note about store."
+],
+"a_n": [
+121
+],
+"q_n": null,
+"sim": 0.8058,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000005.0
+},
+{
+"answer": [
+"seed pack shipped weights shipped membrane tested. deploy weights recall recall recall!",
+"another note about deploy."
+],
+"a_n": [
+123
+],
+"q_n": 56,
+"sim": 0.9632,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000006.0
+},
+{
+"answer": [
+"Bob changed executor explained cache broke. planner membrane Bob weights goal!",
+"another note about Alice."
+],
+"a_n": [
+125
+],
+"q_n": null,
+"sim": 0.7867,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000007.0
+},
+{
+"answer": [
+"Alice changed banner fixed Bob broke. deploy deploy reranker goal planner!",
+"another note about executor."
+],
+"a_n": [
+127
+],
+"q_n": null,
+"sim": 0.936,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000008.0
+},
+{
+"answer": [
+"Alice fixed cache explained executor measured. reranker deploy reranker weights goal!",
+"another note about reranker."
+],
+"a_n": [
+129
+],
+"q_n": 59,
+"sim": 0.9831,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000009.0
+},
+{
+"answer": [
+"executor reverted executor measured cache tested. reranker reranker planner field seed pack!",
+"another note about store."
+],
+"a_n": [
+131
+],
+"q_n": null,
+"sim": 0.8711,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000010.0
+},
+{
+"answer": [
+"cache explained deploy fixed cache reverted. seed pack membrane seed pack store membrane!",
+"another note about seed pack."
+],
+"a_n": [
+133
+],
+"q_n": null,
+"sim": 0.9759,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000011.0
+},
+{
+"answer": [
+"membrane shipped store explained store fixed. Bob executor weights weights planner!",
+"another note about recall."
+],
+"a_n": [
+135
+],
+"q_n": 62,
+"sim": 0.9465,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000012.0
+},
+{
+"answer": [
+"recall explained weights measured weights tested. executor deploy Bob Alice deploy!",
+"another note about membrane."
+],
+"a_n": [
+137
+],
+"q_n": null,
+"sim": 0.8856,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000013.0
+},
+{
+"answer": [
+"deploy fixed weights shipped banner broke. membrane membrane Bob weights field!",
+"another note about Bob."
+],
+"a_n": [
+139
+],
+"q_n": null,
+"sim": 0.7143,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000014.0
+},
+{
+"answer": [
+"field broke seed pack fixed Bob fixed. seed pack field banner planner field!",
+"another note about goal."
+],
+"a_n": [
+141
+],
+"q_n": 65,
+"sim": 0.9952,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000015.0
+},
+{
+"answer": [
+"Alice reverted cache broke Bob tested. store cache goal recall goal!",
+"another note about Alice."
+],
+"a_n": [
+143
+],
+"q_n": null,
+"sim": 0.9488,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000016.0
+},
+{
+"answer": [
+"store measured seed pack broke executor shipped. executor deploy seed pack field field!",
+"another note about membrane."
+],
+"a_n": [
+145
+],
+"q_n": null,
+"sim": 0.9952,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000017.0
+},
+{
+"answer": [
+"store broke cache fixed planner fixed. field executor weights store field!",
+"another note about weights."
+],
+"a_n": [
+147
+],
+"q_n": 68,
+"sim": 0.8253,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000018.0
+},
+{
+"answer": [
+"recall explained goal shipped reranker reverted. Bob weights weights reranker reranker!",
+"another note about deploy."
+],
+"a_n": [
+149
+],
+"q_n": null,
+"sim": 0.9751,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000019.0
+},
+{
+"answer": [
+"reranker shipped membrane measured membrane fixed. field Bob goal store banner!",
+"another note about weights."
+],
+"a_n": [
+151
+],
+"q_n": null,
+"sim": 0.949,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000020.0
+},
+{
+"answer": [
+"Bob measured Bob tested recall tested. store weights planner seed pack seed pack!",
+"another note about Alice."
+],
+"a_n": [
+153
+],
+"q_n": 71,
+"sim": 0.955,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000021.0
+},
+{
+"answer": [
+"seed pack reverted Alice changed executor changed. weights recall reranker banner seed pack!",
+"another note about cache."
+],
+"a_n": [
+155
+],
+"q_n": null,
+"sim": 0.9333,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000022.0
+},
+{
+"answer": [
+"cache measured banner shipped banner shipped. store weights reranker Alice executor!",
+"another note about reranker."
+],
+"a_n": [
+157
+],
+"q_n": null,
+"sim": 0.8789,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000023.0
+},
+{
+"answer": [
+"weights measured deploy tested executor reverted. banner membrane banner Bob goal!",
+"another note about recall."
+],
+"a_n": [
+159
+],
+"q_n": 74,
+"sim": 0.8173,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000024.0
+},
+{
+"answer": [
+"deploy measured goal shipped goal changed. recall banner goal reranker banner!",
+"another note about banner."
+],
+"a_n": [
+161
+],
+"q_n": null,
+"sim": 0.8106,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000025.0
+},
+{
+"answer": [
+"cache reverted Alice broke banner changed. banner banner executor membrane membrane!",
+"another note about weights."
+],
+"a_n": [
+163
+],
+"q_n": null,
+"sim": 0.8693,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000026.0
+},
+{
+"answer": [
+"deploy reverted recall shipped Alice explained. deploy Alice Alice field weights!",
+"another note about recall."
+],
+"a_n": [
+165
+],
+"q_n": 77,
+"sim": 0.8985,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000027.0
+},
+{
+"answer": [
+"Bob changed goal reverted seed pack changed. store seed pack weights recall banner!",
+"another note about deploy."
+],
+"a_n": [
+167
+],
+"q_n": null,
+"sim": 0.8876,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000028.0
+},
+{
+"answer": [
+"goal fixed Bob shipped store measured. planner planner deploy goal weights!",
+"another note about store."
+],
+"a_n": [
+169
+],
+"q_n": null,
+"sim": 0.7045,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000029.0
+}
+],
+"skip": []
+},
+{
+"text": "thanks",
+"rows": [
+{
+"answer": [
+"recall broke field changed store changed. planner store planner membrane banner!",
+"another note about goal."
+],
+"a_n": [
+112
+],
+"q_n": 50,
+"sim": 0.8803,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000000.0,
+"listener": 0.783,
+"said": 0.495,
+"about": 0.245
+},
+{
+"answer": [
+"field fixed cache fixed cache explained. field Bob Alice membrane cache!",
+"another note about Bob."
+],
+"a_n": [
+114
+],
+"q_n": null,
+"sim": 0.7871,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000001.0,
+"listener": 0.926,
+"said": 0.352,
+"about": 0.208
+},
+{
+"answer": [
+"goal fixed store changed membrane tested. reranker Bob cache recall Alice!",
+"another note about store."
+],
+"a_n": [
+116
+],
+"q_n": null,
+"sim": 0.8288,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000002.0,
+"listener": 0.964,
+"said": 0.041,
+"about": 0.808
+},
+{
+"answer": [
+"cache explained reranker shipped reranker tested. reranker cache planner deploy membrane!",
+"another note about field."
+],
+"a_n": [
+118
+],
+"q_n": 53,
+"sim": 0.7023,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000003.0,
+"listener": 0.386,
+"said": 0.69,
+"about": 0.571
+},
+{
+"answer": [
+"deploy fixed deploy changed seed pack fixed. planner banner seed pack executor cache!",
+"another note about weights."
+],
+"a_n": [
+120
+],
+"q_n": null,
+"sim": 0.8047,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000004.0,
+"listener": 0.33,
+"said": 0.603,
+"about": 0.857
+},
+{
+"answer": [
+"recall explained reranker measured field shipped. membrane store seed pack store store!",
+"another note about recall."
+],
+"a_n": [
+122
+],
+"q_n": null,
+"sim": 0.938,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000005.0,
+"listener": 0.777,
+"said": 0.024,
+"about": 0.645
+},
+{
+"answer": [
+"cache measured executor tested banner shipped. goal banner goal executor planner!",
+"another note about cache."
+],
+"a_n": [
+124
+],
+"q_n": 56,
+"sim": 0.7014,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000006.0,
+"listener": 0.265,
+"said": 0.317,
+"about": 0.222
+},
+{
+"answer": [
+"weights shipped recall measured deploy fixed. deploy executor field planner deploy!",
+"another note about cache."
+],
+"a_n": [
+126
+],
+"q_n": null,
+"sim": 0.7623,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000007.0,
+"listener": 0.287,
+"said": 0.704,
+"about": 0.854
+},
+{
+"answer": [
+"Alice broke reranker reverted planner measured. field deploy banner executor planner!",
+"another note about recall."
+],
+"a_n": [
+128
+],
+"q_n": null,
+"sim": 0.712,
+"speaker": "",
+"via": "ask",
+"role": "user",
+"ts": 1700000008.0,
+"listener": 0.728,
+"said": 0.597,
+"about": 0.614
+},
+{
+"answer": [
+"Bob explained weights measured deploy explained. banner goal recall goal membrane!",
+"another note about membrane."
+],
+"a_n": [
+130
+],
+"q_n": 59,
+"sim": 0.8443,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000009.0,
+"listener": 0.397,
+"said": 0.187,
+"about": 0.313
+},
+{
+"answer": [
+"Alice changed field shipped Alice reverted. recall store Bob Bob banner!",
+"another note about cache."
+],
+"a_n": [
+132
+],
+"q_n": null,
+"sim": 0.9196,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000010.0,
+"listener": 0.144,
+"said": 0.746,
+"about": 0.727
+},
+{
+"answer": [
+"Alice shipped banner measured deploy changed. deploy goal Bob store reranker!",
+"another note about banner."
+],
+"a_n": [
+134
+],
+"q_n": null,
+"sim": 0.7341,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000011.0,
+"listener": 1.0,
+"said": 0.785,
+"about": 0.002
+},
+{
+"answer": [
+"field changed store changed field measured. reranker cache deploy banner goal!",
+"another note about Bob."
+],
+"a_n": [
+136
+],
+"q_n": 62,
+"sim": 0.795,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000012.0,
+"listener": 0.911,
+"said": 0.376,
+"about": 0.327
+},
+{
+"answer": [
+"deploy fixed deploy explained executor reverted. deploy reranker deploy goal weights!",
+"another note about Alice."
+],
+"a_n": [
+138
+],
+"q_n": null,
+"sim": 0.888,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000013.0,
+"listener": 0.623,
+"said": 0.3,
+"about": 0.006
+},
+{
+"answer": [
+"store reverted membrane shipped field explained. planner seed pack Alice field membrane!",
+"another note about goal."
+],
+"a_n": [
+140
+],
+"q_n": null,
+"sim": 0.9707,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000014.0,
+"listener": 0.234,
+"said": 0.925,
+"about": 0.221
+},
+{
+"answer": [
+"planner changed planner fixed store tested. recall store banner field cache!",
+"another note about planner."
+],
+"a_n": [
+142
+],
+"q_n": 65,
+"sim": 0.8198,
+"speaker": "Alice",
+"via": "direct",
+"role": "note",
+"ts": 1700000015.0,
+"listener": 0.484,
+"said": 0.635,
+"about": 0.051
+},
+{
+"answer": [
+"Alice measured field tested deploy explained. cache store executor seed pack Bob!",
+"another note about seed pack."
+],
+"a_n": [
+144
+],
+"q_n": null,
+"sim": 0.8315,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000016.0,
+"listener": 0.168,
+"said": 0.208,
+"about": 0.826
+},
+{
+"answer": [
+"executor tested banner tested goal broke. deploy reranker field executor Bob!",
+"another note about membrane."
+],
+"a_n": [
+146
+],
+"q_n": null,
+"sim": 0.8659,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000017.0,
+"listener": 0.614,
+"said": 0.254,
+"about": 0.925
+},
+{
+"answer": [
+"membrane tested executor reverted Bob broke. field store banner cache goal!",
+"another note about cache."
+],
+"a_n": [
+148
+],
+"q_n": 68,
+"sim": 0.8093,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000018.0,
+"listener": 0.786,
+"said": 0.251,
+"about": 0.117
+},
+{
+"answer": [
+"cache measured seed pack reverted cache reverted. cache banner planner deploy goal!",
+"another note about deploy."
+],
+"a_n": [
+150
+],
+"q_n": null,
+"sim": 0.9832,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000019.0,
+"listener": 0.79,
+"said": 0.465,
+"about": 0.784
+},
+{
+"answer": [
+"Bob reverted field shipped field explained. field planner goal seed pack store!",
+"another note about goal."
+],
+"a_n": [
+152
+],
+"q_n": null,
+"sim": 0.8958,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000020.0,
+"listener": 0.948,
+"said": 0.675,
+"about": 0.319
+},
+{
+"answer": [
+"reranker fixed store reverted cache measured. executor executor store store reranker!",
+"another note about membrane."
+],
+"a_n": [
+154
+],
+"q_n": 71,
+"sim": 0.785,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000021.0,
+"listener": 0.492,
+"said": 0.569,
+"about": 0.37
+},
+{
+"answer": [
+"store tested goal explained store changed. membrane planner Alice goal executor!",
+"another note about weights."
+],
+"a_n": [
+156
+],
+"q_n": null,
+"sim": 0.8397,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000022.0,
+"listener": 0.427,
+"said": 0.769,
+"about": 0.772
+},
+{
+"answer": [
+"banner changed field explained field shipped. Bob store membrane banner store!",
+"another note about seed pack."
+],
+"a_n": [
+158
+],
+"q_n": null,
+"sim": 0.7395,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000023.0,
+"listener": 0.901,
+"said": 0.573,
+"about": 0.084
+},
+{
+"answer": [
+"store fixed reranker fixed cache reverted. weights membrane cache store goal!",
+"another note about goal."
+],
+"a_n": [
+160
+],
+"q_n": 74,
+"sim": 0.9259,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000024.0,
+"listener": 0.122,
+"said": 0.567,
+"about": 0.805
+},
+{
+"answer": [
+"field changed planner explained seed pack broke. goal cache recall store Bob!",
+"another note about seed pack."
+],
+"a_n": [
+162
+],
+"q_n": null,
+"sim": 0.9492,
+"speaker": "Bob",
+"via": "ask",
+"role": "model",
+"ts": 1700000025.0,
+"listener": 0.99,
+"said": 0.946,
+"about": 0.145
+},
+{
+"answer": [
+"seed pack tested weights broke store explained. deploy store field Bob reranker!",
+"another note about recall."
+],
+"a_n": [
+164
+],
+"q_n": null,
+"sim": 0.9449,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000026.0,
+"listener": 0.059,
+"said": 0.961,
+"about": 0.933
+},
+{
+"answer": [
+"seed pack explained Alice measured planner shipped. Bob seed pack Bob deploy banner!",
+"another note about Bob."
+],
+"a_n": [
+166
+],
+"q_n": 77,
+"sim": 0.7362,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000027.0,
+"listener": 0.264,
+"said": 0.342,
+"about": 0.908
+},
+{
+"answer": [
+"membrane tested field explained cache measured. store reranker planner store goal!",
+"another note about executor."
+],
+"a_n": [
+168
+],
+"q_n": null,
+"sim": 0.8484,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000028.0,
+"listener": 0.822,
+"said": 0.946,
+"about": 0.247
+},
+{
+"answer": [
+"deploy broke weights reverted reranker explained. Alice membrane recall cache banner!",
+"another note about Alice."
+],
+"a_n": [
+170
+],
+"q_n": null,
+"sim": 0.7565,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000029.0,
+"listener": 0.414,
+"said": 0.152,
+"about": 0.101
+}
+],
+"skip": [
+114,
+120
+]
+},
+{
+"text": "tell me about membrane recall weights",
+"rows": [
+{
+"answer": [
+"planner tested cache fixed Alice measured. recall executor field recall seed pack!",
+"another note about planner."
+],
+"a_n": [
+113
+],
+"q_n": 50,
+"sim": 0.9143,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000000.0
+},
+{
+"answer": [
+"recall broke Bob reverted executor explained. banner seed pack deploy field Alice!",
+"another note about planner."
+],
+"a_n": [
+115
+],
+"q_n": null,
+"sim": 0.8632,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000001.0
+},
+{
+"answer": [
+"recall measured field explained planner explained. goal field membrane deploy membrane!",
+"another note about membrane."
+],
+"a_n": [
+117
+],
+"q_n": null,
+"sim": 0.8035,
+"speaker": "Alice",
+"via": "ask",
+"role": "model",
+"ts": 1700000002.0
+},
+{
+"answer": [
+"recall broke cache reverted deploy fixed. cache planner executor recall weights!",
+"another note about planner."
+],
+"a_n": [
+119
+],
+"q_n": 53,
+"sim": 0.9112,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000003.0
+},
+{
+"answer": [
+"goal broke recall fixed Bob measured. reranker goal goal goal recall!",
+"another note about Alice."
+],
+"a_n": [
+121
+],
+"q_n": null,
+"sim": 0.7272,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000004.0
+},
+{
+"answer": [
+"seed pack fixed executor changed cache broke. Alice cache seed pack membrane goal!",
+"another note about banner."
+],
+"a_n": [
+123
+],
+"q_n": null,
+"sim": 0.9562,
+"speaker": "Alice",
+"via": "direct",
+"role": "model",
+"ts": 1700000005.0
+},
+{
+"answer": [
+"field reverted seed pack measured store explained. seed pack banner recall executor store!",
+"another note about membrane."
+],
+"a_n": [
+125
+],
+"q_n": 56,
+"sim": 0.8891,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000006.0
+},
+{
+"answer": [
+"executor changed field tested deploy fixed. cache planner planner Bob executor!",
+"another note about Bob."
+],
+"a_n": [
+127
+],
+"q_n": null,
+"sim": 0.9468,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000007.0
+},
+{
+"answer": [
+"store measured planner fixed weights reverted. executor Bob membrane cache field!",
+"another note about deploy."
+],
+"a_n": [
+129
+],
+"q_n": null,
+"sim": 0.7741,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000008.0
+},
+{
+"answer": [
+"weights measured store broke weights fixed. reranker goal planner seed pack deploy!",
+"another note about recall."
+],
+"a_n": [
+131
+],
+"q_n": 59,
+"sim": 0.8968,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000009.0
+},
+{
+"answer": [
+"Alice explained Alice explained store explained. field deploy store field reranker!",
+"another note about store."
+],
+"a_n": [
+133
+],
+"q_n": null,
+"sim": 0.8355,
+"speaker": "Bob",
+"via": "ask",
+"role": "note",
+"ts": 1700000010.0
+},
+{
+"answer": [
+"recall tested reranker tested recall fixed. reranker banner Alice goal recall!",
+"another note about weights."
+],
+"a_n": [
+135
+],
+"q_n": null,
+"sim": 0.9807,
+"speaker": "Bob",
+"via": "direct",
+"role": "note",
+"ts": 1700000011.0
+},
+{
+"answer": [
+"seed pack tested cache reverted Bob tested. goal store weights field cache!",
+"another note about seed pack."
+],
+"a_n": [
+137
+],
+"q_n": 62,
+"sim": 0.989,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000012.0
+},
+{
+"answer": [
+"goal reverted deploy reverted Alice fixed. seed pack store deploy Bob field!",
+"another note about membrane."
+],
+"a_n": [
+139
+],
+"q_n": null,
+"sim": 0.7181,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000013.0
+},
+{
+"answer": [
+"membrane measured seed pack reverted deploy measured. Bob planner membrane store cache!",
+"another note about deploy."
+],
+"a_n": [
+141
+],
+"q_n": null,
+"sim": 0.8958,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000014.0
+},
+{
+"answer": [
+"seed pack fixed banner shipped cache shipped. field store store seed pack weights!",
+"another note about reranker."
+],
+"a_n": [
+143
+],
+"q_n": 65,
+"sim": 0.8565,
+"speaker": "Alice",
+"via": "direct",
+"role": "user",
+"ts": 1700000015.0
+},
+{
+"answer": [
+"deploy broke membrane explained reranker explained. Bob store Bob cache recall!",
+"another note about membrane."
+],
+"a_n": [
+145
+],
+"q_n": null,
+"sim": 0.8958,
+"speaker": "",
+"via": "ask",
+"role": "model",
+"ts": 1700000016.0
+},
+{
+"answer": [
+"executor fixed cache fixed banner reverted. planner goal executor goal store!",
+"another note about store."
+],
+"a_n": [
+147
+],
+"q_n": null,
+"sim": 0.7129,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000017.0
+},
+{
+"answer": [
+"executor reverted store changed field reverted. Bob store reranker cache executor!",
+"another note about planner."
+],
+"a_n": [
+149
+],
+"q_n": 68,
+"sim": 0.7223,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000018.0
+},
+{
+"answer": [
+"banner broke weights tested seed pack tested. store reranker store Bob seed pack!",
+"another note about banner."
+],
+"a_n": [
+151
+],
+"q_n": null,
+"sim": 0.9269,
+"speaker": "Bob",
+"via": "direct",
+"role": "user",
+"ts": 1700000019.0
+},
+{
+"answer": [
+"Bob measured Alice measured banner tested. store reranker reranker membrane banner!",
+"another note about banner."
+],
+"a_n": [
+153
+],
+"q_n": null,
+"sim": 0.8736,
+"speaker": "",
+"via": "direct",
+"role": "model",
+"ts": 1700000020.0
+},
+{
+"answer": [
+"Bob explained store tested goal tested. membrane recall membrane weights membrane!",
+"another note about banner."
+],
+"a_n": [
+155
+],
+"q_n": 71,
+"sim": 0.7509,
+"speaker": "Bob",
+"via": "direct",
+"role": "model",
+"ts": 1700000021.0
+},
+{
+"answer": [
+"Bob shipped Alice tested weights broke. field membrane Alice store cache!",
+"another note about seed pack."
+],
+"a_n": [
+157
+],
+"q_n": null,
+"sim": 0.8964,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000022.0
+},
+{
+"answer": [
+"membrane broke cache measured goal fixed. weights deploy Bob recall cache!",
+"another note about banner."
+],
+"a_n": [
+159
+],
+"q_n": null,
+"sim": 0.8121,
+"speaker": "",
+"via": "direct",
+"role": "note",
+"ts": 1700000023.0
+},
+{
+"answer": [
+"seed pack tested planner reverted seed pack tested. deploy reranker seed pack deploy store!",
+"another note about cache."
+],
+"a_n": [
+161
+],
+"q_n": 74,
+"sim": 0.9473,
+"speaker": "",
+"via": "direct",
+"role": "user",
+"ts": 1700000024.0
+},
+{
+"answer": [
+"seed pack changed seed pack shipped reranker explained. Alice weights recall field field!",
+"another note about goal."
+],
+"a_n": [
+163
+],
+"q_n": null,
+"sim": 0.8765,
+"speaker": "",
+"via": "ask",
+"role": "note",
+"ts": 1700000025.0
+},
+{
+"answer": [
+"goal fixed store explained recall changed. seed pack recall cache store seed pack!",
+"another note about planner."
+],
+"a_n": [
+165
+],
+"q_n": null,
+"sim": 0.993,
+"speaker": "Bob",
+"via": "ask",
+"role": "user",
+"ts": 1700000026.0
+},
+{
+"answer": [
+"seed pack measured planner explained membrane explained. field membrane store banner Alice!",
+"another note about seed pack."
+],
+"a_n": [
+167
+],
+"q_n": 77,
+"sim": 0.8965,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000027.0
+},
+{
+"answer": [
+"cache reverted banner changed weights tested. recall store reranker deploy Bob!",
+"another note about executor."
+],
+"a_n": [
+169
+],
+"q_n": null,
+"sim": 0.9324,
+"speaker": "Alice",
+"via": "ask",
+"role": "note",
+"ts": 1700000028.0
+},
+{
+"answer": [
+"Alice shipped cache broke planner reverted. Alice field membrane deploy reranker!",
+"another note about seed pack."
+],
+"a_n": [
+171
+],
+"q_n": null,
+"sim": 0.7708,
+"speaker": "Alice",
+"via": "ask",
+"role": "user",
+"ts": 1700000029.0
+}
+],
+"skip": []
+}
+]
