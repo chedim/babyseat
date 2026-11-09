@@ -108,7 +108,10 @@ def unpack_vec(s: str):
 
 
 def _busy(e) -> bool:
-    return getattr(e, "code", None) == CB.BUSY_CODE
+    if getattr(e, "code", None) == CB.BUSY_CODE:
+        return True
+    m = str(e).lower()                       # SQLite backend: lock contention carries no code, only text (#927)
+    return "database is locked" in m or "database is busy" in m or "database table is locked" in m
 
 
 class CBLiteBackend(MemBackend):
