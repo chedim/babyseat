@@ -311,6 +311,28 @@ def _narrative(s: str, cap: int) -> str:
             return cut[:p + 1].strip()
     return cut.rstrip(",;:") + "…"
 
+
+def as_position(v):
+    """The one type a QuantumEntity.position may hold: None or list[float].
+    Writers that take a position from outside (snapshot load, cliffhanger
+    writes, journal replay) pass it through here, so readers can truth-test it."""
+    if v is None:
+        return None
+    return [float(x) for x in v]
+
+
+def _safe_err(msg: str) -> None:
+    """Log to stderr, never raise: daemon save/side-index threads can fire
+    during interpreter/pytest shutdown when stderr is already closed.
+    Not SafeStderr (safestderr.py): that is installed on the process fd by the
+    server entry point; library/test use never installs it, so sys.stderr here
+    can still be a closed pytest capture handle."""
+    try:
+        print(msg, file=sys.stderr)
+    except Exception:
+        pass
+
+
 @dataclass
 class QuantumEntity:
     """The cortex-experiment entity doc (dataclass view; the wire shape is
@@ -356,9 +378,9 @@ class QuantumEntity:
         # the LIVING geometry rides its own state_space lane (cortex-compat:
         # position.semantic_embeddings stays the STATIC embedding; the
         # tracker's drift lives in position.tracked + trajectory)
-        if self.position:
+        if self.position is not None and len(self.position):
             doc["state_space"]["position"]["tracked"] = list(self.position)
-        if self.position_history:
+        if self.position_history is not None and len(self.position_history):
             doc["state_space"]["trajectory"] = [
                 [float(t), [float(x) for x in p]]
                 for t, p in self.position_history[-RING_MAX:]]
@@ -1538,8 +1560,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                 _stamp_guest_flavor(k, q.properties)
                 self.docs[k] = q
         except Exception as e:
-            print(f"[entities] side-index load failed ({e})",
-                  file=sys.stderr)
+            _safe_err(f"[entities] side-index load failed ({e})")
 
     def save(self) -> None:
         """THE SIDE-INDEX SAVE, rebuilt (the 45s-PENDING exhibit):
@@ -1591,8 +1612,8 @@ class EntityStore(MultiParentOps, TimelineOps):
                     # THE POISON IS NAMED: a doc that can't serialize
                     # skips (never kills the file) and prints its eid
                     # -- the operator sees WHO, the queue keeps flowing
-                    print(f"[entities] side-index: doc {eid} skipped "
-                          f"({str(e)[:80]})", file=sys.stderr)
+                    _safe_err(f"[entities] side-index: doc {eid} skipped "
+                          f"({str(e)[:80]})")
             # preserve tracks: docs-save must not clobber the track lane
             # (the old shape wrote {"docs": ...} bare -- every save wiped
             # the planted tracks; the silent tracking-death bug)
@@ -1616,8 +1637,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             self._side_saved = True       # the retry flag: clean
         except Exception as e:
             self._side_saved = False
-            print(f"[entities] side-index save failed ({e})",
-                  file=sys.stderr)
+            _safe_err(f"[entities] side-index save failed ({e})")
 
     @staticmethod
     def _sig(ent) -> tuple:
@@ -1659,8 +1679,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                             self._cbl.put_json(self.CBL_COLL, self._cbl_key(eid),
                                                json.dumps({"e": eid, "d": doc}))
                         except Exception as e:
-                            print(f"[entities] cbl save: doc {eid} skipped ({str(e)[:80]})",
-                                  file=sys.stderr)
+                            _safe_err(f"[entities] cbl save: doc {eid} skipped ({str(e)[:80]})")
                             sigs.pop(eid, None)
                     for eid in gone:
                         self._cbl.purge(self.CBL_COLL, self._cbl_key(eid))
@@ -1673,13 +1692,13 @@ class EntityStore(MultiParentOps, TimelineOps):
             if self._migrate and self.path and self.path.exists():
                 self.path.rename(self.path.with_name(
                     f"{self.path.name}.migrated-{_t.strftime('%Y%m%d-%H%M%S')}"))
-                print(f"[entities] migrated {len(sigs)} entities into couchbase lite; "
-                      f"the JSON file is kept as a backup", file=sys.stderr)
+                _safe_err(f"[entities] migrated {len(sigs)} entities into couchbase lite; "
+                      f"the JSON file is kept as a backup")
             self._migrate = False
             self._side_saved = True
         except Exception as e:
             self._side_saved = False
-            print(f"[entities] cbl save failed ({e})", file=sys.stderr)
+            _safe_err(f"[entities] cbl save failed ({e})")
 
     def _snap_to_entity(self, eid: str, props: dict, cls: str,
                         links: list, derived_by: list,
@@ -1694,7 +1713,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         ent.links = links
         ent.derived_by = derived_by
         ent.embedding = None              # re-embedded on load (cheap)
-        ent.position = position
+        ent.position = as_position(position)
         ent.position_history = position_history or []
         return ent
 
@@ -1713,7 +1732,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             try:
                 self.save()
             except Exception as e:
-                print(f"[entities] save after close failed ({e})", file=sys.stderr)
+                _safe_err(f"[entities] save after close failed ({e})")
             return
         if self._save_timer is None and not getattr(self, "_saving", False):
             self._arm_save()
@@ -1757,8 +1776,9 @@ class EntityStore(MultiParentOps, TimelineOps):
             self.save()
 
     def _cancel_save_timer(self) -> None:
-        if self._save_timer is not None:
-            self._save_timer.cancel()
+        th = self._save_timer
+        if th is not None:
+            th.cancel()
             self._save_timer = None
 
     # ---- couchbase (the shared collection) ----------------------------------
@@ -1773,7 +1793,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             try:
                 self.save()
             except Exception as e:
-                print(f"[entities] save on close failed ({e})", file=sys.stderr)
+                _safe_err(f"[entities] save on close failed ({e})")
         cluster = getattr(self, "_cluster_ref", None)
         if cluster is None:
             return
@@ -1834,9 +1854,8 @@ class EntityStore(MultiParentOps, TimelineOps):
             return coll
         except Exception as e:
             if not self._cb_warned:
-                print(f"[entities] couchbase write-through unavailable "
-                      f"({str(e)[:80]}); JSON side-index carries",
-                      file=sys.stderr)
+                _safe_err(f"[entities] couchbase write-through unavailable "
+                      f"({str(e)[:80]}); JSON side-index carries")
                 self._cb_warned = True
             return None
 
@@ -2080,8 +2099,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         try:
             rows = list(self._pub_query(limit=limit))
         except Exception as e:
-            print(f"[entities] published pull skipped ({str(e)[:80]})",
-                  file=sys.stderr)
+            _safe_err(f"[entities] published pull skipped ({str(e)[:80]})")
             return 0
         presence_eid = f"{MEMBRANE_NS}presence"
         for doc_id, doc in rows:
@@ -2195,8 +2213,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         try:
             listed = list(rows)
         except Exception as e:
-            print(f"[entities] peers pull skipped ({str(e)[:80]})",
-                  file=sys.stderr)
+            _safe_err(f"[entities] peers pull skipped ({str(e)[:80]})")
             return []
         for doc_id, doc in listed:
             meta = doc.get("published") or {}
@@ -3237,7 +3254,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             d["tracks"] = self.tracks
             self.path.write_text(json.dumps(d))
         except Exception as e:
-            print(f"[entities] track save failed ({e})", file=sys.stderr)
+            _safe_err(f"[entities] track save failed ({e})")
 
     def _load_tracks(self) -> None:
         if self._mirror is not None:
