@@ -80,8 +80,12 @@ def resolve(field_path: str = "", mode: str | None = None) -> str:
 
 
 def is_new(field_path: str = "") -> bool:
-    base, _jdir, sdir, cdir = dirs(field_path)
-    return chosen(base) is None and not sdir.exists() and not cdir.exists()
+    base, jdir, sdir, cdir = dirs(field_path)
+    try:
+        has_journal = jdir.is_dir() and any(jdir.iterdir())     # an old journal seat is not new
+    except OSError:
+        has_journal = False
+    return chosen(base) is None and not sdir.exists() and not cdir.exists() and not has_journal
 
 
 def ensure_chosen(field_path: str = "", interactive: bool | None = None, ask=input, out=sys.stderr) -> str:
