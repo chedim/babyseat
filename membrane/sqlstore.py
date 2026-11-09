@@ -46,6 +46,11 @@ class _Joined:
         return parts[0] if len(parts) == 1 else np.concatenate(parts)
 
 
+def _native_vm() -> bool:
+    import os
+    return os.environ.get("MEMBRANE_NATIVE_VM", "").strip() == "1"
+
+
 class _Matrix:
     """The sentence vectors: an append-only float16 file + its keys, memory-mapped for search."""
 
@@ -115,6 +120,39 @@ class _Matrix:
                 self.keys.append(k)
             self._mm = None
         return len(pairs)
+
+    def native_top(self, q: np.ndarray, want: int):
+        """#1001 k3: the top `want` by the native VM's resident `near` getter (MEMBRANE_NATIVE_VM=1), or None when the
+        extension is not built. The store holds every row ever appended, keyed 'key\\0row'; masked rows are filtered here."""
+        try:
+            from . import membrane_vm as vm
+        except Exception:
+            return None
+        with self.lock:
+            mm, n = self._map(), len(self.keys)
+            if mm is None or not n:
+                return []
+            nv = getattr(self, "_nv", None)
+            if nv is None:
+                nv = self._nv = vm.VecStore(DIM)
+                self._nv_n = 0
+            while self._nv_n < n:                        # keep the resident store synced with appended rows
+                b = min(self._nv_n + 4096, n)
+                blk = np.asarray(mm[self._nv_n:b], dtype=np.float32)
+                for j in range(b - self._nv_n):
+                    nv.add(f"{self.keys[self._nv_n + j]}\0{self._nv_n + j}", blk[j].tolist())
+                self._nv_n = b
+            dead = set(self.dead)
+        ask = min(want + len(dead), n)
+        out = []
+        for kid, sc in nv.near(q.astype(np.float32).tolist(), ask):
+            key, _, r = kid.rpartition("\0")
+            if int(r) in dead:
+                continue
+            out.append((key, float(sc)))
+            if len(out) >= want:
+                break
+        return out
 
     def drop(self, key: str) -> None:
         with self.lock:
@@ -260,11 +298,16 @@ class SQLiteBackend(CBLiteBackend):
         if not getattr(self, "_seeded", False) or self._pending_vec:
             self.catch_up(wait=False)
         mx = self._vectors()
+        top = mx.top
+        if _native_vm():                               # #1001 k3: the VM's resident `near` getter
+            def top(qq, w):
+                r = mx.native_top(qq, w)
+                return mx.top(qq, w) if r is None else r
         if not eq:
-            return mx.top(q / n, int(k))
+            return top(q / n, int(k))
         want = int(k) * 4
         while True:                                    # widen until k matches or the matrix is exhausted
-            out = mx.top(q / n, want)
+            out = top(q / n, want)
             docs = self.get_multi(coll, [kk for kk, _ in out])
             hit = [(kk, s) for kk, s in out if kk in docs and matches(docs[kk], eq)]
             if len(hit) >= k or len(out) < want or want >= len(mx.keys):
