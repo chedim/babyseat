@@ -33,6 +33,9 @@ def vm():
 
 
 def _visits(vm):
+    if hasattr(vm, "trace"):                    # the native VM (#971): its core reports the triggers visited
+        vm.trace = []
+        return vm.trace
     seen = []
     real = vm._on_write
 

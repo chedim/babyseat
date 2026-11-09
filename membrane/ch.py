@@ -914,6 +914,9 @@ class VM:
             return
         now = float(now if now is not None else self.clock())
         with self._run:
+            hook = getattr(self, "on_sweep", None)
+            if hook is not None:                     # #971: journal.Journal.watch -- the sweep, with its time
+                hook(now)
             memo: dict = {}
             for tr in self.triggers():
                 def go(tr=tr):
@@ -960,3 +963,23 @@ class VM:
     def report(self) -> dict:
         return {"triggers": len(self.triggers()), "queued": len(self._q), "dropped": self.dropped,
                 "fired": dict(self.fired), "refused": dict(self.refused), "errors": dict(self.errors)}
+
+
+PyVM = VM                           # this module's VM by a name nothing swaps (graphbanner binds with Python atoms)
+NATIVE_ENV = "MEMBRANE_NATIVE_VM"   # #971: 1 = the native (Rust) VM, when its extension is built
+
+
+def make_vm(est, **kw):
+    """The seat's VM: the native one when MEMBRANE_NATIVE_VM=1 and the extension is built (native/build.sh),
+    else this module's. A missing extension is said, never silent."""
+    if os.environ.get(NATIVE_ENV, "").strip() == "1":
+        try:
+            from . import ch_native
+            return ch_native.NativeVM(est, **kw)
+        except Exception as e:                    # noqa: BLE001 -- not built, or failed to start: never no VM
+            import sys
+            print(f"[ch] {NATIVE_ENV}=1 but the native VM could not start ({type(e).__name__}: {e}); "
+                  "using the Python VM", file=sys.stderr)
+        return PyVM(est, **kw)
+    return VM(est, **kw)
+
