@@ -1260,9 +1260,10 @@ def main() -> None:
                 plant_operator(srv.entity_store)
             except Exception as e:
                 print(f"[opencode] operator entity not planted ({e})", file=sys.stderr)
-            if seed_clock_entity(srv.entity_store):
-                print("[seat] the clock entity is planted (tool:clock, "
-                      "fires on the thinker's heartbeat)", file=sys.stderr)
+            from .seeds_plain import boot as _boot_plain      # #980 Q3: clock, executor, filetree, fs classes, language
+            _pl = _boot_plain(srv.entity_store)
+            if _pl.get("installed"):
+                print(f"[seat] seed pack plain: {_pl['installed']} planted", file=sys.stderr)
         except Exception as e:
             print(f"[seat] clock seeding skipped ({e})", file=sys.stderr)
         # THE PRESENCE ORGAN (the seat-first field's heartbeat): the seat
@@ -1296,34 +1297,7 @@ def main() -> None:
         # the boot also RE-DERIVES the wakes from the board (the durable
         # steering: open intents re-queue their lanes -- boot_wakes below,
         # after the pool lives).
-        # THE AUTONODE (the operator's 2026-10-01 design): seed the
-        # filetree template, then run the trigger layer -- file metadata
-        # under the starting dir, MQTT topics, signals -- firing every
-        # watcher entity's watch_script. Degrades never raising (the
-        # seat works without watchers); --no-autonode opts out.
-        try:
-            from .autonode import seed_filetree_entity
-            if seed_filetree_entity(srv.entity_store):
-                print("[seat] the filetree watcher is planted "
-                      "(tool:filetree -- give any entity a watch_script "
-                      "to watch like it)", file=sys.stderr)
-        except Exception as e:
-            print(f"[seat] filetree seeding skipped ({e})", file=sys.stderr)
-        try:                                  # #715: fs:dir / fs:file / fs:code, the classes an entity extends
-            from .fstree import seed_classes
-            seed_classes(srv.entity_store)
-        except Exception as e:
-            print(f"[seat] fs classes seeding skipped ({e})", file=sys.stderr)
-        # THE EXECUTOR (2026-10-06): the exec organ -- commands link to
-        # it and the engine runs them inline (the 'executes' edge is the
-        # ledger); idempotent like every seeding.
-        try:
-            from .night import seed_executor_entity
-            if seed_executor_entity(srv.entity_store):
-                print("[seat] the executor is planted (tool:executor -- "
-                      "methods run commands through it)", file=sys.stderr)
-        except Exception as e:
-            print(f"[seat] executor seeding skipped ({e})", file=sys.stderr)
+        # #980 Q3: tool:filetree, fs classes and tool:executor are seeded by the 'plain' pack above.
         # ONE SHAPE LOGIC (#741): retire the passthrough methods (marked, never deleted)
         # and note every other method on its shape's node, so a run that has a method
         # runs as it; idempotent.
@@ -1343,9 +1317,7 @@ def main() -> None:
             print(f"[seat] verbs skipped ({e})", file=sys.stderr)
         # LIVING LANGUAGE (language.py): the seeded adjectives and the en executor, made once
         try:
-            from .language import ensure as _ensure_lang, seed as _seed_adj, seed_executor as _seed_lang
-            _seed_adj(srv.entity_store)
-            _seed_lang(srv.entity_store)
+            from .language import ensure as _ensure_lang      # #980 Q3: adjectives + en executor come from the plain pack
             threading.Thread(target=lambda: _ensure_lang(lambda m: print(m, file=sys.stderr)),
                              daemon=True, name="language-ensure").start()   # on by default
         except Exception as e:
