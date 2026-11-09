@@ -57,12 +57,15 @@ pub struct Fields {
     pub banner: bool,
     /// row 4: the recall policy's guard setters and RecallAsk getters (recall.rs) are on
     pub recall: bool,
+    /// row 5: written calls (adapters.rs) are on; the calls they asked the host to run
+    pub adapters: bool,
+    pub method_calls: Vec<J>,
     /// last value each guarded dial accepted
     pub accepted: std::collections::HashMap<String, J>,
 }
 
 impl Fields {
-    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, accepted: Default::default() } }
+    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], accepted: Default::default() } }
 
     /// Row 3: a banner input (Message/Register/Edge/BannerRule) was written: recompute each Chat's `banner`.
     fn banner_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
@@ -91,6 +94,36 @@ impl Fields {
         let mut asks: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == crate::recall::CLASS_ASK).map(|(k, _)| k.clone()).collect();
         asks.sort();
         for a in asks { for (p, v) in crate::recall::ask_values(core, &a) { self.emit(core, work, &a, p, v, "recall", seq, now); } }
+    }
+
+    /// Row 5: a Method's `invoke` was written -> the verdict (refusal receipt / effect), then the slot is consumed.
+    fn adapters_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, seq: &mut i64, now: f64) {
+        use crate::adapters::{decide, receipt, Verdict};
+        if w.prop != "invoke" || !crate::adapters::is_method(core, &w.eid) || !w.new.is_object() || w.new.get("request").is_none() { return; }
+        let name = crate::adapters::method_name(core, &w.eid);
+        let (obj, call) = (w.new["object"].as_str().unwrap_or("").to_string(), w.new["call"].as_str().unwrap_or("").to_string());
+        match decide(name.as_deref(), &w.new) {
+            Verdict::Nothing => {}
+            Verdict::Refuse { clear, rid, head } => {
+                if clear && core.docs.get(&obj).and_then(|e| e.props.get(&call)).map(|v| *v != json!("") && !v.is_null()).unwrap_or(false) {
+                    self.emit(core, work, &obj, &call, json!(""), "call-clear", seq, now);
+                }
+                if core.docs.contains_key(&obj) { for (p, v) in receipt(&call, &rid, 2, &head, None) { self.emit(core, work, &obj, &p, v, "call-receipt", seq, now); } }
+            }
+            Verdict::Run { object, method, call, rid, args } => {
+                self.method_calls.push(json!({"eid": w.eid, "object": object, "method": method, "call": call, "id": rid, "args": args}));
+            }
+        }
+        if core.docs.get(&w.eid).and_then(|e| e.props.get("invoke")) == Some(&w.new) {
+            self.emit(core, work, &w.eid, "invoke", json!(""), "call-consumed", seq, now);
+        }
+    }
+
+    /// Row 5: the host's receipt for a run call (its rc, head, result), written on the object with the request's id.
+    pub fn deliver(&mut self, core: &mut Core, object: &str, call: &str, rid: &str, rc: i64, head: &str, result: Option<J>, now: f64, seq: &mut i64) {
+        if !core.docs.contains_key(object) { return; }
+        let mut work = VecDeque::new();
+        for (p, v) in crate::adapters::receipt(call, rid, rc, head, result) { self.emit(core, &mut work, object, &p, v, "call-receipt", seq, now); }
     }
 
     fn emit(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64) {
@@ -132,6 +165,7 @@ impl Fields {
             if self.banner && w.prop != "banner" {   // any write can move a line (a card's status, a name): the getter reads the whole field
                 self.banner_on(core, &mut work, seq, now);
             }
+            if self.adapters { self.adapters_on(core, &mut work, &w, seq, now); }
             if self.recall { self.recall_on(core, &mut work, &w, seq, now); }
             let hits: Vec<usize> = (0..self.setters.len())
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, self.setters[i].cls)).collect();
