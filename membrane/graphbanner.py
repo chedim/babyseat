@@ -85,14 +85,21 @@ def define(est, name: str, where, show: str, order: int = 100) -> str:
     return eid
 
 
+PACK_VERSION = 1
+
+
+def pack() -> dict:
+    """The banner rules as a versioned seed pack (#980 Q3)."""
+    return {"name": "banner", "version": PACK_VERSION, "entities": [
+        {"eid": _rule_eid(r["name"]), "cls": CLASS_RULE, "properties": {
+            "name": r["name"], "where": [list(a) for a in r["where"]], "show": str(r["show"]),
+            "order": int(r["order"]), "silent_birth": True}} for r in SEED]}
+
+
 def seed(est) -> int:
-    """Boot: the seeded rules, made once (an edited one is kept as it is)."""
-    n = 0
-    for r in SEED:
-        if _rule_eid(r["name"]) not in (est.docs or {}):
-            define(est, r["name"], r["where"], r["show"], r["order"])
-            n += 1
-    return n
+    """Boot: load the pack; an edited rule is kept until a newer release (then kept as an overlay)."""
+    from . import seedpack
+    return seedpack.load(est, pack(), release=True)["installed"]
 
 
 def _rules(est) -> list:
