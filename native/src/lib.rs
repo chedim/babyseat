@@ -3,6 +3,7 @@
 
 pub mod expr;
 pub mod fields;
+pub mod getters;
 pub mod vm;
 
 use pyo3::prelude::*;

@@ -21,7 +21,9 @@ the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
 
 1. **Fields.** Everything is a field on an entity; entities are instances of classes; a field is
    declared once on a class (name, type, getter, setters).
-2. **Getters are cached and eager.** A field with a getter holds its last computed value. A read
+2. **Getters are cached and eager.** A new getter never computes on load (traces start at `{}`);
+   after load it recalculates when an input changes. A field with a getter holds its last computed
+   value. A read
    returns the cache; a read never writes and never fires anything.
 3. **Own name = previous cached value, never an input.** Inside a getter the field's own name is
    its previous value: `x = (x or 0) + 1` is an accumulator. A getter's own field is never one of
