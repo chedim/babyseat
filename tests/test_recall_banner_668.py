@@ -2,6 +2,7 @@
 one fact line per row, the chat's own recent turns skipped, near-duplicates
 collapsed, a no-topic message keeping the previous set."""
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -37,6 +38,13 @@ class TestTopic(unittest.TestCase):
 
 
 class TestScorer(unittest.TestCase):
+    def setUp(self):
+        # These pin the scorer's own order. Once the reranker has loaded (a long run, or a live seat
+        # serving it) rank() re-scores with the reranker's weights instead of the ones passed here.
+        patcher = mock.patch.dict(os.environ, {"MEMBRANE_RERANK": "0"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def rows(self):
         return [{"sim": 0.9, "answer": ["The sky is blue."], "a_n": [1], "q_n": 1},
                 {"sim": 0.8, "answer": ["Caroline adopted a dog named Max."], "a_n": [5], "q_n": 5}]
