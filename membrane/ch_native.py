@@ -20,6 +20,7 @@ from __future__ import annotations
 import collections
 import json
 import math
+import sys
 import threading
 import time
 
@@ -33,12 +34,23 @@ _PyVM = CH.PyVM               # ch.py's own VM: its helpers are reused (a test r
 DEPTH_MAX = 64          # nesting kept for the core (serde refuses past 128); deeper becomes its text
 
 
+def _text(v) -> str:
+    """str(v); an integer past Python's own digit limit has no str, so it gets a stand-in."""
+    try:
+        return str(v)
+    except ValueError:
+        return f"<{type(v).__name__}>"
+
+
 def _clean(v, depth: int = 0):
     """A value the core's strict JSON can carry (Memo's review: one NaN in the store stopped the VM):
-    NaN / Infinity -> None (as `cblstore.dumps` stores them), a lone surrogate -> U+FFFD, nesting past
+    NaN / Infinity -> None (as `cblstore.dumps` stores them), a lone surrogate -> U+FFFD (in keys too),
+    an integer past a float's range -> the largest float of its sign (still a number), nesting past
     DEPTH_MAX -> its text, anything else not JSON -> its text."""
-    if v is None or isinstance(v, (bool, int)):
+    if v is None or isinstance(v, bool):
         return v
+    if isinstance(v, int):
+        return v if abs(v) <= sys.float_info.max else (sys.float_info.max if v > 0 else -sys.float_info.max)
     if isinstance(v, float):
         return v if math.isfinite(v) else None
     if isinstance(v, str):
@@ -50,7 +62,7 @@ def _clean(v, depth: int = 0):
     if depth >= DEPTH_MAX:
         return str(v)[:2000]
     if isinstance(v, dict):
-        return {str(k): _clean(x, depth + 1) for k, x in v.items()}
+        return {_clean(_text(k)): _clean(x, depth + 1) for k, x in v.items()}
     if isinstance(v, (list, tuple)):
         return [_clean(x, depth + 1) for x in v]
     try:
@@ -128,6 +140,15 @@ class _Host:
         except Exception:                              # noqa: BLE001 -- a lookup failing binds nothing
             return None
         return m.eid if m is not None else None
+
+    def live(self, eid, position):
+        ent = (self.est.docs or {}).get(eid)
+        if ent is None:
+            return None
+        try:
+            return _dumps([ent.cls or "", _clean(dict(ent.properties or {})), _pos(ent) if position else None])
+        except Exception:                              # noqa: BLE001 -- the mirror's copy stands
+            return None
 
     def vel(self, eid, now, thr):
         ent = (self.est.docs or {}).get(eid)

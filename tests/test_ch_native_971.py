@@ -276,3 +276,102 @@ def test_a_bare_changed_trigger_still_costs_a_sweep_nothing():
     vm = NV.NativeVM(est)
     vm.define("bare", when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]], write=["?x.hit", "1"])
     assert json.loads(vm.core.sweep_eids())["eids"] == []
+
+
+# -- Memo's review of #972, finding B: a value the core's JSON can't carry never loses the write ------
+def _both():
+    from membrane import ch as CH
+    return (("py", CH.PyVM), ("native", NV.NativeVM))
+
+
+@pytest.mark.parametrize("bad", [{"\udc80k": 1}, {"ok": {"\ud800": [1]}}, 10 ** 400, -(10 ** 400),
+                                 [10 ** 400]], ids=lambda v: type(v).__name__)
+def test_a_value_serde_cannot_read_still_fires_its_trigger(bad):
+    from membrane.entities import MEMBRANE_NS
+    die = MEMBRANE_NS + "toy:die"
+    for label, make in _both():
+        est = _level_store()
+        vm = make(est)
+        vm.attach()
+        vm.define("t", when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]], write=["?x.hit", "1"])
+        with _as_writer():
+            est.edit(die, properties={"a": bad})
+        vm.drain()
+        assert est.docs[die].properties.get("hit") == 1, (label, vm.errors)
+        est.docs[die].properties.pop("hit")
+        with _as_writer():                     # the bad value is now the write's `old`
+            est.edit(die, properties={"a": 2})
+        vm.drain()
+        vm.detach()
+        assert est.docs[die].properties.get("hit") == 1, (label, vm.errors)
+        assert not [k for k in vm.errors if k.startswith("hear:")], (label, vm.errors)
+
+
+def test_clean_keeps_a_huge_integer_a_number_with_its_sign():
+    big = NV._clean(10 ** 400)
+    assert isinstance(big, float) and big == sys.float_info.max
+    assert NV._clean(-(10 ** 400)) == -sys.float_info.max
+    assert NV._clean(10 ** 300) == 10 ** 300            # serde can carry this one
+    json.loads(NV._dumps(NV._clean({10 ** 5000: 1})))
+
+
+# -- a `changed` trigger's write expression reads the live store, as ch.py does ------------------------
+@pytest.mark.parametrize("expr,want", [("x.b", 7), ("x.a + x.b", 8), ("x.position", [9.0, 0.0])])
+def test_a_bare_changed_trigger_reads_a_value_changed_in_place(expr, want):
+    from membrane.entities import MEMBRANE_NS
+    die = MEMBRANE_NS + "toy:die"
+    got = {}
+    for label, make in _both():
+        est = _level_store()
+        vm = make(est)
+        vm.attach()
+        vm.define("t", when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]], write=["?x.hit", expr])
+        est.docs[die].properties["b"] = 7      # no write, so no event carries it
+        est.docs[die].position = np.array([9.0, 0.0])
+        with _as_writer():
+            est.edit(die, properties={"a": 1})
+        vm.drain()
+        vm.detach()
+        got[label] = est.docs[die].properties.get("hit")
+    assert got == {"py": want, "native": want}, got
+
+
+def test_a_bare_changed_trigger_reads_another_entity_changed_in_place():
+    from membrane.entities import MEMBRANE_NS
+    die, y = MEMBRANE_NS + "toy:die", MEMBRANE_NS + "toy:y"
+    got = {}
+    for label, make in _both():
+        est = _level_store()
+        vm = make(est)
+        vm.attach()
+        vm.define("t", when=[["changed", "?x.a"]], where=[["is", "?x", "toy:die"], ["is", "?y", "toy:y"]],
+                  write=["?x.hit", "y.v"])
+        est.docs[y].properties["v"] = 7        # no write; only the store has it
+        with _as_writer():
+            est.edit(die, properties={"a": 1})
+        vm.drain()
+        vm.detach()
+        got[label] = est.docs[die].properties.get("hit")
+    assert got == {"py": 7, "native": 7}, got
+
+
+def test_a_firing_that_names_no_entity_asks_the_store_nothing(monkeypatch):
+    from membrane.entities import MEMBRANE_NS
+    die = MEMBRANE_NS + "toy:die"
+    est = _level_store()
+    vm = NV.NativeVM(est)
+    vm.attach()
+    calls = []
+    real = NV._Host.live
+    monkeypatch.setattr(NV._Host, "live", lambda self, *a: (calls.append(a), real(self, *a))[1])
+    vm.define("t", when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]], write=["?x.hit", "1"])
+    with _as_writer():
+        est.edit(die, properties={"a": 1})
+    vm.drain()
+    vm.detach()
+    assert est.docs[die].properties.get("hit") == 1 and calls == []
+
+
+def _as_writer():
+    from membrane import writes as W
+    return W.as_writer("person:t")

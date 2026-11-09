@@ -25,6 +25,8 @@ pub trait Host {
     fn dispatch(&self, eid: &str, method: &str) -> Option<String>;
     fn vel(&self, eid: &str, now: f64, thr: f64) -> bool;
     fn align(&self, eid: &str, thr: f64) -> bool;
+    /// The live store's entity as JSON [cls, props, position | null]; the position only when asked.
+    fn live(&self, eid: &str, position: bool) -> Option<String>;
 }
 
 pub struct Ent {
@@ -532,6 +534,21 @@ impl Core {
         Ok(if seeded && level && !was { self.fire(host, ti, &sp, b, env, now, chain) } else { None })
     }
 
+    /// A `changed` trigger's firing: what its write expression names comes from the live store, as in
+    /// ch.py. A sweep doesn't keep these fresh (that would cost every sweep), so the cost lands here, per
+    /// firing, and only for the entities the expression names.
+    fn read_live(&mut self, host: &dyn Host, sp: &Spec, b: &Binding) {
+        let names: HashSet<&str> = sp.expr.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+        let position = names.contains("position");
+        for (v, e) in b {
+            if !names.contains(v.trim_start_matches('?')) { continue; }
+            let Some(row) = host.live(e, position).and_then(|t| serde_json::from_str::<J>(&t).ok()) else { continue };
+            let (Some(cls), Some(props)) = (row[0].as_str(), row[1].as_object()) else { continue };
+            let pos = if position { row[2].as_array().map(|a| a.iter().map(f).collect()) } else { Some(vec![f64::NAN]) };
+            self.refresh(e.clone(), cls.to_string(), Some(props.clone()), pos);
+        }
+    }
+
     fn fire(&mut self, host: &dyn Host, ti: usize, sp: &Spec, b: &Binding, env: HashMap<String, V>, now: f64, chain: &J) -> Option<J> {
         let (teid, mine) = (self.triggers[ti].eid.clone(), self.triggers[ti].mine);
         if mine && !self.learner { return None; } // self's triggers run only with a learner (its energy)
@@ -549,6 +566,7 @@ impl Core {
             self.errors.insert(teid, format!("no target {:?}", sp.target));
             return None;
         }
+        if env.contains_key("new") { self.read_live(host, sp, b); }
         let value = match self.eval(&sp.expr, &env).and_then(|v| expr::to_json(&v)) {
             Ok(v) => v,
             Err(e) => { let m: String = format!("{:?}: {}", sp.expr, e).chars().take(200).collect(); self.errors.insert(teid, m); return None; }

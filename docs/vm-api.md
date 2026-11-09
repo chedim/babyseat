@@ -119,11 +119,12 @@ through `make_vm`.
   bind or name, their positions only when a sweep trigger is geometric (near, away, pos, around),
   and every position only when an `around` trigger exists. A `changed` trigger counts as a sweep trigger here when it also has a level
   condition or a filter, since those read the store when its write arrives; a bare `changed` trigger
-  costs a sweep nothing (so its write expression can read a value changed in place only after a write
-  or another trigger's refresh brings it over). With no sweep trigger, a sweep reads
+  costs a sweep nothing; when any `changed` trigger fires, the entities its write expression names are
+  read from the live store first, so that cost is per firing. With no sweep trigger, a sweep reads
   nothing. A drain sees only what was written.
 - **Values crossing to the core** are cleaned in one place (`ch_native._clean`): NaN and Infinity
-  become null (as `cblstore.dumps` stores them), a lone surrogate becomes U+FFFD, and nesting past 64
+  become null (as `cblstore.dumps` stores them), a lone surrogate becomes U+FFFD (keys too), an integer past a float's range becomes the largest
+  float of its sign (the store keeps the real value), and nesting past 64
   becomes its text. A row that still can't be carried is left out and said in `errors`. If the native
   VM fails to start for any reason, `make_vm` says so and runs the Python VM: never no VM.
 - **Locking:** every call into the core is made under the VM's one evaluation lock, so the core's

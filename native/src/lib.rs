@@ -29,6 +29,7 @@ impl<'py> Host for PyHost<'py> {
     fn dispatch(&self, eid: &str, method: &str) -> Option<String> { self.opt("dispatch", (eid, method)) }
     fn vel(&self, eid: &str, now: f64, thr: f64) -> bool { self.yes("vel", (eid, now, thr)) }
     fn align(&self, eid: &str, thr: f64) -> bool { self.yes("align", (eid, thr)) }
+    fn live(&self, eid: &str, position: bool) -> Option<String> { self.opt("live", (eid, position)) }
 }
 
 fn obj(s: &str) -> PyResult<Map<String, J>> {
