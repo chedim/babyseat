@@ -5,6 +5,7 @@ collapsed, a no-topic message keeping the previous set."""
 import os
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
