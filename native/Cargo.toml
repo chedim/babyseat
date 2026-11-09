@@ -11,8 +11,14 @@ name = "membrane_vm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+bytemuck = { version = "1.25.2", optional = true }
+pollster = { version = "1.0.1", optional = true }
 pyo3 = { version = "0.29", features = ["extension-module"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+wgpu = { version = "30.0.1", optional = true }
 
 [profile.release]
 opt-level = 3
+
+[features]
+metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
