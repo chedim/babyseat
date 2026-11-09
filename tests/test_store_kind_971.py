@@ -175,3 +175,36 @@ class Status(unittest.TestCase):
             st = SK.status(f)
         self.assertEqual(st["uses"], "sqlite")
         self.assertEqual(st["stores"]["sqlite"]["collections"]["entity_states"], 1)
+
+
+class MigrateFinalCheck(unittest.TestCase):
+    """The last check compares the new store with the SOURCE's count, not with the copy loop's own tally:
+    a source that hands back nothing for a listed row must fail the migration, not pass it."""
+
+    def test_a_source_that_drops_a_row_fails_the_migration(self):
+        from membrane import sqlitedb as SDB
+        f = _seat()
+        SK.choose(Path(f).parent, "sqlite")
+        with _env():
+            be = efstore.open_backend(f)
+            _fill(be)
+            be.close()
+
+            class Lossy:
+                def __init__(self, db):
+                    self._db = db
+
+                def __getattr__(self, n):
+                    return getattr(self._db, n)
+
+                def get_json(self, c, k):
+                    return None if (c, k) == ("sessions", "ses_1") else self._db.get_json(c, k)
+
+            def fake_open(kind, d):
+                db = SDB.Database("field", str(d))
+                return Lossy(db) if kind == "sqlite" else db
+
+            with mock.patch.object(SK, "_open", fake_open):
+                with self.assertRaises(RuntimeError) as cm:
+                    SK.migrate(f, "cbl", out=io.StringIO())
+            self.assertIn("sessions", str(cm.exception))

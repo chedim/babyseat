@@ -219,9 +219,9 @@ def migrate(field_path: str = "", to: str = DEFAULT, out=sys.stderr, batch: int 
                         dst.end()
                 counts[c] = n
                 print(f"[store] {c}: {n} copied", file=out)
-            for c, n in counts.items():                   # check: every row arrived
-                if dst.count(c) != n:
-                    raise RuntimeError(f"{c}: {dst.count(c)} in the new store, {n} copied")
+            for c, n in counts.items():                   # check against the SOURCE, not the loop's own tally
+                if dst.count(c) != src.count(c):
+                    raise RuntimeError(f"{c}: {dst.count(c)} in the new store, {src.count(c)} in the source ({n} copied)")
         finally:
             src.close()
             dst.close()
