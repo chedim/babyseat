@@ -3,6 +3,7 @@
 
 pub mod banner;
 pub mod recall;
+pub mod topk;
 pub mod expr;
 pub mod fields;
 pub mod getters;
