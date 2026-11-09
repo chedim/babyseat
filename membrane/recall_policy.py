@@ -78,6 +78,15 @@ def install(est) -> None:
     _STATE["est"] = est
 
 
+def seed(est) -> int:
+    """Boot: load the dials pack (a release wins; a seat's edit is kept as an overlay) and point recall at the
+    seat's entity, so tuning it changes recall."""
+    from . import seedpack
+    n = seedpack.load(est, _pack(), release=True)["installed"]
+    install(est)
+    return n
+
+
 def reset() -> None:
     _STATE["est"] = None
 
