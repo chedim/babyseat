@@ -33,3 +33,18 @@ pub fn load_pack(core: &mut Core, text: &str) -> Result<usize, String> {
 }
 
 pub fn load_named(core: &mut Core, text: &str) -> usize { load_pack(core, text).expect("shipped pack parses") }
+
+// ---- #994 row 8: entity scripts (night.py clock tick, autonode.py filetree watch, chat_io.py / concept-drift getters) ----
+// The script TEXT is data in native/packs/scripts.json: sensors (tick_script, watch_script) and read-through getters live
+// on the entities that own them, or on a ScriptTemplate entity the planter copies onto the target. Loading is the same
+// generic pack step; nothing new is a Rust literal. Python's seed_* functions stay the idempotent boot path (an edited
+// script survives); tests/scripts_994_r8.rs checks the shipped text byte-for-byte against the Python constants.
+pub const SCRIPTS: &str = include_str!("../packs/scripts.json");
+
+/// every shipped pack including the entity-script pack
+pub fn shipped_all() -> Vec<&'static str> { vec![BANNER, RECALL_POLICY, SCRIPTS] }
+
+/// an entity's script of one kind ("tick_script" | "watch_script" | "getter_script"), as the field holds it
+pub fn script_of(core: &Core, eid: &str, kind: &str) -> Option<String> {
+    core.docs.get(eid)?.props.get(kind)?.as_str().map(|s| s.to_string())
+}
