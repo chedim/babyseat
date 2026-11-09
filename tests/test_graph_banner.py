@@ -84,6 +84,26 @@ class Seeded(unittest.TestCase):
             _say(self.srv, self.runner, n, f"step {n}", "ok")
         self.assertFalse([ln for ln in _lines(self.srv) if "old.py" in ln])
 
+    def test_concepts_do_not_fill_the_banner(self):
+        """#933 review: every noun phrase links to a Concept; `named` must show things, not Concepts."""
+        _say(self.srv, self.runner, 1, "look at membrane/convgraph.py",
+             "The walk, the banner, the rule, the graph, the file, the lane, the order, the line, "
+             "the window, the store, the seat, the field, the model, the cap, the test, the reply.")
+        lines = _lines(self.srv)
+        self.assertTrue([l for l in lines if "convgraph.py" in l], lines)
+        concepts = {(d.properties or {}).get("name") for d in self.srv.est.docs.values() if d.cls == "Concept"}
+        self.assertTrue(concepts)
+        self.assertFalse([l for l in lines if l.startswith("named: ")
+                          and l[7:].rsplit(" (", 1)[0] in concepts], lines)
+
+    def test_a_reply_mints_no_concepts_and_a_message_is_capped(self):
+        """#933 review: a code-heavy reply made 140 Concepts; a reply links only what exists, code is skipped."""
+        n0 = sum(1 for d in self.srv.est.docs.values() if d.cls == "Concept")
+        code = "```python\n" + "\n".join(f"alpha{i} = beta{i}.gamma{i}(delta{i})" for i in range(60)) + "\n```"
+        _say(self.srv, self.runner, 1, "look", "Here is the walk, the rule, the banner, the cap. " + code)
+        n1 = sum(1 for d in self.srv.est.docs.values() if d.cls == "Concept")
+        self.assertEqual(n1, n0)
+
     def test_the_lane_is_capped(self):
         names = " ".join(f"membrane/f{i}.py" for i in range(30))
         _say(self.srv, self.runner, 1, "look", f"I changed {names}.")

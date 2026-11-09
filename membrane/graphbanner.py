@@ -38,7 +38,7 @@ SEED = [
      "where": [["mine", "?r"], ["edge", "?r", "holds", "?x"]],
      "show": '"{r.pronoun}" = {x.name}'},
     {"name": "named", "order": 30,
-     "where": [["recent", "?m"], ["edge", "?m", "refers-to", "?x"]],
+     "where": [["recent", "?m"], ["edge", "?m", "refers-to", "?x"], ["filter", "x.cls != 'Concept'"]],
      "show": "named: {x.name} ({x.status})"},
     {"name": "ran", "order": 40,
      "where": [["recent", "?m"], ["edge", "?m", "led-to", "?p"], ["edge", "?p", "result", "?res"]],

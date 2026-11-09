@@ -229,17 +229,22 @@ def _as_written(toks: list, last: str | None = None) -> str:
     return out
 
 
-def things(srv, sid: str, text: str) -> list[str]:
+NEW_CONCEPTS_MAX = 6        # #933 review: new Concepts one message may mint (a code-heavy reply made 140)
+
+
+def things(srv, sid: str, text: str, new: int | None = None) -> list[str]:
     """#932 (the operator, 2026-11-04: entities are everything -- ideas, things, knowledge): what
     each noun phrase of `text` names, as entities -- a pronoun's register, a thing by its name or
     other name, else its Concept, made on first use. The words of a specific mention (a path, a
     command, #803) are that mention's (convgraph._mentions), never a phrase of their own.
     A class word is its Concept ("the goals": goal), never every member of the class; a pronoun
     nothing holds names nothing."""
-    if not available() or not str(text or "").strip():
+    text = re.sub(r"```.*?(```|$)", " ", str(text or ""), flags=re.S)       # code is not talk
+    if not available() or not text.strip():
         return []
     from . import convgraph as CG
     est = srv.entity_store
+    left = NEW_CONCEPTS_MAX if new is None else new       # new=0: link only what already exists
     by_name = {}
     for d in list((est.docs or {}).values()):
         if d.eid.startswith(_MACHINERY):
@@ -277,7 +282,12 @@ def things(srv, sid: str, text: str) -> list[str]:
             continue
         kind = [t for t in words[:-1] if t.pos_ != "NUM" and t.ent_type_ not in ("CARDINAL", "ORDINAL")]
         name = " ".join(_as_written(kind + [words[-1]], words[-1].lemma_).lower().split())   # "two projects": project
-        out.append(by_name.get(name) or concept(est, name))
+        if name in by_name:
+            out.append(by_name[name])
+        elif left > 0 and re.search(r"[a-z0-9]", name):      # a non-Latin phrase has no slug: no entity
+            before = len(est.docs or {})
+            out.append(concept(est, name))
+            left -= len(est.docs or {}) - before
     return list(dict.fromkeys(out))
 
 

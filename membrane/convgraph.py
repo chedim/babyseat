@@ -192,13 +192,13 @@ def _mentions(srv, text: str) -> list[str]:
 
 # ---- decisions -----------------------------------------------------------------------------
 
-def _named_things(srv, sid: str, text: str) -> list[str]:
+def _named_things(srv, sid: str, text: str, new: int | None = None) -> list[str]:
     """Everything a message names (#932): the specific entities it mentions, then each noun
     phrase's thing (language.things), so ordinary talk links to its ideas and things too."""
     out = _mentions(srv, text)
     try:
         from . import language as LL
-        out += LL.things(srv, sid, text)
+        out += LL.things(srv, sid, text, new)
     except Exception:
         pass
     return list(dict.fromkeys(out))
@@ -471,8 +471,8 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
     if prev is not None and msg_eid(prev.get("id")) in (est.docs or {}):
         _edge(be, origin, u, "follows", msg_eid(prev.get("id")))
     _edge(be, origin, a, "follows", u)
-    for eid, text in ((u, user_text), (a, reply)):
-        for t in _named_things(srv, sid, text):
+    for eid, text, new in ((u, user_text, None), (a, reply, 0)):     # a reply links what exists, mints nothing
+        for t in _named_things(srv, sid, text, new):
             _edge(be, origin, eid, "refers-to", t)
     for root in (getattr(runner, "_cg_roots", None) or {}).pop(sid, []) if runner is not None else []:
         _edge(be, origin, u, "led-to", root)
