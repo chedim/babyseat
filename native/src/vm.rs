@@ -159,6 +159,9 @@ impl<'a> expr::World for View<'a> {
     }
 }
 
+/// ch.py's LEVEL_VERBS: the conditions that read the store when they are evaluated.
+const LEVEL_VERBS: [&str; 9] = ["near", "away", "above", "below", "pos", "vel", "align", "around", "quiet"];
+
 pub enum Step {
     Idle,
     Done(i64),
@@ -210,7 +213,11 @@ impl Core {
         let mut all = false;
         let mut geo = false;
         let specs: Vec<Spec> = self.triggers.iter().filter_map(|t| t.spec.clone())
-            .filter(|sp| !sp.when.iter().any(|a| s(&a[0]) == "changed")).collect();
+            .filter(|sp| !sp.when.iter().any(|a| s(&a[0]) == "changed")
+                // a `changed` trigger is not swept, but a condition beside it reads the store when its
+                // write arrives; only a bare one has nothing here that a sweep must keep fresh
+                || sp.when.iter().any(|a| LEVEL_VERBS.contains(&s(&a[0]).as_str()))
+                || sp.wh.iter().any(|a| s(&a[0]) == "filter")).collect();
         for sp in &specs {
             if sp.when.iter().any(|a| s(&a[0]) == "around") { all = true; }
             if sp.when.iter().any(|a| matches!(s(&a[0]).as_str(), "near" | "away" | "pos" | "around")) { geo = true; }

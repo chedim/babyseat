@@ -117,7 +117,10 @@ through `make_vm`.
 - **Things changed in place, with no write:** a sweep re-reads the live store into the mirror
   first, because ch.py reads the live store. Only what its triggers can read: the entities they can
   bind or name, their positions only when a sweep trigger is geometric (near, away, pos, around),
-  and every position only when an `around` trigger exists. With no sweep trigger, a sweep reads
+  and every position only when an `around` trigger exists. A `changed` trigger counts as a sweep trigger here when it also has a level
+  condition or a filter, since those read the store when its write arrives; a bare `changed` trigger
+  costs a sweep nothing (so its write expression can read a value changed in place only after a write
+  or another trigger's refresh brings it over). With no sweep trigger, a sweep reads
   nothing. A drain sees only what was written.
 - **Values crossing to the core** are cleaned in one place (`ch_native._clean`): NaN and Infinity
   become null (as `cblstore.dumps` stores them), a lone surrogate becomes U+FFFD, and nesting past 64

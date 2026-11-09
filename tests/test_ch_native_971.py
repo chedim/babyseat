@@ -2,11 +2,13 @@
 - the replay contract (test_journal_971): a journal recorded with ch.VM, replayed through the NATIVE
   VM, gives the same trigger writes in the same order and the same final state;
 - ch.py's own VM tests, run with ch.VM swapped for the native one (tests/test_ch_native_suites_971.py)."""
+import json
 import os
 import sys
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 os.environ.setdefault("MEMBRANE_STORE", "json")
@@ -215,3 +217,62 @@ def test_replay_covers_what_a_sweep_fires():
         fresh = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
         rep = J.replay_vm(p, fresh, make)
         assert rep["mismatches"] == [] and rep["vm_writes"] == 3, rep
+
+
+def _level_store():
+    from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity
+    est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
+    for name, props, pos in (("die", {"name": "die", "a": 0}, [1.0, 0.0]),
+                             ("anchor", {"name": "anchor"}, [0.0, 1.0]),
+                             ("y", {"name": "y", "v": 0}, [0.0, 1.0])):
+        est.upsert(QuantumEntity(eid=MEMBRANE_NS + f"toy:{name}", cls="toy", properties=dict(props),
+                                 position=np.array(pos, dtype=float)), embedder=None)
+    return est
+
+
+def _move_anchor(est):
+    from membrane.entities import MEMBRANE_NS
+    est.docs[MEMBRANE_NS + "toy:anchor"].position = np.array([1.0, 0.0], dtype=float)
+
+
+def _edit_y(est):
+    from membrane.entities import MEMBRANE_NS
+    est.docs[MEMBRANE_NS + "toy:y"].properties["v"] = 9
+
+
+_Y = ["is", "?y", "toy:y"]
+_LEVEL_CASES = [
+    ("near", [["changed", "?x.a"], ["near", "?x", "toy:anchor", 0.1]], [], _move_anchor),
+    ("above", [["changed", "?x.a"], ["above", "y.v", 5]], [_Y], _edit_y),
+    ("filter", [["changed", "?x.a"]], [_Y, ["filter", "y.v > 5"]], _edit_y),
+]
+
+
+@pytest.mark.parametrize("when,where,change", [c[1:] for c in _LEVEL_CASES], ids=[c[0] for c in _LEVEL_CASES])
+def test_a_changed_trigger_with_a_condition_reads_what_was_changed_in_place(when, where, change):
+    """Memo's re-review, A: a sweep skips `changed` triggers, but such a trigger's condition still reads
+    the store when its write arrives; the native VM reads the mirror, so the sweep must refresh it."""
+    from membrane import ch as CH
+    from membrane import writes as W
+    from membrane.entities import MEMBRANE_NS
+    fired = {}
+    for label, make in (("py", CH.PyVM), ("native", NV.NativeVM)):
+        est = _level_store()
+        vm = make(est)
+        vm.attach()
+        vm.define("t", when=when, where=[["isa", "?x", "toy"], *where], write=["?x.hit", "1"])
+        change(est)
+        vm.sweep()
+        with W.as_writer("person:t"):
+            est.edit(MEMBRANE_NS + "toy:die", properties={"a": 1})
+        vm.drain()
+        vm.detach()
+        fired[label] = est.docs[MEMBRANE_NS + "toy:die"].properties.get("hit")
+    assert fired["py"] == 1 and fired["native"] == 1, fired
+
+
+def test_a_bare_changed_trigger_still_costs_a_sweep_nothing():
+    est = _level_store()
+    vm = NV.NativeVM(est)
+    vm.define("bare", when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]], write=["?x.hit", "1"])
+    assert json.loads(vm.core.sweep_eids())["eids"] == []
