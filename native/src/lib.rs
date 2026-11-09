@@ -2,6 +2,7 @@
 //! boundary as JSON text (simple first; typed conversion later, where measurements say it matters).
 
 pub mod expr;
+pub mod fields;
 pub mod vm;
 
 use pyo3::prelude::*;
