@@ -139,6 +139,27 @@ TRIGGERS = [
 ]
 
 
+PACK_VERSION = 1
+
+
+def _trigger_eid(name: str) -> str:
+    from . import ch
+    return MEMBRANE_NS + f"{ch.CLASS}:{ch._slug(name)}"
+
+
+def pack() -> dict:
+    """The goal-graph triggers as a versioned seed pack (#980 Q3): the same entities vm.define wrote."""
+    from . import ch
+    ents = []
+    for name, when, where, write in TRIGGERS:
+        spec = ch._validate(when, where, write)
+        ents.append({"eid": _trigger_eid(name), "cls": ch.CLASS, "properties": {
+            "name": str(name), **spec, "owner": "",
+            "from": [str(a[1]) for a in spec["when"] if len(a) > 1], "to": spec["write"][0],
+            "owner_sig": ""}})
+    return {"name": "goal-graph", "version": PACK_VERSION, "entities": ents}
+
+
 def seed(srv) -> int:
     """Plant tool:workers and define the triggers (idempotent: define overwrites the same
     name). -> how many triggers are defined."""
@@ -150,8 +171,13 @@ def seed(srv) -> int:
     vm = getattr(srv, "ch_vm", None)
     if vm is None:
         return 0
-    for name, when, where, write in TRIGGERS:
-        vm.define(name, when, where, write)
+    from . import seedpack
+    seedpack.load(est, pack(), release=True)       # #980 Q3: versioned; a seat edit stays an overlay
+    vm._trig_v += 1                                # triggers landed through the store: rebuild the VM's view
+    st = getattr(vm, "_state", None)
+    if isinstance(st, dict):
+        for t in TRIGGERS:
+            st.pop(_trigger_eid(t[0]), None)
     est.docs.pop(MEMBRANE_NS + "trigger:goal-graph-reopen-on-replan", None)   # #867: now adapters._replan
     return len(TRIGGERS)
 
