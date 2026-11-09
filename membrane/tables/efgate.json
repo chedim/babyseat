@@ -1,0 +1,3 @@
+{
+ "AB_JUDGE_PROMPT": "Two answers to the same question. Do they agree on the substance (facts, decisions, steps)? Reply with exactly one word -- agree, partial or disagree -- then a colon and one short reason.\n\nQUESTION: {q}\n\nANSWER A: {a}\n\nANSWER B: {b}"
+}

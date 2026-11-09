@@ -9,12 +9,13 @@ were; a lane sees a family only with the actions it may use. The old names
 still work when called. The long-form documentation lives behind `help`.
 """
 from __future__ import annotations
+from . import tables as _T
 
 import json
 import re
 
-SCRIPT_KINDS = ("getter", "tick", "nudge", "mention", "thought", "dreamed", "delete", "watch")
-RETIRED = {"junk_cut"}          # an operator tuning knob, not the model's
+SCRIPT_KINDS = _T.get("toolset", "SCRIPT_KINDS")
+RETIRED = _T.get("toolset", "RETIRED", set_=True)   # an operator tuning knob, not the model's
 
 _S = lambda d: {"type": "string", "description": d}       # noqa: E731
 _I = lambda d: {"type": "integer", "description": d}      # noqa: E731

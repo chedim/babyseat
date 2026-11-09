@@ -68,6 +68,7 @@ the login's token. The old `cli-login` mark (stored before #413 with no
 choice offered) is NOT the opt-in: it means the default, the API key.
 """
 from __future__ import annotations
+from . import tables as _T
 
 import asyncio
 import json
@@ -85,7 +86,7 @@ from . import quota as _Q
 
 PROVIDER = "claude-agent"
 RUNG_PREFIX = PROVIDER + ":"
-DEFAULT_MODELS = ("sonnet", "opus", "haiku")   # the CLI's own model aliases
+DEFAULT_MODELS = _T.get("claude_agent", "DEFAULT_MODELS")   # the CLI's own model aliases
 MARK_KEY = "madeBy"                 # transcript rows: info[MARK_KEY] == PROVIDER
 RESP_KEY = "membrane_provider"      # proxy responses/chunks: the answering provider
 MODE_KEY = "api-key"                # `membrane auth claude-agent`: the default
@@ -100,14 +101,10 @@ KEY_ENV = "ANTHROPIC_API_KEY"       # how the CLI subprocess gets the key
 OVERRIDING_ENV = ("ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK",
                   "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 LOGIN_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)   # a login token: never in key mode
-KEY_HINT = ("run `membrane auth anthropic` (or set ANTHROPIC_API_KEY), then "
-            "`membrane auth claude-agent`")
-INSTALL_HINT = ("pip install 'babyseat[claude-agent]' (or: pip install "
-                "claude-agent-sdk)")
-CLI_HINT = ("reinstall the SDK (it bundles the `claude` CLI) or install "
-            "Claude Code, then `membrane auth claude-agent`")
-LOGIN_HINT = ("run `claude` once to log in, then "
-              "`membrane auth claude-agent --login`")
+KEY_HINT = _T.get("claude_agent", "KEY_HINT")
+INSTALL_HINT = _T.get("claude_agent", "INSTALL_HINT")
+CLI_HINT = _T.get("claude_agent", "CLI_HINT")
+LOGIN_HINT = _T.get("claude_agent", "LOGIN_HINT")
 STATUS_TIMEOUT_S = 20
 MAX_TOOL_CALLS_PER_ANSWER = 2048    # the hard ceiling per answer; Continue
                                     # gives a fresh one (#425; 50 -> 2048 approved
