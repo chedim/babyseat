@@ -128,13 +128,13 @@ setters on a `say` field paced by freeze (decision 2).
 | 6 | Self learned triggers (179) | ch_learn.py | field rules |
 | 7 | Seed packs | seedpack.py #982, #984-991 | field declarations (finish data moves only; no new WHEN/WHERE/WRITE) |
 | 8 | Entity scripts (rows 12-15) | night.py, autonode.py, chat_io.py | getters/setters; sensors pushed |
-| 9 | VM | native/, ch_native.py, ch.py | WHEN/WHERE/WRITE as translation layer, then removed |
+| 9 | VM | native/ (Rust, the only VM target), ch_native.py | WHEN/WHERE/WRITE as translation layer, then removed. Fields are built on the native VM only; no Python VM (ch.py) work. Python VM removal is the separate goal membrane::goal:aeac0f121bf2 |
 
 ## 7. How
 
 One conversion per item, behind the issue's switch; no item switches on a live seat without the
 operator's go. Parity gate: replay the same #971 journal under today's triggers and under fields,
-checksum the whole field (every entity's stored and cached fields, sorted) and compare. Per-rule
+both sides run on the native VM; checksum the whole field (every entity's stored and cached fields, sorted) and compare. Per-rule
 "Done means" tests stay as VM unit tests. The checksum gates every migration row.
 
 ## 8. Same-PR doc edits (not in this draft)
