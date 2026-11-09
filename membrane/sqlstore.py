@@ -184,20 +184,29 @@ class SQLiteBackend(CBLiteBackend):
     # ---- the catch-up: new sentence vectors into the matrix ---------------------------------------
     def catch_up(self, max_batches: int | None = None) -> int:
         mx = self._vectors()
+        with mx.lock:                                  # one catch-up at a time: no duplicate rows
+            return self._catch_up(mx, max_batches)
+
+    def _catch_up(self, mx, max_batches) -> int:
         tot = 0
         if not getattr(self, "_seeded", False):        # the first catch-up: every row the matrix lacks
             have = set(mx.row)
+            seeded_keys = set()
             todo = []
             for r in self.db.iter_query("SELECT META().id AS k, d.vec AS v FROM membrane.sentences"):
                 if r.get("k") not in have and r.get("v"):
                     todo.append((r["k"], unpack_vec(r["v"])))
+                    seeded_keys.add(r["k"])
                     if len(todo) >= self.CATCHUP_BATCH:
                         tot += mx.append(todo)
                         todo = []
             tot += mx.append(todo)
             self._seeded = True
+        else:
+            seeded_keys = set()
         with mx.lock:
             pend, self._pending_vec = self._pending_vec, {}
+        pend = {k: v for k, v in pend.items() if k not in seeded_keys}    # the scan already read these
         tot += mx.append([(k, unpack_vec(v)) for k, v in pend.items() if v])
         if tot:
             self._idx_rows += tot
@@ -213,12 +222,17 @@ class SQLiteBackend(CBLiteBackend):
             return []
         if not getattr(self, "_seeded", False) or self._pending_vec:
             self.catch_up()
-        want = int(k) * (4 if eq else 1)
-        out = self._vectors().top(q / n, want)
-        if eq:
+        mx = self._vectors()
+        if not eq:
+            return mx.top(q / n, int(k))
+        want = int(k) * 4
+        while True:                                    # widen until k matches or the matrix is exhausted
+            out = mx.top(q / n, want)
             docs = self.get_multi(coll, [kk for kk, _ in out])
-            out = [(kk, s) for kk, s in out if kk in docs and matches(docs[kk], eq)][:k]
-        return out
+            hit = [(kk, s) for kk, s in out if kk in docs and matches(docs[kk], eq)]
+            if len(hit) >= k or len(out) < want or want >= len(mx.keys):
+                return hit[:k]
+            want *= 4
 
     def _warm_proof(self, coll: str):
         db = Path(self.db.file)
