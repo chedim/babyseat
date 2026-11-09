@@ -4,18 +4,48 @@ Status: DRAFT for operator review. Nothing here switches on a live seat without 
 Syntax source: github.com/chedim/cliffhanger README (read 2026-11-09). Where the README is silent
 the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
 
-## 1. Cliffhanger syntax used (checked against the spec)
+## 1. The syntax (the syntax pass, 2026-11-09)
 
-- Access guards: `= value` on a path reads (the guard answers a read); `/path = value` writes.
-- Triggers: `WHEN <xpath cond>:` / `ELSE WHEN ...:` / `ELSE:`, each followed by a mutation list.
-  Adjacent `WHEN`s merge with OR; nested `WHEN`s merge as the README shows.
-- Variables in a trigger: `$THIS` (the new value), `$OLD` (the value being overwritten),
-  `$FIELD` (first path element from the trigger to the changed value), `$NODE`, `$REQUEST`.
-- Layers: each module is a trigger layer; a write fires the triggers on its path and then every
-  ancestor path up to the root, layers in reverse load order, triggers within a layer in
-  definition order.
-- Not in the README (MEMBRANE EXTENSION, to be agreed): `every`, cached getters, setters,
-  two-phase setters. Section 2 defines them as fields; they are the translation target.
+Membrane's syntax, made consistent, plus `ELSE` and `ALWAYS` from the spec. It's parsed by
+`native/src/syntax.rs`, and the goal graph ships in it (`native/packs/goalgraph.ch`):
+
+```
+-- a comment
+Task.status on-setter replan-task:
+  WHEN this.status == 'done' or this.status == 'failed':
+    this.goal.replan = 'task ' + this.eid + ' ' + this.status
+  ELSE WHEN this.status == 'stuck':
+    this.goal.replan = 'stuck: ' + this.eid
+  ELSE:
+    this.note = ''
+Goal.replan on-setter plan:
+  ALWAYS: membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan}
+```
+
+- **A setter** starts at column 0: `<Class>.<field> on-setter <name>:`. It runs after a write to
+  that field (the `on` phase, rule 7).
+- **Branches:** `WHEN <expr>:`, then any number of `ELSE WHEN <expr>:`, then an optional `ELSE:`.
+  The first true branch runs, and only it. `ALWAYS:`, or bare statements under the header, is a
+  branch with no condition.
+- **Statements:** `<target>.<field> = <expr>`, after the branch's colon or on lines indented under
+  it. `this` is the entity written; another target is an expression (`this.goal`).
+  `membrane::llm.call = <expr>` is the LLM call effect.
+- **`this`** is the one name for the entity written. It replaces `$THIS` (getters), `x` (setters)
+  and `?t` (triggers). `x` still works, so scripts written before the rename run unchanged.
+- **Expressions:** the VM's expression language: `==`, `!=`, `<`, `and`/`or`/`not`, `in`,
+  `x.prop`, `'a' + b`, `{k: v}`, `clock`.
+- **Comments:** `--` outside quotes.
+- **Getters** are built into the engine for now (the goal graph's count is `fields.rs` `recount`).
+  Their text form comes with the general getter engine.
+
+Kept from the spec (github.com/chedim/cliffhanger README): `WHEN` / `ELSE WHEN` / `ELSE`,
+`ALWAYS`, `--` comments, writes as `target = value`. Not taken: adjacent `WHEN`s merging with OR
+(use `or`), `$`-variables and bash bodies (use `this` and expressions), XPath (decided 2026-10-26).
+
+**Migration.** The old WHEN/WHERE/WRITE triggers translate into this form
+(`translate::translated_goalgraph_setters`, printed with `syntax::print`). `tests/syntax_994.rs`
+holds the text pack equal to the translated triggers, and the pinned field checksum is unchanged.
+A trigger with no field form is refused, never guessed.
 
 ## 2. The rules (1-9)
 
@@ -79,7 +109,7 @@ Cold start: new world = effects run once; warm restart = none; rebuild = silent 
 | trigger `changed ?x.p` | an `on` setter (or dependent getter) on field `p` |
 | `isa ?x C` | the field is declared on class C |
 | `filter expr` | `WHEN expr:` in the guard/getter |
-| `below p N` | `WHEN $THIS < N:` |
+| `below p N` | `WHEN this.p < N:` |
 | `every S` | a rule on the clock field (`WHEN clock - last >= S:`), rule 9 |
 | write `?x.p = e` | a setter writing `p`, or a computed field `p` with getter `e` |
 | method dispatch | a write to a method field; the adapter is its `on` setter |
@@ -88,37 +118,55 @@ Cold start: new world = effects run once; warm restart = none; rebuild = silent 
 
 ## 5. All 12 goalgraph.TRIGGERS rewritten
 
-Counting becomes a computed field instead of decrement-on-event: idempotent and replay-safe.
+Counting becomes a computed field instead of decrement-on-event: idempotent and replay-safe. The
+five counting triggers (1, 2, 6, 7, 8) are the getter; the other seven become the nine setters below (ready and wait-armed also run on
+status), as shipped in `native/packs/goalgraph.ch`:
 
 ```
--- 1 unblock by task, 2 unblock by card, 6 unblock by wait
-Task.open_blockers getter:
-  len([b for b in blockers_of($THIS) if finished(b)==False])
-  finished(b): Task/Wait -> b.status = 'done'; Decision -> b.status = 'closed'
--- 7 wait follows a task, 8 wait follows a card
-Wait.open_blockers getter: same shape (blockers Task: done; Decision: closed)
--- 3 ready
-Task.status on-setter:  WHEN open_blockers < 0.5 and status = 'open': /status = 'owed'
-   (also an on-setter on open_blockers, the original trigger input)
--- 4 replan on task end
-Task.status on-setter:  WHEN status in ('done','failed','stuck'):
-                          /goal/replan = 'task ' + eid + ' ' + status
--- 5 replan on card
-Decision.status on-setter: WHEN status in ('closed','dropped'):
-                          /goal/replan = 'card ' + eid + ' ' + status
--- 9 wait armed
-Wait.status on-setter:  WHEN open_blockers < 0.5 and status = 'open':
-                          /status = 'armed'; /armed_since = clock
--- 10 wait check (was every WAIT_TICK_S = 10)
-Wait.due getter:  WHEN status = 'armed' and clock - armed_since >= every_s: true ELSE false
-Wait.due on-setter: WHEN $THIS: /check = 'due'      -- adapters' check branch
--- 11 plan
-Goal.replan on-setter:  WHEN (status or 'open') = 'open' and replan:
-                          /llm/call = {about: eid, prompt: 'plan the goal: ' + replan, lane: 'planner'}
--- 12 plan after reopen
-Goal.status on-setter:  WHEN status = 'open' and replan and planned_ts
-                              and replan != planned_replan:
-                          /llm/call = {same as 11}
+-- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).
+-- Migrated from packs/goalgraph.json by the translator; tests/syntax_994.rs holds the two equal.
+--
+-- The getter (built into the engine, fields.rs `recount`): a task's or wait's open blockers are counted, never
+-- decremented, so a dropped or doubled write can't make them drift:
+--   Task.open_blockers getter: the blockers of this (Task, Decision, Wait) that are not finished
+--   finished: Task and Wait -> status == 'done'; Decision -> status == 'closed'
+
+-- a task with nothing open in its way is owed (on the count, and on its own status)
+Task.open_blockers on-setter ready:
+  WHEN this.open_blockers < 0.5 and this.status == 'open':
+    this.status = 'owed'
+Task.status on-setter ready-on-status:
+  WHEN this.open_blockers < 0.5 and this.status == 'open':
+    this.status = 'owed'
+
+-- a task or a card that ends asks its goal to replan
+Task.status on-setter replan-task:
+  WHEN (this.status == 'done' or this.status == 'failed' or this.status == 'stuck'):
+    this.goal.replan = 'task ' + this.eid + ' ' + this.status
+Decision.status on-setter replan-card:
+  WHEN (this.status == 'closed' or this.status == 'dropped'):
+    this.goal.replan = 'card ' + this.eid + ' ' + this.status
+
+-- a wait with nothing open in its way is armed; when it is due, its adapter checks
+Wait.open_blockers on-setter wait-armed:
+  WHEN this.open_blockers < 0.5 and this.status == 'open':
+    this.status = 'armed'
+    this.armed_since = clock
+Wait.status on-setter wait-armed-on-status:
+  WHEN this.open_blockers < 0.5 and this.status == 'open':
+    this.status = 'armed'
+    this.armed_since = clock
+Wait.due on-setter wait-check:
+  WHEN this.due:
+    this.check = 'due'
+
+-- a goal asked to replan calls the planner (and again after a reopen with a new reason)
+Goal.replan on-setter plan:
+  WHEN (this.status or 'open') == 'open' and this.replan:
+    membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
+Goal.status on-setter plan-after-reopen:
+  WHEN this.status == 'open' and this.replan and this.planned_ts and this.replan != this.planned_replan:
+    membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
 ```
 Wait example fields: `open_blockers`, `armed`, `armed_since`, `due`. Note: today's `wait check`
 fires every 10 s; in fields `due` recalculates on each clock tick, so the check cadence is the

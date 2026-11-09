@@ -5,6 +5,7 @@ pub mod adapters;
 pub mod learn;
 pub mod banner;
 pub mod recall;
+pub mod syntax;
 pub mod topk;
 pub mod packs;
 pub mod expr;

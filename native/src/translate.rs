@@ -32,9 +32,9 @@ fn rename(src: &str, v: &str, other: Option<&str>) -> String {
     while i < cs.len() {
         if cs[i] == '\'' { q = !q; }
         if !q {
-            if let Some(o) = other { let p = format!("{}.eid", o); if at(i, &p) { out.push_str("x.goal"); i += p.chars().count(); continue; } }
+            if let Some(o) = other { let p = format!("{}.eid", o); if at(i, &p) { out.push_str("this.goal"); i += p.chars().count(); continue; } }
             let p = format!("{}.", v);
-            if at(i, &p) { out.push_str("x."); i += p.chars().count(); continue; }
+            if at(i, &p) { out.push_str("this."); i += p.chars().count(); continue; }
         }
         out.push(cs[i]); i += 1;
     }
@@ -62,8 +62,8 @@ pub fn translate(name: &str, sp: &Spec) -> Result<Field, String> {
     // WHEN every N: the due getter's setter
     if sp.when.len() == 1 && kind(&sp.when[0]) == "every" {
         let cls = cls_of(&tv).ok_or(format!("{}: no class for ?{}", name, tv))?;
-        return Ok(Field::Set(OnSet { name: name.into(), cls, prop: "due".into(), when: "x.due".into(),
-            writes: vec![("x".into(), tp, rename(&sp.expr, &tv, None))] }));
+        return Ok(Field::Set(OnSet { name: name.into(), cls, prop: "due".into(), when: "this.due".into(),
+            writes: vec![("this".into(), tp, rename(&sp.expr, &tv, None))], els: vec![] }));
     }
     let mut ch: Option<(String, String)> = None;
     let mut conds: Vec<String> = vec![];
@@ -102,10 +102,10 @@ pub fn translate(name: &str, sp: &Spec) -> Result<Field, String> {
         };
         conds.push(rename(&f, &v, None));
     }
-    let target = if tv == v { "x".to_string() } else if Some(&tv) == sec.as_ref() { "x.goal".to_string() } else if tv.is_empty() { if tp == LLM_CALL { LLM_CALL.to_string() } else { return Err(format!("{}: target {}", name, tp)) } } else { return Err(format!("{}: target ?{}", name, tv)) };
+    let target = if tv == v { "this".to_string() } else if Some(&tv) == sec.as_ref() { "this.goal".to_string() } else if tv.is_empty() { if tp == LLM_CALL { LLM_CALL.to_string() } else { return Err(format!("{}: target {}", name, tp)) } } else { return Err(format!("{}: target ?{}", name, tv)) };
     let prop_w = if target == LLM_CALL { String::new() } else { tp };
     Ok(Field::Set(OnSet { name: name.into(), cls, prop, when: if conds.is_empty() { "True".into() } else { conds.join(" and ") },
-        writes: vec![(target, prop_w, rename(&sp.expr, &v, sec.as_deref()))] }))
+        writes: vec![(target, prop_w, rename(&sp.expr, &v, sec.as_deref()))], els: vec![] }))
 }
 
 /// A pack of triggers (JSON: [{name, when, where, write:[target, expr]}]) -> specs.
@@ -120,11 +120,20 @@ pub fn specs_of(pack: &str) -> Vec<(String, Spec)> {
 
 /// goalgraph's setters: its triggers translated. What the field form adds to a translated setter (doc section 5): a
 /// condition that reads two props is set on both (`-on-status`), and a Wait that arms stamps `armed_since` for the due getter.
+pub const GOALGRAPH_CH: &str = include_str!("../packs/goalgraph.ch");
+
+/// The goal graph's setters, read from its cliffhanger text (packs/goalgraph.ch).
 pub fn goalgraph_setters() -> Vec<OnSet> {
+    crate::syntax::parse(GOALGRAPH_CH).expect("packs/goalgraph.ch parses (tests/syntax_994.rs)")
+}
+
+/// The same setters translated from the old WHEN/WHERE/WRITE triggers (packs/goalgraph.json): the migration path,
+/// held equal to the text pack by tests/syntax_994.rs.
+pub fn translated_goalgraph_setters() -> Vec<OnSet> {
     let mut out = vec![];
     for (name, sp) in specs_of(GOALGRAPH) {
         let Ok(Field::Set(mut st)) = translate(&name, &sp) else { continue };
-        if name == "wait-armed" { st.writes.push(("x".into(), "armed_since".into(), "clock".into())); }
+        if name == "wait-armed" { st.writes.push(("this".into(), "armed_since".into(), "clock".into())); }
         let twin = if name == "ready" || name == "wait-armed" { let mut t = st.clone(); t.name = format!("{}-on-status", name); t.prop = "status".into(); Some(t) } else { None };
         out.push(st);
         if let Some(t) = twin { out.push(t); }

@@ -15,16 +15,23 @@ const BLOCKER_CLASSES: [&str; 3] = ["Task", "Decision", "Wait"];
 /// finished(b): Task/Wait -> status 'done'; Decision -> status 'closed' (doc section 5).
 const OPEN_BLOCKERS_FILTER: &str = "t.eid in (b.blocks or []) and not ((b.cls == 'Decision' and b.status == 'closed') or (b.cls != 'Decision' and b.status == 'done'))";
 
-/// `x` is the entity written; `clock` the time. Each write: (target entity expr, prop, value expr).
-/// Not written by hand: `translate::goalgraph_setters` translates goalgraph's triggers (packs/goalgraph.json).
-#[derive(Debug, Clone, PartialEq)]
+/// `this` is the entity written (`x` is the old name, still bound for migrated scripts); `clock` the time.
+/// Each write: (target entity expr, prop, value expr). The first branch is `WHEN when: writes`; `els` are the
+/// `ELSE WHEN` branches in order, a plain `ELSE` being the condition `True`. The first true branch runs, only it.
+/// Written in cliffhanger's text form (`syntax.rs`, packs/goalgraph.ch).
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct OnSet {
     pub name: String,
     pub cls: String,
     pub prop: String,
     pub when: String,
     pub writes: Vec<(String, String, String)>,
+    pub els: Vec<(String, Vec<(String, String, String)>)>,
 }
+
+/// The names a setter's expressions use for the entity written: `this`, and `x` for scripts written before the rename.
+fn me(eid: &str) -> [(&'static str, &str); 2] { [("this", eid), ("x", eid)] }
+fn is_me(target: &str) -> bool { target == "this" || target == "x" }
 
 pub const LLM_CALL: &str = "membrane::llm.call";
 
@@ -191,18 +198,22 @@ impl Fields {
             let hits: Vec<usize> = (0..self.setters.len())
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, &self.setters[i].cls)).collect();
             for i in hits {
-                let (when, name) = (self.setters[i].when.clone(), self.setters[i].name.clone());
-                let fire = match core.eval_json(&when, &[("x", &w.eid)], &[("clock", json!(now))]) {
+                let name = self.setters[i].name.clone();
+                let truthy = |r: Result<J, String>| match r {
                     Ok(J::Bool(b)) => b, Ok(J::String(s)) => !s.is_empty(), Ok(J::Number(n)) => n.as_f64().map_or(false, |f| f != 0.0), _ => false };
-                if !fire { continue; }
-                for (target, prop, value) in self.setters[i].writes.clone() {
-                    let Ok(v) = core.eval_json(&value, &[("x", &w.eid)], &[("clock", json!(now))]) else { continue };
+                // WHEN / ELSE WHEN / ELSE: the first true branch runs, only it
+                let branches: Vec<(String, Vec<(String, String, String)>)> =
+                    std::iter::once((self.setters[i].when.clone(), self.setters[i].writes.clone())).chain(self.setters[i].els.clone()).collect();
+                let Some(writes) = branches.into_iter().find(|(c, _)| truthy(core.eval_json(c, &me(&w.eid), &[("clock", json!(now))]))).map(|(_, wr)| wr)
+                    else { continue };
+                for (target, prop, value) in writes {
+                    let Ok(v) = core.eval_json(&value, &me(&w.eid), &[("clock", json!(now))]) else { continue };
                     if target == LLM_CALL { self.calls.push(v); continue; }
-                    let tgt = if target == "x" { Some(w.eid.clone()) } else {
-                        match core.eval_json(&target, &[("x", &w.eid)], &[]) { Ok(J::String(g)) => Some(g), _ => None } };
+                    let tgt = if is_me(&target) { Some(w.eid.clone()) } else {
+                        match core.eval_json(&target, &me(&w.eid), &[]) { Ok(J::String(g)) => Some(g), _ => None } };
                     let Some(tgt) = tgt else { continue };
                     // a replan lands on a Goal only (the trigger's `isa ?g Goal`)
-                    if target != "x" && core.docs.get(&tgt).map(|e| e.cls.as_str()) != Some("Goal") { continue; }
+                    if !is_me(&target) && core.docs.get(&tgt).map(|e| e.cls.as_str()) != Some("Goal") { continue; }
                     if !core.docs.contains_key(&tgt) { continue; }
                     if tgt == w.eid && prop == w.prop {   // rule 6: own name inside its setter stores directly
                         self.emit_unchecked(core, &mut work, &tgt, &prop, v, &format!("direct:{}", name), seq, now);
@@ -219,7 +230,7 @@ impl Fields {
         let mut ws: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == "Wait").map(|(k, _)| k.clone()).collect();
         ws.sort();
         for w in ws {
-            let due = matches!(core.eval_json("x.status == 'armed' and clock - x.armed_since >= x.every_s", &[("x", &w)], &[("clock", json!(now))]), Ok(J::Bool(true)));
+            let due = matches!(core.eval_json("this.status == 'armed' and clock - this.armed_since >= this.every_s", &me(&w), &[("clock", json!(now))]), Ok(J::Bool(true)));
             let was = core.docs.get(&w).and_then(|e| e.props.get("due")) == Some(&json!(true));
             if due != was {
                 *seq += 1;

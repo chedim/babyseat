@@ -98,9 +98,9 @@ fn a_read_never_fires_a_setter() {
 fn a_looping_setter_chain_is_refused_at_the_revisit() {
     let mut fs = Fields::goalgraph();
     fs.setters = vec![
-        OnSet { name: "side".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "side".into(), "1".into())] },
-        OnSet { name: "ping".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "pong".into(), "x.ping + 1".into())] },
-        OnSet { name: "pong".into(), cls: "Task".into(), prop: "pong".into(), when: "x.pong >= 0".into(), writes: vec![("x".into(), "ping".into(), "x.pong + 1".into())] },
+        OnSet { name: "side".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "side".into(), "1".into())], ..Default::default() },
+        OnSet { name: "ping".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "pong".into(), "x.ping + 1".into())], ..Default::default() },
+        OnSet { name: "pong".into(), cls: "Task".into(), prop: "pong".into(), when: "x.pong >= 0".into(), writes: vec![("x".into(), "ping".into(), "x.pong + 1".into())], ..Default::default() },
     ];
     let mut w = World::new(fs);
     classes(&mut w.c);
@@ -183,7 +183,7 @@ fn open_blockers_does_not_drift_under_dropped_or_doubled_writes() {
 fn a_getter_recalculated_twice_in_a_round_is_not_refused() {
     let mut fs = Fields::goalgraph();
     // a task that is done gets archived in the same round (archived is not finished: t7 is blocked again)
-    fs.setters.push(OnSet { name: "archive".into(), cls: "Task".into(), prop: "status".into(), when: "x.status == 'done'".into(), writes: vec![("x".into(), "status".into(), "'archived'".into())] });
+    fs.setters.push(OnSet { name: "archive".into(), cls: "Task".into(), prop: "status".into(), when: "x.status == 'done'".into(), writes: vec![("x".into(), "status".into(), "'archived'".into())], ..Default::default() });
     let mut w = World::new(fs);
     classes(&mut w.c);
     mk(&mut w.c, "g1", "Goal", json!({"status": "open"}));
@@ -194,4 +194,27 @@ fn a_getter_recalculated_twice_in_a_round_is_not_refused() {
     assert_eq!(w.prop("t8", "status"), json!("archived"));
     assert_eq!(w.prop("t7", "open_blockers"), json!(2), "t8 archived is not finished: both blockers open");
     assert!(w.fs.refusals.is_empty(), "no refusal: {:?}", w.fs.refusals);
+}
+
+// syntax pass: WHEN / ELSE WHEN / ELSE run the first true branch, only it; a script still written with `x` runs
+#[test]
+fn else_branches_run_the_first_true_one_only() {
+    let mut fs = Fields::goalgraph();
+    fs.setters = membrane_vm::syntax::parse("
+Task.level on-setter grade:
+  WHEN this.level >= 10: this.grade = 'high'
+  ELSE WHEN this.level >= 5: this.grade = 'mid'
+  ELSE: this.grade = 'low'
+Task.old on-setter legacy:
+  WHEN x.old == 1: x.legacy = x.old + 1
+").unwrap();
+    let mut w = World::new(fs);
+    classes(&mut w.c);
+    mk(&mut w.c, "t9", "Task", json!({"status": "open"}));
+    for (lvl, want) in [(12, "high"), (7, "mid"), (1, "low"), (10, "high")] {
+        w.write("t9", "level", json!(lvl));
+        assert_eq!(w.prop("t9", "grade"), json!(want), "level {}", lvl);
+    }
+    w.write("t9", "old", json!(1));
+    assert_eq!(w.prop("t9", "legacy"), json!(2), "an `x` script still runs");
 }
