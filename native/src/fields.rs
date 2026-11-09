@@ -55,10 +55,14 @@ pub struct Fields {
     pub writes: u64,
     /// row 3: the Chat entities' `banner` getter (banner.rs) is on
     pub banner: bool,
+    /// row 4: the recall policy's guard setters and RecallAsk getters (recall.rs) are on
+    pub recall: bool,
+    /// last value each guarded dial accepted
+    pub accepted: std::collections::HashMap<String, J>,
 }
 
 impl Fields {
-    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false } }
+    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, accepted: Default::default() } }
 
     /// Row 3: a banner input (Message/Register/Edge/BannerRule) was written: recompute each Chat's `banner`.
     fn banner_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
@@ -69,6 +73,24 @@ impl Fields {
             let lines = crate::banner::walk(core, &sid);
             self.emit(core, work, &eid, "banner", json!(lines), "banner", seq, now);
         }
+    }
+
+    /// Row 4: a dial was written -> its guard setter (a bad value goes back to the last accepted one); a dial or an ask
+    /// moved -> recompute every RecallAsk's getters.
+    fn recall_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, seq: &mut i64, now: f64) {
+        let is_dial = w.eid == crate::recall::DIALS;
+        let is_ask = core.docs.get(&w.eid).map(|e| e.cls == crate::recall::CLASS_ASK).unwrap_or(false);
+        if !is_dial && !is_ask { return; }
+        if is_dial && !crate::recall::guard(&w.prop, &w.new) {
+            let back = self.accepted.get(&w.prop).cloned().or_else(|| crate::recall::defaults().get(&w.prop).cloned());
+            if let Some(b) = back { self.emit(core, work, &w.eid, &w.prop, b, "recall-guard", seq, now); }
+            return;
+        }
+        if is_dial { self.accepted.insert(w.prop.clone(), w.new.clone()); }
+        if is_ask && ["lanes", "rank_set", "rerank_top"].contains(&w.prop.as_str()) { return; }   // the ask getters themselves (the dial rerank_top is not one)
+        let mut asks: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == crate::recall::CLASS_ASK).map(|(k, _)| k.clone()).collect();
+        asks.sort();
+        for a in asks { for (p, v) in crate::recall::ask_values(core, &a) { self.emit(core, work, &a, p, v, "recall", seq, now); } }
     }
 
     fn emit(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64) {
@@ -110,6 +132,7 @@ impl Fields {
             if self.banner && w.prop != "banner" {   // any write can move a line (a card's status, a name): the getter reads the whole field
                 self.banner_on(core, &mut work, seq, now);
             }
+            if self.recall { self.recall_on(core, &mut work, &w, seq, now); }
             let hits: Vec<usize> = (0..self.setters.len())
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, self.setters[i].cls)).collect();
             for i in hits {
