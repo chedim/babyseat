@@ -61,6 +61,11 @@ def load(est, pack: dict, release: bool = False) -> dict:
                 raise PackRefused(f"pack {name}: {e.get('eid')} carries a script; only a release pack may")
     out = {"installed": 0, "updated": 0, "overlaid": 0}
     if installed_version(est, name) >= ver:
+        for e in ents:                              # same version: only a deleted entity comes back
+            if (est.docs or {}).get(e["eid"]) is None:
+                est.upsert(QuantumEntity(eid=e["eid"], cls=e.get("cls", "Other"),
+                                         properties=copy.deepcopy(e.get("properties") or {})), embedder=None)
+                out["installed"] += 1
         return out
     led = _ledger(est, name)
     base, ovs = dict(led.get("base") or {}), list(led.get("overlays") or [])

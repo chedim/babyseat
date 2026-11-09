@@ -1243,6 +1243,11 @@ def main() -> None:
         except Exception as _be:
             print(f"[opencode] boot entity skipped ({_be})",
                   file=sys.stderr)
+        try:                                        # #980 Q3: every seed pack, idempotent
+            from .seedboot import boot_packs
+            boot_packs(srv.entity_store)
+        except Exception as _se:
+            print(f"[opencode] seed packs skipped ({_se})", file=sys.stderr)
         # THE MODEL'S EVENT POOL (the reactive layer's lane): the watch
         # fires, the script errors/overruns, the peer misses -- the
         # loops' reads land here; the store's watch lanes put through
