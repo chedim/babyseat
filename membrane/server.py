@@ -2288,7 +2288,14 @@ class TurnRunner:
             with self._queue_lock:
                 q = self._queue.get(sid) or []
                 if q:
-                    nxt = q.pop(0)
+                    # BATCHED DELIVERY (#970): everything waiting now goes
+                    # out TOGETHER as one turn, in arrival order.
+                    batch = list(q)
+                    del q[:]
+                    nxt = dict(batch[0])
+                    if len(batch) > 1:
+                        nxt["text"] = "\n\n".join(str(b["text"]) for b in batch)
+                        nxt["parts_all"] = batch
             if nxt is None:
                 return
             ent = nxt
@@ -2300,11 +2307,15 @@ class TurnRunner:
                                    user_info=ent["user_info"],
                                    user_parts=ent["user_parts"],
                                    _drained=True)
-                    self._drain_results[ent["qid"]] = res
+                    for b in ent.get("parts_all") or [ent]:
+                        self._drain_results[b["qid"]] = res
                 except Exception as e:
-                    self._drain_results[ent["qid"]] = {
-                        "error": f"{type(e).__name__}: {e}"[:200]}
+                    for b in ent.get("parts_all") or [ent]:
+                        self._drain_results[b["qid"]] = {
+                            "error": f"{type(e).__name__}: {e}"[:200]}
                 finally:
+                    for b in ent.get("parts_all") or [ent]:
+                        b["done"].set()
                     done_ev.set()
                     # THE BOUNDED LEDGER (the unbounded-growth family):
                     # threads and results are one-turn artifacts -- the
