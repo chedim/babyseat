@@ -99,6 +99,8 @@ def pack() -> dict:
 def seed(est) -> int:
     """Boot: load the pack; an edited rule is kept until a newer release (then kept as an overlay)."""
     from . import seedpack
+    from . import dials
+    dials.install(est)
     return seedpack.load(est, pack(), release=True)["installed"]
 
 
