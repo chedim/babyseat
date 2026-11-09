@@ -46,10 +46,14 @@ pub struct Fields {
     pub learn: Option<crate::learn::Learner>,
     /// last value each guarded dial accepted
     pub accepted: std::collections::HashMap<String, J>,
+    /// (entity, prop) pairs written by the field in the current round (one outside write's react)
+    pub visited: std::collections::HashSet<(String, String)>,
+    /// loop refusals: the write that was refused at a revisit, and why
+    pub refusals: Vec<J>,
 }
 
 impl Fields {
-    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default() } }
+    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![] } }
 
     /// Row 3: a banner input (Message/Register/Edge/BannerRule) was written: recompute each Chat's `banner`.
     fn banner_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
@@ -121,6 +125,15 @@ impl Fields {
 
     fn emit(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64) {
         if core.docs.get(eid).map(|e| e.props.get(prop) == Some(&new)).unwrap_or(false) { return; }   // idempotent
+        if !self.visited.insert((eid.to_string(), prop.to_string())) && writer != "recall-guard" {   // the guard puts back the value just refused: not a loop
+   // revisit in this round: refuse BEFORE applying
+            let reason = format!("loop: ({}, {}) already written this round by the field; refused {} by {}", eid, prop, new, writer);
+            self.refusals.push(json!({"eid": eid, "prop": prop, "refused": new, "writer": writer, "reason": reason}));
+            *seq += 1;
+            let r = Write { eid: eid.into(), prop: "refused".into(), new: json!(reason), old: J::Null, writer: "field:loop-refused".into(), chain: json!({}), seq: *seq };
+            core.hear(r, None, now);   // a receipt, not queued: it triggers nothing
+            return;
+        }
         *seq += 1;
         self.writes += 1;
         let w = Write { eid: eid.into(), prop: prop.into(), new, old: J::Null, writer: format!("field:{}", writer), chain: json!({}), seq: *seq };
@@ -147,11 +160,9 @@ impl Fields {
 
     /// React to one write (already applied to the mirror): getters, then the on-setters, until quiet.
     pub fn react(&mut self, core: &mut Core, host: &dyn Host, w: Write, now: f64, seq: &mut i64) {
+        self.visited.clear();
         let mut work: VecDeque<Write> = VecDeque::from([w]);
-        let mut guard = 0;
         while let Some(w) = work.pop_front() {
-            guard += 1;
-            if guard > 10_000 { break; }
             if w.prop == "status" && core.docs.get(&w.eid).map(|e| BLOCKER_CLASSES.contains(&e.cls.as_str())).unwrap_or(false) {
                 self.recount(core, &mut work, seq, now);
             }

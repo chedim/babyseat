@@ -95,9 +95,10 @@ fn a_read_never_fires_a_setter() {
 
 // gap 3: a setter chain that loops is cut off, not run forever
 #[test]
-fn a_looping_setter_chain_is_bounded() {
+fn a_looping_setter_chain_is_refused_at_the_revisit() {
     let mut fs = Fields::goalgraph();
     fs.setters = vec![
+        OnSet { name: "side".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "side".into(), "1".into())] },
         OnSet { name: "ping".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "pong".into(), "x.ping + 1".into())] },
         OnSet { name: "pong".into(), cls: "Task".into(), prop: "pong".into(), when: "x.pong >= 0".into(), writes: vec![("x".into(), "ping".into(), "x.pong + 1".into())] },
     ];
@@ -105,8 +106,13 @@ fn a_looping_setter_chain_is_bounded() {
     classes(&mut w.c);
     mk(&mut w.c, "t9", "Task", json!({"status": "open"}));
     w.write("t9", "ping", json!(0));   // must return
-    assert!(w.fs.writes > 100, "the loop really ran ({} writes)", w.fs.writes);
-    assert!(w.fs.writes <= 10_001, "and was cut at the guard ({} writes)", w.fs.writes);
+    // refused at the revisit of (t9, ping), before applying: no numeric cap, a handful of writes
+    assert!(w.fs.writes <= 6, "the loop was cut at the revisit ({} writes)", w.fs.writes);
+    assert_eq!(w.prop("t9", "pong"), json!(1), "the repeat write (pong=3) was not applied");
+    assert_eq!(w.fs.refusals.len(), 1, "one refusal recorded: {:?}", w.fs.refusals);
+    assert!(w.fs.refusals[0].to_string().contains("loop"), "with a reason: {:?}", w.fs.refusals);
+    assert_eq!(w.prop("t9", "refused").to_string().contains("loop"), true, "recorded as a write on the entity");
+    assert_eq!(w.prop("t9", "side"), json!(1), "unrelated work in the same round still ran");
     w.write("t9", "status", json!("done"));
     assert_eq!(w.prop("t9", "status"), json!("done"));
 }
