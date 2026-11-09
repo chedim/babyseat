@@ -1475,13 +1475,13 @@ def shadow_cli(argv=None) -> int:
     """`membrane shadow`: the shadow's rates on this seat (reads the field, never writes)."""
     import json as _json
     from pathlib import Path
-    from . import cblite as CB
-    db_path = Path(".membrane") / "field.cblite"
-    if not db_path.exists():
-        print("no seat here (no .membrane/field.cblite)")
+    from .sqlitedb import open_db, store_dir
+    db_path = store_dir(Path(".membrane"))
+    if db_path is None:
+        print("no seat here (no .membrane/field.sqlite or .membrane/field.cblite)")
         return 1
     try:
-        d = CB.Database(CB.load(), "field", str(db_path))
+        d = open_db(db_path)
     except Exception as e:
         print(f"can't open the field: {e}")
         return 1

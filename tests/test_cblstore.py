@@ -189,16 +189,17 @@ class TestCBLiteBackend(unittest.TestCase):
 
 
 class TestTheLadder(unittest.TestCase):
-    def test_vendored_libraries_make_it_the_default_home(self):
+    def test_a_seat_that_chose_couchbase_lite_opens_it(self):
+        """#971: SQLite is a new seat's default; Couchbase Lite opens when the seat chose it (or already has
+        one) and its libraries are there; =file still forces the journals."""
+        from membrane import storekind
         with tempfile.TemporaryDirectory() as d:
             fp = os.path.join(d, "rag-field.json")
-            with mock.patch("membrane.substrate._is_lab_field_path", return_value=False), \
-                    mock.patch("membrane.efstore._cbl_wanted", return_value=False):
-                self.assertIsInstance(efstore.open_backend(fp), FileBackend)
             with mock.patch.dict(os.environ, {"MEMBRANE_EFIELD_STORE": "file"}), \
                     mock.patch("membrane.substrate._is_lab_field_path", return_value=False):
                 self.assertIsInstance(efstore.open_backend(fp), FileBackend)
             if HAVE:
+                storekind.choose(Path(fp).resolve().parent, "cbl")
                 with mock.patch("membrane.substrate._is_lab_field_path", return_value=False):
                     be = efstore.open_backend(fp)
                 try:

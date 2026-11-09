@@ -46,6 +46,15 @@ jobs:
       # e385aec and its tests went stale under a changed wire contract -- the
       # close publish; repaired 2026-10-13, back in the gate.)
       - run: pytest -q -p no:cacheprovider
+      # #971: the SQLite store (the default for a new seat) held to Couchbase Lite's contract -- the same
+      # store suites, with MEMBRANE_TEST_STORE=sqlite swapping the backend (tests/conftest.py)
+      - run: >-
+          MEMBRANE_TEST_STORE=sqlite pytest -q -p no:cacheprovider
+          tests/test_background_door_755.py tests/test_cbl_foreign_write_commits.py tests/test_cblite_get_once.py
+          tests/test_cblstore.py tests/test_datafiles_in_cbl.py tests/test_db_thread.py tests/test_entities_in_cbl.py
+          tests/test_field_readonly.py tests/test_person_turn_first.py tests/test_recall_bugs_429.py
+          tests/test_serve_stores_in_cbl.py tests/test_store_turn_first_541.py tests/test_tool_recall_429.py
+          tests/test_warm_restart_720.py tests/test_efstore_cb.py tests/test_efstore_file.py
       # The integration's suite is its own tree with its own stub-conftest
       # (a fake HA + aiohttp) -- run in its own process, never together with
       # the seat's.

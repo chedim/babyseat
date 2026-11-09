@@ -101,6 +101,15 @@ def _seat_credential(request, monkeypatch):
     yield
 
 
+# #971: MEMBRANE_TEST_STORE=sqlite runs every Couchbase Lite store test against the SQLite store instead --
+# the same suites are its contract.
+if os.environ.get("MEMBRANE_TEST_STORE", "").strip() == "sqlite":
+    import sys as _sys2
+    _sys2.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from membrane import cblstore as _cbs
+    from membrane import sqlstore as _sqs
+    _cbs.CBLiteBackend = _sqs.SQLiteBackend
+
 # #971: MEMBRANE_NATIVE_VM=1 runs every test that builds a ch.VM against the native (Rust) VM instead --
 # the same suites are its contract. Skipped quietly when the extension is not built.
 if os.environ.get("MEMBRANE_NATIVE_VM", "").strip() == "1":

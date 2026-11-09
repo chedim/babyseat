@@ -65,8 +65,9 @@ def read_raw(path: str) -> dict[str, list[dict]]:
     if not isinstance(base, dict):
         base = {}
     if not text and not base:
-        db = Path(path).parent / "field.cblite"
-        if db.exists():                     # #799: the store moved into the database
+        from .sqlitedb import store_dir
+        db = store_dir(Path(path).parent)
+        if db is not None:                  # #799: the store moved into the database (either kind, #971)
             return read_cbl(db)
     if not text:
         return base
@@ -102,8 +103,8 @@ def read_cbl(db_path) -> dict[str, list[dict]]:
     """The message store from the seat's Couchbase Lite store (#799), read beside
     a live seat: the `messages` collection only, in stored order. {} on any error."""
     try:
-        from . import cblite as CB
-        d = CB.Database(CB.load(), "field", str(db_path))
+        from .sqlitedb import open_db
+        d = open_db(db_path)
     except Exception:
         return {}
     try:
@@ -128,7 +129,8 @@ def read_cbl_file(db_path, name: str):
     try:
         from . import cblite as CB
         from .datafiles import COLL
-        d = CB.Database(CB.load(), "field", str(db_path))
+        from .sqlitedb import open_db
+        d = open_db(db_path)
     except Exception:
         return None
     try:
@@ -406,8 +408,10 @@ def main(argv: list[str] | None = None) -> int:
     a = accounting(store)
     from .bgusage import FILE as _BG, load as _load_bg
     bg = _load_bg(args.bg or Path(args.store).parent / _BG)
-    if bg is None and not args.bg and (Path(args.store).parent / "field.cblite").exists():
-        bg = read_cbl_file(Path(args.store).parent / "field.cblite", _BG)   # #799
+    from .sqlitedb import store_dir as _store_dir
+    _sd = _store_dir(Path(args.store).parent)
+    if bg is None and not args.bg and _sd is not None:
+        bg = read_cbl_file(_sd, _BG)   # #799
     if args.baseline:
         b = baseline(store)
     if args.json:

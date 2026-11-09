@@ -138,15 +138,23 @@ class TestOpenBackendRouting(unittest.TestCase):
     own folder; couchbase only on MEMBRANE_FIELD_CLOUD=1; a down cluster
     degrades to FILE (never to RAM, which forgets)."""
 
-    def test_default_is_the_file_home(self):
+    def test_default_is_the_sqlite_home(self):
+        """#971: a new seat's default store is SQLite under its folder; =file still opens the journals."""
+        from membrane.sqlstore import SQLiteBackend
         with tempfile.TemporaryDirectory() as d:
             fp = os.path.join(d, "rag-field.json")
             with mock.patch("membrane.substrate._is_lab_field_path",
                             return_value=False), \
-                    mock.patch("membrane.efstore._cbl_wanted", return_value=False), \
                     mock.patch("membrane.substrate.cb_open",
                                side_effect=RuntimeError("must not be called")):
                 be = efstore.open_backend(fp)
+                try:
+                    self.assertIsInstance(be, SQLiteBackend)
+                    self.assertEqual(be.path, (Path(d) / ".membrane" / "field.sqlite").resolve())
+                finally:
+                    be.close()
+                with mock.patch.dict(os.environ, {"MEMBRANE_EFIELD_STORE": "file"}):
+                    be = efstore.open_backend(fp)
         self.assertIsInstance(be, FileBackend)
         self.assertEqual(be.dir, (Path(d) / ".membrane" / "field").resolve())
 
@@ -171,7 +179,11 @@ class TestOpenBackendRouting(unittest.TestCase):
                     mock.patch("membrane.substrate.cb_open",
                                side_effect=RuntimeError("down")):
                 be = efstore.open_backend(fp)
-            self.assertIsInstance(be, FileBackend)  # FILE, never RAM
+            try:                                      # the seat's local store (SQLite, #971), never RAM
+                from membrane.sqlstore import SQLiteBackend
+                self.assertIsInstance(be, SQLiteBackend)
+            finally:
+                be.close()
 
     def test_the_ram_guard_still_wins(self):
         with mock.patch.dict(os.environ, {"MEMBRANE_EFIELD_STORE": "mem",

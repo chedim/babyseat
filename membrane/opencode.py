@@ -1079,6 +1079,10 @@ def main() -> None:
             from .efield import EntityField
             from .efstore import open_backend
             from .substrate import _origin_tag
+            from . import storekind as _SK          # #971: a new seat's first start asks which store
+            from .substrate import _is_lab_field_path as _lab
+            if not _lab(args.field):
+                _SK.ensure_chosen(args.field)
             be = open_backend(args.field)
             srv.efield = EntityField(
                 be, LazyEmbedder(mem),
