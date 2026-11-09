@@ -209,7 +209,7 @@ def test_a_loop_through_self_is_allowed(vm):
 def test_the_seat_runs_the_vm():
     import inspect
     from membrane import opencode, thinker
-    assert "_CH.VM(srv.entity_store" in inspect.getsource(opencode) and "srv.ch_vm.start()" in inspect.getsource(opencode)
+    assert "_CH.make_vm(srv.entity_store" in inspect.getsource(opencode) and "srv.ch_vm.start()" in inspect.getsource(opencode)
     assert "_vm.request_sweep()" in inspect.getsource(thinker)
 
 

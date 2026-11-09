@@ -1,0 +1,18 @@
+[package]
+name = "membrane_vm"
+version = "0.1.0"
+edition = "2021"
+description = "membrane's cliffhanger VM, native (#971)"
+license = "MIT"
+publish = false
+
+[lib]
+name = "membrane_vm"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.26", features = ["extension-module"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+opt-level = 3
