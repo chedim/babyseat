@@ -29,6 +29,23 @@ KIND = "sqlite"
 CHUNK = 65536                                  # rows per block of the brute-force product (memory, not a cutoff)
 
 
+class _Joined:
+    """Readonly view: the mapped file rows (snapshotted at open) followed by the RAM overlay rows."""
+
+    def __init__(self, base, ram):
+        self.base, self.ram = base, ram
+        self.nb = 0 if base is None else len(base)
+
+    def __getitem__(self, sl):
+        a, b = sl.start or 0, sl.stop
+        parts = []
+        if self.base is not None and a < self.nb:
+            parts.append(np.asarray(self.base[a:min(b, self.nb)]))
+        if self.ram is not None and b > self.nb:
+            parts.append(np.asarray(self.ram[max(a - self.nb, 0):b - self.nb]))
+        return parts[0] if len(parts) == 1 else np.concatenate(parts)
+
+
 class _Matrix:
     """The sentence vectors: an append-only float16 file + its keys, memory-mapped for search."""
 
@@ -45,6 +62,7 @@ class _Matrix:
         self.row: dict[str, int] = {}
         self.dead: set[int] = set()
         self._mm = None
+        self._base_n = 0                       # readonly: file rows at open (the file may grow under us)
         if self.f.exists() and self.kf.exists():
             try:
                 txt = self.kf.read_text()
@@ -58,13 +76,14 @@ class _Matrix:
                 if n != len(self.keys):
                     raise ValueError("vectors and keys disagree")
                 self.row = {k: i for i, k in enumerate(self.keys)}
+                self._base_n = n if self.readonly else 0
             except Exception:
                 self.reset()
 
     def reset(self) -> None:
         with self.lock:
             self.keys, self.row, self.dead, self._mm = [], {}, set(), None
-            self._ram = None
+            self._ram, self._base_n = None, 0
             for p in (() if self.readonly else (self.f, self.kf)):
                 try:
                     p.unlink()
@@ -105,7 +124,11 @@ class _Matrix:
 
     def _map(self):
         if self.readonly:
-            return self._ram
+            if self._mm is None and self._base_n:
+                self._mm = np.memmap(self.f, dtype=np.float16, mode="r", shape=(self._base_n, DIM))
+            if self._mm is None:
+                return self._ram
+            return self._mm if self._ram is None else _Joined(self._mm, self._ram)
         if self._mm is None and self.keys:
             self._mm = np.memmap(self.f, dtype=np.float16, mode="r", shape=(len(self.keys), DIM))
         return self._mm
