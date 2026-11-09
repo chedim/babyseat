@@ -86,3 +86,11 @@ class ReadonlySearch(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeanShell(unittest.TestCase):
+    def test_import_only_shell_has_readonly(self):
+        # cblstore.import_only builds the backend with __new__ (no __init__) and the
+        # read-only search design reads .readonly on it: it must default to False.
+        shell = B.__new__(B)
+        self.assertFalse(shell.readonly)

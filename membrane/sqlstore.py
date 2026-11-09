@@ -157,6 +157,7 @@ class _Matrix:
 class SQLiteBackend(CBLiteBackend):
     KIND = KIND
     LABEL = "sqlite"
+    readonly = False                          # (import_only's __new__ shell reads it too)
     _mx = None                                # (defaults: cblstore.import_only builds a backend without __init__)
     _seeded = False
     _sdb_path = None
