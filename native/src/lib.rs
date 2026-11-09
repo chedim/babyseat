@@ -2,6 +2,7 @@
 //! boundary as JSON text (simple first; typed conversion later, where measurements say it matters).
 
 pub mod adapters;
+pub mod learn;
 pub mod banner;
 pub mod recall;
 pub mod topk;
