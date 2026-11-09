@@ -23,6 +23,8 @@ the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
    declared once on a class (name, type, getter, setters).
 2. **Getters are cached and eager.** A field with a getter holds its last computed value. A read
    returns the cache; a read never writes and never fires anything.
+   A new getter never computes on load (traces start at `{}`); after load it recalculates when an
+   input changes.
 3. **Own name = previous cached value.** Inside a getter the field's own name is its previous
    value: `x = (x or 0) + 1` is an accumulator.
 4. **A recalculated value is a write through the setters.** When inputs change the getter runs

@@ -91,3 +91,38 @@ fn mutual_getters_recalculate_once_per_outside_write_in_fixed_order() {
     for (p, v) in e.journal.clone() { r.write(&p, v); }
     assert_eq!(e.checksum(), r.checksum());
 }
+
+
+#[test]
+fn same_value_write_is_no_change_and_fires_nothing() {
+    let mut e = Engine::new();
+    e.add("x", "/x", |c| json!(c.get("/in").and_then(|v| v.as_i64()).unwrap_or(0) + 1));
+    e.write("/in", json!(1));
+    let (rounds, recalcs) = (e.rounds, e.recalcs["x"]);
+    e.write("/in", json!(1));
+    assert_eq!((e.rounds, e.recalcs["x"]), (rounds, recalcs), "rule 5: same value fires nothing");
+}
+
+#[test]
+fn downstream_registered_before_its_input_still_recalculates_in_the_same_round() {
+    let mut e = Engine::new();
+    // b depends on a, but is registered first: dependency order, not registration order
+    e.add("b", "/b", |c| json!(c.get("/a").and_then(|v| v.as_i64()).unwrap_or(0) * 10));
+    e.add("a", "/a", |c| json!(c.get("/in").and_then(|v| v.as_i64()).unwrap_or(0) + 1));
+    e.write("/in", json!(1));
+    e.write("/in", json!(2));
+    assert_eq!(num(&e, "/a"), 3);
+    assert_eq!(num(&e, "/b"), 30, "b follows a in the same round");
+    let n = e.recalcs["b"];
+    e.write("/in", json!(3));
+    assert_eq!((num(&e, "/b"), e.recalcs["b"]), (40, n + 1), "at most once per round");
+}
+
+#[test]
+fn getter_with_no_inputs_runs_once_then_never_again() {
+    let mut e = Engine::new();
+    e.add("k", "/k", |c| json!(c.get("/k").and_then(|v| v.as_i64()).unwrap_or(0) + 1));
+    e.write("/a", json!(1));
+    e.write("/b", json!(2));
+    assert_eq!((num(&e, "/k"), e.recalcs["k"]), (1, 1), "own field is not an input");
+}
