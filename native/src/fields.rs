@@ -53,10 +53,23 @@ pub struct Fields {
     /// the llm calls the plan fields asked for (the effect that is not a prop write)
     pub calls: Vec<J>,
     pub writes: u64,
+    /// row 3: the Chat entities' `banner` getter (banner.rs) is on
+    pub banner: bool,
 }
 
 impl Fields {
-    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0 } }
+    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false } }
+
+    /// Row 3: a banner input (Message/Register/Edge/BannerRule) was written: recompute each Chat's `banner`.
+    fn banner_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
+        let mut chats: Vec<(String, String)> = core.docs.iter().filter(|(_, e)| e.cls == crate::banner::CLASS_CHAT)
+            .map(|(k, e)| (k.clone(), e.props.get("sid").and_then(|s| s.as_str()).unwrap_or(k).to_string())).collect();
+        chats.sort();
+        for (eid, sid) in chats {
+            let lines = crate::banner::walk(core, &sid);
+            self.emit(core, work, &eid, "banner", json!(lines), "banner", seq, now);
+        }
+    }
 
     fn emit(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64) {
         if core.docs.get(eid).map(|e| e.props.get(prop) == Some(&new)).unwrap_or(false) { return; }   // idempotent
@@ -93,6 +106,9 @@ impl Fields {
             if guard > 10_000 { break; }
             if w.prop == "status" && core.docs.get(&w.eid).map(|e| BLOCKER_CLASSES.contains(&e.cls.as_str())).unwrap_or(false) {
                 self.recount(core, &mut work, seq, now);
+            }
+            if self.banner && w.prop != "banner" {   // any write can move a line (a card's status, a name): the getter reads the whole field
+                self.banner_on(core, &mut work, seq, now);
             }
             let hits: Vec<usize> = (0..self.setters.len())
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, self.setters[i].cls)).collect();
