@@ -16,37 +16,19 @@ const BLOCKER_CLASSES: [&str; 3] = ["Task", "Decision", "Wait"];
 const OPEN_BLOCKERS_FILTER: &str = "t.eid in (b.blocks or []) and not ((b.cls == 'Decision' and b.status == 'closed') or (b.cls != 'Decision' and b.status == 'done'))";
 
 /// `x` is the entity written; `clock` the time. Each write: (target entity expr, prop, value expr).
+/// Not written by hand: `translate::goalgraph_setters` translates goalgraph's triggers (packs/goalgraph.json).
+#[derive(Debug, Clone, PartialEq)]
 pub struct OnSet {
-    pub name: &'static str,
-    pub cls: &'static str,
-    pub prop: &'static str,
-    pub when: &'static str,
-    pub writes: &'static [(&'static str, &'static str, &'static str)],
+    pub name: String,
+    pub cls: String,
+    pub prop: String,
+    pub when: String,
+    pub writes: Vec<(String, String, String)>,
 }
 
 pub const LLM_CALL: &str = "membrane::llm.call";
-const PLAN: &str = "{'about': x.eid, 'prompt': 'plan the goal: ' + x.replan, 'lane': 'planner'}";
 
-pub fn on_setters() -> Vec<OnSet> {
-    vec![
-        // 3 ready (on the original trigger input, open_blockers, and on status)
-        OnSet { name: "ready", cls: "Task", prop: "open_blockers", when: "x.open_blockers < 0.5 and x.status == 'open'", writes: &[("x", "status", "'owed'")] },
-        OnSet { name: "ready-on-status", cls: "Task", prop: "status", when: "x.open_blockers < 0.5 and x.status == 'open'", writes: &[("x", "status", "'owed'")] },
-        // 4 replan on task end
-        OnSet { name: "replan-task", cls: "Task", prop: "status", when: "x.status in ('done', 'failed', 'stuck')", writes: &[("x.goal", "replan", "'task ' + x.eid + ' ' + x.status")] },
-        // 5 replan on card
-        OnSet { name: "replan-card", cls: "Decision", prop: "status", when: "x.status in ('closed', 'dropped')", writes: &[("x.goal", "replan", "'card ' + x.eid + ' ' + x.status")] },
-        // 9 wait armed
-        OnSet { name: "wait-armed", cls: "Wait", prop: "open_blockers", when: "x.open_blockers < 0.5 and x.status == 'open'", writes: &[("x", "status", "'armed'"), ("x", "armed_since", "clock")] },
-        OnSet { name: "wait-armed-on-status", cls: "Wait", prop: "status", when: "x.open_blockers < 0.5 and x.status == 'open'", writes: &[("x", "status", "'armed'"), ("x", "armed_since", "clock")] },
-        // 10 wait check: the due getter's on-setter (adapters' check branch)
-        OnSet { name: "wait-check", cls: "Wait", prop: "due", when: "x.due", writes: &[("x", "check", "'due'")] },
-        // 11 plan
-        OnSet { name: "plan", cls: "Goal", prop: "replan", when: "(x.status or 'open') == 'open' and (x.replan or '') != ''", writes: &[(LLM_CALL, "", PLAN)] },
-        // 12 plan after reopen
-        OnSet { name: "plan-after-reopen", cls: "Goal", prop: "status", when: "x.status == 'open' and x.replan and x.planned_ts and x.replan != x.planned_replan", writes: &[(LLM_CALL, "", PLAN)] },
-    ]
-}
+pub fn on_setters() -> Vec<OnSet> { crate::translate::goalgraph_setters() }
 
 pub struct Fields {
     pub setters: Vec<OnSet>,
@@ -180,19 +162,21 @@ impl Fields {
             if self.adapters { self.adapters_on(core, &mut work, &w, seq, now); }
             if self.recall { self.recall_on(core, &mut work, &w, seq, now); }
             let hits: Vec<usize> = (0..self.setters.len())
-                .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, self.setters[i].cls)).collect();
+                .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, &self.setters[i].cls)).collect();
             for i in hits {
-                let (when, name) = (self.setters[i].when, self.setters[i].name);
-                if !matches!(core.eval_json(when, &[("x", &w.eid)], &[("clock", json!(now))]), Ok(J::Bool(true))) { continue; }
-                for (target, prop, value) in self.setters[i].writes.iter().copied() {
-                    let Ok(v) = core.eval_json(value, &[("x", &w.eid)], &[("clock", json!(now))]) else { continue };
+                let (when, name) = (self.setters[i].when.clone(), self.setters[i].name.clone());
+                let fire = match core.eval_json(&when, &[("x", &w.eid)], &[("clock", json!(now))]) {
+                    Ok(J::Bool(b)) => b, Ok(J::String(s)) => !s.is_empty(), Ok(J::Number(n)) => n.as_f64().map_or(false, |f| f != 0.0), _ => false };
+                if !fire { continue; }
+                for (target, prop, value) in self.setters[i].writes.clone() {
+                    let Ok(v) = core.eval_json(&value, &[("x", &w.eid)], &[("clock", json!(now))]) else { continue };
                     if target == LLM_CALL { self.calls.push(v); continue; }
                     let tgt = if target == "x" { Some(w.eid.clone()) } else {
-                        match core.eval_json(target, &[("x", &w.eid)], &[]) { Ok(J::String(g)) => Some(g), _ => None } };
+                        match core.eval_json(&target, &[("x", &w.eid)], &[]) { Ok(J::String(g)) => Some(g), _ => None } };
                     let Some(tgt) = tgt else { continue };
                     // a replan lands on a Goal only (the trigger's `isa ?g Goal`)
                     if target != "x" && core.docs.get(&tgt).map(|e| e.cls.as_str()) != Some("Goal") { continue; }
-                    if core.docs.contains_key(&tgt) { self.emit(core, &mut work, &tgt, prop, v, name, seq, now); }
+                    if core.docs.contains_key(&tgt) { self.emit(core, &mut work, &tgt, &prop, v, &name, seq, now); }
                 }
             }
         }

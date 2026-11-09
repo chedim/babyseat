@@ -10,6 +10,7 @@ pub mod packs;
 pub mod expr;
 pub mod fields;
 pub mod getters;
+pub mod translate;
 pub mod vm;
 
 use pyo3::prelude::*;
