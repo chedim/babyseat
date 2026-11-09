@@ -144,6 +144,15 @@ impl Fields {
         self.emit_as(core, work, eid, prop, new, writer, seq, now, false)
     }
 
+    /// A receipt that a setter wrote nothing (an error in a condition): recorded, and written as `refused` on the
+    /// entity. Not queued: it triggers nothing.
+    fn receipt(&mut self, core: &mut Core, eid: &str, writer: &str, reason: String, refused: J, seq: &mut i64, now: f64) {
+        self.refusals.push(json!({"eid": eid, "prop": "", "refused": refused, "writer": writer, "reason": reason}));
+        *seq += 1;
+        let r = Write { eid: eid.into(), prop: "refused".into(), new: json!(reason), old: J::Null, writer: "field:setter-error".into(), chain: json!({}), seq: *seq };
+        core.hear(r, None, now);
+    }
+
     fn emit_as(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64, check: bool) {
         if core.docs.get(eid).map(|e| e.props.get(prop) == Some(&new)).unwrap_or(false) { return; }   // idempotent
         if check && !self.visited.insert((eid.to_string(), prop.to_string())) {
@@ -199,13 +208,25 @@ impl Fields {
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, &self.setters[i].cls)).collect();
             for i in hits {
                 let name = self.setters[i].name.clone();
-                let truthy = |r: Result<J, String>| match r {
-                    Ok(J::Bool(b)) => b, Ok(J::String(s)) => !s.is_empty(), Ok(J::Number(n)) => n.as_f64().map_or(false, |f| f != 0.0), _ => false };
-                // WHEN / ELSE WHEN / ELSE: the first true branch runs, only it
+                let truthy = |v: &J| match v {
+                    J::Bool(b) => *b, J::String(s) => !s.is_empty(), J::Number(n) => n.as_f64().map_or(false, |f| f != 0.0), _ => false };
+                // WHEN / ELSE WHEN / ELSE: the first true branch runs, only it. A condition that errors stops the
+                // setter: nothing is written and a receipt says why (it never falls through to ELSE).
                 let branches: Vec<(String, Vec<(String, String, String)>)> =
                     std::iter::once((self.setters[i].when.clone(), self.setters[i].writes.clone())).chain(self.setters[i].els.clone()).collect();
-                let Some(writes) = branches.into_iter().find(|(c, _)| truthy(core.eval_json(c, &me(&w.eid), &[("clock", json!(now))]))).map(|(_, wr)| wr)
-                    else { continue };
+                let mut chosen = None;
+                for (c, wr) in branches {
+                    match core.eval_json(&c, &me(&w.eid), &[("clock", json!(now))]) {
+                        Ok(v) if truthy(&v) => { chosen = Some(wr); break; }
+                        Ok(_) => {}
+                        Err(e) => {
+                            let reason = format!("error in setter {}: WHEN {}: {}; the setter wrote nothing", name, c, e);
+                            self.receipt(core, &w.eid, &name, reason, J::Null, seq, now);
+                            break;
+                        }
+                    }
+                }
+                let Some(writes) = chosen else { continue };
                 for (target, prop, value) in writes {
                     let Ok(v) = core.eval_json(&value, &me(&w.eid), &[("clock", json!(now))]) else { continue };
                     if target == LLM_CALL { self.calls.push(v); continue; }

@@ -218,3 +218,31 @@ Task.old on-setter legacy:
     w.write("t9", "old", json!(1));
     assert_eq!(w.prop("t9", "legacy"), json!(2), "an `x` script still runs");
 }
+
+// Memo's review of #1024: a WHEN whose condition errors stops the setter (nothing written, a receipt left);
+// it never falls through to ELSE
+#[test]
+fn an_erroring_condition_stops_the_setter_and_never_runs_else() {
+    let mut fs = Fields::goalgraph();
+    fs.setters = membrane_vm::syntax::parse("
+Task.level on-setter typo:
+  WHEN nope == 1: this.a = 1
+  ELSE: this.note = 'x'
+Task.level on-setter broken:
+  WHEN this.level >>> 3: this.b = 1
+  ELSE: this.note2 = 'x'
+Task.level on-setter fine:
+  WHEN this.level > 0: this.ok = 1
+").unwrap();
+    let mut w = World::new(fs);
+    classes(&mut w.c);
+    mk(&mut w.c, "t9", "Task", json!({"status": "open"}));
+    w.write("t9", "level", json!(2));
+    assert_eq!(w.prop("t9", "note"), J::Null, "ELSE did not run on an error");
+    assert_eq!(w.prop("t9", "note2"), J::Null, "ELSE did not run on a parse error");
+    assert_eq!(w.prop("t9", "a"), J::Null);
+    assert_eq!(w.prop("t9", "ok"), json!(1), "a later, working setter still ran");
+    let errs: Vec<_> = w.fs.refusals.iter().filter(|r| r["reason"].as_str().unwrap_or("").starts_with("error")).collect();
+    assert_eq!(errs.len(), 2, "one receipt per broken setter: {:?}", w.fs.refusals);
+    assert!(w.prop("t9", "refused").as_str().unwrap_or("").contains("error"), "recorded as a write on the entity");
+}

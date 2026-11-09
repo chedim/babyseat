@@ -91,10 +91,50 @@ def reset() -> None:
     _STATE["est"] = None
 
 
+# keys whose value is a share between 0 and 1
+_SHARES = ("no_topic_min", "dedupe_jaccard")
+
+
+def _fits(v, default) -> bool:
+    """Does an edited value have the default's shape? Numbers must be numbers (an int where the default is
+    an int), counts are never negative, dicts keep the default's keys with fitting values, lists keep the
+    type of their items. Anything else falls back to the default (an edit never breaks recall)."""
+    if isinstance(default, bool):
+        return isinstance(v, bool)
+    if isinstance(default, int):
+        return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+    if isinstance(default, float):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+    if isinstance(default, str):
+        return isinstance(v, str)
+    if isinstance(default, list):
+        return isinstance(v, list) and all(isinstance(x, type(default[0])) for x in v) if default else isinstance(v, list)
+    if isinstance(default, dict):
+        return isinstance(v, dict) and all(k in v and _fits(v[k], dv) for k, dv in default.items())
+    return v == default
+
+
+def _merged(props: dict) -> dict:
+    """The seat's dials over the defaults: each key that fits its default's shape (and a share that stays in
+    0..1) is the seat's; the rest are the defaults, each named once in the log."""
+    out = _defaults()
+    for k, dv in list(out.items()):
+        if k not in props:
+            continue
+        v = props[k]
+        ok = _fits(v, dv) and not (k in _SHARES and not (0 <= v <= 1))
+        if ok:
+            out[k] = v
+        elif _STATE.setdefault("warned", {}).get(k) != repr(v):
+            _STATE["warned"][k] = repr(v)
+            _LOG.warning("recall dial %s=%r doesn't fit (default %r): using the default", k, v, dv)
+    return out
+
+
 def dials() -> dict:
     est = _STATE["est"]
     d = (getattr(est, "docs", None) or {}).get(DIALS_EID) if est is not None else None
-    return d.properties if d is not None else _defaults()
+    return _merged(d.properties or {}) if d is not None else _defaults()
 
 
 # ---- the methods (R1, R5, R6, R7, R9, R14-R20 policy parts) ---------------------------------------------
