@@ -4655,7 +4655,7 @@ def _apply_entity_update(srv, ent, out: dict, trigger: str,
     # the shape of ongoing work may propose the direction, the ENGINE
     # plants. Honest refusal when the goal layer is unmounted.
     if out.get("intent"):
-        intent_text = str(out["intent"])[:400].strip()
+        intent_text = str(out["intent"])[:20000].strip()
         board = getattr(srv, "_intent_board", None)
         if not intent_text or board is None:
             out["intent_result"] = {"ok": False,

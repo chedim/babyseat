@@ -322,7 +322,7 @@ def apply_plan(srv, goal: str, plan) -> dict:
         eid = keys[str(t["key"])]
         d = (est.docs or {}).get(eid)
         p = {"name": str(t.get("title") or t["key"])[:120], "title": str(t.get("title") or t["key"])[:200],
-             "detail": str(t.get("detail") or "")[:2000], "goal": goal, "plan_key": str(t["key"])}
+             "detail": str(t.get("detail") or "")[:20000], "goal": goal, "plan_key": str(t["key"])}
         if d is None:
             est.upsert(QuantumEntity(eid=eid, cls=TASK, properties={**p, "status": OPEN, "blocks": [],
                                                                     "silent_birth": True}), embedder=None)
@@ -817,14 +817,14 @@ def planner_text(est, goal: str, why: str) -> str:
     g = (est.docs or {}).get(goal)
     p = (g.properties or {}) if g is not None else {}
     text = p.get("text") or p.get("summary") or p.get("name") or goal
-    return PLANNER_TEXT.format(goal=goal, text=str(text)[:1200], why=str(why)[:400], graph=_graph_lines(est, goal),
+    return PLANNER_TEXT.format(goal=goal, text=str(text)[:20000], why=str(why)[:400], graph=_graph_lines(est, goal),
                                tick_s=WAIT_TICK_S)
 
 
 def worker_text(est, task: str) -> str:
     d = (est.docs or {}).get(task)
     p = (d.properties or {}) if d is not None else {}
-    done = [f"{b.eid}: {str((b.properties or {}).get('receipt') or (b.properties or {}).get('value') or '')[:160]}"
+    done = [f"{b.eid}: {str((b.properties or {}).get('receipt') or (b.properties or {}).get('value') or '')[:1200]}"
             for b in _blockers_of(est, task)]
     text = WORKER_TEXT.format(task=task, goal=p.get("goal"), title=p.get("title") or task,
                               detail=p.get("detail") or "", done="; ".join(done) or "nothing")

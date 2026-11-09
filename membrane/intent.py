@@ -151,7 +151,7 @@ class IntentBoard:
                 continue
             slug = _hashlib.sha256(text.lower().encode()).hexdigest()[:12]
             eid = f"{MEMBRANE_NS}goal:{slug}"
-            props = {"name": text[:120], "summary": text[:600],
+            props = {"name": text[:120], "summary": text[:600], "text": text,
                      "status": ("fulfilled" if i.status == "fulfilled"
                                 else "open"),
                      "born": i.created or time.time()}

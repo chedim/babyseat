@@ -1674,7 +1674,7 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = "",
         eid = f"{MEMBRANE_NS}goal:{slug}"
         goal = QuantumEntity(
             eid=eid, cls=CLASS_GOAL,
-            properties={"name": (text or "")[:120], "summary": (text or "")[:600],
+            properties={"name": (text or "")[:120], "summary": (text or "")[:600], "text": text or "",
                         "status": "open", "born": time.time(),
                         # outcome learning: whose goal (operator / auto / loop / model / script:x)
                         "planted_by": planted_by or "model",
