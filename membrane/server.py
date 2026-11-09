@@ -164,15 +164,47 @@ def _is_op(owner) -> bool:
     return owner == OWNER_SUB or owner in OPERATOR_SUBS or (bool(_op_name()) and owner == _op_name())
 
 
-def boot_migrate_one_chat(sessions, env=None) -> None:
-    """#770 one-time boot migration, configured not hardcoded: the chat named by
-    MEMBRANE_OPERATOR_CHAT (a session id) becomes MEMBRANE_OPERATOR's (default
-    the seat owner) one chat; their other chats go readonly. No chat named:
-    nothing moves."""
+def _said(messages, sid) -> int:
+    try:
+        return len(messages.list(sid)) if messages is not None else 0
+    except Exception:
+        return 0
+
+
+def _real_first(rows, messages):
+    """#966: the real chat (one with words in it) outranks any empty one, newer or not."""
+    def key(x):
+        t = x.get("time") or {}
+        return (_said(messages, x.get("id")) > 0, t.get("updated") or t.get("created") or 0)
+    return sorted(rows, key=key)
+
+
+def boot_migrate_one_chat(sessions, env=None, messages=None) -> None:
+    """#770/#966 boot migration: owner, MEMBRANE_OPERATOR and the operator's token subs are
+    ONE person. MEMBRANE_OPERATOR_CHAT (a session id) names their chat; without it the
+    real (non-empty, then latest) live chat of that person is kept. Their other chats go
+    readonly, so a later cold start holds. Other people's chats are left alone."""
     env = os.environ if env is None else env
+    op = str(env.get("MEMBRANE_OPERATOR") or "").strip()
+    op = "" if op in ("0", "1", "false", "true") else op
+    me = op or OWNER_SUB
+    ids = {OWNER_SUB, me} | set(OPERATOR_SUBS)
     keep = str(env.get("MEMBRANE_OPERATOR_CHAT") or "").strip()
-    if keep:
-        migrate_one_chat(sessions, keep, str(env.get("MEMBRANE_OPERATOR") or OWNER_SUB))
+    with sessions._lock:
+        if not keep or keep not in sessions.sessions:
+            mine = [s for s in sessions.sessions.values()
+                    if str(s.get("owner") or "") in ids and not s.get("readonly")
+                    and not s.get("parentID")]
+            if not mine:
+                return
+            keep = _real_first(mine, messages)[-1]["id"]
+        k = sessions.sessions[keep]
+        k["owner"] = me
+        k.pop("readonly", None)
+        for sid, s in sessions.sessions.items():
+            if sid != keep and str(s.get("owner") or "") in ids and not s.get("parentID"):
+                s["readonly"] = True
+    sessions.flush()
 
 
 def _migrated_name(path: str) -> str:
@@ -4743,7 +4775,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                                  or (_is_op(x.get("owner")) and _is_op(_me)))     # one operator (#842)
                              and not x.get("readonly") and not x.get("parentID")]
                     if _mine:
-                        return self._json_out(_mine[-1])
+                        return self._json_out(_real_first(_mine, messages)[-1])
                 s = sessions.create(title=b.get("title"),
                                     parent_id=b.get("parentID"))
                 _who = self._jwt_person()
