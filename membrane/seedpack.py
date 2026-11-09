@@ -72,6 +72,13 @@ def load(est, pack: dict, release: bool = False) -> dict:
             out["installed"] += 1
         else:
             cur = d.properties
+            if eid not in base:
+                # no ledger entry (first boot after upgrade): the seat's current values are the
+                # baseline; leave them alone rather than reading every edit as stale
+                base[eid] = {k: copy.deepcopy(cur[k]) for k in new if k in cur}
+                for k, v in new.items():
+                    cur.setdefault(k, copy.deepcopy(v))
+                continue
             old = base.get(eid) or new
             edited = {k: copy.deepcopy(cur[k]) for k in new
                       if k in cur and cur[k] != new[k] and cur[k] != old.get(k)}

@@ -114,3 +114,13 @@ def test_banner_rules_ship_as_a_pack_and_an_edit_is_not_stranded():
     SP.load(est, pk, release=True)
     assert est.docs[eid].properties["show"] == GB.SEED[0]["show"]
     assert SP.overlays(est, "banner")[0]["properties"]["show"] == "edited"
+
+
+def test_first_boot_without_ledger_keeps_seat_edit():
+    est = _est()
+    SP.load(est, _pack(1, "a"))
+    est.docs[E].properties["show"] = "operator edit"
+    est.docs.pop(SP._led_eid("t"))           # upgrade: the seat has no ledger yet
+    SP.load(est, _pack(2, "b"))
+    assert est.docs[E].properties["show"] == "operator edit"
+    assert SP._ledger(est, "t")["base"][E]["show"] == "operator edit"

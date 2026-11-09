@@ -161,10 +161,13 @@ def score(feat: dict, weights: dict) -> float:
 def rank(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True) -> list[dict]:
     """The pool, best first: the policy (weights choice, rerank depth) is the field's (recall_policy, #980);
     the old path runs when the field method fails."""
+    from . import recall_policy as RPO
+    if RPO.native_only():
+        return _rank_native(rows, text, weights, rerank)
     try:
-        from . import recall_policy as RPO
         return _rank_policy(rows, text, weights, rerank, RPO)
-    except Exception:
+    except Exception as e:
+        RPO.fell_back("rank", e)
         return _rank_native(rows, text, weights, rerank)
 
 
@@ -280,11 +283,14 @@ def history_texts(field, session: str, text: str, n: int = HISTORY_TURNS) -> lis
 def pick(rows: list[dict], text: str, n: int | None = BANNER_N, skip=(), weights: dict | None = None,
          ranked: list[dict] | None = None) -> list[dict]:
     """The banner rows (policy: the field's, #980; the old path on failure)."""
+    from . import recall_policy as RPO
+    if RPO.native_only():
+        return _pick_native(rows, text, BANNER_N if n is None else n, skip, weights, ranked)
     try:
-        from . import recall_policy as RPO
         return RPO.call("select", ranked if ranked is not None else rank(rows, text, weights), text, n, skip,
                         fact_line, _sig, _alike)
-    except Exception:
+    except Exception as e:
+        RPO.fell_back("pick", e)
         return _pick_native(rows, text, BANNER_N if n is None else n, skip, weights, ranked)
 
 
@@ -361,10 +367,13 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
 
 
 def render(lines: list[str]) -> str | None:
+    from . import recall_policy as RPO
+    if RPO.native_only():
+        return _render_native(lines)
     try:
-        from . import recall_policy as RPO
         return RPO.call("render", lines)
-    except Exception:
+    except Exception as e:
+        RPO.fell_back("render", e)
         return _render_native(lines)
 
 

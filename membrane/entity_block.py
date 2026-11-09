@@ -497,10 +497,13 @@ def _machine(field, d: dict) -> bool:
 
 def rrf(lists, key) -> list[tuple[dict, float]]:
     """Fusion by the field's recall policy (#980); the old path when it fails."""
+    from . import recall_policy as RPO
+    if RPO.native_only():
+        return _rrf_native(lists, key)
     try:
-        from . import recall_policy as RPO
         return RPO.call("fuse", lists, key)
-    except Exception:
+    except Exception as e:
+        RPO.fell_back("rrf", e)
         return _rrf_native(lists, key)
 
 
@@ -827,10 +830,14 @@ def recall_answers(field, text: str, qvec=None, k: int = 3,
         asks = past_answers(field, text, qv, k=min(k, ASK_K), sim_min=sim_min)
         direct = direct_answers(field, text, qv, k=k, sim_min=sim_min)
         tool_fn = globals().get("tool_answers")
+        from . import recall_policy as RPO
         try:                                     # lane choice is the field's (#980); the old rule on failure
-            from . import recall_policy as RPO
+            if RPO.native_only():
+                raise RuntimeError("MEMBRANE_RECALL_NATIVE")
             tool_lane = RPO.call("lanes", question, True)["tool"]
-        except Exception:
+        except Exception as e:
+            if not RPO.native_only():
+                RPO.fell_back("lanes", e)
             tool_lane = question
         tools = (tool_fn(field, text, qv, k=min(k, globals().get("TOOL_HITS_MAX", k)),
                          sim_min=sim_min) if tool_fn and tool_lane else [])
