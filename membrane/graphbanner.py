@@ -185,7 +185,7 @@ def _fill(est, show: str, b: dict) -> str:
 def walk(srv, sid: str) -> list[tuple]:
     """This chat's graph-walk lines with where each came from: [(rule eid, show template, line)],
     every rule's, in order, unique, at most LINES."""
-    from .ch import VM
+    from .ch import PyVM as VM            # its binding helper with this module's atoms (Python-only, #971)
     est = getattr(srv, "entity_store", None)
     if est is None or not sid:
         return []

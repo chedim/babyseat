@@ -250,7 +250,8 @@ changes since the last message), `learn` to keep a lesson (with the same guards 
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
 where it came from. The VM's surface (writes, store, triggers, effects) and the replay test a
-native VM must pass are in [the VM's API](docs/vm-api.md) (#971).
+native VM must pass are in [the VM's API](docs/vm-api.md) (#971). A native (Rust) VM is in `native/`:
+build it with `native/build.sh` and switch a seat to it with `MEMBRANE_NATIVE_VM=1`.
 
 **Two advisory checks run on every turn:** the **gate** compares the answer
 with the nearest past one (shadow by default), and the **[membrane]

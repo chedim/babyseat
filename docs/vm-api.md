@@ -92,7 +92,36 @@ A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebu
   `trigger:*` writes, in order. The final state must match too. A native VM passes the
   same test on the same journals (`tests/test_journal_971.py`).
 
-## 6. Gaps found while writing this down
+## 6. The native VM (`native/`, `membrane/ch_native.py`, #971 step 3)
+
+A Rust core (PyO3) behind `ch.VM`'s API. `ch.make_vm()` returns it when `MEMBRANE_NATIVE_VM=1` and the
+extension is built (`native/build.sh` puts `membrane/membrane_vm.so` in place); otherwise it returns
+`ch.VM`, and says so when the switch is on but the extension is missing. The seat builds its VM
+through `make_vm`.
+
+- **In Rust:** the expression language (its own parser, with Python's semantics and `ast.walk`'s
+  node count), a mirror of the field kept from its writes, the triggers' index, WHERE bindings,
+  WHEN watchers with per-binding state, the loop rule, and self's chain rule.
+- **In Python:**
+  - `define` and `_validate`;
+  - writing a firing (`_writable`, `_call_envelope`, the position check, the upsert);
+  - Blurp's learner hooks (`observe`, `on_fire`, `landed`);
+  - the lookups that follow the store's spelling rules, as callbacks: resolving a spec,
+    `dispatches`, `vel` and `align`.
+- **Firing order:** the drain is resumable. `step` returns one firing, the wrapper applies it,
+  and the write comes back through the listener. So a later trigger on the same write reads what
+  an earlier one wrote, as in ch.py.
+- **Things changed in place, with no write:** a sweep re-reads the live store into the mirror
+  first, because ch.py reads the live store. A drain sees only what was written.
+- **The contract:**
+  - `tests/test_ch_native_971.py`: a journal recorded with ch.VM replays identically through the
+    native VM, and the expression language matches ch.py's.
+  - Every VM suite (`test_ch_576`, `test_ch_index_956`, `test_ch_calls_956`, the Blurp suites, …)
+    runs against the native VM with `MEMBRANE_NATIVE_VM=1` (the switch in `tests/conftest.py`).
+  - The index tests read the native VM's trace (`vm.trace`) where they spied on
+    `ch.VM._on_write`.
+
+## 7. Gaps found while writing this down
 
 1. **No write journal on the seats yet.** `journal.py` exists but no seat opens one, so
    there are no real journals to replay. Opening one on a live seat needs the

@@ -99,3 +99,16 @@ def _seat_credential(request, monkeypatch):
 
     monkeypatch.setattr(hc.HTTPConnection, "request", request_)
     yield
+
+
+# #971: MEMBRANE_NATIVE_VM=1 runs every test that builds a ch.VM against the native (Rust) VM instead --
+# the same suites are its contract. Skipped quietly when the extension is not built.
+if os.environ.get("MEMBRANE_NATIVE_VM", "").strip() == "1":
+    try:
+        import sys as _sys
+        _sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from membrane import ch as _ch
+        from membrane import ch_native as _chn
+        _ch.VM = _chn.NativeVM
+    except ImportError:
+        pass

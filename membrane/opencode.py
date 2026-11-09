@@ -1741,7 +1741,7 @@ def main() -> None:
         try:                               # #576 B: the cliffhanger VM hears every write
             from . import ch as _CH
             if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
-                srv.ch_vm = _CH.VM(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))
+                srv.ch_vm = _CH.make_vm(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))   # #971
                 srv.ch_vm.attach()
                 srv.ch_vm.start()
                 from . import ch_blurp as _CHB    # #576 D2: Blurp's learner, its purse closed until Blurp reports

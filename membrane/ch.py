@@ -960,3 +960,21 @@ class VM:
     def report(self) -> dict:
         return {"triggers": len(self.triggers()), "queued": len(self._q), "dropped": self.dropped,
                 "fired": dict(self.fired), "refused": dict(self.refused), "errors": dict(self.errors)}
+
+
+PyVM = VM                           # this module's VM by a name nothing swaps (graphbanner binds with Python atoms)
+NATIVE_ENV = "MEMBRANE_NATIVE_VM"   # #971: 1 = the native (Rust) VM, when its extension is built
+
+
+def make_vm(est, **kw):
+    """The seat's VM: the native one when MEMBRANE_NATIVE_VM=1 and the extension is built (native/build.sh),
+    else this module's. A missing extension is said, never silent."""
+    if os.environ.get(NATIVE_ENV, "").strip() == "1":
+        try:
+            from .ch_native import NativeVM
+            return NativeVM(est, **kw)
+        except ImportError as e:
+            import sys
+            print(f"[ch] {NATIVE_ENV}=1 but the native VM is not built ({e}); using the Python VM", file=sys.stderr)
+    return VM(est, **kw)
+
