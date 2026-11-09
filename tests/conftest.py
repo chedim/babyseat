@@ -121,3 +121,20 @@ if os.environ.get("MEMBRANE_NATIVE_VM", "").strip() == "1":
         _ch.VM = _chn.NativeVM
     except ImportError:
         pass
+
+
+# Native VM runs leave daemon threads (watchers/ticks) alive; at interpreter finalization CPython can abort
+# ("_enter_buffered_busy ... daemon threads", exit 134) AFTER every test passed. Under the native VM, flush and
+# leave with pytest's own status before finalization starts.
+def pytest_unconfigure(config):
+    if os.environ.get("MEMBRANE_NATIVE_VM", "").strip() == "1":
+        import sys as _s
+        try:
+            _s.stdout.flush(); _s.stderr.flush()
+        except Exception:
+            pass
+        os._exit(int(getattr(config, "_membrane_exit", 0) or 0))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    session.config._membrane_exit = int(exitstatus)
