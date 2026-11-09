@@ -1467,40 +1467,7 @@ def mine_idle_artifacts(fld, est, mem=None, now=None,
 # re-read a bounded window around the span, and report whether the verbatim
 # ``definition`` still appears there -- a changed source surfaces as drift
 # instead of silent belief.
-_CONCEPT_DRIFT_GETTER = '''\
-props = state.get("properties") or {}
-defined_in = props.get("defined_in") or {}
-definition = str(props.get("definition") or "")
-path = str(defined_in.get("file") or "")
-line = defined_in.get("line")
-if not path:
-    result = {"state": {"drift": None, "error": "no defined_in.file",
-                        "definition": definition,
-                        "checked_at": state.get("now")}}
-else:
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as _fh:
-            lines = _fh.read().splitlines()
-    except OSError as _e:
-        result = {"state": {"drift": None,
-                            "error": "%s: %s" % (type(_e).__name__, _e)[:200],
-                            "definition": definition,
-                            "checked_at": state.get("now")}}
-    else:
-        start, end = 0, len(lines)
-        if line is not None:
-            try:
-                start = max(0, int(line) - 1)
-                end = min(len(lines), start + 8)
-            except (TypeError, ValueError):
-                pass
-        window = " ".join(" ".join(lines[start:end]).split())
-        norm = " ".join(definition.split())
-        result = {"state": {"drift": bool(norm) and norm not in window,
-                            "current": window[:400],
-                            "definition": definition,
-                            "checked_at": state.get("now")}}
-'''
+from .seedscripts import CONCEPT_DRIFT_GETTER as _CONCEPT_DRIFT_GETTER
 
 
 def concept_entity(est, spec, name, definition, line=None,
@@ -3741,12 +3708,7 @@ _SCRIPT_COOLDOWN_WATCH_S = 5.0
 # tick_script fires on the thinker's heartbeat -- its default script
 # prints the current time (the render) and stores it as `last_tick`
 # (the last output survives on the doc, across restarts).
-DEFAULT_CLOCK_TICK_SCRIPT = (
-    "import time as _t\n"
-    "now = _t.strftime('%H:%M:%S')\n"
-    "result = {'render': 'clock ' + now, "
-    "'patch': {'script_data': {'last_tick': now}}}"
-)
+from .seedscripts import CLOCK_TICK_SCRIPT as DEFAULT_CLOCK_TICK_SCRIPT
 
 
 def seed_clock_entity(est) -> bool:

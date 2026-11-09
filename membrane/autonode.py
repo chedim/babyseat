@@ -602,17 +602,7 @@ class Autonode:
 
 # ---- the seeded template ----------------------------------------------------
 
-DEFAULT_FILETREE_WATCH_SCRIPT = (
-    "import time as _t\n"
-    "x = state.get('extra') or {}\n"
-    "py = x.get('payload') or {}\n"
-    "ev = py.get('event') or x.get('kind') or '?'\n"
-    "pth = py.get('path') or py.get('topic') or py.get('name') or ''\n"
-    "result = {'render': 'filetree: ' + str(ev) + ' ' + str(pth),\n"
-    "          'patch': {'script_data': {'last_change': {'event': str(ev),\n"
-    "                                                  'path': str(pth),\n"
-    "                                                  'ts': _t.time()}}}}"
-)
+from .seedscripts import FILETREE_WATCH_SCRIPT as DEFAULT_FILETREE_WATCH_SCRIPT
 
 
 # The default shipped before #597: it patched `last_change` at the top level,

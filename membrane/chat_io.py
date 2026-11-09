@@ -64,9 +64,7 @@ _BLURP_LOCK = threading.Lock()    # #337: one private chat per person, even when
 _MIGRATE_LOCK = threading.RLock()
 _SAY_LOCK = threading.RLock()     # #576 part E: one post per `say`, whoever reads it first
 
-_GETTER = (
-    "result = {'state': {'heard_n': int(membrane.me.properties.get('heard_n') or 0)}}"
-)
+from .seedscripts import CHAT_IO_GETTER as _GETTER
 FROM_IN = ("heard", "heard_n", "heard_ts", "session")     # the migration: what chat:in carries over
 FROM_OUT = ("on", "say", "said")                           # ...and chat:out
 
