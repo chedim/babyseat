@@ -326,6 +326,7 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
 - **The VM.**
   - It hears every write (part A) and only queues it.
   - One worker thread drains the queue: the `changed` triggers on the written path, and level triggers re-read for every variable the written entity can bind.
+  - **Indexed by property (#956 stage 1):** a write on `<eid>.<prop>` visits only the `changed` triggers watching `<prop>` (plus every level trigger; `every` triggers are the sweep's). The index is rebuilt only when a trigger entity is written. With 1,000 `changed` triggers a write costs about 0.1 ms instead of about 11 ms.
   - The same worker runs the sweeps the thinker requests (`request_sweep`) for the geometric and timed watchers. All evaluation happens on one thread, under one lock.
   - One failing trigger never stops the others (`vm.errors`), and nothing runs while the seat is paused.
   - A firing writes through the store as `trigger:<eid>`, in the chain that caused it. A sweep starts a fresh chain per firing.
@@ -335,6 +336,27 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
   - Self's ownership is **signed** by `define`: an HMAC under a key file beside the store (`.ch-key`, mode 0600, never an entity). A trigger that merely says `owner = self` is not self's and falls under the loop rule.
   - The entity API never edits a trigger, and only this seat's triggers run; an imported one never does.
   - A chain arriving over the relay cannot claim `self`.
+
+## Calls are writes (#956, stage 2)
+
+A call is a write of a request to the object's call path: `<obj>.call:<method> = {id, args}`.
+
+- **Dispatch:** each method's dispatch trigger watches the call path of the objects it serves:
+  `WHEN changed(?x.call:<m>) WHERE dispatches(?x, <m>, <method eid>): <method eid>.invoke = {'object': x.eid, 'call': 'call:<m>', 'request': new}`.
+  `dispatches` is a binder that holds only for the method `resolve_method` picks for that entity (own, then
+  classes, then global), so exactly one method's trigger matches a call. (Stage 5 defines these triggers for
+  every method; until then a dispatch trigger is defined by hand.)
+- **The request comes from the event:** a `changed` trigger's write reads the written value as `new` and the
+  one it replaced as `old` (the spec's `$THIS` / `$OLD`), so two quick calls never read each other's request.
+  `prop(x, 'call:m')` reads a property whose name isn't an identifier.
+- **The method runs exactly once, as given:** the `invoke` adapter runs that method entity (no second lookup by
+  name) and leaves the receipt on the object, with the request's id: `<obj>.call:<m>_result =
+  {id, status, rc, head[, result]}` and `<obj>.call:<m>_rc`. One slot per call path: a writer that wants its
+  own receipt checks the id.
+- **Refused, with a receipt:** a request that isn't `{id, args}`; secret-named args (a written call's args are
+  stored, so a secret can't be both redacted and used); a call on the executor (as on the model's route).
+- **Method names:** a name with `.`, or ending in `_result` / `_rc`, is refused at define (they would collide
+  with call paths and receipts).
 
 ## Program the field first (#576, part F)
 

@@ -55,13 +55,17 @@ class TestScorer(unittest.TestCase):
         self.assertEqual(RB.load_weights(f), RB.DEFAULT_WEIGHTS)
         RB.save_weights(f, {**RB.DEFAULT_WEIGHTS, "overlap": 5.0})
         self.assertEqual(RB.load_weights(f)["overlap"], 5.0)
-        got = RB.rank(self.rows(), "what did Caroline adopt?", RB.load_weights(f))
+        # #942: saved weights apply to rows the reply models scored (rows without those scores take the
+        # pre-#942 pair, fitted without them)
+        scored = [dict(r, listener=0.0, said=0.0, about=0.0) for r in self.rows()]
+        got = RB.rank(scored, "what did Caroline adopt?", RB.load_weights(f))
         self.assertEqual(got[0]["a_n"][0], 5)       # word overlap now outweighs raw cosine
 
     def test_speaker_match_feature(self):
         rows = [{"sim": 0.8, "answer": ["I painted a lake."], "a_n": [1], "q_n": 1, "speaker": "Melanie"},
                 {"sim": 0.8, "answer": ["I painted a lake."], "a_n": [2], "q_n": 2, "speaker": "Caroline"}]
         w = {**RB.DEFAULT_WEIGHTS, "speaker": 2.0}
+        rows = [dict(r, listener=0.0, said=0.0, about=0.0) for r in rows]   # #942: rows the reply models scored
         self.assertEqual(RB.rank(rows, "what did Caroline paint?", w)[0]["a_n"][0], 2)
 
     def test_speaker_comes_from_the_events_own_speaker_slot(self):

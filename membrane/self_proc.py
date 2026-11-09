@@ -39,6 +39,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+
+from . import seatauth as _seatauth
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -77,7 +79,7 @@ class SeatClient:
 
     def _call(self, path: str, body=None) -> dict:
         from . import jwtauth as J
-        h = {"Content-Type": "application/json", **J.client_headers()}
+        h = {"Content-Type": "application/json", **_seatauth.loopback_headers(J.client_headers())}
         data = None if body is None else json.dumps(body).encode()
         req = urllib.request.Request(self.url + path, data=data, headers=h,
                                      method="GET" if body is None else "POST")
@@ -235,6 +237,10 @@ def _handler(fac: Facade):
             ident = getattr(self, "_identity", None)
             if ident is not None and not ident.internal:
                 self._out({"error": "for the seat's own token"}, 403)
+                return False
+            # B3 (#842): no address is a credential. JWT off, the writes (/control,
+            # /chat-in, /reach) need the seat token; JWT on, J.gate above was the door.
+            if self.command == "POST" and not _seatauth.gate(self, True):
                 return False
             return True
 

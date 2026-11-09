@@ -84,7 +84,8 @@ class TestRelay(unittest.TestCase):
         self.serve = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=self.serve.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.serve.server_address[1]}"
-        self.auth = {"Authorization": "Basic " + base64.b64encode(b"u:p").decode()}
+        from membrane import seatauth
+        self.auth = {"Authorization": "Bearer " + seatauth.ensure()}
 
     def tearDown(self):
         self.serve.shutdown()

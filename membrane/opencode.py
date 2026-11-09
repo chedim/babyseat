@@ -410,7 +410,7 @@ def proxy_bind_host(args) -> str:
     --listen-host / MEMBRANE_LISTEN_HOST bind it back to 127.0.0.1. Reads
     are open on the LAN; an off-box caller's writes (the field, entities,
     scripts, methods, models, /v1 and Ollama turns) need the seat token or,
-    in JWT mode, a JWT (#253, seatauth.py); localhost needs nothing."""
+    in JWT mode, a JWT (#253, seatauth.py); localhost needs it too."""
     return (getattr(args, "listen_host", None)
             or os.environ.get("MEMBRANE_LISTEN_HOST") or "0.0.0.0")
 
@@ -1079,6 +1079,10 @@ def main() -> None:
             from .efield import EntityField
             from .efstore import open_backend
             from .substrate import _origin_tag
+            from . import storekind as _SK          # #971: a new seat's first start asks which store
+            from .substrate import _is_lab_field_path as _lab
+            if not _lab(args.field):
+                _SK.ensure_chosen(args.field)
             be = open_backend(args.field)
             srv.efield = EntityField(
                 be, LazyEmbedder(mem),
@@ -1741,7 +1745,7 @@ def main() -> None:
         try:                               # #576 B: the cliffhanger VM hears every write
             from . import ch as _CH
             if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
-                srv.ch_vm = _CH.VM(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))
+                srv.ch_vm = _CH.make_vm(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))   # #971
                 srv.ch_vm.attach()
                 srv.ch_vm.start()
                 from . import ch_blurp as _CHB    # #576 D2: Blurp's learner, its purse closed until Blurp reports

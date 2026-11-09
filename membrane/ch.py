@@ -114,6 +114,8 @@ BUILTINS = {
     "distance": _dist,
     "unit": _unit,
     "abs": abs, "min": min, "max": max,
+    # #956: a property whose name is not an identifier (a call path, `call:<method>`)
+    "prop": lambda e, name: e.get(str(name)) if isinstance(e, EntityView) else None,
 }
 _NAMES = {"True": True, "False": False, "None": None}
 _PY = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
@@ -302,12 +304,31 @@ def _writable_inner(v, _depth: int = 3):
         return v
     if isinstance(v, list) and all(isinstance(x, (int, float)) and not isinstance(x, bool)
                                    and math.isfinite(float(x)) for x in v):
-        return [float(x) for x in v]
+        return list(v)                               # ints stay ints (Memo's review of #959)
     if isinstance(v, dict) and all(isinstance(k, str) for k in v) and _depth > 0:
         return {k: _writable_inner(x, _depth - 1) for k, x in v.items()}      # a call's arguments
     if isinstance(v, list) and _depth > 0:
         return [_writable_inner(x, _depth - 1) for x in v]
     raise Refused(f"cannot write a {type(v).__name__}")
+
+
+def _call_envelope(v: dict) -> dict:
+    """#956: a dispatch trigger's `<method>.invoke = {object, call, request}`. The envelope is not part
+    of the call's arguments, so it doesn't use their depth: object/call are scalars, and the request's
+    own fields get the full depth. A request that can't be written is not dropped into vm.errors (its
+    caller would wait on the id forever): it goes on as `{id, refused}` and the adapter leaves the
+    refusal's receipt."""
+    out = {k: _writable(x, 0) for k, x in v.items() if k != "request"}
+    req = v.get("request")
+    if isinstance(req, dict):
+        try:
+            req = {k: _writable(x) for k, x in req.items()}
+        except Refused as e:
+            req = {"id": str(req.get("id") or ""), "refused": str(e)}
+    else:
+        req = _writable(req, 0)
+    out["request"] = req
+    return out
 
 
 # ---- definitions -----------------------------------------------------------------------------
@@ -340,8 +361,14 @@ def _validate(when, where, write) -> dict:
         raise Refused("write is [target, expression]")
     bound = set()
     for a in where:
-        if not isinstance(a, (list, tuple)) or not a or a[0] not in ("isa", "is", "filter"):
-            raise Refused(f"unknown pattern atom {a!r} (isa, is, filter)")
+        if not isinstance(a, (list, tuple)) or not a or a[0] not in ("isa", "is", "filter", "dispatches"):
+            raise Refused(f"unknown pattern atom {a!r} (isa, is, filter, dispatches)")
+        if a[0] == "dispatches":                     # #956: dispatches(?x, <method>, <method eid>)
+            v = _var(a[1]) if len(a) == 4 else None
+            if not v:
+                raise Refused(f"dispatches binds a ?variable: dispatches(?x, method, method eid): {a!r}")
+            bound.add(v)
+            continue
         if a[0] in ("isa", "is"):
             v = _var(a[1]) if len(a) > 2 else None
             if not v:
@@ -378,7 +405,9 @@ def _validate(when, where, write) -> dict:
     v = _var(head)
     if v and v not in bound:
         raise Refused(f"?{v} is bound by nothing (WHERE isa/is)")
-    _check(_parse(expr), bound)
+    # #956: a changed trigger's write reads the written value as `new` and the one it replaced as `old`
+    # (the spec's $THIS / $OLD), from the event -- so two quick writes never read each other's value
+    _check(_parse(expr), bound | ({"new", "old"} if any(a[0] == "changed" for a in when) else set()))
     return {"when": [list(a) for a in when], "where": [list(a) for a in where],
             "write": [str(tgt), str(expr)]}
 
@@ -441,6 +470,7 @@ class VM:
         self._state: dict[str, dict] = {}         # trigger -> binding -> {lv, every, stamp, within}
         self._thread = None
         self._trig: tuple | None = None            # (version, eids)
+        self._index: tuple | None = None           # #956: (fingerprint, changed-by-prop, level)
         self._trig_v = 0
         self._spec: dict[str, tuple] = {}          # trigger -> (definition fingerprint, spec or None)
         self._seq = itertools.count()
@@ -518,6 +548,41 @@ class VM:
         docs = self.est.docs or {}
         return [docs[e] for e in hit[1] if e in docs]
 
+    def _relevant(self, prop: str) -> list:
+        """#956 stage 1: the triggers a write on <eid>.<prop> can concern, in definition order (a
+        firing writes at once, so a later trigger on the same write reads what an earlier one
+        wrote, as before the index):
+        - the `changed` triggers watching <prop> (the watched path's last segment, as _on_write
+          reads it);
+        - every level trigger (any write can change their bindings);
+        - every trigger with a `pos` or `around` atom: they are pulses whose per-binding state
+          advances each time they are evaluated, and before the index every write evaluated them.
+        `every` triggers are the sweep's. Rebuilt when a trigger entity is written through the
+        store (the VM's trigger version); a definition edited in place without a store write is
+        not seen until then."""
+        trs = self.triggers()
+        fp = self._trig[0] if self._trig else None   # bumped on every write to a trigger entity
+        idx = self._index
+        if idx is None or idx[0] != fp:
+            by_prop: dict[str, set] = {}
+            always: set = set()
+            for t in trs:
+                spec = self._valid(t)
+                if spec is None:
+                    continue
+                kinds = {a[0] for a in spec["when"]}
+                if "every" in kinds:
+                    continue
+                if "changed" in kinds and not kinds & {"pos", "around"}:
+                    a = next(a for a in spec["when"] if a[0] == "changed")
+                    by_prop.setdefault(str(a[1]).rpartition(".")[2], set()).add(t.eid)
+                else:
+                    always.add(t.eid)
+            idx = (fp, by_prop, always)
+            self._index = idx
+        want = idx[2] | idx[1].get(prop, set())
+        return [t for t in trs if t.eid in want]          # definition order, as triggers() lists them
+
     def _valid(self, tr) -> dict | None:
         """A trigger's spec, validated when first used or changed -- an entity of class
         Trigger made any other way is checked like a definition."""
@@ -555,10 +620,26 @@ class VM:
         e = self.est.resolve(ref, exact=True) if hasattr(self.est, "resolve") else None
         return e.eid if e is not None else None
 
+    def _dispatches(self, ent, atom, memo) -> bool:
+        """#956: is `atom[3]` the method resolve_method picks for this entity under the name atom[2]
+        (own -> classes -> global)? Exactly one method's dispatch trigger then matches a call."""
+        key = ("disp", ent.eid, str(atom[2]))
+        if key not in memo:
+            from .night import resolve_method
+            try:
+                m, _via = resolve_method(self.est, ent, str(atom[2]))
+            except Exception:                        # noqa: BLE001 -- a lookup failing binds nothing
+                m = None
+            memo[key] = m.eid if m is not None else None
+        return memo[key] == str(atom[3])
+
     def _candidates(self, atom, memo) -> list[str]:
         if atom[0] == "is":
             e = self._lookup(atom[2])
             return [e] if e else []
+        if atom[0] == "dispatches":                  # a sweep's binding: every entity it dispatches for
+            return [eid for eid, e in list((self.est.docs or {}).items())
+                    if e.cls != CLASS and self._dispatches(e, atom, memo)]
         key = ("cands", str(atom[2]).lower())
         if key not in memo:
             memo[key] = [eid for eid, e in list((self.est.docs or {}).items())
@@ -575,7 +656,7 @@ class VM:
             if atoms and a[0] in atoms:
                 out = atoms[a[0]](a, out)
                 continue
-            if a[0] not in ("isa", "is"):
+            if a[0] not in ("isa", "is", "dispatches"):
                 continue
             v = _var(a[1])
             nxt = []
@@ -583,6 +664,7 @@ class VM:
                 if v in b:
                     ent = (self.est.docs or {}).get(b[v])
                     if ent is not None and (ent.eid in self._candidates(a, memo) if a[0] == "is"
+                                            else self._dispatches(ent, a, memo) if a[0] == "dispatches"
                                             else self._isa(ent, a[2], memo)):
                         nxt.append(b)
                 else:
@@ -666,6 +748,8 @@ class VM:
         key = json.dumps(binding, sort_keys=True)
         st = self._state.setdefault(tr.eid, {}).setdefault(key, {})
         env = self._env(binding)
+        if event is not None:                            # #956: the written value, from the event itself
+            env["new"], env["old"] = event.get("new"), event.get("old")
         ev_atoms = [a for a in spec["when"] if a[0] in EVENT_VERBS]
         lv = [self._level(x, binding, env, st, now) for x in spec["when"] if x[0] in LEVEL_VERBS]   # every atom
         level = all(lv)
@@ -714,7 +798,9 @@ class VM:
             self.errors[tr.eid] = f"no target {tgt!r}"
             return
         try:
-            value = _writable(evaluate(expr, env))
+            value = evaluate(expr, env)
+            value = (_call_envelope(value) if prop == "invoke" and isinstance(value, dict) and "request" in value
+                     else _writable(value))
             if prop == "position" and (not isinstance(value, list) or
                                        (ent.position is not None and len(value) != len(ent.position))):
                 raise Refused("a position is a list of the field's dimension")
@@ -761,6 +847,8 @@ class VM:
                 out.append(_var(a[1]))
             elif a[0] == "isa" and self._isa(ent, a[2], memo):
                 out.append(_var(a[1]))
+            elif a[0] == "dispatches" and self._dispatches(ent, a, memo):
+                out.append(_var(a[1]))
         return [v for v in out if v]
 
     def _one(self, tr, fn) -> None:
@@ -779,10 +867,10 @@ class VM:
                     break
                 w = self._q.popleft()
             n += 1
-            eid, _prop = self._split(w)
+            eid, prop = self._split(w)
             with self._run:
                 ent = (self.est.docs or {}).get(eid)
-                trs = [t for t in self.triggers() if t.eid != eid]
+                trs = [t for t in self._relevant(prop) if t.eid != eid]   # #956: indexed by property
                 if trs and ent is not None and ent.cls != CLASS:
                     now = float(self.clock())
                     memo: dict = {}
@@ -826,6 +914,9 @@ class VM:
             return
         now = float(now if now is not None else self.clock())
         with self._run:
+            hook = getattr(self, "on_sweep", None)
+            if hook is not None:                     # #971: journal.Journal.watch -- the sweep, with its time
+                hook(now)
             memo: dict = {}
             for tr in self.triggers():
                 def go(tr=tr):
@@ -872,3 +963,23 @@ class VM:
     def report(self) -> dict:
         return {"triggers": len(self.triggers()), "queued": len(self._q), "dropped": self.dropped,
                 "fired": dict(self.fired), "refused": dict(self.refused), "errors": dict(self.errors)}
+
+
+PyVM = VM                           # this module's VM by a name nothing swaps (graphbanner binds with Python atoms)
+NATIVE_ENV = "MEMBRANE_NATIVE_VM"   # #971: 1 = the native (Rust) VM, when its extension is built
+
+
+def make_vm(est, **kw):
+    """The seat's VM: the native one when MEMBRANE_NATIVE_VM=1 and the extension is built (native/build.sh),
+    else this module's. A missing extension is said, never silent."""
+    if os.environ.get(NATIVE_ENV, "").strip() == "1":
+        try:
+            from . import ch_native
+            return ch_native.NativeVM(est, **kw)
+        except Exception as e:                    # noqa: BLE001 -- not built, or failed to start: never no VM
+            import sys
+            print(f"[ch] {NATIVE_ENV}=1 but the native VM could not start ({type(e).__name__}: {e}); "
+                  "using the Python VM", file=sys.stderr)
+        return PyVM(est, **kw)
+    return VM(est, **kw)
+

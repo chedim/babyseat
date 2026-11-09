@@ -4,12 +4,13 @@ A seat has two ports: the OpenAI proxy (:11500) and the serve API + UI (:4096).
 Both listen on every interface, so the phone and Home Assistant reach the seat
 over Wi-Fi. Two levels protect them:
 
-- **The seat token (only when JWT mode is off: `MEMBRANE_JWT=0`).** Reads are open on the
-  network; localhost needs nothing. From any other machine, every request that
-  changes something needs the seat token.
+- **The seat token (only when JWT mode is off: `MEMBRANE_JWT=0`).** Every request,
+  reads included, needs it, localhost too: an address is not a credential. The one
+  open read on the Ollama port is `GET /api/tags`. The page's cookie is minted only
+  on this machine (in JWT mode it carries an owner JWT).
 - **JWT mode (on by default).** Every request on both ports, reads included, needs
   a signed token, and the token says who is talking. A caller on this machine
-  needs none: a bare loopback request is the seat itself, as with JWT off. Use it to
+  needs a token too; the page served to this machine gets an owner cookie. Use it to
   put a seat behind an ingress or on a network other people share.
 
 ## The seat token
@@ -46,8 +47,11 @@ off-box write gets `401` with `WWW-Authenticate: Bearer`.
 the [zoo](home-assistant.md#the-zoo-several-seats) carries its own). A seat Home Assistant runs
   itself listens on loopback and needs none.
   `OPENCODE_SERVER_PASSWORD=<seat token> opencode attach http://seat:4096`
-- **The web UI from another machine (:4096, standalone):** the page reads freely,
-  then asks for the seat token once. `POST /ui/login` turns it into the same
+- **The web UI from another machine (:4096, standalone):** the page shell loads,
+  then asks for the seat token once; GET reads need the token too, not only
+  writes (only the shell, `/ui/www/`, `/ui/conf` and health stay open). The
+  cookie is minted on loopback only, and the seat's internal readers send
+  loopback headers. `POST /ui/login` turns it into the same
   HttpOnly cookie JWT mode uses (`membrane_jwt`, SameSite=Strict, a 400-day life,
   Secure over https). The page then asks your name as usual.
 
@@ -55,7 +59,7 @@ the [zoo](home-assistant.md#the-zoo-several-seats) carries its own). A seat Home
 
 | Port | Needs the token | Open |
 |---|---|---|
-| :11500 | every `POST`/`PUT`/`PATCH`/`DELETE`: `/v1/chat/completions`, Ollama's `/api/chat` and `/api/generate`, `/v1/embeddings`, every `/membrane/*` write (entity add/edit/remove/inherit, method define/call/each, filetool, learn/forget, intend/fulfill, watch, attention, entity-track, junk-cut, delegate, peer/post), and every other `/api/*` write passed to Ollama (pull, delete, create, ...); also `GET /membrane/intend`, which creates an intent | every other `GET`/`HEAD`; the read-only `POST`s `/membrane/entity-query`, `/membrane/entity-track/list`, `/membrane/method/inspect`, `/membrane/codegraph` |
+| :11500 | every `POST`/`PUT`/`PATCH`/`DELETE`: `/v1/chat/completions`, Ollama's `/api/chat` and `/api/generate`, `/v1/embeddings`, every `/membrane/*` write (entity add/edit/remove/inherit, method define/call/each, filetool, learn/forget, intend/fulfill, watch, attention, entity-track, junk-cut, delegate, peer/post), and every other `/api/*` write passed to Ollama (pull, delete, create, ...); also `GET /membrane/intend`, which creates an intent; every `GET`/`HEAD` under `/v1/`, `/membrane/` and `/state` needs the token too | only `GET /api/tags` (and other `/api/*` reads); no `POST` is open: the queries (`/membrane/entity-query`, `/membrane/codegraph`, ...) read the field and need the token, as does every `GET`/`HEAD` under `/v1/` and `/membrane/` and `/state` |
 | :4096 | every `POST`/`PATCH`/`DELETE`: sessions and their messages and prompts, `/membrane/*` (toybox poke, models, seat control and restart asks, field purge, voice, HA token and states, the JS executor), `/tui/*`, `/log`, `/instance/dispose`, the page's `/ui/serve/*`, `/ui/stt`, `/ui/log` | every `GET`; `POST /ui/login` and `/ui/logout` |
 
 The chat routes count as writes: every turn is captured into the field, its

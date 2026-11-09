@@ -9,6 +9,7 @@ the accepted socket's peer address for a LAN one, so the handler sees exactly
 what a phone on the Wi-Fi would give it (`client_address`), with no header
 involved."""
 import base64
+import pytest
 import http.client
 import json
 import os
@@ -25,6 +26,8 @@ from unittest import mock
 from membrane import jwtauth as J
 from membrane import seatauth as SA
 from tests.test_jwt_auth import SECRET, _StubBackend, _canned_chat, _jwt_env
+
+pytestmark = pytest.mark.tokenless
 
 LAN = "192.168.1.50"
 
@@ -271,13 +274,24 @@ class TestProxyOffBox(_TokenFile):
         self.assertEqual(len(_canned_chat.bodies), 1)
 
     def test_reads_stay_open(self):
-        for p in ("/v1/models", "/api/tags", "/membrane/gate-stages"):
-            self.assertEqual(_req(self.port, p)[0], 200, p)
+        self.assertEqual(_req(self.port, "/api/tags")[0], 200)
         self.assertEqual(_req(self.port, "/api/tags", "HEAD")[0], 200)
-        # the read-only POSTs are reads
-        for p in sorted(SA.PROXY_READ_POSTS):
-            self.assertFalse(SA.proxy_is_write("POST", p), p)
-        self.assertEqual(_req(self.port, "/membrane/entity-track/list", "POST", {})[0], 200)
+        # operator (#842): the model list and the field's answers need the token
+        for p in ("/v1/models", "/membrane/ask?q=x"):
+            self.assertEqual(_req(self.port, p)[0], 401, p)
+            self.assertNotEqual(_req(self.port, p, headers=self._bearer())[0], 401, p)
+        # #842 review: by prefix, /v1/ and /membrane/ reads need the token, /api/ stays open
+        for p in ("/membrane/entity/read", "/membrane/decisions", "/membrane/item-chat",
+                  "/membrane/state", "/state", "/membrane/entity-history", "/v1/models/",
+                  "/membrane/gate-stages"):
+            self.assertTrue(SA.proxy_is_write("GET", p), p)
+            self.assertEqual(_req(self.port, p)[0], 401, p)
+        self.assertFalse(SA.proxy_is_write("GET", "/api/tags"))
+        # no POST is open: the queries read the field
+        for p in ("/membrane/entity-query", "/membrane/codegraph",
+                  "/membrane/entity-track/list", "/membrane/method/inspect"):
+            self.assertTrue(SA.proxy_is_write("POST", p), p)
+            self.assertEqual(_req(self.port, p, "POST", {})[0], 401, p)
 
 
 class TestProxyLocal(_TokenFile):
@@ -293,10 +307,12 @@ class TestProxyLocal(_TokenFile):
         cls.srv.shutdown()
         cls.backend.shutdown()
 
-    def test_writes_need_nothing(self):
-        code, b, _ = _req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT)
+    def test_writes_need_the_token(self):      # #842: no address is a credential
+        self.assertEqual(_req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT)[0], 401)
+        auth = {"Authorization": f"Bearer {self.tok}"}
+        code, b, _ = _req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT, headers=auth)
         self.assertEqual(code, 200, b)
-        self.assertEqual(_req(self.port, "/api/pull", "POST", {})[0], 200)
+        self.assertEqual(_req(self.port, "/api/pull", "POST", {}, headers=auth)[0], 200)
 
     def test_internal_callers(self):
         from membrane import mcp_server as M
@@ -309,7 +325,7 @@ class TestProxyLocal(_TokenFile):
         self.assertEqual(_req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT, headers=h)[0], 401)
         self.assertEqual(_req(self.port, "/membrane/entity/edit", "POST", SCRIPT_EDIT,
                               headers={**h, "Authorization": f"Bearer {self.tok}"})[0], 200)
-        self.assertEqual(_req(self.port, "/v1/models", headers=h)[0], 200)         # reads stay open
+        self.assertEqual(_req(self.port, "/api/tags", headers=h)[0], 200)         # reads stay open
 
 
 class TestScriptBelt(unittest.TestCase):
@@ -391,9 +407,15 @@ class TestServeOffBox(_Serve):
             self.assertEqual(code, 401, (method, p))
             self.assertTrue(h.get("WWW-Authenticate", "").startswith("Bearer"))
 
-    def test_reads_stay_open(self):
-        for p in ("/session", "/global/health", "/ui/conf", "/", "/ui/serve/session", "/config"):
+    def test_reads_need_the_token_too(self):
+        for p in ("/session", "/ui/serve/session", "/config"):
+            self.assertEqual(self._req(p)[0], 401, p)
+            self.assertEqual(self._req(p, headers={"Authorization": f"Bearer {self.tok}"})[0], 200, p)
+        for p in ("/", "/global/health", "/ui/conf"):
             self.assertEqual(self._req(p)[0], 200, p)
+
+    def test_page_off_box_mints_no_cookie(self):
+        self.assertIsNone(self._req("/")[2].get("Set-Cookie"))
 
     def test_bearer_basic_and_cookie(self):
         self.assertEqual(self._req("/session", "POST", {}, {"Authorization": f"Bearer {self.tok}"})[0], 200)
@@ -447,11 +469,20 @@ class TestServeOffBox(_Serve):
 class TestServeLocal(_Serve):
     OFFBOX = False
 
-    def test_writes_need_nothing(self):
-        code, s, _ = self._req("/session", "POST", {})
+    def test_page_on_loopback_mints_the_cookie(self):
+        ck = self._req("/")[2].get("Set-Cookie", "")
+        self.assertTrue(ck.startswith(f"membrane_jwt={self.tok};"))
+        self.assertEqual(self._req("/session")[0], 401)
+        self.assertEqual(self._req("/session", headers={"Cookie": f"membrane_jwt={self.tok}"})[0], 200)
+        self.assertIsNone(self._req("/", headers={"X-Forwarded-For": "127.0.0.1"})[2].get("Set-Cookie"))
+
+    def test_writes_need_the_token(self):      # #842
+        self.assertEqual(self._req("/session", "POST", {})[0], 401)
+        auth = {"Authorization": f"Bearer {self.tok}"}
+        code, s, _ = self._req("/session", "POST", {}, auth)
         self.assertEqual(code, 200)
-        self.assertEqual(self._req(f"/session/{s['id']}", "PATCH", {"title": "t"})[0], 200)
-        self.assertEqual(self._req("/ui/conf")[1]["owner"], True)
+        self.assertEqual(self._req(f"/session/{s['id']}", "PATCH", {"title": "t"}, auth)[0], 200)
+        self.assertEqual(self._req("/ui/conf", headers=auth)[1]["owner"], True)
 
     def test_forwarded_header_is_off_box(self):
         self.assertEqual(self._req("/session", "POST", {}, {"X-Forwarded-For": "127.0.0.1"})[0], 401)
@@ -524,3 +555,4 @@ class TestCarriers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

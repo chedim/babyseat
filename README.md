@@ -128,10 +128,10 @@ You get membrane home:
   and it will ask.
 
 Other devices on your network open `http://<this machine>:4096/`. They can
-read freely, and they ask once for the seat token before writing
-(`membrane token seat` prints it). Callers from outside your network are
+ask once for the seat token (`membrane token seat` prints it): reads need it
+too, not only writes. The page's cookie is minted only on this machine. Callers from outside your network are
 refused: [JWT mode](docs/auth.md) is on by default (turn it off with `MEMBRANE_JWT=0`);
-this machine itself needs no token. The microphone needs
+this machine needs the seat token too (the page served here carries it). The microphone needs
 `localhost` (a secure origin), and the first voice use downloads about 65 MB
 of speech models.
 
@@ -249,7 +249,9 @@ changes since the last message), `learn` to keep a lesson (with the same guards 
 `entities_related`, …), `code_run` and Cliffhanger's method tools (`method_define/call/each/inspect`). Code the model runs becomes a tree of entities in the field, linked to its executor, and each run ends on its own result entity ([the executor](docs/entity-field.md#the-executor-code-is-a-tree-in-the-field-614)); what it will do again it defines as a method on an entity, then calls ([program the field first](docs/cliffhanger.md#program-the-field-first-576-part-f)). Commands compose in **Cliffhanger**, membrane's command
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
-where it came from.
+where it came from. The VM's surface (writes, store, triggers, effects) and the replay test a
+native VM must pass are in [the VM's API](docs/vm-api.md) (#971). A native (Rust) VM is in `native/`:
+build it with `native/build.sh` and switch a seat to it with `MEMBRANE_NATIVE_VM=1`.
 
 **Two advisory checks run on every turn:** the **gate** compares the answer
 with the nearest past one (shadow by default), and the **[membrane]
@@ -378,9 +380,10 @@ pass through to Ollama unchanged.
 | `membrane ingest` | cold start: absorb docs/README into the field (DOC events; a second ingest is a no-op) |
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running + the field's vitals |
-| `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): from another machine, every write to either port needs it (Bearer, Basic's password, or the web UI's one-time prompt); reads and localhost need none; see [docs/auth.md](docs/auth.md) |
+| `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): every request to either port needs it, localhost and reads included (Bearer, Basic's password, or the web UI's one-time prompt; only `GET /api/tags` is open); see [docs/auth.md](docs/auth.md) |
 | `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running JWT mode (on by default; off with `MEMBRANE_JWT=0`); see [docs/auth.md](docs/auth.md) |
-| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads the chat message store (`serve-msgs.json`, or the seat's Couchbase Lite store once it has migrated there), plus the background model calls from `bg-usage.json`; no model call) |
+| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads the chat message store (`serve-msgs.json`, or the seat's store, SQLite or Couchbase Lite, once it has migrated there), plus the background model calls from `bg-usage.json`; no model call) |
+| `membrane store` | which store this seat uses (SQLite or Couchbase Lite) and what is in it; `membrane store migrate --to sqlite\|cbl` copies every collection into the other kind with the seat stopped, switches the seat, and keeps the old store as a backup |
 | `membrane shadow` | compile-first routing, shadow stage: how many person messages living language compiled, had gaps in (by type) or left to thinking, and whether the model then used tools (read-only, no model call). See [docs/cliffhanger.md](docs/cliffhanger.md#living-language-2026-11-01-on-by-default) |
 | `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Every kind can be added (#576 retired the unlocks with the ladder). See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
@@ -402,8 +405,8 @@ appear to the client as ordinary tool parts riding `message.part.updated`
 (pending → completed), so you can watch what it's doing from the room.
 `--serve-port` (default 4096, walks up if busy) and `--listen` (the proxy,
 default 11500) are independent. The proxy binds all interfaces by default:
-reads are open on the LAN, and an off-box caller's writes (chat turns included)
-need the seat token; `--listen-host 127.0.0.1` (or
+only `GET /api/tags` is open; every other call (reads under `/v1/` and `/membrane/` included, chat turns included)
+needs the seat token; `--listen-host 127.0.0.1` (or
 `MEMBRANE_LISTEN_HOST=127.0.0.1`) keeps it on this machine. Exposure is LAN-only by design:
 reach the server only from a network you own; JWT mode is on by default (`MEMBRANE_JWT=0` turns it off),
 so hand each client a token ([docs/auth.md](docs/auth.md)).
@@ -425,11 +428,14 @@ Since the seat-first change, sharing comes in three layers: what each seat
 keeps, what it publishes, and an opt-in merged field.
 
 **1. Every seat is local-first.** A seat's entity field lives on its own
-disk, at `<project>/.membrane/field/` (or `.membrane/field.cblite` where
-the Couchbase Lite libraries are fetched with `scripts/fetch-cbl.sh`). Its
+disk, in a store under `<project>/.membrane/`. A new seat uses **SQLite**
+(`.membrane/field.sqlite`, the default); **Couchbase Lite** (`.membrane/field.cblite`, its
+libraries fetched with `scripts/fetch-cbl.sh`; Enterprise is free for development and evaluation
+only) is the other kind. A new seat started on a terminal asks which one; an existing Couchbase
+Lite seat keeps its store until `membrane store migrate --to sqlite` moves it. Its
 events, entity states, claims, scripts and turn text stay there and
 survive restarts with no cluster at all. Nothing is copied to the bucket
-unless one of the layers below sends it. With Couchbase Lite the seat's
+unless one of the layers below sends it. In either store the seat's
 entities, its chat sessions and messages, and its small state files (the
 absorb watermark, the router's state, the watch board, the background-usage
 tally) live in that store too, one document each (#799); the first boot
@@ -604,6 +610,11 @@ fit on conversations 2-9 (`DEFAULT_WEIGHTS` comment in `recall_banner.py`), so
 | conversations 0-1, held out (231) | 168 / 231 = 72.7% | **179 / 231 = 77.5%** | 153 / 231 = 66.2% |
 | conversations 2-9, in-sample (1,305) | 968 / 1,305 = 74.2% | not run | not re-run |
 | all conversations (1,536) | 1,136 / 1,536 = 74.0% | not run | 65.4% |
+
+**Reply models (#942, 2026-11-08).** The scorer and the reranker were refit
+with three more features from per-person reply models (`replies.py`) on the
+same cached pools: on conversations 0-1 (230 questions), the full order goes
+hit@1 73 -> 83, hit@8 173 -> 173, hit@20 187 -> 190.
 
 On the held-out conversations the reranker lifts hit@8 from 168 to 179 of 231
 (+4.8 points), same code and questions, rerank on against off; median ask

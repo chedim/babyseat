@@ -108,6 +108,8 @@ def unpack_vec(s: str):
 
 
 class CBLiteBackend(MemBackend):
+    KIND = "cbl"
+    LABEL = "couchbase lite"
     CATCHUP_BATCH = 500
     CATCHUP_IDLE_S = 30.0
     # THE WRITE-BEHIND (2026-10-10, the first live rounds: the banner's field
@@ -130,6 +132,7 @@ class CBLiteBackend(MemBackend):
         # and reads a snapshot: no writer, no vector catch-up, no migration
         # or tail replay -- nothing this handle can write.
         if not readonly:
+            self.path.parent.mkdir(parents=True, exist_ok=True)   # a brand-new seat has no .membrane yet (#971)
             lk = self.path.parent / f".{self.path.name}.writer.lock"
             self._lock_fd = os.open(str(lk), os.O_CREAT | os.O_RDWR, 0o600)
             try:
@@ -141,8 +144,7 @@ class CBLiteBackend(MemBackend):
                                 f"membrane process (the live serve?)") from None
         else:
             self._lock_fd = None
-        self.lib = CB.load(lib_dir)
-        self.db = CB.Database(self.lib, "field", str(self.path))
+        self.lib, self.db = self._open_db(lib_dir)
         self._ord: dict[str, dict[str, int]] = {c: {} for c in COLLECTIONS}
         self._next: dict[str, int] = {c: 0 for c in COLLECTIONS}
         self._cache: dict[str, dict] = {}
@@ -179,6 +181,11 @@ class CBLiteBackend(MemBackend):
         self._wake.set()
 
     # ---- setup ---------------------------------------------------------------
+    def _open_db(self, lib_dir):
+        """(the library, the database): Couchbase Lite here; sqlstore.SQLiteBackend opens SQLite (#971)."""
+        lib = CB.load(lib_dir)
+        return lib, CB.Database(lib, "field", str(self.path))
+
     def _ensure_indexes(self) -> None:
         for c in COLLECTIONS:
             self.db.coll(c)
@@ -224,7 +231,7 @@ class CBLiteBackend(MemBackend):
                     ords[k] = int(r.get("o") or 0)
                     n += 1
                 self._next[c] = (max(ords.values()) + 1) if ords else 0
-        print(f"[efield] couchbase lite: {n} hot rows loaded in {time.time() - t:.1f}s "
+        print(f"[efield] {self.LABEL}: {n} hot rows loaded in {time.time() - t:.1f}s "
               f"({self.db.count('sentences')} sentences on disk)", file=sys.stderr)
 
     # ---- the one-time import of the journals --------------------------------
@@ -787,10 +794,10 @@ def import_only(path, journal_dir, lib_dir=None) -> dict:
     beside a live seat on a phone with little memory to spare (the full
     rehearsal's 1.1 GB peak beside the seat's 2.9 GB woke the low-memory
     killer). The switch-over boot then loads and replays the tails only."""
-    lib = CB.load(lib_dir)
-    db = CB.Database(lib, "field", str(path))
     shell = CBLiteBackend.__new__(CBLiteBackend)
-    shell.db, shell.lib = db, lib
+    shell.path = Path(path)
+    shell.lib, shell.db = shell._open_db(lib_dir)      # the backend's own kind (#971: SQLite or CBL)
+    db = shell.db
     try:
         CBLiteBackend._ensure_indexes(shell)
         out = {} if shell._meta("migrated") else CBLiteBackend.migrate_from(shell, Path(journal_dir))
