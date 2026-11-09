@@ -107,6 +107,10 @@ def unpack_vec(s: str):
     return a / n if n > 0 else None
 
 
+def _busy(e) -> bool:
+    return getattr(e, "code", None) == CB.BUSY_CODE
+
+
 class CBLiteBackend(MemBackend):
     KIND = "cbl"
     LABEL = "couchbase lite"
@@ -409,6 +413,18 @@ class CBLiteBackend(MemBackend):
         self._fails = getattr(self, "_fails", 0) + 1
         self._retry_at = time.monotonic() + min(self.RETRY_MAX_S, self.RETRY_MIN_S * 2 ** (self._fails - 1))
 
+    def _give_up(self, items, e) -> None:
+        """PR 948: a non-busy failure is permanent -- retrying forever helps
+        no one. Stop retrying, send the writes to the unsaved record, say so."""
+        items = list(items)
+        with self._pend_lock:
+            self._gave_up = dict(getattr(self, "_gave_up", None) or {})
+            self._gave_up.update(items)
+            self._inflight = {}
+        print(f"[efield] cbl save failed for good ({e}); {len(items)} write(s) NOT retried, "
+              f"recorded as unsaved: {', '.join(f'{c}/{k}' for (c, k), _ in items[:10])}", file=sys.stderr)
+        self._record_unsaved()
+
     def drain(self) -> int:
         """Save every pending hot write now (one transaction). A failed
         save re-queues its key (unless a newer write arrived); a failed
@@ -419,9 +435,13 @@ class CBLiteBackend(MemBackend):
         if not todo:
             return 0
         failed: list = []
+        perm: list = []
         try:
             self.db.begin()
         except Exception as e:
+            if not _busy(e):
+                self._give_up(todo.items(), e)
+                return 0
             print(f"[efield] cbl begin failed ({e}); {len(todo)} writes re-queued", file=sys.stderr)
             self._requeue(todo.items())
             return 0
@@ -431,16 +451,26 @@ class CBLiteBackend(MemBackend):
                     if d is None:
                         self.db.purge(c, k)
                     else:
-                        self.db.put_json(c, k, dumps({"o": o, "d": d}))
+                        self.db.put_json(c, k, dumps({"o": o, "t": time.time(), "d": d}))
                 except CB.CBLException as e:
-                    print(f"[efield] cbl save {c}/{k} failed ({e}); re-queued", file=sys.stderr)
-                    failed.append(((c, k), (o, d)))
+                    if _busy(e):
+                        print(f"[efield] cbl save {c}/{k} failed ({e}); re-queued", file=sys.stderr)
+                        failed.append(((c, k), (o, d)))
+                    else:
+                        perm.append((((c, k), (o, d)), e))
         finally:
             try:
                 self.db.end()
             except Exception as e:
-                print(f"[efield] cbl commit failed ({e}); {len(todo)} writes re-queued", file=sys.stderr)
-                failed = list(todo.items())
+                perm = []
+                if _busy(e):
+                    print(f"[efield] cbl commit failed ({e}); {len(todo)} writes re-queued", file=sys.stderr)
+                    failed = list(todo.items())
+                else:
+                    failed = []
+                    perm = [(it, e) for it in todo.items()]
+        if perm:
+            self._give_up([it for it, _ in perm], perm[0][1])
         if failed:
             self._requeue(failed)
             self._inflight = {}
@@ -448,7 +478,7 @@ class CBLiteBackend(MemBackend):
             self._inflight = {}
             self._fails = 0
             self._retry_at = 0
-        return len(todo) - len(failed)
+        return len(todo) - len(failed) - len(perm)
 
     def _writer_loop(self) -> None:
         with CB.background():                      # its operations queue behind turns'
@@ -702,6 +732,10 @@ class CBLiteBackend(MemBackend):
             return
         applied = stale = 0
         todo = []
+        try:
+            rec_ts = float(rec.get("ts") or 0)
+        except (TypeError, ValueError):
+            rec_ts = 0.0
         for it in rec.get("items") or []:
             try:
                 c, k, o, d = it["c"], it["k"], it.get("o"), it.get("d")
@@ -709,13 +743,15 @@ class CBLiteBackend(MemBackend):
                 continue
             if c not in COLLECTIONS or c in COLD:
                 continue
-            disk = None
+            disk_t = None
             try:
                 js = self.db.get_json(c, k)
-                disk = json.loads(js).get("o") if js else None
+                disk_t = float(json.loads(js).get("t") or 0) if js else None
             except Exception:
                 pass
-            if d is not None and disk is not None and o is not None and disk > o:
+            # `o` is the insertion ordinal, equal across updates: the save time
+            # `t` is the version. A row saved after the cut is newer and wins.
+            if disk_t is not None and disk_t > rec_ts:
                 stale += 1
                 continue
             todo.append((c, k, o, d))
@@ -726,7 +762,7 @@ class CBLiteBackend(MemBackend):
                     if d is None:
                         self.db.purge(c, k)
                     else:
-                        self.db.put_json(c, k, dumps({"o": o, "d": d}))
+                        self.db.put_json(c, k, dumps({"o": o, "t": rec_ts, "d": d}))
                     applied += 1
             finally:
                 self.db.end()
@@ -749,7 +785,8 @@ class CBLiteBackend(MemBackend):
         got = self._pend_lock.acquire() if lock_timeout is None \
             else self._pend_lock.acquire(timeout=lock_timeout)
         try:
-            snap = dict(getattr(self, "_inflight", None) or {})
+            snap = dict(getattr(self, "_gave_up", None) or {})
+            snap.update(getattr(self, "_inflight", None) or {})
             snap.update(self._pending)             # a newer pending write wins over the batch in flight
         finally:
             if got:

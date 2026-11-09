@@ -356,7 +356,7 @@ class TestDrainFailures(unittest.TestCase):
         tmp, b = self._held()
         try:
             b.upsert("entity_states", "e1", {"origin": "o", "mass": 1.0})
-            with mock.patch.object(b.db, "put_json", side_effect=CB.CBLException("busy")):
+            with mock.patch.object(b.db, "put_json", side_effect=CB.CBLException("busy", code=CB.BUSY_CODE)):
                 b.drain()
             self.assertIn(("entity_states", "e1"), b._pending)
             self.assertGreater(b._retry_at, 0)
@@ -404,10 +404,10 @@ class TestDrainFailures(unittest.TestCase):
         self._shut_unsaved(tmp, b, "entity_states", "e9", {"origin": "o", "mass": 2.0})
         rp = Path(tmp) / "db.unsaved.json"
         rec = _j.loads(rp.read_text())
-        old_o = rec["items"][0]["o"]
-        b0 = CBLiteBackend(Path(tmp) / "db")          # boot 1 applies it ...
+        b0 = CBLiteBackend(Path(tmp) / "db")          # boot 1 applies it (row saved at rec ts) ...
         b0.close()
-        rec["items"][0]["o"] = old_o - 1              # ... a record older than the disk row
+        rec["ts"] = rec["ts"] - 100                   # ... a record cut before the disk row was saved
+        rec.pop("reapplied", None)
         rec["items"][0]["d"]["mass"] = 99.0
         rp.write_text(_j.dumps(rec))
         b2 = CBLiteBackend(Path(tmp) / "db")
@@ -440,11 +440,11 @@ class TestDrainFailures(unittest.TestCase):
             b.drain()
             b.upsert("entity_states", "e2", {"origin": "o", "mass": 2.0})
             b.delete("entity_states", "e1")
-            with mock.patch.object(b.db, "begin", side_effect=CB.CBLException("busy")):
+            with mock.patch.object(b.db, "begin", side_effect=CB.CBLException("busy", code=CB.BUSY_CODE)):
                 b.drain()
             self.assertEqual(set(b._pending), {("entity_states", "e1"), ("entity_states", "e2")})
             b._retry_at = 0
-            with mock.patch.object(b.db, "purge", side_effect=CB.CBLException("busy")):
+            with mock.patch.object(b.db, "purge", side_effect=CB.CBLException("busy", code=CB.BUSY_CODE)):
                 b.drain()
             self.assertEqual(set(b._pending), {("entity_states", "e1")})   # e2 saved; the failed purge stays
             b._retry_at = 0

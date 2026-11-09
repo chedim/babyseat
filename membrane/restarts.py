@@ -125,6 +125,10 @@ def _unsaved_text(d: str) -> str:
         if rec.get("reapplied"):
             s += f"; {int(rec.get('applied') or 0)} re-applied now, {int(rec.get('stale') or 0)} skipped as older than what is on disk"
         s += "."
+        if rec.get("items") and not rec.get("reapplied"):
+            # PR 948: not re-applied (the re-apply failed): keep the record, the next boot tries again
+            out += s[:-1] + "; it was not re-applied and stays for the next boot."
+            continue
         out += s
         try:
             os.replace(p, p[:-len(".json")] + ".reported.json")
