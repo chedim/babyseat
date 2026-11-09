@@ -152,10 +152,7 @@ def _colls(db, kind: str) -> list[str]:
 
 
 def _keys(db, coll: str) -> list[str]:
-    try:
-        return [r["k"] for r in db.query(f"SELECT META().id AS k FROM membrane.{coll}") if r.get("k")]
-    except Exception:
-        return []
+    return [r["k"] for r in db.query(f"SELECT META().id AS k FROM membrane.{coll}") if r.get("k")]
 
 
 def status(field_path: str = "") -> dict:
