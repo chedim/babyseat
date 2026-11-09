@@ -32,9 +32,12 @@ CHUNK = 65536                                  # rows per block of the brute-for
 class _Matrix:
     """The sentence vectors: an append-only float16 file + its keys, memory-mapped for search."""
 
-    def __init__(self, d: Path):
+    def __init__(self, d: Path, readonly: bool = False):
         self.d = d
-        d.mkdir(parents=True, exist_ok=True)
+        self.readonly = readonly
+        self._ram = None                       # readonly: the vectors live in memory, never in the file
+        if not readonly:
+            d.mkdir(parents=True, exist_ok=True)
         self.f = d / "sentences.f16"
         self.kf = d / "sentences.keys"
         self.lock = threading.RLock()
@@ -44,7 +47,13 @@ class _Matrix:
         self._mm = None
         if self.f.exists() and self.kf.exists():
             try:
-                self.keys = json.loads(self.kf.read_text())
+                txt = self.kf.read_text()
+                if txt.lstrip().startswith("["):           # the old one-list format
+                    self.keys = json.loads(txt)
+                    if not self.readonly:
+                        self.kf.write_text("".join(json.dumps(k) + "\n" for k in self.keys))
+                else:
+                    self.keys = [json.loads(ln) for ln in txt.splitlines() if ln]
                 n = self.f.stat().st_size // (2 * DIM)
                 if n != len(self.keys):
                     raise ValueError("vectors and keys disagree")
@@ -55,7 +64,8 @@ class _Matrix:
     def reset(self) -> None:
         with self.lock:
             self.keys, self.row, self.dead, self._mm = [], {}, set(), None
-            for p in (self.f, self.kf):
+            self._ram = None
+            for p in (() if self.readonly else (self.f, self.kf)):
                 try:
                     p.unlink()
                 except OSError:
@@ -71,15 +81,19 @@ class _Matrix:
             return 0
         with self.lock:
             a = np.stack([np.asarray(v, np.float32) for _, v in pairs]).astype(np.float16)
-            with self.f.open("ab") as fh:
-                fh.write(a.tobytes())
+            if self.readonly:
+                self._ram = a if self._ram is None else np.concatenate([self._ram, a])
+            else:
+                with self.f.open("ab") as fh:
+                    fh.write(a.tobytes())
+                with self.kf.open("a") as fh:           # append-only, one JSON key per line
+                    fh.write("".join(json.dumps(k) + "\n" for k, _ in pairs))
             for k, _ in pairs:
                 old = self.row.get(k)
                 if old is not None:
                     self.dead.add(old)
                 self.row[k] = len(self.keys)
                 self.keys.append(k)
-            self.kf.write_text(json.dumps(self.keys))
             self._mm = None
         return len(pairs)
 
@@ -90,6 +104,8 @@ class _Matrix:
                 self.dead.add(i)
 
     def _map(self):
+        if self.readonly:
+            return self._ram
         if self._mm is None and self.keys:
             self._mm = np.memmap(self.f, dtype=np.float16, mode="r", shape=(len(self.keys), DIM))
         return self._mm
@@ -135,7 +151,7 @@ class SQLiteBackend(CBLiteBackend):
 
     def _vectors(self) -> _Matrix:
         if self._mx is None:
-            self._mx = _Matrix(Path(self._sdb_path or self.path) / "vectors")
+            self._mx = _Matrix(Path(self._sdb_path or self.path) / "vectors", readonly=bool(self.readonly))
         return self._mx
 
     @property
