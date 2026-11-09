@@ -21,6 +21,7 @@ pub fn defaults() -> Map<String, J> {
         "dedupe_jaccard": 0.8, "rrf_k": 60, "entity_pool_max": 24, "rerank_top": 20, "rerank": true,
         "reply_keys": ["listener", "said", "about"], "header": HEADER,
         "weights": {
+            "fit": "#942 (2026-11-08), LoCoMo conversations 2-9",
             "default": {"bias": -5.2364, "sim": 0.3277, "inv_rank": 1.9884, "bm25": 0.1381, "overlap": 0.483, "speaker": 0.7361, "neighbour": 0.5734, "listener": 0.3336, "said": 0.1624, "about": 0.3901},
             "legacy": {"bias": -5.0278, "sim": -0.1116, "inv_rank": 2.3526, "bm25": 0.2391, "overlap": 0.7827, "speaker": 0.7574, "neighbour": 0.7372},
             "rerank": {"bias": -5.1767, "sim": 0.2556, "inv_rank": 1.9601, "bm25": 0.1209, "overlap": 0.4404, "speaker": 0.7502, "neighbour": 0.5717, "listener": 0.3299, "said": 0.1609, "about": 0.3994, "bge": 0.6376},
@@ -31,7 +32,8 @@ pub fn defaults() -> Map<String, J> {
     v.as_object().unwrap().clone()
 }
 
-pub fn load_seed(core: &mut Core) { core.load(DIALS.into(), CLASS_DIALS.into(), defaults(), None, 0.0); }
+/// the recall-policy pack (native/packs/recall-policy.json, #994 row 7): the dials are data, declared by the pack loader.
+pub fn load_seed(core: &mut Core) { crate::packs::load_named(core, crate::packs::RECALL_POLICY); }
 
 fn num(v: &J) -> Option<f64> { v.as_f64() }
 fn count(v: &J, min: i64) -> bool { v.as_i64().map(|n| n >= min).unwrap_or(false) }
