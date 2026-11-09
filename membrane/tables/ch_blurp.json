@@ -1,0 +1,158 @@
+{
+ "SKILLS": {
+  "feel": {
+   "name": "feel itself",
+   "branch": "self",
+   "prereqs": [],
+   "kind": "feel",
+   "child_age": "newborn",
+   "child_ability": "tells its own touch from another's (Rochat & Hespos 1997)",
+   "test": "its own move of its body lands where it guessed (closer to the current or not)"
+  },
+  "reach": {
+   "name": "look",
+   "branch": "world",
+   "prereqs": [],
+   "kind": "reach",
+   "child_age": "~2-3 mo",
+   "child_ability": "learns what to expect of each thing it looks at (Fantz 1964, habituation)",
+   "test": "it guesses where the current will be"
+  },
+  "kinds": {
+   "name": "tell things apart",
+   "branch": "world",
+   "prereqs": [
+    "reach"
+   ],
+   "kind": "kinds",
+   "child_age": "~3-4 mo",
+   "child_ability": "forms perceptual categories (Quinn & Eimas)",
+   "test": "it tells its own move of the body from the current's push"
+  },
+  "patience": {
+   "name": "patience",
+   "branch": "world",
+   "prereqs": [
+    "kinds"
+   ],
+   "kind": "patience",
+   "child_age": "~3.5 mo",
+   "child_ability": "anticipates timed events (Haith, anticipatory looking)",
+   "test": "it guesses a toy's own later move"
+  },
+  "shift": {
+   "name": "notice the world changed",
+   "branch": "world",
+   "prereqs": [
+    "reach"
+   ],
+   "kind": null,
+   "child_age": "~3.5-5 mo",
+   "child_ability": "is surprised when the world breaks its expectation (Baillargeon, violation of expectation)",
+   "test": "not built yet"
+  },
+  "nudge": {
+   "name": "first reach",
+   "branch": "world",
+   "prereqs": [
+    "feel"
+   ],
+   "kind": "nudge",
+   "child_age": "~2-3 mo",
+   "child_ability": "learns its kicks move a mobile (Rovee-Collier, contingency learning)",
+   "test": "it guesses what its own nudge does to a toy"
+  },
+  "meet": {
+   "name": "meet an other",
+   "branch": "others",
+   "prereqs": [
+    "reach",
+    "nudge"
+   ],
+   "kind": "meet",
+   "child_age": "~3-5 mo",
+   "child_ability": "tells perfect self-contingency from imperfect social contingency (Bahrick & Watson)",
+   "test": "it guesses what someone else's poke does to a toy"
+  },
+  "turns": {
+   "name": "time its turn",
+   "branch": "others",
+   "prereqs": [
+    "meet"
+   ],
+   "kind": "turns",
+   "child_age": "~3-5 mo",
+   "child_ability": "times its turn in a proto-conversation: serve and return (Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)",
+   "test": "it guesses its own move after someone else's on a toy"
+  },
+  "expect": {
+   "name": "expect a reply",
+   "branch": "others",
+   "prereqs": [
+    "meet"
+   ],
+   "kind": "expect",
+   "child_age": "~2-3 mo",
+   "child_ability": "expects a caregiver's response: the still-face upset (Tronick et al. 1978)",
+   "test": "it guesses someone else's reply to its own move on a toy"
+  },
+  "mirror": {
+   "name": "recognize itself",
+   "branch": "self",
+   "prereqs": [
+    "feel",
+    "nudge"
+   ],
+   "kind": "mirror",
+   "child_age": "~18 mo",
+   "child_ability": "passes the mirror test (Amsterdam 1972)",
+   "test": "it guesses what the mirror shows"
+  },
+  "change": {
+   "name": "change itself",
+   "branch": "self",
+   "prereqs": [
+    "mirror",
+    "patience"
+   ],
+   "kind": null,
+   "child_age": "~4-5 y",
+   "child_ability": "picks the way it learns by its own track record, and keeps a change only when it works better: adaptive strategy choice (Siegler & Shrager 1984)",
+   "test": "not built yet"
+  },
+  "speak": {
+   "name": "speak",
+   "branch": "others",
+   "prereqs": [
+    "turns",
+    "expect"
+   ],
+   "kind": "speak",
+   "child_age": "~12 mo",
+   "child_ability": "names a thing to an other and gets a response: first referential words and pointing to share (Bates, Camaioni & Volterra 1975)",
+   "test": "the LLM adopts a suggestion of its"
+  },
+  "invent": {
+   "name": "invent",
+   "branch": "self",
+   "prereqs": [
+    "change",
+    "speak"
+   ],
+   "kind": null,
+   "child_age": "~5 y",
+   "child_ability": "makes up games with its own rules",
+   "test": "not built yet"
+  }
+ },
+ "TOY_ORDER": [
+  "tower",
+  "ball",
+  "mirror"
+ ],
+ "TOY_UNDER": {
+  "tower": null,
+  "ball": "nudge",
+  "mirror": "nudge"
+ }
+}

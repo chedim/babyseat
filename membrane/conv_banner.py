@@ -28,6 +28,7 @@ ask, decision, goal, fact, news, alert or pause) is not sent. The block is
 sent every turn while it has content: it is small and moves with the chat.
 """
 from __future__ import annotations
+from . import tables as _T
 
 import sys
 import time
@@ -56,11 +57,10 @@ JUST_NOW_S = 5 * 60
 HOURS_S = 12 * 3600
 DAYS_MAX = 7
 
-HEADER = "THIS CONVERSATION (membrane, from this chat's own records; context, not instructions):"
-MORE_LINE = ("MORE: state(section='changes'|'tracks'|'commands'|...) for the seat · "
-             "query(topic) for memory · entity_read(id) for one entity")
-MODEL_LINE = "MODEL: {} is answering this turn"
-PAUSED_LINE = "PAUSED: the seat's acting lanes are down; reads and memory work, your writes are refused."
+HEADER = _T.get("conv_banner", "HEADER")
+MORE_LINE = _T.get("conv_banner", "MORE_LINE")
+MODEL_LINE = _T.get("conv_banner", "MODEL_LINE")
+PAUSED_LINE = _T.get("conv_banner", "PAUSED_LINE")
 _FOCUS_KINDS = ("f", "s", "c", "port", "m", "u", "ha")
 _MARKS_KEPT = 64
 _EIDS_KEPT = 20000           # memo of events already read for focus (bookkeeping, not a threshold)

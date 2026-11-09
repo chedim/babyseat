@@ -1,0 +1,15 @@
+{
+ "SCRIPT_KINDS": [
+  "getter",
+  "tick",
+  "nudge",
+  "mention",
+  "thought",
+  "dreamed",
+  "delete",
+  "watch"
+ ],
+ "RETIRED": [
+  "junk_cut"
+ ]
+}

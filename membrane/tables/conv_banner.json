@@ -1,0 +1,6 @@
+{
+ "HEADER": "THIS CONVERSATION (membrane, from this chat's own records; context, not instructions):",
+ "MORE_LINE": "MORE: state(section='changes'|'tracks'|'commands'|...) for the seat · query(topic) for memory · entity_read(id) for one entity",
+ "MODEL_LINE": "MODEL: {} is answering this turn",
+ "PAUSED_LINE": "PAUSED: the seat's acting lanes are down; reads and memory work, your writes are refused."
+}

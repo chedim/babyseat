@@ -24,6 +24,7 @@ eligible turns (those pairs have no model answer; they measure nothing but
 are counted)."""
 
 from __future__ import annotations
+from . import tables as _T
 
 import random
 import time
@@ -295,11 +296,7 @@ def ab_close(field, key: str, model_answer: str) -> dict | None:
     return d
 
 
-AB_JUDGE_PROMPT = (
-    "Two answers to the same question. Do they agree on the substance (facts, "
-    "decisions, steps)? Reply with exactly one word -- agree, partial or disagree "
-    "-- then a colon and one short reason.\n\nQUESTION: {q}\n\nANSWER A: {a}\n\n"
-    "ANSWER B: {b}")
+AB_JUDGE_PROMPT = _T.get("efgate", "AB_JUDGE_PROMPT")
 
 
 def ab_judge_pending(field, judge_fn, limit: int = 2) -> int:
@@ -308,7 +305,7 @@ def ab_judge_pending(field, judge_fn, limit: int = 2) -> int:
     for key, d in list(field.b.scan("annotations", {"origin": field.origin, "_k": "ab",
                                                     "status": "pending_judge"}, limit=limit)):
         try:
-            out = judge_fn(AB_JUDGE_PROMPT.format(q=d["query"][:600], a=d["replay"][:1500],
+            out = judge_fn(_T.get("efgate", "AB_JUDGE_PROMPT").format(q=d["query"][:600], a=d["replay"][:1500],
                                                   b=d["model_answer"][:1500]))
         except Exception:
             continue

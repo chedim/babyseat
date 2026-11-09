@@ -1,0 +1,11 @@
+{
+ "DEFAULT_MODELS": [
+  "sonnet",
+  "opus",
+  "haiku"
+ ],
+ "KEY_HINT": "run `membrane auth anthropic` (or set ANTHROPIC_API_KEY), then `membrane auth claude-agent`",
+ "INSTALL_HINT": "pip install 'babyseat[claude-agent]' (or: pip install claude-agent-sdk)",
+ "CLI_HINT": "reinstall the SDK (it bundles the `claude` CLI) or install Claude Code, then `membrane auth claude-agent`",
+ "LOGIN_HINT": "run `claude` once to log in, then `membrane auth claude-agent --login`"
+}
