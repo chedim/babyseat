@@ -23,10 +23,14 @@ the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
    declared once on a class (name, type, getter, setters).
 2. **Getters are cached and eager.** A field with a getter holds its last computed value. A read
    returns the cache; a read never writes and never fires anything.
-3. **Own name = previous cached value.** Inside a getter the field's own name is its previous
-   value: `x = (x or 0) + 1` is an accumulator.
+3. **Own name = previous cached value, never an input.** Inside a getter the field's own name is
+   its previous value: `x = (x or 0) + 1` is an accumulator. A getter's own field is never one of
+   its inputs: reading its own name does not subscribe, so the getter recalculates only when a
+   field other than itself changes. Example: `x = (x or 0) + 1` on `clock.tick` adds 1 per tick
+   (it depends on `clock.tick` only) and does not run again because `x` changed.
 4. **A recalculated value is a write through the setters.** When inputs change the getter runs
-   and its result is written like any write.
+   and its result is written like any write. That write fires its dependents (rule 5) inside the
+   current round (rule 8).
 5. **Every change fires.** A write whose stored value differs fires the triggers/getters that
    depend on that field. A write of the same value is no change and fires nothing.
 6. **Setters.** A field has several setters, run in the order added. A write to the field's own
@@ -36,9 +40,16 @@ the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
    or refuse the value (a refusal stops the chain, nothing is stored). The value is stored once.
    Then `on` setters run in added order, see the stored value, and do effects and writes to
    other fields.
-8. **Loops.** Getters see the previous values of fields, in a fixed evaluation order. A setter
-   chain that returns to a field already written in the chain is refused and reported (via the
-   existing loop rule, `writes.source` chains).
+8. **One round per outside write; loops.** Each outside write (rule 9) starts one round. In a
+   round each downstream getter recalculates at most once, in dependency order. The edge that
+   closes a cycle reads the previous value of its input. The round ends when every downstream
+   getter has run once; the next outside write starts a new round. So cycles terminate and need
+   no refusal inside getters. Examples: Russell's `R = not R`-style self-reference cannot
+   subscribe to itself (rule 3), so R flips once per write to another field, never loops;
+   `a = b + 1, b = a + 1`: a write to a runs b once (from the new a), then a's closing edge
+   reads b's previous value, so a is not rerun and the round ends. A setter chain that returns to
+   a field already written in the chain is still refused and reported (the existing loop rule,
+   `writes.source` chains).
 9. **Events come only from outside, as writes.** A sensor, a person or a watcher writes a field.
    Time is the clock tick, itself a write; there is no `every`. A timed rule reads the clock field.
 
