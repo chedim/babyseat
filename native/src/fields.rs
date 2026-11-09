@@ -28,6 +28,9 @@ pub struct OnSet {
 
 pub const LLM_CALL: &str = "membrane::llm.call";
 
+/// writer prefix of an own-name store (rule 6): it fires getters but not setters
+const DIRECT: &str = "field:direct:";
+
 pub fn on_setters() -> Vec<OnSet> { crate::translate::goalgraph_setters() }
 
 pub struct Fields {
@@ -62,7 +65,7 @@ impl Fields {
         chats.sort();
         for (eid, sid) in chats {
             let lines = crate::banner::walk(core, &sid);
-            self.emit(core, work, &eid, "banner", json!(lines), "banner", seq, now);
+            self.emit_unchecked(core, work, &eid, "banner", json!(lines), "banner", seq, now);
         }
     }
 
@@ -74,14 +77,14 @@ impl Fields {
         if !is_dial && !is_ask { return; }
         if is_dial && !crate::recall::guard(&w.prop, &w.new) {
             let back = self.accepted.get(&w.prop).cloned().or_else(|| crate::recall::defaults().get(&w.prop).cloned());
-            if let Some(b) = back { self.emit(core, work, &w.eid, &w.prop, b, "recall-guard", seq, now); }
+            if let Some(b) = back { self.emit_unchecked(core, work, &w.eid, &w.prop, b, "recall-guard", seq, now); }
             return;
         }
         if is_dial { self.accepted.insert(w.prop.clone(), w.new.clone()); }
         if is_ask && ["lanes", "rank_set", "rerank_top"].contains(&w.prop.as_str()) { return; }   // the ask getters themselves (the dial rerank_top is not one)
         let mut asks: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == crate::recall::CLASS_ASK).map(|(k, _)| k.clone()).collect();
         asks.sort();
-        for a in asks { for (p, v) in crate::recall::ask_values(core, &a) { self.emit(core, work, &a, p, v, "recall", seq, now); } }
+        for a in asks { for (p, v) in crate::recall::ask_values(core, &a) { self.emit_unchecked(core, work, &a, p, v, "recall", seq, now); } }
     }
 
     /// Row 5: a Method's `invoke` was written -> the verdict (refusal receipt / effect), then the slot is consumed.
@@ -103,7 +106,7 @@ impl Fields {
             }
         }
         if core.docs.get(&w.eid).and_then(|e| e.props.get("invoke")) == Some(&w.new) {
-            self.emit(core, work, &w.eid, "invoke", json!(""), "call-consumed", seq, now);
+            self.emit_unchecked(core, work, &w.eid, "invoke", json!(""), "call-consumed", seq, now);   // own name: the invoke setter consumes its slot (rule 6)
         }
     }
 
@@ -123,10 +126,21 @@ impl Fields {
         for (p, v) in crate::adapters::receipt(call, rid, rc, head, result) { self.emit(core, &mut work, object, &p, v, "call-receipt", seq, now); }
     }
 
+    /// A setter-chain write: refused at a revisit of (entity, prop) in this round (rule 8).
     fn emit(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64) {
+        self.emit_as(core, work, eid, prop, new, writer, seq, now, true)
+    }
+
+    /// A getter's recalculated value, the recall guard's put-back, or an own-name store: not a setter chain, so no
+    /// loop check (rule 8: getters recalculate, they are never refused).
+    fn emit_unchecked(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64) {
+        self.emit_as(core, work, eid, prop, new, writer, seq, now, false)
+    }
+
+    fn emit_as(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64, check: bool) {
         if core.docs.get(eid).map(|e| e.props.get(prop) == Some(&new)).unwrap_or(false) { return; }   // idempotent
-        if !self.visited.insert((eid.to_string(), prop.to_string())) && writer != "recall-guard" {   // the guard puts back the value just refused: not a loop
-   // revisit in this round: refuse BEFORE applying
+        if check && !self.visited.insert((eid.to_string(), prop.to_string())) {
+            // revisit in this round: refuse BEFORE applying
             let reason = format!("loop: ({}, {}) already written this round by the field; refused {} by {}", eid, prop, new, writer);
             self.refusals.push(json!({"eid": eid, "prop": prop, "refused": new, "writer": writer, "reason": reason}));
             *seq += 1;
@@ -154,13 +168,14 @@ impl Fields {
             }
             // an entity with no stored count and no open blocker stays as it is
             if core.docs.get(&t).map(|e| e.props.get("open_blockers").is_none()).unwrap_or(false) && n == 0 { continue; }
-            self.emit(core, work, &t, "open_blockers", json!(n), "open_blockers", seq, now);
+            self.emit_unchecked(core, work, &t, "open_blockers", json!(n), "open_blockers", seq, now);
         }
     }
 
     /// React to one write (already applied to the mirror): getters, then the on-setters, until quiet.
     pub fn react(&mut self, core: &mut Core, host: &dyn Host, w: Write, now: f64, seq: &mut i64) {
         self.visited.clear();
+        self.visited.insert((w.eid.clone(), w.prop.clone()));   // the outside write starts the chain: returning to it is a loop
         let mut work: VecDeque<Write> = VecDeque::from([w]);
         while let Some(w) = work.pop_front() {
             if w.prop == "status" && core.docs.get(&w.eid).map(|e| BLOCKER_CLASSES.contains(&e.cls.as_str())).unwrap_or(false) {
@@ -172,6 +187,7 @@ impl Fields {
             if self.learn.is_some() { self.learn_on(core, host, &mut work, &w, seq, now); }
             if self.adapters { self.adapters_on(core, &mut work, &w, seq, now); }
             if self.recall { self.recall_on(core, &mut work, &w, seq, now); }
+            if w.writer.starts_with(DIRECT) { continue; }   // rule 6: an own-name store bypasses the setters (getters above still ran)
             let hits: Vec<usize> = (0..self.setters.len())
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, &self.setters[i].cls)).collect();
             for i in hits {
@@ -187,7 +203,12 @@ impl Fields {
                     let Some(tgt) = tgt else { continue };
                     // a replan lands on a Goal only (the trigger's `isa ?g Goal`)
                     if target != "x" && core.docs.get(&tgt).map(|e| e.cls.as_str()) != Some("Goal") { continue; }
-                    if core.docs.contains_key(&tgt) { self.emit(core, &mut work, &tgt, &prop, v, &name, seq, now); }
+                    if !core.docs.contains_key(&tgt) { continue; }
+                    if tgt == w.eid && prop == w.prop {   // rule 6: own name inside its setter stores directly
+                        self.emit_unchecked(core, &mut work, &tgt, &prop, v, &format!("direct:{}", name), seq, now);
+                    } else {
+                        self.emit(core, &mut work, &tgt, &prop, v, &name, seq, now);
+                    }
                 }
             }
         }

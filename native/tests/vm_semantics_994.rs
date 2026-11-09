@@ -108,9 +108,11 @@ fn a_looping_setter_chain_is_refused_at_the_revisit() {
     w.write("t9", "ping", json!(0));   // must return
     // refused at the revisit of (t9, ping), before applying: no numeric cap, a handful of writes
     assert!(w.fs.writes <= 6, "the loop was cut at the revisit ({} writes)", w.fs.writes);
-    assert_eq!(w.prop("t9", "pong"), json!(1), "the repeat write (pong=3) was not applied");
+    assert_eq!(w.prop("t9", "pong"), json!(1), "pong was written once");
+    assert_eq!(w.prop("t9", "ping"), json!(0), "the revisit of the outside-written ping (ping=2) was refused, the person's write stands");
     assert_eq!(w.fs.refusals.len(), 1, "one refusal recorded: {:?}", w.fs.refusals);
     assert!(w.fs.refusals[0].to_string().contains("loop"), "with a reason: {:?}", w.fs.refusals);
+    assert_eq!(w.fs.refusals[0]["prop"], json!("ping"), "refused at the revisit of (t9, ping): {:?}", w.fs.refusals);
     assert_eq!(w.prop("t9", "refused").to_string().contains("loop"), true, "recorded as a write on the entity");
     assert_eq!(w.prop("t9", "side"), json!(1), "unrelated work in the same round still ran");
     w.write("t9", "status", json!("done"));
@@ -174,4 +176,22 @@ fn open_blockers_does_not_drift_under_dropped_or_doubled_writes() {
     assert_eq!(w.prop("x", "open_blockers"), json!(1));
     w.write("a", "status", json!("done"));
     assert_eq!(w.prop("x", "open_blockers"), json!(0));
+}
+
+// rule 8: a getter whose input changes twice in one round ends on the last value; getters are never refused as a loop
+#[test]
+fn a_getter_recalculated_twice_in_a_round_is_not_refused() {
+    let mut fs = Fields::goalgraph();
+    // a task that is done gets archived in the same round (archived is not finished: t7 is blocked again)
+    fs.setters.push(OnSet { name: "archive".into(), cls: "Task".into(), prop: "status".into(), when: "x.status == 'done'".into(), writes: vec![("x".into(), "status".into(), "'archived'".into())] });
+    let mut w = World::new(fs);
+    classes(&mut w.c);
+    mk(&mut w.c, "g1", "Goal", json!({"status": "open"}));
+    mk(&mut w.c, "t8", "Task", json!({"goal": "g1", "status": "running", "open_blockers": 0, "blocks": ["t7"]}));
+    mk(&mut w.c, "d9", "Decision", json!({"goal": "g1", "status": "open", "blocks": ["t7"]}));
+    mk(&mut w.c, "t7", "Task", json!({"goal": "g1", "status": "open", "open_blockers": 2}));
+    w.write("t8", "status", json!("done"));
+    assert_eq!(w.prop("t8", "status"), json!("archived"));
+    assert_eq!(w.prop("t7", "open_blockers"), json!(2), "t8 archived is not finished: both blockers open");
+    assert!(w.fs.refusals.is_empty(), "no refusal: {:?}", w.fs.refusals);
 }
