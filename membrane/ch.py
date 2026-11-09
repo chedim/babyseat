@@ -55,7 +55,7 @@ import time
 import numpy as np
 
 from . import writes as W
-from .entities import MEMBRANE_NS, QuantumEntity
+from .entities import MEMBRANE_NS, QuantumEntity, as_position
 
 SELF = MEMBRANE_NS + "Component:self"
 CLASS = "Trigger"
@@ -827,7 +827,7 @@ class VM:
                                               "chain": ch_now.get("id"), "ts": now}
                 self.est.upsert(tr)
             elif prop == "position":
-                ent.position = value
+                ent.position = as_position(value)
                 self.est.upsert(ent)
             else:
                 ent.properties[prop] = value          # in place: a concurrent writer's keys survive

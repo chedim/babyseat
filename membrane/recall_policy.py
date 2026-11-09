@@ -14,6 +14,22 @@ from __future__ import annotations
 
 from .entities import MEMBRANE_NS
 
+import logging
+import os
+
+_LOG = logging.getLogger("membrane.recall_policy")
+
+
+def native_only() -> bool:
+    """The one switch back to the Python path: MEMBRANE_RECALL_NATIVE=1 (every caller skips the field)."""
+    return os.environ.get("MEMBRANE_RECALL_NATIVE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def fell_back(where: str, exc: BaseException) -> None:
+    """Every fallback to the Python path is logged (#980: no silent drop)."""
+    _LOG.warning("recall policy %s fell back to native: %s: %s", where, type(exc).__name__, exc)
+
+
 DIALS_EID = MEMBRANE_NS + "recall:dials"
 _STATE: dict = {"est": None}
 

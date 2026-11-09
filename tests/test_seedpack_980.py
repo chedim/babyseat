@@ -37,7 +37,7 @@ def test_first_load_installs_and_records_version():
 def test_same_version_is_a_noop():
     est = _est()
     SP.load(est, _pack(1))
-    assert SP.load(est, _pack(1)) == {"installed": 0, "updated": 0, "overlaid": 0}
+    assert SP.load(est, _pack(1)) == {"installed": 0, "updated": 0, "overlaid": 0, "adopted": 0, "reinstalled": []}
 
 
 def test_unedited_entity_takes_the_new_release_silently():
@@ -111,6 +111,42 @@ def test_banner_rules_ship_as_a_pack_and_an_edit_is_not_stranded():
     assert est.docs[eid].properties["show"] == "edited"
     pk = GB.pack()
     pk["version"] += 1
+    for e in pk["entities"]:
+        if e["eid"] == eid:
+            e["properties"]["show"] = "released v2"
     SP.load(est, pk, release=True)
-    assert est.docs[eid].properties["show"] == GB.SEED[0]["show"]
+    assert est.docs[eid].properties["show"] == "released v2"
     assert SP.overlays(est, "banner")[0]["properties"]["show"] == "edited"
+
+
+def test_first_adoption_keeps_seat_edit_and_missing_entity_comes_back(capsys):
+    est = _est()
+    GB.seed(est)
+    eid = GB._rule_eid("open decisions")
+    est.docs[eid].properties["show"] = "edited"
+    est.docs[SP._led_eid("banner")].properties["base"] = {}
+    GB.seed(est)
+    assert est.docs[eid].properties["show"] == "edited"
+    del est.docs[eid]
+    GB.seed(est)
+    assert eid in est.docs and eid in capsys.readouterr().out
+
+
+def test_code_change_without_version_bump_reaches_seat_and_corrupt_version_is_survived():
+    est = _est()
+    GB.seed(est)
+    eid = GB._rule_eid("open decisions")
+    pk = GB.pack()
+    for e in pk["entities"]:
+        if e["eid"] == eid:
+            e["properties"]["show"] = "changed in code"
+    est.docs[SP._led_eid("banner")].properties["version"] = "junk"
+    SP.load(est, pk, release=True)
+    assert est.docs[eid].properties["show"] == "changed in code"
+
+
+def test_python_switch_runs_old_seed(monkeypatch):
+    monkeypatch.setenv("MEMBRANE_SEED_PYTHON", "1")
+    est = _est()
+    assert GB.seed(est) == len(GB.SEED)
+    assert SP._led_eid("banner") not in est.docs

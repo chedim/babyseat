@@ -26,7 +26,7 @@ import time
 
 from . import ch as CH
 from . import writes as W
-from .entities import MEMBRANE_NS, QuantumEntity
+from .entities import MEMBRANE_NS, QuantumEntity, as_position
 
 _PyVM = CH.PyVM               # ch.py's own VM: its helpers are reused (a test run may swap CH.VM)
 
@@ -391,7 +391,7 @@ class NativeVM:
                                               "chain": ch_now.get("id"), "ts": now}
                 self.est.upsert(tr)
             elif prop == "position":
-                ent.position = value
+                ent.position = as_position(value)
                 self.est.upsert(ent)
             else:
                 ent.properties[prop] = value          # in place: a concurrent writer's keys survive

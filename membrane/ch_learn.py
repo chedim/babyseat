@@ -1,4 +1,5 @@
 """LEARNING LIVES IN THE VM (#576 part C): Blurp's plasticity, as field physics.
+#935 HABITS read the balance below; no second scorer is imported.
 
 GUESS. A write W (by anyone but a trigger) is explained by a cause C: one of the
 last LOOK_BACK writes before it in the SAME chain. The guess is a trigger owned
@@ -35,6 +36,7 @@ import hashlib
 import json
 
 from . import ch as CH
+from . import score as S
 from .energy import BASAL_PER_S
 
 WRITE_COST = BASAL_PER_S          # every Blurp write: one awake second (approved)
@@ -127,6 +129,29 @@ def _same(a, b) -> bool:
     return _scalar(a) and type(a) is type(b) and a == b
 
 
+_ACTING_VERBS = ("say", "poke", "invoke", "replan", "plan", "restart", "call", "wake", "unwake",
+                 "list", "add", "remove", "reset")
+
+
+def reversible(trigger) -> bool:
+    """#935: only a plain field write can be undone; a method call (`.invoke`) never graduates."""
+    from . import adapters as _AD              # the one table of what acts beyond a field write
+    w = (getattr(trigger, "properties", None) or {}).get("write")
+    path = str(w[0]) if isinstance(w, (list, tuple)) and w else ""
+    if not path:
+        return False
+    eid, _, prop = path.rpartition(".")
+    if eid.startswith("?"):                    # a variable entity: ANY entity may be the target, so
+        probe = _AD._branch("x:probe." + prop)  # test the verb on a stand-in, and on the known acting objects
+        if probe is not None or prop in _ACTING_VERBS:
+            return False
+        from .entities import MEMBRANE_NS
+        for e in (MEMBRANE_NS + "llm", MEMBRANE_NS + "presence", MEMBRANE_NS + "toybox"):
+            if _AD._branch(e + "." + prop) is not None:
+                return False
+    return _AD._branch(path) is None
+
+
 def _literal(v) -> str | None:
     if not _scalar(v):
         return None
@@ -141,8 +166,9 @@ STALL_KEYS = ("guess:asleep", "fire:skip", "fire:gated", "pass:not_toy")
 
 class Learner:
     def __init__(self, vm, purse, granted=lambda path: False, suggest=None, adopted=None, toy_open=None,
-                 moved=None):
+                 moved=None, llm_works=None):
         self.vm = vm
+        self.llm_works = llm_works       # (chain) -> True while the LLM works that chain (#576 H: then only suggest)
         self.toy_open = toy_open or (lambda name: True)   # #727: the toys Blurp may learn on now
         self.purse = purse
         self.granted = granted
@@ -152,6 +178,7 @@ class Learner:
         self._recent: collections.OrderedDict = collections.OrderedDict()   # chain -> its last writes
         self._pending: collections.OrderedDict = collections.OrderedDict()  # chain -> [(cand, path, value)]
         self._bal: dict[str, float] = {}
+        self._habits: set[str] = set()       # #935: graduated candidates, run without a model round
         self._hits: dict[str, int] = {}
         self._adopt: dict[str, int] = {}     # #751: adopted suggestions per candidate (speak)
         self._on_toy: collections.OrderedDict = collections.OrderedDict()   # toy -> (chain, writer, link)
@@ -194,6 +221,26 @@ class Learner:
     # -- the account ------------------------------------------------------------------------
     def balance(self, cand: str) -> float:
         return self._bal.get(cand, 0.0)
+
+    def graduate(self, cand: str, *, threshold: float) -> bool:
+        """#935: a reversible candidate whose ch_learn balance reached the operator's line
+        becomes a habit. The line is required: no default."""
+        tr = self.vm.est.docs.get(cand)
+        if tr is None or not reversible(tr) or self.balance(cand) < threshold:
+            return False
+        self._habits.add(cand)
+        return True
+
+    def habits(self) -> list[str]:
+        return sorted(self._habits)
+
+    def is_habit(self, cand: str) -> bool:
+        return cand in self._habits
+
+    def consequence(self, cand: str, bad: bool) -> None:
+        """One bad consequence demotes a habit back to a candidate (kept, not deleted)."""
+        if bad:
+            self._habits.discard(cand)
 
     def _hit(self, cand: str) -> None:
         self.counts["hit"] += 1
@@ -256,6 +303,10 @@ class Learner:
         kind = (tr.properties or {}).get("kind")         # its skill's Accept grants it too (the child tree)
         suggests = self.state(tr.eid) == "proposal" and (
             self.granted(grant_path) or bool(kind and self.granted(f"skill:{kind}")))   # as it stood before this write
+        habit = tr.eid in self._habits
+        if habit and not (self.granted(grant_path) or bool(kind and self.granted(f"skill:{kind}"))):
+            self.counts["fire:skip"] += 1              # #935: a habit still needs the operator's grant
+            return "skip"
         if not self._spend(tr.eid, "fire"):
             self.counts["fire:skip"] += 1
             return "skip"
@@ -263,6 +314,11 @@ class Learner:
         ch = (CH.W.current() or {}).get("id")
         if ch:                                  # no chain, nothing can confirm it: no prediction kept
             self._remember(self._pending, ch, list).append((tr.eid, self._expected(target_path), value))
+        if habit and not (self.llm_works(ch) if self.llm_works else False):
+            S.note("answer", lane="habit")             # #935: field work, no model round
+            self.counts["fire:habit"] += 1
+            self.counts["fire:live"] += 1
+            return "live"                              # pending above: it is re-scored like any live fire
         if suggests and target_path == f"{CH.SELF}.{SELF_MOVE}":
             self.counts["fire:live"] += 1           # #732: Blurp's own move -- a granted look moves its body
             return "live"
@@ -433,6 +489,7 @@ class Learner:
             return False                                # every candidate pays for itself: no room
         self.vm.est.remove(worst.eid)
         self._bal.pop(worst.eid, None)
+        self._habits.discard(worst.eid)
         return True
 
     @staticmethod
@@ -455,4 +512,5 @@ class Learner:
             if est.remove(eid):
                 gone.append(eid)
             self._bal.pop(eid, None)
+            self._habits.discard(eid)
         return gone
