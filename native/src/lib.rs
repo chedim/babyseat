@@ -6,6 +6,7 @@ pub mod learn;
 pub mod banner;
 pub mod recall;
 pub mod topk;
+pub mod packs;
 pub mod expr;
 pub mod fields;
 pub mod getters;

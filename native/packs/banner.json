@@ -1,0 +1,104 @@
+{
+ "name": "banner",
+ "version": 1,
+ "entities": [
+  {
+   "eid": "rule:open-decisions",
+   "cls": "BannerRule",
+   "properties": {
+    "name": "open decisions",
+    "where": [
+     [
+      "recent",
+      "?m"
+     ],
+     [
+      "edge",
+      "?m",
+      "asks:*",
+      "?d"
+     ],
+     [
+      "filter",
+      "d.status == 'open'"
+     ]
+    ],
+    "show": "open decision: {d.name}",
+    "order": 10,
+    "silent_birth": true
+   }
+  },
+  {
+   "eid": "rule:pronouns",
+   "cls": "BannerRule",
+   "properties": {
+    "name": "pronouns",
+    "where": [
+     [
+      "mine",
+      "?r"
+     ],
+     [
+      "edge",
+      "?r",
+      "holds",
+      "?x"
+     ]
+    ],
+    "show": "\"{r.pronoun}\" = {x.name}",
+    "order": 20,
+    "silent_birth": true
+   }
+  },
+  {
+   "eid": "rule:named",
+   "cls": "BannerRule",
+   "properties": {
+    "name": "named",
+    "where": [
+     [
+      "recent",
+      "?m"
+     ],
+     [
+      "edge",
+      "?m",
+      "refers-to",
+      "?x"
+     ]
+    ],
+    "show": "named: {x.name} ({x.status})",
+    "order": 30,
+    "silent_birth": true
+   }
+  },
+  {
+   "eid": "rule:ran",
+   "cls": "BannerRule",
+   "properties": {
+    "name": "ran",
+    "where": [
+     [
+      "recent",
+      "?m"
+     ],
+     [
+      "edge",
+      "?m",
+      "led-to",
+      "?p"
+     ],
+     [
+      "edge",
+      "?p",
+      "result",
+      "?res"
+     ]
+    ],
+    "show": "ran: {p.name} (rc {res.rc})",
+    "order": 40,
+    "silent_birth": true
+   }
+  }
+ ]
+}

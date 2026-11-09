@@ -27,16 +27,8 @@ pub fn seed_rules() -> Vec<(&'static str, i64, J, &'static str)> {
     ]
 }
 
-pub fn load_seed(core: &mut Core) {
-    for (name, order, wh, show) in seed_rules() {
-        let mut p = serde_json::Map::new();
-        p.insert("name".into(), json!(name));
-        p.insert("order".into(), json!(order));
-        p.insert("where".into(), wh);
-        p.insert("show".into(), json!(show));
-        core.load(format!("rule:{}", name.replace(' ', "-")), CLASS_RULE.into(), p, None, 0.0);
-    }
-}
+/// the banner pack (native/packs/banner.json, #994 row 7): the rules are data, declared by the pack loader.
+pub fn load_seed(core: &mut Core) { crate::packs::load_named(core, crate::packs::BANNER); }
 
 type B = HashMap<String, String>;
 
