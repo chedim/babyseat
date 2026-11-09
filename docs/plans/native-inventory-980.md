@@ -55,11 +55,11 @@ Source: issue #980 body + survey of origin/main (membrane/*.py). Draft; item lis
 45 rows: MIGRATE 25 (of which 4 as Q2 entity scripts, rows 12-15), STAY 13, BLOCKED 7 (each names its primitive).
 
 ## Design question outcomes
-- **Q1 decided:** native = store/journal, trigger engine, loop rule, owner auth, effect adapters, VM machinery and dependency drivers. The VM is never migrated.
-- **Q2 decided:** cliffhanger by default; an entity script only where a primitive is missing, each recorded as a missing primitive (rows 12-15).
-- **Q3 decided:** versioned seed pack; release changes must not be stranded by a seat edit (row 10).
+- **Q1 proposed (awaiting operator):** native = store/journal, trigger engine, loop rule, owner auth, effect adapters, VM machinery and dependency drivers. The VM is never migrated.
+- **Q2 proposed (awaiting operator):** cliffhanger by default; an entity script only where a primitive is missing, each recorded as a missing primitive (rows 12-15).
+- **Q3 proposed (awaiting operator):** versioned seed pack; release changes must not be stranded by a seat edit (row 10).
 - **Q4 open:** owner-only writes, ledger and revert-to-shipped; only the write-gate/revert design waits on a decision.
-- **Q5 decided:** peer import is script-free (#226); core programs arrive only from the release.
+- **Q5 proposed (awaiting operator):** peer import is script-free (#226); core programs arrive only from the release.
 
 ## Recall policy rows (r1 of the recall-policy goal)
 
