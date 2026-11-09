@@ -82,6 +82,47 @@ class Findings(unittest.TestCase):
         with self.assertRaises(Exception):
             SK._keys(Bad(), "events")
 
+    def test_catch_up_seed_does_not_block_write_or_search(self):
+        import threading
+        be = open_be(self.d)
+        for i in range(3):
+            be.upsert("sentences", f"s{i}", {"text": "x", "vec": pack(vec(i))})
+        be.flush()
+        be.close()
+        be = open_be(self.d)
+        inside, release = threading.Event(), threading.Event()
+        real = be.db.iter_query
+
+        def slow(*a, **k):
+            rows = list(real(*a, **k))     # the raw read is done (db lock freed); the scan is held here
+            inside.set()
+            release.wait(10)
+            yield from rows
+        be.db.iter_query = slow
+        seeder = threading.Thread(target=be.catch_up)
+        seeder.start()
+        self.assertTrue(inside.wait(5))
+        done = []
+
+        def work():
+            be.upsert("sentences", "late", {"text": "l", "vec": pack(vec(99))})
+            be.vector_top_k("sentences", "vec", vec(1), 2)
+            done.append(1)
+        w = threading.Thread(target=work)
+        w.start()
+        w.join(3)
+        stuck = w.is_alive()
+        release.set()
+        seeder.join(10)
+        w.join(10)
+        self.assertFalse(stuck, "write/search blocked behind the seed")
+        be.db.iter_query = real
+        be.flush(); be.catch_up()
+        mx = be._vectors()
+        self.assertEqual(len(mx.keys), len(set(mx.keys)), "duplicate rows")
+        self.assertIn("late", mx.keys)
+        self.assertEqual(len(mx.keys), 4)
+
     def test4_concurrent_catch_up_adds_no_duplicate_rows(self):
         import threading
         be = open_be(self.d)

@@ -205,9 +205,19 @@ class SQLiteBackend(CBLiteBackend):
             self._pending_vec.pop(key, None)
 
     # ---- the catch-up: new sentence vectors into the matrix ---------------------------------------
-    def catch_up(self, max_batches: int | None = None) -> int:
+    def catch_up(self, max_batches: int | None = None, wait: bool = True) -> int:
         mx = self._vectors()
-        with mx.lock:                                  # one catch-up at a time: no duplicate rows
+        if not wait:                                   # a search never queues behind a running seed
+            lk = self.__dict__.setdefault("_cu_lock", threading.Lock())
+            if not lk.acquire(blocking=False):
+                return 0
+            try:
+                return self._catch_up(mx, max_batches)
+            finally:
+                lk.release()
+        # one catch-up at a time (its own lock); mx.lock is taken only inside mx.append / the pending swap,
+        # so writes and searches are never held behind the seed scan
+        with self.__dict__.setdefault("_cu_lock", threading.Lock()):
             return self._catch_up(mx, max_batches)
 
     def _catch_up(self, mx, max_batches) -> int:
@@ -216,7 +226,10 @@ class SQLiteBackend(CBLiteBackend):
             have = set(mx.row)
             seeded_keys = set()
             todo = []
-            for r in self.db.iter_query("SELECT META().id AS k, d.vec AS v FROM membrane.sentences"):
+            # drain the stream first: the db lock is held only for the raw read, never across the
+            # unpack/append work, and mx.lock only inside mx.append
+            rows = list(self.db.iter_query("SELECT META().id AS k, d.vec AS v FROM membrane.sentences"))
+            for r in rows:
                 if r.get("k") not in have and r.get("v"):
                     todo.append((r["k"], unpack_vec(r["v"])))
                     seeded_keys.add(r["k"])
@@ -244,7 +257,7 @@ class SQLiteBackend(CBLiteBackend):
         if not n or q.size != DIM:
             return []
         if not getattr(self, "_seeded", False) or self._pending_vec:
-            self.catch_up()
+            self.catch_up(wait=False)
         mx = self._vectors()
         if not eq:
             return mx.top(q / n, int(k))
