@@ -25,10 +25,11 @@ import threading
 import time
 
 from . import ch as CH
+from . import membrane_vm as MV     # no fallback: a missing/broken extension raises here, at import
 from . import writes as W
 from .entities import MEMBRANE_NS, QuantumEntity, as_position
 
-_PyVM = CH.PyVM               # ch.py's own VM: its helpers are reused (a test run may swap CH.VM)
+_PyVM = CH.Binder            # the shared binder helpers (_split, _is_selfs)
 
 
 DEPTH_MAX = 64          # nesting kept for the core (serde refuses past 128); deeper becomes its text
@@ -167,7 +168,6 @@ class _Host:
 
 class NativeVM:
     def __init__(self, est, clock=time.time, paused=lambda: False):
-        from . import membrane_vm as MV
         self.est = est
         self.clock = clock
         self.paused = paused

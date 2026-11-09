@@ -97,9 +97,8 @@ A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebu
 
 ## 6. The native VM (`native/`, `membrane/ch_native.py`, #971 step 3)
 
-A Rust core (PyO3) behind `ch.VM`'s API. `ch.make_vm()` returns it when `MEMBRANE_NATIVE_VM=1` and the
-extension is built (`native/build.sh` puts `membrane/membrane_vm.so` in place); otherwise it returns
-`ch.VM`, and says so when the switch is on but the extension is missing. The seat builds its VM
+A Rust core (PyO3) behind `ch.VM`'s API. `ch.make_vm()` always returns it (no switch, no Python fallback; a missing extension raises at startup) (`native/build.sh` puts `membrane/membrane_vm.so` in place).
+The seat builds its VM
 through `make_vm`.
 
 - **In Rust:** the expression language (its own parser, with Python's semantics and `ast.walk`'s
@@ -136,7 +135,7 @@ through `make_vm`.
   - `tests/test_ch_native_971.py`: a journal recorded with ch.VM replays identically through the
     native VM, and the expression language matches ch.py's.
   - Every VM suite (`test_ch_576`, `test_ch_index_956`, `test_ch_calls_956`, the Blurp suites, …)
-    runs against the native VM with `MEMBRANE_NATIVE_VM=1` (the switch in `tests/conftest.py`).
+    runs against the native VM.
   - The index tests read the native VM's trace (`vm.trace`) where they spied on
     `ch.VM._on_write`.
 
