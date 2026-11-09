@@ -2458,7 +2458,8 @@ def _tune_threshold(srv, Vn, tag: str) -> float | None:
     mem = srv.membrane
     if mem.embedder is None:
         return None
-    anti = np.asarray(mem.embedder.embed(_INTERCEPT_ANTI_SEEDS), dtype=float)
+    from . import seedtables as _ST
+    anti = np.asarray(mem.embedder.embed(_ST.anti_seeds(getattr(srv, "entity_store", None))), dtype=float)
     norms = np.linalg.norm(anti, axis=1)
     norms[norms <= 1e-12] = 1.0
     anti = anti / norms[:, None]
@@ -2501,9 +2502,10 @@ def _family_of(text: str) -> str:
     return "recall"
 
 
-def _seed_topics() -> list:
+def _seed_topics(srv=None) -> list:
     """(text, family) for every fixed seed phrase."""
-    return [(s, _family_of(s)) for s in _INTERCEPT_SEEDS]
+    from . import seedtables as _ST
+    return [(s, _family_of(s)) for s in _ST.intercept_seeds(getattr(srv, "entity_store", None))]
 
 
 def _embed_seed_matrix(srv) -> bool:
@@ -2515,7 +2517,7 @@ def _embed_seed_matrix(srv) -> bool:
     mem = srv.membrane
     if mem.embedder is None:
         return False
-    topics = _seed_topics()
+    topics = _seed_topics(srv)
     try:
         V = np.asarray(mem.embedder.embed([t for t, _ in topics]), dtype=float)
         Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
