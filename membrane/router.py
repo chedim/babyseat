@@ -462,6 +462,9 @@ class Registry:
         only seeds the prior mass; lived evidence dilutes it. Background-safe:
         any failure leaves the claim unseeded (fit falls to 0; locals still
         route by latency + exploration until an imprint lands)."""
+        def _imprint_prompt():
+            from . import seedtables
+            return seedtables.imprint_prompt(getattr(self, "entity_store", None))
         for rec in list(self.records.values()):
             if rec.imprint or self.embedder is None:
                 continue
@@ -471,10 +474,7 @@ class Registry:
                 body = json.dumps({
                     "model": rec.name, "stream": False,
                     "messages": [{"role": "user", "content":
-                                  "In exactly 3 short bullet lines: (1) the "
-                                  "tasks you are best at, (2) the tasks you "
-                                  "are worst at, (3) what you were trained "
-                                  "for. Plain text, no preamble."}]}).encode()
+                                  _imprint_prompt()}]}).encode()
                 from .rag import MODE_BACKGROUND   # #753: never stored
                 req = urllib.request.Request(
                     self.backend + "/api/chat", data=body,
