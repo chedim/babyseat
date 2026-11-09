@@ -1,6 +1,7 @@
 //! membrane_vm: the cliffhanger VM, native (#971). Python sees one class, `Core`; values cross the
 //! boundary as JSON text (simple first; typed conversion later, where measurements say it matters).
 
+pub mod banner;
 pub mod expr;
 pub mod fields;
 pub mod vm;
