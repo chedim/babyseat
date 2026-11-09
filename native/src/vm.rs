@@ -187,12 +187,50 @@ impl Core {
 
     /// The live store's content for an entity, with no write behind it (a sweep re-reads what was
     /// changed in place); its `seen` time is untouched.
-    pub fn refresh(&mut self, eid: String, cls: String, props: Map<String, J>, pos: Option<Vec<f64>>) {
+    pub fn refresh(&mut self, eid: String, cls: String, props: Option<Map<String, J>>, pos: Option<Vec<f64>>) {
         if !self.at.contains_key(&eid) {
             self.at.insert(eid.clone(), self.order.len());
             self.order.push(Some(eid.clone()));
         }
-        self.docs.insert(eid, Ent { cls, props, pos });
+        // a position of one NaN: keep the mirror's (a sweep with no geometric trigger doesn't copy them)
+        let keep_pos = matches!(&pos, Some(v) if v.len() == 1 && v[0].is_nan());
+        match (self.docs.get_mut(&eid), props) {
+            (Some(e), None) => { e.cls = cls; if !keep_pos { e.pos = pos; } }   // positions only (an `around` sweep)
+            (Some(e), Some(props)) if keep_pos => { e.cls = cls; e.props = props; }
+            (_, props) => { self.docs.insert(eid, Ent { cls, props: props.unwrap_or_default(), pos: if keep_pos { None } else { pos } }); }
+        }
+    }
+
+    /// What a sweep can read: (every entity's position is needed -- an `around` trigger --, the entities
+    /// the sweep's triggers can bind or name). Empty when no trigger is the sweep's.
+    pub fn sweep_eids(&mut self, host: &dyn Host) -> (bool, bool, Vec<String>) {
+        let mut memo = Memo::default();
+        let mut out: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut all = false;
+        let mut geo = false;
+        let specs: Vec<Spec> = self.triggers.iter().filter_map(|t| t.spec.clone())
+            .filter(|sp| !sp.when.iter().any(|a| s(&a[0]) == "changed")).collect();
+        for sp in &specs {
+            if sp.when.iter().any(|a| s(&a[0]) == "around") { all = true; }
+            if sp.when.iter().any(|a| matches!(s(&a[0]).as_str(), "near" | "away" | "pos" | "around")) { geo = true; }
+            for a in &sp.wh {
+                let kind = s(&a[0]);
+                if kind == "isa" || kind == "is" || kind == "dispatches" {
+                    for e in self.candidates(host, a, &mut memo) { if seen.insert(e.clone()) { out.push(e); } }
+                }
+            }
+            for a in &sp.when {
+                for x in a.iter().skip(1) {
+                    if let J::String(r) = x {
+                        if !r.starts_with('?') && s(&a[0]) != "above" && s(&a[0]) != "below" && s(&a[0]) != "every" {
+                            if let Some(e) = self.lookup(host, r) { if seen.insert(e.clone()) { out.push(e); } }
+                        }
+                    }
+                }
+            }
+        }
+        (all, geo, out)
     }
 
     fn remove(&mut self, eid: &str) {

@@ -914,6 +914,9 @@ class VM:
             return
         now = float(now if now is not None else self.clock())
         with self._run:
+            hook = getattr(self, "on_sweep", None)
+            if hook is not None:                     # #971: journal.Journal.watch -- the sweep, with its time
+                hook(now)
             memo: dict = {}
             for tr in self.triggers():
                 def go(tr=tr):
@@ -971,10 +974,12 @@ def make_vm(est, **kw):
     else this module's. A missing extension is said, never silent."""
     if os.environ.get(NATIVE_ENV, "").strip() == "1":
         try:
-            from .ch_native import NativeVM
-            return NativeVM(est, **kw)
-        except ImportError as e:
+            from . import ch_native
+            return ch_native.NativeVM(est, **kw)
+        except Exception as e:                    # noqa: BLE001 -- not built, or failed to start: never no VM
             import sys
-            print(f"[ch] {NATIVE_ENV}=1 but the native VM is not built ({e}); using the Python VM", file=sys.stderr)
+            print(f"[ch] {NATIVE_ENV}=1 but the native VM could not start ({type(e).__name__}: {e}); "
+                  "using the Python VM", file=sys.stderr)
+        return PyVM(est, **kw)
     return VM(est, **kw)
 

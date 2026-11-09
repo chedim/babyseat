@@ -84,3 +84,134 @@ def test_what_ch_py_refuses_the_native_parser_refuses(src):
         CH._check(CH._parse(src), {"x", "a", "b", "c"})
     with pytest.raises(Exception):
         MV.evaluate(src, json.dumps({"x": [1], "a": 1, "b": 1, "c": 1}))
+
+
+# ---- Memo's review of 6f9b4de ------------------------------------------------------------------
+
+def _toy_store():
+    from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity
+    est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
+    est.upsert(QuantumEntity(eid=MEMBRANE_NS + "toy:die", cls="toy", properties={"name": "die", "a": 0}), embedder=None)
+    return est, est.docs[MEMBRANE_NS + "toy:die"]
+
+
+def test_reading_the_counters_while_another_thread_drains_never_deadlocks():
+    """1: `fired` read off the worker thread while `step` was inside a host callback froze the process."""
+    import threading
+    import time
+    from membrane import writes as W
+    est, die = _toy_store()
+    vm = NV.NativeVM(est)
+    vm.attach()
+    slow = vm.core  # noqa: F841
+    real = NV._Host.resolve_exact
+    NV._Host.resolve_exact = lambda self, ref: (time.sleep(0.002), real(self, ref))[1]
+    try:
+        vm.define("inc", when=[["changed", "?x.a"]], where=[["is", "?x", "toy:die"]], write=["?x.b", "x.a + 1"])
+        stop = time.time() + 2.0
+        done = {"n": 0}
+
+        def writer():
+            i = 0
+            while time.time() < stop:
+                i += 1
+                with W.as_writer("person:t"):
+                    die.properties["a"] = i
+                    est.upsert(die, embedder=None)
+                vm.drain()
+            done["n"] = i
+
+        t = threading.Thread(target=writer, daemon=True)
+        t.start()
+        reads = 0
+        while t.is_alive() and time.time() < stop + 5:
+            _ = vm.fired, vm.errors, vm.report()
+            reads += 1
+        t.join(timeout=8)
+        assert not t.is_alive(), "the drain thread is stuck (deadlock)"
+        assert reads > 0 and done["n"] > 0
+    finally:
+        NV._Host.resolve_exact = real
+        vm.detach()
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), "\ud800x", {"a": [[[[[[[[1]]]]]]]]}])
+def test_a_value_strict_json_cannot_carry_never_stops_the_vm(bad):
+    """2: NaN / Infinity / a lone surrogate / deep nesting in the store or in a write."""
+    from membrane import ch as CH
+    from membrane import writes as W
+    est, die = _toy_store()
+    die.properties["weird"] = bad
+    est.upsert(die, embedder=None)
+    deep = bad
+    for _ in range(200):
+        deep = [deep] if not isinstance(bad, float) else deep
+    die.properties["deeper"] = deep
+    est.upsert(die, embedder=None)
+    vm = NV.NativeVM(est)                      # construction survives
+    vm.attach()
+    vm.define("inc", when=[["changed", "?x.a"]], where=[["is", "?x", "toy:die"]], write=["?x.b", "x.a + 1"])
+    with W.as_writer("person:t"):
+        die.properties["weird2"] = bad         # a write of it survives too
+        die.properties["a"] = 4
+        est.upsert(die, embedder=None)
+    vm.drain()
+    vm.detach()
+    assert die.properties.get("b") == 5
+
+
+def test_make_vm_falls_back_to_the_python_vm_when_the_native_one_cannot_start(monkeypatch):
+    from membrane import ch as CH
+    monkeypatch.setenv(CH.NATIVE_ENV, "1")
+    est, _ = _toy_store()
+
+    def boom(*a, **k):
+        raise ValueError("cannot start")
+    monkeypatch.setattr(NV, "NativeVM", boom)
+    assert isinstance(CH.make_vm(est), CH.PyVM)
+
+
+def test_a_sweep_without_level_triggers_reads_nothing_from_the_store():
+    """3: every sweep serialised the whole store; with no trigger a sweep can bind, it reads nothing."""
+    est, _ = _toy_store()
+    vm = NV.NativeVM(est)
+    seen = []
+    real = NV.NativeVM._refresh_rows
+    NV.NativeVM._refresh_rows = lambda self, eids, positions=True: (seen.append(len(eids)), real(self, eids, positions))[1]
+    try:
+        vm.sweep()
+        assert seen in ([], [0])
+        vm.define("hot", when=[["above", "x.a", 5]], where=[["isa", "?x", "toy"]], write=["?x.hot", "1"])
+        vm.sweep()
+        assert seen[-1] == 1                   # only the one entity the level trigger can bind
+    finally:
+        NV.NativeVM._refresh_rows = real
+
+
+def test_replay_covers_what_a_sweep_fires():
+    """4: a journal with an `every` firing replayed as want 1, got 0 -- sweeps and the VM's clock are journalled."""
+    from membrane import ch as CH
+    from membrane import writes as W
+    from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity
+    for make in (lambda s, **k: CH.PyVM(s, **k), lambda s, **k: NV.NativeVM(s, **k)):
+        p = Path(tempfile.mkdtemp()) / "w.jsonl"
+        est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
+        jn = J.Journal(p, est)
+        jn.attach()
+        clock = {"t": 1000.0}
+        vm = CH.PyVM(est, clock=lambda: clock["t"])
+        jn.watch(vm)
+        vm.attach()
+        with W.as_writer("person:t"):
+            est.upsert(QuantumEntity(eid=MEMBRANE_NS + "toy:c", cls="toy", properties={"name": "c", "n": 0}), embedder=None)
+            vm.define("tick", when=[["every", 10]], where=[["isa", "?x", "toy"]], write=["?x.n", "x.n + 1"])
+        vm.drain()
+        for _ in range(3):
+            clock["t"] += 11
+            vm.sweep()
+            vm.drain()
+        vm.detach()
+        jn.close()
+        fresh = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
+        rep = J.replay_vm(p, fresh, make)
+        assert rep["mismatches"] == [] and rep["vm_writes"] == 3, rep

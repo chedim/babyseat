@@ -43,6 +43,30 @@ fn atoms(j: &J) -> Vec<Vec<J>> {
     j.as_array().map(|a| a.iter().map(|x| x.as_array().cloned().unwrap_or_default()).collect()).unwrap_or_default()
 }
 
+type Row = (String, String, Option<Map<String, J>>, Option<Vec<f64>>);
+
+fn rows_of(rows_json: &str, pos: &[u8]) -> PyResult<Vec<Row>> {
+    let rows: J = serde_json::from_str(rows_json).map_err(bad)?;
+    let mut at = 0usize;
+    let mut out = Vec::new();
+    for r in rows.as_array().cloned().unwrap_or_default() {
+        let a = r.as_array().cloned().unwrap_or_default();
+        if a.len() < 4 { continue; }
+        let dim = a[3].as_i64().unwrap_or(-1);
+        let keep = dim == -2;
+        let p = if dim >= 0 {
+            let n = dim as usize * 8;
+            if at + n > pos.len() { return Err(bad("positions buffer too short")); }
+            let v: Vec<f64> = pos[at..at + n].chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().unwrap())).collect();
+            at += n;
+            Some(v)
+        } else { None };
+        out.push((a[0].as_str().unwrap_or("").to_string(), a[1].as_str().unwrap_or("").to_string(),
+                  a[2].as_object().cloned(), if keep { Some(vec![f64::NAN]) } else { p }));
+    }
+    Ok(out)
+}
+
 #[pyclass]
 struct Core { c: std::sync::Mutex<vm::Core>, host: Py<PyAny> }
 
@@ -62,17 +86,29 @@ impl Core {
         Ok(())
     }
 
-    /// Many entities' live content at once (a sweep): [[eid, cls, props, position], ...].
-    fn refresh_many(&self, rows_json: &str) -> PyResult<()> {
-        let rows: J = serde_json::from_str(rows_json).map_err(bad)?;
+    /// Many entities' live content at once (a sweep): rows [[eid, cls, props | null, dim], ...] as JSON,
+    /// their positions as one buffer of little-endian f64 (dim numbers per row, dim -1 = no position).
+    fn refresh_many(&self, rows_json: &str, pos: &[u8]) -> PyResult<()> {
+        let rows = rows_of(rows_json, pos)?;
         let mut c = self.g();
-        for r in rows.as_array().cloned().unwrap_or_default() {
-            let a = r.as_array().cloned().unwrap_or_default();
-            if a.len() < 4 { continue; }
-            c.refresh(a[0].as_str().unwrap_or("").to_string(), a[1].as_str().unwrap_or("").to_string(),
-                      a[2].as_object().cloned().unwrap_or_default(), pos_of(&a[3]));
-        }
+        for (eid, cls, props, p) in rows { c.refresh(eid, cls, props, p); }
         Ok(())
+    }
+
+    /// The VM coming up: the same rows, in one call.
+    fn load_many(&self, rows_json: &str, pos: &[u8], now: f64) -> PyResult<()> {
+        let rows = rows_of(rows_json, pos)?;
+        let mut c = self.g();
+        for (eid, cls, props, p) in rows { c.load(eid, cls, props.unwrap_or_default(), p, now); }
+        Ok(())
+    }
+
+    /// What a sweep can read: {"all": bool, "eids": [...]}.
+    fn sweep_eids(&self, py: Python<'_>) -> PyResult<String> {
+        let h = self.host.bind(py).clone();
+        let host = PyHost { py, obj: &h };
+        let (all, geo, eids) = self.g().sweep_eids(&host);
+        Ok(serde_json::json!({"all": all, "positions": geo, "eids": eids}).to_string())
     }
 
     /// A write heard: {eid, prop, new, old, writer, chain[, born: {cls, props, position}]}.

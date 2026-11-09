@@ -63,6 +63,14 @@ class Journal:
     def detach(self) -> None:
         W.off_write(self._hear)
 
+    def watch(self, vm) -> None:
+        """Journal the VM's sweeps with their time (Memo's review of #972: what a sweep fires -- `every`,
+        a level crossing the thinker's beat sees -- replays only if the sweep and its clock do)."""
+        vm.on_sweep = self._sweep
+
+    def _sweep(self, now: float) -> None:
+        self._q.put(json.dumps({"sweep": float(now)}))
+
     def _hear(self, w: dict) -> None:
         ch = w.get("chain") or None
         line = {"ts": w.get("ts"), "path": w.get("path"), "eid": w.get("eid"), "prop": w.get("prop") or "",
@@ -110,6 +118,8 @@ def read(path):
 def apply(store, line: dict) -> None:
     """One journal line onto a store, with its writer and chain (so the store's own events carry them)."""
     from .entities import QuantumEntity
+    if "sweep" in line:
+        return                                   # the VM's own: replay_vm runs it
     path, eid, prop, new = line["path"], line.get("eid"), line.get("prop") or "", line.get("new")
     if path.startswith("rel:") or not eid:
         return                                   # relations: not in the replay yet (flagged in docs/vm-api.md)
@@ -159,6 +169,8 @@ def replay_vm(path, store, make_vm, record=None) -> dict:
     recorded `trigger:*` writes ((path, new), in order)."""
     lines = list(read(path))
     want = [(ln["path"], ln.get("new")) for ln in lines if str(ln.get("writer", "")).startswith(VM_WRITER)]
+    clock = {"t": next((float(ln["sweep"]) for ln in lines if "sweep" in ln), None)}
+    clock["t"] = clock["t"] if clock["t"] is not None else next((float(ln["ts"]) for ln in lines if ln.get("ts")), 0.0)
     got: list = []
 
     def hear(w):
@@ -167,11 +179,19 @@ def replay_vm(path, store, make_vm, record=None) -> dict:
     jn = Journal(record, store) if record else None
     if jn:
         jn.attach()
-    vm = make_vm(store)
+    try:
+        vm = make_vm(store, clock=lambda: clock["t"])
+    except TypeError:                            # a factory without a clock
+        vm = make_vm(store)
     vm.attach()
     W.on_write(hear)
     try:
         for ln in lines:
+            if "sweep" in ln:                    # the VM's sweep, at its recorded time
+                clock["t"] = float(ln["sweep"])
+                vm.sweep(now=clock["t"])
+                vm.drain()
+                continue
             if str(ln.get("writer", "")).startswith(VM_WRITER):
                 continue
             apply(store, ln)
@@ -184,4 +204,5 @@ def replay_vm(path, store, make_vm, record=None) -> dict:
     mism = [{"at": i, "want": w, "got": g} for i, (w, g) in enumerate(zip(want, got)) if w != g]
     if len(want) != len(got):
         mism.append({"at": min(len(want), len(got)), "want_n": len(want), "got_n": len(got)})
-    return {"outside": len(lines) - len(want), "vm_writes": len(got), "mismatches": mism}
+    return {"outside": sum(1 for ln in lines if "sweep" not in ln) - len(want), "sweeps": sum(1 for ln in lines if "sweep" in ln),
+            "vm_writes": len(got), "mismatches": mism}

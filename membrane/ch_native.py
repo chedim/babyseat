@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import collections
 import json
+import math
 import threading
 import time
 
@@ -29,21 +30,70 @@ from .entities import MEMBRANE_NS, QuantumEntity
 _PyVM = CH.PyVM               # ch.py's own VM: its helpers are reused (a test run may swap CH.VM)
 
 
-def _plain(v):
+DEPTH_MAX = 64          # nesting kept for the core (serde refuses past 128); deeper becomes its text
+
+
+def _clean(v, depth: int = 0):
+    """A value the core's strict JSON can carry (Memo's review: one NaN in the store stopped the VM):
+    NaN / Infinity -> None (as `cblstore.dumps` stores them), a lone surrogate -> U+FFFD, nesting past
+    DEPTH_MAX -> its text, anything else not JSON -> its text."""
+    if v is None or isinstance(v, (bool, int)):
+        return v
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, str):
+        try:
+            v.encode("utf-8")
+            return v
+        except UnicodeEncodeError:
+            return v.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    if depth >= DEPTH_MAX:
+        return str(v)[:2000]
+    if isinstance(v, dict):
+        return {str(k): _clean(x, depth + 1) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_clean(x, depth + 1) for x in v]
     try:
-        return json.loads(json.dumps(v, default=str))
+        import numpy as _np
+        if isinstance(v, _np.ndarray):
+            return _clean(v.tolist(), depth)
+        if isinstance(v, _np.generic):
+            return _clean(v.item(), depth)
     except Exception:
-        return str(v)
+        pass
+    return str(v)
 
 
-def _pos(ent):
+def _plain(v):
+    return _clean(v)
+
+
+def _dumps(v) -> str:
+    return json.dumps(v, allow_nan=False, ensure_ascii=False)
+
+
+_KEEP = object()        # a refresh row that leaves the mirror's position as it is
+
+
+def _posa(ent):
+    """A position as a float64 array; one that isn't all finite numbers is no position (vectorised: a
+    seat holds tens of thousands of 1024-d positions)."""
     p = getattr(ent, "position", None)
     if p is None:
         return None
     try:
-        return [float(x) for x in p]
+        import numpy as _np
+        a = _np.asarray(p, dtype="<f8")
+        if a.ndim != 1 or not _np.isfinite(a).all():
+            return None
+        return a
     except Exception:
         return None
+
+
+def _pos(ent):
+    a = _posa(ent)
+    return None if a is None else a.tolist()
 
 
 class _Host:
@@ -118,9 +168,9 @@ class NativeVM:
         self._trace: list | None = None
         self.recent: collections.deque = collections.deque(maxlen=CH.RECENT_FIRINGS)
         now = float(self.clock())
+        self.on_sweep = None                      # journal.Journal.watch: a sweep is journalled with its time
+        self._send(self.core.load_many, self._rows(list((est.docs or {}).keys())), now)
         for eid, ent in list((est.docs or {}).items()):
-            self.core.load(eid, ent.cls or "", json.dumps(_plain(dict(ent.properties or {}))),
-                           json.dumps(_pos(ent)), now)
             self._cls[eid] = ent.cls or ""
 
     @property
@@ -131,7 +181,8 @@ class NativeVM:
     @trace.setter
     def trace(self, lst) -> None:
         self._trace = lst
-        self.core.set_trace(lst is not None)
+        with self._run:
+            self.core.set_trace(lst is not None)
 
     def _traced(self) -> None:
         if self._trace is not None:
@@ -146,7 +197,50 @@ class NativeVM:
     @learner.setter
     def learner(self, lr) -> None:
         self._learner = lr
-        self.core.set_learner(lr is not None)
+        with self._run:
+            self.core.set_learner(lr is not None)
+
+    def _rows(self, eids, props: bool = True, positions: bool = True) -> list:
+        """[[eid, cls, props | None, position array | None]] from the live store, each row cleaned on its
+        own (a row that still can't be carried is left out and said in `errors`)."""
+        docs = self.est.docs or {}
+        out = []
+        for eid in eids:
+            ent = docs.get(eid)
+            if ent is None:
+                continue
+            try:
+                out.append([eid, ent.cls or "", _clean(dict(ent.properties or {})) if props else None,
+                            _posa(ent) if positions else _KEEP])
+            except Exception as e:                       # noqa: BLE001
+                self._errors[f"row:{eid}"] = f"{type(e).__name__}: {e}"[:200]
+        return out
+
+    @staticmethod
+    def _pack(rows):
+        """(the rows' JSON with each position's length, the positions as one little-endian f64 buffer)."""
+        meta, bufs = [], []
+        for eid, cls, props, pos in rows:
+            if pos is _KEEP:
+                meta.append([eid, cls, props, -2])
+                continue
+            meta.append([eid, cls, props, -1 if pos is None else int(pos.size)])
+            if pos is not None:
+                bufs.append(pos.tobytes())
+        return _dumps(meta), b"".join(bufs)
+
+    def _send(self, method, rows, *args) -> None:
+        """Rows to the core in one call; if the batch can't be carried, row by row (a bad row said)."""
+        try:
+            method(*self._pack(rows), *args)
+            return
+        except Exception:                                # noqa: BLE001
+            pass
+        for row in rows:
+            try:
+                method(*self._pack([row]), *args)
+            except Exception as e:                       # noqa: BLE001
+                self._errors[f"row:{row[0]}"] = f"{type(e).__name__}: {e}"[:200]
 
     # -- hearing ----------------------------------------------------------------------------
     def attach(self) -> None:
@@ -174,13 +268,23 @@ class NativeVM:
         if not prop and w.get("new") is not None and w.get("old") is None and ent is not None:
             line["born"] = {"cls": ent.cls or "", "props": _plain(dict(ent.properties or {})), "position": _pos(ent)}
         cls = (ent.cls or "") if ent is not None else None
-        self._buf.append((json.dumps(line), float(self.clock()), eid, cls))
+        try:
+            js = _dumps(line)
+        except Exception as e:                           # noqa: BLE001 -- said, the write still queued bare
+            self._errors[f"write:{eid}.{prop}"] = f"{type(e).__name__}: {e}"[:200]
+            line["new"] = line["old"] = None
+            line.pop("born", None)
+            js = _dumps(_clean(line))
+        self._buf.append((js, float(self.clock()), eid, cls))
         self._wake.set()
 
     def _flush(self) -> None:
         while self._buf:
             s, now, eid, cls = self._buf.popleft()
-            self.core.hear(s, now)
+            try:
+                self.core.hear(s, now)
+            except Exception as e:                       # noqa: BLE001 -- one write never stops the VM
+                self._errors[f"hear:{eid}"] = f"{type(e).__name__}: {e}"[:200]
             if cls is not None and self._cls.get(eid) != cls:      # a class change is no write: follow it
                 self._cls[eid] = cls
                 self.core.set_cls(eid, cls)
@@ -199,6 +303,7 @@ class NativeVM:
             self.est.upsert(old)
         else:
             self.est.upsert(QuantumEntity(eid=eid, cls=CH.CLASS, properties=props))
+        self._trig_v += 1                         # its own definition, heard or not
         with self._run:
             self._flush()
             self.core.forget_state(eid)
@@ -321,6 +426,8 @@ class NativeVM:
             if self.core.busy():
                 return
             self._sync()
+            if self.on_sweep is not None:
+                self.on_sweep(now)
             self._refresh()
             self.core.start_sweep(now, json.dumps(W.current()))
             while self.core.busy():
@@ -332,10 +439,19 @@ class NativeVM:
 
     def _refresh(self) -> None:
         """The sweep reads the live store, as ch.VM does: what changed in place (a position the field
-        moved, a property edited before its upsert) has no write behind it, so the mirror re-reads it."""
-        rows = [[eid, e.cls or "", _plain(dict(e.properties or {})), _pos(e)]
-                for eid, e in list((self.est.docs or {}).items())]
-        self.core.refresh_many(json.dumps(rows))
+        moved, a property edited before its upsert) has no write behind it, so the mirror re-reads it.
+        Only what the sweep's triggers can read (Memo's review: a whole-store copy per sweep): the entities
+        they can bind or name, and -- only when an `around` trigger exists -- every position."""
+        want = json.loads(self.core.sweep_eids())
+        self._refresh_rows(want["eids"], want["positions"])
+        if want["all"]:
+            named = set(want["eids"])
+            self._send(self.core.refresh_many, self._rows([e for e in list((self.est.docs or {}).keys())
+                                                           if e not in named], props=False))
+
+    def _refresh_rows(self, eids, positions: bool = True) -> None:
+        if eids:
+            self._send(self.core.refresh_many, self._rows(eids, positions=positions))
 
     def request_sweep(self) -> None:
         self._sweep_wanted = True
@@ -371,7 +487,8 @@ class NativeVM:
 
     # -- reading ----------------------------------------------------------------------------
     def _r(self) -> dict:
-        return json.loads(self.core.report())
+        with self._run:                       # Memo's review: the core's lock is only ever taken under _run
+            return json.loads(self.core.report())
 
     @property
     def errors(self) -> dict:

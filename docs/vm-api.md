@@ -86,6 +86,9 @@ store)` appends every write to JSONL:
 A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebuild.
 
 - `replay(path, store)` applies every line and rebuilds the store.
+- `Journal.watch(vm)` also journals the VM's sweeps with their time (`{"sweep": now}`), so what a sweep
+  fires (`every`, a level crossing the thinker's beat sees) replays: `replay_vm` runs each sweep at its
+  recorded time on a VM whose clock it feeds.
 - `replay_vm(path, store, make_vm)` is **the VM contract**. Only the outside writes go in
   (everything not `trigger:*`; adapters' recorded receipts stand in for running the
   effects). A fresh VM is drained after each one, and its writes must equal the recorded
@@ -112,7 +115,19 @@ through `make_vm`.
   and the write comes back through the listener. So a later trigger on the same write reads what
   an earlier one wrote, as in ch.py.
 - **Things changed in place, with no write:** a sweep re-reads the live store into the mirror
-  first, because ch.py reads the live store. A drain sees only what was written.
+  first, because ch.py reads the live store. Only what its triggers can read: the entities they can
+  bind or name, their positions only when a sweep trigger is geometric (near, away, pos, around),
+  and every position only when an `around` trigger exists. With no sweep trigger, a sweep reads
+  nothing. A drain sees only what was written.
+- **Values crossing to the core** are cleaned in one place (`ch_native._clean`): NaN and Infinity
+  become null (as `cblstore.dumps` stores them), a lone surrogate becomes U+FFFD, and nesting past 64
+  becomes its text. A row that still can't be carried is left out and said in `errors`. If the native
+  VM fails to start for any reason, `make_vm` says so and runs the Python VM: never no VM.
+- **Locking:** every call into the core is made under the VM's one evaluation lock, so the core's
+  own lock is never contended while it calls back into Python (Memo's review of #972: a deadlock).
+- **Known difference:** integers are 64-bit in the core. `9223372036854775807 + 1` is a number in
+  ch.py and an error (no write) in the native VM.
+- **CI:** the `native-vm` job builds `native/` and runs the VM suites against it.
 - **The contract:**
   - `tests/test_ch_native_971.py`: a journal recorded with ch.VM replays identically through the
     native VM, and the expression language matches ch.py's.

@@ -438,6 +438,14 @@ fn vec_arith(op: Op, a: &V, b: &V) -> Result<V, Err> {
         let q = if y.len() == 1 { y[0] } else { y[i] };
         let r = match op { Op::Add => p + q, Op::Sub => p - q, Op::Mul => p * q, Op::Div => p / q };
         if !r.is_finite() && p.is_finite() && q.is_finite() { return Err("vector arithmetic: floating point error".into()); }
+        // numpy's errstate(all='raise') also raises on underflow: a non-zero result too small for a normal
+        // float, or a product/quotient of non-zeros that rounds to zero (Memo's fuzz: `l / -1e308`)
+        // (IEEE: tiny AND inexact; a sum of normals is exact, so only * and / of normal operands count)
+        let normal = |x: f64| x.abs() >= f64::MIN_POSITIVE && x.is_finite();
+        let muldiv = matches!(op, Op::Mul | Op::Div) && normal(p) && normal(q);
+        let tiny = muldiv && r != 0.0 && r.abs() < f64::MIN_POSITIVE;
+        let lost = muldiv && r == 0.0;
+        if tiny || lost { return Err("vector arithmetic: underflow".into()); }
         out.push(r);
     }
     Ok(floats(out))
