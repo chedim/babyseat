@@ -3,7 +3,7 @@
 //! entities too: class Message (sid, ts), Register (person), Edge (subj, rel, obj, first_ts,
 //! superseded). A Chat entity's `banner` prop is a getter: the walk's lines, a pure function of
 //! those entities, recomputed when one of them is written (fields.rs `Fields::banner_on`) and
-//! materialised only when it changes. Same atoms as graphbanner.py: recent, mine, edge, isa, is, filter.
+//! materialised only when it changes. Atoms: recent, mine, edge, filter. `isa`/`is` are NOT implemented (no seed rule uses them): a rule using one yields no lines.
 //! Differences, stated: a name with no `name` prop falls back to the eid's last segment (python asks
 //! convgraph._label); no per-person banneruse measuring (that is a write the host does).
 use std::collections::HashMap;
