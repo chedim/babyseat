@@ -125,7 +125,7 @@ through `make_vm`.
   become null (as `cblstore.dumps` stores them), a lone surrogate becomes U+FFFD (keys too), an integer past a float's range becomes the largest
   float of its sign (the store keeps the real value), and nesting past 64
   becomes its text. A row that still can't be carried is left out and said in `errors`. If the native
-  VM fails to start for any reason, `make_vm` says so and runs the Python VM: never no VM.
+  VM fails to start, `make_vm` raises at startup: there is no Python VM to fall back to.
 - **Locking:** every call into the core is made under the VM's one evaluation lock, so the core's
   own lock is never contended while it calls back into Python (Memo's review of #972: a deadlock).
 - **Known difference:** integers are 64-bit in the core. `9223372036854775807 + 1` is a number in
