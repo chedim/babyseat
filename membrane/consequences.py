@@ -22,18 +22,18 @@ from __future__ import annotations
 
 import threading
 import time
+from . import dials
 
 ENT = "consequences"
-HORIZONS = (3600.0, 86400.0, 3 * 86400.0)
+HORIZONS = dials.tup("consequences", "HORIZONS")
 SETTLE_S = 300.0
 COALESCE_S = 600.0
 PENDING_MAX = 300
 SETTLED_MAX = 100
 ON_ENTITY = 3
-SNAP_KEYS = ("state", "value", "status", "online", "enabled", "fulfilled_ts", "blocked_until")
+SNAP_KEYS = dials.tup("consequences", "SNAP_KEYS")
 ACTED = ("done", "step")
-WRITE_TOOLS = ("exec", "actuate", "entity", "edit", "learn", "forget", "memory", "intend", "goal",
-               "watch", "script", "method", "fulfill")
+WRITE_TOOLS = dials.tup("consequences", "WRITE_TOOLS")
 READ_ACTIONS = ("read", "find", "list", "get", "search", "show", "look", "describe", "help")
 
 _lock = threading.Lock()

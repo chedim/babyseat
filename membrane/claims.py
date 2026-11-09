@@ -23,6 +23,7 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 
+from . import dials
 from . import eids as E
 from . import streams as ST
 from .efstore import h16, o8
@@ -50,7 +51,7 @@ _PAST_AUX = re.compile(r"\b(did|didn't|haven't|hasn't|have|has|had|never)\b", re
 STATE_MAX_CHARS = 200
 _WRITES = re.compile(r"sed -i|>>?\s*\S|tee\s|\bpatch\b|git apply|\bmv\b|\bcp\b")
 
-ACTION_WINDOW = (-45 * 60, 5 * 60)
+ACTION_WINDOW = dials.tup("claims", "ACTION_WINDOW")
 # A RETRIEVAL CLAIM (2026-10-11: "that fetch ... landed in one pass" -- a turn
 # with no tool call summarized a page it never pulled; nothing flagged it):
 # I/we + a fetch-family verb in the past, or '<a fetch> landed/came back'
@@ -58,8 +59,8 @@ _RETRIEVE = re.compile(r"\b(fetched|pulled|downloaded|curled|probed|queried|scra
                        r"opened|loaded|ran|checked|read)\b", re.I)
 _RETRIEVE_PASSIVE = re.compile(r"\b(fetch|pull|download|curl|probe|query|request|read)\b[^.]{0,80}?"
                                r"\b(landed|came back|returned|succeeded|went through)\b", re.I)
-RETRIEVAL_WINDOW = (-10 * 60, 2 * 60)
-TESTS_WINDOW = 60 * 60
+RETRIEVAL_WINDOW = dials.tup("claims", "RETRIEVAL_WINDOW")
+TESTS_WINDOW = dials.get("claims", "TESTS_WINDOW")
 
 
 @dataclass

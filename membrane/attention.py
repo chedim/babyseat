@@ -17,6 +17,7 @@ hits -- so the model can see what to drop.
 from __future__ import annotations
 
 import time
+from . import dials
 
 ATTENTION_BUDGET = 12
 
@@ -93,7 +94,7 @@ def render(inv: list[dict]) -> str:
 # "More observers = more next-turn interrupts = longer turns = 300s watchdog
 # deaths. An alert budget per turn -- consolidate into the WHERE WE ARE block
 # instead of N interrupt turns, with a digest mode this seat can dial."
-ALERT_EXEMPT = ("intent-planted", "intent-landed")   # the operator's own asks
+ALERT_EXEMPT = dials.tup("attention", "ALERT_EXEMPT")   # the operator's own asks
 
 
 def is_exempt(ev: dict) -> bool:
