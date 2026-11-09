@@ -1,0 +1,223 @@
+"""THE SQLITE HOME (#971, the operator 2026-11-08): the field's store on SQLite, a parallel option to
+Couchbase Lite and the default for new seats.
+
+It is `cblstore.CBLiteBackend` with `sqlitedb.Database` underneath: the same hot/cold split (the hot
+collections in RAM with the database as their persistence, write-behind; `sentences` cold, read on
+demand), the same writer lock, warm snapshot and journal import. Only two things differ:
+
+- the database: one SQLite file, `<dir>/field.sqlite3` (WAL), public domain, shipped in the wheel;
+- the sentence vectors: no vector index in the database -- a brute-force search over a float16 matrix
+  kept beside it (`<dir>/vectors/sentences.f16` + `.keys`), memory-mapped so the OS pages it in instead
+  of the process holding it. New rows are appended by the same lazy catch-up thread; a deleted row is
+  masked; the whole matrix is rebuilt from the rows when it no longer matches them. Exact search, so
+  recall is the matrix's (no IVF probes).
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+from pathlib import Path
+
+import numpy as np
+
+from . import sqlitedb as SDB
+from .cblstore import COLD, DIM, VEC, CBLiteBackend, StoreBusy, unpack_vec  # noqa: F401
+from .efstore import matches
+
+KIND = "sqlite"
+CHUNK = 65536                                  # rows per block of the brute-force product (memory, not a cutoff)
+
+
+class _Matrix:
+    """The sentence vectors: an append-only float16 file + its keys, memory-mapped for search."""
+
+    def __init__(self, d: Path):
+        self.d = d
+        d.mkdir(parents=True, exist_ok=True)
+        self.f = d / "sentences.f16"
+        self.kf = d / "sentences.keys"
+        self.lock = threading.RLock()
+        self.keys: list[str] = []
+        self.row: dict[str, int] = {}
+        self.dead: set[int] = set()
+        self._mm = None
+        if self.f.exists() and self.kf.exists():
+            try:
+                self.keys = json.loads(self.kf.read_text())
+                n = self.f.stat().st_size // (2 * DIM)
+                if n != len(self.keys):
+                    raise ValueError("vectors and keys disagree")
+                self.row = {k: i for i, k in enumerate(self.keys)}
+            except Exception:
+                self.reset()
+
+    def reset(self) -> None:
+        with self.lock:
+            self.keys, self.row, self.dead, self._mm = [], {}, set(), None
+            for p in (self.f, self.kf):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+    def __len__(self):
+        return len(self.keys)
+
+    def append(self, pairs) -> int:
+        """[(key, unit float32 vec)] -> appended (a re-written key: its old row masked)."""
+        pairs = [(k, v) for k, v in pairs if v is not None and np.asarray(v).size == DIM]
+        if not pairs:
+            return 0
+        with self.lock:
+            a = np.stack([np.asarray(v, np.float32) for _, v in pairs]).astype(np.float16)
+            with self.f.open("ab") as fh:
+                fh.write(a.tobytes())
+            for k, _ in pairs:
+                old = self.row.get(k)
+                if old is not None:
+                    self.dead.add(old)
+                self.row[k] = len(self.keys)
+                self.keys.append(k)
+            self.kf.write_text(json.dumps(self.keys))
+            self._mm = None
+        return len(pairs)
+
+    def drop(self, key: str) -> None:
+        with self.lock:
+            i = self.row.pop(key, None)
+            if i is not None:
+                self.dead.add(i)
+
+    def _map(self):
+        if self._mm is None and self.keys:
+            self._mm = np.memmap(self.f, dtype=np.float16, mode="r", shape=(len(self.keys), DIM))
+        return self._mm
+
+    def top(self, q: np.ndarray, want: int) -> list[tuple[str, float]]:
+        with self.lock:
+            mm, keys, dead = self._map(), list(self.keys), set(self.dead)
+        if mm is None or not keys:
+            return []
+        best_i, best_s = np.empty(0, np.int64), np.empty(0, np.float32)
+        for s in range(0, len(keys), CHUNK):
+            block = np.asarray(mm[s:s + CHUNK], dtype=np.float32)
+            sc = block @ q
+            if dead:
+                for i in dead:
+                    if s <= i < s + len(sc):
+                        sc[i - s] = -np.inf
+            take = min(want, len(sc))
+            idx = np.argpartition(-sc, take - 1)[:take] if take < len(sc) else np.arange(len(sc))
+            best_i = np.concatenate([best_i, idx + s])
+            best_s = np.concatenate([best_s, sc[idx]])
+        order = np.argsort(-best_s)[:want]
+        return [(keys[int(best_i[j])], float(best_s[j])) for j in order if np.isfinite(best_s[j])]
+
+
+class SQLiteBackend(CBLiteBackend):
+    KIND = KIND
+    LABEL = "sqlite"
+    _mx = None                                # (defaults: cblstore.import_only builds a backend without __init__)
+    _seeded = False
+    _sdb_path = None
+
+    def __init__(self, path, journal_dir=None, lib_dir=None, readonly=False):
+        self._sdb_path = Path(path)
+        self._mx = None
+        self._pending_vec = {}
+        self._seeded = False
+        super().__init__(path, journal_dir=journal_dir, lib_dir=lib_dir, readonly=readonly)
+
+    # the database: SQLite in place of CBL (CBLiteBackend.__init__ calls these two)
+    def _open_db(self, lib_dir):
+        return None, SDB.Database("field", str(self._sdb_path or self.path))
+
+    def _vectors(self) -> _Matrix:
+        if self._mx is None:
+            self._mx = _Matrix(Path(self._sdb_path or self.path) / "vectors")
+        return self._mx
+
+    @property
+    def _pending_vec(self) -> dict:
+        return self.__dict__.setdefault("_pv", {})
+
+    @_pending_vec.setter
+    def _pending_vec(self, v) -> None:
+        self.__dict__["_pv"] = v
+
+    def _ensure_vector_indexes(self) -> None:
+        mx = self._vectors()
+        n = self.db.count("sentences")
+        if n and len(mx.row) > n:                  # the matrix holds rows the database doesn't: rebuild
+            mx.reset()
+
+    def _cold_put(self, coll: str, key: str, doc: dict) -> None:
+        super()._cold_put(coll, key, doc)
+        if coll in VEC:
+            with self._vectors().lock:
+                self._pending_vec[key] = doc.get(VEC[coll][0])
+
+    def delete(self, coll, key):
+        super().delete(coll, key)
+        if coll in VEC:
+            self._vectors().drop(key)
+            self._pending_vec.pop(key, None)
+
+    # ---- the catch-up: new sentence vectors into the matrix ---------------------------------------
+    def catch_up(self, max_batches: int | None = None) -> int:
+        mx = self._vectors()
+        tot = 0
+        if not getattr(self, "_seeded", False):        # the first catch-up: every row the matrix lacks
+            have = set(mx.row)
+            todo = []
+            for r in self.db.iter_query("SELECT META().id AS k, d.vec AS v FROM membrane.sentences"):
+                if r.get("k") not in have and r.get("v"):
+                    todo.append((r["k"], unpack_vec(r["v"])))
+                    if len(todo) >= self.CATCHUP_BATCH:
+                        tot += mx.append(todo)
+                        todo = []
+            tot += mx.append(todo)
+            self._seeded = True
+        with mx.lock:
+            pend, self._pending_vec = self._pending_vec, {}
+        tot += mx.append([(k, unpack_vec(v)) for k, v in pend.items() if v])
+        if tot:
+            self._idx_rows += tot
+            self._idx_last = time.time()
+        return tot
+
+    def vector_top_k(self, coll, field, vec, k, eq=None):
+        if coll not in VEC or VEC[coll][0] != field:
+            return super(CBLiteBackend, self).vector_top_k(coll, field, vec, k, eq)
+        q = np.asarray(vec, dtype=np.float32)
+        n = float(np.linalg.norm(q))
+        if not n or q.size != DIM:
+            return []
+        if not getattr(self, "_seeded", False) or self._pending_vec:
+            self.catch_up()
+        want = int(k) * (4 if eq else 1)
+        out = self._vectors().top(q / n, want)
+        if eq:
+            docs = self.get_multi(coll, [kk for kk, _ in out])
+            out = [(kk, s) for kk, s in out if kk in docs and matches(docs[kk], eq)][:k]
+        return out
+
+    def _warm_proof(self, coll: str):
+        db = Path(self.db.file)
+        try:
+            st = db.stat()
+        except OSError:
+            return None
+        try:
+            wal = Path(str(db) + "-wal").stat().st_size
+        except OSError:
+            wal = 0
+        return [int(st.st_size), int(st.st_mtime_ns), int(wal)]
+
+    def vec_status(self) -> dict:
+        st = super(CBLiteBackend, self).vec_status()
+        mx = self._vectors()
+        st["sqlite"] = {"sentences_on_disk": self.db.count("sentences"), "vectors": len(mx.row),
+                        "masked": len(mx.dead), "indexed_since_boot": self._idx_rows, "last_catchup_ts": self._idx_last}
+        return st

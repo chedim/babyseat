@@ -130,8 +130,8 @@ class TestOpenBackend(unittest.TestCase):
     def test_an_unreachable_cluster_degrades_to_file(self):
         """THE SEAT-FIRST FLIP (stage 4): the couchbase field answers
         only behind MEMBRANE_FIELD_CLOUD=1 now -- and a down cluster
-        degrades to the FILE home under the seat's folder, never to RAM
-        (RAM forgets on restart; the file survives)."""
+        degrades to the seat's LOCAL store under its folder (SQLite by default since #971), never to
+        RAM (RAM forgets on restart; the local store survives)."""
         with tempfile.TemporaryDirectory() as d:
             fp = os.path.join(d, "rag-field.json")
             with mock.patch.dict(os.environ, {"MEMBRANE_FIELD_CLOUD": "1"}), \
@@ -140,8 +140,12 @@ class TestOpenBackend(unittest.TestCase):
                     mock.patch("membrane.substrate._is_lab_field_path",
                                return_value=False), \
                     mock.patch("membrane.efstore._cbl_wanted", return_value=False):
-                self.assertIsInstance(efstore.open_backend(fp),
-                                      efstore.FileBackend)
+                be = efstore.open_backend(fp)
+                try:                                  # #971: the seat's local store, SQLite by default
+                    from membrane.sqlstore import SQLiteBackend
+                    self.assertIsInstance(be, SQLiteBackend)
+                finally:
+                    be.close()
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@
     membrane stats        token/call accounting + the savings baseline
                           (--baseline: bounded window vs a naive full-history
                           replay; reads serve-msgs, no model call)
+    membrane store        which store this seat uses (SQLite or Couchbase Lite); `store migrate --to ...` moves it
     membrane bench        held-out recall benchmark for the entity field
                           (MRR + hit@k across read modes; a COPY of the field)
     membrane erase-field  stop the seat and move the field + entity
@@ -684,7 +685,7 @@ def main() -> None:
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth", "serve", "standalone", "stop",
-                   "stats", "bench", "erase-field", "token", "toybox", "self", "shadow"):
+                   "stats", "bench", "erase-field", "token", "toybox", "self", "shadow", "store"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -695,6 +696,10 @@ def main() -> None:
                               force="--force" in forwarded)
     if cmd == "doctor":
         raise SystemExit(_doctor())
+    if cmd == "store":
+        # #971: which store this seat uses (SQLite or Couchbase Lite), and moving between them
+        from .storekind import cli_main as store_main
+        raise SystemExit(store_main(forwarded))
     if cmd == "token":
         # JWT MODE (jwtauth.py, docs/auth.md): mint a token with the seat's secret
         from .jwtauth import cli_main as token_main
