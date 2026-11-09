@@ -60,12 +60,14 @@ pub struct Fields {
     /// row 5: written calls (adapters.rs) are on; the calls they asked the host to run
     pub adapters: bool,
     pub method_calls: Vec<J>,
+    /// row 6: self's learned triggers (learn.rs) are on
+    pub learn: Option<crate::learn::Learner>,
     /// last value each guarded dial accepted
     pub accepted: std::collections::HashMap<String, J>,
 }
 
 impl Fields {
-    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], accepted: Default::default() } }
+    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default() } }
 
     /// Row 3: a banner input (Message/Register/Edge/BannerRule) was written: recompute each Chat's `banner`.
     fn banner_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
@@ -119,6 +121,15 @@ impl Fields {
         }
     }
 
+    /// Row 6: a write teaches and scores the learner, then fires the candidates on its prop; a live one writes the real path.
+    fn learn_on(&mut self, core: &mut Core, host: &dyn Host, work: &mut VecDeque<Write>, w: &Write, seq: &mut i64, now: f64) {
+        let Some(mut l) = self.learn.take() else { return };
+        l.observe(core, w, now);
+        let live = l.fire(core, host, w, now);
+        self.learn = Some(l);
+        for (e, p, v, c) in live { if core.docs.contains_key(&e) { self.emit(core, work, &e, &p, v, &format!("learn:{}", c), seq, now); } }
+    }
+
     /// Row 5: the host's receipt for a run call (its rc, head, result), written on the object with the request's id.
     pub fn deliver(&mut self, core: &mut Core, object: &str, call: &str, rid: &str, rc: i64, head: &str, result: Option<J>, now: f64, seq: &mut i64) {
         if !core.docs.contains_key(object) { return; }
@@ -165,6 +176,7 @@ impl Fields {
             if self.banner && w.prop != "banner" {   // any write can move a line (a card's status, a name): the getter reads the whole field
                 self.banner_on(core, &mut work, seq, now);
             }
+            if self.learn.is_some() { self.learn_on(core, host, &mut work, &w, seq, now); }
             if self.adapters { self.adapters_on(core, &mut work, &w, seq, now); }
             if self.recall { self.recall_on(core, &mut work, &w, seq, now); }
             let hits: Vec<usize> = (0..self.setters.len())
