@@ -212,9 +212,23 @@ fn evaluate(src: &str, env_json: &str) -> PyResult<String> {
     Ok(expr::to_json(&v).map_err(bad)?.to_string())
 }
 
+#[pyclass]
+struct VecStore { s: std::sync::Mutex<topk::VecStore> }
+
+#[pymethods]
+impl VecStore {
+    #[new]
+    fn new(dim: usize) -> Self { VecStore { s: std::sync::Mutex::new(topk::VecStore::new(dim)) } }
+    fn add(&self, id: &str, v: Vec<f32>) { self.s.lock().unwrap_or_else(|e| e.into_inner()).add(id, &v) }
+    fn len(&self) -> usize { self.s.lock().unwrap_or_else(|e| e.into_inner()).len() }
+    /// The cached `near` getter: [(id, cosine)] best first.
+    fn near(&self, q: Vec<f32>, k: usize) -> Vec<(String, f32)> { self.s.lock().unwrap_or_else(|e| e.into_inner()).near(&q, k) }
+}
+
 #[pymodule]
 fn membrane_vm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Core>()?;
+    m.add_class::<VecStore>()?;
     m.add_function(wrap_pyfunction!(evaluate, m)?)?;
     Ok(())
 }

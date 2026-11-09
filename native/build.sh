@@ -3,8 +3,15 @@
 set -e
 cd "$(dirname "$0")"
 PY="${PYO3_PYTHON:-$HOME/.membrane/venv/bin/python}"
-PYO3_PYTHON="$PY" cargo build --release
+FEAT="${MEMBRANE_VM_FEATURES:-}"
+if [ -n "$FEAT" ]; then
+  PYO3_PYTHON="$PY" cargo build --release --features "$FEAT"
+else
+  PYO3_PYTHON="$PY" cargo build --release
+fi
 lib=target/release/libmembrane_vm.dylib
 [ -f "$lib" ] || lib=target/release/libmembrane_vm.so
-cp "$lib" ../membrane/membrane_vm.so
+tmp="../membrane/.membrane_vm.so.$$"
+cp "$lib" "$tmp"
+mv -f "$tmp" ../membrane/membrane_vm.so
 echo "built ../membrane/membrane_vm.so"
