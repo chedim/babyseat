@@ -212,9 +212,53 @@ fn evaluate(src: &str, env_json: &str) -> PyResult<String> {
     Ok(expr::to_json(&v).map_err(bad)?.to_string())
 }
 
+
+/// Fields (#994): the field engine over its own Core, reachable from Python (tests, a test seat).
+#[pyclass]
+struct Fields { c: std::sync::Mutex<(vm::Core, fields::Fields, i64)>, host: Py<PyAny> }
+
+#[pymethods]
+impl Fields {
+    #[new]
+    fn new(host: Py<PyAny>) -> Self {
+        Fields { c: std::sync::Mutex::new((vm::Core::new(), fields::Fields::goalgraph(), 0)), host }
+    }
+    fn load(&self, eid: String, cls: String, props_json: &str) -> PyResult<()> {
+        let p = obj(props_json)?;
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        g.0.load(eid, cls, p, None, 0.0);
+        Ok(())
+    }
+    /// A write: the Core hears it, the fields react (setters, getters, effects). Returns nothing; read back with `get`.
+    fn write(&self, py: Python<'_>, eid: String, prop: String, new_json: &str, now: f64) -> PyResult<()> {
+        let new: J = serde_json::from_str(new_json).map_err(bad)?;
+        let h = self.host.bind(py).clone();
+        let host = PyHost { py, obj: &h };
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let (core, f, seq) = &mut *g;
+        let old = core.docs.get(&eid).and_then(|e| e.props.get(&prop).cloned()).unwrap_or(J::Null);
+        *seq += 1;
+        let w = Write { eid, prop, new, old, writer: "py".into(), chain: serde_json::json!({}), seq: *seq };
+        core.hear(w.clone(), None, now);
+        let mut s = *seq;
+        f.react(core, &host, w, now, &mut s);
+        *seq = s;
+        Ok(())
+    }
+    fn get(&self, eid: &str) -> String {
+        let g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        g.0.docs.get(eid).map(|e| J::Object(e.props.clone()).to_string()).unwrap_or_else(|| "null".into())
+    }
+    fn writes(&self) -> u64 { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.writes }
+    fn calls(&self) -> String {
+        J::Array(self.c.lock().unwrap_or_else(|e| e.into_inner()).1.calls.clone()).to_string()
+    }
+}
+
 #[pymodule]
 fn membrane_vm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Core>()?;
+    m.add_class::<Fields>()?;
     m.add_function(wrap_pyfunction!(evaluate, m)?)?;
     Ok(())
 }
