@@ -381,6 +381,19 @@ impl Core {
         }
     }
 
+    /// A field's read: one expression over named entities and extra values (fields.rs, #994 row 2).
+    pub fn eval_json(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<J, String> {
+        let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
+        for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
+        let v = self.eval(src, &env)?;
+        expr::to_json(&v)
+    }
+
+    /// Is the entity of this class (its own, or an ancestor's)?
+    pub fn is_a(&self, host: &dyn Host, eid: &str, cls: &str) -> bool {
+        self.isa(host, eid, cls, &mut Memo::default())
+    }
+
     fn env(b: &Binding) -> HashMap<String, V> {
         b.iter().map(|(k, e)| (k.clone(), V::Ent(e.clone()))).collect()
     }
