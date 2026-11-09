@@ -152,7 +152,12 @@ def _colls(db, kind: str) -> list[str]:
 
 
 def _keys(db, coll: str) -> list[str]:
-    return [r["k"] for r in db.query(f"SELECT META().id AS k FROM membrane.{coll}") if r.get("k")]
+    try:
+        return [r["k"] for r in db.query(f"SELECT META().id AS k FROM membrane.{coll}") if r.get("k")]
+    except Exception as e:
+        if "no such collection" in str(e).lower():     # a collection never created is empty; any other error is real
+            return []
+        raise
 
 
 def status(field_path: str = "") -> dict:
