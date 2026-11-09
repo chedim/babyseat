@@ -44,7 +44,16 @@ def _ledger(est, name: str) -> dict:
 
 def installed_version(est, name: str) -> int:
     d = (est.docs or {}).get(_led_eid(name))
-    return int((d.properties or {}).get("version", 0)) if d else 0
+    try:
+        return int((d.properties or {}).get("version", 0)) if d else 0
+    except (TypeError, ValueError):
+        return 0  # a corrupt ledger version must not skip the pack
+
+
+def pack_hash(pack: dict) -> str:
+    import hashlib
+    import json
+    return hashlib.sha256(json.dumps(pack.get("entities", []), sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
 def overlays(est, name: str) -> list:
@@ -53,15 +62,20 @@ def overlays(est, name: str) -> list:
 
 
 def load(est, pack: dict, release: bool = False) -> dict:
-    name, ver = pack["name"], int(pack["version"])
+    """Idempotent, per entity, every boot (content, not the version number, decides):
+    missing -> (re)installed and printed; first adoption -> base recorded, the seat's edits untouched;
+    later -> only keys where new != base are written; a seat edit on such a key is parked as an overlay."""
+    name = pack["name"]
+    try:
+        ver = int(pack["version"])
+    except (TypeError, ValueError):
+        ver = 0
     ents = pack.get("entities", [])
     if not release:
         for e in ents:
             if any(_is_script(k) for k in (e.get("properties") or {})):
                 raise PackRefused(f"pack {name}: {e.get('eid')} carries a script; only a release pack may")
-    out = {"installed": 0, "updated": 0, "overlaid": 0}
-    if installed_version(est, name) >= ver:
-        return out
+    out = {"installed": 0, "updated": 0, "overlaid": 0, "adopted": 0, "reinstalled": []}
     led = _ledger(est, name)
     base, ovs = dict(led.get("base") or {}), list(led.get("overlays") or [])
     for e in ents:
@@ -70,20 +84,34 @@ def load(est, pack: dict, release: bool = False) -> dict:
         if d is None:
             est.upsert(QuantumEntity(eid=eid, cls=e.get("cls", "Other"), properties=dict(new)), embedder=None)
             out["installed"] += 1
+            if eid in base:
+                out["reinstalled"].append(eid)
+        elif eid not in base:
+            out["adopted"] += 1  # first adoption: record base, never overwrite
         else:
-            cur = d.properties
-            old = base.get(eid) or new
-            edited = {k: copy.deepcopy(cur[k]) for k in new
-                      if k in cur and cur[k] != new[k] and cur[k] != old.get(k)}
+            cur = copy.deepcopy(d.properties)
+            old = base[eid]
+            edited = {}
             for k, v in new.items():
-                cur[k] = copy.deepcopy(v)
+                if k in old and old[k] == v:
+                    continue
+                if k in cur and cur[k] != v and cur[k] != old.get(k):
+                    edited[k] = copy.deepcopy(cur[k])
+                if cur.get(k) != v:
+                    cur[k] = copy.deepcopy(v)
+            if cur != d.properties:
+                d.properties.clear()
+                d.properties.update(cur)  # upsert merges (never overwrites), so set in place, then journal
+                est.upsert(QuantumEntity(eid=eid, cls=d.cls, properties=dict(cur)), embedder=None)
+                out["updated"] += 1
             if edited:
                 ovs = [o for o in ovs if not (o["eid"] == eid and o["status"] == "pending")]
                 ovs.append({"eid": eid, "version": ver, "status": "pending", "properties": edited})
                 out["overlaid"] += 1
-            out["updated"] += 1
         base[eid] = copy.deepcopy(new)
-    led["base"], led["overlays"], led["version"] = base, ovs, ver
+    led["base"], led["overlays"], led["version"], led["hash"] = base, ovs, ver, pack_hash(pack)
+    if out["reinstalled"]:
+        print(f"[seedpack] {name}: re-installed {', '.join(out['reinstalled'])}")
     return out
 
 
