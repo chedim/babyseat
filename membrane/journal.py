@@ -117,7 +117,7 @@ def read(path):
 
 def apply(store, line: dict) -> None:
     """One journal line onto a store, with its writer and chain (so the store's own events carry them)."""
-    from .entities import QuantumEntity
+    from .entities import QuantumEntity, as_position
     if "sweep" in line:
         return                                   # the VM's own: replay_vm runs it
     path, eid, prop, new = line["path"], line.get("eid"), line.get("prop") or "", line.get("new")
@@ -137,7 +137,7 @@ def apply(store, line: dict) -> None:
         if ent is None:
             return
         if prop == "position":
-            ent.position = new
+            ent.position = as_position(new)
         elif new is None:
             (ent.properties or {}).pop(prop, None)
         else:

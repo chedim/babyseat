@@ -312,9 +312,21 @@ def _narrative(s: str, cap: int) -> str:
     return cut.rstrip(",;:") + "…"
 
 
+def as_position(v):
+    """The one type a QuantumEntity.position may hold: None or list[float].
+    Writers that take a position from outside (snapshot load, cliffhanger
+    writes, journal replay) pass it through here, so readers can truth-test it."""
+    if v is None:
+        return None
+    return [float(x) for x in v]
+
+
 def _safe_err(msg: str) -> None:
     """Log to stderr, never raise: daemon save/side-index threads can fire
-    during interpreter/pytest shutdown when stderr is already closed."""
+    during interpreter/pytest shutdown when stderr is already closed.
+    Not SafeStderr (safestderr.py): that is installed on the process fd by the
+    server entry point; library/test use never installs it, so sys.stderr here
+    can still be a closed pytest capture handle."""
     try:
         print(msg, file=sys.stderr)
     except Exception:
@@ -1701,7 +1713,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         ent.links = links
         ent.derived_by = derived_by
         ent.embedding = None              # re-embedded on load (cheap)
-        ent.position = position
+        ent.position = as_position(position)
         ent.position_history = position_history or []
         return ent
 
@@ -1768,11 +1780,6 @@ class EntityStore(MultiParentOps, TimelineOps):
         if th is not None:
             th.cancel()
             self._save_timer = None
-            try:
-                if th.is_alive() and th is not threading.current_thread():
-                    th.join(timeout=2.0)
-            except Exception:
-                pass
 
     # ---- couchbase (the shared collection) ----------------------------------
     def close(self) -> None:
