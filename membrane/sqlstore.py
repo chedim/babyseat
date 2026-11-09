@@ -149,7 +149,8 @@ class SQLiteBackend(CBLiteBackend):
     def _ensure_vector_indexes(self) -> None:
         mx = self._vectors()
         n = self.db.count("sentences")
-        if n and len(mx.row) > n:                  # the matrix holds rows the database doesn't: rebuild
+        # dead masks are not persisted: rebuild whenever the matrix and the database differ at all
+        if len(mx.keys) != len(mx.row) or (len(mx.row) != n and (n or mx.keys)):
             mx.reset()
 
     def _cold_put(self, coll: str, key: str, doc: dict) -> None:
