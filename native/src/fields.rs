@@ -18,7 +18,7 @@ const OPEN_BLOCKERS_FILTER: &str = "t.eid in (b.blocks or []) and not ((b.cls ==
 /// `this` is the entity written (`x` is the old name, still bound for migrated scripts); `clock` the time.
 /// Each write: (target entity expr, prop, value expr). The first branch is `WHEN when: writes`; `els` are the
 /// `ELSE WHEN` branches in order, a plain `ELSE` being the condition `True`. The first true branch runs, only it.
-/// Written in cliffhanger's text form (`syntax.rs`, packs/goalgraph.ch).
+/// Written in cliffhanger's text form (`syntax.rs`, packs/goalgraph.c1f).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct OnSet {
     pub name: String,

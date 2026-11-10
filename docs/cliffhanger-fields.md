@@ -6,8 +6,9 @@ the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
 
 ## 1. The syntax (the syntax pass, 2026-11-09)
 
-Membrane's syntax, made consistent, plus `ELSE` and `ALWAYS` from the spec. It's parsed by
-`native/src/syntax.rs`, and the goal graph ships in it (`native/packs/goalgraph.ch`):
+Membrane's syntax, made consistent, plus `ELSE` and `ALWAYS` from the spec. Cliffhanglets (pieces of
+cliffhanger code: setters and getters) are stored in `.c1f` files (decided 2026-11-09). It's parsed by
+`native/src/syntax.rs`, and the goal graph ships in it (`native/packs/goalgraph.c1f`):
 
 ```
 -- a comment
@@ -130,7 +131,7 @@ Cold start: new world = effects run once; warm restart = none; rebuild = silent 
 
 Counting becomes a computed field instead of decrement-on-event: idempotent and replay-safe. The
 five counting triggers (1, 2, 6, 7, 8) are the getter; the other seven become the nine setters below (ready and wait-armed also run on
-status), as shipped in `native/packs/goalgraph.ch`:
+status), as shipped in `native/packs/goalgraph.c1f`:
 
 ```
 -- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).

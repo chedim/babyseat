@@ -120,16 +120,16 @@ pub fn specs_of(pack: &str) -> Vec<(String, Spec)> {
 
 /// goalgraph's setters: its triggers translated. What the field form adds to a translated setter (doc section 5): a
 /// condition that reads two props is set on both (`-on-status`), and a Wait that arms stamps `armed_since` for the due getter.
-pub const GOALGRAPH_CH: &str = include_str!("../packs/goalgraph.ch");
+pub const GOALGRAPH_CH: &str = include_str!("../packs/goalgraph.c1f");
 
-/// The goal graph's setters, read from its cliffhanger text (packs/goalgraph.ch).
+/// The goal graph's setters, read from its cliffhanger text (packs/goalgraph.c1f).
 pub fn goalgraph_setters() -> Vec<OnSet> {
-    crate::syntax::parse(GOALGRAPH_CH).expect("packs/goalgraph.ch parses (tests/syntax_994.rs)")
+    crate::syntax::parse(GOALGRAPH_CH).expect("packs/goalgraph.c1f parses (tests/syntax_994.rs)")
 }
 
-/// The goal graph's getters, read from its cliffhanger text (packs/goalgraph.ch).
+/// The goal graph's getters, read from its cliffhanger text (packs/goalgraph.c1f).
 pub fn goalgraph_getters() -> Vec<crate::fields::Getter> {
-    crate::syntax::parse_pack(GOALGRAPH_CH).expect("packs/goalgraph.ch parses").1
+    crate::syntax::parse_pack(GOALGRAPH_CH).expect("packs/goalgraph.c1f parses").1
 }
 
 /// The same setters translated from the old WHEN/WHERE/WRITE triggers (packs/goalgraph.json): the migration path,

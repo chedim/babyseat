@@ -11,7 +11,7 @@ engine) nothing here runs and `goalgraph.seed` defines the triggers as before.
   (worker pool, wait checks, replan) hear it, a replan written by it is not a send-back, Blurp's learner skips it,
   and the journal counts it as the VM's.
 - **Effects:** a planner call goes to `membrane::llm.call`, which the LLM adapter runs.
-- **Getters** (`packs/goalgraph.ch`: `finished`, `open_blockers`, `due`) compute once at start, as a rebuild: the
+- **Getters** (`packs/goalgraph.c1f`: `finished`, `open_blockers`, `due`) compute once at start, as a rebuild: the
   values are stored, no setter runs. After that they recalculate when what they read changes.
 - **The clock:** every `goalgraph.WAIT_TICK_S` the engine's clock ticks, so armed waits come due (`Wait.due`).
 - Writes the engine made are never fed back to it: they carry its writer and are skipped.

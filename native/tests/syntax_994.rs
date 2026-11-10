@@ -1,5 +1,5 @@
 //! #994 syntax pass: cliffhanger's text form for field setters (src/syntax.rs). The goal graph ships as text
-//! (packs/goalgraph.ch); the old WHEN/WHERE/WRITE triggers migrate into it through the translator, unchanged.
+//! (packs/goalgraph.c1f); the old WHEN/WHERE/WRITE triggers migrate into it through the translator, unchanged.
 use membrane_vm::fields::{OnSet, LLM_CALL};
 use membrane_vm::syntax::{parse, print};
 use membrane_vm::translate::{goalgraph_setters, translated_goalgraph_setters, GOALGRAPH_CH};
