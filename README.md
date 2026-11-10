@@ -431,8 +431,9 @@ keeps, what it publishes, and an opt-in merged field.
 disk, in a store under `<project>/.membrane/`. A new seat uses **SQLite**
 (`.membrane/field.sqlite`, the default); **Couchbase Lite** (`.membrane/field.cblite`, its
 libraries fetched with `scripts/fetch-cbl.sh`; Enterprise is free for development and evaluation
-only) is the other kind. A new seat started on a terminal asks which one; an existing Couchbase
-Lite seat keeps its store until `membrane store migrate --to sqlite` moves it. Its
+only) is the other kind. A new seat started on a terminal asks which one; a Couchbase Lite seat
+from before that choice existed moves to SQLite by itself at its first start (the old store stays as
+a backup; a seat that chose Couchbase Lite keeps it, and a failed move leaves the seat where it was). Its
 events, entity states, claims, scripts and turn text stay there and
 survive restarts with no cluster at all. Nothing is copied to the bucket
 unless one of the layers below sends it. In either store the seat's

@@ -10,7 +10,9 @@ Two kinds, the same contract (cblstore.CBLiteBackend; sqlstore.SQLiteBackend ove
 The seat's choice lives in `<.membrane>/store.json` ({"kind": ...}). Which store opens (efstore.open_backend):
 1. MEMBRANE_EFIELD_STORE=sqlite|cbl|file|mem, when set;
 2. the seat's choice;
-3. a store already there: an existing Couchbase Lite seat keeps it until it is migrated;
+3. a store already there: a Couchbase Lite seat with no choice on record (one from before the choice) is
+   moved to SQLite at its first start (`ensure_chosen`, the operator 2026-11-10; the CBL store stays as a
+   backup, and a failed move keeps it on CBL);
 4. a new seat: the default, SQLite -- asked first when the seat starts on a terminal (`ensure_chosen`).
 
 `membrane store status` says which store this seat uses and what is in it; `membrane store migrate --to
@@ -91,8 +93,12 @@ def is_new(field_path: str = "") -> bool:
 def ensure_chosen(field_path: str = "", interactive: bool | None = None, ask=input, out=sys.stderr) -> str:
     """A new seat's first start: ask which store on a terminal, else take the default; the answer is kept.
     A seat that already has a store or a choice is never asked."""
-    base = dirs(field_path)[0]
-    if os.environ.get("MEMBRANE_EFIELD_STORE", "auto") != "auto" or not is_new(field_path):
+    base, _jdir, sdir, cdir = dirs(field_path)
+    if os.environ.get("MEMBRANE_EFIELD_STORE", "auto") != "auto":
+        return resolve(field_path)
+    if chosen(base) is None and cdir.exists() and not sdir.exists():
+        return _move_to_default(field_path, out)
+    if not is_new(field_path):
         return resolve(field_path)
     if interactive is None:
         interactive = sys.stdin.isatty() and sys.stdout.isatty()
@@ -111,6 +117,22 @@ def ensure_chosen(field_path: str = "", interactive: bool | None = None, ask=inp
     print(f"[store] this seat uses {kind} ({base / CHOICE_FILE}); `membrane store migrate --to ...` switches",
           file=out)
     return kind
+
+
+def _move_to_default(field_path: str, out) -> str:
+    """A Couchbase Lite seat from before the choice existed (no choice on record): moved to SQLite once, at its
+    first start on this version (the operator, 2026-11-10). The CBL store stays as it was, a backup. A seat that
+    chose CBL is never moved; when the copy fails the seat stays on CBL and the reason is printed."""
+    print("[store] this seat is on Couchbase Lite; moving it to SQLite, the default (the old store stays as a "
+          "backup)...", file=out)
+    try:
+        rep = migrate(field_path, DEFAULT, out=out)
+    except Exception as e:                          # noqa: BLE001 -- the seat still starts, on its old store
+        print(f"[store] the move failed ({type(e).__name__}: {e}); this seat stays on Couchbase Lite. "
+              "`membrane store migrate --to sqlite` tries again.", file=out)
+        return resolve(field_path)
+    print(f"[store] moved to SQLite; the Couchbase Lite store stays at {rep.get('backup')}", file=out)
+    return resolve(field_path)
 
 
 # ---- status and migration ------------------------------------------------------------------------------
