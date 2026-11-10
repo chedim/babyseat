@@ -374,9 +374,10 @@ class Live:
         return {k: v for k, v in want.items() if k not in have}
 
     def banner(self, field, owner: str, chat: str, session: str, text: str, now: float | None = None,
-               sections: dict | None = None) -> dict:
+               facts: dict | None = None) -> dict:
         """Run this chat's banner for the message: {eid, lines, text, error, state}. The pack decides what a message
-        recalls and lays out the block (`text`); `sections` are the parts not ported yet, as the turn made them. A
+        recalls and lays out the block (`text`); `facts` are the seat's facts for this turn (paused, alerts, tools, and
+        Blurp's blurp / suggest when it is on), written as plain fields like the ask. A
         getter's error is the banner's error (shown, never replaced). The reads the pack asked for (sql, jsonl) are
         waited for here, outside the engine's lock and the GIL. `state` is None when nothing was recalled."""
         now = time.time() if now is None else now
@@ -405,9 +406,7 @@ class Live:
                 if cur0.get("ask") == text:
                     self.f.write(eid, "ask", "null", now)      # the same words again: recall again
                 # only what changed is written, the ask last: a write re-runs what read it, with the ask it sees
-                for p, v in (("session", session), ("sections", sections), ("ask", text)):
-                    if p == "sections" and sections is None:
-                        continue
+                for p, v in (("session", session), *sorted((facts or {}).items()), ("ask", text)):
                     if p != "ask" and cur0.get(p) == v:
                         continue
                     with W.as_writer(WRITER + "banner"):

@@ -20,7 +20,8 @@ Banner.lines getter: this.lines
 -- Dials on the instance (seeded from today's values; Memo may change them per chat): budget (the block's
 -- characters, recall excluded), open_max, decided_max, news_chars (a line's clip), header, paused_line,
 -- suggest_head, more_line, recall_header, ledger_file (the operator's decisions, a .jsonl of the seat).
--- Sections not ported yet arrive as `sections` {paused, alerts, working, about, stable, since, blurp, suggest, more},
+-- The turn writes the seat's facts as fields: paused, alerts (the track alerts it took), tools (the turn carries
+-- tools), and Blurp's blurp / suggest when it is on.
 -- written by the turn; each moves into this pack in its own step.
 
 -- a goal's own facts for the banner (chat-independent)
@@ -96,16 +97,16 @@ Banner.stable_facts getter: head(sort_by([f for f in this.lasting if len([n for 
 Banner.stable_tagged getter: [{'text': prop(f, 'text'), 'tag': join([x for x in ['fact · ' + str(prop(f, 'convs')) + ' chats', ago(prop(f, 'ts'), clock)] if x], ' · ')} for f in this.stable_facts]
 Banner.stable_lines getter: FOR f IN this.stable_tagged: '- ' + clip(prop(f, 'text'), this.clip_n) + ' (' + prop(f, 'tag') + ')'
 
--- the not-yet-ported sections, as the turn wrote them
-Banner.s_paused getter: prop(this.sections, 'paused')
-Banner.s_alerts getter: head(prop(this.sections, 'alerts') or [], 2)
+-- each section's lines, from the fields above and the turn's facts
+Banner.s_paused getter: this.paused
+Banner.s_alerts getter: head(this.alerts or [], 2)
 Banner.s_working getter: join(this.working_line, '') or None
-Banner.s_suggest getter: prop(this.sections, 'suggest') or []
+Banner.s_suggest getter: this.suggest or []
 Banner.s_about getter: this.focus
 Banner.s_stable getter: this.stable_lines
 Banner.s_since getter: this.since_lines
-Banner.s_blurp getter: prop(this.sections, 'blurp')
-Banner.s_more getter: prop(this.sections, 'more')
+Banner.s_blurp getter: this.blurp
+Banner.s_more getter: this.tools
 
 -- the layout: each candidate line {text, prio (lower is kept first), slot (its place on the page)}
 Banner.row_paused getter: [{'text': this.paused_line, 'prio': 0, 'slot': 100}] if this.s_paused else []

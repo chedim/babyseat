@@ -181,7 +181,8 @@ def test_the_pack_lays_out_the_same_block_as_the_python_banner(seat, tmp_path, m
     sqlite3.connect(store_dir / "field.sqlite3").execute("CREATE TABLE c_events (k TEXT PRIMARY KEY, body TEXT)").connection.commit()
     FL.stop(seat)
     live = FL.start(seat, thread=False)
-    r = live.banner(object(), "owner", "ses_op", "ses_op", "", now=now, sections={**sections, "working": None, "since": []})
+    r = live.banner(object(), "owner", "ses_op", "ses_op", "", now=now,
+                    facts={"paused": sections["paused"], "alerts": sections["alerts"], "tools": sections["more"]})
     assert r["error"] is None, r
     assert r["text"] == want, "\n--- pack\n" + str(r["text"]) + "\n--- python\n" + str(want)
 
@@ -230,10 +231,10 @@ def test_step_2_working_about_since_stable_come_from_the_store(seat, tmp_path, m
                         else _REAL(ctx, name, args))          # recall is another test's: no rows here
     FL.stop(seat)
     live = FL.start(seat, thread=False)
-    live.banner(object(), "owner", "ses_op", "ses_op", "", now=now, sections={})        # the instance, its dials
+    live.banner(object(), "owner", "ses_op", "ses_op", "", now=now, facts={})        # the instance, its dials
     FL.mark_delivered(seat.entity_store, "sid:ses_op", 5)
     live.settle()
-    r = live.banner(object(), "owner", "ses_op", "ses_op", "what about x.py now?", now=now, sections={})
+    r = live.banner(object(), "owner", "ses_op", "ses_op", "what about x.py now?", now=now, facts={})
     assert r["error"] is None, r
     text = r["text"]
     assert "ABOUT: f:membrane/x.py" in text, text
@@ -281,3 +282,23 @@ def test_the_same_words_again_recall_again(seat, monkeypatch):
     _lines(seat, "ses_op", q, monkeypatch, counting)
     _lines(seat, "ses_op", q, monkeypatch, counting)
     assert calls.count("recall") == 2 and calls.count("rerank") == 2
+
+
+def test_the_turns_facts_are_plain_fields_no_sections(seat, monkeypatch):
+    # the operator 2026-11-10: the banner's last Python sections are gone; the seat's facts (paused, the track alerts
+    # taken this turn, whether the turn carries tools; Blurp's when it is on) are fields the turn writes, like `ask`
+    monkeypatch.setattr(RB, "c1f_call", _fake)
+    live = seat.live
+    facts = {"paused": True, "alerts": ["ALERT: a b c", "ALERT: d e f", "ALERT: g h i"], "tools": True}
+    r = live.banner(object(), "owner", "ses_op", "ses_op", "", now=100.0, facts=facts)
+    assert r["error"] is None, r
+    d = seat.entity_store.docs[FL.banner_eid("owner", "ses_op")]
+    assert "sections" not in d.properties
+    assert d.properties["paused"] is True and d.properties["tools"] is True
+    text = r["text"] or ""
+    assert CB.PAUSED_LINE in text and CB.MORE_LINE in text
+    assert "ALERT: a b c" in text and "ALERT: d e f" in text and "ALERT: g h i" not in text   # at most 2 a turn
+    r = live.banner(object(), "owner", "ses_op", "ses_op", "", now=101.0, facts={"paused": False, "alerts": [], "tools": False})
+    assert CB.PAUSED_LINE not in (r["text"] or "") and CB.MORE_LINE not in (r["text"] or "")
+    pack = (Path(FL.__file__).parent / "packs" / "banner.c1f").read_text()
+    assert "this.sections" not in pack

@@ -722,16 +722,17 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     return lines
 
 
-def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: str, sections: dict) -> str | None:
+def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: str, facts: dict) -> str | None:
     """#994: the whole block from this chat's banner instance (the banner pack: recall, OPEN, DECIDED, the layout);
-    `sections` are the parts not ported yet. A script's error is shown in the block's place, never replaced."""
+    `facts` are the seat's facts for this turn, written as fields. A script's error is shown in the block's place,
+    never replaced."""
     memo = srv.__dict__.setdefault("_recall_prev", {})
     session = next((d.get("session") for _k, d in reversed(events or []) if d.get("session")), "")
     chat = sid or conv
     sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
     owner = str(((sess.get(chat) if sess is not None else None) or {}).get("owner") or "seat")
     try:
-        r = live.banner(fld, owner, chat, session or chat, latest or "", now=now, sections=sections)
+        r = live.banner(fld, owner, chat, session or chat, latest or "", now=now, facts=facts)
     except Exception as e:                        # noqa: BLE001 -- shown, never replaced (the operator, 2026-11-10)
         return f"▸ the banner failed: {type(e).__name__}: {e}"[:400]
     if r["error"]:
@@ -790,16 +791,18 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
     from . import fields_live as _FL
     live = _FL.CURRENT
     if live is not None and live.has_banner() and fld is not None:
-        # #994: the banner pack lays the block out and makes RECALL, OPEN, DECIDED, WORKING ON, ABOUT, STABLE and
-        # SINCE itself (from the store); these are the parts not ported yet (seat state), each in its own step
-        sections = {
+        # #994: the banner pack makes the whole block (every section, the layout); the turn only writes the seat's
+        # facts as fields on the chat's instance: paused, the track alerts it took, whether it carries tools, and
+        # Blurp's line and suggestions when Blurp is on
+        from .self_super import blurp_on as _blurp_on
+        facts = {
             "paused": bool(_L.nerve_paused(srv)),
             "alerts": take_alerts(srv, on_alert),
-            "blurp": _blurp(srv),
-            "suggest": _suggestions(srv, conv),
-            "more": bool((body or {}).get("tools")),
+            "tools": bool((body or {}).get("tools")),
         }
-        block = pack_block(srv, live, fld, conv, events, latest, now, str((body or {}).get("_turn_sid") or ""), sections)
+        if _blurp_on():
+            facts.update(blurp=_blurp(srv), suggest=_suggestions(srv, conv))
+        block = pack_block(srv, live, fld, conv, events, latest, now, str((body or {}).get("_turn_sid") or ""), facts)
         if os.environ.get("MEMBRANE_BANNER_SHADOW", "").strip() == "1":
             _shadow(srv, fld, conv, events, latest, now, tz, block)
         return block

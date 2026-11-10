@@ -281,8 +281,10 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
 
 ## 11. Libraries in `.c1f`
 
-- **`membrane/packs/banner.c1f`** (the recall section of the banner): one `Banner:<owner>:<chat>` per person per
-  chat, internal chats too; a turn writes `ask`, the turn shows `lines`. Built-ins: `recall(text, pool, session)`,
+- **`membrane/packs/banner.c1f`** (the whole banner): one `Banner:<owner>:<chat>` per person per chat, internal
+  chats too; a turn writes `ask` and the seat's facts as fields (`paused`, `alerts` -- the track alerts it took --,
+  `tools`, and Blurp's `blurp` / `suggest` when Blurp is on), and shows `text` (every section and the layout:
+  RECALL, OPEN, DECIDED, WORKING ON, ABOUT, STABLE, SINCE, the paused / alert / more lines; `lines` is RECALL). Built-ins: `recall(text, pool, session)`,
   `rerank(rows, text, weights)`, `pick(rows, n, session)`, `line(row)`, `topic(text)`; a row is
   `{h, n, ts, role, via, score, fact}`. Dials on the instance start as a copy of `recall:dials`. An instance of
   another class runs that class's pack (Memo's own banner). A script's error is shown in place of the lines.
