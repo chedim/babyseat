@@ -18,6 +18,7 @@ from membrane import adapters as AD  # noqa: E402
 from membrane import ch as CH  # noqa: E402
 from membrane import decision_map as DM  # noqa: E402
 from membrane import goalgraph as GG  # noqa: E402
+from membrane import fields_live as FL  # noqa: E402
 from membrane import llm as LLM  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane import writes as W  # noqa: E402
@@ -42,9 +43,12 @@ def seat(monkeypatch):
     est.upsert(QuantumEntity(eid=MEMBRANE_NS + "llm", cls="Component", properties={"name": "llm"}))
     est.upsert(QuantumEntity(eid=GOAL, cls="Goal", properties={"name": "ship it", "text": "ship it",
                                                                 "status": "open"}))
-    assert GG.seed(srv) == len(GG.TRIGGERS)
+    n = GG.seed(srv)
+    srv.live = FL.start(srv, thread=False)         # #994: the field engine by default; MEMBRANE_FIELDS=0 -> triggers
+    assert n == (0 if srv.live else len(GG.TRIGGERS))
     srv.calls, srv.told = calls, told
     yield srv
+    FL.stop(srv)
     AD.stop()
     srv.ch_vm.detach()
 
@@ -52,6 +56,8 @@ def seat(monkeypatch):
 def settle(srv, rounds=8):
     for _ in range(rounds):
         srv.ch_vm.drain()
+        if getattr(srv, "live", None):
+            srv.live.settle()
         AD.drain()
         time.sleep(0.02)
     srv.ch_vm.drain()

@@ -124,3 +124,25 @@ def test_an_armed_wait_is_checked_every_every_s_not_once(seat, monkeypatch):
             seat.entity_store.upsert(w)
         settle(seat)
     assert len(checks) == 2, checks                       # at +31 and +62: every 30 s, not once, not every beat
+
+
+def test_the_field_engine_is_on_by_default(monkeypatch):
+    """Behaviour lives on the field: with the engine built, no switch is needed."""
+    monkeypatch.delenv("MEMBRANE_FIELDS", raising=False)
+    assert FL.enabled()
+    monkeypatch.setenv("MEMBRANE_FIELDS", "1")
+    assert FL.enabled()
+
+
+def test_fields_zero_is_the_kill_switch(monkeypatch):
+    monkeypatch.setenv("MEMBRANE_FIELDS", "0")
+    assert not FL.enabled()
+
+
+def test_without_the_engine_the_triggers_stay(monkeypatch):
+    """A seat whose native engine isn't built keeps the 12 triggers: the goal graph never goes dark."""
+    monkeypatch.delenv("MEMBRANE_FIELDS", raising=False)
+    import membrane as _pkg
+    monkeypatch.delattr(_pkg, "membrane_vm", raising=False)
+    monkeypatch.setitem(sys.modules, "membrane.membrane_vm", None)     # import fails
+    assert not FL.enabled()

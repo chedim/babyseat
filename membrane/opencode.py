@@ -1767,7 +1767,7 @@ def main() -> None:
                 from . import goalgraph as _GG
                 _n = _GG.seed(srv)
                 from . import fields_live as _FL
-                _FL.start(srv)             # #994: MEMBRANE_FIELDS=1 runs the goal graph on the field engine
+                _FL.start(srv)             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
                 _r = _GG.reowe(srv)
                 _p = _GG.replan_lost(srv)
                 print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool, "

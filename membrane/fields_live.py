@@ -1,6 +1,7 @@
 """#994 live switch: the goal graph runs on the field engine (`membrane_vm.Fields`) instead of its 12 triggers.
 
-`MEMBRANE_FIELDS=1` turns it on. Without it nothing here runs, and `goalgraph.seed` defines the triggers as before.
+On by default whenever the native engine is built; `MEMBRANE_FIELDS=0` turns it off, and then (or without the
+engine) nothing here runs and `goalgraph.seed` defines the triggers as before.
 
 - **The mirror:** at start, every Goal, Task, Decision and Wait is loaded into the engine. A write to one of them
   (heard from the store's write listener) goes to the engine as an outside write; an entity the engine hasn't
@@ -33,7 +34,15 @@ LLM_EID = MEMBRANE_NS + "llm"
 
 
 def enabled() -> bool:
-    return os.environ.get("MEMBRANE_FIELDS", "").strip() == "1"
+    """On by default: the goal graph runs on the field. `MEMBRANE_FIELDS=0` is the kill switch, and a seat whose
+    native engine isn't built (or predates `Fields.drain`) keeps the triggers, so the goal graph never goes dark."""
+    if os.environ.get("MEMBRANE_FIELDS", "").strip() == "0":
+        return False
+    try:
+        from . import membrane_vm as MV
+    except Exception:
+        return False
+    return hasattr(getattr(MV, "Fields", None), "drain")
 
 
 def _json(v) -> str:
@@ -156,7 +165,7 @@ class Live:
 
 
 def start(srv, thread: bool = True) -> Live | None:
-    """Turn the goal graph's field engine on (MEMBRANE_FIELDS=1). Returns None when off."""
+    """Turn the goal graph's field engine on (the default; MEMBRANE_FIELDS=0 is off). Returns None when off."""
     if not enabled():
         return None
     live = Live(srv)

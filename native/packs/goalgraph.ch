@@ -1,10 +1,9 @@
 -- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).
 -- Migrated from packs/goalgraph.json by the translator; tests/syntax_994.rs holds the two equal.
 --
--- The getter (built into the engine, fields.rs `recount`): a task's or wait's open blockers are counted, never
--- decremented, so a dropped or doubled write can't make them drift:
---   Task.open_blockers getter: the blockers of this (Task, Decision, Wait) that are not finished
---   finished: Task and Wait -> status == 'done'; Decision -> status == 'closed'
+-- The getters live here too (below): `finished` per class, `open_blockers` and `due`. A task's or wait's open
+-- blockers are counted, never decremented, so a dropped or doubled write can't make them drift. The engine's
+-- built-in recount and due stand down because this pack declares them.
 
 -- a task with nothing open in its way is owed (on the count, and on its own status)
 Task.open_blockers on-setter ready:
