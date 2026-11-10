@@ -135,7 +135,7 @@ the surprise words mean, in the forms the field can keep (a verb it knows, an ad
 property and a value, another name of a thing). What fits is taught at once (`language.teach`);
 every word asked is marked (`membrane::gap:<word>`) and never asked again, kept or not. Only the
 operator's chats teach (a guest's don't, #882); `shadow.filled` keeps what came back and the
-tokens; `MEMBRANE_GAP_FILL=0` turns it off. **Membrane answers from the filled graph** (#887 C): before the
+tokens; **off by default since 0.7.5**, `MEMBRANE_GAP_FILL=1` turns it on. **Membrane answers from the filled graph** (#887 C): before the
 model's turn, the message is scored (the shadow keeps that score, from before the fill), its
 surprise words are filled (build B, now before the turn), and `language.respond` words a reply
 from what it understood: each condition the message names checked on each thing it names ("goal
