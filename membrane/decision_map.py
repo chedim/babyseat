@@ -432,9 +432,9 @@ def _wait_on(d, reason: str) -> dict:
             "title": p.get("title") or p.get("name") or d.eid, "reason": reason}
 
 
-def _goal_waiting_on(docs, goal: str, GG) -> list:
+def _goal_waiting_on(docs, goal: str, GG, by_goal: dict | None = None) -> list:
     out = []
-    for d in docs.values():
+    for d in (by_goal.get(goal, ()) if by_goal is not None else docs.values()):
         p = d.properties or {}
         if p.get("goal") != goal or d.eid == goal:
             continue
@@ -509,13 +509,17 @@ def work_graph(est) -> dict:
             if p.get("goal"):
                 raw.append({"from": ent.eid, "to": str(p["goal"]), "rel": "of"})
     ids = {n["id"] for n in nodes}
+    idx = GG.blockers_index(est)                       # one pass each, never a scan per node
+    by_goal: dict = {}
+    for d in docs.values():
+        by_goal.setdefault((d.properties or {}).get("goal"), []).append(d)
     for n in nodes:
         if n["kind"] == "goal":
-            n["waiting_on"] = _goal_waiting_on(docs, n["id"], GG)
+            n["waiting_on"] = _goal_waiting_on(docs, n["id"], GG, by_goal)
         elif n["kind"] == "task":
             n["waiting_on"] = [_wait_on(b, "unfinished " + ("wait" if b.cls == GG.WAIT else
                                "blocker task" if b.cls == GG.TASK else "decision"))
-                               for b in GG._blockers_of(est, n["id"])
+                               for b in GG._blockers_of(est, n["id"], idx)
                                if b.eid in docs and GG._unfinished(b)]
     wnodes, wedges = _watch_nodes(est)
     nodes.extend(wnodes)

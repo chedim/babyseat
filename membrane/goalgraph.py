@@ -208,7 +208,20 @@ def _edge(srv, subj: str, rel: str, obj: str, receipt: dict | None = None, drop:
 
 
 # ---- the plan (the planner's one write) ---------------------------------------------------------
-def _blockers_of(est, task: str) -> list:
+def blockers_index(est) -> dict:
+    """{task: [the entities whose `blocks` name it]} in ONE pass over the store (a loop over tasks asks this,
+    never a scan per task)."""
+    idx: dict = {}
+    for d in list((est.docs or {}).values()):
+        bl = (d.properties or {}).get("blocks") or []
+        for t in (bl if isinstance(bl, list) else []):
+            idx.setdefault(t, []).append(d)
+    return idx
+
+
+def _blockers_of(est, task: str, index: dict | None = None) -> list:
+    if index is not None:
+        return list(index.get(task, ()))
     return [d for d in list((est.docs or {}).values())
             if task in ((d.properties or {}).get("blocks") or [])]
 
@@ -423,11 +436,12 @@ def recount(srv, goal: str) -> int:
     UNCHANGED planner must not leave its tasks blocked for good). -> tasks re-counted."""
     est = srv.entity_store
     n_changed = 0
+    idx = blockers_index(est)
     for d in list((est.docs or {}).values()):
         if d.cls not in (TASK, WAIT) or (d.properties or {}).get("goal") != goal \
                 or (d.properties or {}).get("status") != OPEN:
             continue
-        n = sum(1 for b in _blockers_of(est, d.eid) if _unfinished(b))
+        n = sum(1 for b in _blockers_of(est, d.eid, idx) if _unfinished(b))
         if (d.properties or {}).get("open_blockers") != n:
             d.properties = {**(d.properties or {}), "open_blockers": n}
             est.upsert(d, embedder=None)
@@ -760,19 +774,20 @@ def view(est, goal: str) -> dict:
     """The goal's graph: its tasks (what each waits on, its state, its receipt) and cards."""
     tasks, cards, waits = [], [], []
     docs = list((est.docs or {}).values())
+    idx = blockers_index(est)
     for d in docs:
         p = d.properties or {}
         if p.get("goal") != goal:
             continue
         if d.cls == TASK:
             tasks.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"),
-                          "waits_on": [b.eid for b in _blockers_of(est, d.eid) if _unfinished(b)],
+                          "waits_on": [b.eid for b in _blockers_of(est, d.eid, idx) if _unfinished(b)],
                           "open_blockers": p.get("open_blockers"), "result": p.get("result"),
                           "receipt": p.get("receipt")})
         elif d.cls == WAIT:
             waits.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"),
                           "condition": p.get("condition"), "blocks": p.get("blocks") or [],
-                          "waits_on": [b.eid for b in _blockers_of(est, d.eid) if _unfinished(b)],
+                          "waits_on": [b.eid for b in _blockers_of(est, d.eid, idx) if _unfinished(b)],
                           "last_check": p.get("last_check_result"), "receipt": p.get("receipt")})
         elif d.cls == "Decision":
             cards.append({"eid": d.eid, "name": p.get("name"), "status": p.get("status"),
