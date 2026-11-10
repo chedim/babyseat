@@ -13,7 +13,8 @@ engine) nothing here runs and `goalgraph.seed` defines the triggers as before.
 - **Effects:** a planner call goes to `membrane::llm.call`, which the LLM adapter runs.
 - **Getters** (`packs/goalgraph.c1f`: `finished`, `open_blockers`, `due`) compute once at start, as a rebuild: the
   values are stored, no setter runs. After that they recalculate when what they read changes.
-- **The clock:** every `goalgraph.WAIT_TICK_S` the engine's clock ticks, so armed waits come due (`Wait.due`).
+- **The clock:** the engine ticks on the VM's sweeps (the beat the old `every` trigger fired on), so armed waits
+  come due (`Wait.due`); a seat without a VM ticks every `goalgraph.WAIT_TICK_S`.
 - Writes the engine made are never fed back to it: they carry its writer and are skipped.
 """
 from __future__ import annotations
@@ -68,6 +69,7 @@ class Live:
         self.busy = threading.Lock()
         self.stopped = threading.Event()
         self.errors = 0
+        self.swept = False
         n = 0
         for eid, d in list((self.est.docs or {}).items()):
             if d.cls in CLASSES:
@@ -150,6 +152,11 @@ class Live:
                 self.errors += 1
                 print(f"[fields] tick failed: {e!r}"[:300], file=sys.stderr)
 
+    def on_sweep(self, now: float) -> None:
+        """The VM's sweep is the clock (the beat the old `every` trigger fired on): the queue first, then a tick."""
+        self.settle()
+        self.tick(now)
+
     def _worker(self) -> None:
         from . import goalgraph as GG
         next_tick = time.time() + GG.WAIT_TICK_S
@@ -160,7 +167,8 @@ class Live:
             except queue.Empty:
                 pass
             if time.time() >= next_tick:
-                self.tick()
+                if not self.swept:                   # no VM sweeping: keep our own beat
+                    self.tick()
                 next_tick = time.time() + GG.WAIT_TICK_S
 
 
@@ -171,6 +179,15 @@ def start(srv, thread: bool = True) -> Live | None:
     live = Live(srv)
     srv.fields_live = live
     W.on_write(live.hear)
+    vm = getattr(srv, "ch_vm", None)
+    if vm is not None and hasattr(vm, "on_sweep"):   # the clock ticks on the VM's sweeps, chained after the journal's
+        prev = vm.on_sweep
+        def _sweep(now, _prev=prev, _live=live):
+            if _prev is not None:
+                _prev(now)
+            _live.on_sweep(now)
+        vm.on_sweep = _sweep
+        live.swept = True
     if thread:
         threading.Thread(target=live._worker, daemon=True, name="fields-live").start()
     print(f"[fields] the goal graph runs on the field engine: {live.loaded} entities loaded", file=sys.stderr)

@@ -56,6 +56,10 @@ def test_a_wait_left_at_check_due_is_checked_again_after_a_restart(seat):  # (c)
     seat.entity_store.upsert(d, embedder=None)
     seat.ch_vm = CH.VM(seat.entity_store)                  # the new process: fresh VM and queue
     seat.ch_vm.attach()
+    if getattr(seat, "live", None):                        # #994: and a fresh field engine on it
+        from membrane import fields_live as FL
+        FL.stop(seat)
+        seat.live = FL.start(seat, thread=False)
     AD.start(seat)
     settle(seat)
     seat.ch_vm.sweep(now=time.time() + 3 * GG.WAIT_TICK_S)

@@ -105,25 +105,23 @@ def test_a_new_task_born_later_joins_the_field(seat):
     assert p(seat, C, "status") == "owed"
 
 
-def test_an_armed_wait_is_checked_every_every_s_not_once(seat, monkeypatch):
+def test_an_armed_wait_is_asked_to_check_on_every_beat_after_it_armed(seat, monkeypatch):
+    """As the old every-beat trigger did: from the first beat after arming, every beat asks for a check (the adapter's
+    check_wait paces the real checks by every_s). A wait already armed when it's loaded is asked too (after a
+    restart), never only once."""
     checks = []
-    monkeypatch.setattr(GG, "check_wait", lambda srv, eid: checks.append(eid) or (
-        srv.entity_store.docs[eid].properties.update({"last_check_ts": now[0]}) or "still armed"))
+    monkeypatch.setattr(GG, "check_wait", lambda srv, eid: checks.append(eid) or "still armed")
     Wt = MEMBRANE_NS + "wait:t:w"
-    base = time.time()                                    # the engine's clock is the real one (a birth computes now)
+    base = time.time()
     seat.entity_store.upsert(QuantumEntity(eid=Wt, cls="Wait", properties={"goal": GOAL, "status": "armed",
                                                                           "armed_ts": base, "every_s": 30}))
     settle(seat)
-    now = [base]
-    for t in (base + 10, base + 20, base + 31, base + 40, base + 50, base + 62):
-        now[0] = t
-        seat.live.tick(t)
+    assert checks == []                                   # not at the moment it appears
+    for k in range(1, 5):
+        seat.live.tick(base + 10 * k)
         settle(seat)
-        w = seat.entity_store.docs[Wt]
-        with W.as_writer("adapter:check"):               # the adapter's write of the check time, as the store hears it
-            seat.entity_store.upsert(w)
-        settle(seat)
-    assert len(checks) == 2, checks                       # at +31 and +62: every 30 s, not once, not every beat
+    assert len(checks) == 4, checks                       # one ask per beat; the adapter paces the real checks
+
 
 
 def test_the_field_engine_is_on_by_default(monkeypatch):

@@ -135,7 +135,18 @@ impl Fields {
         new.sort();
         for e in new {
             self.known.insert(e.clone());
-            for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
+            // a birth: its own getters compute silently (stored, no setter runs), as at a rebuild. An entity made
+            // in parts (a plan written entity by entity) must not fire on a half-made state.
+            for gi in self.getters_of(core, &e) {
+                let Some(v) = self.compute(core, &e, gi, now, seq) else { continue };
+                let prop = self.getters[gi].prop.clone();
+                if core.docs.get(&e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
+                *seq += 1;
+                let w = Write { eid: e.clone(), prop: prop.clone(), new: v, old: J::Null, writer: "field:rebuild".into(), chain: json!({}), seq: *seq };
+                self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+                core.hear(w, None, now);
+            }
+            // what references it recalculates live
             let props: Vec<String> = core.docs.get(&e).map(|d| d.props.keys().cloned().collect()).unwrap_or_default();
             for p in props { self.mark(&e, &p); }
         }
