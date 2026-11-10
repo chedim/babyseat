@@ -9,6 +9,7 @@ rename patch landed.
 """
 import os
 import tempfile
+import json
 import unittest
 from unittest import mock
 
@@ -68,17 +69,15 @@ class TestEntityEditSchemaSize(unittest.TestCase):
 
     def test_description_keeps_essentials(self):
         d = self._tool()["description"]
-        for word in ("nudge_script", "tick_script", "getter_script",
-                     "publish", "merged_into", "scripts"):
+        for word in ("publish", "merged_into", ".c1f", "help('packs')", "chat:<person>.say"):   # #1043
             self.assertIn(word, d)
 
     def test_every_property_is_still_advertised(self):
         props = self._tool()["inputSchema"]["properties"]
-        for k in ("spec", "summary", "links", "class", "merged_into",
-                  "nudge_script", "delete_script", "mention_script",
-                  "thought_script", "dreamed_script", "tick_script",
-                  "getter_script", "watch_script", "publish", "unpublish"):
+        for k in ("spec", "summary", "links", "class", "merged_into", "publish", "unpublish",
+                  "watch_ops", "watch_fields", "properties"):
             self.assertIn(k, props)
+        assert not any(k.endswith("_script") for k in props)       # #1043: behaviour is a pack, never a script
 
 
 class TestEntityEditPropertiesAreShort(unittest.TestCase):
@@ -92,30 +91,29 @@ class TestEntityEditPropertiesAreShort(unittest.TestCase):
         self.assertLess(len(json.dumps(t)), 2600)
 
     def test_what_the_properties_dropped_lives_in_help(self):
-        from membrane.toolset import HELP
-        s, w = HELP["scripts"], HELP["watches"]
-        for needle in ("tick_every", "tool:clock", "4 run at once", "state.extra.payload",
-                       "tool:filetree", "3 failures", "60s..1h", "empty string clears"):
-            self.assertIn(needle, s, needle)
+        # #1043: behaviour is a .c1f pack; the watch contract stays in help('watches')
+        from membrane.help_pack import packaged
+        p, w = packaged("packs"), packaged("watches")
+        for needle in ("getter", "on-setter", "clock", "IMPORT", "refused", "receipt", "sql("):
+            self.assertIn(needle, p, needle)
         for needle in ("cap 8", "cap 3", "re-arm", "watch-attached"):
             self.assertIn(needle, w, needle)
 
 
 class TestScriptsHelpKeepsTheContract(unittest.TestCase):
-    """#569: what entity_edit's description dropped lives in help('scripts'),
-    which costs tokens only when the model asks for it."""
+    """#569 / #1043: the long contract lives in help (field entities), which costs tokens only when read; the
+    tool description teaches packs, not Python scripts."""
 
-    def test_the_dropped_contract_is_in_help(self):
-        from membrane.toolset import HELP
-        h = HELP["scripts"]
-        for needle in ("intent", "Goal", "chat", "voice", "30s", "never the same line twice",
-                       "delete_script", "replaces the track's", "10s", "0.25",
-                       "publish", "keeps its edit", "membrane::presence"):
+    def test_scripts_help_points_at_packs(self):
+        from membrane.help_pack import packaged
+        h = packaged("scripts")
+        for needle in ("help('packs')", "retired", "script_port.pending", "clock"):
             self.assertIn(needle, h, needle)
 
-    def test_the_description_says_which_budget_is_which(self):
-        d = next(t for t in M.TOOLS if t["name"] == "entity_edit")["description"]
-        self.assertIn("getter 10s", d)
+    def test_the_description_teaches_packs(self):
+        t = next(t for t in M.TOOLS if t["name"] == "entity_edit")
+        self.assertIn("help('packs')", t["description"])
+        self.assertNotIn("python", json.dumps(t).lower())
 
 
 class TestBashSteersToMethods(unittest.TestCase):

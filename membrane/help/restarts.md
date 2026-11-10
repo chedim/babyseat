@@ -1,0 +1,1 @@
+RESTARTS: you are told when the seat or Home Assistant restarted, and why. A seat restart for new code is yours to do: when the entity `restart` is pending, restart the seat once nothing of yours is mid-flight -- exec(action='call', object='presence', method='restart', args={why: '<one line>'}) -- before it is due.

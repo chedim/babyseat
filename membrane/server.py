@@ -3342,7 +3342,7 @@ class TurnRunner:
                         if self.tools is None:
                             from . import toolset as _ts
                             if name == "help":
-                                _help = _ts.help_text(str(args.get("topic") or ""))
+                                _help = _ts.help_text(str(args.get("topic") or ""), getattr(getattr(self, "srv", None), "entity_store", None))
                             else:
                                 try:
                                     if _args_bad:

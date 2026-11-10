@@ -484,7 +484,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_edit",
-        "description": ("Edit an entity (eid or exact name); only the given fields change. merged_into marks a subsumption (the source stays, pointing at its survivor). *_script properties are python that reads `state` and sets `result` ({render, patch, run, delete, intent, chat, voice}): getter_script on a read, tick_script on the heartbeat, nudge_script at consolidation, the others at their hooks (budgets: getter 10s, triggers 0.25s-2s), with a read-only `membrane` object. publish=True exports it. Contract: help('scripts')."),
+        "description": ("Edit an entity (eid or exact name); only the given fields change. merged_into marks a subsumption (the source stays, pointing at its survivor). Behaviour is a .c1f pack, never a script property: a Pack entity's `c1f` holds getters and setters that run on every entity of their classes (help('packs')); `class` may be any class a loaded pack declares. A write to a property whose write is an effect (chat:<person>.say, membrane::llm.call, a File or Command verb) is the way to act. publish=True exports it (state only)."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -495,19 +495,9 @@ TOOLS: list[dict] = [
                 "links": {"type": "array"},
                 "class": {"type": "string"},
                 "merged_into": {"type": "string", "description": "the survivor's eid or name."},
-                "nudge_script": {"type": "string", "description": "python; at consolidation."},
-                "delete_script": {"type": "string", "description": "python; result.delete=True retires."},
-                "mention_script": {"type": "string", "description": "python; on a mention."},
-                "thought_script": {"type": "string", "description": "python; when the thinker extends under it."},
-                "dreamed_script": {"type": "string", "description": "python; on a dream under it."},
-                "tick_script": {"type": "string", "description": "python; on the ~1s heartbeat, paced by `tick_every`."},
-                "watch_script": {"type": "string", "description": "python; on a watched external event."},
-                "watch": {"type": "object", "description": "{kind: 'file'|'signal', glob/name}: what fires watch_script."},
-                "getter_script": {"type": "string",
-                                  "description": "python; on a read: set result = {'state': {...live values...}}."},
                 "watch_ops": {"type": "array", "description": "[{op: near|away|around, rel, z|y}]; help('watches')."},
                 "watch_fields": {"type": "array", "description": "[{verb: pos|align|vel, arg}]; help('watches')."},
-                "properties": {"type": "object", "description": "bounded property patch (script_* keys are the engine's)."},
+                "properties": {"type": "object", "description": "bounded property patch (a pack's c1f text, the fields its getters read)."},
             },
             "required": ["spec"],
         },
@@ -761,7 +751,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_read",
-        "description": ("READ an entity's value after processing: a getter_script fires (run=true bypasses its 5s cache), and the reply carries the current properties, script_data and any run the getter triggered. The properties blob is clipped at ~800 chars: read one in full with prop= (tail=N pages a list from its newest end; lines=A-B pages text, such as a run's kept output)."),
+        "description": ("READ an entity's value after processing: its pack getters' current values with its properties (run=true reads through any cache). The properties blob is clipped at ~800 chars: read one in full with prop= (tail=N pages a list from its newest end; lines=A-B pages text, such as a run's kept output)."),
         "inputSchema": {
             "type": "object",
             "properties": {
