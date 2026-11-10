@@ -63,3 +63,23 @@ def test_no_prompt_teaches_python_entity_scripts():
     for t in HP.topics():
         assert "scripts are python" not in HP.packaged(t).lower(), t
     assert "scripts are python" not in DOCTRINE.lower()
+
+
+def test_the_doctrine_ships_inside_the_package():
+    # the operator 2026-11-10 ("well shiiiit! that is a bug"): doctrine.md lived at the repo root, outside the
+    # package, so a PyPI / HACS / Docker install loaded an empty doctrine
+    import tomllib
+    from membrane import rag
+    pkg = ROOT / "membrane"
+    assert Path(rag._REPO_DOCTRINE).resolve() == (pkg / "doctrine.md").resolve()
+    assert (pkg / "doctrine.md").is_file() and not (pkg / "doctrine.md").is_symlink()
+    for pp in (ROOT / "pyproject.toml", ROOT / "shim" / "membrane-seat" / "pyproject.toml"):
+        data = tomllib.loads(pp.read_text())["tool"]["setuptools"]["package-data"]["membrane"]
+        assert "doctrine.md" in data, pp
+    assert rag._RAG_SYSTEM.strip() and "THE FIELD IS YOUR MEMORY" in rag._RAG_SYSTEM
+
+
+def test_blurp_is_a_help_topic_not_doctrine():
+    # the operator 2026-11-10: Blurp is off in 0.7.5; its paragraph leaves the always-sent doctrine
+    assert "SELF (#161)" not in DOCTRINE
+    assert "self (#161)" in HP.packaged("blurp").lower()

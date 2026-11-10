@@ -115,9 +115,12 @@ class TestArgusRestarts(unittest.TestCase):
         self.assertIn("STEP", t)
 
     def test_the_doctrine_says_the_restart_is_his(self):
+        from membrane.help_pack import packaged
         d = (Path(__file__).resolve().parent.parent / "doctrine.md").read_text()
-        self.assertIn("RESTARTS:", d)
-        self.assertIn("method='restart'", d)
+        self.assertIn("restarts (yours to do when `restart` is pending)", d)   # #1043: the pointer stays
+        h = packaged("restarts")                                              # the long form is help('restarts')
+        self.assertIn("RESTARTS:", h)
+        self.assertIn("method='restart'", h)
 
 
 class TestARestartRestarts(unittest.TestCase):
