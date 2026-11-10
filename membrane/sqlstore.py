@@ -46,6 +46,11 @@ class _Joined:
         return parts[0] if len(parts) == 1 else np.concatenate(parts)
 
 
+def _native_vm() -> bool:
+    import os
+    return os.environ.get("MEMBRANE_NATIVE_VM", "").strip() != "0"   # on by default; =0 is the kill switch
+
+
 class _Matrix:
     """The sentence vectors: an append-only float16 file + its keys, memory-mapped for search."""
 
@@ -83,6 +88,7 @@ class _Matrix:
     def reset(self) -> None:
         with self.lock:
             self.keys, self.row, self.dead, self._mm = [], {}, set(), None
+            self._nv = None                              # the native mapping goes too (#1020 review)
             self._ram, self._base_n = None, 0
             for p in (() if self.readonly else (self.f, self.kf)):
                 try:
@@ -115,6 +121,34 @@ class _Matrix:
                 self.keys.append(k)
             self._mm = None
         return len(pairs)
+
+    def native_top(self, q: np.ndarray, want: int):
+        """#1001 k3 / #1025: the top `want` from the native VM, reading the vectors in place: the float16 file this
+        matrix appends to is memory-mapped, and with Metal (on unless MEMBRANE_GPU_TOPK=0) it reads the same pages (no second
+        copy). None when the extension isn't built or the matrix lives in memory (readonly); masked rows are
+        filtered here."""
+        try:
+            from . import membrane_vm as vm
+        except Exception:
+            return None
+        if self.readonly or not hasattr(vm, "MappedVecs"):
+            return None
+        with self.lock:
+            n, keys, dead = len(self.keys), self.keys, set(self.dead)
+            if not n:
+                return []
+            nv = getattr(self, "_nv", None)
+            if nv is None:
+                nv = self._nv = vm.MappedVecs(str(self.f), DIM)
+        ask = min(want + len(dead), n)
+        out = []
+        for r, sc in nv.near(np.asarray(q, np.float32).tolist(), ask, n):   # rows < n never move (append-only)
+            if r in dead:
+                continue
+            out.append((keys[r], float(sc)))
+            if len(out) >= want:
+                break
+        return out
 
     def drop(self, key: str) -> None:
         with self.lock:
@@ -260,11 +294,16 @@ class SQLiteBackend(CBLiteBackend):
         if not getattr(self, "_seeded", False) or self._pending_vec:
             self.catch_up(wait=False)
         mx = self._vectors()
+        top = mx.top
+        if _native_vm():                               # #1001 k3: the VM's resident `near` getter
+            def top(qq, w):
+                r = mx.native_top(qq, w)
+                return mx.top(qq, w) if r is None else r
         if not eq:
-            return mx.top(q / n, int(k))
+            return top(q / n, int(k))
         want = int(k) * 4
         while True:                                    # widen until k matches or the matrix is exhausted
-            out = mx.top(q / n, want)
+            out = top(q / n, want)
             docs = self.get_multi(coll, [kk for kk, _ in out])
             hit = [(kk, s) for kk, s in out if kk in docs and matches(docs[kk], eq)]
             if len(hit) >= k or len(out) < want or want >= len(mx.keys):

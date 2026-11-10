@@ -16,9 +16,13 @@ pollster = { version = "1.0.1", optional = true }
 pyo3 = { version = "0.29", features = ["extension-module"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 wgpu = { version = "30.0.1", optional = true }
+libc = "0.2"
+objc2 = { version = "0.6.5", optional = true }
+objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-metal = { version = "0.3.2", optional = true, default-features = false, features = ["std", "block2", "MTLAllocation", "MTLBuffer", "MTLCommandBuffer", "MTLCommandEncoder", "MTLCommandQueue", "MTLComputeCommandEncoder", "MTLComputePipeline", "MTLDevice", "MTLLibrary", "MTLResource", "MTLTypes"] }
 
 [profile.release]
 opt-level = 3
 
 [features]
-metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:objc2", "dep:objc2-foundation", "dep:objc2-metal"]
