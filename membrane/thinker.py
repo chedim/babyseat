@@ -467,6 +467,13 @@ class Thinker:
                 continue          # no tick of its own, none inherited (opt-in classes)
             if night and not props.get("wakes"):
                 continue          # the body at rest; the whisker listens
+            if str(props.get("name") or "").startswith("toy:") or ":toy:" in ent.eid:
+                try:
+                    from . import self_loop as _SL
+                    if _SL.mode(self.srv) == "off":
+                        continue      # self disabled: toys dormant, no strikes
+                except Exception:
+                    pass
             inherited_tick = not props.get("tick_script")
             if inherited_tick:
                 from .night import effective_properties
