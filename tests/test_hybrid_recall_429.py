@@ -261,6 +261,23 @@ class TestEntityPool(unittest.TestCase):
         self.assertIn("BM25 index", _texts(rows))
         self.assertEqual(rows[0]["how"], ["entity"])
 
+    def test_the_pool_scans_a_session_once_not_once_per_reply(self):
+        # profiled on the live seat (2026-11-10): ~2.7 s of a turn's recall was this scan, repeated per candidate
+        f = _field()
+        for i in range(20):
+            f.write_events([ST.Event(stream="discourse", role="user", ts=T0 + 2 * i,
+                                     text=f"what about membrane/lexical.py, take {i}?")], session="s:1")
+            f.write_events([ST.Event(stream="discourse", role="model", ts=T0 + 2 * i + 1,
+                                     text=f"membrane/lexical.py keeps the word index, take {i}.")], session="s:1")
+        f.process()
+        scans = []
+        real = f.b.scan
+        f.b.scan = lambda table, flt=None, *a, **k: (scans.append((table, (flt or {}).get("session"))),
+                                                     real(table, flt, *a, **k))[1]
+        pool = EB.entity_pool(f, "what does membrane/lexical.py do?")
+        self.assertEqual(len(pool), 20)                      # the replies answer a person: all kept
+        self.assertEqual(scans.count(("events", "s:1")), 1)      # (the word index's own build is separate)
+
     def test_a_command_named_in_prose_reads_its_rows(self):
         f = _field()
         f.write_events([ST.Event(stream="discourse", role="model", ts=T0, text=(
