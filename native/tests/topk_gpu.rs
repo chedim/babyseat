@@ -14,7 +14,7 @@ fn rss_mb() -> f64 {
 }
 
 #[test]
-fn off_by_default() { assert!(!gpu_enabled() || std::env::var("MEMBRANE_GPU_TOPK").is_ok()); }
+fn on_by_default() { assert!(gpu_enabled() || std::env::var("MEMBRANE_GPU_TOPK").map(|v| v.trim() == "0").unwrap_or(false)); }
 
 #[test]
 fn cpu_topk_sane() {
