@@ -362,7 +362,7 @@ def test_a_refusal_keeps_the_state_and_says_why():
 
 def test_the_top_bar_button():
     src = (UI / "home.js").read_text()
-    top = re.search(r'<div class="top glass">(.*?)</div>', src, re.S).group(1)
+    top = re.search(r'<div class="top glass"[^>]*>(.*?)</div>', src, re.S).group(1)
     m = re.search(r'<button class="pausebtn"[^>]*>', top)
     assert m, "the pause button sits in the top bar"
     assert 'aria-pressed="false"' in m.group(0) and "aria-label=" in m.group(0) and "title=" in m.group(0)

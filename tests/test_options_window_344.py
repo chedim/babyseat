@@ -147,7 +147,7 @@ def test_the_percent_helpers():
 
 def test_the_top_bar_keeps_the_bell_and_play_and_gains_the_gear():
     src = (UI / "home.js").read_text()
-    top = re.search(r'<div class="top glass">(.*?)</div>', src, re.S).group(1)
+    top = re.search(r'<div class="top glass"[^>]*>(.*?)</div>', src, re.S).group(1)
     for cls in ("pausebtn", "rungbell", "optbtn"):        # #348: the ▶ is the seat's pause now
         assert f'class="{cls}"' in top, cls
     assert re.search(r'class="optbtn"[^>]*>⚙</button>', top)

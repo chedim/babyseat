@@ -1567,6 +1567,17 @@ const HSTYLE = `
          padding:4px; border-radius:999px; max-width:calc(100% - 24px); }
   .top button { border:0; background:transparent; border-radius:999px; padding:6px 12px; white-space:nowrap; }
   .top button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); }
+  /* the about pack's ⓘ and its window (membrane/packs/about.c1f): the window opens right under its button */
+  .top .aboutwrap { position:relative; display:inline-flex; }
+  .top .aboutwrap > .about { position:absolute; top:calc(100% + 8px); left:0; z-index:6; width:min(420px, calc(100vw - 32px));
+         max-height:60vh; overflow:auto; padding:10px 14px; border-radius:12px; text-align:left; white-space:normal;
+         box-shadow:0 6px 24px rgba(0,0,0,.18); }
+  .top .aboutwrap > .about[hidden] { display:none; }
+  .top .about header { display:flex; align-items:center; gap:8px; }
+  .top .about header button { margin-left:auto; padding:2px 8px; font-size:20px; line-height:1; }
+  .top .about h3 { margin:10px 0 4px; font-size:15px; } .top .about h4 { margin:10px 0 2px; font-size:14px; }
+  .top .about ul { margin:4px 0; padding-left:18px; } .top .about li, .top .about p { margin:3px 0; line-height:1.4; }
+  .top .about a { display:inline-block; margin-top:8px; }
   /* hover only where there is one: a phone keeps :hover on the last tapped
      button, which looked like 📱 stayed on after it was switched off */
   @media (hover: hover) { .top button:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); } }
@@ -3170,7 +3181,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       root.innerHTML = `
         <div class="field"></div>
         <div class="msg">finding you on the field…</div>
-        <div class="top glass">
+        <div class="top glass" id="topbar">
           <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu"><img class="seat-logo" src="${SEAT_LOGO}" alt="" width="26" height="26"></button>
           <button class="zoobtn" title="The zoo: this house's seats, each with its own ${nm} -- tap one to talk to it" aria-label="the zoo: this house's seats" aria-haspopup="dialog" aria-expanded="false" aria-controls="zoopanel">🦠</button>
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · ${nm} (the 🌱 loop, framed to what it is doing) · 👁 ${nm}'s eyes (looking out from it)">◎ activity</button>
