@@ -4539,6 +4539,10 @@ def _apply_entity_update(srv, ent, out: dict, trigger: str,
     if _ref:
         props["patch_refused"] = {"keys": _ref[:12], "trigger": trigger, "ts": round(time.time(), 1),
                                   "allowed": "render, patch.script_data, patch.position, run, intent"}
+        # said where errors are looked for (Memo's pack-sync tick was refused every 5 s with nothing to show):
+        # the error bubble, as for any script's error
+        _script_error_announce(est, ent.eid, trigger,
+                               f"patch refused: {', '.join(_ref)[:24]} (allowed: script_data, position)")
     elif (props.get("patch_refused") or {}).get("trigger") == trigger:
         props.pop("patch_refused", None)   # the same trigger running clean retires its own stamp (#612)
     # THE RUN VERDICT (the exec's only lane, the operator's ruling
