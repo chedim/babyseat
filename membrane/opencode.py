@@ -1079,6 +1079,10 @@ def main() -> None:
             from .efield import EntityField
             from .efstore import open_backend
             from .substrate import _origin_tag
+            from . import storekind as _SK          # #971: a new seat's first start asks which store
+            from .substrate import _is_lab_field_path as _lab
+            if not _lab(args.field):
+                _SK.ensure_chosen(args.field)
             be = open_backend(args.field)
             srv.efield = EntityField(
                 be, LazyEmbedder(mem),
@@ -1352,6 +1356,12 @@ def main() -> None:
             _seed_banner_rules(srv.entity_store)
         except Exception as e:
             print(f"[seat] banner rules skipped ({e})", file=sys.stderr)
+        # THE RECALL DIALS (recall_policy): installed so the seat's edits steer recall
+        try:
+            from .recall_policy import seed as _seed_recall_dials
+            _seed_recall_dials(srv.entity_store)
+        except Exception as e:
+            print(f"[seat] recall dials skipped ({e})", file=sys.stderr)
         # THE WARM-UP (2026-10-10: the first turn after a restart paid 11.8 s
         # for the intent seeds -- a full scan + every seed embedded cold):
         # done in the background right after boot, nobody waits for it
@@ -1741,7 +1751,7 @@ def main() -> None:
         try:                               # #576 B: the cliffhanger VM hears every write
             from . import ch as _CH
             if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
-                srv.ch_vm = _CH.VM(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))
+                srv.ch_vm = _CH.make_vm(srv.entity_store, paused=lambda: bool(nerve_paused(srv)))   # #971
                 srv.ch_vm.attach()
                 srv.ch_vm.start()
                 from . import ch_blurp as _CHB    # #576 D2: Blurp's learner, its purse closed until Blurp reports
@@ -1756,6 +1766,8 @@ def main() -> None:
             try:                           # #738: goals as a graph -- the triggers, the worker pool
                 from . import goalgraph as _GG
                 _n = _GG.seed(srv)
+                from . import fields_live as _FL
+                _FL.start(srv)             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
                 _r = _GG.reowe(srv)
                 _p = _GG.replan_lost(srv)
                 print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool, "

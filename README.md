@@ -249,7 +249,9 @@ changes since the last message), `learn` to keep a lesson (with the same guards 
 `entities_related`, …), `code_run` and Cliffhanger's method tools (`method_define/call/each/inspect`). Code the model runs becomes a tree of entities in the field, linked to its executor, and each run ends on its own result entity ([the executor](docs/entity-field.md#the-executor-code-is-a-tree-in-the-field-614)); what it will do again it defines as a method on an entity, then calls ([program the field first](docs/cliffhanger.md#program-the-field-first-576-part-f)). Commands compose in **Cliffhanger**, membrane's command
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
-where it came from.
+where it came from. The VM's surface (writes, store, triggers, effects) and the replay test a
+native VM must pass are in [the VM's API](docs/vm-api.md) (#971). A native (Rust) VM is in `native/`:
+build it with `native/build.sh` (the native VM is the only VM; a missing extension fails loudly at startup).
 
 **Two advisory checks run on every turn:** the **gate** compares the answer
 with the nearest past one (shadow by default), and the **[membrane]
@@ -380,7 +382,8 @@ pass through to Ollama unchanged.
 | `membrane doctor` | what's installed/running + the field's vitals |
 | `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): every request to either port needs it, localhost and reads included (Bearer, Basic's password, or the web UI's one-time prompt; only `GET /api/tags` is open); see [docs/auth.md](docs/auth.md) |
 | `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running JWT mode (on by default; off with `MEMBRANE_JWT=0`); see [docs/auth.md](docs/auth.md) |
-| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads the chat message store (`serve-msgs.json`, or the seat's Couchbase Lite store once it has migrated there), plus the background model calls from `bg-usage.json`; no model call) |
+| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads the chat message store (`serve-msgs.json`, or the seat's store, SQLite or Couchbase Lite, once it has migrated there), plus the background model calls from `bg-usage.json`; no model call) |
+| `membrane store` | which store this seat uses (SQLite or Couchbase Lite) and what is in it; `membrane store migrate --to sqlite\|cbl` copies every collection into the other kind with the seat stopped, switches the seat, and keeps the old store as a backup |
 | `membrane shadow` | compile-first routing, shadow stage: how many person messages living language compiled, had gaps in (by type) or left to thinking, and whether the model then used tools (read-only, no model call). See [docs/cliffhanger.md](docs/cliffhanger.md#living-language-2026-11-01-on-by-default) |
 | `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Every kind can be added (#576 retired the unlocks with the ladder). See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
@@ -425,11 +428,14 @@ Since the seat-first change, sharing comes in three layers: what each seat
 keeps, what it publishes, and an opt-in merged field.
 
 **1. Every seat is local-first.** A seat's entity field lives on its own
-disk, at `<project>/.membrane/field/` (or `.membrane/field.cblite` where
-the Couchbase Lite libraries are fetched with `scripts/fetch-cbl.sh`). Its
+disk, in a store under `<project>/.membrane/`. A new seat uses **SQLite**
+(`.membrane/field.sqlite`, the default); **Couchbase Lite** (`.membrane/field.cblite`, its
+libraries fetched with `scripts/fetch-cbl.sh`; Enterprise is free for development and evaluation
+only) is the other kind. A new seat started on a terminal asks which one; an existing Couchbase
+Lite seat keeps its store until `membrane store migrate --to sqlite` moves it. Its
 events, entity states, claims, scripts and turn text stay there and
 survive restarts with no cluster at all. Nothing is copied to the bucket
-unless one of the layers below sends it. With Couchbase Lite the seat's
+unless one of the layers below sends it. In either store the seat's
 entities, its chat sessions and messages, and its small state files (the
 absorb watermark, the router's state, the watch board, the background-usage
 tally) live in that store too, one document each (#799); the first boot

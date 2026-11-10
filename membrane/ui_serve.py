@@ -485,6 +485,10 @@ def intercept(handler) -> bool:
             c["auth"] = "seat"
             c["owner"] = _SA.owner(handler, cookie=True, basic=True)
         _json(handler, c)
+    elif path == "/ui/fieldvm":                # the browser VM's start: packs + mirrored entities (then /event)
+        from . import fields_live as _FL
+        live = _FL.CURRENT
+        _json(handler, live.snapshot() if live is not None else {"error": "the field engine is off"}, 200 if live is not None else 503)
     elif path == "/ui/log":
         _page_log(handler)
     elif path == "/ui/stt":

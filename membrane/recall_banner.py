@@ -159,7 +159,39 @@ def score(feat: dict, weights: dict) -> float:
 
 
 def rank(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True) -> list[dict]:
-    """The pool, best first by the scorer (ties keep recall's order). With the
+    """The pool, best first: the policy (weights choice, rerank depth) is the field's (recall_policy, #980);
+    the old path runs when the field method fails."""
+    from . import recall_policy as RPO
+    if RPO.native_only():
+        return _rank_native(rows, text, weights, rerank)
+    try:
+        return _rank_policy(rows, text, weights, rerank, RPO)
+    except Exception as e:
+        RPO.fell_back("rank", e)
+        return _rank_native(rows, text, weights, rerank)
+
+
+def _rank_policy(rows, text, weights, rerank, RPO):
+    w, rr_weights = RPO.call("rank_policy", rows, weights)
+    scored = [(score(f, w), i, r, f) for i, (f, r) in enumerate(zip(features(rows, text), rows))]
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    out = [dict(r, score=s, feat=f) for s, _i, r, f in scored]
+    top_n = RPO.call("rerank_top", rerank)
+    if top_n and out:
+        from . import recall_rerank as RR
+        top = out[:top_n]
+        got = RR.scores(text, [_answer_text(r) for r in top])
+        if got:
+            for r, b in zip(top, got):
+                r["feat"] = dict(r["feat"], bge=b)
+                r["score"] = score(r["feat"], rr_weights)
+            top = [r for _i, r in sorted(enumerate(top), key=lambda t: (-t[1]["score"], t[0]))]
+            out = top + out[top_n:]
+    return out
+
+
+def _rank_native(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True) -> list[dict]:
+    """The old path. The pool, best first by the scorer (ties keep recall's order). With the
     reranker ready (#680), the scorer's top RERANK_TOP rows are re-ordered by
     RERANK_WEIGHTS, which add its `bge` score; the rows below keep their place.
     Rows without the reply models' scores (#942: still building, or a failed
@@ -248,9 +280,23 @@ def history_texts(field, session: str, text: str, n: int = HISTORY_TURNS) -> lis
     return [d["text"] for d in rows[-n:]]
 
 
-def pick(rows: list[dict], text: str, n: int = BANNER_N, skip=(), weights: dict | None = None,
+def pick(rows: list[dict], text: str, n: int | None = BANNER_N, skip=(), weights: dict | None = None,
          ranked: list[dict] | None = None) -> list[dict]:
-    """The banner rows: ranked, the chat's own recent turns skipped,
+    """The banner rows (policy: the field's, #980; the old path on failure)."""
+    from . import recall_policy as RPO
+    if RPO.native_only():
+        return _pick_native(rows, text, BANNER_N if n is None else n, skip, weights, ranked)
+    try:
+        return RPO.call("select", ranked if ranked is not None else rank(rows, text, weights), text, n, skip,
+                        fact_line, _sig, _alike)
+    except Exception as e:
+        RPO.fell_back("pick", e)
+        return _pick_native(rows, text, BANNER_N if n is None else n, skip, weights, ranked)
+
+
+def _pick_native(rows: list[dict], text: str, n: int = BANNER_N, skip=(), weights: dict | None = None,
+                 ranked: list[dict] | None = None) -> list[dict]:
+    """The old path. The banner rows: ranked, the chat's own recent turns skipped,
     near-duplicate fact lines collapsed, at most n; each carries its 'fact'."""
     skip = set(skip)
     out, seen = [], []
@@ -321,4 +367,15 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
 
 
 def render(lines: list[str]) -> str | None:
+    from . import recall_policy as RPO
+    if RPO.native_only():
+        return _render_native(lines)
+    try:
+        return RPO.call("render", lines)
+    except Exception as e:
+        RPO.fell_back("render", e)
+        return _render_native(lines)
+
+
+def _render_native(lines: list[str]) -> str | None:
     return "\n".join([HEADER, *lines]) if lines else None

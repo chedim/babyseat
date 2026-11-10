@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field VM demo</title>
+<style>
+  :root { --bg: #f7f7f4; --fg: #1d1d1b; --muted: #6b6b66; --line: #d9d9d2; --owed: #2f6f4f; --done: #9a9a92; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #171716; --fg: #ecece6; --muted: #9b9b94; --line: #33332f; --owed: #7fc8a0; --done: #6b6b66; } }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 0;
+         padding: 24px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.note { color: var(--muted); margin: 0 0 16px; }
+  #view li { list-style: none; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; cursor: pointer; }
+  #view li.owed { border-color: var(--owed); color: var(--owed); }
+  #view li.done { color: var(--done); text-decoration: line-through; }
+  #view ul { padding: 0; margin: 0; }
+  pre#errors { color: #b4442d; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>The field engine, running in this page</h1>
+  <p class="note">A goal graph rendered by a <code>.c1f</code> pack in the browser: the same Rust VM as the seat,
+  compiled to WebAssembly. Click a task to finish it; the goal graph makes what it blocked owed.</p>
+  <div id="view"></div>
+  <pre id="errors"></pre>
+</main>
+<script type="module">
+import { start, connect } from './fieldvm.js';
+
+const DEMO = `PACK demo 1
+IMPORT goalgraph 1
+IMPORT dom 1
+
+-- one list for the goal, one row per task; a row shows the task's status and finishes it on a click
+Goal.status on-setter list:
+  ALWAYS:
+    ('DomNode:demo:' + this.eid).tag = 'ul'
+Task.status on-setter row:
+  ALWAYS:
+    ('DomNode:demo:' + this.eid).tag = 'li'
+    ('DomNode:demo:' + this.eid).parent = 'DomNode:demo:' + this.goal
+    ('DomNode:demo:' + this.eid).task = this.eid
+    ('DomNode:demo:' + this.eid).class = this.status
+    ('DomNode:demo:' + this.eid).text = this.name + ' (' + this.status + ')'
+DomNode.clicked on-setter finish:
+  WHEN this.task: this.task.status = 'done'
+`;
+
+const view = document.getElementById('view');
+const note = document.getElementById('errors');
+let host;
+if (new URLSearchParams(location.search).has('live')) {
+  // ?live: follow the seat's own goal graph (snapshot + /event), drawn by the same view pack
+  // the seat's own view packs draw it (packs importing dom: on the seat they wait for the page); &demo adds the demo list
+  const extra = new URLSearchParams(location.search).has('demo') ? { demo: DEMO } : {};
+  host = await connect(view, { packs: extra, onStatus: s => { document.querySelector('p.note').textContent = 'Live: ' + s; } });
+} else {
+  host = await start(view, { packs: { demo: DEMO } });
+  host.feed('g1', 'Goal', { name: 'ship the browser VM', status: 'open' });
+  host.feed('t1', 'Task', { goal: 'g1', name: 'build the wasm target', blocks: ['t2', 't3'], status: 'open' });
+  host.feed('t2', 'Task', { goal: 'g1', name: 'mount the DOM', blocks: ['t3'], status: 'open' });
+  host.feed('t3', 'Task', { goal: 'g1', name: 'render the in-flight view', status: 'open' });
+}
+note.textContent = Object.values(host.errors).join('\n');
+window.fieldvm = host;
+</script>
+</body>
+</html>

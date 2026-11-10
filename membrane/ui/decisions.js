@@ -300,6 +300,19 @@ function cardEdges(board) {
   return { lines, chips };
 }
 
+/** G16 (#1033; docs/ui-pack-design.md): what picking an option changes -- the card's
+ * var.impact (or impact) maps option -> one line; absent, the card says so. */
+function impactOf(card, o) {
+  const m = (card && card.var && card.var.impact) || (card && card.impact);
+  if (!m || typeof m !== "object") return "";
+  const v = m[o];
+  return v == null ? "" : String(v);
+}
+function impactHtml(card, o) {
+  const t = impactOf(card, o);
+  return t ? `<span class="imp">→ ${esc(t)}</span>` : `<span class="imp none">impact not stated</span>`;
+}
+
 /** How an open card's one variable is entered: {kind, options?, step?}. */
 function inputSpec(v) {
   const t = v && v.type;
@@ -481,6 +494,9 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
     .dpanel label.opt { display:flex; gap:8px; align-items:flex-start; padding:5px 8px; cursor:pointer; opacity:1;
               font-size:13px; border:1px solid var(--dim); overflow-wrap:anywhere; min-width:0; }
     .dpanel label.opt span { min-width:0; overflow-wrap:anywhere; }
+    .dpanel label.opt .imp { display:block; font-size:11px; opacity:.75; margin-top:2px; }
+    .dpanel label.opt .imp.none { opacity:.4; font-style:italic; }
+    .dpanel label.opt em.rec { font-style:normal; font-size:10px; opacity:.7; border:1px solid currentColor; border-radius:4px; padding:0 4px; margin-left:4px; }
     .dpanel label.opt:has(input:checked) { border-color:var(--cyan); }
     .dpanel form.ans input:not([type=radio]) { width:100%; box-sizing:border-box; }
     .dpanel .pa { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; justify-content:flex-end; }
@@ -901,7 +917,8 @@ if (typeof customElements !== "undefined" && !customElements.get("membrane-decis
           const unit = card.var && card.var.unit ? esc(card.var.unit) : "";
           const field = sp.kind === "select"
             ? `<fieldset class="opts"><legend class="sr">${esc(card.title)}</legend>${sp.options.map((o) =>
-                `<label class="opt"><input type="radio" name="v" value="${esc(o)}"${o === p ? " checked" : ""}><span>${esc(o)}</span></label>`).join("")}</fieldset>`
+                `<label class="opt"><input type="radio" name="v" value="${esc(o)}"${o === p ? " checked" : ""}><span>${esc(o)}` +
+                `${o === p ? ' <em class="rec">recommended</em>' : ""}${impactHtml(card, o)}</span></label>`).join("")}</fieldset>`
             : `<label class="m" for="pv">${unit || "value"}</label><input id="pv" name="v" type="${sp.kind}"` +
               `${sp.step ? ` step="${sp.step}"` : ""} value="${esc(p)}" autocomplete="off">`;
           body = `<form class="ans" data-eid="${esc(card.eid)}">${field}` +

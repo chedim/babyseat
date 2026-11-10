@@ -150,6 +150,12 @@ def seed(srv) -> int:
     vm = getattr(srv, "ch_vm", None)
     if vm is None:
         return 0
+    from . import fields_live as _FL
+    if _FL.enabled():                       # #994: the field engine runs the goal graph; its triggers stand down
+        from . import ch as _CH
+        gone = [MEMBRANE_NS + f"{_CH.CLASS}:{_CH._slug(name)}" for name, *_ in TRIGGERS]
+        est.remove_many([e for e in gone if e in (est.docs or {})])
+        return 0
     for name, when, where, write in TRIGGERS:
         vm.define(name, when, where, write)
     est.docs.pop(MEMBRANE_NS + "trigger:goal-graph-reopen-on-replan", None)   # #867: now adapters._replan

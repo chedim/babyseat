@@ -496,7 +496,19 @@ def _machine(field, d: dict) -> bool:
 
 
 def rrf(lists, key) -> list[tuple[dict, float]]:
-    """Reciprocal-rank fusion: each row scores sum(1 / (RRF_K + rank)) over
+    """Fusion by the field's recall policy (#980); the old path when it fails."""
+    from . import recall_policy as RPO
+    if RPO.native_only():
+        return _rrf_native(lists, key)
+    try:
+        return RPO.call("fuse", lists, key)
+    except Exception as e:
+        RPO.fell_back("rrf", e)
+        return _rrf_native(lists, key)
+
+
+def _rrf_native(lists, key) -> list[tuple[dict, float]]:
+    """The old path. Reciprocal-rank fusion: each row scores sum(1 / (RRF_K + rank)) over
     the lists it is in (rank from 1); best first, the first-seen row of a
     key stands for it."""
     score: dict = {}
@@ -818,8 +830,17 @@ def recall_answers(field, text: str, qvec=None, k: int = 3,
         asks = past_answers(field, text, qv, k=min(k, ASK_K), sim_min=sim_min)
         direct = direct_answers(field, text, qv, k=k, sim_min=sim_min)
         tool_fn = globals().get("tool_answers")
+        from . import recall_policy as RPO
+        try:                                     # lane choice is the field's (#980); the old rule on failure
+            if RPO.native_only():
+                raise RuntimeError("MEMBRANE_RECALL_NATIVE")
+            tool_lane = RPO.call("lanes", question, True)["tool"]
+        except Exception as e:
+            if not RPO.native_only():
+                RPO.fell_back("lanes", e)
+            tool_lane = question
         tools = (tool_fn(field, text, qv, k=min(k, globals().get("TOOL_HITS_MAX", k)),
-                         sim_min=sim_min) if tool_fn and question else [])
+                         sim_min=sim_min) if tool_fn and tool_lane else [])
     else:
         asks, direct, tools = [], [], []
     try:

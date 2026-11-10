@@ -99,3 +99,14 @@ def _seat_credential(request, monkeypatch):
 
     monkeypatch.setattr(hc.HTTPConnection, "request", request_)
     yield
+
+
+# #971: MEMBRANE_TEST_STORE=sqlite runs every Couchbase Lite store test against the SQLite store instead --
+# the same suites are its contract.
+if os.environ.get("MEMBRANE_TEST_STORE", "").strip() == "sqlite":
+    import sys as _sys2
+    _sys2.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from membrane import cblstore as _cbs
+    from membrane import sqlstore as _sqs
+    _cbs.CBLiteBackend = _sqs.SQLiteBackend
+

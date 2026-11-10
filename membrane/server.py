@@ -4689,6 +4689,19 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if not res.get("ok"):
                     return self._json_out({"error": res.get("error")}, code=409 if res.get("conflict") else 400)
                 return self._json_out(res)
+            if path == "/membrane/feedback":
+                # G15/G9 (docs/ui-pack-design.md): a reply's footer press -- 👍/👎(+why), owner's door above
+                from . import reply_feedback as _RF
+                b = self._read_body()
+                if not isinstance(b, dict):
+                    return self._json_out({"error": "a JSON object body is required"}, code=400)
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                res = _RF.record(getattr(psrv, "entity_store", None), str(b.get("message") or ""),
+                                 str(b.get("kind") or ""), why=str(b.get("why") or ""),
+                                 session=str(b.get("session") or ""))
+                if not res.get("ok"):
+                    return self._json_out({"error": res.get("error")}, code=400)
+                return self._json_out(res)
             if path == "/membrane/item-chat/say":
                 # #772: the item card's mini-chat -- a Message that refers to the item (owner's door above)
                 from . import decision_map as _DM

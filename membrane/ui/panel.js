@@ -455,6 +455,18 @@ function quotaPopupHtml(p, nowMs) {
 
 /** The message a Retry re-sends: the person's text of the user row before the
  *  failed answer `mid` (its speaker line off; the send adds it again). */
+/** This tab's memory of the reply verdicts it sent (the seat keeps the real ones). */
+const FB_KEY = "membrane.feedback.v1";
+function fbAll() { try { return JSON.parse(localStorage.getItem(FB_KEY) || "{}") || {}; } catch (e) { return {}; } }
+function fbGet(mid) { return fbAll()[mid] || null; }
+function fbSet(mid, v) {
+  const a = fbAll();
+  if (v) a[mid] = v; else delete a[mid];
+  const ks = Object.keys(a);
+  for (const k of ks.slice(0, Math.max(0, ks.length - 500))) delete a[k];
+  try { localStorage.setItem(FB_KEY, JSON.stringify(a)); } catch (e) { /* private mode */ }
+}
+
 function retryText(rows, mid) {
   const i = (rows || []).findIndex((r) => r && r.info && r.info.id === mid);
   for (let j = i - 1; i > 0 && j >= 0; j--) {
@@ -2202,6 +2214,13 @@ const STYLE = `
   .more { font-size:11px; border:0; background:none; color:var(--primary-color,#4a90e2); padding:0; }
   details.think .md { padding:2px 10px 8px; opacity:.75; font-size:13px; }
   .usage { font-size:11px; opacity:.45; margin-top:4px; }
+  .fb { display:flex; gap:4px; margin-top:6px; opacity:.55; transition:opacity .15s; }
+  .msg.ai:hover .fb, .fb:focus-within, .fb.set { opacity:1; }
+  .fb button { font:inherit; font-size:12px; line-height:1; padding:3px 7px; border-radius:6px; cursor:pointer;
+    background:transparent; color:inherit; border:1px solid rgba(127,127,127,.35); }
+  .fb button:hover { border-color:currentColor; }
+  .fb button[aria-pressed="true"] { background:rgba(95,214,255,.18); border-color:#5fd6ff; }
+  .fb .why { font-size:11px; opacity:.7; align-self:center; margin-left:4px; }
   .working { opacity:.6; font-style:italic; margin:10px 0; display:flex; gap:8px; align-items:center; }
   .spin { width:10px; height:10px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent;
           animation:spin .8s linear infinite; }
@@ -3613,8 +3632,42 @@ function definePanel() {
       if (info.error && !info.seatBusy) html += '<div class="err">' + escText(pretty(info.error.data || info.error)) + "</div>";
       html += capHtml(info);
       html += busyHtml(info);
+      if (!live && (info.time || {}).completed && !info.error && info.from !== "self") html += this._fbHtml(info.id);
       el.innerHTML = html || '<div class="usage">…</div>';
       return el;
+    }
+
+    /** THE REPLY FOOTER (G15 #1029, G9 #1032; docs/ui-pack-design.md): 👍 / 👎 (a why is
+     *  asked, optional) and ↻ retry (the same question again). A verdict is kept on the
+     *  seat as feedback:<id>; this tab remembers it to draw the pressed state. */
+    _fbHtml(mid) {
+      if (!mid) return "";
+      const k = fbGet(mid);
+      const b = (kind, icon, label) => '<button type="button" data-fb="' + kind + '" data-fbmid="' + escAttr(mid) +
+        '" aria-pressed="' + (k && k.kind === kind ? "true" : "false") + '" title="' + label + '" aria-label="' + label + '">' + icon + "</button>";
+      return '<div class="fb' + (k ? " set" : "") + '">' + b("up", "👍", "Helpful") + b("down", "👎", "Not helpful") +
+        '<button type="button" data-cretry="' + escAttr(mid) + '" title="Ask again" aria-label="Ask again">↻ retry</button>' +
+        (k && k.why ? '<span class="why">' + escText(k.why) + "</span>" : "") + "</div>";
+    }
+
+    async _feedback(mid, kind, btn) {
+      const prev = fbGet(mid);
+      if (prev && prev.kind === kind) kind = "clear";        // a second press takes it back
+      let why = "";
+      if (kind === "down") {
+        const w = window.prompt("What was wrong with this reply? (optional)", "");
+        if (w === null) return;
+        why = w.trim();
+      }
+      if (btn) btn.disabled = true;
+      const r = await this._api(SERVE + "/membrane/feedback", { method: "POST",
+        body: JSON.stringify({ message: mid, kind, why, session: this._sid || "" }) });
+      if (btn) btn.disabled = false;
+      if (!r.ok) { this._err(this._apiErr("feedback not saved", r)); return; }
+      fbSet(mid, kind === "clear" ? null : { kind, why });
+      const row = this._chat && this._chat.byId && this._chat.byId[mid];
+      const el = this._rowEls[mid];
+      if (row && el && el.parentNode) { const nx = this._rowEl(row); el.replaceWith(nx); this._rowEls[mid] = nx; }
     }
 
     _toolHtml(p) {
@@ -3879,6 +3932,8 @@ function definePanel() {
       }
       const cont = ev.target.closest("[data-ccont]");
       if (cont) { this._claudeContinue(cont.dataset.ccont, cont).catch(() => {}); return; }
+      const fb = ev.target.closest("[data-fb]");
+      if (fb) { this._feedback(fb.dataset.fbmid, fb.dataset.fb, fb).catch(() => {}); return; }
       const retry = ev.target.closest("[data-cretry]");
       if (retry) { this._retryBusy(retry.dataset.cretry, retry).catch(() => {}); return; }
       const more = ev.target.closest(".more");

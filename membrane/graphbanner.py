@@ -85,14 +85,31 @@ def define(est, name: str, where, show: str, order: int = 100) -> str:
     return eid
 
 
+PACK_VERSION = 1
+
+
+def pack() -> dict:
+    """The banner rules as a versioned seed pack (#980 Q3)."""
+    return {"name": "banner", "version": PACK_VERSION, "entities": [
+        {"eid": _rule_eid(r["name"]), "cls": CLASS_RULE, "properties": {
+            "name": r["name"], "where": [list(a) for a in r["where"]], "show": str(r["show"]),
+            "order": int(r["order"]), "silent_birth": True}} for r in SEED]}
+
+
 def seed(est) -> int:
-    """Boot: the seeded rules, made once (an edited one is kept as it is)."""
-    n = 0
-    for r in SEED:
-        if _rule_eid(r["name"]) not in (est.docs or {}):
-            define(est, r["name"], r["where"], r["show"], r["order"])
-            n += 1
-    return n
+    """Boot: load the pack (content decides; edits kept). MEMBRANE_SEED_PYTHON=1 runs the old
+    made-once Python path instead (#980's switch back)."""
+    import os
+    if os.environ.get("MEMBRANE_SEED_PYTHON") == "1":
+        n = 0
+        for r in SEED:
+            if _rule_eid(r["name"]) not in (est.docs or {}):
+                define(est, r["name"], r["where"], r["show"], r["order"])
+                n += 1
+        return n
+    from . import seedpack
+    return seedpack.load(est, pack(), release=True)["installed"]
+
 
 
 def _rules(est) -> list:
@@ -185,7 +202,7 @@ def _fill(est, show: str, b: dict) -> str:
 def walk(srv, sid: str) -> list[tuple]:
     """This chat's graph-walk lines with where each came from: [(rule eid, show template, line)],
     every rule's, in order, unique, at most LINES."""
-    from .ch import VM
+    from .ch import Binder as VM         # its binding helper with this module's atoms
     est = getattr(srv, "entity_store", None)
     if est is None or not sid:
         return []

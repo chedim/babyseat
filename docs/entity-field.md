@@ -736,6 +736,23 @@ refreshed when fixed (so it drifts back in time on the updated axis by
 itself). The event pool never hears engine lanes: what the model's
 watchers watch is the model's own choice.
 
+## Sensors, getters and setters as fields (draft, #994)
+
+Design: [cliffhanger-fields.md](cliffhanger-fields.md). DRAFT: nothing here switches on a
+live seat without the operator's go; `every`, cached getters and two-phase setters are
+MEMBRANE EXTENSIONS, not cliffhanger syntax.
+
+- A sensor, a getter and a setter are not separate script kinds but parts of a **field**
+  declared once on a class: a cached eager getter (the field's own name is its previous
+  value), and setters run in added order.
+- A read returns the cache and never writes. A recalculated getter result is a write
+  through the setters; only a changed value fires anything.
+- Setters have two phases: `set` (before the store; may alter or refuse) and `on` (after;
+  effects and writes to other fields). A setter chain that loops back is refused.
+- Events come only from outside as writes. Time is the clock tick, itself a write; a timed
+  rule reads the clock field (no `every`). This supersedes the getter/tick_script split
+  in the covenant and budgets below once switched on; until then they stay as written.
+
 ## Script budgets (the resource matrix)
 
 | trigger | budget | pacing | gravity? |

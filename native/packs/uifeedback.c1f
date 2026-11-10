@@ -1,0 +1,36 @@
+PACK uifeedback 1
+IMPORT goalgraph 1
+-- The UI pack (docs/ui-pack-design.md, #994, #1027): fields only, no page logic. First release covers the chat
+-- and the decision cards; the old UI is replaced (cards: which-surfaces..., keep-the-old-ui...).
+-- The pack owns Reply, Feedback and Prefs. Decision comes through the goalgraph import.
+
+-- G2: how well the answer is backed. Host counts `receipts` (tool results cited) and `unchecked` (claims marked
+-- "not checked"); the model can't declare them.
+Reply.verified getter: this.receipts > 0 and (this.unchecked or 0) == 0
+Reply.quality getter:
+  (this.verified and 'verified') or (this.receipts > 0 and 'partial') or 'unchecked'
+
+-- G9: a retry names the reply it replaces; the replaced one reads superseded
+Reply.superseded getter: len(referencing(this, 'retry_of')) > 0
+
+-- G15: feedback counts per reply (a Feedback row is created by writing to it; its `reply` is the Reply eid)
+Reply.up getter: len([f for f in referencing(this, 'reply') if f.kind == 'useful'])
+Reply.down getter: len([f for f in referencing(this, 'reply') if f.kind == 'wrong' or f.kind == 'unsafe' or f.kind == 'biased'])
+Reply.reports getter: len([f for f in referencing(this, 'reply') if f.kind == 'biased'])
+
+-- G15, G6: the kind a person picked lands on the reply, and an unsafe or biased report is flagged for review
+Feedback.kind on-setter feedback-note:
+  WHEN this.kind == 'useful' or this.kind == 'wrong' or this.kind == 'unsafe' or this.kind == 'biased':
+    this.reply.last_feedback = this.kind
+Feedback.kind on-setter feedback-flag:
+  WHEN this.kind == 'unsafe' or this.kind == 'biased':
+    this.reply.flagged = True
+
+-- G10: an uncertain reply says why; with no reason it says so
+Reply.uncertain_shown getter: this.uncertain and (this.uncertain_why or 'reason not stated')
+
+-- G5: tone is one of three fixed levels; anything else reads as normal
+Prefs.tone_level getter: (this.tone == 'terse' and 'terse') or (this.tone == 'detailed' and 'detailed') or 'normal'
+
+-- G16: a decision card shows what each pick changes, or says it is not stated
+Decision.impact_shown getter: this.impact or 'impact not stated'

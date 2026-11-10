@@ -1393,7 +1393,19 @@ def open_backend(field_path: str = "", readonly: bool = False):
     # =file keeps the journals. The journals import once and stay as a backup.
     mode = os.environ.get("MEMBRANE_EFIELD_STORE", "auto")
     cdir = jdir.with_name(jdir.name + ".cblite")
-    if mode == "cbl" or (mode == "auto" and _cbl_wanted()):
+    # #971: which store this seat uses -- SQLite (the default for a new seat) or Couchbase Lite (an
+    # existing CBL seat keeps it until `membrane store migrate`); storekind.py holds the order
+    from . import storekind as _SK
+    kind = _SK.resolve(field_path, mode)
+    if kind == "sqlite":
+        from .cblstore import StoreBusy
+        from .sqlstore import SQLiteBackend
+        try:
+            return SQLiteBackend(jdir.with_name(jdir.name + ".sqlite"), journal_dir=jdir, readonly=readonly)
+        except StoreBusy as e:
+            print(f"[efield] store busy ({e}); nothing opened", file=sys.stderr)
+            raise
+    if kind == "cbl" and (mode == "cbl" or _cbl_wanted()):
         from .cblstore import StoreBusy
         try:
             from .cblstore import CBLiteBackend

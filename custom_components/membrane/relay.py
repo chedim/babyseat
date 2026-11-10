@@ -66,7 +66,7 @@ ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane
                  "membrane/decision/answer", "membrane/decision/chat", "membrane/decision/drop",
                  "membrane/quota/resume", "membrane/options",
                  # #772: the field view's item card says in its mini-chat
-                 "membrane/item-chat/say")
+                 "membrane/item-chat/say", "membrane/feedback")
 # #244: the 👶 panel's play buttons -- the poke is tagged with the HA user, stamped here;
 # #299: the seat's switches too (an admin's accept of self's achievement names them on its record)
 PERSON_PATHS = ("membrane/toybox/poke", "membrane/seat/control", "membrane/seat/pause")

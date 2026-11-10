@@ -1,0 +1,335 @@
+[
+ {
+  "name": "unblock-task",
+  "when": [
+   [
+    "changed",
+    "?b.status"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?b",
+    "Task"
+   ],
+   [
+    "isa",
+    "?t",
+    "Task"
+   ],
+   [
+    "filter",
+    "b.status == 'done' and t.status == 'open' and t.eid in (b.blocks or [])"
+   ]
+  ],
+  "write": [
+   "?t.open_blockers",
+   "t.open_blockers - 1"
+  ]
+ },
+ {
+  "name": "unblock-card",
+  "when": [
+   [
+    "changed",
+    "?b.status"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?b",
+    "Decision"
+   ],
+   [
+    "isa",
+    "?t",
+    "Task"
+   ],
+   [
+    "filter",
+    "b.status == 'closed' and t.status == 'open' and t.eid in (b.blocks or [])"
+   ]
+  ],
+  "write": [
+   "?t.open_blockers",
+   "t.open_blockers - 1"
+  ]
+ },
+ {
+  "name": "ready",
+  "when": [
+   [
+    "changed",
+    "?t.open_blockers"
+   ],
+   [
+    "below",
+    "t.open_blockers",
+    0.5
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?t",
+    "Task"
+   ],
+   [
+    "filter",
+    "t.status == 'open'"
+   ]
+  ],
+  "write": [
+   "?t.status",
+   "'owed'"
+  ]
+ },
+ {
+  "name": "replan-task",
+  "when": [
+   [
+    "changed",
+    "?t.status"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?t",
+    "Task"
+   ],
+   [
+    "isa",
+    "?g",
+    "Goal"
+   ],
+   [
+    "filter",
+    "g.eid == t.goal and (t.status == 'done' or t.status == 'failed' or t.status == 'stuck')"
+   ]
+  ],
+  "write": [
+   "?g.replan",
+   "'task ' + t.eid + ' ' + t.status"
+  ]
+ },
+ {
+  "name": "replan-card",
+  "when": [
+   [
+    "changed",
+    "?d.status"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?d",
+    "Decision"
+   ],
+   [
+    "isa",
+    "?g",
+    "Goal"
+   ],
+   [
+    "filter",
+    "g.eid == d.goal and (d.status == 'closed' or d.status == 'dropped')"
+   ]
+  ],
+  "write": [
+   "?g.replan",
+   "'card ' + d.eid + ' ' + d.status"
+  ]
+ },
+ {
+  "name": "unblock-wait",
+  "when": [
+   [
+    "changed",
+    "?b.status"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?b",
+    "Wait"
+   ],
+   [
+    "isa",
+    "?t",
+    "Task"
+   ],
+   [
+    "filter",
+    "b.status == 'done' and t.status == 'open' and t.eid in (b.blocks or [])"
+   ]
+  ],
+  "write": [
+   "?t.open_blockers",
+   "t.open_blockers - 1"
+  ]
+ },
+ {
+  "name": "wait-follows-task",
+  "when": [
+   [
+    "changed",
+    "?b.status"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?b",
+    "Task"
+   ],
+   [
+    "isa",
+    "?w",
+    "Wait"
+   ],
+   [
+    "filter",
+    "b.status == 'done' and w.status == 'open' and w.eid in (b.blocks or [])"
+   ]
+  ],
+  "write": [
+   "?w.open_blockers",
+   "w.open_blockers - 1"
+  ]
+ },
+ {
+  "name": "wait-follows-card",
+  "when": [
+   [
+    "changed",
+    "?b.status"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?b",
+    "Decision"
+   ],
+   [
+    "isa",
+    "?w",
+    "Wait"
+   ],
+   [
+    "filter",
+    "b.status == 'closed' and w.status == 'open' and w.eid in (b.blocks or [])"
+   ]
+  ],
+  "write": [
+   "?w.open_blockers",
+   "w.open_blockers - 1"
+  ]
+ },
+ {
+  "name": "wait-armed",
+  "when": [
+   [
+    "changed",
+    "?w.open_blockers"
+   ],
+   [
+    "below",
+    "w.open_blockers",
+    0.5
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?w",
+    "Wait"
+   ],
+   [
+    "filter",
+    "w.status == 'open'"
+   ]
+  ],
+  "write": [
+   "?w.status",
+   "'armed'"
+  ]
+ },
+ {
+  "name": "wait-check",
+  "when": [
+   [
+    "every",
+    10
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?w",
+    "Wait"
+   ],
+   [
+    "filter",
+    "w.status == 'armed'"
+   ]
+  ],
+  "write": [
+   "?w.check",
+   "'due'"
+  ]
+ },
+ {
+  "name": "plan",
+  "when": [
+   [
+    "changed",
+    "?g.replan"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?g",
+    "Goal"
+   ],
+   [
+    "filter",
+    "(g.status or 'open') == 'open' and g.replan"
+   ]
+  ],
+  "write": [
+   "membrane::llm.call",
+   "{'about': g.eid, 'prompt': 'plan the goal: ' + g.replan, 'lane': 'planner'}"
+  ]
+ },
+ {
+  "name": "plan-after-reopen",
+  "when": [
+   [
+    "changed",
+    "?g.status"
+   ]
+  ],
+  "where": [
+   [
+    "isa",
+    "?g",
+    "Goal"
+   ],
+   [
+    "filter",
+    "g.status == 'open' and g.replan and g.planned_ts and g.replan != g.planned_replan"
+   ]
+  ],
+  "write": [
+   "membrane::llm.call",
+   "{'about': g.eid, 'prompt': 'plan the goal: ' + g.replan, 'lane': 'planner'}"
+  ]
+ }
+]
