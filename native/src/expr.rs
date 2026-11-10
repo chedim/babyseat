@@ -543,7 +543,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "words" => { argn(1)?; Ok(V::List(text_of(&a[0])?.split_whitespace().map(|w| V::Str(w.to_string())).collect())) }
         "join" => {
             argn(2)?;
-            let V::List(l) = &a[0] else { return Err("join(list, sep): a list".into()) };
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("join(list, sep): a list".into()) };  // #1065: a pending read (None) is empty
             Ok(V::Str(l.iter().map(py_str).collect::<Vec<_>>().join(&text_of(&a[1])?)))
         }
         "head" => {
@@ -555,7 +555,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         // ---- lists ----
         "sort_by" => {
             if a.len() < 2 || a.len() > 3 { return Err("sort_by(rows, key[, desc]): 2 or 3 arguments".into()); }
-            let V::List(l) = &a[0] else { return Err("sort_by(rows, key, desc): rows is a list".into()) };
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("sort_by(rows, key, desc): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let key = text_of(&a[1])?;
             let desc = a.get(2).map(truthy).unwrap_or(false);
             let field = |v: &V| -> V { match v { V::Dict(d) => d.iter().find(|(k, _)| *k == key).map(|(_, x)| x.clone()).unwrap_or(V::None), _ => V::None } };
@@ -604,13 +604,13 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "pluck" => {
             // a column of rows: [row[key] for row in rows]
             argn(2)?;
-            let V::List(l) = &a[0] else { return Err("pluck(rows, key): rows is a list".into()) };
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("pluck(rows, key): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let key = text_of(&a[1])?;
             Ok(V::List(l.iter().map(|r| match r { V::Dict(d) => d.iter().find(|(x, _)| *x == key).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None }).collect()))
         }
         "distinct" => {
             argn(1)?;
-            let V::List(l) = &a[0] else { return Err("distinct(list): a list".into()) };
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("distinct(list): a list".into()) };  // #1065: a pending read (None) is empty
             let mut out: Vec<V> = vec![];
             for x in l { if !out.iter().any(|y| py_eq(y, x)) { out.push(x.clone()); } }
             Ok(V::List(out))
@@ -618,7 +618,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "group_by" => {
             // rows grouped by a key, in first-seen order: [{key, rows}]
             argn(2)?;
-            let V::List(l) = &a[0] else { return Err("group_by(rows, key): rows is a list".into()) };
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("group_by(rows, key): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let key = text_of(&a[1])?;
             let mut groups: Vec<(V, Vec<V>)> = vec![];
             for r in l {
@@ -637,7 +637,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             // the banner's budget (conv_banner.render): rows {text, prio, slot}; lower prio kept first, each line
             // costs len(text) + 1, a line that does not fit is skipped (a later shorter one may); page order = slot
             if a.len() < 2 || a.len() > 3 { return Err("fit(rows, budget[, used]): 2 or 3 arguments".into()); }
-            let V::List(l) = &a[0] else { return Err("fit(rows, budget): rows is a list".into()) };
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("fit(rows, budget): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let budget = match &a[1] { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err("fit(rows, budget): budget is a number".into()) };
             let get = |v: &V, k: &str| -> V { match v { V::Dict(d) => d.iter().find(|(x, _)| x == k).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None } };
             let num = |v: V| -> f64 { match v { V::Int(n) => n as f64, V::Float(f) => f, _ => 0.0 } };

@@ -105,3 +105,16 @@ fn a_long_string_literal_does_not_count_toward_the_character_cap() {
     let long_logic = vec!["a"; 220].join(" + ");                      // ~880 characters of logic: still refused
     assert!(membrane_vm::evaluate_json(&long_logic, "{\"a\": 1}").unwrap_err().contains("at most"));
 }
+
+#[test]
+fn a_pending_read_is_an_empty_list_to_every_list_builtin() {
+    // #1065 (2026-11-10): a getter's sql()/jsonl() reads None until its rows land; group_by(None) raised and the
+    // banner's build stored the error as `refused` ("the banner failed"). None is the empty list everywhere, as FOR has it.
+    let x = json!({"x": null});
+    assert_eq!(ev("group_by(x, 'k')", x.clone()), json!([]));
+    assert_eq!(ev("sort_by(x, 'k')", x.clone()), json!([]));
+    assert_eq!(ev("pluck(x, 'k')", x.clone()), json!([]));
+    assert_eq!(ev("distinct(x)", x.clone()), json!([]));
+    assert_eq!(ev("fit(x, 10, 0)", x.clone()), json!([]));
+    assert_eq!(ev("join(x, ',')", x.clone()), json!(""));
+}
