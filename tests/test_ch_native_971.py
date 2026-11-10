@@ -162,16 +162,6 @@ def test_a_value_strict_json_cannot_carry_never_stops_the_vm(bad):
     assert die.properties.get("b") == 5
 
 
-def test_make_vm_falls_back_to_the_python_vm_when_the_native_one_cannot_start(monkeypatch):
-    from membrane import ch as CH
-    monkeypatch.setenv(CH.NATIVE_ENV, "1")
-    est, _ = _toy_store()
-
-    def boom(*a, **k):
-        raise ValueError("cannot start")
-    monkeypatch.setattr(NV, "NativeVM", boom)
-    assert isinstance(CH.make_vm(est), CH.PyVM)
-
 
 def test_a_sweep_without_level_triggers_reads_nothing_from_the_store():
     """3: every sweep serialised the whole store; with no trigger a sweep can bind, it reads nothing."""
@@ -195,13 +185,13 @@ def test_replay_covers_what_a_sweep_fires():
     from membrane import ch as CH
     from membrane import writes as W
     from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity
-    for make in (lambda s, **k: CH.PyVM(s, **k), lambda s, **k: NV.NativeVM(s, **k)):
+    for make in (lambda s, **k: NV.NativeVM(s, **k),):
         p = Path(tempfile.mkdtemp()) / "w.jsonl"
         est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
         jn = J.Journal(p, est)
         jn.attach()
         clock = {"t": 1000.0}
-        vm = CH.PyVM(est, clock=lambda: clock["t"])
+        vm = NV.NativeVM(est, clock=lambda: clock["t"])
         jn.watch(vm)
         vm.attach()
         with W.as_writer("person:t"):
@@ -256,7 +246,7 @@ def test_a_changed_trigger_with_a_condition_reads_what_was_changed_in_place(when
     from membrane import writes as W
     from membrane.entities import MEMBRANE_NS
     fired = {}
-    for label, make in (("py", CH.PyVM), ("native", NV.NativeVM)):
+    for label, make in (("native", NV.NativeVM),):
         est = _level_store()
         vm = make(est)
         vm.attach()
@@ -268,7 +258,7 @@ def test_a_changed_trigger_with_a_condition_reads_what_was_changed_in_place(when
         vm.drain()
         vm.detach()
         fired[label] = est.docs[MEMBRANE_NS + "toy:die"].properties.get("hit")
-    assert fired["py"] == 1 and fired["native"] == 1, fired
+    assert fired["native"] == 1, fired
 
 
 def test_a_bare_changed_trigger_still_costs_a_sweep_nothing():
@@ -281,7 +271,7 @@ def test_a_bare_changed_trigger_still_costs_a_sweep_nothing():
 # -- Memo's review of #972, finding B: a value the core's JSON can't carry never loses the write ------
 def _both():
     from membrane import ch as CH
-    return (("py", CH.PyVM), ("native", NV.NativeVM))
+    return (("native", NV.NativeVM),)
 
 
 @pytest.mark.parametrize("bad", [{"\udc80k": 1}, {"ok": {"\ud800": [1]}}, 10 ** 400, -(10 ** 400),
@@ -333,7 +323,7 @@ def test_a_bare_changed_trigger_reads_a_value_changed_in_place(expr, want):
         vm.drain()
         vm.detach()
         got[label] = est.docs[die].properties.get("hit")
-    assert got == {"py": want, "native": want}, got
+    assert got == {"native": want}, got
 
 
 def test_a_bare_changed_trigger_reads_another_entity_changed_in_place():
@@ -352,7 +342,7 @@ def test_a_bare_changed_trigger_reads_another_entity_changed_in_place():
         vm.drain()
         vm.detach()
         got[label] = est.docs[die].properties.get("hit")
-    assert got == {"py": 7, "native": 7}, got
+    assert got == {"native": 7}, got
 
 
 def test_a_firing_that_names_no_entity_asks_the_store_nothing(monkeypatch):

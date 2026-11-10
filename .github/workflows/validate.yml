@@ -41,6 +41,8 @@ jobs:
       - run: sh scripts/fetch-cbl.sh linux-x86_64
       # living language (language.py, on by default): spaCy, its small English model and lemminflect (verb forms; without it test_generation passed only when another test's boot had installed it)
       - run: pip install "spacy>=3.8.18" lemminflect && python -m spacy download en_core_web_sm
+      # the native (Rust) VM is the only VM: build the extension before the suite
+      - run: PYO3_PYTHON="$(which python)" sh native/build.sh
       # The seat's suite (tests/) -- live-lane tests skip themselves when the
       # runner has no ollama. (The thinking-indicator file was deselected at
       # e385aec and its tests went stale under a changed wire contract -- the
@@ -60,7 +62,7 @@ jobs:
       # the seat's.
       - run: pytest -q -p no:cacheprovider integrations/homeassistant/tests
   # #971: the native (Rust) VM. Built here and held to the same contract as ch.VM: every VM suite runs
-  # against it (MEMBRANE_NATIVE_VM=1 swaps ch.VM in tests/conftest.py), plus its own tests. Without this
+  # against it, plus its own tests. Without this
   # job the native tests skip in `tests` and nothing enforces the contract (Memo's review of #972).
   native-vm:
     runs-on: ubuntu-latest
@@ -72,7 +74,7 @@ jobs:
       - run: pip install -e . pytest
       - run: PYO3_PYTHON="$(which python)" sh native/build.sh
       - run: >-
-          MEMBRANE_NATIVE_VM=1 pytest -q -p no:cacheprovider
+          pytest -q -p no:cacheprovider
           tests/test_ch_native_971.py tests/test_journal_971.py tests/test_ch_576.py tests/test_ch_index_956.py
           tests/test_ch_calls_956.py tests/test_ch_learn_576.py tests/test_blurp_learns_576.py
           tests/test_blurp_skills_751.py tests/test_blurp_body_576.py tests/test_blurp_suggests_576.py

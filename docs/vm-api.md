@@ -97,9 +97,8 @@ A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebu
 
 ## 6. The native VM (`native/`, `membrane/ch_native.py`, #971 step 3)
 
-A Rust core (PyO3) behind `ch.VM`'s API. `ch.make_vm()` returns it when `MEMBRANE_NATIVE_VM=1` and the
-extension is built (`native/build.sh` puts `membrane/membrane_vm.so` in place); otherwise it returns
-`ch.VM`, and says so when the switch is on but the extension is missing. The seat builds its VM
+A Rust core (PyO3) behind `ch.VM`'s API. `ch.make_vm()` always returns it (no switch, no Python fallback; a missing extension raises at startup) (`native/build.sh` puts `membrane/membrane_vm.so` in place).
+The seat builds its VM
 through `make_vm`.
 
 - **In Rust:** the expression language (its own parser, with Python's semantics and `ast.walk`'s
@@ -126,7 +125,7 @@ through `make_vm`.
   become null (as `cblstore.dumps` stores them), a lone surrogate becomes U+FFFD (keys too), an integer past a float's range becomes the largest
   float of its sign (the store keeps the real value), and nesting past 64
   becomes its text. A row that still can't be carried is left out and said in `errors`. If the native
-  VM fails to start for any reason, `make_vm` says so and runs the Python VM: never no VM.
+  VM fails to start, `make_vm` raises at startup: there is no Python VM to fall back to.
 - **Locking:** every call into the core is made under the VM's one evaluation lock, so the core's
   own lock is never contended while it calls back into Python (Memo's review of #972: a deadlock).
 - **Known difference:** integers are 64-bit in the core. `9223372036854775807 + 1` is a number in
@@ -136,7 +135,7 @@ through `make_vm`.
   - `tests/test_ch_native_971.py`: a journal recorded with ch.VM replays identically through the
     native VM, and the expression language matches ch.py's.
   - Every VM suite (`test_ch_576`, `test_ch_index_956`, `test_ch_calls_956`, the Blurp suites, …)
-    runs against the native VM with `MEMBRANE_NATIVE_VM=1` (the switch in `tests/conftest.py`).
+    runs against the native VM.
   - The index tests read the native VM's trace (`vm.trace`) where they spied on
     `ch.VM._on_write`.
 
