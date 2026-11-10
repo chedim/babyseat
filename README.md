@@ -165,6 +165,11 @@ of speech models.
   ```
 
   Claude Code keeps its own model; membrane is its memory and its field.
+- **MCP servers, the other way round**: the seat is an MCP client too. A server is a `McpServer:<name>` entity
+  (`enabled`, `command`/`args` or `url`, secrets named in `env_from`, never stored); its tools, resources and
+  prompts appear as entities, a tool runs when `call:run` is written, and the enabled servers are the Claude
+  rung's own tools as well. `membrane::mcp.import = 'all'` brings in Claude Code's and opencode's servers,
+  disabled. The logic is a `.c1f` library (`membrane/packs/mcp.c1f`, docs/cliffhanger-fields.md §11).
 - **opencode**: `membrane opencode` attaches the opencode TUI to membrane's own
   serve surface ([First run in a project](#first-run-in-a-project)).
 

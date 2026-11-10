@@ -64,6 +64,15 @@ def _SL():
     return SL
 
 
+BLURP_FLAG = "MEMBRANE_BLURP"
+
+
+def blurp_on() -> bool:
+    """0.7.5 (the operator, 2026-11-10): Blurp is off -- "disable blurps for 0.7.5 and we'll rewrite them later".
+    MEMBRANE_BLURP=1 turns it on (its loop and its process, its page parts)."""
+    return os.environ.get(BLURP_FLAG, "0").strip() not in ("0", "", "off", "false", "no")
+
+
 def enabled() -> bool:
     """#440 part 5: Blurp's own process is the default; MEMBRANE_SELF_PROC=0
     keeps the loop in the seat."""
@@ -79,7 +88,10 @@ def of(srv):
 
 def boot(srv, seat_url: str, log_path=None):
     """The seat's boot, after self_loop.bind: the in-process loop (flag off;
-    -> None) or a supervisor of Blurp's own process (flag on; -> it)."""
+    -> None) or a supervisor of Blurp's own process (flag on; -> it). Blurp off (0.7.5): neither."""
+    if not blurp_on():
+        print("[self] Blurp is off (MEMBRANE_BLURP=1 turns it on)", file=sys.stderr)
+        return None
     if not enabled():
         _SL().start(srv)
         return None

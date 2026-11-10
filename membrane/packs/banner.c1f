@@ -1,0 +1,127 @@
+PACK banner 1
+IMPORT goalgraph 1
+-- The recall section of a chat's banner (#994). One Banner:<owner>:<chat> per person per chat, internal chats too.
+-- Each turn writes the person's message to `ask`; `lines` is what the turn shows under RECALL. A message with no
+-- topic ("ok", "1. yes", "thanks!") recalls nothing: the lines stay as they were (the default arm reads itself).
+-- Dials on the instance (start as a copy of recall:dials): pool (candidates), n (rows shown), weights (the scorer's;
+-- none = the learned set). An instance may be of another class whose pack declares its own `lines`.
+-- Built-ins: recall(text, pool, session), rerank(rows, text, weights), pick(rows, n, session), line(row),
+-- topic(text); a row is {h, n, ts, role, via, score, fact}, read with prop(row, 'score').
+Banner.lines getter WHEN topic(this.ask): [line(r) for r in pick(rerank(recall(this.ask, this.pool, this.session), this.ask, this.weights), this.n, this.session)]
+Banner.lines getter: this.lines
+
+
+-- ---- the whole block (#994, step 1 of the port: no Python in OPEN, DECIDED and the layout) -------------------
+-- Dials on the instance (seeded from today's values; Memo may change them per chat): budget (the block's
+-- characters, recall excluded), open_max, decided_max, news_chars (a line's clip), header, paused_line,
+-- suggest_head, more_line, recall_header, ledger_file (the operator's decisions, a .jsonl of the seat).
+-- Sections not ported yet arrive as `sections` {paused, alerts, working, about, stable, since, blurp, suggest, more},
+-- written by the turn; each moves into this pack in its own step.
+
+-- a goal's own facts for the banner (chat-independent)
+Goal.open getter: (this.status or 'open') == 'open'
+Goal.display getter: this.name or this.eid
+Goal.worked getter:
+  WHEN not (this.picked_up_by and this.picked_up_ts): ''
+  ELSE WHEN this.running_now and (this.picked_up_end_ts or 0) < this.picked_up_ts: 'being worked by ' + str(this.picked_up_by) + ' since ' + prop(localtime(this.picked_up_ts), 'clock')
+  ELSE: 'last worked by ' + str(this.picked_up_by) + ' at ' + prop(localtime(max(this.picked_up_ts, this.picked_up_end_ts or 0)), 'clock')
+
+-- OPEN: the open goals; this chat's first, then another chat's, then the board's; newest first within each
+Banner.open_here getter: sort_by([{'name': g.display, 'worked': g.worked, 'born': g.born, 'src': 'goal · this chat'} for g in instances('Goal') if g.open and this.chat in (g.convs or [])], 'born', True)
+Banner.open_there getter: sort_by([{'name': g.display, 'worked': g.worked, 'born': g.born, 'src': 'goal · another chat'} for g in instances('Goal') if g.open and g.convs and not this.chat in g.convs], 'born', True)
+Banner.open_board getter: sort_by([{'name': g.display, 'worked': g.worked, 'born': g.born, 'src': 'goal · board'} for g in instances('Goal') if g.open and not g.convs], 'born', True)
+Banner.open_goals getter: head(concat(this.open_here, this.open_there, this.open_board), this.open_max or 3)
+Banner.clip_n getter: this.news_chars or 200
+Banner.open_tagged getter: [{'name': prop(r, 'name'), 'tag': join([x for x in [prop(r, 'src'), prop(r, 'worked'), ago(prop(r, 'born'), clock)] if x], ' · ')} for r in (this.open_goals or [])]
+Banner.open_lines getter: FOR r IN (this.open_tagged or []): '- ' + clip(prop(r, 'name'), this.clip_n) + ' (' + prop(r, 'tag') + ')'
+
+-- DECIDED: this chat's decisions, newest first: the operator ledger's entries said here, goals fulfilled here
+Banner.ledger getter: (jsonl(this.ledger_file) if this.ledger_file else []) or []
+Banner.ledger_rows getter: [{'text': prop(e, 'text'), 'src': 'person', 'ts': epoch(prop(e, 'ts'))} for e in this.ledger if prop(e, 'conv') == this.chat and strip(prop(e, 'text') or '')]
+Banner.fulfilled_rows getter: [{'text': 'goal fulfilled: ' + g.display, 'src': 'goal', 'ts': g.fulfilled_ts} for g in instances('Goal') if g.status == 'fulfilled' and g.fulfilled_conv == this.chat]
+Banner.decided_rows getter: head(sort_by(concat(this.ledger_rows, this.fulfilled_rows), 'ts', True), this.decided_max or 3)
+Banner.decided_tagged getter: [{'text': prop(r, 'text'), 'tag': join([x for x in [prop(r, 'src'), ago(prop(r, 'ts'), clock)] if x], ' · ')} for r in (this.decided_rows or [])]
+Banner.decided_lines getter: FOR r IN (this.decided_tagged or []): '- ' + clip(prop(r, 'text'), this.clip_n) + ' (' + prop(r, 'tag') + ')'
+
+-- ---- step 2: this chat's own records, read from what capture stored (events, and the entities each touched) ----
+-- Dials (seeded from today's values): window (person messages looked at), focus_k, focus_min_events,
+-- working_chars, news_max, stable_min_convs, stable_min_days, stable_max, tool_names (never focus), mark_seq
+-- (this chat's last delivered turn: SINCE counts from it).
+Banner.chat_key getter: this.chat if startswith(str(this.chat), 'sid:') else 'sid:' + str(this.chat)
+Banner.cur getter: lower(join(words(unspeak(this.ask or '')), ' '))
+Banner.user_turns getter: sql("SELECT k, json_extract(body,'$.d.seq') AS seq, json_extract(body,'$.d.ts') AS ts, json_extract(body,'$.d.text') AS text, json_extract(body,'$.d.author') AS author FROM c_events WHERE json_extract(body,'$.d.conv') = ? AND json_extract(body,'$.d.stream') = 'discourse' AND json_extract(body,'$.d.role') = 'user' AND coalesce(json_extract(body,'$.d.status'), '') != 'forgotten' ORDER BY seq DESC LIMIT 50", this.chat_key) or []
+-- the person's own messages (newest first), the speaker line dropped
+Banner.asks getter: [{'k': prop(r, 'k'), 'seq': prop(r, 'seq'), 'ts': prop(r, 'ts'), 'raw': join(words(unspeak(prop(r, 'text') or '')), ' ')} for r in this.user_turns if prop(r, 'author') == 'person']
+Banner.cur_key getter: join(head([prop(a, 'k') for a in this.asks if lower(prop(a, 'raw')) == this.cur], 1), '')
+Banner.earlier_asks getter: [a for a in this.asks if prop(a, 'raw') and lower(prop(a, 'raw')) != this.cur and not startswith(lower(prop(a, 'raw')), 'membrane:')]
+-- the window: the n-1 latest earlier asks and everything after the first of them (a shorter chat: all of it)
+Banner.window_asks getter: head(this.earlier_asks, (this.window or 3) - 1)
+Banner.window_start getter: min([prop(a, 'seq') for a in this.window_asks]) if len(this.window_asks) >= (this.window or 3) - 1 and this.window_asks else 0
+
+-- ABOUT (focus): the entities named in the person's message now (first, in its order), then those in at least
+-- focus_min_events of the window's events (most events first, then the most recent)
+Banner.named_raw getter: [prop(r, 'eid') for r in (sql("SELECT json_extract(body,'$.d.eid') AS eid FROM c_entity_deltas WHERE json_extract(body,'$.d.event') = ? AND instr(json_extract(body,'$.d.eid'), ':') > 0 AND substr(json_extract(body,'$.d.eid'), 1, instr(json_extract(body,'$.d.eid'), ':') - 1) IN ('f','s','c','port','m','u','ha') ORDER BY json_extract(body,'$.d.sidx'), rowid", this.cur_key) or [])] if this.cur_key else []
+Banner.named getter: [e for e in distinct(this.named_raw) if not (startswith(e, 's:?') and (after(e, 's:?') in (this.tool_names or []) or before(after(e, 's:?'), '.') in (this.tool_names or [])))]
+Banner.counted getter: [prop(r, 'eid') for r in (sql("SELECT json_extract(d.body,'$.d.eid') AS eid, count(DISTINCT json_extract(d.body,'$.d.event')) AS n, max(json_extract(d.body,'$.d.seq')) AS last FROM c_entity_deltas d WHERE json_extract(d.body,'$.d.event') IN (SELECT k FROM c_events WHERE json_extract(body,'$.d.conv') = ? AND json_extract(body,'$.d.seq') >= ? AND json_extract(body,'$.d.stream') != 'code') AND instr(eid, ':') > 0 AND substr(eid, 1, instr(eid, ':') - 1) IN ('f','s','c','port','m','u','ha') AND eid NOT LIKE 's:?%' GROUP BY eid HAVING n >= ? ORDER BY n DESC, last DESC, eid LIMIT 50", this.chat_key, this.window_start, this.focus_min_events or 2) or [])]
+Banner.focus getter: head(concat(this.named, [e for e in this.counted if not e in this.named]), this.focus_k or 5)
+
+-- WORKING ON: the person's latest earlier ask in the window; with focus, the latest that names a focus entity
+Banner.ask_eids getter: (sql("SELECT json_extract(body,'$.d.event') AS ev, json_extract(body,'$.d.eid') AS eid FROM c_entity_deltas WHERE json_extract(body,'$.d.event') IN (SELECT value FROM json_each(?))", [prop(a, 'k') for a in this.window_asks]) or []) if this.window_asks else []
+Banner.on_focus getter: [prop(r, 'ev') for r in this.ask_eids if prop(r, 'eid') in this.focus]
+Banner.working_ask getter: head(concat([a for a in this.window_asks if prop(a, 'k') in this.on_focus], this.window_asks), 1)
+Banner.working_line getter: FOR a IN this.working_ask: 'WORKING ON: "' + clip(prop(a, 'raw'), this.working_chars or 160) + '" (' + join([x for x in ['person', ago(prop(a, 'ts'), clock)] if x], ' · ') + ')'
+
+-- SINCE YOUR LAST MESSAGE: what moved a focus entity after this chat's last delivered turn, from outside this
+-- chat (code, scripts, other chats): the newest line each, in focus order
+Banner.since_rows getter: (sql("SELECT x.eid AS eid, x.ts AS ts, CASE WHEN x.stream = 'code' THEN 'code' WHEN coalesce(x.src, '') LIKE 'script%' THEN x.src WHEN coalesce(x.conv, '') != '' THEN 'another chat' ELSE 'outside this chat' END AS label, coalesce(json_extract(s.body,'$.d.text'), x.text) AS text FROM (SELECT json_extract(d.body,'$.d.eid') AS eid, max(json_extract(d.body,'$.d.seq')) AS seq, coalesce(json_extract(e.body,'$.d.ts'), json_extract(d.body,'$.d.ts')) AS ts, json_extract(d.body,'$.d.sid') AS sid, json_extract(e.body,'$.d.stream') AS stream, json_extract(e.body,'$.d.src') AS src, json_extract(e.body,'$.d.conv') AS conv, json_extract(e.body,'$.d.text') AS text FROM c_entity_deltas d JOIN c_events e ON e.k = json_extract(d.body,'$.d.event') WHERE json_extract(d.body,'$.d.eid') IN (SELECT value FROM json_each(?)) AND json_extract(d.body,'$.d.seq') > ? AND (json_extract(e.body,'$.d.stream') = 'code' OR coalesce(json_extract(e.body,'$.d.conv'), '') != ?) GROUP BY eid) x JOIN json_each(?) j ON j.value = x.eid LEFT JOIN c_sentences s ON s.k = x.sid ORDER BY j.key LIMIT ?", this.focus, this.mark_seq, this.chat_key, this.focus, this.news_max or 3) or []) if this.mark_seq and this.focus else []
+Banner.since_tagged getter: [{'eid': prop(r, 'eid'), 'text': prop(r, 'text'), 'tag': join([x for x in [prop(r, 'label'), ago(prop(r, 'ts'), clock)] if x], ' · ')} for r in this.since_rows]
+Banner.since_lines getter: FOR r IN this.since_tagged: '- ' + clip(prop(r, 'eid') + ': ' + join(words(prop(r, 'text') or ''), ' '), this.clip_n) + ' (' + prop(r, 'tag') + ')'
+
+-- STABLE: facts the operator said in at least stable_min_convs chats over stable_min_days days, about a focus entity
+Banner.ledger_norm getter: [{'key': lower(join(words(prop(e, 'text') or ''), ' ')), 'text': prop(e, 'text'), 'conv': prop(e, 'conv'), 'ts': epoch(prop(e, 'ts'))} for e in this.ledger if prop(e, 'text')]
+Banner.ledger_days getter: [{'key': prop(r, 'key'), 'text': prop(r, 'text'), 'conv': prop(r, 'conv'), 'ts': prop(r, 'ts'), 'day': prop(localtime(prop(r, 'ts') or 0), 'day_number')} for r in this.ledger_norm]
+Banner.ledger_groups getter: [prop(g, 'rows') for g in group_by(this.ledger_days, 'key')]
+Banner.facts1 getter: [{'rs': rs, 'text': join(head(pluck(rs, 'text'), 1), '')} for rs in this.ledger_groups]
+Banner.facts2 getter: [{'rs': prop(f, 'rs'), 'text': prop(f, 'text'), 'convs': len(distinct([c for c in pluck(prop(f, 'rs'), 'conv') if c]))} for f in this.facts1]
+Banner.facts3 getter: [{'rs': prop(f, 'rs'), 'text': prop(f, 'text'), 'convs': prop(f, 'convs'), 'days': len(distinct(pluck(prop(f, 'rs'), 'day')))} for f in this.facts2]
+Banner.facts getter: [{'text': prop(f, 'text'), 'convs': prop(f, 'convs'), 'days': prop(f, 'days'), 'ts': max([t for t in pluck(prop(f, 'rs'), 'ts') if t] or [0])} for f in this.facts3]
+Banner.lasting getter: [f for f in this.facts if prop(f, 'convs') >= (this.stable_min_convs or 3) and prop(f, 'days') >= (this.stable_min_days or 2)]
+Banner.focus_names getter: [lower(after(e, ':')) for e in this.focus]
+Banner.stable_facts getter: head(sort_by([f for f in this.lasting if len([n for n in this.focus_names if n in lower(prop(f, 'text'))]) > 0], 'ts', True), this.stable_max or 3)
+Banner.stable_tagged getter: [{'text': prop(f, 'text'), 'tag': join([x for x in ['fact · ' + str(prop(f, 'convs')) + ' chats', ago(prop(f, 'ts'), clock)] if x], ' · ')} for f in this.stable_facts]
+Banner.stable_lines getter: FOR f IN this.stable_tagged: '- ' + clip(prop(f, 'text'), this.clip_n) + ' (' + prop(f, 'tag') + ')'
+
+-- the not-yet-ported sections, as the turn wrote them
+Banner.s_paused getter: prop(this.sections, 'paused')
+Banner.s_alerts getter: head(prop(this.sections, 'alerts') or [], 2)
+Banner.s_working getter: join(this.working_line, '') or None
+Banner.s_suggest getter: prop(this.sections, 'suggest') or []
+Banner.s_about getter: this.focus
+Banner.s_stable getter: this.stable_lines
+Banner.s_since getter: this.since_lines
+Banner.s_blurp getter: prop(this.sections, 'blurp')
+Banner.s_more getter: prop(this.sections, 'more')
+
+-- the layout: each candidate line {text, prio (lower is kept first), slot (its place on the page)}
+Banner.row_paused getter: [{'text': this.paused_line, 'prio': 0, 'slot': 100}] if this.s_paused else []
+Banner.row_alerts getter: [{'text': clip(a, this.clip_n), 'prio': 1, 'slot': 200} for a in this.s_alerts]
+Banner.row_working getter: [{'text': this.s_working, 'prio': 2, 'slot': 300}] if this.s_working else []
+Banner.row_suggest getter: concat([{'text': this.suggest_head, 'prio': 0.5, 'slot': 350}] if this.s_suggest else [], [{'text': '- ' + clip(s, this.clip_n), 'prio': 0.5, 'slot': 351} for s in this.s_suggest])
+Banner.row_about getter: [{'text': 'ABOUT: ' + join(this.s_about, ' · '), 'prio': 6, 'slot': 400}] if this.s_about else []
+Banner.row_decided getter: [{'text': t, 'prio': 3, 'slot': 501, 'head': 'DECIDED:', 'head_slot': 500} for t in (this.decided_lines or [])]
+Banner.row_open getter: [{'text': t, 'prio': 4, 'slot': 601, 'head': 'OPEN:', 'head_slot': 600} for t in (this.open_lines or [])]
+Banner.row_stable getter: [{'text': t, 'prio': 7, 'slot': 701, 'head': 'STABLE:', 'head_slot': 700} for t in this.s_stable]
+Banner.row_since getter: [{'text': t, 'prio': 5, 'slot': 801, 'head': 'SINCE YOUR LAST MESSAGE:', 'head_slot': 800} for t in this.s_since]
+Banner.row_blurp getter: [{'text': clip(this.s_blurp, this.clip_n), 'prio': 6.5, 'slot': 850}] if this.s_blurp else []
+Banner.row_more getter: [{'text': this.more_line, 'prio': 8, 'slot': 900}] if this.s_more else []
+Banner.rows getter: concat(this.row_paused, this.row_alerts, this.row_working, this.row_suggest, this.row_about, this.row_decided, this.row_open, this.row_stable, this.row_since, this.row_blurp, this.row_more)
+
+-- NOW, the header, the lines that fit the budget in page order, then RECALL in full (its own block); None when
+-- there is nothing of this chat
+Banner.now_parts getter: localtime(clock)
+Banner.now_line getter: strip('NOW (for reference, not an event): ' + prop(this.now_parts, 'date') + ' ' + prop(this.now_parts, 'clock') + ' ' + prop(this.now_parts, 'zone'))
+Banner.used getter: len(this.now_line) + 1 + len(this.header or '')
+Banner.recall_block getter: concat([this.recall_header], this.lines) if this.lines else []
+Banner.text getter:
+  WHEN this.rows or this.lines: join(concat([this.now_line, this.header], fit(this.rows, this.budget or 900, this.used), this.recall_block), '\n')
+  ELSE: None

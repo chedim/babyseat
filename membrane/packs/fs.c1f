@@ -1,0 +1,15 @@
+PACK fs 1
+-- THE fs STDLIB PACK (#1044): files and folders as entities, read by getters, changed by writes. Native, no Python.
+--   File:<name> {path}: text (the file's text), info {exists, kind, size, mtime}
+--   Dir:<name>  {path}: entries [{name, kind, size, mtime}], names
+-- A path is absolute, ~/..., or relative to the seat's folder. Reads are asked like sql(): the field reads None until
+-- the answer lands, and never waits for the disk. They recompute when `path` or `seen` is written (a watcher may write
+-- `seen`).
+-- Effects (writes; the receipt lands as <verb>_result {id, status, rc, head} and <verb>_rc):
+--   File.write = {id, content, append}    File.move = {id, to}    File.delete = {id}
+-- Reach: everything the seat's OS user can do. Entity scripts and peers never run an effect.
+
+File.text getter: read(this.path) if this.path and (this.seen or True) else None
+File.info getter: stat(this.path) if this.path and (this.seen or True) else None
+Dir.entries getter: listdir(this.path) if this.path and (this.seen or True) else []
+Dir.names getter: [prop(e, 'name') for e in (this.entries or [])]

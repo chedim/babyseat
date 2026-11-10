@@ -1,0 +1,6 @@
+PACK ported 1
+-- KINDS FOR PORTED ENTITY SCRIPTS (#1044): what a script used to compute, as the kind's getters. The seat's upgrade
+-- (membrane/scriptport.py) gives an entity the kind (`parents: [cls:<kind>]`) once a replay matched its old script.
+
+-- a chat thing's "heard" count (was: result = {'state': {'heard_n': int(membrane.me.properties.get('heard_n') or 0)}})
+ChatThing.heard_n getter: this.heard_n or 0

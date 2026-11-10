@@ -247,7 +247,14 @@ def conf() -> dict:
     return {"serve_ok": True, "serve_url": "standalone", "standalone": True, "build": build_id(),
             "name": name, "named": bool(st.get("name")), "aliases": list(st.get("aliases") or []),
             "stt": "server" if str(st.get("stt") or "").startswith("http") else "browser",
-            "voice_out": bool(st.get("voice_out")), "language": st.get("language") or "en"}
+            "voice_out": bool(st.get("voice_out")), "language": st.get("language") or "en",
+            "blurp": _blurp_on()}
+
+
+def _blurp_on() -> bool:
+    """0.7.5: Blurp is off unless MEMBRANE_BLURP=1; the page then hides every Blurp part."""
+    from .self_super import blurp_on
+    return blurp_on()
 
 
 # -- speech to text -----------------------------------------------------------

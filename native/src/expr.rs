@@ -48,6 +48,8 @@ pub enum Node {
     Call(String, Vec<Node>),
     /// `[elt for var in iter if cond]` (#994 getters: a computed value over other entities)
     Comp(Box<Node>, String, Box<Node>, Option<Box<Node>>),
+    /// `a if cond else b` (then, cond, else)
+    If(Box<Node>, Box<Node>, Box<Node>),
 }
 
 pub type Err = String;
@@ -150,8 +152,14 @@ impl P {
     fn expr(&mut self) -> Result<Node, Err> {
         if self.is_kw("lambda") || self.is_kw("await") || self.is_kw("yield") { return Err("not allowed in an expression: Lambda".into()); }
         let e = self.or_test()?;
-        if self.is_kw("if") { return Err("not allowed in an expression: IfExp".into()); }
-        Ok(e)
+        if !self.is_kw("if") { return Ok(e); }
+        self.next();
+        let cond = self.or_test()?;
+        if !self.is_kw("else") { return Err("not an expression: `if` needs its `else`".into()); }
+        self.next();
+        let other = self.expr()?;
+        self.n(3);
+        Ok(Node::If(Box::new(e), Box::new(cond), Box::new(other)))
     }
     fn or_test(&mut self) -> Result<Node, Err> {
         let a = self.and_test()?;
@@ -334,12 +342,20 @@ impl P {
     }
 }
 
-pub fn parse(src: &str) -> Result<Node, Err> {
-    if src.chars().count() > EXPR_MAX { return Err(format!("an expression is at most {} characters", EXPR_MAX)); }
-    let mut p = P { t: lex(src)?, i: 0, nodes: 0 };
+pub fn parse(src: &str) -> Result<Node, Err> { parse_scaled(src, 1) }
+
+/// `parse` with the caps times `scale`: a getter's arms are each held to the caps, and folded into one expression
+/// (syntax.rs fold_arms) that may be that many times as long.
+pub fn parse_scaled(src: &str, scale: usize) -> Result<Node, Err> {
+    let (chars, nodes) = (EXPR_MAX * scale + 40 * (scale - 1), NODES_MAX * scale + 4 * (scale - 1));
+    let toks = lex(src)?;
+    // the character cap is for logic: a string literal's text (a SQL query, a header) is one node, not counted here
+    let quoted: usize = toks.iter().map(|t| if let Tok::Str(x) = t { x.chars().count() } else { 0 }).sum();
+    if src.chars().count().saturating_sub(quoted) > chars { return Err(format!("an expression is at most {} characters (string literals not counted)", EXPR_MAX)); }
+    let mut p = P { t: toks, i: 0, nodes: 0 };
     let e = p.expr()?;
     if *p.peek() != Tok::End { return Err("not an expression: trailing input".into()); }
-    if p.nodes > NODES_MAX { return Err(format!("an expression is at most {} nodes", NODES_MAX)); }
+    if p.nodes > nodes { return Err(format!("an expression is at most {} nodes", NODES_MAX)); }
     Ok(e)
 }
 
@@ -347,10 +363,11 @@ pub struct Cache { m: HashMap<String, Rc<Result<Node, Err>>> }
 
 impl Cache {
     pub fn new() -> Self { Cache { m: HashMap::new() } }
-    pub fn get(&mut self, src: &str) -> Rc<Result<Node, Err>> {
+    pub fn get(&mut self, src: &str) -> Rc<Result<Node, Err>> { self.get_scaled(src, 1) }
+    pub fn get_scaled(&mut self, src: &str, scale: usize) -> Rc<Result<Node, Err>> {
         if let Some(h) = self.m.get(src) { return h.clone(); }
         if self.m.len() > 4096 { self.m.clear(); }
-        let r = Rc::new(parse(src));
+        let r = Rc::new(parse_scaled(src, scale.max(1)));
         self.m.insert(src.to_string(), r.clone());
         r
     }
@@ -363,6 +380,8 @@ pub trait World {
     fn attr(&self, eid: &str, attr: &str) -> V;
     /// The entities whose `prop` holds `eid` (a list containing it, or equal to it): `referencing(x, 'prop')`.
     fn refs(&self, _eid: &str, _prop: &str) -> Vec<String> { vec![] }
+    /// A function the host runs (the seat's `recall(...)` and the other banner built-ins). None: not the host's.
+    fn host(&self, _f: &str, _a: &[V]) -> Option<Result<V, Err>> { None }
 }
 
 pub fn truthy(v: &V) -> bool {
@@ -516,6 +535,152 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "min" => { if a.is_empty() { return Err("min expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Less) }
         "max" => { if a.is_empty() { return Err("max expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Greater) }
         "len" => { argn(1)?; match &a[0] { V::List(l) => Ok(V::Int(l.len() as i64)), V::Str(t) => Ok(V::Int(t.chars().count() as i64)), V::Dict(d) => Ok(V::Int(d.len() as i64)), V::None => Ok(V::Int(0)), v => Err(format!("object of type {:?} has no len()", v)) } }
+        // ---- text (the banner port; plain functions, no new syntax) ----
+        "lower" => { argn(1)?; Ok(V::Str(text_of(&a[0])?.to_lowercase())) }
+        "strip" => { argn(1)?; Ok(V::Str(text_of(&a[0])?.trim().to_string())) }
+        "startswith" => { argn(2)?; Ok(V::Bool(text_of(&a[0])?.starts_with(&text_of(&a[1])?))) }
+        "lines" => { argn(1)?; Ok(V::List(text_of(&a[0])?.lines().map(|l| V::Str(l.to_string())).collect())) }
+        "words" => { argn(1)?; Ok(V::List(text_of(&a[0])?.split_whitespace().map(|w| V::Str(w.to_string())).collect())) }
+        "join" => {
+            argn(2)?;
+            let V::List(l) = &a[0] else { return Err("join(list, sep): a list".into()) };
+            Ok(V::Str(l.iter().map(py_str).collect::<Vec<_>>().join(&text_of(&a[1])?)))
+        }
+        "head" => {
+            argn(2)?;
+            let n = match &a[1] { V::Int(n) => (*n).max(0) as usize, V::Float(f) => f.max(0.0) as usize, _ => return Err("head(text, n): n is a number".into()) };
+            if let V::List(l) = &a[0] { return Ok(V::List(l.iter().take(n).cloned().collect())); }   // a list's first n
+            Ok(V::Str(text_of(&a[0])?.chars().take(n).collect()))
+        }
+        // ---- lists ----
+        "sort_by" => {
+            if a.len() < 2 || a.len() > 3 { return Err("sort_by(rows, key[, desc]): 2 or 3 arguments".into()); }
+            let V::List(l) = &a[0] else { return Err("sort_by(rows, key, desc): rows is a list".into()) };
+            let key = text_of(&a[1])?;
+            let desc = a.get(2).map(truthy).unwrap_or(false);
+            let field = |v: &V| -> V { match v { V::Dict(d) => d.iter().find(|(k, _)| *k == key).map(|(_, x)| x.clone()).unwrap_or(V::None), _ => V::None } };
+            let mut out = l.clone();
+            // None first going up, last going down; ties keep their order
+            out.sort_by(|x, y| {
+                let (p, q) = (field(x), field(y));
+                let o = match (&p, &q) {
+                    (V::None, V::None) => std::cmp::Ordering::Equal,
+                    (V::None, _) => std::cmp::Ordering::Less,
+                    (_, V::None) => std::cmp::Ordering::Greater,
+                    _ => py_cmp(&p, &q).unwrap_or(std::cmp::Ordering::Equal),
+                };
+                if desc { o.reverse() } else { o }
+            });
+            Ok(V::List(out))
+        }
+        "unspeak" => {
+            // speakers.strip_speaker_lines, rule for rule: leading whitespace, a speaker tag -- "[user: X]",
+            // "[HA user: X]" (X: 1..80 characters, no ']' or newline) or "[user#<id>: X]" (id: [a-z0-9][a-z0-9-]{0,79})
+            // -- then spaces or tabs and one optional newline; again while one leads
+            argn(1)?;
+            let mut t = text_of(&a[0])?;
+            loop {
+                let s = t.trim_start();
+                let Some(rest) = s.strip_prefix('[') else { return Ok(V::Str(t)) };
+                let Some(close) = rest.find(']') else { return Ok(V::Str(t)) };
+                let inner = &rest[..close];
+                if inner.contains('\n') { return Ok(V::Str(t)); }
+                let ok = match inner.split_once(": ") {
+                    Some((who, name)) => !name.is_empty() && name.chars().count() <= 80 && (who == "user" || who == "HA user"
+                        || who.strip_prefix("user#").map_or(false, |id| {
+                            let mut cs = id.chars();
+                            matches!(cs.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit()) && id.chars().count() <= 80
+                                && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                        })),
+                    None => false,
+                };
+                if !ok { return Ok(V::Str(t)); }
+                let after = rest[close + 1..].trim_start_matches([' ', '\t']);
+                t = after.strip_prefix('\n').unwrap_or(after).to_string();
+            }
+        }
+        "before" => { argn(2)?; let (t, sep) = (text_of(&a[0])?, text_of(&a[1])?); Ok(V::Str(t.split_once(sep.as_str()).map(|(x, _)| x.to_string()).unwrap_or(t))) }
+        "after" => { argn(2)?; let (t, sep) = (text_of(&a[0])?, text_of(&a[1])?); Ok(V::Str(t.split_once(sep.as_str()).map(|(_, y)| y.to_string()).unwrap_or_default())) }
+        "pluck" => {
+            // a column of rows: [row[key] for row in rows]
+            argn(2)?;
+            let V::List(l) = &a[0] else { return Err("pluck(rows, key): rows is a list".into()) };
+            let key = text_of(&a[1])?;
+            Ok(V::List(l.iter().map(|r| match r { V::Dict(d) => d.iter().find(|(x, _)| *x == key).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None }).collect()))
+        }
+        "distinct" => {
+            argn(1)?;
+            let V::List(l) = &a[0] else { return Err("distinct(list): a list".into()) };
+            let mut out: Vec<V> = vec![];
+            for x in l { if !out.iter().any(|y| py_eq(y, x)) { out.push(x.clone()); } }
+            Ok(V::List(out))
+        }
+        "group_by" => {
+            // rows grouped by a key, in first-seen order: [{key, rows}]
+            argn(2)?;
+            let V::List(l) = &a[0] else { return Err("group_by(rows, key): rows is a list".into()) };
+            let key = text_of(&a[1])?;
+            let mut groups: Vec<(V, Vec<V>)> = vec![];
+            for r in l {
+                let k = match r { V::Dict(d) => d.iter().find(|(x, _)| *x == key).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None };
+                match groups.iter_mut().find(|(g, _)| py_eq(g, &k)) { Some(g) => g.1.push(r.clone()), None => groups.push((k, vec![r.clone()])) }
+            }
+            Ok(V::List(groups.into_iter().map(|(k, rows)| V::Dict(vec![("key".into(), k), ("rows".into(), V::List(rows))])).collect()))
+        }
+        "concat" => {
+            // lists joined end to end (`+` on lists is vector addition: lists are vectors)
+            let mut out = vec![];
+            for x in a.iter() { match x { V::List(l) => out.extend(l.iter().cloned()), V::None => {}, _ => return Err("concat(list, ...): lists".into()) } }
+            Ok(V::List(out))
+        }
+        "fit" => {
+            // the banner's budget (conv_banner.render): rows {text, prio, slot}; lower prio kept first, each line
+            // costs len(text) + 1, a line that does not fit is skipped (a later shorter one may); page order = slot
+            if a.len() < 2 || a.len() > 3 { return Err("fit(rows, budget[, used]): 2 or 3 arguments".into()); }
+            let V::List(l) = &a[0] else { return Err("fit(rows, budget): rows is a list".into()) };
+            let budget = match &a[1] { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err("fit(rows, budget): budget is a number".into()) };
+            let get = |v: &V, k: &str| -> V { match v { V::Dict(d) => d.iter().find(|(x, _)| x == k).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None } };
+            let num = |v: V| -> f64 { match v { V::Int(n) => n as f64, V::Float(f) => f, _ => 0.0 } };
+            // optional {head, head_slot}: a group's heading (DECIDED:), costed and shown once, with its first kept line
+            let mut rows: Vec<(f64, f64, String, String, f64)> = l.iter().map(|r| (num(get(r, "prio")), num(get(r, "slot")), py_str(&get(r, "text")),
+                match get(r, "head") { V::Str(h) => h, _ => String::new() }, num(get(r, "head_slot")))).collect();
+            rows.sort_by(|x, y| (x.0, x.1).partial_cmp(&(y.0, y.1)).unwrap_or(std::cmp::Ordering::Equal));
+            let mut used = match a.get(2) { Some(V::Int(n)) => *n as f64, Some(V::Float(f)) => *f, _ => 0.0 };
+            let mut kept: Vec<(f64, String)> = vec![];
+            let mut heads: std::collections::HashSet<String> = Default::default();
+            for (_, slot, t, head, hslot) in rows {
+                let mut cost = t.chars().count() as f64 + 1.0;
+                let new_head = !head.is_empty() && !heads.contains(&head);
+                if new_head { cost += head.chars().count() as f64 + 1.0; }
+                if used + cost > budget { continue; }
+                used += cost;
+                if new_head { heads.insert(head.clone()); kept.push((hslot, head)); }
+                kept.push((slot, t));
+            }
+            kept.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            Ok(V::List(kept.into_iter().map(|(_, t)| V::Str(t)).collect()))
+        }
+        "clip" => {
+            // conv_banner._clip: whitespace collapsed; longer than n: cut to n - 3, stripped, then "..."
+            argn(2)?;
+            let n = match &a[1] { V::Int(n) => (*n).max(1) as usize, V::Float(f) => f.max(1.0) as usize, _ => return Err("clip(text, n): n is a number".into()) };
+            let t = text_of(&a[0])?.split_whitespace().collect::<Vec<_>>().join(" ");
+            if t.chars().count() <= n { return Ok(V::Str(t)); }
+            let cut: String = t.chars().take(n.saturating_sub(3).max(1)).collect();
+            Ok(V::Str(format!("{}...", cut.trim_end())))
+        }
+        "ago" => {
+            // conv_banner.age: a record's age in the operator's buckets ('' with no time)
+            argn(2)?;
+            let num = |v: &V| -> Option<f64> { match v { V::Int(n) => Some(*n as f64), V::Float(f) => Some(*f), V::Str(s) => s.parse().ok(), _ => None } };
+            let (Some(ts), Some(now)) = (num(&a[0]).or_else(|| epoch_of(&a[0])), num(&a[1])) else { return Ok(V::Str(String::new())) };
+            Ok(V::Str(crate::clock::ago(ts, now)))
+        }
+        "epoch" => { argn(1)?; Ok(match &a[0] { V::Int(n) => V::Float(*n as f64), V::Float(f) => V::Float(*f), v => epoch_of(v).map(V::Float).unwrap_or(V::None) }) }
+        // ---- time ----
+        "localtime" => { argn(1)?; let ts = match &a[0] { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err("localtime(ts): a number".into()) }; Ok(crate::clock::local(ts)) }
+        "json" => { argn(1)?; match &a[0] { V::Str(t) => serde_json::from_str::<serde_json::Value>(t).map(|j| from_json(&j)).map_err(|e| format!("json: {}", e)), V::None => Ok(V::None), _ => Err("json(text): a string".into()) } }
+        "str" => { argn(1)?; Ok(V::Str(match &a[0] { V::Str(t) => t.clone(), V::List(_) | V::Dict(_) => to_json(&a[0])?.to_string(), v => py_str(v) })) }
         "referencing" => {
             argn(2)?;
             let e = match &a[0] { V::Ent(e) | V::Str(e) => e.clone(), _ => return Ok(V::List(vec![])) };
@@ -525,11 +690,31 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             argn(2)?;
             match &a[0] {
                 V::Ent(e) => { let name = py_str(&a[1]); if name.starts_with('_') { return Err(format!("no attribute {:?}", name)); } Ok(w.attr(e, &name)) }
+                V::Dict(d) => { let name = py_str(&a[1]); Ok(d.iter().find(|(k, _)| *k == name).map(|(_, v)| v.clone()).unwrap_or(V::None)) }
+                // an entity's id (a reference stored as a string): its field, read like `x.name`
+                V::Str(id) => { let name = py_str(&a[1]); if name.starts_with('_') { return Err(format!("no attribute {:?}", name)); } Ok(w.attr(id, &name)) }
                 _ => Ok(V::None),
             }
         }
-        _ => Err("only the built-ins may be called".into()),
+        _ => match w.host(f, &a) { Some(r) => r, None => Err("only the built-ins may be called".into()) },
     }
+}
+
+/// "YYYY-MM-DDTHH:MM:SSZ" (UTC, as the ledgers write it) -> seconds since 1970, or a number as it is.
+fn epoch_of(v: &V) -> Option<f64> {
+    let s = match v { V::Str(s) => s.trim().to_string(), V::Int(n) => return Some(*n as f64), V::Float(f) => return Some(*f), _ => return None };
+    if let Ok(x) = s.parse::<f64>() { return Some(x); }
+    let b = s.as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || (b[10] != b'T' && b[10] != b' ') { return None; }
+    let n = |r: std::ops::Range<usize>| s.get(r).and_then(|x| x.parse::<i64>().ok());
+    let (y, mo, d, h, mi, se) = (n(0..4)?, n(5..7)?, n(8..10)?, n(11..13)?, n(14..16)?, n(17..19)?);
+    let (y2, m2) = if mo <= 2 { (y - 1, mo + 12) } else { (y, mo) };
+    let days = 365 * y2 + y2 / 4 - y2 / 100 + y2 / 400 + (153 * (m2 - 3) + 2) / 5 + d - 719469;
+    Some((days * 86400 + h * 3600 + mi * 60 + se) as f64)
+}
+
+fn text_of(v: &V) -> Result<String, Err> {
+    match v { V::Str(s) => Ok(s.clone()), V::None => Ok(String::new()), V::Ent(e) => Ok(e.clone()), V::List(_) | V::Dict(_) => Err("expected text".into()), v => Ok(py_str(v)) }
 }
 
 pub fn py_str(v: &V) -> String {
@@ -579,6 +764,7 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
             }
             Ok(V::Bool(true))
         }
+        Node::If(a, c, b) => if truthy(&eval(c, env, w)?) { eval(a, env, w) } else { eval(b, env, w) },
         Node::Comp(elt, var, iter, cond) => {
             let xs = match eval(iter, env, w)? { V::List(l) => l, V::None => vec![], v => return Err(format!("can't iterate over {:?}", v)) };
             let mut out = Vec::new();

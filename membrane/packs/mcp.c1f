@@ -1,0 +1,66 @@
+PACK mcp 1
+-- MCP servers, and the tools, resources and prompts they offer, as entities (#963). The seat's adapter only does the
+-- I/O (membrane/mcpfield.py): it starts or connects a server when its `link` is written, writes back what the
+-- server lists, and runs a tool's call; everything else is here.
+--
+-- A server: McpServer:<name> {name, transport: 'stdio' | 'http', command, args, env_from {VAR: ENV_VAR},
+--   url, headers_from {Header: ENV_VAR}, enabled}. Secrets are never stored: env_from / headers_from name
+--   environment variables, read when the server starts.
+-- A tool:   McpTool:<server>:<tool> {name, description, input_schema, server, listed}
+--   call it with a write: McpTool:<server>:<tool>.call:run = {id, args}
+--   -> receipt McpTool:<server>:<tool>.call:run_result = {id, status, rc, head, result}
+-- Resources (McpResource:<server>:<uri>) and prompts (McpPrompt:<server>:<name>) are listed the same way.
+-- Packs that use them: IMPORT mcp 1.
+
+-- connecting follows `enabled`
+McpServer.enabled on-setter link:
+  WHEN this.enabled: this.link = 'up'
+  ELSE: this.link = 'down'
+
+-- how the server is doing, from what the adapter wrote back (link_state, link_error)
+McpServer.state getter:
+  WHEN not this.enabled: 'off'
+  ELSE WHEN this.link_error: 'failed'
+  ELSE WHEN this.link_state == 'up': 'up'
+  ELSE: 'starting'
+McpServer.tool_count getter: len(this.listed_tools or []) if this.link_state == 'up' else 0
+
+-- what the server lists becomes entities; what it stopped listing stays, marked listed = False
+McpServer.listed_tools on-setter tools:
+  ALWAYS:
+    FOR t IN (this.listed_tools or []):
+      ('McpTool:' + this.name + ':' + prop(t, 'name')).name = prop(t, 'name')
+      ('McpTool:' + this.name + ':' + prop(t, 'name')).description = prop(t, 'description') or ''
+      ('McpTool:' + this.name + ':' + prop(t, 'name')).input_schema = prop(t, 'input_schema')
+      ('McpTool:' + this.name + ':' + prop(t, 'name')).server = this.eid
+    FOR t IN referencing(this, 'server'):
+      t.listed = prop(t, 'name') in [prop(x, 'name') for x in (this.listed_tools or [])]
+
+McpServer.listed_resources on-setter resources:
+  ALWAYS:
+    FOR r IN (this.listed_resources or []):
+      ('McpResource:' + this.name + ':' + prop(r, 'uri')).uri = prop(r, 'uri')
+      ('McpResource:' + this.name + ':' + prop(r, 'uri')).name = prop(r, 'name') or prop(r, 'uri')
+      ('McpResource:' + this.name + ':' + prop(r, 'uri')).description = prop(r, 'description') or ''
+      ('McpResource:' + this.name + ':' + prop(r, 'uri')).mime = prop(r, 'mime')
+      ('McpResource:' + this.name + ':' + prop(r, 'uri')).resource_of = this.eid
+    FOR r IN referencing(this, 'resource_of'):
+      r.listed = prop(r, 'uri') in [prop(x, 'uri') for x in (this.listed_resources or [])]
+
+McpServer.listed_prompts on-setter prompts:
+  ALWAYS:
+    FOR p IN (this.listed_prompts or []):
+      ('McpPrompt:' + this.name + ':' + prop(p, 'name')).name = prop(p, 'name')
+      ('McpPrompt:' + this.name + ':' + prop(p, 'name')).description = prop(p, 'description') or ''
+      ('McpPrompt:' + this.name + ':' + prop(p, 'name')).arguments = prop(p, 'arguments')
+      ('McpPrompt:' + this.name + ':' + prop(p, 'name')).prompt_of = this.eid
+    FOR p IN referencing(this, 'prompt_of'):
+      p.listed = prop(p, 'name') in [prop(x, 'name') for x in (this.listed_prompts or [])]
+
+-- a tool can be called when it is listed by a server that is up
+McpTool.callable getter: (this.listed or False) and prop(this.server, 'state') == 'up'
+
+-- each kind says what it is (and so the pack owns the class: it may create its entities)
+McpTool.kind getter: 'tool'
+McpResource.kind getter: 'resource'
+McpPrompt.kind getter: 'prompt'

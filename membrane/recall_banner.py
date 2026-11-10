@@ -190,6 +190,18 @@ def _rank_policy(rows, text, weights, rerank, RPO):
     return out
 
 
+def _policy_weights(w: dict) -> dict:
+    """recall:dials nests its weights {default, legacy, rerank, ...}; the scorer wants one flat set. Pick `rerank`
+    when the reranker is up, else `default`. A flat dict passes through."""
+    if not any(isinstance(v, dict) for v in w.values()):
+        return w
+    from . import recall_rerank as RR
+    up = getattr(RR, "_state", "") in ("ready", "remote")
+    sub = w.get("rerank") if up else None
+    sub = sub if isinstance(sub, dict) else w.get("default")
+    return sub if isinstance(sub, dict) else {}
+
+
 def _rank_native(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True) -> list[dict]:
     """The old path. The pool, best first by the scorer (ties keep recall's order). With the
     reranker ready (#680), the scorer's top RERANK_TOP rows are re-ordered by
@@ -379,3 +391,99 @@ def render(lines: list[str]) -> str | None:
 
 def _render_native(lines: list[str]) -> str | None:
     return "\n".join([HEADER, *lines]) if lines else None
+
+
+# ---- the banner as a .c1f pack (#994): the built-ins a Banner getter calls ------------------------------------
+# One build per turn (fields_live.Live.banner): the script passes light rows (h = the row's handle in this build,
+# n, ts, role, via, score, fact); the full rows stay here, in the build's context, and are never stored.
+
+NOT_MINE = object()
+
+
+def _light(ctx: dict, r: dict) -> dict:
+    h = id(r)
+    ctx["rows"][h] = r                            # the handle: the full row stays here for this build
+    n = (r.get("a_n") or [r.get("q_n")])[0]
+    out = {"h": h, "n": n, "ts": r.get("ts"), "role": r.get("role"), "via": r.get("via")}
+    for k in ("score", "fact"):
+        if r.get(k) is not None:
+            out[k] = float(r[k]) if k == "score" else r[k]
+    return out
+
+
+def _full(ctx: dict, rows) -> list[dict]:
+    if rows is None:
+        return []
+    if not isinstance(rows, list):
+        raise ValueError("rows must be a list (from recall/rerank/pick)")
+    out = []
+    for x in rows:
+        r = ctx["rows"].get(x.get("h")) if isinstance(x, dict) else None
+        if r is None:
+            raise ValueError("a row that is not this turn's recall (rows come from recall(...))")
+        out.append(r)
+    return out
+
+
+def c1f_call(ctx: dict, name: str, args: list):
+    """Run one built-in for a Banner getter; NOT_MINE when the name is not one of them."""
+    import time as _t
+    field = ctx["field"]
+    t0 = _t.monotonic()
+    if name == "topic":
+        return has_topic(str(args[0] or "")) if args else False
+    if name == "recall":                          # recall(text, pool, session): the candidates, scored by recall
+        text = str(args[0] or "")
+        if not text.strip():
+            return []
+        pool_n = int(args[1]) if len(args) > 1 and args[1] is not None else POOL
+        session = str(args[2] or "") if len(args) > 2 and args[2] is not None else ctx.get("session", "")
+        from . import efgate as G
+        from .entity_block import PAST_SIM_MIN, recall_answers
+        qv = G.message_vec(field, text)
+        if qv is not None:
+            from .efield import unit
+            hv = [v for v in (G.message_vec(field, h, embed_missing=False)
+                              for h in history_texts(field, session, text)) if v is not None]
+            if hv:
+                qv = unit(qv + sum(hv))
+        t1 = _t.monotonic()
+        pool = recall_answers(field, text, qvec=qv, k=pool_n, sim_min=PAST_SIM_MIN)
+        t2 = _t.monotonic()
+        from . import replies as RP
+        spk = RP.annotate(field, with_speakers(field, pool), text)
+        ctx["text"], ctx["pool_n"] = text, len(pool)
+        ctx["timing"].update(vec=t1 - t0, recall=t2 - t1, speakers=_t.monotonic() - t2)
+        return [_light(ctx, r) for r in spk]
+    if name == "rerank":                          # rerank(rows, text, weights): best first, with score
+        text = str(args[1] or ctx.get("text", "")) if len(args) > 1 else ctx.get("text", "")
+        w = _policy_weights(args[2]) if len(args) > 2 and isinstance(args[2], dict) else None   # Memo's fix
+        ranked = rank(_full(ctx, args[0] if args else None), text, w if w is not None else load_weights(field))
+        ctx["ranked"] = ranked
+        ctx["timing"]["rank"] = _t.monotonic() - t0
+        return [_light(ctx, r) for r in ranked]
+    if name == "pick":                            # pick(rows, n, session): the banner rows, own echo skipped, with fact
+        rows = _full(ctx, args[0] if args else None)
+        n = int(args[1]) if len(args) > 1 and args[1] is not None else BANNER_N
+        session = str(args[2] or "") if len(args) > 2 and args[2] is not None else ctx.get("session", "")
+        picked = pick(rows, ctx.get("text", ""), n=n, skip=recent_ns(field, session), ranked=rows)
+        ctx["timing"]["pick"] = _t.monotonic() - t0
+        return [_light(ctx, r) for r in picked]
+    if name == "line":                            # line(row): the banner's line for a picked row
+        r = _full(ctx, [args[0]])[0] if args else None
+        if r is None or "fact" not in r:
+            raise ValueError("line(row) takes a row from pick(...)")
+        return line_of(r, ctx.get("now"))
+    return NOT_MINE
+
+
+def c1f_state(ctx: dict, lines: list[str]) -> dict | None:
+    """What build() keeps for the next turn and the search labels (#668), from a Banner build; None when the
+    script recalled nothing this turn (a no-topic message keeps the previous set)."""
+    ranked = ctx.get("ranked")
+    if ranked is None:
+        return None
+    text = ctx.get("text", "")
+    snap = [{"feat": r.get("feat"), "fact": fact_line(r, text)} for r in ranked]
+    return {"lines": lines, "pool": snap, "text": text, "session": ctx.get("session", ""),
+            "timing": {**ctx["timing"], "rows": ctx.get("pool_n", 0)}, "top": list(ranked[:3])}

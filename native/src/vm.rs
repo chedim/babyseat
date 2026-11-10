@@ -19,6 +19,10 @@ pub const CLASS: &str = "Trigger";
 pub const QUEUE_MAX: usize = 4096;
 pub const ANCESTOR_HOPS: usize = 16 * 4; // entities.MultiParentOps.MAX_CHAIN * 4, as night.ancestors
 
+/// An item of a FOR's list: an entity (the loop name is that entity) or a value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Item { Ent(String), Val(J) }
+
 pub trait Host {
     fn resolve(&self, spec: &str) -> Option<String>;
     fn resolve_exact(&self, spec: &str) -> Option<String>;
@@ -27,6 +31,8 @@ pub trait Host {
     fn align(&self, eid: &str, thr: f64) -> bool;
     /// The live store's entity as JSON [cls, props, position | null]; the position only when asked.
     fn live(&self, eid: &str, position: bool) -> Option<String>;
+    /// A function a getter calls (`recall(...)`): args and result as JSON. None: no such function here.
+    fn call(&self, _f: &str, _args_json: &str) -> Option<Result<String, String>> { None }
 }
 
 pub struct Ent {
@@ -108,6 +114,9 @@ pub struct Core {
     pub dropped: u64,
     pub fired: HashMap<String, u64>,
     pub refused: HashMap<String, u64>,
+    /// the store driver (`sql(...)`): the seat's SQLite store, read-only, this engine's own connection
+    #[cfg(feature = "python")]
+    pub store: Option<crate::store::Store>,
     pub errors: HashMap<String, String>,
     /// `referencing(x, prop)`'s reverse index: prop -> target eid -> the entities whose prop holds it. Built per prop
     /// the first time it is asked for, then kept current on every write, load and removal.
@@ -163,12 +172,18 @@ impl<'a> expr::World for View<'a> {
         }
     }
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> { self.core.refs(eid, prop) }
+    fn host(&self, f: &str, a: &[V]) -> Option<Result<V, String>> { self.core.native_call(f, a) }
 }
 
 /// A view that records what an evaluation read: (eid, field) for every attribute, and (REFS, prop) for every
 /// `referencing(_, prop)`. #994 getters: these are the getter's inputs.
 pub const REFS: &str = "\u{0}refs";
-struct Traced<'a> { inner: View<'a>, reads: std::cell::RefCell<Vec<(String, String)>> }
+struct Traced<'a> { inner: View<'a>, reads: std::cell::RefCell<Vec<(String, String)>>, host: Option<&'a dyn Host>, asker: &'a str }
+
+/// The read key a getter's query is tracked under: when its rows arrive, the getter is dirty (fields.rs).
+pub const SQL: &str = "\u{0}sql";
+/// The read key of `instances(cls)`: a birth or a retirement of that class makes the reader dirty (fields.rs).
+pub const CLASS_READ: &str = "\u{0}class";
 
 impl<'a> expr::World for Traced<'a> {
     fn attr(&self, eid: &str, attr: &str) -> V {
@@ -178,6 +193,31 @@ impl<'a> expr::World for Traced<'a> {
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> {
         self.reads.borrow_mut().push((REFS.to_string(), format!("{}\u{0}{}", prop, eid)));   // per (prop, target)
         self.inner.refs(eid, prop)
+    }
+    /// The host's functions run on live rounds only: a silent compute (rebuild, birth) never calls out, its value
+    /// is None until the next live round reads its inputs again.
+    fn host(&self, f: &str, a: &[V]) -> Option<Result<V, String>> {
+        if f == "instances" {
+            if let Some(V::Str(c)) = a.first() { self.reads.borrow_mut().push((CLASS_READ.to_string(), c.clone())); }
+            return self.inner.core.native_call(f, a);
+        }
+        if f == "read" || f == "listdir" || f == "stat" {   // the fs driver: asked like a query (drivers.rs)
+            let r = self.inner.core.fs_request(self.asker, f, a);
+            if let Some(k) = r.1 { self.reads.borrow_mut().push((SQL.to_string(), k)); }
+            return Some(r.0);
+        }
+        if f == "sql" || f == "jsonl" {       // the store driver: asked, never waited for (store.rs)
+            let r = if f == "sql" { self.inner.core.sql_request(self.asker, a) } else { self.inner.core.jsonl_request(self.asker, a) };
+            if let Some(k) = r.1 { self.reads.borrow_mut().push((SQL.to_string(), k)); }
+            return Some(r.0);
+        }
+        if let Some(r) = self.inner.core.native_call(f, a) { return Some(r); }
+        let Some(h) = self.host else { return Some(Ok(V::None)) };
+        let args = match a.iter().map(expr::to_json).collect::<Result<Vec<_>, _>>() { Ok(v) => v, Err(e) => return Some(Err(e)) };
+        match h.call(f, &serde_json::Value::Array(args).to_string())? {
+            Ok(s) => Some(serde_json::from_str::<serde_json::Value>(&s).map(|j| expr::from_json(&j)).map_err(|e| format!("{}: {}", f, e))),
+            Err(e) => Some(Err(format!("{}: {}", f, e))),
+        }
     }
 }
 
@@ -197,6 +237,8 @@ impl Core {
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
+            #[cfg(feature = "python")]
+            store: None,
         }
     }
 
@@ -447,6 +489,108 @@ impl Core {
         expr::to_json(&v)
     }
 
+    /// The engine's own built-ins that need the Core: `sql(query, args...)` (the store driver, store.rs). None: not one.
+    pub fn native_call(&self, f: &str, a: &[V]) -> Option<Result<V, String>> {
+        if f == "instances" {
+            // every entity of a class (its own class, not its ancestors'), in id order, as entities
+            let Some(V::Str(c)) = a.first() else { return Some(Err("instances(class): a class name".into())) };
+            let mut ids: Vec<&String> = self.docs.iter().filter(|(_, e)| e.cls == *c).map(|(k, _)| k).collect();
+            ids.sort();
+            return Some(Ok(V::List(ids.into_iter().map(|k| V::Ent(k.clone())).collect())));
+        }
+        if f != "sql" && f != "jsonl" && f != "read" && f != "listdir" && f != "stat" { return None; }
+        // a setter runs once, when something is written: it can't wait for a query's rows. A getter reads sql(...)
+        // (it recomputes when the rows arrive) and the setter reads the getter's field.
+        Some(Err("sql(...) is read in getters: a setter reads the getter's field".into()))
+    }
+
+    /// A getter's `sql(query, args...)`: the rows when they are in, None while the query runs (the getter is dirty
+    /// again when they arrive: the read key returned). The query never runs under the engine's lock (store.rs).
+    pub fn sql_request(&self, asker: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
+        let Some(V::Str(q)) = a.first() else { return (Err("sql(query, args...): the query is a string".into()), None) };
+        let args = match a[1..].iter().map(expr::to_json).collect::<Result<Vec<_>, _>>() { Ok(v) => v, Err(e) => return (Err(e), None) };
+        #[cfg(feature = "python")]
+        {
+            let Some(st) = &self.store else { return (Err("sql: no store attached to this field".into()), None) };
+            let k = crate::store::scoped(asker, &crate::store::key(q, &args));
+            match st.request(asker, q, &args) {
+                crate::store::Poll::Ready(r) => (r.map(|rows| V::List(rows.iter().map(expr::from_json).collect())), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+            }
+        }
+        #[cfg(not(feature = "python"))]
+        { let _ = (asker, q, args); (Err("sql: this build has no store driver".into()), None) }
+    }
+
+    /// A getter's `jsonl(name)`: the seat's JSON-lines file, asked like a query.
+    pub fn jsonl_request(&self, asker: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
+        let Some(V::Str(name)) = a.first() else { return (Err("jsonl(name): a file name".into()), None) };
+        #[cfg(feature = "python")]
+        {
+            let Some(st) = &self.store else { return (Err("jsonl: no store attached to this field".into()), None) };
+            let k = crate::store::scoped(asker, &crate::store::jsonl_key(name));
+            match st.request_jsonl(asker, name) {
+                crate::store::Poll::Ready(r) => (r.map(|rows| V::List(rows.iter().map(expr::from_json).collect())), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+            }
+        }
+        #[cfg(not(feature = "python"))]
+        { let _ = (asker, name); (Err("jsonl: this build has no store driver".into()), None) }
+    }
+
+    /// A getter's `read(path)` / `listdir(path)` / `stat(path)` (drivers.rs): the answer when it's in, None while it's
+    /// read.
+    pub fn fs_request(&self, asker: &str, f: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
+        let Some(V::Str(path)) = a.first() else { return (Err(format!("{}(path): a path", f)), None) };
+        #[cfg(feature = "python")]
+        {
+            let Some(st) = &self.store else { return (Err(format!("{}: no drivers attached to this field", f)), None) };
+            let k = crate::store::scoped(asker, &crate::drivers::key(st, f, path));
+            match crate::drivers::request(st, asker, f, path) {
+                crate::store::Poll::Ready(r) => (r.map(|mut rows| rows.pop().map(|j| expr::from_json(&j)).unwrap_or(V::None)), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+            }
+        }
+        #[cfg(not(feature = "python"))]
+        { let _ = (asker, path); (Err(format!("{}: this build has no drivers", f)), None) }
+    }
+
+    /// The drivers' effects' receipts since the last round: (entity, verb, receipt).
+    pub fn effect_receipts(&self) -> Vec<(String, String, J)> {
+        #[cfg(feature = "python")]
+        { if let Some(st) = &self.store { return st.take_receipts(); } }
+        vec![]
+    }
+
+    /// The queries whose rows arrived since the last round (their getters are dirty).
+    pub fn sql_ready(&self) -> Vec<String> {
+        #[cfg(feature = "python")]
+        { if let Some(st) = &self.store { return st.take_ready(); } }
+        vec![]
+    }
+
+    fn env_of(vars: &[(&str, &str)], extra: &[(&str, J)]) -> HashMap<String, V> {
+        let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
+        for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
+        env
+    }
+
+    /// A FOR's list (#994): each item an entity (bound as one) or a value; None is the empty list.
+    pub fn eval_items(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<Vec<Item>, String> {
+        let env = Self::env_of(vars, extra);
+        match self.eval(src, &env)? {
+            V::List(l) => l.into_iter().map(|v| match v { V::Ent(e) => Ok(Item::Ent(e)), v => expr::to_json(&v).map(Item::Val) }).collect(),
+            V::None => Ok(vec![]),
+            other => Err(format!("not a list ({})", expr::to_json(&other).map(|j| j.to_string()).unwrap_or_else(|_| "an entity".into()))),
+        }
+    }
+
+    /// A write's target: an entity, or the id of one (a string).
+    pub fn eval_ref(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Option<String> {
+        let env = Self::env_of(vars, extra);
+        match self.eval(src, &env) { Ok(V::Ent(e)) | Ok(V::Str(e)) => Some(e), _ => None }
+    }
+
     /// Is the entity of this class (its own, or an ancestor's)?
     pub fn is_a(&self, host: &dyn Host, eid: &str, cls: &str) -> bool {
         self.isa(host, eid, cls, &mut Memo::default())
@@ -465,12 +609,12 @@ impl Core {
     }
 
     /// Evaluate and return what it read (#994 getters). `vars` bind names to entities, `extra` to values.
-    pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)])
+    pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)], host: Option<&dyn Host>, asker: &str, scale: usize)
         -> (Result<serde_json::Value, String>, Vec<(String, String)>) {
         let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
         for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
-        let parsed = self.cache.get(src);
-        let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]) };
+        let parsed = self.cache.get_scaled(src, scale);
+        let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
         let r = match &*parsed {
             Ok(node) => { let n: &Node = node; expr::eval(n, &env, &tv).and_then(|v| expr::to_json(&v)) }
             Err(e) => Err(e.clone()),

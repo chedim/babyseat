@@ -70,6 +70,14 @@ def _branch(path: str) -> tuple[str, str, str] | None:
         return "replan", eid, prop              # #867: who wrote a goal's replan decides a send-back
     if prop == "plan":
         return "plan", eid, prop                # #738: a goal's plan (the worker checks it is a Goal)
+    if prop == "import" and eid == MEMBRANE_NS + "mcp":
+        return "mcp", eid, prop                 # #963: other clients' MCP configs become McpServer entities
+    if prop in ("link", "call:run"):              # #963: MCP servers and tools (membrane/packs/mcp.c1f)
+        from . import mcpfield as _MF
+        srv = _SEAT.get("srv")
+        d = ((getattr(srv, "entity_store", None) and srv.entity_store.docs) or {}).get(eid) if srv is not None else None
+        if d is not None and (d.cls, prop) in ((_MF.SERVER, "link"), (_MF.TOOL, "call:run")):
+            return "mcp", eid, prop
     from . import goalgraph as _GG
     if prop == "status" and _GG.is_task(eid):
         return "tasks", eid, prop               # #738: a task owed goes to the worker pool
@@ -328,7 +336,12 @@ def _wait(srv, est, ent, prop, new, by) -> None:
     _consume(est, ent, prop, new, seen or pp.get(prop + "_result") or "not due")
 
 
-EFFECTS = {"exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
+def _mcp(srv, est, ent, prop, new, by) -> None:
+    from . import mcpfield as MF
+    {"link": MF.link, "call:run": MF.call, "import": MF.import_effect}[prop](srv, est, ent, prop, new, by)
+
+
+EFFECTS = {"mcp": _mcp, "exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
            "toybox": _toybox, "plan": _plan, "replan": _replan, "tasks": _tasks, "wait": _wait}
 
 

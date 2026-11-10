@@ -1767,6 +1767,13 @@ def main() -> None:
                 from . import goalgraph as _GG
                 _n = _GG.seed(srv)
                 from . import fields_live as _FL
+                try:                       # #1044: the upgrade -- entity scripts move into .c1f once (rules, replay-gated)
+                    from . import scriptport as _SPORT
+                    _rep = _SPORT.upgrade(srv.entity_store)
+                    if any(_rep.values()):
+                        print("[upgrade] scripts: " + ", ".join(f"{k} {len(v)}" for k, v in _rep.items()), file=sys.stderr)
+                except Exception as e:     # noqa: BLE001 -- the seat starts; scripts stay Python
+                    print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
                 _FL.start(srv)             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
                 _r = _GG.reowe(srv)
                 _p = _GG.replan_lost(srv)
@@ -2282,6 +2289,11 @@ def main() -> None:
                 _TB.bind(srv)
                 from . import adapters as _AD     # #576 part E: effects are writes (chat, toys, llm, restart)
                 _AD.start(srv)
+                try:                              # #963: the MCP servers enabled in the field connect again
+                    from . import mcpfield as _MCPF
+                    _MCPF.start(srv)
+                except Exception as e:            # noqa: BLE001
+                    print(f"[mcp] servers not started ({e})", file=sys.stderr)
                 from . import self_super as _SUP  # #440: its own process (default), or in-process with MEMBRANE_SELF_PROC=0
                 _self_host = surf_host if surf_host not in ("0.0.0.0", "::", "") else "127.0.0.1"
                 _SUP.boot(srv, f"http://{_self_host}:{serve_port or 4096}",   # the native serve: its /membrane/self/*
@@ -2597,6 +2609,12 @@ def main() -> None:
         except Exception:
             pass
         _td_mark("autonode closed")
+        try:                                      # #963: stdio MCP servers stop with the seat
+            from . import mcpfield as _MCPF
+            _MCPF.stop()
+        except Exception:
+            pass
+        _td_mark("mcp servers closed")
         # THE SEED PERSISTENCE (the personalized field's enabler):
         # session:now is RAM-only by covenant (never a shared doc), but
         # the seat's OWN seed file is the boot's neighborhood center: the

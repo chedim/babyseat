@@ -27,6 +27,15 @@ impl<'py> Host for PyHost<'py> {
     fn vel(&self, eid: &str, now: f64, thr: f64) -> bool { self.yes("vel", (eid, now, thr)) }
     fn align(&self, eid: &str, thr: f64) -> bool { self.yes("align", (eid, thr)) }
     fn live(&self, eid: &str, position: bool) -> Option<String> { self.opt("live", (eid, position)) }
+    /// A getter's host function: the host object's `call(name, args_json)` returns the result as JSON, None when
+    /// it has no such function; a Python error is the getter's error.
+    fn call(&self, f: &str, args_json: &str) -> Option<Result<String, String>> {
+        if !self.obj.hasattr("call").unwrap_or(false) { return None; }
+        match self.obj.call_method1("call", (f, args_json)) {
+            Ok(r) => match r.extract::<Option<String>>() { Ok(Some(s)) => Some(Ok(s)), Ok(None) => None, Err(e) => Some(Err(e.to_string())) },
+            Err(e) => Some(Err(e.to_string())),
+        }
+    }
 }
 
 fn obj(s: &str) -> PyResult<Map<String, J>> {
@@ -233,98 +242,154 @@ impl MappedVecs {
     fn chunks(&self) -> usize { self.m.lock().unwrap_or_else(|e| e.into_inner()).chunks() }
 }
 
-/// Fields (#994): the field engine over its own Core, reachable from Python (tests, a test seat).
+/// The engine's host while the GIL is released: each callback takes the GIL for its own Python call only, so a
+/// field round (and a store query in it) never holds the GIL, and no thread waits for the engine while holding it.
+struct DetachedHost { obj: Py<PyAny> }
+
+impl DetachedHost {
+    fn opt<A>(&self, name: &str, args: A) -> Option<String> where A: for<'py> pyo3::call::PyCallArgs<'py> {
+        Python::attach(|py| self.obj.bind(py).call_method1(name, args).ok().and_then(|r| r.extract::<Option<String>>().ok()).flatten())
+    }
+    fn yes<A>(&self, name: &str, args: A) -> bool where A: for<'py> pyo3::call::PyCallArgs<'py> {
+        Python::attach(|py| self.obj.bind(py).call_method1(name, args).ok().and_then(|r| r.is_truthy().ok()).unwrap_or(false))
+    }
+}
+
+impl Host for DetachedHost {
+    fn resolve(&self, spec: &str) -> Option<String> { self.opt("resolve", (spec,)) }
+    fn resolve_exact(&self, spec: &str) -> Option<String> { self.opt("resolve_exact", (spec,)) }
+    fn dispatch(&self, eid: &str, method: &str) -> Option<String> { self.opt("dispatch", (eid, method)) }
+    fn vel(&self, eid: &str, now: f64, thr: f64) -> bool { self.yes("vel", (eid, now, thr)) }
+    fn align(&self, eid: &str, thr: f64) -> bool { self.yes("align", (eid, thr)) }
+    fn live(&self, eid: &str, position: bool) -> Option<String> { self.opt("live", (eid, position)) }
+    fn call(&self, f: &str, args_json: &str) -> Option<Result<String, String>> {
+        Python::attach(|py| {
+            let o = self.obj.bind(py);
+            if !o.hasattr("call").unwrap_or(false) { return None; }
+            match o.call_method1("call", (f, args_json)) {
+                Ok(r) => match r.extract::<Option<String>>() { Ok(Some(s)) => Some(Ok(s)), Ok(None) => None, Err(e) => Some(Err(e.to_string())) },
+                Err(e) => Some(Err(e.to_string())),
+            }
+        })
+    }
+}
+
+type Engine = (vm::Core, fields::Fields, i64);
+
+/// Fields (#994): the field engine over its own Core, reachable from Python. Thread-safe and non-blocking: every
+/// method releases the GIL before it takes the engine's lock (so no thread ever waits for the engine while holding
+/// the GIL), and a round's Python callbacks take the GIL back only for themselves.
 #[pyclass]
-struct Fields { c: std::sync::Mutex<(vm::Core, fields::Fields, i64)>, host: Py<PyAny> }
+struct Fields { c: std::sync::Mutex<Engine>, host: Py<PyAny>, waiter: std::sync::Mutex<Option<crate::store::Waiter>> }
+
+impl Fields {
+    fn with<R: Send>(&self, py: Python<'_>, f: impl FnOnce(&mut Engine) -> R + Send) -> R {
+        py.detach(|| { let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner()); f(&mut g) })
+    }
+    fn host(&self, py: Python<'_>) -> DetachedHost { DetachedHost { obj: self.host.clone_ref(py) } }
+}
 
 #[pymethods]
 impl Fields {
     #[new]
     fn new(host: Py<PyAny>) -> Self {
-        Fields { c: std::sync::Mutex::new((vm::Core::new(), fields::Fields::goalgraph(), 0)), host }
+        Fields { c: std::sync::Mutex::new((vm::Core::new(), fields::Fields::goalgraph(), 0)), host, waiter: std::sync::Mutex::new(None) }
     }
-    fn load(&self, eid: String, cls: String, props_json: &str) -> PyResult<()> {
+    /// The store driver: `sql(...)` in getters and setters reads this SQLite file (read-only, its own connection).
+    fn set_store(&self, py: Python<'_>, path: &str) -> PyResult<()> {
+        let st = crate::store::Store::open(path).map_err(bad)?;
+        *self.waiter.lock().unwrap_or_else(|e| e.into_inner()) = Some(st.waiter());
+        self.with(py, move |g| { g.0.store = Some(st); });
+        Ok(())
+    }
+    /// The drivers without a database (fs, proc, jsonl): reads and effects in `dir` (the seat's folder).
+    fn set_io(&self, py: Python<'_>, dir: &str) {
+        let st = crate::store::Store::io_only(dir);
+        *self.waiter.lock().unwrap_or_else(|e| e.into_inner()) = Some(st.waiter());
+        self.with(py, move |g| { g.0.store = Some(st); });
+    }
+    /// Wait (without the engine's lock, without the GIL) until a getter's query finishes, or `timeout_s`; True when
+    /// one did. Then `settle` lets the getters waiting for it recompute.
+    #[pyo3(signature = (timeout_s=None))]
+    fn sql_wait(&self, py: Python<'_>, timeout_s: Option<f64>) -> bool {
+        let w = self.waiter.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|w| crate::store::Waiter::clone(w));
+        match w { None => false, Some(w) => py.detach(move || w.wait(timeout_s.map(std::time::Duration::from_secs_f64))) }
+    }
+    /// How many getters' queries are running.
+    fn sql_pending(&self) -> usize {
+        self.waiter.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|w| w.pending()).unwrap_or(0)
+    }
+    /// Stop every running query (shutdown).
+    fn sql_interrupt(&self) {
+        if let Some(w) = self.waiter.lock().unwrap_or_else(|e| e.into_inner()).as_ref() { w.interrupt_all(); }
+    }
+    fn load(&self, py: Python<'_>, eid: String, cls: String, props_json: &str) -> PyResult<()> {
         let p = obj(props_json)?;
-        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        let (core, f, _) = &mut *g;
-        let old = core.docs.get(&eid).map(|e| e.props.clone());
-        core.load(eid.clone(), cls, p, None, 0.0);
-        if let (Some(old), Some(new)) = (old, core.docs.get(&eid).map(|e| e.props.clone())) { f.reloaded(&eid, &old, &new); }
+        self.with(py, move |g| {
+            let (core, f, _) = g;
+            let old = core.docs.get(&eid).map(|e| e.props.clone());
+            core.load(eid.clone(), cls, p, None, 0.0);
+            if let (Some(old), Some(new)) = (old, core.docs.get(&eid).map(|e| e.props.clone())) { f.reloaded(&eid, &old, &new); }
+        });
         Ok(())
     }
     /// A write: the Core hears it, the fields react (setters, getters, effects). Returns nothing; read back with `get`.
-    fn write(&self, py: Python<'_>, eid: String, prop: String, new_json: &str, now: f64) -> PyResult<()> {
+    #[pyo3(signature = (eid, prop, new_json, now, writer="py".to_string()))]
+    fn write(&self, py: Python<'_>, eid: String, prop: String, new_json: &str, now: f64, writer: String) -> PyResult<()> {
         let new: J = serde_json::from_str(new_json).map_err(bad)?;
-        let h = self.host.bind(py).clone();
-        let host = PyHost { py, obj: &h };
-        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        let (core, f, seq) = &mut *g;
-        let old = core.docs.get(&eid).and_then(|e| e.props.get(&prop).cloned()).unwrap_or(J::Null);
-        *seq += 1;
-        let w = Write { eid, prop, new, old, writer: "py".into(), chain: serde_json::json!({}), seq: *seq };
-        core.hear(w.clone(), None, now);
-        let mut s = *seq;
-        f.react(core, &host, w, now, &mut s);
-        *seq = s;
+        let host = self.host(py);
+        self.with(py, move |g| {
+            let (core, f, seq) = g;
+            let old = core.docs.get(&eid).and_then(|e| e.props.get(&prop).cloned()).unwrap_or(J::Null);
+            *seq += 1;
+            let w = Write { eid, prop, new, old, writer, chain: serde_json::json!({}), seq: *seq };
+            core.hear(w.clone(), None, now);
+            let mut s = *seq;
+            f.react(core, &host, w, now, &mut s);
+            *seq = s;
+        });
         Ok(())
     }
-    fn get(&self, eid: &str) -> String {
-        let g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        g.0.docs.get(eid).map(|e| J::Object(e.props.clone()).to_string()).unwrap_or_else(|| "null".into())
+    fn get(&self, py: Python<'_>, eid: String) -> String {
+        self.with(py, move |g| g.0.docs.get(&eid).map(|e| J::Object(e.props.clone()).to_string()).unwrap_or_else(|| "null".into()))
     }
-    fn writes(&self) -> u64 { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.writes }
+    fn writes(&self, py: Python<'_>) -> u64 { self.with(py, |g| g.1.writes) }
     /// Drain what the field did since the last drain: {"writes": [{eid, prop, new, writer}], "calls": [...]}.
-    fn drain(&self) -> String {
-        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        let f = &mut g.1;
-        let out = serde_json::json!({"writes": std::mem::take(&mut f.out), "calls": std::mem::take(&mut f.calls)});
-        out.to_string()
+    fn drain(&self, py: Python<'_>) -> String {
+        self.with(py, |g| {
+            let f = &mut g.1;
+            serde_json::json!({"writes": std::mem::take(&mut f.out), "calls": std::mem::take(&mut f.calls)}).to_string()
+        })
     }
     /// The clock input: waits whose check is due fire (Wait.due getter, then its setter).
     fn tick(&self, py: Python<'_>, now: f64) {
-        let h = self.host.bind(py).clone();
-        let host = PyHost { py, obj: &h };
-        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        let (core, f, seq) = &mut *g;
-        let mut s = *seq;
-        f.tick(core, &host, now, &mut s);
-        *seq = s;
+        let host = self.host(py);
+        self.with(py, move |g| { let (core, f, seq) = g; let mut s = *seq; f.tick(core, &host, now, &mut s); *seq = s; });
     }
     /// Start-up: compute every getter once and keep the values, running no setter (a rebuild runs no effects).
-    fn rebuild(&self, now: f64) {
-        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        let (core, f, seq) = &mut *g;
-        let mut s = *seq;
-        f.rebuild(core, now, &mut s);
-        *seq = s;
+    fn rebuild(&self, py: Python<'_>, now: f64) {
+        self.with(py, move |g| { let (core, f, seq) = g; let mut s = *seq; f.rebuild(core, now, &mut s); *seq = s; });
     }
     /// Run a round with no outside write: a newly loaded entity's getters compute, and what references it recalculates.
     fn settle(&self, py: Python<'_>, now: f64) {
-        let h = self.host.bind(py).clone();
-        let host = PyHost { py, obj: &h };
-        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        let (core, f, seq) = &mut *g;
-        let mut s = *seq;
-        f.settle(core, &host, now, &mut s);
-        *seq = s;
+        let host = self.host(py);
+        self.with(py, move |g| { let (core, f, seq) = g; let mut s = *seq; f.settle(core, &host, now, &mut s); *seq = s; });
     }
     /// Load or replace a named `.c1f` pack (a parse error raises and changes nothing). New getters compute at the
     /// next `rebuild`, which runs no setter.
-    fn set_pack(&self, name: &str, src: &str) -> PyResult<()> {
-        self.c.lock().unwrap_or_else(|e| e.into_inner()).1.set_pack(name, src).map_err(bad)
+    fn set_pack(&self, py: Python<'_>, name: String, src: String) -> PyResult<()> {
+        self.with(py, move |g| g.1.set_pack(&name, &src)).map_err(bad)
     }
     /// Packs that aren't active, and why: {name: reason}.
-    fn pack_errors(&self) -> String {
-        serde_json::to_string(&self.c.lock().unwrap_or_else(|e| e.into_inner()).1.pack_errors).unwrap_or_else(|_| "{}".into())
+    fn pack_errors(&self, py: Python<'_>) -> String {
+        self.with(py, |g| serde_json::to_string(&g.1.pack_errors).unwrap_or_else(|_| "{}".into()))
     }
-    fn remove_pack(&self, name: &str) -> bool { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.remove_pack(name) }
+    fn remove_pack(&self, py: Python<'_>, name: String) -> bool { self.with(py, move |g| g.1.remove_pack(&name)) }
     /// The classes the loaded setters and getters are declared on (what the host mirrors).
-    fn classes(&self) -> Vec<String> { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.classes() }
+    fn classes(&self, py: Python<'_>) -> Vec<String> { self.with(py, |g| g.1.classes()) }
     /// Is this entity in the field's mirror?
-    fn has(&self, eid: &str) -> bool { self.c.lock().unwrap_or_else(|e| e.into_inner()).0.docs.contains_key(eid) }
-    fn calls(&self) -> String {
-        J::Array(self.c.lock().unwrap_or_else(|e| e.into_inner()).1.calls.clone()).to_string()
-    }
+    fn has(&self, py: Python<'_>, eid: String) -> bool { self.with(py, move |g| g.0.docs.contains_key(&eid)) }
+    fn calls(&self, py: Python<'_>) -> String { self.with(py, |g| J::Array(g.1.calls.clone()).to_string()) }
 }
 
 #[pymodule]

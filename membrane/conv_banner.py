@@ -29,6 +29,7 @@ sent every turn while it has content: it is small and moves with the chat.
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -645,6 +646,11 @@ def note_delivered(srv, conv: str, mark) -> None:
     marks[conv] = dict(mark)
     while len(marks) > _MARKS_KEPT:
         marks.pop(next(iter(marks)))
+    try:                                  # #994: the banner pack's SINCE reads the mark off this chat's instance
+        from . import fields_live as _FL
+        _FL.mark_delivered(getattr(srv, "entity_store", None), conv, (mark or {}).get("seq"))
+    except Exception:
+        pass
 
 
 def _suggestions(srv, conv: str) -> list[str]:
@@ -664,6 +670,22 @@ def _blurp(srv) -> str | None:
         return None
 
 
+def _instance_lines(srv, live, fld, conv: str, sid: str, session: str, latest: str, now, prev):
+    """The banner pack's lines for this person in this chat, and the state build() would keep."""
+    chat = sid or conv
+    sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
+    owner = str(((sess.get(chat) if sess is not None else None) or {}).get("owner") or "seat")
+    try:
+        r = live.banner(fld, owner, chat, session or chat, latest, now=now)
+    except Exception as e:                        # noqa: BLE001 -- shown, never replaced (the operator, 2026-11-10)
+        return [f"▸ the banner failed: {type(e).__name__}: {e}"[:400]], None
+    if r["error"]:
+        return [f"▸ the banner failed ({r['eid']}): {r['error']}"[:400]], None
+    if r["state"] is None and prev is not None:
+        return r["lines"], prev                   # recalled nothing this turn: the previous search state stays
+    return r["lines"], r["state"]
+
+
 def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = None,
                  sid: str = "") -> list[str]:
     """#668: the banner is recall -- the top rows for the person's message
@@ -673,11 +695,17 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     from . import recall_banner as RB
     memo = srv.__dict__.setdefault("_recall_prev", {})
     session = next((d.get("session") for _k, d in reversed(events or []) if d.get("session")), "")
-    try:
-        lines, state = RB.build(fld, latest, session=session or "", prev=memo.get(conv), now=now)
-    except Exception as e:
-        print(f"[recall-banner] error: {e}", file=sys.stderr)
-        return []
+    from . import fields_live as _FL
+    live = _FL.CURRENT
+    if live is not None and live.has_banner():
+        # #994: this chat's own banner instance (Banner:<owner>:<chat>) runs the banner pack; its error is shown
+        lines, state = _instance_lines(srv, live, fld, conv, sid, session, latest, now, memo.get(conv))
+    else:
+        try:
+            lines, state = RB.build(fld, latest, session=session or "", prev=memo.get(conv), now=now)
+        except Exception as e:
+            print(f"[recall-banner] error: {e}", file=sys.stderr)
+            return []
     if state is not None and state is not memo.get(conv) and state.get("timing"):
         t = state["timing"]
         print("[recall-banner] " + " ".join(f"{k} {v:.2f}s" for k, v in t.items() if k != "rows")
@@ -694,6 +722,63 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     return lines
 
 
+def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: str, sections: dict) -> str | None:
+    """#994: the whole block from this chat's banner instance (the banner pack: recall, OPEN, DECIDED, the layout);
+    `sections` are the parts not ported yet. A script's error is shown in the block's place, never replaced."""
+    memo = srv.__dict__.setdefault("_recall_prev", {})
+    session = next((d.get("session") for _k, d in reversed(events or []) if d.get("session")), "")
+    chat = sid or conv
+    sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
+    owner = str(((sess.get(chat) if sess is not None else None) or {}).get("owner") or "seat")
+    try:
+        r = live.banner(fld, owner, chat, session or chat, latest or "", now=now, sections=sections)
+    except Exception as e:                        # noqa: BLE001 -- shown, never replaced (the operator, 2026-11-10)
+        return f"▸ the banner failed: {type(e).__name__}: {e}"[:400]
+    if r["error"]:
+        return f"▸ the banner failed ({r['eid']}): {r['error']}"[:400]
+    state = r["state"]
+    if state is not None and state.get("timing"):
+        t = state["timing"]
+        print("[recall-banner] " + " ".join(f"{k} {v:.2f}s" for k, v in t.items() if k != "rows")
+              + f" (pool {t['rows']})", file=sys.stderr)
+    try:                                  # #934: measured when the turn's reply lands
+        from . import banneruse as _BU
+        _BU.shown_recall(srv, sid or conv, r["lines"])
+    except Exception:
+        pass
+    if state is not None:
+        memo[conv] = state
+        while len(memo) > _MARKS_KEPT:
+            memo.pop(next(iter(memo)))
+    return r["text"]
+
+
+def _shadow(srv, fld, conv, events, latest, now, tz, block) -> None:
+    """MEMBRANE_BANNER_SHADOW=1 (the operator, 2026-11-10: the pack reads focus from what capture stored; see the old
+    and the new side by side): today's Python WORKING ON / ABOUT / SINCE / STABLE beside the pack's block, logged
+    where they differ. Read-only; the block the model sees is the pack's."""
+    try:
+        marks = getattr(srv, "_conv_marks", None)
+        mark = marks.get(conv) if isinstance(marks, dict) and conv else None
+        about = focus(fld, events, latest)
+        w = working_on(events, latest, about, fld)
+        old = {"WORKING ON": _working_line(w, now, tz) if w is not None else "",
+               "ABOUT": ("ABOUT: " + " · ".join(about)) if about else "",
+               "SINCE": "\n".join(_item_line(i, now, tz) for i in since(fld, conv, mark, about)),
+               "STABLE": "\n".join(_item_line(i, now, tz) for i in stable(srv, about, fld, tz))}
+        new = str(block or "")
+        for k, v in old.items():
+            for ln in [x for x in v.splitlines() if x]:
+                if ln not in new:
+                    print(f"[banner-shadow] {conv} {k}: python only: {ln[:200]}", file=sys.stderr)
+        for ln in new.splitlines():
+            if ln.startswith(("WORKING ON:", "ABOUT:")) and ln not in "\n".join(old.values()):
+                print(f"[banner-shadow] {conv} pack only: {ln[:200]}", file=sys.stderr)
+        print(f"[banner-shadow] {conv} compared ({len(about)} focus)", file=sys.stderr)
+    except Exception as e:                                 # noqa: BLE001 -- a diagnostic never breaks a turn
+        print(f"[banner-shadow] {conv} failed: {e!r}"[:300], file=sys.stderr)
+
+
 def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
           on_alert=None) -> str | None:
     """The block for this turn (None when it holds nothing of this chat)."""
@@ -702,6 +787,22 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
     fld = _L._efield_on(srv)
     latest = _L._last_user_text(body or {})
     events = conv_events(fld, conv)
+    from . import fields_live as _FL
+    live = _FL.CURRENT
+    if live is not None and live.has_banner() and fld is not None:
+        # #994: the banner pack lays the block out and makes RECALL, OPEN, DECIDED, WORKING ON, ABOUT, STABLE and
+        # SINCE itself (from the store); these are the parts not ported yet (seat state), each in its own step
+        sections = {
+            "paused": bool(_L.nerve_paused(srv)),
+            "alerts": take_alerts(srv, on_alert),
+            "blurp": _blurp(srv),
+            "suggest": _suggestions(srv, conv),
+            "more": bool((body or {}).get("tools")),
+        }
+        block = pack_block(srv, live, fld, conv, events, latest, now, str((body or {}).get("_turn_sid") or ""), sections)
+        if os.environ.get("MEMBRANE_BANNER_SHADOW", "").strip() == "1":
+            _shadow(srv, fld, conv, events, latest, now, tz, block)
+        return block
     about = focus(fld, events, latest) if fld is not None else []
     marks = getattr(srv, "_conv_marks", None)
     mark = marks.get(conv) if isinstance(marks, dict) and conv else None

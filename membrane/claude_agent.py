@@ -772,6 +772,23 @@ def _with_tools_note(system: str) -> str:
     return kept.rstrip() + "\n\n" + TOOLS_NOTE
 
 
+def _field_mcp_servers() -> dict:
+    try:
+        from . import mcpfield as MF
+        return {k: v for k, v in MF.sdk_servers().items() if k != MCP_NAME}
+    except Exception as e:                                 # noqa: BLE001 -- the rung still runs on membrane's tools
+        print(f"[claude-agent] the field's MCP servers were not mounted: {e}", file=sys.stderr)
+        return {}
+
+
+def _field_mcp_tools() -> list[str]:
+    try:
+        from . import mcpfield as MF
+        return [t for t in MF.sdk_tool_names() if not t.startswith(f"mcp__{MCP_NAME}__")]
+    except Exception:                                      # noqa: BLE001
+        return []
+
+
 def build_options(sdk, system: str, model: str, stream: bool, port=None,
                   resume=None, env=None, answer=None):
     answer = answer if answer is not None else _Answer()
@@ -785,8 +802,10 @@ def build_options(sdk, system: str, model: str, stream: bool, port=None,
         env=env,
         system_prompt=_with_tools_note(system),
         tools=[],                  # Claude Code's built-in tools: off
-        allowed_tools=tool_names(),  # only membrane's tools (#389)
-        mcp_servers={MCP_NAME: build_mcp_server(sdk, port, answer)},
+        # membrane's tools (#389), and the tools of the MCP servers enabled in the field (#963, McpServer entities):
+        # those are mounted directly, so Claude calls them as its own tools as well as by writes
+        allowed_tools=tool_names() + _field_mcp_tools(),
+        mcp_servers={**_field_mcp_servers(), MCP_NAME: build_mcp_server(sdk, port, answer)},
         strict_mcp_config=True,    # no user MCP config, no claude.ai connectors (#455)
         setting_sources=[],        # no settings files, no CLAUDE.md
         max_turns=MAX_TURNS,       # a backstop: the hook's ceiling stops first (#425)
