@@ -233,3 +233,24 @@ both sides run on the native VM; checksum the whole field (every entity's stored
 
 doctrine.md (sensor line, SCHEDULED READS) and docs/entity-field.md (entity-scripts covenant,
 decision 3). Until the design lands, #980 PRs #984-991 add no more WHEN/WHERE/WRITE triggers.
+
+## 9. The field engine in the browser
+
+The same Rust engine (getters, setters, `.c1f` packs, imports) is compiled to WebAssembly (`native/build-web.sh`,
+binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/fieldvm.js`, loaded by `index.html`).
+
+- **Following the seat:** the page starts from `GET /ui/fieldvm` (the seat's packs and every entity of a class they
+  declare on), then applies each `field.write` and `field.pack` event from `/ui/serve/event`. When the stream drops it
+  reconnects and takes a fresh snapshot. Toward the seat the page is read-only: what its packs write stays in the page.
+- **View packs:** packs importing `dom` wait on the seat and run in the page. `DomNode:<key>` entities are elements:
+  `tag` (allow-listed), `text` (textContent only, never HTML), `parent`, and allow-listed attributes (`href` http(s)
+  only). A click writes `clicked`. A round's DOM writes are applied together, once per frame.
+- **The page's own DOM:** `link(document.body)` puts every page element (open shadow roots included) in the field as
+  `DomNode:page:#<id>` (`DomNode:page:<n>` without an id) with `page=true`, its tag, parent, id, own text and the
+  allow-listed attributes. A new element is born whole, a change is written (only what differs from the field, so a
+  pack's own write never echoes), a removed element leaves the field (`Fields::remove`: what read or referenced it
+  recalculates). Packs read page elements, put their nodes in them (`parent = 'DomNode:page:#chat'`) and write to them;
+  writing `text` replaces the element's content.
+- **Caching:** the loader asks for the wasm by its content hash (`fieldvm_version.js`), since the seat caches `.wasm`.
+- **Tests:** `tests/js/fieldvm_core.test.mjs` (the wasm engine in Node) and `tests/js/fieldvm_link.test.mjs` (the page
+  link in headless Chrome over the DevTools protocol).
