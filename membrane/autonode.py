@@ -199,11 +199,25 @@ class FileTreeScanner:
         self._fps: dict[str, tuple[int, int]] = {}
         self._primed = False
 
+    def _native(self):
+        """{rel: (mtime_ns, size)} from the native walk (membrane_vm.fingerprints: one call, the GIL released for the
+        whole tree -- a Python stat per file waited on the GIL behind every busy thread); None without the extension."""
+        try:
+            from . import membrane_vm as MV
+        except Exception:                                    # noqa: BLE001
+            return None
+        if not hasattr(MV, "fingerprints"):
+            return None
+        rows = MV.fingerprints(str(self.root), sorted(SKIP_DIRS), sorted(_OWN_NAMES), ["serve-"], [".seed.json"],
+                               int(_MAX_FILES))
+        return {rel: (mt, size) for rel, mt, size in rows}
+
     def scan(self) -> list[Trigger]:
         fps: dict[str, tuple[int, int]] = {}
         root = self.root
         try:
-            for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+            native = self._native()
+            for dirpath, dirnames, filenames in (() if native is not None else os.walk(root, topdown=True)):
                 dirnames[:] = [dn for dn in dirnames
                                if dn not in SKIP_DIRS and
                                not dn.startswith(".")]
@@ -224,6 +238,8 @@ class FileTreeScanner:
                     except OSError:
                         continue
                     fps[rel] = (st.st_mtime_ns, st.st_size)
+            if native is not None:
+                fps = native
         except Exception as e:
             print(f"[autonode] scan failed ({str(e)[:60]})", file=sys.stderr)
             return []

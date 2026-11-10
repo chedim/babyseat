@@ -33,7 +33,13 @@ pub trait Host {
     fn live(&self, eid: &str, position: bool) -> Option<String>;
     /// A function a getter calls (`recall(...)`): args and result as JSON. None: no such function here.
     fn call(&self, _f: &str, _args_json: &str) -> Option<Result<String, String>> { None }
+    /// A slow function the host runs OFF the engine (`recall`, `rerank`): the job that computes it, or None to call
+    /// it in the round (`call`). The getter reads None until the answer lands, like `sql(...)`.
+    fn call_later(&self, _f: &str, _args_json: &str, _asker: &str) -> Option<HostJob> { None }
 }
+
+/// A host function's answer (JSON), computed on another thread.
+pub type HostJob = Box<dyn FnOnce() -> Result<String, String> + Send>;
 
 pub struct Ent {
     pub cls: String,
@@ -214,7 +220,13 @@ impl<'a> expr::World for Traced<'a> {
         if let Some(r) = self.inner.core.native_call(f, a) { return Some(r); }
         let Some(h) = self.host else { return Some(Ok(V::None)) };
         let args = match a.iter().map(expr::to_json).collect::<Result<Vec<_>, _>>() { Ok(v) => v, Err(e) => return Some(Err(e)) };
-        match h.call(f, &serde_json::Value::Array(args).to_string())? {
+        let args_s = serde_json::Value::Array(args).to_string();
+        if let Some(job) = h.call_later(f, &args_s, self.asker) {
+            let r = self.inner.core.host_request(self.asker, f, &args_s, job);
+            if let Some(k) = r.1 { self.reads.borrow_mut().push((SQL.to_string(), k)); }
+            return Some(r.0);
+        }
+        match h.call(f, &args_s)? {
             Ok(s) => Some(serde_json::from_str::<serde_json::Value>(&s).map(|j| expr::from_json(&j)).map_err(|e| format!("{}: {}", f, e))),
             Err(e) => Some(Err(format!("{}: {}", f, e))),
         }
@@ -520,6 +532,32 @@ impl Core {
         }
         #[cfg(not(feature = "python"))]
         { let _ = (asker, q, args); (Err("sql: this build has no store driver".into()), None) }
+    }
+
+    /// A slow host function (Host::call_later): asked like a query, on its own thread, never under the engine's lock.
+    /// Each function has its own slot per getter (a getter may chain recall -> rerank); a newer call of the same
+    /// function by the same getter drops the older one's answer. Without a store attached it runs in the round.
+    pub fn host_request(&self, asker: &str, f: &str, args_json: &str, job: HostJob) -> (Result<V, String>, Option<String>) {
+        let fname = f.to_string();
+        let parse = move |s: String| serde_json::from_str::<J>(&s).map_err(|e| format!("{}: {}", fname, e));
+        #[cfg(feature = "python")]
+        {
+            if let Some(st) = &self.store {
+                let slot = format!("{}\u{0}{}", asker, f);
+                let key = format!("\u{3}{}\u{0}{}", f, args_json);
+                let k = crate::store::scoped(&slot, &key);
+                let f2 = f.to_string();
+                let run = Box::new(move || -> Result<Vec<J>, String> {
+                    job().map_err(|e| format!("{}: {}", f2, e)).and_then(|s| parse(s).map(|j| vec![j]))
+                });
+                return match st.request_job(&slot, key, true, run) {
+                    crate::store::Poll::Ready(r) => (r.map(|mut rows| rows.pop().map(|j| expr::from_json(&j)).unwrap_or(V::None)), Some(k)),
+                    crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                };
+            }
+        }
+        let _ = asker;
+        (job().map_err(|e| format!("{}: {}", f, e)).and_then(|s| parse(s)).map(|j| expr::from_json(&j)), None)
     }
 
     /// A getter's `jsonl(name)`: the seat's JSON-lines file, asked like a query.

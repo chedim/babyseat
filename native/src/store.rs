@@ -167,11 +167,14 @@ impl Store {
 
     /// A read on its own thread, asked like a query (`key` names it; the same asker asking another key drops the
     /// first's answer). The fs built-ins (read, listdir, stat) go through here.
-    pub fn request_job(&self, asker: &str, k: String, job: Box<dyn FnOnce() -> Result<Vec<J>, String> + Send>) -> Poll {
+    /// `keep`: the answer stays for this asker until it asks another key (or `forget`): a getter that asks again with
+    /// the same arguments reads it again instead of asking anew (a chain of slow calls in one getter settles).
+    pub fn request_job(&self, asker: &str, k: String, keep: bool, job: Box<dyn FnOnce() -> Result<Vec<J>, String> + Send>) -> Poll {
         let k = scoped(asker, &k);
         {
             let mut sh = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
             match sh.results.get(&k) {
+                Some(State::Done(r)) if keep => { let r = r.clone(); sh.asked.insert(asker.to_string(), k); return Poll::Ready(r); }
                 Some(State::Done(_)) => { if let Some(State::Done(r)) = sh.results.remove(&k) { return Poll::Ready(r); } }
                 Some(State::Pending) => { sh.asked.insert(asker.to_string(), k); return Poll::Pending; }
                 None => {}
@@ -208,6 +211,17 @@ impl Store {
             g.done += 1;
             sh.1.notify_all();
         }).expect("a thread for an effect");
+    }
+
+    /// Drop the kept answers of every asker whose name starts with `prefix` (a banner build starts fresh); a job
+    /// still running finishes and its answer is dropped.
+    pub fn forget(&self, prefix: &str) {
+        let mut sh = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        let gone: Vec<(String, String)> = sh.asked.iter().filter(|(a, _)| a.starts_with(prefix)).map(|(a, k)| (a.clone(), k.clone())).collect();
+        for (a, k) in gone {
+            sh.asked.remove(&a);
+            if !sh.asked.values().any(|v| *v == k) && matches!(sh.results.get(&k), Some(State::Done(_))) { sh.results.remove(&k); }
+        }
     }
 
     /// The effects' receipts since the last round.
@@ -274,6 +288,7 @@ impl Store {
 #[derive(Clone)]
 pub struct Waiter { sh: Arc<(Mutex<Shared>, Condvar)> }
 impl Waiter {
+    pub fn forget(&self, prefix: &str) { Store { path: String::new(), dir: Default::default(), sh: self.sh.clone() }.forget(prefix) }
     pub fn wait(&self, timeout: Option<Duration>) -> bool {
         Store { path: String::new(), dir: Default::default(), sh: self.sh.clone() }.wait(timeout)
     }

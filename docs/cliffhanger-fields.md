@@ -274,7 +274,10 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
   `x.name`; `this.eid` is an entity's id (a reference is written as an id, never as an entity).
 - **Host built-ins**: a getter may call a function the seat provides, on live rounds only (a silent rebuild or birth
   never calls out); an error in one is the getter's error (a `refused` receipt, the field keeps its value). Effects
-  are never getters: they stay writes to adapter branches.
+  are never getters: they stay writes to adapter branches. The seat's slow ones (`recall`, `rerank`) run off the
+  engine like `sql(...)`: the getter reads None until the answer lands, and the banner waits for them without the
+  field's lock (a slow recall never stalls the thinker or another chat). Each keeps its answer for its getter until
+  that getter asks with other arguments, so a chain in one getter settles; each banner build starts fresh.
 
 ## 11. Libraries in `.c1f`
 

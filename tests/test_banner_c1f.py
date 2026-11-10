@@ -241,3 +241,43 @@ def test_step_2_working_about_since_stable_come_from_the_store(seat, tmp_path, m
     assert "SINCE YOUR LAST MESSAGE:\n- f:membrane/x.py: x.py now splits the index (another chat · 9 min ago)" in text, text
     assert "STABLE:\n- membrane/x.py must stay small (fact · 3 chats" in text, text
     assert "an unrelated rule" not in text
+
+
+def test_a_slow_recall_does_not_hold_the_field(seat, monkeypatch):
+    # the operator 2026-11-10 (perf): recall and rerank run off the engine, like sql(); the banner waits for them
+    # without the field's lock, so a slow recall never stalls the thinker's tick or another chat's banner
+    import threading
+    started, release = threading.Event(), threading.Event()
+
+    def slow(ctx, name, args):
+        if name == "recall":
+            started.set()
+            assert release.wait(10)
+        return _fake(ctx, name, args)
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault("lines", _lines(seat, "ses_op",
+                                                                       "what is the battery voltage on the boat?",
+                                                                       monkeypatch, slow)))
+    t.start()
+    try:
+        assert started.wait(10), "recall never ran"
+        ticked = threading.Event()
+        threading.Thread(target=lambda: (seat.live.tick(), ticked.set()), daemon=True).start()
+        assert ticked.wait(3), "the field's lock was held while recall ran"
+    finally:
+        release.set()
+        t.join(10)
+    assert out["lines"] == ["#3 the bilge pump ran twice", "#2 the anchor light is LED"]
+
+
+def test_the_same_words_again_recall_again(seat, monkeypatch):
+    # a slow built-in's answer stays with its getter (a chain in one getter settles), but each build starts fresh
+    calls = []
+
+    def counting(ctx, name, args):
+        calls.append(name)
+        return _fake(ctx, name, args)
+    q = "what is the battery voltage on the boat?"
+    _lines(seat, "ses_op", q, monkeypatch, counting)
+    _lines(seat, "ses_op", q, monkeypatch, counting)
+    assert calls.count("recall") == 2 and calls.count("rerank") == 2

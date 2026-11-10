@@ -125,8 +125,14 @@ class _Host:
     def __init__(self, live=None):
         self.live = live
 
-    def call(self, name, args_json):
-        ctx = getattr(self.live, "ctx", None)
+    # the slow built-ins run on the drivers' threads, off the engine's lock (the getter reads None until they land)
+    later = frozenset({"recall", "rerank"})
+
+    def call(self, name, args_json, asker=None):
+        ctxs = getattr(self.live, "ctxs", None) or {}
+        ctx = ctxs.get(str(asker).split("\0", 1)[0]) if asker else None
+        if ctx is None and len(ctxs) == 1 and not asker:
+            ctx = next(iter(ctxs.values()))           # a call in the round: the one build running
         if ctx is None:
             return None
         from . import recall_banner as RB
@@ -146,7 +152,7 @@ class Live:
         from . import membrane_vm as MV
         self.srv, self.est = srv, srv.entity_store
         self.f = MV.Fields(_Host(self))
-        self.ctx = None                            # a banner build's context while its getters run
+        self.ctxs: dict = {}                       # banner eid -> its build's context while its getters run
         self.store_path = _store_file(srv)
         if self.store_path:                        # the store driver: `sql(...)` in packs reads it, read-only
             try:
@@ -376,6 +382,7 @@ class Live:
         now = time.time() if now is None else now
         eid = banner_eid(owner, chat)
         writes: list = []
+        ctx = {"field": field, "session": session, "now": now, "rows": {}, "timing": {}}
         with self.busy:
             d = self._banner_instance(eid, owner, chat)
             dials = self._banner_dials(d)
@@ -390,9 +397,10 @@ class Live:
                 self.f.load(eid, d.cls, _json(dict(d.properties or {})))
                 self.f.settle(now)
                 self._apply()
-            ctx = {"field": field, "session": session, "now": now, "rows": {}, "timing": {}}
-            self.ctx = ctx
-            try:
+            self.ctxs[eid] = ctx
+            self.f.sql_forget(eid)                     # this build's recall starts fresh (the same words recall again)
+        try:
+            with self.busy:
                 cur0 = json.loads(self.f.get(eid)) or {}
                 if cur0.get("ask") == text:
                     self.f.write(eid, "ask", "null", now)      # the same words again: recall again
@@ -407,17 +415,20 @@ class Live:
                         self.est.upsert(d, embedder=None)
                     self.f.write(eid, p, _json(v), now)
                 writes += self._apply().get("writes") or []
-                # the pack's reads (sql, jsonl): wait for each, and settle after the last one too (its rows land on the
-                # round after it finishes); a round may ask for more (a read that needs another's rows)
-                while self.f.sql_pending():               # running, or finished and not landed yet
-                    self.f.sql_wait(None)
+            # the pack's reads (sql, jsonl, recall, rerank): wait for each WITHOUT the field's lock (a slow one never
+            # stalls the thinker or another chat), and settle after the last one too (its answer lands on the round
+            # after it finishes); a round may ask for more (a read that needs another's answer)
+            while self.f.sql_pending():               # running, or finished and not landed yet
+                self.f.sql_wait(None)
+                with self.busy:
                     self.f.settle(now)
                     writes += self._apply().get("writes") or []
-            finally:
-                self.ctx = None
-            refused = next((w.get("new") for w in reversed(writes)
-                            if w.get("eid") == eid and w.get("prop") == "refused"), None)
-            cur = json.loads(self.f.get(eid)) or {}
+            with self.busy:
+                refused = next((w.get("new") for w in reversed(writes)
+                                if w.get("eid") == eid and w.get("prop") == "refused"), None)
+                cur = json.loads(self.f.get(eid)) or {}
+        finally:
+            self.ctxs.pop(eid, None)
         lines = [str(x) for x in (cur.get("lines") or []) if x is not None] if not refused else []
         from . import recall_banner as RB
         return {"eid": eid, "lines": lines, "text": None if refused else cur.get("text"), "error": refused,

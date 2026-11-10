@@ -209,6 +209,16 @@ fn evaluate(src: &str, env_json: &str) -> PyResult<String> {
     Ok(expr::to_json(&v).map_err(bad)?.to_string())
 }
 
+/// The autonode fingerprint walk (walk.rs) with the GIL released for the whole tree.
+#[pyfunction]
+#[pyo3(signature = (root, skip_dirs, skip_names, skip_prefixes, skip_suffixes, max_files))]
+fn fingerprints(py: Python<'_>, root: &str, skip_dirs: Vec<String>, skip_names: Vec<String>, skip_prefixes: Vec<String>,
+                skip_suffixes: Vec<String>, max_files: usize) -> Vec<(String, i64, u64)> {
+    let skip = crate::walk::Skip { dirs: skip_dirs, names: skip_names, prefixes: skip_prefixes, suffixes: skip_suffixes, hidden_dirs: true };
+    let root = std::path::PathBuf::from(root);
+    py.detach(move || crate::walk::fingerprints(&root, &skip, max_files))
+}
+
 #[pyclass]
 struct VecStore { s: std::sync::Mutex<topk::VecStore> }
 
@@ -272,6 +282,20 @@ impl Host for DetachedHost {
             }
         })
     }
+    /// The host object lists its slow functions in `later` (a set of names); those run on the driver's threads.
+    fn call_later(&self, f: &str, args_json: &str, asker: &str) -> Option<vm::HostJob> {
+        Python::attach(|py| {
+            let o = self.obj.bind(py);
+            let later = o.getattr("later").ok()?;
+            if !later.contains(f).unwrap_or(false) { return None; }
+            let obj = self.obj.clone_ref(py);
+            let (f, a, k) = (f.to_string(), args_json.to_string(), asker.to_string());
+            Some(Box::new(move || Python::attach(|py| match obj.bind(py).call_method1("call", (f.as_str(), a.as_str(), k.as_str())) {
+                Ok(r) => match r.extract::<Option<String>>() { Ok(Some(s)) => Ok(s), Ok(None) => Err("no such function".into()), Err(e) => Err(e.to_string()) },
+                Err(e) => Err(e.to_string()),
+            })) as vm::HostJob)
+        })
+    }
 }
 
 type Engine = (vm::Core, fields::Fields, i64);
@@ -318,6 +342,10 @@ impl Fields {
     /// How many getters' queries are running.
     fn sql_pending(&self) -> usize {
         self.waiter.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|w| w.pending()).unwrap_or(0)
+    }
+    /// Drop the kept answers of the getters of `eid` (a banner build starts fresh: the same words recall again).
+    fn sql_forget(&self, eid: &str) {
+        if let Some(w) = self.waiter.lock().unwrap_or_else(|e| e.into_inner()).as_ref() { w.forget(&format!("{}\u{0}", eid)); }
     }
     /// Stop every running query (shutdown).
     fn sql_interrupt(&self) {
@@ -399,5 +427,6 @@ fn membrane_vm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MappedVecs>()?;
     m.add_class::<Fields>()?;
     m.add_function(wrap_pyfunction!(evaluate, m)?)?;
+    m.add_function(wrap_pyfunction!(fingerprints, m)?)?;
     Ok(())
 }

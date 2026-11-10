@@ -7,7 +7,12 @@ IMPORT goalgraph 1
 -- none = the learned set). An instance may be of another class whose pack declares its own `lines`.
 -- Built-ins: recall(text, pool, session), rerank(rows, text, weights), pick(rows, n, session), line(row),
 -- topic(text); a row is {h, n, ts, role, via, score, fact}, read with prop(row, 'score').
-Banner.lines getter WHEN topic(this.ask): [line(r) for r in pick(rerank(recall(this.ask, this.pool, this.session), this.ask, this.weights), this.n, this.session)]
+-- recall and rerank run off the engine (None until they land), one step per getter so `lines` changes once
+Banner.recalled getter WHEN topic(this.ask): recall(this.ask, this.pool, this.session)
+Banner.recalled getter: None
+Banner.ranked getter WHEN this.recalled != None: rerank(this.recalled, this.ask, this.weights)
+Banner.ranked getter: None
+Banner.lines getter WHEN this.ranked != None: [line(r) for r in pick(this.ranked, this.n, this.session)]
 Banner.lines getter: this.lines
 
 

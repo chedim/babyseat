@@ -41,7 +41,7 @@ pub fn request(st: &Store, asker: &str, f: &str, path: &str) -> Poll {
     let p = resolve(&st.dir, path);
     let key = format!("\u{2}{}\u{0}{}", f, p.display());
     let f = f.to_string();
-    st.request_job(asker, key, Box::new(move || -> Result<Vec<J>, String> {
+    st.request_job(asker, key, false, Box::new(move || -> Result<Vec<J>, String> {
         match f.as_str() {
             "read" => std::fs::read_to_string(&p).map(|t| vec![J::String(t)]).map_err(|e| format!("read {}: {}", p.display(), e)),
             "listdir" => {
