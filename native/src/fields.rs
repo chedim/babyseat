@@ -60,10 +60,13 @@ pub struct Fields {
     pub visited: std::collections::HashSet<(String, String)>,
     /// loop refusals: the write that was refused at a revisit, and why
     pub refusals: Vec<J>,
+    /// every write the field made (getters, setters, receipts), in order, until the host drains it:
+    /// {eid, prop, new, writer}. The host applies them to its store (fields_live.py).
+    pub out: Vec<J>,
 }
 
 impl Fields {
-    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![] } }
+    pub fn goalgraph() -> Self { Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![] } }
 
     /// Row 3: a banner input (Message/Register/Edge/BannerRule) was written: recompute each Chat's `banner`.
     fn banner_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
@@ -150,6 +153,7 @@ impl Fields {
         self.refusals.push(json!({"eid": eid, "prop": "", "refused": refused, "writer": writer, "reason": reason}));
         *seq += 1;
         let r = Write { eid: eid.into(), prop: "refused".into(), new: json!(reason), old: J::Null, writer: "field:setter-error".into(), chain: json!({}), seq: *seq };
+        self.out.push(json!({"eid": r.eid, "prop": r.prop, "new": r.new, "writer": r.writer}));
         core.hear(r, None, now);
     }
 
@@ -161,12 +165,14 @@ impl Fields {
             self.refusals.push(json!({"eid": eid, "prop": prop, "refused": new, "writer": writer, "reason": reason}));
             *seq += 1;
             let r = Write { eid: eid.into(), prop: "refused".into(), new: json!(reason), old: J::Null, writer: "field:loop-refused".into(), chain: json!({}), seq: *seq };
+            self.out.push(json!({"eid": r.eid, "prop": r.prop, "new": r.new, "writer": r.writer}));
             core.hear(r, None, now);   // a receipt, not queued: it triggers nothing
             return;
         }
         *seq += 1;
         self.writes += 1;
         let w = Write { eid: eid.into(), prop: prop.into(), new, old: J::Null, writer: format!("field:{}", writer), chain: json!({}), seq: *seq };
+        self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
         core.hear(w.clone(), None, now);
         work.push_back(w);
     }
@@ -255,11 +261,12 @@ impl Fields {
         let mut ws: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == "Wait").map(|(k, _)| k.clone()).collect();
         ws.sort();
         for w in ws {
-            let due = matches!(core.eval_json("this.status == 'armed' and clock - this.armed_since >= this.every_s", &me(&w), &[("clock", json!(now))]), Ok(J::Bool(true)));
+            let due = matches!(core.eval_json("this.status == 'armed' and clock - (this.last_check_ts or this.armed_since or this.armed_ts or clock) >= (this.every_s or 10)", &me(&w), &[("clock", json!(now))]), Ok(J::Bool(true)));
             let was = core.docs.get(&w).and_then(|e| e.props.get("due")) == Some(&json!(true));
             if due != was {
                 *seq += 1;
                 let wr = Write { eid: w.clone(), prop: "due".into(), new: json!(due), old: J::Null, writer: "field:due".into(), chain: json!({}), seq: *seq };
+                self.out.push(json!({"eid": wr.eid, "prop": wr.prop, "new": wr.new, "writer": wr.writer}));
                 core.hear(wr.clone(), None, now);
                 self.react(core, host, wr, now, seq);
             }

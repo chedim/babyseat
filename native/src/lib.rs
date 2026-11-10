@@ -251,6 +251,25 @@ impl Fields {
         g.0.docs.get(eid).map(|e| J::Object(e.props.clone()).to_string()).unwrap_or_else(|| "null".into())
     }
     fn writes(&self) -> u64 { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.writes }
+    /// Drain what the field did since the last drain: {"writes": [{eid, prop, new, writer}], "calls": [...]}.
+    fn drain(&self) -> String {
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let f = &mut g.1;
+        let out = serde_json::json!({"writes": std::mem::take(&mut f.out), "calls": std::mem::take(&mut f.calls)});
+        out.to_string()
+    }
+    /// The clock input: waits whose check is due fire (Wait.due getter, then its setter).
+    fn tick(&self, py: Python<'_>, now: f64) {
+        let h = self.host.bind(py).clone();
+        let host = PyHost { py, obj: &h };
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let (core, f, seq) = &mut *g;
+        let mut s = *seq;
+        f.tick(core, &host, now, &mut s);
+        *seq = s;
+    }
+    /// Is this entity in the field's mirror?
+    fn has(&self, eid: &str) -> bool { self.c.lock().unwrap_or_else(|e| e.into_inner()).0.docs.contains_key(eid) }
     fn calls(&self) -> String {
         J::Array(self.c.lock().unwrap_or_else(|e| e.into_inner()).1.calls.clone()).to_string()
     }
