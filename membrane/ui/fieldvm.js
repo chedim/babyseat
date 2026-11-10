@@ -11,6 +11,7 @@
 // Data enters as writes (`feed`): an entity is made empty, then each field is written, so the views' setters
 // fire on it (a birth's own getters compute silently, as everywhere).
 import init, { Field } from './fieldvm_core.js';
+import { WASM_VERSION } from './fieldvm_version.js';
 
 export const DOM_PACK = "PACK dom 1\n-- the page's DOM as entities: DomNode:<key>\nDomNode.tag getter: this.tag or 'div'\n";
 
@@ -20,7 +21,8 @@ const ATTRS = new Set(['class', 'title', 'role', 'hidden', 'alt', 'href', 'aria-
 const NODE = 'DomNode:';
 
 export async function start(root, { packs = {}, wasm } = {}) {
-  await init(wasm ? { module_or_path: wasm } : undefined);
+  // by its content hash: the seat caches .wasm for a week, so a rebuilt loader never meets an old binary
+  await init({ module_or_path: wasm || new URL(`./fieldvm_core_bg.wasm?v=${WASM_VERSION}`, import.meta.url) });
   const f = new Field();
   f.set_pack('dom', DOM_PACK);
   const errors = {};

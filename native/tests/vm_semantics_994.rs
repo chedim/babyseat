@@ -288,3 +288,20 @@ fn a_pack_writes_and_creates_only_in_classes_it_owns_or_imports() {
     assert_eq!(w.prop("t9", "note"), J::Null, "lamps doesn't import goalgraph: no write to a Task");
     assert!(w.fs.refusals.iter().any(|r| r["reason"].as_str().unwrap_or("").contains("pack lamps can't write Task")), "{:?}", w.fs.refusals);
 }
+
+// Memo's live check: a dropped blocker kept its task blocked forever (finished counted only done/closed)
+#[test]
+fn a_dropped_blocker_no_longer_blocks() {
+    let mut w = World::new(Fields::goalgraph());
+    classes(&mut w.c);
+    mk(&mut w.c, "g1", "Goal", json!({"status": "open"}));
+    mk(&mut w.c, "k3", "Task", json!({"goal": "g1", "status": "running", "blocks": ["k4"]}));
+    mk(&mut w.c, "d1", "Decision", json!({"goal": "g1", "status": "open", "blocks": ["k5"]}));
+    mk(&mut w.c, "k4", "Task", json!({"goal": "g1", "status": "open", "open_blockers": 1}));
+    mk(&mut w.c, "k5", "Task", json!({"goal": "g1", "status": "open", "open_blockers": 1}));
+    w.write("k3", "status", json!("dropped"));
+    assert_eq!(w.prop("k4", "open_blockers"), json!(0));
+    assert_eq!(w.prop("k4", "status"), json!("owed"));
+    w.write("d1", "status", json!("dropped"));
+    assert_eq!(w.prop("k5", "open_blockers"), json!(0));
+}

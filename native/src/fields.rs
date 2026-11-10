@@ -245,6 +245,7 @@ impl Fields {
     fn sync(&mut self, core: &mut Core, now: f64, seq: &mut i64) {
         if self.getters.is_empty() { return; }
         if !self.primed { self.prime(core, now, seq); return; }
+        if core.docs.len() == self.known.len() { return; }   // nothing new (a removal is rare: its next birth registers at the scan after)
         let mut new: Vec<String> = core.docs.keys().filter(|k| !self.known.contains(*k)).cloned().collect();
         if new.is_empty() { return; }
         new.sort();
@@ -284,9 +285,23 @@ impl Fields {
 
     /// A write changed (eid, prop): every getter instance that read it, or that asked `referencing(_, prop)`, is dirty.
     fn mark(&mut self, eid: &str, prop: &str) {
-        for k in [(eid.to_string(), prop.to_string()), (crate::vm::REFS.to_string(), prop.to_string())] {
-            if let Some(s) = self.deps.get(&k) { for (e, gi) in s.clone() { self.dirty.insert((self.glevel[gi], e, gi)); } }
+        self.mark_key(&(eid.to_string(), prop.to_string()));
+    }
+
+    fn mark_key(&mut self, k: &(String, String)) {
+        if let Some(s) = self.deps.get(k) {
+            let hit: Vec<(String, usize)> = s.iter().cloned().collect();
+            for (e, gi) in hit { self.dirty.insert((self.glevel[gi], e, gi)); }
         }
+    }
+
+    /// `prop` went from `old` to `new` somewhere: the getters that asked `referencing(t, prop)` for a target t
+    /// that was added or removed recalculate (only those: not every getter that ever referenced `prop`).
+    fn mark_refs(&mut self, prop: &str, old: &J, new: &J) {
+        let (o, n) = (crate::vm::Core::targets(old), crate::vm::Core::targets(new));
+        let mut ts: Vec<String> = o.iter().filter(|t| !n.contains(t)).chain(n.iter().filter(|t| !o.contains(t))).cloned().collect();
+        ts.sort(); ts.dedup();
+        for t in ts { self.mark_key(&(crate::vm::REFS.to_string(), format!("{}\u{0}{}", prop, t))); }
     }
 
     /// A birth: its own getters compute silently (stored, no setter runs), as at a rebuild. An entity made in parts (a
@@ -302,8 +317,8 @@ impl Fields {
             self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
             core.hear(w, None, now);
         }
-        let props: Vec<String> = core.docs.get(e).map(|d| d.props.keys().cloned().collect()).unwrap_or_default();
-        for p in props { self.mark(e, &p); }
+        let props: Vec<(String, J)> = core.docs.get(e).map(|d| d.props.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default();
+        for (p, v) in props { self.mark(e, &p); self.mark_refs(&p, &J::Null, &v); }
     }
 
     /// First contact without a rebuild (an engine that started on a live field): every getter computes once to
@@ -354,7 +369,12 @@ impl Fields {
     pub fn reloaded(&mut self, eid: &str, old: &serde_json::Map<String, J>, new: &serde_json::Map<String, J>) {
         if !self.known.contains(eid) { return; }
         let keys: std::collections::BTreeSet<&String> = old.keys().chain(new.keys()).collect();
-        for k in keys { if old.get(k) != new.get(k) { self.mark(eid, k); } }
+        for k in keys {
+            if old.get(k) != new.get(k) {
+                self.mark(eid, k);
+                self.mark_refs(k, old.get(k).unwrap_or(&J::Null), new.get(k).unwrap_or(&J::Null));
+            }
+        }
     }
 
     /// A round with no outside write (new entities registered, dirty getters settled).
@@ -475,7 +495,8 @@ impl Fields {
         }
         *seq += 1;
         self.writes += 1;
-        let w = Write { eid: eid.into(), prop: prop.into(), new, old: J::Null, writer: format!("field:{}", writer), chain: json!({}), seq: *seq };
+        let old = core.docs.get(eid).and_then(|e| e.props.get(prop).cloned()).unwrap_or(J::Null);
+        let w = Write { eid: eid.into(), prop: prop.into(), new, old, writer: format!("field:{}", writer), chain: json!({}), seq: *seq };
         self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
         core.hear(w.clone(), None, now);
         work.push_back(w);
@@ -527,6 +548,7 @@ impl Fields {
 
     fn step(&mut self, core: &mut Core, host: &dyn Host, work: &mut VecDeque<Write>, w: Write, now: f64, seq: &mut i64) {
         self.mark(&w.eid, &w.prop);
+        self.mark_refs(&w.prop, &w.old, &w.new);
         {
             let cls = core.docs.get(&w.eid).map(|e| e.cls.clone()).unwrap_or_default();
             if w.prop == "status" && BLOCKER_CLASSES.contains(&cls.as_str()) && !self.has_getter("Task", "open_blockers") {

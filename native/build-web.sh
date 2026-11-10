@@ -13,4 +13,7 @@ for f in fieldvm_core.js fieldvm_core_bg.wasm; do
   mv -f "../membrane/ui/.$f.$$" "../membrane/ui/$f"
 done
 rm -rf "$out"
+# the seat caches .wasm for a week and the JS for no time: the loader asks for the wasm by its content hash
+h=$(shasum -a 256 ../membrane/ui/fieldvm_core_bg.wasm | cut -c1-12)
+printf '// written by native/build-web.sh: the wasm build the loader asks for (a cache key)\nexport const WASM_VERSION = "%s";\n' "$h" > ../membrane/ui/fieldvm_version.js
 echo "built ../membrane/ui/fieldvm_core.js and fieldvm_core_bg.wasm ($(wc -c < ../membrane/ui/fieldvm_core_bg.wasm) bytes)"

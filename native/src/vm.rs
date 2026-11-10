@@ -109,6 +109,9 @@ pub struct Core {
     pub fired: HashMap<String, u64>,
     pub refused: HashMap<String, u64>,
     pub errors: HashMap<String, String>,
+    /// `referencing(x, prop)`'s reverse index: prop -> target eid -> the entities whose prop holds it. Built per prop
+    /// the first time it is asked for, then kept current on every write, load and removal.
+    ref_ix: std::cell::RefCell<HashMap<String, HashMap<String, std::collections::BTreeSet<String>>>>,
     seq: u64,
     pub learner: bool,
     pub trace: Option<Vec<String>>,
@@ -159,15 +162,7 @@ impl<'a> expr::World for View<'a> {
             _ => e.props.get(attr).map(expr::from_json).unwrap_or(V::None),
         }
     }
-    fn refs(&self, eid: &str, prop: &str) -> Vec<String> {
-        let mut out: Vec<String> = self.core.docs.iter().filter(|(_, e)| match e.props.get(prop) {
-            Some(serde_json::Value::Array(a)) => a.iter().any(|x| x.as_str() == Some(eid)),
-            Some(serde_json::Value::String(x)) => x == eid,
-            _ => false,
-        }).map(|(k, _)| k.clone()).collect();
-        out.sort();
-        out
-    }
+    fn refs(&self, eid: &str, prop: &str) -> Vec<String> { self.core.refs(eid, prop) }
 }
 
 /// A view that records what an evaluation read: (eid, field) for every attribute, and (REFS, prop) for every
@@ -181,7 +176,7 @@ impl<'a> expr::World for Traced<'a> {
         self.inner.attr(eid, attr)
     }
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> {
-        self.reads.borrow_mut().push((REFS.to_string(), prop.to_string()));
+        self.reads.borrow_mut().push((REFS.to_string(), format!("{}\u{0}{}", prop, eid)));   // per (prop, target)
         self.inner.refs(eid, prop)
     }
 }
@@ -201,8 +196,39 @@ impl Core {
             docs: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
-            seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(),
+            seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
         }
+    }
+
+    /// The eids a value points at: a string, or the strings in a list.
+    pub fn targets(v: &J) -> Vec<String> {
+        match v { J::String(s) => vec![s.clone()], J::Array(a) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(), _ => vec![] }
+    }
+
+    /// The entities whose `prop` holds `eid` (sorted): an index lookup after the prop's first use.
+    pub fn refs(&self, eid: &str, prop: &str) -> Vec<String> {
+        let mut ix = self.ref_ix.borrow_mut();
+        let m = ix.entry(prop.to_string()).or_insert_with(|| {
+            let mut m: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
+            for (k, e) in &self.docs {
+                if let Some(v) = e.props.get(prop) { for t in Self::targets(v) { m.entry(t).or_default().insert(k.clone()); } }
+            }
+            m
+        });
+        m.get(eid).map(|s| s.iter().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Keep the index current for one entity's prop going from `old` to `new`.
+    fn reindex(&self, eid: &str, prop: &str, old: Option<&J>, new: Option<&J>) {
+        let mut ix = self.ref_ix.borrow_mut();
+        let Some(m) = ix.get_mut(prop) else { return };
+        if let Some(o) = old { for t in Self::targets(o) { if let Some(s) = m.get_mut(&t) { s.remove(eid); } } }
+        if let Some(n) = new { for t in Self::targets(n) { m.entry(t).or_default().insert(eid.to_string()); } }
+    }
+
+    fn reindex_entity(&self, eid: &str, old: Option<&Map<String, J>>, new: Option<&Map<String, J>>) {
+        let props: Vec<String> = self.ref_ix.borrow().keys().cloned().collect();
+        for p in props { self.reindex(eid, &p, old.and_then(|o| o.get(&p)), new.and_then(|n| n.get(&p))); }
     }
 
     // ---- the mirror ----------------------------------------------------------------------------
@@ -212,6 +238,8 @@ impl Core {
             self.order.push(Some(eid.clone()));
         }
         self.seen.insert(eid.clone(), now);
+        let old = self.docs.get(&eid).map(|e| e.props.clone());
+        self.reindex_entity(&eid, old.as_ref(), Some(&props));
         self.docs.insert(eid, Ent { cls, props, pos });
     }
 
@@ -269,7 +297,7 @@ impl Core {
 
     fn remove(&mut self, eid: &str) {
         if let Some(i) = self.at.remove(eid) { self.order[i] = None; }
-        self.docs.remove(eid);
+        if let Some(e) = self.docs.remove(eid) { self.reindex_entity(eid, Some(&e.props), None); }
     }
 
     fn eids(&self) -> Vec<String> {
@@ -287,7 +315,12 @@ impl Core {
             } else if let Some((cls, props, pos)) = born {
                 self.load(w.eid.clone(), cls, props, pos, now);
             }
-        } else if let Some(e) = self.docs.get_mut(&w.eid) {
+        } else if self.docs.contains_key(&w.eid) {
+            if w.prop != "position" {
+                let old = self.docs.get(&w.eid).and_then(|e| e.props.get(&w.prop).cloned());
+                self.reindex(&w.eid, &w.prop, old.as_ref(), if w.new.is_null() { None } else { Some(&w.new) });
+            }
+            let e = self.docs.get_mut(&w.eid).unwrap();
             if w.prop == "position" {
                 e.pos = match &w.new { J::Array(a) => Some(a.iter().map(f).collect()), _ => None };
             } else if w.new.is_null() {
