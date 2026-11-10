@@ -70,6 +70,7 @@ choice offered) is NOT the opt-in: it means the default, the API key.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 import queue
@@ -665,6 +666,11 @@ def _footer(answer) -> str:
     return f"\n\n\u00b7 {left} calls left"
 
 
+# #1061: the agent of the turn this rung answers (set by the proxy when it hands the turn over; the SDK thread and
+# its tool calls run in that context): its watches are stamped with it, as on the native serve
+TURN_AGENT: contextvars.ContextVar = contextvars.ContextVar("membrane_turn_agent", default=None)
+
+
 def _tool_handler(name: str, port, answer=None):
     """The SDK tool's handler: the stdio MCP server's own function for
     `name` (mcp_server.TOOL_IMPLS), run off the event loop, relaying to this
@@ -677,7 +683,12 @@ def _tool_handler(name: str, port, answer=None):
         try:
             if port is None:
                 raise _mcp.ProxyError(503, "the seat's proxy port is unknown")
-            text = await asyncio.to_thread(impl, dict(args or {}), int(port))
+            call = dict(args or {})
+            agent = TURN_AGENT.get()
+            if agent:
+                from .server import stamp_watch_owner
+                call = stamp_watch_owner(name, call, agent)
+            text = await asyncio.to_thread(impl, call, int(port))
             return {"content": [{"type": "text",
                                  "text": str(text) + _footer(answer)}]}
         except _mcp.ProxyError as e:
