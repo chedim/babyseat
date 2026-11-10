@@ -122,3 +122,58 @@ class Host {
     if (el.parentNode !== p) p.appendChild(el);
   }
 }
+
+/**
+ * Follow the seat's field: start from its snapshot (/ui/fieldvm: the seat's packs and every entity of a class
+ * they declare on), then apply each `field.write` from the seat's /event stream. When the stream ends, it
+ * reconnects and starts from a fresh snapshot (nothing missed). Read-only toward the seat: what the page's own
+ * packs write stays in the page. `opts.packs` adds page packs (views) on top of the seat's.
+ */
+export async function connect(root, opts = {}) {
+  const host = await start(root, { packs: {}, wasm: opts.wasm });
+  const status = opts.onStatus || (() => {});
+  let stopped = false;
+  host.stop = () => { stopped = true; };
+  const order = (e) => (e.cls === 'Goal' ? 0 : 1);           // a goal's list exists before its tasks' rows
+  async function snapshot() {
+    const r = await fetch('/ui/fieldvm', { credentials: 'same-origin' });
+    if (!r.ok) throw new Error(`snapshot: ${r.status}`);
+    const snap = await r.json();
+    for (const [name, src] of Object.entries(snap.packs || {})) if (name !== 'goalgraph') host.pack(name, src);
+    for (const [name, src] of Object.entries(opts.packs || {})) host.pack(name, src);
+    for (const e of [...snap.entities].sort((a, b) => order(a) - order(b))) host.feed(e.eid, e.cls, e.props);
+    status(`following ${snap.entities.length} entities`);
+  }
+  async function follow() {
+    const r = await fetch('/ui/serve/event', { credentials: 'same-origin', headers: { Accept: 'text/event-stream' } });
+    if (!r.ok || !r.body) throw new Error(`stream: ${r.status}`);
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (!stopped) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const data = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).join('\n');
+        if (!data) continue;
+        let ev; try { ev = JSON.parse(data); } catch { continue; }
+        const e = ev && (ev.type === 'field.write' ? ev : ev.payload && ev.payload.type === 'field.write' ? ev.payload : null);
+        if (!e) continue;
+        host.feed(e.eid, e.cls, e.props || { [e.prop]: e.new });
+      }
+    }
+  }
+  (async () => {
+    let wait = 1000;
+    while (!stopped) {
+      try { await snapshot(); wait = 1000; await follow(); status('stream ended: resyncing'); }
+      catch (err) { status(String(err)); }
+      await new Promise(res => setTimeout(res, wait));
+      wait = Math.min(wait * 2, 30000);
+    }
+  })();
+  return host;
+}

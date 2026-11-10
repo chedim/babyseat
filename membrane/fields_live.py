@@ -59,6 +59,10 @@ WRITER = "trigger:field:"
 LLM_EID = MEMBRANE_NS + "llm"
 
 
+# the running engine (the browser VM's snapshot route reads it: ui_serve /ui/fieldvm)
+CURRENT = None
+
+
 def enabled() -> bool:
     """On by default: the goal graph runs on the field. `MEMBRANE_FIELDS=0` is the kill switch, and a seat whose
     native engine isn't built (or predates `Fields.drain`) keeps the triggers, so the goal graph never goes dark."""
@@ -96,6 +100,7 @@ class Live:
         self.errors = 0
         self.swept = False
         self.pack_eids: dict = {}
+        self.pack_texts: dict = {}
         self.classes: set = set(CLASSES)
         self.file_mtimes: dict = {}
         self._scan_files()
@@ -113,6 +118,7 @@ class Live:
         try:
             self.f.set_pack(name, text)
             err = ""
+            self.pack_texts[name] = text
         except Exception as e:                    # noqa: BLE001
             err = str(e)
             print(f"[fields] {err}"[:300], file=sys.stderr)
@@ -144,6 +150,31 @@ class Live:
                     self.f.load(eid, d.cls, _json(dict(d.properties or {})))
                 n += 1
         return n
+
+    # ---- the browser VM's feed ------------------------------------------------------------------------
+    def snapshot(self) -> dict:
+        """What a page starts from: the loaded packs' text and every entity of a mirrored class."""
+        ents = [{"eid": eid, "cls": d.cls, "props": dict(d.properties or {})}
+                for eid, d in list((self.est.docs or {}).items()) if d.cls in self.classes and not is_pack(eid, d)]
+        return {"packs": dict(self.pack_texts), "entities": ents}
+
+    def publish(self, w: dict) -> None:
+        """The store's write listener for pages: every write to a mirrored entity (the engine's own too) goes to
+        the seat's /event hub as `field.write`; a birth carries the entity's fields. Cheap, never writes."""
+        hub = getattr(getattr(self.srv, "_loop_runner", None), "hub", None)
+        eid = w.get("eid")
+        if hub is None or not eid or str(w.get("path") or "").startswith("rel:"):
+            return
+        d = (self.est.docs or {}).get(eid)
+        if d is None or d.cls not in self.classes or is_pack(eid, d):
+            return
+        prop = str(w.get("prop") or "")
+        ev = ({"type": "field.write", "eid": eid, "cls": d.cls, "prop": prop, "new": w.get("new")} if prop
+              else {"type": "field.write", "eid": eid, "cls": d.cls, "props": dict(d.properties or {})})
+        try:
+            hub.publish(ev)
+        except Exception:                          # noqa: BLE001 -- a page's feed never stops a write
+            pass
 
     # ---- hearing the store ---------------------------------------------------------------------------
     def hear(self, w: dict) -> None:
@@ -280,9 +311,12 @@ def start(srv, thread: bool = True) -> Live | None:
     """Turn the goal graph's field engine on (the default; MEMBRANE_FIELDS=0 is off). Returns None when off."""
     if not enabled():
         return None
+    global CURRENT
     live = Live(srv)
     srv.fields_live = live
+    CURRENT = live
     W.on_write(live.hear)
+    W.on_write(live.publish)
     vm = getattr(srv, "ch_vm", None)
     if vm is not None and hasattr(vm, "on_sweep"):   # the clock ticks on the VM's sweeps, chained after the journal's
         prev = vm.on_sweep
@@ -299,8 +333,12 @@ def start(srv, thread: bool = True) -> Live | None:
 
 
 def stop(srv) -> None:
+    global CURRENT
     live = getattr(srv, "fields_live", None)
     if live is not None:
         W.off_write(live.hear)
+        W.off_write(live.publish)
+        if CURRENT is live:
+            CURRENT = None
         live.stopped.set()
         srv.fields_live = None

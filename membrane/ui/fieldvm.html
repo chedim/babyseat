@@ -28,7 +28,7 @@
   <pre id="errors"></pre>
 </main>
 <script type="module">
-import { start } from './fieldvm.js';
+import { start, connect } from './fieldvm.js';
 
 const DEMO = `PACK demo 1
 IMPORT goalgraph 1
@@ -49,12 +49,20 @@ DomNode.clicked on-setter finish:
   WHEN this.task: this.task.status = 'done'
 `;
 
-const host = await start(document.getElementById('view'), { packs: { demo: DEMO } });
-host.feed('g1', 'Goal', { name: 'ship the browser VM', status: 'open' });
-host.feed('t1', 'Task', { goal: 'g1', name: 'build the wasm target', blocks: ['t2', 't3'], status: 'open' });
-host.feed('t2', 'Task', { goal: 'g1', name: 'mount the DOM', blocks: ['t3'], status: 'open' });
-host.feed('t3', 'Task', { goal: 'g1', name: 'render the in-flight view', status: 'open' });
-document.getElementById('errors').textContent = Object.values(host.errors).join('\n');
+const view = document.getElementById('view');
+const note = document.getElementById('errors');
+let host;
+if (new URLSearchParams(location.search).has('live')) {
+  // ?live: follow the seat's own goal graph (snapshot + /event), drawn by the same view pack
+  host = await connect(view, { packs: { demo: DEMO }, onStatus: s => { document.querySelector('p.note').textContent = 'Live: ' + s; } });
+} else {
+  host = await start(view, { packs: { demo: DEMO } });
+  host.feed('g1', 'Goal', { name: 'ship the browser VM', status: 'open' });
+  host.feed('t1', 'Task', { goal: 'g1', name: 'build the wasm target', blocks: ['t2', 't3'], status: 'open' });
+  host.feed('t2', 'Task', { goal: 'g1', name: 'mount the DOM', blocks: ['t3'], status: 'open' });
+  host.feed('t3', 'Task', { goal: 'g1', name: 'render the in-flight view', status: 'open' });
+}
+note.textContent = Object.values(host.errors).join('\n');
 window.fieldvm = host;
 </script>
 </body>
