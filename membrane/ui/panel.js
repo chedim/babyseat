@@ -33,7 +33,12 @@
 let SEAT = (typeof window !== "undefined" && window.MEMBRANE_NAME) || "the assistant";
 const SERVE = "/ui/serve";
 const SPEAKER_PREFIX = "[HA user: ";
-const SPEAKER_RE = /\[(?:HA )?user: [^\]\n]{1,80}\]/;
+// the speaker line a person's message carries: '[user: X]', '[HA user: X]', or the id form '[user#owner: X]'
+// (speakers._LINE / _ID_LINE on the seat)
+const SPEAKER_RE = /\[(?:HA user|user(?:#[a-z0-9][a-z0-9-]{0,79})?): [^\]\n]{1,80}\]/;
+const SPEAKER_LEAD = /^\s*\[(?:HA user|user(?:#[a-z0-9][a-z0-9-]{0,79})?): /;
+/** A person's message (it starts with a speaker line); the loops' lines don't. */
+function isPerson(text) { return SPEAKER_LEAD.test(String(text || "")); }
 const NEW_TITLE = "New chat";
 const POLL_MS = 1500;
 const START_GRACE_MS = 8000;
@@ -180,7 +185,7 @@ function sseFeed(st, chunk) {
 
 function stripSpeaker(text) {
   const t = String(text || "");
-  if (!/^\s*\[(?:HA )?user: /.test(t)) return t;
+  if (!isPerson(t)) return t;
   const nl = t.indexOf("\n");
   return nl >= 0 ? t.slice(nl + 1) : "";
 }
@@ -2069,7 +2074,7 @@ function offlineNotice(data, zoo) {
     : { text: name + " is offline", switchTo: null };
 }
 
-const AiPanelLogic = { quotaClock, quotaLine, quotaForChat, quotaPopupHtml, QUOTA_PATH, offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, shownModel, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { quotaClock, quotaLine, quotaForChat, quotaPopupHtml, QUOTA_PATH, offlineNotice, isPerson, SPEAKER_RE, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, shownModel, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, sheetSleep, sleepBars, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -3587,7 +3592,7 @@ function definePanel() {
           return el;
         }
         // a person's message carries the speaker line ('[HA user: X]' / '[user: X]'); the loops' don't
-        const person = row.parts.some((p) => p.type === "text" && /^\s*\[(?:HA )?user: /.test(p.text || ""));
+        const person = row.parts.some((p) => p.type === "text" && isPerson(p.text));
         if (!line) {
           el.className = "msg user" + (person ? "" : " machine");
           el.innerHTML = '<div class="bub md">' + md(stripSpeaker(text)) + "</div>";
