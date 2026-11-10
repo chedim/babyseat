@@ -5,6 +5,7 @@ pub mod adapters;
 pub mod learn;
 pub mod banner;
 pub mod recall;
+pub mod mapped;
 pub mod topk;
 pub mod packs;
 pub mod expr;
@@ -225,10 +226,31 @@ impl VecStore {
     fn near(&self, q: Vec<f32>, k: usize) -> Vec<(String, f32)> { self.s.lock().unwrap_or_else(|e| e.into_inner()).near(&q, k) }
 }
 
+/// #1025: the sentence vectors read in place from the store's float16 file (Metal no-copy buffers under
+/// MEMBRANE_GPU_TOPK=1, else the CPU over the same mapping).
+#[pyclass]
+struct MappedVecs { m: std::sync::Mutex<mapped::Mapped> }
+
+#[pymethods]
+impl MappedVecs {
+    #[new]
+    fn new(path: &str, dim: usize) -> PyResult<Self> {
+        let m = mapped::Mapped::open(path, dim, topk::gpu_enabled()).map_err(bad)?;
+        Ok(MappedVecs { m: std::sync::Mutex::new(m) })
+    }
+    /// The top `k` of the first `n` rows: [(row, cosine)], best first. The GIL is released while it runs.
+    fn near(&self, py: Python<'_>, q: Vec<f32>, k: usize, n: usize) -> PyResult<Vec<(usize, f32)>> {
+        py.detach(|| self.m.lock().unwrap_or_else(|e| e.into_inner()).near(&q, k, n)).map_err(bad)
+    }
+    fn on_gpu(&self) -> bool { self.m.lock().unwrap_or_else(|e| e.into_inner()).on_gpu() }
+    fn chunks(&self) -> usize { self.m.lock().unwrap_or_else(|e| e.into_inner()).chunks() }
+}
+
 #[pymodule]
 fn membrane_vm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Core>()?;
     m.add_class::<VecStore>()?;
+    m.add_class::<MappedVecs>()?;
     m.add_function(wrap_pyfunction!(evaluate, m)?)?;
     Ok(())
 }

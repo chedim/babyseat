@@ -391,6 +391,10 @@ name = "membrane_vm"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "libc",
+ "objc2",
+ "objc2-foundation",
+ "objc2-metal",
  "pollster",
  "pyo3",
  "serde_json",

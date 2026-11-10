@@ -88,7 +88,7 @@ class _Matrix:
     def reset(self) -> None:
         with self.lock:
             self.keys, self.row, self.dead, self._mm = [], {}, set(), None
-            self._nv, self._nv_n = None, 0              # the resident copy goes too (#1020 review)
+            self._nv = None                              # the native mapping goes too (#1020 review)
             self._ram, self._base_n = None, 0
             for p in (() if self.readonly else (self.f, self.kf)):
                 try:
@@ -123,34 +123,29 @@ class _Matrix:
         return len(pairs)
 
     def native_top(self, q: np.ndarray, want: int):
-        """#1001 k3: the top `want` by the native VM's resident `near` getter (MEMBRANE_NATIVE_VM=1), or None when the
-        extension is not built. The store holds every row ever appended, keyed 'key\\0row'; masked rows are filtered here."""
+        """#1001 k3 / #1025: the top `want` from the native VM, reading the vectors in place: the float16 file this
+        matrix appends to is memory-mapped, and under MEMBRANE_GPU_TOPK=1 Metal reads the same pages (no second
+        copy). None when the extension isn't built or the matrix lives in memory (readonly); masked rows are
+        filtered here."""
         try:
             from . import membrane_vm as vm
         except Exception:
             return None
+        if self.readonly or not hasattr(vm, "MappedVecs"):
+            return None
         with self.lock:
-            mm, n = self._map(), len(self.keys)
-            if mm is None or not n:
+            n, keys, dead = len(self.keys), self.keys, set(self.dead)
+            if not n:
                 return []
             nv = getattr(self, "_nv", None)
             if nv is None:
-                nv = self._nv = vm.VecStore(DIM)
-                self._nv_n = 0
-            while self._nv_n < n:                        # keep the resident store synced with appended rows
-                b = min(self._nv_n + 4096, n)
-                blk = np.asarray(mm[self._nv_n:b], dtype=np.float32)
-                for j in range(b - self._nv_n):
-                    nv.add(f"{self.keys[self._nv_n + j]}\0{self._nv_n + j}", blk[j].tolist())
-                self._nv_n = b
-            dead = set(self.dead)
+                nv = self._nv = vm.MappedVecs(str(self.f), DIM)
         ask = min(want + len(dead), n)
         out = []
-        for kid, sc in nv.near(q.astype(np.float32).tolist(), ask):
-            key, _, r = kid.rpartition("\0")
-            if int(r) in dead:
+        for r, sc in nv.near(np.asarray(q, np.float32).tolist(), ask, n):   # rows < n never move (append-only)
+            if r in dead:
                 continue
-            out.append((key, float(sc)))
+            out.append((keys[r], float(sc)))
             if len(out) >= want:
                 break
         return out
