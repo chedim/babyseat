@@ -302,3 +302,17 @@ def test_the_turns_facts_are_plain_fields_no_sections(seat, monkeypatch):
     assert CB.PAUSED_LINE not in (r["text"] or "") and CB.MORE_LINE not in (r["text"] or "")
     pack = (Path(FL.__file__).parent / "packs" / "banner.c1f").read_text()
     assert "this.sections" not in pack
+
+
+def test_recall_dials_header_never_becomes_the_conversation_header(seat, monkeypatch):
+    # #1051 (Memo, 2026-11-10): recall:dials carries its own `header` (the RECALL header); copied onto the instance it
+    # replaced the block's THIS CONVERSATION header -> an empty RECALL header above WORKING ON / OPEN
+    d = seat.entity_store.docs[FL.DIALS_EID]
+    d.properties = {**d.properties, "header": RB.HEADER}
+    seat.entity_store.upsert(d, embedder=None)
+    monkeypatch.setattr(RB, "c1f_call", _fake)
+    r = seat.live.banner(object(), "owner", "ses_op", "ses_op", "what is the battery voltage on the boat?",
+                         now=100.0, facts={"paused": True, "alerts": [], "tools": False})
+    text = r["text"] or ""
+    assert text.count(RB.HEADER) == 1, text
+    assert CB.HEADER in text.split("\n")[:3], text

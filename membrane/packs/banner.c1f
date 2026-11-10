@@ -18,7 +18,7 @@ Banner.lines getter: this.lines
 
 -- ---- the whole block (#994, step 1 of the port: no Python in OPEN, DECIDED and the layout) -------------------
 -- Dials on the instance (seeded from today's values; Memo may change them per chat): budget (the block's
--- characters, recall excluded), open_max, decided_max, news_chars (a line's clip), header, paused_line,
+-- characters, recall excluded), open_max, decided_max, news_chars (a line's clip), conv_header, paused_line,
 -- suggest_head, more_line, recall_header, ledger_file (the operator's decisions, a .jsonl of the seat).
 -- The turn writes the seat's facts as fields: paused, alerts (the track alerts it took), tools (the turn carries
 -- tools), and Blurp's blurp / suggest when it is on.
@@ -126,8 +126,8 @@ Banner.rows getter: concat(this.row_paused, this.row_alerts, this.row_working, t
 -- there is nothing of this chat
 Banner.now_parts getter: localtime(clock)
 Banner.now_line getter: strip('NOW (for reference, not an event): ' + prop(this.now_parts, 'date') + ' ' + prop(this.now_parts, 'clock') + ' ' + prop(this.now_parts, 'zone'))
-Banner.used getter: len(this.now_line) + 1 + len(this.header or '')
+Banner.used getter: len(this.now_line) + 1 + len(this.conv_header or '')
 Banner.recall_block getter: concat([this.recall_header], this.lines) if this.lines else []
 Banner.text getter:
-  WHEN this.rows or this.lines: join(concat([this.now_line, this.header], fit(this.rows, this.budget or 900, this.used), this.recall_block), '\n')
+  WHEN this.rows or this.lines: join(concat([this.now_line, this.conv_header], fit(this.rows, this.budget or 900, this.used), this.recall_block), '\n')
   ELSE: None

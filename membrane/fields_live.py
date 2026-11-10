@@ -364,7 +364,7 @@ class Live:
         from . import recall_banner as RB
         led = str(getattr(getattr(self.srv, "user_ledger", None), "path", "") or "")
         want = {"budget": CB.BANNER_CHAR_BUDGET, "open_max": CB.OPEN_MAX, "decided_max": CB.DECIDED_MAX,
-                "news_chars": CB.NEWS_CHARS, "header": CB.HEADER, "paused_line": CB.PAUSED_LINE,
+                "news_chars": CB.NEWS_CHARS, "conv_header": CB.HEADER, "paused_line": CB.PAUSED_LINE,
                 "suggest_head": CB.SUGGEST_HEAD, "more_line": CB.MORE_LINE, "recall_header": RB.HEADER,
                 "ledger_file": os.path.basename(led) if led.endswith(".jsonl") else None,
                 "window": CB.WINDOW_MESSAGES, "focus_k": CB.FOCUS_K, "focus_min_events": CB.FOCUS_MIN_EVENTS,
