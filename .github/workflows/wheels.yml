@@ -32,8 +32,8 @@ jobs:
         include:
           - { name: linux-x86_64, os: ubuntu-latest, archs: x86_64 }
           - { name: linux-aarch64, os: ubuntu-24.04-arm, archs: aarch64 }
-          - { name: macos-arm64, os: macos-14, archs: arm64 }
-          - { name: macos-x86_64, os: macos-14, archs: x86_64 }      # cross-built on Apple silicon
+          - { name: macos-arm64, os: macos-latest, archs: arm64 }
+          - { name: macos-x86_64, os: macos-latest, archs: x86_64 }      # cross-built on Apple silicon
     steps:
       - uses: actions/checkout@v4
         with:
