@@ -53,3 +53,193 @@ references:
       - type: other
         value: "arXiv:2402.17753"
     url: "https://arxiv.org/abs/2402.17753"
+  - type: article
+    title: "LongMemEval: Benchmarking Chat Assistants on Long-Term Interactive Memory"
+    authors:
+      - {family-names: Wu, given-names: Di}
+      - {family-names: Wang, given-names: Hongwei}
+      - {family-names: Yu, given-names: Wenhao}
+      - {family-names: Zhang, given-names: Yuwei}
+      - {family-names: Chang, given-names: Kai-Wei}
+      - {family-names: Yu, given-names: Dong}
+    year: 2024
+    identifiers:
+      - {type: other, value: "arXiv:2410.10813"}
+    url: "https://arxiv.org/abs/2410.10813"
+    notes: "Recall benchmark (benchmark/)."
+  - type: article
+    title: "Computing Machinery and Intelligence"
+    authors:
+      - {family-names: Turing, given-names: "Alan M."}
+    year: 1950
+    journal: Mind
+    volume: 59
+    issue: "236"
+    start: 433
+    end: 460
+    notes: "The child-machine idea Blurp grows up on."
+  - type: article
+    title: "Every good regulator of a system must be a model of that system"
+    authors:
+      - {family-names: Conant, given-names: "Roger C."}
+      - {family-names: Ashby, given-names: "W. Ross"}
+    year: 1970
+    journal: "International Journal of Systems Science"
+    volume: 1
+    issue: "2"
+    start: 89
+    end: 97
+    notes: "The regulator argument behind the self's model of its world."
+  - type: conference-paper
+    title: "A preliminary architecture for a basic data-flow processor"
+    authors:
+      - {family-names: Dennis, given-names: "Jack B."}
+      - {family-names: Misunas, given-names: "David P."}
+    year: 1975
+    conference: {name: "2nd Annual Symposium on Computer Architecture (ISCA '75)"}
+    start: 126
+    end: 132
+    notes: "Dataflow execution: the field engine's getters recalculate when their inputs change (#994, #1001)."
+  - type: conference-paper
+    title: "Reciprocal rank fusion outperforms Condorcet and individual rank learning methods"
+    authors:
+      - {family-names: Cormack, given-names: "Gordon V."}
+      - {family-names: Clarke, given-names: "Charles L. A."}
+      - {family-names: Büttcher, given-names: Stefan}
+    year: 2009
+    conference: {name: "32nd International ACM SIGIR Conference on Research and Development in Information Retrieval"}
+    start: 758
+    end: 759
+    notes: "RRF merges recall's lanes (rrf_k = 60, as in the paper)."
+  - type: conference-paper
+    title: "Okapi at TREC-3"
+    authors:
+      - {family-names: Robertson, given-names: "Stephen E."}
+      - {family-names: Walker, given-names: Steve}
+      - {family-names: Jones, given-names: Susan}
+      - {family-names: Hancock-Beaulieu, given-names: "Micheline M."}
+      - {family-names: Gatford, given-names: Mike}
+    year: 1995
+    conference: {name: "Third Text REtrieval Conference (TREC-3), NIST Special Publication 500-225"}
+    notes: "BM25, recall's keyword lane."
+  - type: article
+    title: "Étude comparative de la distribution florale dans une portion des Alpes et des Jura"
+    authors:
+      - {family-names: Jaccard, given-names: Paul}
+    year: 1901
+    journal: "Bulletin de la Société Vaudoise des Sciences Naturelles"
+    volume: 37
+    start: 547
+    end: 579
+    notes: "The Jaccard index, recall's duplicate cut."
+  - type: article
+    title: "Holographic reduced representations"
+    authors:
+      - {family-names: Plate, given-names: "Tony A."}
+    year: 1995
+    journal: "IEEE Transactions on Neural Networks"
+    volume: 6
+    issue: "3"
+    start: 623
+    end: 641
+    notes: "Vector-symbolic binding, the root of the field's VSA memory."
+  - type: article
+    title: "Hyperdimensional computing: An introduction to computing in distributed representation with high-dimensional random vectors"
+    authors:
+      - {family-names: Kanerva, given-names: Pentti}
+    year: 2009
+    journal: "Cognitive Computation"
+    volume: 1
+    issue: "2"
+    start: 139
+    end: 159
+    notes: "Hyperdimensional computing, the field's vector memory."
+  - type: generic
+    title: "Open Source Strikes Bread - New Fluffy Embeddings Model (mxbai-embed-large)"
+    authors:
+      - {family-names: Lee, given-names: Sean}
+      - {family-names: Shakir, given-names: Aamir}
+      - {family-names: Koenig, given-names: Darius}
+      - {name: Mixedbread}
+    year: 2024
+    url: "https://www.mixedbread.ai/blog/mxbai-embed-large-v1"
+    notes: "The sentence embedder (mxbai-embed-large)."
+  - type: article
+    title: "BGE M3-Embedding: Multi-Lingual, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation"
+    authors:
+      - {family-names: Chen, given-names: Jianlv}
+      - {family-names: Xiao, given-names: Shitao}
+      - {family-names: Zhang, given-names: Peitian}
+      - {family-names: Luo, given-names: Kun}
+      - {family-names: Lian, given-names: Defu}
+      - {family-names: Liu, given-names: Zheng}
+    year: 2024
+    identifiers:
+      - {type: other, value: "arXiv:2402.03216"}
+    url: "https://arxiv.org/abs/2402.03216"
+    notes: "The reranker's base (BAAI/bge-reranker-v2-m3)."
+  - type: article
+    title: "C-Pack: Packaged Resources To Advance General Chinese Embedding"
+    authors:
+      - {family-names: Xiao, given-names: Shitao}
+      - {family-names: Liu, given-names: Zheng}
+      - {family-names: Zhang, given-names: Peitian}
+      - {family-names: Muennighoff, given-names: Niklas}
+    year: 2023
+    identifiers:
+      - {type: other, value: "arXiv:2309.07597"}
+    url: "https://arxiv.org/abs/2309.07597"
+    notes: "The BGE model family the reranker comes from."
+  - type: software
+    title: "spaCy: Industrial-strength Natural Language Processing in Python"
+    authors:
+      - {family-names: Honnibal, given-names: Matthew}
+      - {family-names: Montani, given-names: Ines}
+      - {family-names: Van Landeghem, given-names: Sofie}
+      - {family-names: Boyd, given-names: Adriane}
+    year: 2020
+    doi: "10.5281/zenodo.1212303"
+    notes: "Parsing for the living language and sentence structures (en_core_web_sm)."
+  - type: conference-paper
+    title: "PyTorch: An Imperative Style, High-Performance Deep Learning Library"
+    authors:
+      - {family-names: Paszke, given-names: Adam}
+      - {name: "and others"}
+    year: 2019
+    conference: {name: "Advances in Neural Information Processing Systems 32 (NeurIPS 2019)"}
+    notes: "Runs the reranker."
+  - type: software
+    title: "Ollama"
+    authors: [{name: "Ollama contributors"}]
+    url: "https://github.com/ollama/ollama"
+    notes: "The local model server babyseat sits in front of, and the embedder's host."
+  - type: software
+    title: "opencode"
+    authors: [{name: "opencode contributors (SST)"}]
+    url: "https://github.com/sst/opencode"
+    notes: "The agent and serve protocol the seat speaks."
+  - type: software
+    title: "SQLite"
+    authors: [{family-names: Hipp, given-names: "D. Richard"}]
+    url: "https://sqlite.org"
+    notes: "The field's store (#971)."
+  - type: software
+    title: "Couchbase Lite"
+    authors: [{name: "Couchbase, Inc."}]
+    url: "https://github.com/couchbase/couchbase-lite-C"
+    notes: "The field's earlier store, still supported."
+  - type: software
+    title: "PyO3"
+    authors: [{name: "PyO3 contributors"}]
+    url: "https://github.com/PyO3/pyo3"
+    notes: "Python bindings for the native cliffhanger VM."
+  - type: software
+    title: "wgpu"
+    authors: [{name: "gfx-rs contributors"}]
+    url: "https://github.com/gfx-rs/wgpu"
+    notes: "GPU compute for vector getters (#1001)."
+  - type: software
+    title: "cliffhanger"
+    authors: [{family-names: Chechetkin, given-names: "Dmitrii O."}]
+    url: "https://github.com/chedim/cliffhanger"
+    notes: "The language the field runs; its README credits its own influences (JavaScript, Forth, Appian SAIL, MIT RMPL, SQL, Kafka)."
