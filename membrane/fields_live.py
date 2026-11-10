@@ -79,8 +79,66 @@ def _json(v) -> str:
     return json.dumps(v, default=str)
 
 
+BANNER_CLASS = "Banner"
+BANNER_NS = MEMBRANE_NS + "Banner:"
+DIALS_EID = MEMBRANE_NS + "recall:dials"
+
+
+def banner_eid(owner: str, chat: str) -> str:
+    """The banner instance of one person in one chat (internal chats too)."""
+    return f"{BANNER_NS}{owner or 'seat'}:{chat}"
+
+
+STORE_EID = "Store:field"
+SQL_ARRIVED = "\x00sql"                          # the queue item a finished query sends to the worker
+
+
+def _tool_names() -> list:
+    """The seat's own tool and method names (never a chat's focus): the banner's dial."""
+    try:
+        from . import entity_block as EB
+        return sorted(str(t) for t in EB._tool_names())
+    except Exception:                                      # noqa: BLE001
+        return []
+
+
+def mark_delivered(est, conv: str, seq) -> None:
+    """This chat's turn reached the model: its banner instances' SINCE counts from here (`mark_seq`)."""
+    if est is None or not conv or seq is None:
+        return
+    chat = conv[4:] if conv.startswith("sid:") else conv
+    for eid, d in list((est.docs or {}).items()):
+        if eid.startswith(BANNER_NS) and eid.endswith(":" + chat) and (d.properties or {}).get("mark_seq") != seq:
+            d.properties = {**(d.properties or {}), "mark_seq": seq}
+            est.upsert(d, embedder=None)
+
+
+def _store_file(srv) -> str:
+    """The seat's SQLite store file (the SQLite backend's database), or '' (another store: no sql())."""
+    be = getattr(getattr(srv, "efield", None), "b", None)
+    return str(getattr(getattr(be, "db", None), "file", "") or "")
+
+
 class _Host:
-    """The engine's host callbacks: the goal graph's setters bind by class, so none of these lookups is used."""
+    """The engine's host callbacks: the goal graph's setters bind by class, so none of these lookups is used.
+    `call`: a Banner getter's built-ins (recall_banner.c1f_call), during a banner build only."""
+    def __init__(self, live=None):
+        self.live = live
+
+    # the slow built-ins run on the drivers' threads, off the engine's lock (the getter reads None until they land)
+    later = frozenset({"recall", "rerank"})
+
+    def call(self, name, args_json, asker=None):
+        ctxs = getattr(self.live, "ctxs", None) or {}
+        ctx = ctxs.get(str(asker).split("\0", 1)[0]) if asker else None
+        if ctx is None and len(ctxs) == 1 and not asker:
+            ctx = next(iter(ctxs.values()))           # a call in the round: the one build running
+        if ctx is None:
+            return None
+        from . import recall_banner as RB
+        out = RB.c1f_call(ctx, name, json.loads(args_json))
+        return None if out is RB.NOT_MINE else json.dumps(out, default=float)
+
     def resolve(self, s): return None
     def resolve_exact(self, s): return None
     def dispatch(self, e, m): return None
@@ -93,7 +151,21 @@ class Live:
     def __init__(self, srv):
         from . import membrane_vm as MV
         self.srv, self.est = srv, srv.entity_store
-        self.f = MV.Fields(_Host())
+        self.f = MV.Fields(_Host(self))
+        self.ctxs: dict = {}                       # banner eid -> its build's context while its getters run
+        self.cls_of: dict = {}                     # mirrored eid -> its class (a removal's event names it, #1054)
+        self.store_path = _store_file(srv)
+        if self.store_path:                        # the store driver: `sql(...)` in packs reads it, read-only
+            try:
+                self.f.set_store(self.store_path)
+            except Exception as e:                 # noqa: BLE001 -- the field runs; sql() then says no store
+                print(f"[fields] the store driver is off ({e})", file=sys.stderr)
+                self.store_path = ""
+        if not self.store_path:                    # the stdlib drivers (fs, proc) still run, in the seat's folder
+            try:
+                self.f.set_io(os.getcwd())
+            except Exception:                      # noqa: BLE001
+                pass
         self.q: queue.Queue = queue.Queue()
         self.busy = threading.Lock()
         self.stopped = threading.Event()
@@ -107,9 +179,30 @@ class Live:
         for eid, d in list((self.est.docs or {}).items()):
             if is_pack(eid, d):
                 self._pack_entity(eid, d)
+        self._seed_store()
         self.loaded = self._mirror()
         self.f.rebuild(time.time())          # the getters compute once; their values are stored, no setter runs
         self._apply()
+
+    def mirrored(self, d) -> bool:
+        """An entity the engine sees: its class is a pack's, or a pack's class is one of its ISA kinds
+        (`parents: ["cls:chatthing"]`: the kind's getters and setters apply to it, its own class unchanged)."""
+        if d.cls in self.classes:
+            return True
+        ps = (d.properties or {}).get("parents")
+        if not ps:
+            return False
+        kinds = {c.lower() for c in self.classes}
+        return any(str(x).lower().split(":", 1)[-1] in kinds for x in (ps if isinstance(ps, list) else [ps]))
+
+    def _seed_store(self) -> None:
+        """The store pack's one entity (Store:field), so its getters (tables, counts) run on the seat's store."""
+        if "Store" not in self.classes or not self.store_path or STORE_EID in (self.est.docs or {}):
+            return
+        from .entities import QuantumEntity
+        with W.as_writer(WRITER + "store"):
+            self.est.upsert(QuantumEntity(eid=STORE_EID, cls="Store", properties={
+                "name": "the seat's store", "path": self.store_path, "counted": True}), embedder=None)
 
     # ---- packs ---------------------------------------------------------------------------------------
     def _pack(self, name: str, text: str, eid) -> bool:
@@ -153,8 +246,9 @@ class Live:
         """Load every entity of a mirrored class the engine hasn't seen (after a pack adds a class too)."""
         n = 0
         for eid, d in list((self.est.docs or {}).items()):
-            if d.cls in self.classes:
+            if self.mirrored(d):
                 if not self.f.has(eid):
+                    self.cls_of[eid] = d.cls
                     self.f.load(eid, d.cls, _json(dict(d.properties or {})))
                 n += 1
         return n
@@ -163,7 +257,7 @@ class Live:
     def snapshot(self) -> dict:
         """What a page starts from: the loaded packs' text and every entity of a mirrored class."""
         ents = [{"eid": eid, "cls": d.cls, "props": dict(d.properties or {})}
-                for eid, d in list((self.est.docs or {}).items()) if d.cls in self.classes and not is_pack(eid, d)]
+                for eid, d in list((self.est.docs or {}).items()) if self.mirrored(d) and not is_pack(eid, d)]
         return {"packs": dict(self.pack_texts), "entities": ents}
 
     def publish(self, w: dict) -> None:
@@ -174,9 +268,18 @@ class Live:
         if hub is None or not eid or str(w.get("path") or "").startswith("rel:"):
             return
         d = (self.est.docs or {}).get(eid)
-        if d is None or d.cls not in self.classes or is_pack(eid, d):
-            return
         prop = str(w.get("prop") or "")
+        if d is None:
+            # #1054: a removal (prop "", new None): the pages drop it too, when the engine held it
+            if not prop and w.get("new") is None and eid in self.cls_of:
+                cls = self.cls_of.get(eid) or ""
+                try:
+                    hub.publish({"type": "field.remove", "eid": eid, "cls": cls})
+                except Exception:                  # noqa: BLE001
+                    pass
+            return
+        if not self.mirrored(d) or is_pack(eid, d):
+            return
         ev = ({"type": "field.write", "eid": eid, "cls": d.cls, "prop": prop, "new": w.get("new")} if prop
               else {"type": "field.write", "eid": eid, "cls": d.cls, "props": dict(d.properties or {})})
         try:
@@ -194,13 +297,27 @@ class Live:
         if not eid or str(w.get("path") or "").startswith("rel:"):
             return
         d = (self.est.docs or {}).get(eid)
-        if d is None or (d.cls not in self.classes and not is_pack(eid, d)):
+        if d is None:
+            if not w.get("prop") and w.get("new") is None and eid in self.cls_of:
+                self.q.put((eid, "", None, time.time(), writer))       # #1054: removed -> it leaves the engine
             return
-        self.q.put((eid, str(w.get("prop") or ""), w.get("new"), time.time()))
+        if not self.mirrored(d) and not is_pack(eid, d):
+            return
+        if not is_pack(eid, d):
+            self.cls_of[eid] = d.cls                 # its class outlives it (a removal's event names it)
+        self.q.put((eid, str(w.get("prop") or ""), w.get("new"), time.time(), writer))
 
-    def _one(self, eid: str, prop: str, new, now: float) -> None:
+    def _one(self, eid: str, prop: str, new, now: float, writer: str = "py") -> None:
+        if eid == SQL_ARRIVED:                       # a getter's query finished: the getters waiting for it recompute
+            self.f.settle(now)
+            self._apply()
+            return
         d = (self.est.docs or {}).get(eid)
         if d is None:
+            if not prop and self.f.has(eid):         # #1054: removed from the store -> it leaves the engine
+                self.f.remove(eid, now)
+                self._apply()
+            self.cls_of.pop(eid, None)
             return
         if is_pack(eid, d):                          # a pack written: reload it, mirror any new class, rebuild
             if prop in ("", "c1f", "name") and self._pack_entity(eid, d):
@@ -216,10 +333,10 @@ class Live:
                 return
         if prop == "position":
             return
-        self.f.write(eid, prop, _json(new), now)
+        self.f.write(eid, prop, _json(new), now, writer or "py")     # who wrote it: entity scripts never run effects
         self._apply()
 
-    def _apply(self) -> None:
+    def _apply(self) -> dict:
         out = json.loads(self.f.drain())
         for w in out.get("writes") or []:
             if "born" in w:                          # a setter created it (`<Class>:<key>` of its own or imported class)
@@ -241,6 +358,101 @@ class Live:
             with W.as_writer(WRITER + "plan"):
                 llm.properties = {**(llm.properties or {}), "call": c}
                 self.est.upsert(llm, embedder=None)
+        return out
+
+    # ---- the banner (#994): a Banner pack's `lines` for one person in one chat -----------------------
+    def has_banner(self) -> bool:
+        return BANNER_CLASS in self.classes
+
+    def _banner_instance(self, eid: str, owner: str, chat: str):
+        d = (self.est.docs or {}).get(eid)
+        if d is not None:
+            return d
+        from . import recall_banner as RB
+        from .entities import QuantumEntity
+        dials = (self.est.docs or {}).get(DIALS_EID)
+        props = {k: v for k, v in ((dials.properties if dials is not None else None) or {}).items()
+                 if k not in ("name", "summary", "parents", "born", "silent_birth", "refused", "error")}
+        props.update({"name": f"banner: {owner} in {chat}", "owner": owner, "chat": chat,
+                      "pool": props.get("pool", RB.POOL), "n": props.get("n", RB.BANNER_N), "silent_birth": True})
+        with W.as_writer(WRITER + "banner"):
+            self.est.upsert(QuantumEntity(eid=eid, cls=BANNER_CLASS, properties=props), embedder=None)
+        return (self.est.docs or {}).get(eid)
+
+    def _banner_dials(self, d) -> dict:
+        """The layout's dials an instance lacks (today's values, conv_banner's); an instance keeps what it has."""
+        from . import conv_banner as CB
+        from . import recall_banner as RB
+        led = str(getattr(getattr(self.srv, "user_ledger", None), "path", "") or "")
+        want = {"budget": CB.BANNER_CHAR_BUDGET, "open_max": CB.OPEN_MAX, "decided_max": CB.DECIDED_MAX,
+                "news_chars": CB.NEWS_CHARS, "conv_header": CB.HEADER, "paused_line": CB.PAUSED_LINE,
+                "suggest_head": CB.SUGGEST_HEAD, "more_line": CB.MORE_LINE, "recall_header": RB.HEADER,
+                "ledger_file": os.path.basename(led) if led.endswith(".jsonl") else None,
+                "window": CB.WINDOW_MESSAGES, "focus_k": CB.FOCUS_K, "focus_min_events": CB.FOCUS_MIN_EVENTS,
+                "working_chars": CB.WORKING_ON_CHARS, "news_max": CB.NEWS_MAX, "stable_min_convs": CB.STABLE_MIN_CONVS,
+                "stable_min_days": CB.STABLE_MIN_DAYS, "stable_max": CB.STABLE_MAX, "tool_names": _tool_names()}
+        have = d.properties or {}
+        return {k: v for k, v in want.items() if k not in have}
+
+    def banner(self, field, owner: str, chat: str, session: str, text: str, now: float | None = None,
+               facts: dict | None = None) -> dict:
+        """Run this chat's banner for the message: {eid, lines, text, error, state}. The pack decides what a message
+        recalls and lays out the block (`text`); `facts` are the seat's facts for this turn (paused, alerts, tools, and
+        Blurp's blurp / suggest when it is on), written as plain fields like the ask. A
+        getter's error is the banner's error (shown, never replaced). The reads the pack asked for (sql, jsonl) are
+        waited for here, outside the engine's lock and the GIL. `state` is None when nothing was recalled."""
+        now = time.time() if now is None else now
+        eid = banner_eid(owner, chat)
+        writes: list = []
+        ctx = {"field": field, "session": session, "now": now, "rows": {}, "timing": {}}
+        with self.busy:
+            d = self._banner_instance(eid, owner, chat)
+            dials = self._banner_dials(d)
+            if dials:
+                with W.as_writer(WRITER + "banner"):
+                    d.properties = {**(d.properties or {}), **dials}
+                    self.est.upsert(d, embedder=None)
+                if self.f.has(eid):
+                    for k, v in dials.items():
+                        self.f.write(eid, k, _json(v), now)
+            if not self.f.has(eid):
+                self.f.load(eid, d.cls, _json(dict(d.properties or {})))
+                self.f.settle(now)
+                self._apply()
+            self.ctxs[eid] = ctx
+            self.f.sql_forget(eid)                     # this build's recall starts fresh (the same words recall again)
+        try:
+            with self.busy:
+                cur0 = json.loads(self.f.get(eid)) or {}
+                if cur0.get("ask") == text:
+                    self.f.write(eid, "ask", "null", now)      # the same words again: recall again
+                # only what changed is written, the ask last: a write re-runs what read it, with the ask it sees
+                for p, v in (("session", session), *sorted((facts or {}).items()), ("ask", text)):
+                    if p != "ask" and cur0.get(p) == v:
+                        continue
+                    with W.as_writer(WRITER + "banner"):
+                        d.properties = {**(d.properties or {}), p: v}
+                        self.est.upsert(d, embedder=None)
+                    self.f.write(eid, p, _json(v), now)
+                writes += self._apply().get("writes") or []
+            # the pack's reads (sql, jsonl, recall, rerank): wait for each WITHOUT the field's lock (a slow one never
+            # stalls the thinker or another chat), and settle after the last one too (its answer lands on the round
+            # after it finishes); a round may ask for more (a read that needs another's answer)
+            while self.f.sql_pending():               # running, or finished and not landed yet
+                self.f.sql_wait(None)
+                with self.busy:
+                    self.f.settle(now)
+                    writes += self._apply().get("writes") or []
+            with self.busy:
+                refused = next((w.get("new") for w in reversed(writes)
+                                if w.get("eid") == eid and w.get("prop") == "refused"), None)
+                cur = json.loads(self.f.get(eid)) or {}
+        finally:
+            self.ctxs.pop(eid, None)
+        lines = [str(x) for x in (cur.get("lines") or []) if x is not None] if not refused else []
+        from . import recall_banner as RB
+        return {"eid": eid, "lines": lines, "text": None if refused else cur.get("text"), "error": refused,
+                "state": None if refused else RB.c1f_state(ctx, lines)}
 
     # ---- running -------------------------------------------------------------------------------------
     def settle(self) -> None:
@@ -295,6 +507,13 @@ class Live:
                 self._apply()
         self.tick(now)
 
+    def _sql_waiter(self) -> None:
+        """The store driver's results: wait (no engine lock, no GIL) until a getter's query finishes, then let the
+        worker settle the getters waiting for it. A query never runs under the engine's lock, so it can't hang it."""
+        while not self.stopped.is_set():
+            if self.f.sql_wait(1.0):
+                self.q.put((SQL_ARRIVED, "", None, time.time()))
+
     def _worker(self) -> None:
         from . import goalgraph as GG
         next_tick = time.time() + GG.WAIT_TICK_S
@@ -336,6 +555,7 @@ def start(srv, thread: bool = True) -> Live | None:
         live.swept = True
     if thread:
         threading.Thread(target=live._worker, daemon=True, name="fields-live").start()
+        threading.Thread(target=live._sql_waiter, daemon=True, name="fields-io").start()   # reads and effects land
     print(f"[fields] the goal graph runs on the field engine: {live.loaded} entities loaded", file=sys.stderr)
     return live
 
@@ -349,4 +569,8 @@ def stop(srv) -> None:
         if CURRENT is live:
             CURRENT = None
         live.stopped.set()
+        try:
+            live.f.sql_interrupt()                   # running queries stop with the seat
+        except Exception:                            # noqa: BLE001
+            pass
         srv.fields_live = None

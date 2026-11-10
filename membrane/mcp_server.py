@@ -459,8 +459,10 @@ TOOLS: list[dict] = [
             "properties": {
                 "class": {"type": "string",
                           "description": "Decision | FailureMode | "
-                                         "Component | Goal | Model | Other "
-                                         "(default Component)."},
+                                         "Component | Goal | Model | Other, "
+                                         "or any class a loaded .c1f pack declares "
+                                         "(its getters and setters then run on it; "
+                                         "default Component)."},
                 "name": {"type": "string"},
                 "summary": {"type": "string",
                             "description": "One line: what it is / what "

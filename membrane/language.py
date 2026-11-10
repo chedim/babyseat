@@ -815,6 +815,13 @@ def _state(est, eid: str) -> str:
     return str(((est.docs or {}).get(eid) or QuantumEntity(eid="", cls="")).properties.get("status") or "")
 
 
+def teach_hint_on() -> bool:
+    """The unknown-words hint (stage 3, #802): off in 0.7.5 -- it mis-segments ordinary messages and invites junk
+    definitions (#1052); MEMBRANE_TEACH_HINT=1 turns it on until its segmentation is fixed (0.7.6)."""
+    import os
+    return os.environ.get("MEMBRANE_TEACH_HINT", "0").strip().lower() in ("1", "on", "true", "yes")
+
+
 def answer_on() -> bool:
     """Membrane's own 🧩 answers: on by default; MEMBRANE_ANSWER=0 turns them off."""
     import os

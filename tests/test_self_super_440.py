@@ -72,6 +72,7 @@ def test_the_backoff_is_capped():
 
 def test_with_the_flag_off_the_seat_runs_the_loop_in_process(monkeypatch):
     monkeypatch.setenv(SUP.FLAG, "0")            # #440 part 5: unset now means on; "0" is off
+    monkeypatch.setenv(SUP.BLURP_FLAG, "1")      # 0.7.5: Blurp itself is off unless switched on
     srv = _felt()
     started = []
     monkeypatch.setattr(SL, "start", lambda s: started.append(s))
@@ -82,6 +83,7 @@ def test_with_the_flag_off_the_seat_runs_the_loop_in_process(monkeypatch):
 
 def test_with_the_flag_on_the_seat_does_not_start_the_in_process_loop(monkeypatch):
     monkeypatch.setenv(SUP.FLAG, "1")
+    monkeypatch.setenv(SUP.BLURP_FLAG, "1")      # 0.7.5: Blurp itself is off unless switched on
     srv = _felt()
     SL.set_mode(srv, "off")
     started = []

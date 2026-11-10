@@ -29,6 +29,16 @@ def _ctx(srv, said):
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class GapsToTheModel(unittest.TestCase):
+    def setUp(self):                    # #1052: the hint is off by default in 0.7.5; these test it switched on
+        self._env = os.environ.get("MEMBRANE_TEACH_HINT")
+        os.environ["MEMBRANE_TEACH_HINT"] = "1"
+
+    def tearDown(self):
+        if self._env is None:
+            os.environ.pop("MEMBRANE_TEACH_HINT", None)
+        else:
+            os.environ["MEMBRANE_TEACH_HINT"] = self._env
+
     def test_an_unknown_verb_is_told_with_its_teaching_sentence(self):
         srv, f, est, goal, g1, g2 = _world()
         ctx = _ctx(srv, "shut goal one")
@@ -75,3 +85,13 @@ class GapsToTheModel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
+class TheHintIsOffByDefault(unittest.TestCase):
+    def test_no_teach_hint_without_the_switch(self):
+        # #1052 (the operator, 2026-11-10): the hint mis-segments ordinary messages ("welcome back ...") and invites
+        # junk definitions into the field; off in 0.7.5, MEMBRANE_TEACH_HINT=1 turns it on
+        os.environ.pop("MEMBRANE_TEACH_HINT", None)
+        srv, f, est, goal, g1, g2 = _world()
+        self.assertNotIn("doesn't know", _ctx(srv, "shut goal one"))

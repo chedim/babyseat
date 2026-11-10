@@ -35,7 +35,43 @@ pub struct OnSet {
 fn me(eid: &str) -> [(&'static str, &str); 2] { [("this", eid), ("x", eid)] }
 fn is_me(target: &str) -> bool { target == "this" || target == "x" }
 
+/// The names a write sees: `this` and the loop names bound to entities; `clock` and the loop names bound to values.
+fn scope<'a>(eid: &'a str, binds: &'a [(String, crate::vm::Item)], now: f64) -> (Vec<(&'a str, &'a str)>, Vec<(&'a str, J)>) {
+    let mut vars: Vec<(&str, &str)> = me(eid).to_vec();
+    let mut extra: Vec<(&str, J)> = vec![("clock", json!(now))];
+    for (k, it) in binds {
+        match it { crate::vm::Item::Ent(e) => vars.push((k.as_str(), e.as_str())), crate::vm::Item::Val(v) => extra.push((k.as_str(), v.clone())) }
+    }
+    (vars, extra)
+}
+
+
 pub const LLM_CALL: &str = "membrane::llm.call";
+
+/// The entities a getter of `cls` applies to: that class, or an entity with it among its ISA parents.
+fn of_kind(core: &Core, cls: &str) -> Vec<String> {
+    core.docs.iter().filter(|(k, e)| e.cls == cls || has_kind(core, k, &e.props, cls)).map(|(k, _)| k.clone()).collect()
+}
+
+/// A kind among an entity's ISA parents: named by the parent's id (`cls:chatthing` is ChatThing, mirrored or not),
+/// or found up the chain (core.is_a).
+fn has_kind(core: &Core, eid: &str, props: &serde_json::Map<String, J>, cls: &str) -> bool {
+    let Some(ps) = props.get("parents").filter(|p| !p.is_null()) else { return false };
+    let named = |p: &J| p.as_str().map(|s| s.rsplit(':').next().unwrap_or("").eq_ignore_ascii_case(cls)).unwrap_or(false);
+    let direct = match ps { J::Array(a) => a.iter().any(named), p => named(p) };
+    direct || core.is_a(&NoHost, eid, cls)
+}
+
+/// No lookups: what ISA needs is on the entities (getters_of runs where no host is at hand).
+struct NoHost;
+impl Host for NoHost {
+    fn resolve(&self, _: &str) -> Option<String> { None }
+    fn resolve_exact(&self, _: &str) -> Option<String> { None }
+    fn dispatch(&self, _: &str, _: &str) -> Option<String> { None }
+    fn vel(&self, _: &str, _: f64, _: f64) -> bool { false }
+    fn align(&self, _: &str, _: f64) -> bool { false }
+    fn live(&self, _: &str, _: bool) -> Option<String> { None }
+}
 
 /// writer prefix of an own-name store (rule 6): it fires getters but not setters
 const DIRECT: &str = "field:direct:";
@@ -45,7 +81,11 @@ pub fn on_setters() -> Vec<OnSet> { crate::translate::goalgraph_setters() }
 /// A getter declared in cliffhanger (`<Class>.<field> getter: <expr>`, #994 rule 2): the field's value is the
 /// expression, recalculated when something it read changes. `this` is the entity; `clock` the time.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Getter { pub cls: String, pub prop: String, pub expr: String }
+pub struct Getter {
+    pub cls: String, pub prop: String, pub expr: String,
+    /// how many written arms were folded into `expr` (the size caps hold per arm: the fold may be that many times longer)
+    pub arms: usize,
+}
 
 /// The input key of a getter that reads `clock`.
 const CLOCK: &str = "\u{0}clock";
@@ -256,16 +296,19 @@ impl Fields {
 
     fn getters_of(&self, core: &Core, eid: &str) -> Vec<usize> {
         let Some(e) = core.docs.get(eid) else { return vec![] };
-        let mut v: Vec<usize> = (0..self.getters.len()).filter(|&i| self.getters[i].cls == e.cls).collect();
+        // its own class, or a kind among its ISA parents (`parents: ["cls:chatthing"]`), as setters bind (core.is_a)
+        let mut v: Vec<usize> = (0..self.getters.len()).filter(|&i| self.getters[i].cls == e.cls
+            || has_kind(core, eid, &e.props, &self.getters[i].cls)).collect();
         v.sort_by_key(|&i| self.glevel[i]);
         v
     }
 
     /// Evaluate one getter instance, record what it read as its inputs, and return its value (None on an error,
     /// with a receipt). Its own field is never an input (rule 3: own name = previous value).
-    fn compute(&mut self, core: &mut Core, eid: &str, gi: usize, now: f64, seq: &mut i64) -> Option<J> {
+    fn compute(&mut self, core: &mut Core, host: Option<&dyn Host>, eid: &str, gi: usize, now: f64, seq: &mut i64) -> Option<J> {
         let g = self.getters[gi].clone();
-        let (r, reads) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))]);
+        let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
+        let (r, reads) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker, g.arms.max(1));
         let key = (eid.to_string(), gi);
         if let Some(old) = self.reads.remove(&key) { for k in old { if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); } } }
         let mut ins: Vec<(String, String)> = reads.into_iter().filter(|(e, p)| !(e == eid && *p == g.prop)).collect();
@@ -308,8 +351,9 @@ impl Fields {
     /// plan written entity by entity) must not fire on a half-made state. What references it recalculates live.
     fn birth(&mut self, core: &mut Core, e: &str, now: f64, seq: &mut i64) {
         self.known.insert(e.to_string());
+        if let Some(c) = core.docs.get(e).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c)); }
         for gi in self.getters_of(core, e) {
-            let Some(v) = self.compute(core, e, gi, now, seq) else { continue };
+            let Some(v) = self.compute(core, None, e, gi, now, seq) else { continue };
             let prop = self.getters[gi].prop.clone();
             if core.docs.get(e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
             *seq += 1;
@@ -331,10 +375,10 @@ impl Fields {
         for gi in order {
             let cls = self.getters[gi].cls.clone();
             let prop = self.getters[gi].prop.clone();
-            let mut es: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == cls).map(|(k, _)| k.clone()).collect();
+            let mut es: Vec<String> = of_kind(core, &cls);
             es.sort();
             for e in es {
-                let Some(v) = self.compute(core, &e, gi, now, seq) else { continue };
+                let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
                 if core.docs.get(&e).and_then(|d| d.props.get(&prop)) != Some(&v) { self.dirty.insert((self.glevel[gi], e, gi)); }
             }
         }
@@ -349,10 +393,10 @@ impl Fields {
         order.sort_by_key(|&i| self.glevel[i]);
         for gi in order {
             let cls = self.getters[gi].cls.clone();
-            let mut es: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == cls).map(|(k, _)| k.clone()).collect();
+            let mut es: Vec<String> = of_kind(core, &cls);
             es.sort();
             for e in es {
-                let Some(v) = self.compute(core, &e, gi, now, seq) else { continue };
+                let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
                 let prop = self.getters[gi].prop.clone();
                 if core.docs.get(&e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
                 *seq += 1;
@@ -528,6 +572,7 @@ impl Fields {
     /// referenced it recalculates, live, as after a write of each of its fields to nothing.
     pub fn remove(&mut self, core: &mut Core, host: &dyn Host, eid: &str, now: f64, seq: &mut i64) {
         let Some(old) = core.docs.get(eid).map(|e| e.props.clone()) else { return };
+        if let Some(c) = core.docs.get(eid).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c)); }
         *seq += 1;
         core.hear(Write { eid: eid.into(), prop: String::new(), new: J::Null, old: J::Null, writer: "remove".into(),
                           chain: json!({}), seq: *seq }, None, now);
@@ -549,19 +594,27 @@ impl Fields {
     /// recalculate, lowest level first, and a changed value is written (which can queue more). Until both are empty.
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
         self.sync(core, now, seq);
+        for k in core.sql_ready() { self.mark_key(&(crate::vm::SQL.to_string(), k)); }   // a query's rows are in
+        for (e, verb, rec) in core.effect_receipts() {                                       // a driver effect finished
+            if !core.docs.contains_key(&e) { continue; }
+            let rc = rec.get("rc").cloned().unwrap_or(J::Null);
+            self.emit_unchecked(core, &mut work, &e, &format!("{}_result", verb), rec, &format!("driver:{}", verb), seq, now);
+            self.emit_unchecked(core, &mut work, &e, &format!("{}_rc", verb), rc, &format!("driver:{}", verb), seq, now);
+        }
         loop {
             if let Some(w) = work.pop_front() {
                 self.step(core, host, &mut work, w, now, seq);
                 continue;
             }
             let Some((_, e, gi)) = self.dirty.pop_first() else { break };
-            let Some(v) = self.compute(core, &e, gi, now, seq) else { continue };
+            let Some(v) = self.compute(core, Some(host), &e, gi, now, seq) else { continue };
             let prop = self.getters[gi].prop.clone();
             self.emit_unchecked(core, &mut work, &e, &prop, v, &format!("getter:{}", prop), seq, now);
         }
     }
 
     fn step(&mut self, core: &mut Core, host: &dyn Host, work: &mut VecDeque<Write>, w: Write, now: f64, seq: &mut i64) {
+        self.driver_effect(core, work, &w, now, seq);
         self.mark(&w.eid, &w.prop);
         self.mark_refs(&w.prop, &w.old, &w.new);
         {
@@ -600,34 +653,92 @@ impl Fields {
                     }
                 }
                 let Some(writes) = chosen else { continue };
-                for (target, prop, value) in writes {
-                    let Ok(v) = core.eval_json(&value, &me(&w.eid), &[("clock", json!(now))]) else { continue };
-                    if target == LLM_CALL { self.calls.push(v); continue; }
-                    let tgt = if is_me(&target) { Some(w.eid.clone()) } else {
-                        match core.eval_json(&target, &me(&w.eid), &[]) { Ok(J::String(g)) => Some(g), _ => None } };
-                    let Some(tgt) = tgt else { continue };
-                    let pack = self.setters[i].pack.clone();
-                    if !core.docs.contains_key(&tgt) {
-                        // creation: `<Class>:<key>` of a class the pack owns or imports
-                        let Some((cls, _)) = tgt.split_once(':') else { continue };
-                        if self.owner.get(cls).is_none() || self.may_write(&pack, cls).is_err() { continue; }
-                        core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
-                        self.out.push(json!({"eid": tgt, "born": cls}));
-                        self.birth(core, &tgt, now, seq);
-                    }
-                    let cls = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
-                    if let Err(why) = self.may_write(&pack, &cls) {
-                        self.receipt(core, &w.eid, &name, why, J::Null, seq, now);
-                        continue;
-                    }
-                    if tgt == w.eid && prop == w.prop {   // rule 6: own name inside its setter stores directly
-                        self.emit_unchecked(core, work, &tgt, &prop, v, &format!("direct:{}", name), seq, now);
-                    } else {
-                        self.emit(core, work, &tgt, &prop, v, &name, seq, now);
-                    }
+                let pack = self.setters[i].pack.clone();
+                // in written order; a FOR's list is read when the FOR is reached (it sees what the writes above made)
+                if let Err(e) = self.run_writes(core, work, &w.eid, &w.prop, &name, &pack, &writes, &[], now, seq) {
+                    let reason = format!("error in setter {}: {}; the setter stopped there", name, e);
+                    self.receipt(core, &w.eid, &name, reason, J::Null, seq, now);
                 }
             }
-        
+    }
+
+    /// A chosen branch's writes, in order: FOR blocks run their body once per item of their list, read when the
+    /// FOR is reached, the loop name bound to the item (an entity, or a value); nested FORs too. An error in a FOR's
+    /// list stops here (the writes above it stand).
+    fn run_writes(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, wprop: &str, name: &str, pack: &str,
+                  ws: &[(String, String, String)], binds: &[(String, crate::vm::Item)], now: f64, seq: &mut i64) -> Result<(), String> {
+        let mut k = 0;
+        while k < ws.len() {
+            let (target, prop, value) = &ws[k];
+            if target == crate::syntax::FOR {
+                let mut depth = 0; let mut j = k + 1;
+                while j < ws.len() {
+                    if ws[j].0 == crate::syntax::FOR { depth += 1; }
+                    if ws[j].0 == crate::syntax::END { if depth == 0 { break; } depth -= 1; }
+                    j += 1;
+                }
+                let items = {
+                    let (vars, extra) = scope(eid, binds, now);
+                    core.eval_items(value, &vars, &extra).map_err(|e| format!("FOR {} IN {}: {}", prop, value, e))?
+                };
+                for it in items {
+                    let mut b = binds.to_vec();
+                    b.retain(|(n, _)| n != prop);
+                    b.push((prop.clone(), it));
+                    self.run_writes(core, work, eid, wprop, name, pack, &ws[k + 1..j.min(ws.len())], &b, now, seq)?;
+                }
+                k = j + 1;
+                continue;
+            }
+            k += 1;
+            if target == crate::syntax::END { continue; }
+            let (vars, extra) = scope(eid, binds, now);
+            let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
+            if target == LLM_CALL { self.calls.push(v); continue; }
+            let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
+            let Some(tgt) = tgt else { continue };
+            if !core.docs.contains_key(&tgt) {
+                // creation: `<Class>:<key>` of a class the pack owns or imports
+                let Some((cls, _)) = tgt.split_once(':') else { continue };
+                if self.owner.get(cls).is_none() || self.may_write(pack, cls).is_err() { continue; }
+                core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
+                self.out.push(json!({"eid": tgt, "born": cls}));
+                self.birth(core, &tgt, now, seq);
+            }
+            let cls = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
+            if let Err(why) = self.may_write(pack, &cls) {
+                self.receipt(core, eid, name, why, J::Null, seq, now);
+                continue;
+            }
+            if tgt == eid && prop == wprop {   // rule 6: own name inside its setter stores directly
+                self.emit_unchecked(core, work, &tgt, prop, v, &format!("direct:{}", name), seq, now);
+            } else {
+                self.emit(core, work, &tgt, prop, v, name, seq, now);
+            }
+        }
+        Ok(())
+    }
+
+    /// A write of a driver verb (File.write, Command.run, ...: drivers.rs) runs its effect off the engine; the verb's
+    /// slot is consumed. Entity scripts and peers never trigger one (a refusal receipt says so).
+    fn driver_effect(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, now: f64, seq: &mut i64) {
+        #[cfg(feature = "python")]
+        {
+            if w.new.is_null() || w.new == json!("") { return; }
+            let Some(cls) = core.docs.get(&w.eid).map(|e| e.cls.clone()) else { return };
+            if !crate::drivers::VERBS.iter().any(|(c, v)| *c == cls && *v == w.prop) { return; }
+            let props = core.docs.get(&w.eid).map(|e| e.props.clone()).unwrap_or_default();
+            self.emit_unchecked(core, work, &w.eid, &w.prop.clone(), json!(""), "direct:consumed", seq, now);
+            if w.writer.starts_with("script:") || w.writer.starts_with("peer") {
+                let id = w.new.get("id").cloned().unwrap_or(J::Null);
+                let rec = json!({"id": id, "status": "error", "rc": 2, "head": "refused: entity scripts and peers don't run effects"});
+                self.emit_unchecked(core, work, &w.eid, &format!("{}_result", w.prop), rec, "driver:refused", seq, now);
+                return;
+            }
+            if let Some(st) = &core.store { crate::drivers::effect(st, &w.eid, &cls, &w.prop, &w.new, &props); }
+        }
+        #[cfg(not(feature = "python"))]
+        { let _ = (core, work, w, now, seq); }
     }
 
     /// The clock input: Wait.due is a getter on the clock (status armed and clock - armed_since >= every_s).

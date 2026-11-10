@@ -254,3 +254,47 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
 - **Caching:** the loader asks for the wasm by its content hash (`fieldvm_version.js`), since the seat caches `.wasm`.
 - **Tests:** `tests/js/fieldvm_core.test.mjs` (the wasm engine in Node) and `tests/js/fieldvm_link.test.mjs` (the page
   link in headless Chrome over the DevTools protocol).
+
+## 10. The language, 2026-11-10: setters and getters support the same forms
+
+- **Bare ifs** in any expression: `'on' if this.level > 0 else 'off'` (chains: `a if c else b if d else e`).
+- **Arms** (alternative definitions of one field; the first whose condition holds wins):
+  - getters, one line each: `Light.word getter WHEN this.level > 0: 'on'` ... `Light.word getter: 'off'` (the arm without
+    WHEN is the default and comes last; two defaults, or an arm after the default, are refused at load);
+  - getters, block form (as setters): `Light.word getter:` then indented `WHEN c: e` / `ELSE WHEN c: e` / `ELSE: e`;
+  - setters: `WHEN` / `ELSE WHEN` / `ELSE` / `ALWAYS`, as before. Arms compile to bare ifs.
+  - A default arm that reads its own field keeps the value: `X.f getter: this.f`.
+- **FOR**:
+  - in a setter body, a block: `FOR t IN this.listed:` with indented writes, run once per item, the list read when
+    the FOR is reached (it sees what the writes above it made); nested blocks; an item that is an entity binds as
+    one (`FOR t IN referencing(this, 'server'):` then `t.listed = ...`); None runs zero times; anything else that is
+    not a list stops the setter with a `refused` receipt;
+  - in any expression, a list: `FOR b IN this.listed: prop(b, 'title')` is `[prop(b, 'title') for b in this.listed]`.
+- **`prop(x, name)`** reads a dict's key and follows an entity's id (`prop(this.server, 'state')`), tracked like
+  `x.name`; `this.eid` is an entity's id (a reference is written as an id, never as an entity).
+- **Host built-ins**: a getter may call a function the seat provides, on live rounds only (a silent rebuild or birth
+  never calls out); an error in one is the getter's error (a `refused` receipt, the field keeps its value). Effects
+  are never getters: they stay writes to adapter branches. The seat's slow ones (`recall`, `rerank`) run off the
+  engine like `sql(...)`: the getter reads None until the answer lands, and the banner waits for them without the
+  field's lock (a slow recall never stalls the thinker or another chat). Each keeps its answer for its getter until
+  that getter asks with other arguments, so a chain in one getter settles; each banner build starts fresh.
+
+## 11. Libraries in `.c1f`
+
+- **`membrane/packs/banner.c1f`** (the whole banner): one `Banner:<owner>:<chat>` per person per chat, internal
+  chats too; a turn writes `ask` and the seat's facts as fields (`paused`, `alerts` -- the track alerts it took --,
+  `tools`, and Blurp's `blurp` / `suggest` when Blurp is on), and shows `text` (every section and the layout:
+  RECALL, OPEN, DECIDED, WORKING ON, ABOUT, STABLE, SINCE, the paused / alert / more lines; `lines` is RECALL). Built-ins: `recall(text, pool, session)`,
+  `rerank(rows, text, weights)`, `pick(rows, n, session)`, `line(row)`, `topic(text)`; a row is
+  `{h, n, ts, role, via, score, fact}`. Dials on the instance start as a copy of `recall:dials`. An instance of
+  another class runs that class's pack (Memo's own banner). A script's error is shown in place of the lines.
+- **`membrane/packs/mcp.c1f`** (#963): MCP servers and what they offer as entities.
+  - `McpServer:<name>` {transport stdio|http, command, args, env_from, url, headers_from, enabled}; `state`
+    (off / starting / up / failed), `tool_count`. Secrets are named (`env_from`, `headers_from`), never stored.
+  - `McpTool:<server>:<tool>` {name, description, input_schema, server, listed, callable}, `McpResource:<server>:<uri>`,
+    `McpPrompt:<server>:<name>`; what a server stops listing stays, `listed = False`.
+  - Calls are writes: `McpTool:...call:run = {id, args}` -> `call:run_result` {id, status, rc, head, result}; secret-named
+    args, entity scripts and peers are refused; 60 s per call. `membrane::mcp.import = 'all'` imports Claude Code's
+    and opencode's configs as disabled servers (`import_result`).
+  - The I/O is `membrane/mcpfield.py` (one connection loop, no polling: list-changed notifications list again);
+    enabled servers connect again at boot, stop with the seat, and are mounted into the Claude rung as its own tools.

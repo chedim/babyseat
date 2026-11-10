@@ -1651,6 +1651,9 @@ const HSTYLE = `
   .top .qpop .qmsg { margin:4px 0 0; font-size:12px; opacity:.75; }
   .top .qpop .qmsg:empty { display:none; }
   .top .selfstat { font-size:12px; opacity:.85; white-space:nowrap; padding-right:6px; }
+  /* 0.7.5 (the operator, 2026-11-10): Blurp is off -- none of its parts show */
+  .noblurp .babybtn, .noblurp .selfpanel, .noblurp .toydock, .noblurp .bbody, .noblurp .selfstat,
+  .noblurp .rungbell, .noblurp .celebrate { display:none !important; }
   .view-chat .selfstat { display:none; }
   /* THE WAVE (2026-10-10, the operator: "a wavy animation like Siri, but
      angly and graph-y"): a chain of nodes joined by straight edges -- a strip
@@ -2295,6 +2298,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     // zoo's, _zooBodies), one loop for all (BlurpBodies): frames only while a
     // body is on screen and the tab visible; reduced motion: a still frame
     _wireBodies(root) {
+      if (this._blurpOff) return;                    // 0.7.5: Blurp is off
       const mq = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
       const cbs = new Map();
       const io = typeof IntersectionObserver === "function"
@@ -2511,6 +2515,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     // its stats and the play actions. GET /membrane/toybox/state every DOCK_MS
     // while the page is visible; the actions go through _onToyPoke.
     _dockStart() {
+      if (this._blurpOff) return;                    // 0.7.5: Blurp is off
       clearInterval(this._dockT);
       this._dockT = setInterval(() => this._dockTick(), DOCK_MS);
       this._dockTick();
@@ -2764,6 +2769,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     // level-up's gold) and the newest one into the caption, in plain words,
     // citing its line. READ-ONLY: nothing here posts or changes self.
     _brainStart() {
+      if (this._blurpOff) return;                    // 0.7.5: Blurp is off: no brain caption to poll
       clearInterval(this._brainT);
       this._brainSeen = null; this._brainOtherAt = 0;
       this._brainT = setInterval(() => this._brainTick(), BRAIN_MS);
@@ -3344,8 +3350,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // #161 / #299: where self is (the exp bar); the 🌱 growth-limit chooser that
       // sat here gave way to acceptance -- sleep / wake is the 👶 panel's toggle
       this._selfStat = $(".selfstat");
-      this._paintSelf();
-      this._selfT = setInterval(() => { this._paintSelf(); this._rungTick(); this._bodyTick(); }, 1500);
+      this._blurpOff = typeof window !== "undefined" && window.MEMBRANE_BLURP === false;   // 0.7.5: Blurp is off
+      if (this._blurpOff) root.classList.add("noblurp");
+      if (!this._blurpOff) {
+        this._paintSelf();
+        this._selfT = setInterval(() => { this._paintSelf(); this._rungTick(); this._bodyTick(); }, 1500);
+      }
       // #289: the 🔔 (the rung chime + notifications) and the celebration
       this._bell = $(".rungbell"); this._cb = $(".celebrate"); this._cbText = $(".cb-t"); this._cbCanvas = $(".cb-c");
       // #299: the celebration's Accept -- real buttons, the one clickable part of the overlay

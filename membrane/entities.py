@@ -61,6 +61,21 @@ CLASSES = (CLASS_COMPONENT, CLASS_DECISION, CLASS_FAILURE, CLASS_MODEL,
            CLASS_SENSOR, CLASS_ACTUATOR, CLASS_PROJECT, CLASS_SESSION,
            CLASS_TIMELINE, CLASS_SEAT, CLASS_CONCEPT)
 
+
+def known_class(cls) -> bool:
+    """A class an entity may be made of: the built-in ones, and every class a loaded `.c1f` pack declares (Memo,
+    2026-11-10: a pack's own class -- MemoBanner, Probe -- could not be created, so its getters never ran)."""
+    if not cls:
+        return False
+    if cls in CLASSES:
+        return True
+    try:
+        from . import fields_live as _FL
+        live = _FL.CURRENT
+        return live is not None and cls in live.classes
+    except Exception:                                      # noqa: BLE001
+        return False
+
 # membrane-namespace doc-id prefix in the shared entities collection
 MEMBRANE_NS = "membrane::"
 
@@ -2459,7 +2474,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         _bad = _lint_name(name)
         if _bad:
             return {"ok": False, "error": f"name {name[:60]!r} refused: {_bad}"}
-        c = cls if cls in CLASSES else CLASS_COMPONENT   # safest default
+        c = cls if known_class(cls) else CLASS_COMPONENT   # safest default
         eid = entity_id(c, name)
         ent = QuantumEntity(eid=eid, cls=c,
                             properties={"name": name,
@@ -2652,7 +2667,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                      if str(i).lstrip("-").isdigit()]
             merged = set(ent.links or []) | set(clean)
             ent.links = sorted(merged)
-        if cls and cls in CLASSES:
+        if cls and known_class(cls):
             ent.cls = cls
         # THE SCRIPT FIELDS (programmable entities, size-capped; ''
         # clears the script and its failure state). Setting a NEW

@@ -107,6 +107,12 @@ def unpack_vec(s: str):
     return a / n if n > 0 else None
 
 
+# the banner pack's reads (sql(), #994): a chat's events, an event's entities, an entity's changes
+PACK_INDEXES = (("events", "events_conv", "d.conv"),
+                ("entity_deltas", "entity_deltas_event", "d.event"),
+                ("entity_deltas", "entity_deltas_eid", "d.eid"))
+
+
 class CBLiteBackend(MemBackend):
     KIND = "cbl"
     LABEL = "couchbase lite"
@@ -188,6 +194,9 @@ class CBLiteBackend(MemBackend):
             self.db.coll(c)
             if c not in COLD and not self.db.has_index(c, f"{c}_o"):
                 self.db.value_index(c, f"{c}_o", "o")
+        for c, name, expr in PACK_INDEXES:
+            if not self.db.has_index(c, name):
+                self.db.value_index(c, name, expr)
 
     def _ensure_vector_indexes(self) -> None:
         for c, (fld, name) in VEC.items():
