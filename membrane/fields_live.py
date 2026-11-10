@@ -24,6 +24,7 @@ engine) nothing here runs and `goalgraph.seed` defines the triggers as before.
 from __future__ import annotations
 
 import json
+import re
 import os
 import queue
 import sys
@@ -234,8 +235,19 @@ class Live:
                 with W.as_writer(WRITER + "pack"):
                     d.properties = {**(d.properties or {}), "error": want}
                     self.est.upsert(d, embedder=None)
-        self.classes = set(CLASSES) | set(self.f.classes())
+        self.classes = set(CLASSES) | set(self.f.classes()) | self._view_classes()
         return not err
+
+    def _view_classes(self) -> set:
+        """The classes the view packs declare (packs importing `dom` wait on the seat and run in pages): their entities
+        are mirrored too, so pages get them (the about pack's About:seat)."""
+        out = set()
+        for text in self.pack_texts.values():
+            if not re.search(r"(?m)^IMPORT dom\b", text or ""):
+                continue
+            out |= {m for m in re.findall(r"(?m)^([A-Z][A-Za-z0-9_]*)\.[A-Za-z_]\w* (?:getter|on-setter)\b", text)
+                    if m != "DomNode"}
+        return out
 
     def _pack_entity(self, eid: str, d) -> bool:
         p = d.properties or {}

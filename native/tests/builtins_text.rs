@@ -105,3 +105,11 @@ fn a_long_string_literal_does_not_count_toward_the_character_cap() {
     let long_logic = vec!["a"; 220].join(" + ");                      // ~880 characters of logic: still refused
     assert!(membrane_vm::evaluate_json(&long_logic, "{\"a\": 1}").unwrap_err().contains("at most"));
 }
+
+#[test]
+fn replace_swaps_every_occurrence() {
+    // the About view (operator 2026-11-10): a changelog line's **bold** markers come off before it is shown
+    assert_eq!(ev("replace('- **Code** is a **tree**', '**', '')", json!({})), json!("- Code is a tree"));
+    assert_eq!(ev("replace('a-b-c', '-', ' ')", json!({})), json!("a b c"));
+    assert_eq!(ev("replace('abc', '', 'x')", json!({})), json!("abc"));       // an empty pattern changes nothing
+}

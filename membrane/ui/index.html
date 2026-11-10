@@ -36,6 +36,14 @@
     max-height: 50vh; overflow: auto; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--divider-color);
     background: var(--card-background-color, var(--primary-background-color)); color: var(--primary-text-color);
     box-shadow: 0 4px 16px rgba(0, 0, 0, .15); font-size: 14px; }
+  /* the about pack's window (membrane/packs/about.c1f) */
+  #field-views .about header { display: flex; align-items: center; gap: 8px; }
+  #field-views .about header button { margin-left: auto; border: 0; background: transparent; color: inherit;
+    font-size: 20px; line-height: 1; cursor: pointer; }
+  #field-views .about h3 { margin: 10px 0 4px; font-size: 15px; }
+  #field-views .about h4 { margin: 10px 0 2px; font-size: 14px; }
+  #field-views .about ul { margin: 4px 0; padding-left: 18px; }
+  #field-views .about li, #field-views .about p { margin: 3px 0; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -144,7 +152,9 @@
     dock.id = "field-views";
     dock.hidden = true;
     document.body.appendChild(dock);
-    new MutationObserver(() => { dock.hidden = !dock.childElementCount; }).observe(dock, { childList: true });
+    // shown while something in it is shown: a closed view (the About window, hidden) leaves the dock hidden
+    const fit = () => { dock.hidden = ![...dock.children].some((c) => !c.hidden); };
+    new MutationObserver(fit).observe(dock, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
     // link: the whole page's DOM is in the field too (DomNode:page:*), kept in step as the page changes
     window.MEMBRANE_FIELD = await m.connect(dock, { link: document.body, onStatus: (s) => { dock.dataset.status = s; } });
   }).catch((e) => console.warn("field VM:", e));

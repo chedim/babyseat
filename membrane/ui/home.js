@@ -3170,7 +3170,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       root.innerHTML = `
         <div class="field"></div>
         <div class="msg">finding you on the field…</div>
-        <div class="top glass">
+        <div class="top glass" id="topbar">
           <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu"><img class="seat-logo" src="${SEAT_LOGO}" alt="" width="26" height="26"></button>
           <button class="zoobtn" title="The zoo: this house's seats, each with its own ${nm} -- tap one to talk to it" aria-label="the zoo: this house's seats" aria-haspopup="dialog" aria-expanded="false" aria-controls="zoopanel">🦠</button>
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · ${nm} (the 🌱 loop, framed to what it is doing) · 👁 ${nm}'s eyes (looking out from it)">◎ activity</button>

@@ -53,4 +53,4 @@ markers = [
 
 [tool.setuptools.package-data]
 membrane = ["skills/*/SKILL.md", "skills/*/*.md", "viewer.html", "three.min.js", "*.woff2",
-            "ui/*.html", "ui/*.js", "ui/*.mjs", "ui/*.svg", "ui/*.wasm", "packs/*.c1f"]
+            "ui/*.html", "ui/*.js", "ui/*.mjs", "ui/*.svg", "ui/*.wasm", "packs/*.c1f", "CHANGELOG.md"]

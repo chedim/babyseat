@@ -538,6 +538,11 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         // ---- text (the banner port; plain functions, no new syntax) ----
         "lower" => { argn(1)?; Ok(V::Str(text_of(&a[0])?.to_lowercase())) }
         "strip" => { argn(1)?; Ok(V::Str(text_of(&a[0])?.trim().to_string())) }
+        "replace" => {
+            argn(3)?;
+            let (t, from, to) = (text_of(&a[0])?, text_of(&a[1])?, text_of(&a[2])?);
+            Ok(V::Str(if from.is_empty() { t } else { t.replace(&from, &to) }))
+        }
         "startswith" => { argn(2)?; Ok(V::Bool(text_of(&a[0])?.starts_with(&text_of(&a[1])?))) }
         "lines" => { argn(1)?; Ok(V::List(text_of(&a[0])?.lines().map(|l| V::Str(l.to_string())).collect())) }
         "words" => { argn(1)?; Ok(V::List(text_of(&a[0])?.split_whitespace().map(|w| V::Str(w.to_string())).collect())) }

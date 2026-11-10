@@ -288,6 +288,10 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
   `rerank(rows, text, weights)`, `pick(rows, n, session)`, `line(row)`, `topic(text)`; a row is
   `{h, n, ts, role, via, score, fact}`. Dials on the instance start as a copy of `recall:dials`. An instance of
   another class runs that class's pack (Memo's own banner). A script's error is shown in place of the lines.
+- **`membrane/packs/about.c1f`** (a view pack, `IMPORT dom 1`): the About window (ⓘ) in every page, drawn from
+  `About:seat` {version, sha, changelog}. A view pack's classes are mirrored to pages like any pack's, though the
+  pack itself waits on the seat (no `dom` there). Note: an on-setter sees the getters as they were before the write in
+  the same round, so the pack computes what it shows in the setter itself.
 - **`membrane/packs/mcp.c1f`** (#963): MCP servers and what they offer as entities.
   - `McpServer:<name>` {transport stdio|http, command, args, env_from, url, headers_from, enabled}; `state`
     (off / starting / up / failed), `tool_count`. Secrets are named (`env_from`, `headers_from`), never stored.
