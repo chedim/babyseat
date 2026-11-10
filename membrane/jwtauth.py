@@ -464,14 +464,32 @@ def _from_authorization(value: str, basic: bool) -> str | None:
     return None
 
 
+def cookie_name() -> str:
+    """This seat's cookie: `membrane_jwt_<8 hex of a hash of its secret>`. Cookies are per host, not per port, so
+    two seats on one host (:4097 and :4096) under one name overwrite each other's token (every tab switch asked
+    for a token, 2026-11-10); the name says nothing about the secret. JWT off: the plain name."""
+    try:
+        cfg = config()
+    except JWTConfigError:
+        cfg = None
+    if cfg is None:
+        return COOKIE
+    return COOKIE + "_" + hashlib.sha256(b"membrane cookie\0" + cfg.secret).hexdigest()[:8]
+
+
 def _from_cookie(headers) -> str | None:
-    found = []
+    """This seat's cookie; the old shared name only when this seat's is absent (a page from before the rename)."""
+    names = (cookie_name(), COOKIE)
+    found: dict = {n: [] for n in names}
     for v in _all(headers, "Cookie"):
         for kv in str(v or "").split(";"):
             k, sep, val = kv.strip().partition("=")
-            if sep and k.strip() == COOKIE:
-                found.append(val.strip())
-    return found[0] if len(found) == 1 and found[0] else None    # two of them: ambiguous, refused
+            if sep and k.strip() in found:
+                found[k.strip()].append(val.strip())
+    for n in names:
+        if found[n]:
+            return found[n][0] if len(found[n]) == 1 and found[n][0] else None    # two of one: ambiguous, refused
+    return None
 
 
 def token_of(headers, cookie: bool = False, basic: bool = False) -> str | None:
@@ -549,12 +567,12 @@ def request_is_https(headers) -> bool:
 
 def login_cookie(token: str, ident: Identity, secure: bool) -> str:
     age = max(0, int(ident.claims.get("exp", 0) - time.time()))
-    return (f"{COOKIE}={token}; Path=/; Max-Age={age}; HttpOnly; SameSite=Strict"
+    return (f"{cookie_name()}={token}; Path=/; Max-Age={age}; HttpOnly; SameSite=Strict"
             + ("; Secure" if secure else ""))
 
 
 def logout_cookie(secure: bool) -> str:
-    return f"{COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" + ("; Secure" if secure else "")
+    return f"{cookie_name()}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" + ("; Secure" if secure else "")
 
 
 # -- attribution ----------------------------------------------------------------

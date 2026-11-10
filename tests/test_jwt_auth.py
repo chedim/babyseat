@@ -651,7 +651,7 @@ class TestServeGate(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(out["who"], {"sub": "alice", "name": "Alice"})
         ck = h["Set-Cookie"]
-        self.assertTrue(ck.startswith(f"membrane_jwt={self.alice};"))
+        self.assertTrue(ck.startswith(f"membrane_jwt_") and f"={self.alice};" in ck)   # the seat's own name
         for attr in ("HttpOnly", "SameSite=Strict", "Path=/"):
             self.assertIn(attr, ck)
         self.assertNotIn("Secure", ck)
@@ -761,3 +761,41 @@ class TestServeGate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSeatCookieName(unittest.TestCase):
+    """Two seats on one host (Memo's on :4097, Rosie on :4096): cookies are per host, not per port, so one shared
+    `membrane_jwt` name let each seat's page overwrite the other's token, and every tab switch asked for a token
+    (2026-11-10). Each seat's cookie is named after its secret; the old name is still read."""
+
+    def _env(self, secret):
+        base = {k: v for k, v in os.environ.items() if not k.startswith("MEMBRANE_JWT")}
+        base["MEMBRANE_JWT_SECRET"] = secret
+        return mock.patch.dict(os.environ, base, clear=True)
+
+    def test_each_seat_has_its_own_cookie_name(self):
+        with self._env(SECRET):
+            mine, again = J.cookie_name(), J.cookie_name()
+        with self._env(OTHER):
+            theirs = J.cookie_name()
+        self.assertEqual(mine, again)
+        self.assertNotEqual(mine, theirs)
+        self.assertTrue(mine.startswith("membrane_jwt_") and len(mine) == len("membrane_jwt_") + 8)
+        self.assertNotIn(SECRET, mine)
+
+    def test_the_login_cookie_carries_the_seats_name(self):
+        with self._env(SECRET):
+            tok = J.mint(SECRET, "owner")
+            ident = J.verify_configured(tok)
+            self.assertTrue(J.login_cookie(tok, ident, False).startswith(J.cookie_name() + "="))
+            self.assertTrue(J.logout_cookie(False).startswith(J.cookie_name() + "="))
+
+    def test_the_other_seats_cookie_never_shadows_this_ones(self):
+        with self._env(SECRET):
+            mine = J.mint(SECRET, "owner")
+            theirs = J.mint(OTHER, "owner")
+            with self._env(OTHER):
+                other_name = J.cookie_name()
+            h = {"Cookie": f"membrane_jwt={theirs}; {other_name}={theirs}; {J.cookie_name()}={mine}"}
+            self.assertEqual(J.token_of(h, cookie=True), mine)
+            self.assertEqual(J.token_of({"Cookie": f"membrane_jwt={mine}"}, cookie=True), mine)   # the old name

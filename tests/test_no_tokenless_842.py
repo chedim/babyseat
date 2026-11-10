@@ -119,7 +119,7 @@ class JwtOnPageCookie(NoTokenless):
             code, _, hdr = self._req("/")
             ck = hdr.get("Set-Cookie") or ""
             self.assertEqual(code, 200)
-            self.assertIn(UI._JWT.COOKIE + "=", ck)
+            self.assertIn(UI._JWT.cookie_name() + "=", ck)         # the seat's own cookie name
             self.assertIn("HttpOnly", ck)
             cookie = {"Cookie": ck.split(";")[0]}
             self.assertEqual(self._req("/ui/conf", headers=cookie)[0], 200)
