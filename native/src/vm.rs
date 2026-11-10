@@ -159,6 +159,31 @@ impl<'a> expr::World for View<'a> {
             _ => e.props.get(attr).map(expr::from_json).unwrap_or(V::None),
         }
     }
+    fn refs(&self, eid: &str, prop: &str) -> Vec<String> {
+        let mut out: Vec<String> = self.core.docs.iter().filter(|(_, e)| match e.props.get(prop) {
+            Some(serde_json::Value::Array(a)) => a.iter().any(|x| x.as_str() == Some(eid)),
+            Some(serde_json::Value::String(x)) => x == eid,
+            _ => false,
+        }).map(|(k, _)| k.clone()).collect();
+        out.sort();
+        out
+    }
+}
+
+/// A view that records what an evaluation read: (eid, field) for every attribute, and (REFS, prop) for every
+/// `referencing(_, prop)`. #994 getters: these are the getter's inputs.
+pub const REFS: &str = "\u{0}refs";
+struct Traced<'a> { inner: View<'a>, reads: std::cell::RefCell<Vec<(String, String)>> }
+
+impl<'a> expr::World for Traced<'a> {
+    fn attr(&self, eid: &str, attr: &str) -> V {
+        self.reads.borrow_mut().push((eid.to_string(), attr.to_string()));
+        self.inner.attr(eid, attr)
+    }
+    fn refs(&self, eid: &str, prop: &str) -> Vec<String> {
+        self.reads.borrow_mut().push((REFS.to_string(), prop.to_string()));
+        self.inner.refs(eid, prop)
+    }
 }
 
 /// ch.py's LEVEL_VERBS: the conditions that read the store when they are evaluated.
@@ -404,6 +429,21 @@ impl Core {
             Ok(node) => { let n: &Node = node; expr::eval(n, env, &View { core: self }) }
             Err(e) => Err(e.clone()),
         }
+    }
+
+    /// Evaluate and return what it read (#994 getters). `vars` bind names to entities, `extra` to values.
+    pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)])
+        -> (Result<serde_json::Value, String>, Vec<(String, String)>) {
+        let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
+        for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
+        let parsed = self.cache.get(src);
+        let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]) };
+        let r = match &*parsed {
+            Ok(node) => { let n: &Node = node; expr::eval(n, &env, &tv).and_then(|v| expr::to_json(&v)) }
+            Err(e) => Err(e.clone()),
+        };
+        let reads = tv.reads.into_inner();
+        (r, reads)
     }
 
     fn bindings(&mut self, host: &dyn Host, sp: &Spec, memo: &mut Memo, fixed: Binding) -> Vec<Binding> {

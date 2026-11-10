@@ -42,3 +42,13 @@ Goal.replan on-setter plan:
 Goal.status on-setter plan-after-reopen:
   WHEN this.status == 'open' and this.replan and this.planned_ts and this.replan != this.planned_replan:
     membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
+
+-- getters (#994 rule 2): computed fields, recalculated when what they read changes
+Task.finished getter: this.status == 'done'
+Wait.finished getter: this.status == 'done'
+Decision.finished getter: this.status == 'closed'
+Task.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.finished])
+Wait.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.finished])
+-- a wait is due when its every_s has passed since it was last checked (or armed)
+Wait.due getter:
+  this.status == 'armed' and clock - (this.last_check_ts or this.armed_since or this.armed_ts or clock) >= (this.every_s or 10)

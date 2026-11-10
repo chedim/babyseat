@@ -35,8 +35,18 @@ Goal.replan on-setter plan:
 - **Expressions:** the VM's expression language: `==`, `!=`, `<`, `and`/`or`/`not`, `in`,
   `x.prop`, `'a' + b`, `{k: v}`, `clock`.
 - **Comments:** `--` outside quotes.
-- **Getters** are built into the engine for now (the goal graph's count is `fields.rs` `recount`).
-  Their text form comes with the general getter engine.
+- **Getters:** `<Class>.<field> getter: <expr>`, the expression on the header line or on indented
+  lines under it. The engine records what an expression reads while it evaluates. Those reads are the
+  getter's inputs, and a write to one of them recalculates it (rule 2), lower levels first: a getter
+  that reads another getter's field sits above it. Values compute once at start as a rebuild (stored,
+  no setter runs). After that a changed value is a write and fires setters (rule 4). From the goal graph:
+  ```
+  Task.finished getter: this.status == 'done'
+  Decision.finished getter: this.status == 'closed'
+  Task.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.finished])
+  ```
+  `referencing(x, 'prop')` is the entities whose `prop` holds x. `[e for v in xs if cond]` and `len()`
+  are in the expression language for getters like this.
 
 Kept from the spec (github.com/chedim/cliffhanger README): `WHEN` / `ELSE WHEN` / `ELSE`,
 `ALWAYS`, `--` comments, writes as `target = value`. Not taken: adjacent `WHEN`s merging with OR

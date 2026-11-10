@@ -227,7 +227,10 @@ impl Fields {
     fn load(&self, eid: String, cls: String, props_json: &str) -> PyResult<()> {
         let p = obj(props_json)?;
         let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        g.0.load(eid, cls, p, None, 0.0);
+        let (core, f, _) = &mut *g;
+        let old = core.docs.get(&eid).map(|e| e.props.clone());
+        core.load(eid.clone(), cls, p, None, 0.0);
+        if let (Some(old), Some(new)) = (old, core.docs.get(&eid).map(|e| e.props.clone())) { f.reloaded(&eid, &old, &new); }
         Ok(())
     }
     /// A write: the Core hears it, the fields react (setters, getters, effects). Returns nothing; read back with `get`.
@@ -266,6 +269,24 @@ impl Fields {
         let (core, f, seq) = &mut *g;
         let mut s = *seq;
         f.tick(core, &host, now, &mut s);
+        *seq = s;
+    }
+    /// Start-up: compute every getter once and keep the values, running no setter (a rebuild runs no effects).
+    fn rebuild(&self, now: f64) {
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let (core, f, seq) = &mut *g;
+        let mut s = *seq;
+        f.rebuild(core, now, &mut s);
+        *seq = s;
+    }
+    /// Run a round with no outside write: a newly loaded entity's getters compute, and what references it recalculates.
+    fn settle(&self, py: Python<'_>, now: f64) {
+        let h = self.host.bind(py).clone();
+        let host = PyHost { py, obj: &h };
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let (core, f, seq) = &mut *g;
+        let mut s = *seq;
+        f.settle(core, &host, now, &mut s);
         *seq = s;
     }
     /// Is this entity in the field's mirror?

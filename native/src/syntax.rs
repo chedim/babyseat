@@ -22,7 +22,7 @@
 //!   (`this.goal`). `membrane::llm.call = <expr>` is the LLM call effect.
 //! - Expressions are the VM's expression language (`==`, `and`/`or`/`not`, `in`, `x.prop`, `'a' + b`, `{k: v}`).
 //! - `--` starts a comment outside quotes.
-use crate::fields::{OnSet, LLM_CALL};
+use crate::fields::{Getter, OnSet, LLM_CALL};
 
 type W = (String, String, String);
 
@@ -77,8 +77,14 @@ fn statement(s: &str, at: usize) -> Result<W, String> {
     Ok((tgt.into(), field.into(), rhs.into()))
 }
 
-/// Parse setters in cliffhanger's text form. Errors name the line and say what was expected.
-pub fn parse(src: &str) -> Result<Vec<OnSet>, String> {
+/// Parse setters in cliffhanger's text form (getters are skipped: `parse_pack` returns both).
+pub fn parse(src: &str) -> Result<Vec<OnSet>, String> { parse_pack(src).map(|p| p.0) }
+
+/// Parse a pack: its setters and its getters (`<Class>.<field> getter: <expr>`, the expression on the header line
+/// or on indented lines under it). Errors name the line and say what was expected.
+pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
+    let mut getters: Vec<Getter> = vec![];
+    let mut in_getter = false;
     let mut out: Vec<OnSet> = vec![];
     // the branches of the setter being read: (condition, writes); `None` before its first line
     let mut branches: Vec<(String, Vec<W>)> = vec![];
@@ -96,7 +102,15 @@ pub fn parse(src: &str) -> Result<Vec<OnSet>, String> {
         let line = strip_comment(raw).trim_end();
         if line.trim().is_empty() { continue; }
         if !line.starts_with(char::is_whitespace) {
-            close(&mut out, &mut branches)?;
+            if let Some((path, expr)) = line.split_once(" getter:") {
+                if !in_getter { close(&mut out, &mut branches)?; }
+                if let Some(g) = getters.last() { if g.expr.trim().is_empty() { return Err(format!("getter {}.{} has no expression", g.cls, g.prop)); } }
+                let (cls, prop) = path.trim().split_once('.').ok_or(format!("line {}: expected `<Class>.<field> getter:`", at))?;
+                getters.push(Getter { cls: cls.into(), prop: prop.into(), expr: expr.trim().into() });
+                in_getter = true;
+                continue;
+            }
+            if in_getter { in_getter = false; } else { close(&mut out, &mut branches)?; }
             let head = line.strip_suffix(':').ok_or(format!("line {}: a setter header ends with `:`", at))?;
             let (path, name) = head.split_once(" on-setter ").ok_or(format!("line {}: expected `<Class>.<field> on-setter <name>:`", at))?;
             let (cls, prop) = path.trim().split_once('.').ok_or(format!("line {}: expected `<Class>.<field>`", at))?;
@@ -104,6 +118,11 @@ pub fn parse(src: &str) -> Result<Vec<OnSet>, String> {
             if name.is_empty() || name.contains(char::is_whitespace) { return Err(format!("line {}: the setter needs a one-word name", at)); }
             out.push(OnSet { name: name.into(), cls: cls.into(), prop: prop.into(), ..Default::default() });
             state = 0;
+            continue;
+        }
+        if in_getter {                                  // a getter's expression continues on indented lines
+            let g = getters.last_mut().unwrap();
+            g.expr = format!("{} {}", g.expr, line.trim()).trim().to_string();
             continue;
         }
         if out.is_empty() { return Err(format!("line {}: indented line before any setter header", at)); }
@@ -138,11 +157,13 @@ pub fn parse(src: &str) -> Result<Vec<OnSet>, String> {
             }
         }
     }
-    close(&mut out, &mut branches)?;
+    if !in_getter { close(&mut out, &mut branches)?; }
     if let Some(s) = out.iter().find(|s| s.writes.is_empty() && s.els.iter().all(|(_, w)| w.is_empty())) {
         return Err(format!("setter {} writes nothing", s.name));
     }
-    Ok(out)
+    if let Some(g) = getters.iter().find(|g| g.expr.is_empty()) { return Err(format!("getter {}.{} has no expression", g.cls, g.prop)); }
+    for g in &getters { crate::expr::parse(&g.expr).map_err(|e| format!("getter {}.{}: {}", g.cls, g.prop, e))?; }
+    Ok((out, getters))
 }
 
 fn print_writes(out: &mut String, ws: &[W], indent: &str) {

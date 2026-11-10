@@ -110,11 +110,12 @@ def test_an_armed_wait_is_checked_every_every_s_not_once(seat, monkeypatch):
     monkeypatch.setattr(GG, "check_wait", lambda srv, eid: checks.append(eid) or (
         srv.entity_store.docs[eid].properties.update({"last_check_ts": now[0]}) or "still armed"))
     Wt = MEMBRANE_NS + "wait:t:w"
+    base = time.time()                                    # the engine's clock is the real one (a birth computes now)
     seat.entity_store.upsert(QuantumEntity(eid=Wt, cls="Wait", properties={"goal": GOAL, "status": "armed",
-                                                                          "armed_ts": 1000.0, "every_s": 30}))
+                                                                          "armed_ts": base, "every_s": 30}))
     settle(seat)
-    now = [1000.0]
-    for t in (1010.0, 1020.0, 1031.0, 1040.0, 1050.0, 1062.0):
+    now = [base]
+    for t in (base + 10, base + 20, base + 31, base + 40, base + 50, base + 62):
         now[0] = t
         seat.live.tick(t)
         settle(seat)
@@ -122,4 +123,4 @@ def test_an_armed_wait_is_checked_every_every_s_not_once(seat, monkeypatch):
         with W.as_writer("adapter:check"):               # the adapter's write of the check time, as the store hears it
             seat.entity_store.upsert(w)
         settle(seat)
-    assert len(checks) == 2, checks                       # at 1031 and at 1062: every 30 s, not once, not every beat
+    assert len(checks) == 2, checks                       # at +31 and +62: every 30 s, not once, not every beat

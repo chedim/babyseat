@@ -46,6 +46,8 @@ pub enum Node {
     Or(Vec<Node>),
     Compare(Box<Node>, Vec<(Cmp, Node)>),
     Call(String, Vec<Node>),
+    /// `[elt for var in iter if cond]` (#994 getters: a computed value over other entities)
+    Comp(Box<Node>, String, Box<Node>, Option<Box<Node>>),
 }
 
 pub type Err = String;
@@ -293,7 +295,19 @@ impl P {
                 let mut v = Vec::new();
                 while !self.is_p("]") {
                     v.push(self.expr()?);
-                    if self.is_kw("for") { return Err("not allowed in an expression: ListComp".into()); }
+                    if self.is_kw("for") {
+                        if v.len() != 1 { return Err("a comprehension starts the list: [x for x in xs]".into()); }
+                        self.next();
+                        let var = match self.next() { Tok::Name(n) if !KEYWORDS.contains(&n.as_str()) => n, _ => return Err("for needs a name".into()) };
+                        if !self.is_kw("in") { return Err("expected `in` in a comprehension".into()); }
+                        self.next();
+                        let iter = self.or_test()?;
+                        let cond = if self.is_kw("if") { self.next(); Some(Box::new(self.or_test()?)) } else { None };
+                        self.expect("]")?;
+                        self.n(4);
+                        let elt = v.pop().unwrap();
+                        return Ok(Node::Comp(Box::new(elt), var, Box::new(iter), cond));
+                    }
                     if !self.is_p("]") { self.expect(",")?; }
                 }
                 self.next();
@@ -347,6 +361,8 @@ impl Cache {
 /// What an expression reads off an entity.
 pub trait World {
     fn attr(&self, eid: &str, attr: &str) -> V;
+    /// The entities whose `prop` holds `eid` (a list containing it, or equal to it): `referencing(x, 'prop')`.
+    fn refs(&self, _eid: &str, _prop: &str) -> Vec<String> { vec![] }
 }
 
 pub fn truthy(v: &V) -> bool {
@@ -499,6 +515,12 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "abs" => { argn(1)?; match &a[0] { V::Int(i) => Ok(V::Int(i.abs())), V::Float(x) => Ok(V::Float(x.abs())), V::Bool(b) => Ok(V::Int(*b as i64)), _ => Err("bad operand type for abs()".into()) } }
         "min" => { if a.is_empty() { return Err("min expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Less) }
         "max" => { if a.is_empty() { return Err("max expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Greater) }
+        "len" => { argn(1)?; match &a[0] { V::List(l) => Ok(V::Int(l.len() as i64)), V::Str(t) => Ok(V::Int(t.chars().count() as i64)), V::Dict(d) => Ok(V::Int(d.len() as i64)), V::None => Ok(V::Int(0)), v => Err(format!("object of type {:?} has no len()", v)) } }
+        "referencing" => {
+            argn(2)?;
+            let e = match &a[0] { V::Ent(e) | V::Str(e) => e.clone(), _ => return Ok(V::List(vec![])) };
+            Ok(V::List(w.refs(&e, &py_str(&a[1])).into_iter().map(V::Ent).collect()))
+        }
         "prop" => {
             argn(2)?;
             match &a[0] {
@@ -556,6 +578,17 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
                 left = right;
             }
             Ok(V::Bool(true))
+        }
+        Node::Comp(elt, var, iter, cond) => {
+            let xs = match eval(iter, env, w)? { V::List(l) => l, V::None => vec![], v => return Err(format!("can't iterate over {:?}", v)) };
+            let mut out = Vec::new();
+            let mut env2 = env.clone();
+            for x in xs {
+                env2.insert(var.clone(), x);
+                if let Some(c) = cond { if !truthy(&eval(c, &env2, w)?) { continue; } }
+                out.push(eval(elt, &env2, w)?);
+            }
+            Ok(V::List(out))
         }
         Node::Call(f, args) => {
             let a = args.iter().map(|x| eval(x, env, w)).collect::<Result<Vec<_>, _>>()?;

@@ -127,6 +127,11 @@ pub fn goalgraph_setters() -> Vec<OnSet> {
     crate::syntax::parse(GOALGRAPH_CH).expect("packs/goalgraph.ch parses (tests/syntax_994.rs)")
 }
 
+/// The goal graph's getters, read from its cliffhanger text (packs/goalgraph.ch).
+pub fn goalgraph_getters() -> Vec<crate::fields::Getter> {
+    crate::syntax::parse_pack(GOALGRAPH_CH).expect("packs/goalgraph.ch parses").1
+}
+
 /// The same setters translated from the old WHEN/WHERE/WRITE triggers (packs/goalgraph.json): the migration path,
 /// held equal to the text pack by tests/syntax_994.rs.
 pub fn translated_goalgraph_setters() -> Vec<OnSet> {
