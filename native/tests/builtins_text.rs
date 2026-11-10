@@ -117,6 +117,9 @@ fn a_pending_read_is_an_empty_list_to_every_list_builtin() {
     assert_eq!(ev("distinct(x)", x.clone()), json!([]));
     assert_eq!(ev("fit(x, 10, 0)", x.clone()), json!([]));
     assert_eq!(ev("join(x, ',')", x.clone()), json!(""));
+}
+
+#[test]
 fn replace_swaps_every_occurrence() {
     // the About view (operator 2026-11-10): a changelog line's **bold** markers come off before it is shown
     assert_eq!(ev("replace('- **Code** is a **tree**', '**', '')", json!({})), json!("- Code is a tree"));
