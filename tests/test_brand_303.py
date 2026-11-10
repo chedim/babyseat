@@ -90,7 +90,10 @@ class TestThePublishLane(unittest.TestCase):
         self.wf = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
 
     def test_it_builds_both_distributions_into_one_dist(self):
-        self.assertIn("python -m build --outdir dist", self.wf)
+        # 0.7.5: babyseat's wheels (the compiled engine) and sdist come from wheels.yml; the shim builds here; the
+        # publish job uploads them all from one dist
+        self.assertIn("uses: ./.github/workflows/wheels.yml", self.wf)
+        self.assertIn("merge-multiple: true", self.wf)
         self.assertIn("python -m build shim/membrane-seat --outdir dist", self.wf)
         # the module goes into the shim before it builds (and nothing else does)
         self.assertIn("cp -R membrane shim/membrane-seat/membrane", self.wf)

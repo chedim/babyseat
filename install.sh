@@ -31,6 +31,22 @@ warn() { printf "${YELLOW}[membrane]${OFF} %s\n" "$*"; }
 
 BIN_DIR="${MEMBRANE_BIN_DIR:-$HOME/.local/bin}"
 
+# ------------------------------------------------------------- rust (0.7.5) ---
+# babyseat's field engine is native (Rust): this installer builds it from source, so it needs cargo. When there is
+# none, a user-local Rust toolchain is installed with rustup (no sudo, the shell profile left alone); the package's
+# build (setuptools-rust) then compiles the engine. A `pip install babyseat` from PyPI needs none of this on macOS and
+# Linux: the wheels there carry the engine compiled.
+ensure_rust() {
+  export PATH="$HOME/.cargo/bin:$PATH"
+  command -v cargo >/dev/null 2>&1 && return 0
+  say "babyseat's field engine is native (Rust): installing a user-local Rust toolchain (rustup, no sudo)..."
+  command -v curl >/dev/null 2>&1 || { warn "curl is needed to fetch rustup"; return 1; }
+  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path >/dev/null \
+    || { warn "rustup failed: install Rust (https://rustup.rs) and re-run"; return 1; }
+  command -v cargo >/dev/null 2>&1 || { warn "cargo still not on PATH ($HOME/.cargo/bin)"; return 1; }
+  ok "Rust ready ($(cargo --version))"
+}
+
 # ---------------------------------------------------------------- uv path ---
 install_with_uv() {
   command -v uv >/dev/null 2>&1 || return 1
@@ -64,8 +80,18 @@ install_with_venv() {
 }
 
 # ------------------------------------------------------------------- main ---
+ensure_rust || exit 1
+say "building babyseat (its native field engine compiles here: a minute or two the first time)..."
 if ! install_with_uv 2>/dev/null; then
   install_with_venv
+fi
+
+# the field engine must be in: a seat without it fails at startup
+_py="$HOME/.membrane/venv/bin/python"
+[ -x "$_py" ] || _py="$(uv tool dir 2>/dev/null)/babyseat/bin/python"
+if [ -x "$_py" ] && ! "$_py" -c "from membrane import membrane_vm" >/dev/null 2>&1; then
+  warn "the native field engine did not build (membrane.membrane_vm is missing): re-run with Rust on PATH"
+  exit 1
 fi
 
 # sanity check

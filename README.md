@@ -286,7 +286,11 @@ curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh | b
 Installs the `membrane` CLI globally, user-local (`~/.local/bin`):
 `uv tool install` if you have [uv](https://docs.astral.sh/uv/), otherwise a
 managed venv at `~/.membrane/venv` + a symlink on your PATH. Re-running it is
-safe (upgrade in place). To install from a local checkout instead (e.g. while
+safe (upgrade in place). It builds babyseat from source, including its native field
+engine (Rust): when there is no `cargo`, it installs a user-local Rust toolchain with
+rustup first (no sudo; a minute or two of compiling the first time). `pip install babyseat`
+needs none of that on macOS (Apple silicon, Intel) and Linux (x86_64, aarch64): the
+wheels there carry the engine compiled. To install from a local checkout instead (e.g. while
 hacking on membrane):
 
 ```bash
@@ -295,6 +299,8 @@ MEMBRANE_REPO=/path/to/membrane bash install.sh
 
 **Dependencies, honestly:**
 
+- **The native field engine** (`membrane.membrane_vm`, Rust) — inside the wheel on macOS and
+  Linux; built from source elsewhere (needs Rust; `native/build.sh` rebuilds it in a checkout).
 - **Python ≥ 3.10** + **numpy** — the only import-time dep (`couchbase`
   installed by default, imported lazily; a missing cluster degrades that
   feature, never the boot).

@@ -13,6 +13,19 @@
 # The ports carry no authentication today: publish them only on a network
 # you trust.
 
+# the field engine is native (Rust): a build stage compiles the package into a wheel; the image installs only the
+# wheel (no Rust toolchain in the image)
+FROM python:3.12-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends curl build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+WORKDIR /src
+COPY pyproject.toml setup.py README.md LICENSE ./
+COPY native ./native
+COPY membrane ./membrane
+RUN pip wheel --no-cache-dir --no-deps -w /wheels .
+
 FROM python:3.12-slim
 
 ARG VERSION=dev
@@ -34,10 +47,9 @@ ENV PYTHONUNBUFFERED=1 \
     MEMBRANE_NO_BROWSER=1 \
     MEMBRANE_NO_ASK=1
 
-WORKDIR /src
-COPY pyproject.toml README.md LICENSE ./
-COPY membrane ./membrane
-RUN pip install --no-cache-dir . && rm -rf /src
+COPY --from=build /wheels /wheels
+RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels \
+    && python -c "from membrane import membrane_vm"
 
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh \

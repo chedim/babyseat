@@ -125,7 +125,8 @@ def test_dockerignore_is_an_allowlist():
     includes = [r[1:] for r in rules if r.startswith("!")]
     assert includes, "the allowlist re-includes nothing"
     allowed = {"pyproject.toml", "README.md", "LICENSE", "membrane",
-               "membrane/**", "docker", "docker/**"}
+               "membrane/**", "docker", "docker/**",
+               "setup.py", "native", "native/**"}         # 0.7.5: the engine compiles in the image's build stage
     assert set(includes) <= allowed, set(includes) - allowed
     for inc in includes:
         assert ".membrane" not in inc
