@@ -52,3 +52,17 @@ def test_lane_switch(tmp_path, monkeypatch):
     monkeypatch.setenv("MEMBRANE_NATIVE_VM", "1")
     assert S._native_vm()
     assert [k for k, _ in mx.native_top(q, 20)] == [k for k, _ in mx.top(q, 20)]
+
+
+def test_a_reset_matrix_never_answers_from_the_old_resident_rows(tmp_path):
+    """Review of #1020: reset() (a rebuild when the matrix and the database disagree) must drop the resident
+    copy too, or a search returns rows that no longer exist."""
+    mx, rng = _field(tmp_path, 50)
+    q = _unit(rng, 1)[0]
+    assert mx.native_top(q, 5)                          # the resident copy is built
+    mx.reset()
+    fresh = _unit(rng, 3)
+    mx.append([(f"n{i}", fresh[i]) for i in range(3)])
+    keys = [k for k, _ in mx.native_top(q, 10)]
+    assert sorted(keys) == ["n0", "n1", "n2"], keys
+    assert keys == [k for k, _ in mx.top(q, 10)]

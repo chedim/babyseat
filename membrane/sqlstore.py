@@ -88,6 +88,7 @@ class _Matrix:
     def reset(self) -> None:
         with self.lock:
             self.keys, self.row, self.dead, self._mm = [], {}, set(), None
+            self._nv, self._nv_n = None, 0              # the resident copy goes too (#1020 review)
             self._ram, self._base_n = None, 0
             for p in (() if self.readonly else (self.f, self.kf)):
                 try:
