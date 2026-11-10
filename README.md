@@ -7,9 +7,6 @@ babyseat is an AI seat with a memory that learns in real time. Everything you
 and your AI say passes through it, and it learns from every message as it
 happens. 
 
-![Membrane](screenshot.png)
-> the new "Decisions Cockpit" UI with Membrane field in the background.
-
 It runs locally, on its own or inside [Home Assistant](docs/home-assistant.md),
 in front of your models: [Ollama](https://ollama.com) (local or its cloud
 models), OpenAI-compatible cloud APIs, and Claude through the Claude Code engine.
