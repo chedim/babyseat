@@ -17,7 +17,7 @@ Any OpenAI, Ollama or MCP client, Claude Code included, can talk to it
 ([models and clients](#models-and-clients)).
 
 > **The names.** **babyseat** is the whole project: the seat, its web UI,
-> Blurp, the Home Assistant integration and the Docker image
+> Blurp (off in 0.7.5: `MEMBRANE_BLURP=1` turns it on), the Home Assistant integration and the Docker image
 > (`pip install babyseat`, `chedim/babyseat`). **membrane** is its memory and
 > proxy, so the `membrane` command, Python module, `MEMBRANE_*` variables and
 > `.membrane` folders keep that name. Why "membrane": a living boundary that
@@ -222,7 +222,7 @@ integration is then only its UI and agent).
 **Several seats, one house (the 🦠 zoo):** *Configure* → **Add a seat** (host,
 ports 4096 / 11500, its `membrane token seat`) adds a laptop or a phone; the
 house talks to one at a time — switch it from membrane home's 🦠 button (a
-card per seat, its Blurp's level and rung) or the `select.membrane_seat`
+card per seat; its Blurp's level and rung only when Blurp is on) or the `select.membrane_seat`
 entity ([docs/home-assistant.md](docs/home-assistant.md#the-zoo-several-seats)).
 
 ### The daily work: typed tools, guarded writes
@@ -255,8 +255,8 @@ changes since the last message), `learn` to keep a lesson (with the same guards 
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
 where it came from. The VM's surface (writes, store, triggers, effects) and the replay test a
-native VM must pass are in [the VM's API](docs/vm-api.md) (#971). A native (Rust) VM is in `native/`:
-build it with `native/build.sh` (the native VM is the only VM; a missing extension fails loudly at startup).
+native VM must pass are in [the VM's API](docs/vm-api.md) (#971). The field engine is native Rust (`native/`, the `membrane_vm` extension):
+build it with `native/build.sh` (there is no Python VM; a missing extension fails loudly at startup). Behaviour is written as `.c1f` packs -- getters, setters, `WHEN` arms and `FOR` blocks ([cliffhanger-fields.md](docs/cliffhanger-fields.md)); the seat's Python entity scripts are retired in 0.7.5 (the boot upgrade ports them to packs). The same engine runs in the browser (WebAssembly), with the page's DOM in the field and view packs drawing in it, such as the ⓘ About window.
 
 **Two advisory checks run on every turn:** the **gate** compares the answer
 with the nearest past one (shadow by default), and the **[membrane]
@@ -396,7 +396,7 @@ pass through to Ollama unchanged.
 | `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads the chat message store (`serve-msgs.json`, or the seat's store, SQLite or Couchbase Lite, once it has migrated there), plus the background model calls from `bg-usage.json`; no model call) |
 | `membrane store` | which store this seat uses (SQLite or Couchbase Lite) and what is in it; `membrane store migrate --to sqlite\|cbl` copies every collection into the other kind with the seat stopped, switches the seat, and keeps the old store as a backup |
 | `membrane shadow` | compile-first routing, shadow stage: how many person messages living language compiled, had gaps in (by type) or left to thinking, and whether the model then used tools (read-only, no model call). See [docs/cliffhanger.md](docs/cliffhanger.md#living-language-2026-11-01-on-by-default) |
-| `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Every kind can be added (#576 retired the unlocks with the ladder). See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
+| `membrane toybox` | (Blurp: off in 0.7.5) self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower / ball, rung 7's turn toy): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes`, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge, ball roll -- roll it back to self, from either side; each change tagged by who made it; self acts on a toy by nudging it, #333); also the seat's `toybox` object and the 👶 panel's play buttons. Every kind can be added (#576 retired the unlocks with the ladder). See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
 
 `MEMBRANE_EFIELD` selects the field's mode: `on` (the default: capture,
@@ -460,7 +460,7 @@ MCP tool) calls `entity_edit` with `publish: true`. The entity goes to the
 bucket's `_default.entities` collection under a per-seat key,
 `pub:<origin>:<eid>`, so two seats publishing the same entity never
 overwrite each other. Only the entity's **state** travels: every
-`*_script` and the script bookkeeping are stripped on publish, and again
+`*_script` (retired in 0.7.5) and the script bookkeeping are stripped on publish, and again
 on import, so a teammate's code never runs on your seat. Publishing again
 bumps the version (`published_ver`); `unpublish: true` removes only your
 own key. Other seats pull published entities at boot and again about once
@@ -689,10 +689,10 @@ of the top 8.
 | [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup (publish, or the merged field with `MEMBRANE_FIELD_CLOUD=1`), the async loop, watches, operator rules, go-live checklist |
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The opt-in merged field: the origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion and consensus (shared only on the merged field) |
-| [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer, the NightClock, entity scripts and tracks, the intent steering wheel, **the pause**, kill switches |
-| [docs/selfgrowth.md](docs/selfgrowth.md) | **Retired in #576 (D1): Blurp starts anew** -- the body stays (the ⏻ switch, energy and sleep, the record, the 👶 panel, rendering empty), the learner below is history until D2 plugs the new one into `self_loop.learn_step`. **Growing self (#161)**, named Blurp (#277; each seat names its own, #283). Switching it on (⏻ on/off) and accepting what it earns (#299: an earned achievement opens its children only once the operator accepts it), reading its exp bar, the 👶 panel as a character sheet (attributes: measured traits; the skills it is learning now; growth curve, working hours, toys, relationships, live activity) and the toy dock, the amoeba and the brain on the screen (what it looks at, its trail of looks, shift pulses, the caption; ◎ self framing and 👁 self's eyes), the skill tree (#295: achievements with real prerequisites, earned out of order) and their real pass tests, the nudge (#333: Blurp's one act on the things of its world, aimed mostly at things it can look at, tilted toward those whose nudge outcomes it is learning fastest; first reach (rung 13) passes when its nudges at one thing beat that thing's tempo and the changes were its own; it speaks by nudging chat:out, a draft whose line is the NNLS fit over sentences heard in its private chat; recognize itself rebuilt on its looks at the mirror (rows only at a look; opens with feel and first reach, no person needed); meet an other rebuilt on delayed contingency (the look 30 s after a nudge's check finds a change its tempo does not predict, and not its own; opens with look and first reach); toys unlock by skill in #337's order; time its turn and expect a reply rebuilt on meet's other (its nudges timed by a bandit over the other's age, and its own prediction of each follow-up; the model advisor out)), how to help it climb, troubleshooting |
+| [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer, the NightClock, tracks (entity scripts retired in 0.7.5: behaviour is a `.c1f` pack), the intent steering wheel, **the pause**, kill switches |
+| [docs/selfgrowth.md](docs/selfgrowth.md) | **Blurp is off in 0.7.5 (`MEMBRANE_BLURP=1`).** **Retired in #576 (D1): Blurp starts anew** -- the body stays (the ⏻ switch, energy and sleep, the record, the 👶 panel, rendering empty), the learner below is history until D2 plugs the new one into `self_loop.learn_step`. **Growing self (#161)**, named Blurp (#277; each seat names its own, #283). Switching it on (⏻ on/off) and accepting what it earns (#299: an earned achievement opens its children only once the operator accepts it), reading its exp bar, the 👶 panel as a character sheet (attributes: measured traits; the skills it is learning now; growth curve, working hours, toys, relationships, live activity) and the toy dock, the amoeba and the brain on the screen (what it looks at, its trail of looks, shift pulses, the caption; ◎ self framing and 👁 self's eyes), the skill tree (#295: achievements with real prerequisites, earned out of order) and their real pass tests, the nudge (#333: Blurp's one act on the things of its world, aimed mostly at things it can look at, tilted toward those whose nudge outcomes it is learning fastest; first reach (rung 13) passes when its nudges at one thing beat that thing's tempo and the changes were its own; it speaks by nudging chat:out, a draft whose line is the NNLS fit over sentences heard in its private chat; recognize itself rebuilt on its looks at the mirror (rows only at a look; opens with feel and first reach, no person needed); meet an other rebuilt on delayed contingency (the look 30 s after a nudge's check finds a change its tempo does not predict, and not its own; opens with look and first reach); toys unlock by skill in #337's order; time its turn and expect a reply rebuilt on meet's other (its nudges timed by a bandit over the other's age, and its own prediction of each follow-up; the model advisor out)), how to help it climb, troubleshooting |
 | [docs/patient-hm.md](docs/patient-hm.md) | Patient H.M., viewed from membrane: epilepsy as a loop that excites itself (the seat's brakes, a seizure's signature in the field, running out of energy as its end), and cutting sleep's consolidation as H.M.'s surgery, with the experiment that tests it |
-| [docs/sleep.md](docs/sleep.md) | Sleep, viewed from Blurp: its energy, sleep and wake (#345: the reserves, the sleep pull, what wakes it), consolidation (the day's raw record to dated archives, a summary of the birth, the accepts and the last lines, restart-safe), and the viewpoint from before it slept (one store, no open loops, windowed beliefs, per-thing models; its cycle pace against its record's growth) |
+| [docs/sleep.md](docs/sleep.md) | (Blurp: off in 0.7.5) Sleep, viewed from Blurp: its energy, sleep and wake (#345: the reserves, the sleep pull, what wakes it), consolidation (the day's raw record to dated archives, a summary of the birth, the accepts and the last lines, restart-safe), and the viewpoint from before it slept (one store, no open loops, windowed beliefs, per-thing models; its cycle pace against its record's growth) |
 | [docs/vsa-token-lane.md](docs/vsa-token-lane.md) | **Entity keys + relations (the VSA lane).** Canonical ids, key binding, the relations composites, structure-awareness numbers |
 | [docs/token-economics.md](docs/token-economics.md) | Where the savings come from + the router: the ladder, the ceiling, the outage fallback |
 | [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, `/monologue` toggle |
@@ -724,7 +724,7 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 
 A working lab, used every day to build itself: this repo's own field holds
 about 14,000 entities, and its background mind digests, dreams and talks
-about its own work. Version **0.7.4**; API and flag surfaces may still
+about its own work. Version **0.7.5**; API and flag surfaces may still
 move. Licensing: **MIT** from 0.7.3 (see [LICENSE](LICENSE)); releases up to
 0.7.2 stay under PolyForm Noncommercial 1.0.0.
 

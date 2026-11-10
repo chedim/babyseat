@@ -167,7 +167,7 @@ instructions":
   `matched` words.
 - **SINCE YOUR LAST MESSAGE** (normal mode): the entities whose state moved
   after the watermark of the last model turn delivered. Changes from
-  *outside* the conversation (code edits, entity scripts, other sessions)
+  *outside* the conversation (code edits, packs, other sessions)
   are quoted; the conversation's own turns only count. New conflicts come
   last. No block means nothing changed.
 - **THE CONVERSATION SO FAR** (`--no-context`, the default since 2026-10-29): the session rebuilt from
@@ -191,7 +191,7 @@ conversation key, `conv` on events), derived from records with no model call:
 | `DECIDED` | the newest 3 of: ledger entries said in this chat, goals and json-board intents fulfilled in it (`fulfilled_conv`), coproc `decide()` records made in it |
 | `OPEN` | the newest 3 goals (`convs`) or json-board intents (`conv`) planted in this chat and still open |
 | `STABLE` | up to 3 facts (coproc `remember()` values, ledger lines) seen in at least 3 chats over at least 2 days, never given another value, about a focus entity |
-| `SINCE YOUR LAST MESSAGE` | up to 3 lines (200 chars) on focus entities moved after this chat's last delivered turn by code, scripts or other chats |
+| `SINCE YOUR LAST MESSAGE` | up to 3 lines (200 chars) on focus entities moved after this chat's last delivered turn by code, packs or other chats |
 | `ALERT` | at most 2 per turn; the rest ride the next turns |
 | `MORE` | the pull pointer (`state(section=...)`, `query`, `entity_read`), only when the request carries tools |
 
@@ -335,7 +335,7 @@ membrane/server.py):
   `fulfill`), room (`peer_post`, `peer_seats`, `peer_read`, `junk_cut`), the watches
   (`entity_watch`, `entity_unwatch`, `field_watch`, `attention`) and the
   entity hands (`entity_add`, `entity_edit`, `entity_remove`,
-  `entity_inherit`) and the method tools (`method_define`, `method_call`,
+  `entity_inherit`, `entity_write`), `pack` and the method tools (`method_define`, `method_call`,
   `method_each`, `method_inspect`). The chat defines and calls a method
   itself instead of planting a goal for it.
 - **Event listener** (agent `watch:<eid>` — the thinking loops): the
@@ -372,9 +372,7 @@ tracks keep the banner ALERT delivery; `entity_tracks` is owner-aware.
 Intentions steer the idle mind and are planted by the model: the
 `intend` tool / `membrane: intend that …` frame create-or-pin a shared
 Goal entity and pin it on the seat's active set; `intents` reads the
-board; fulfillment is explicit (`membrane: fulfill #N`). An entity
-script may plant too — its result carries `{intent: …}` and the engine
-plants through the same lane (night.py's apply). The plant is an
+board; fulfillment is explicit (`membrane: fulfill #N`). The plant is an
 EVENT (`intent-planted`) a thinking loop receives as its next turn
 (plan or ignore) — the operator creates, the thinker receives and
 executes. While the seat is paused, planting still works and is inert
@@ -467,7 +465,7 @@ straight at the executor is refused. Their composition:
 The composition loop: author small methods once (build, test, scan),
 wire them into pipelines REUSING them (steps or ISA parents), call, and
 every step's residue stays readable for the next composition. The
-model-facing teaching: doctrine.md + the `entity_add`/`entity_watch`
+model-facing teaching: `membrane/doctrine.md`, the help entities (`membrane::help:<topic>`) + the `entity_add`/`entity_watch`
 tool descriptions.
 
 ### The durability plan (the seat's own design, delivered)
@@ -645,7 +643,9 @@ serves the replay on a fraction P of eligible turns.
 
 ## Storage
 
-Couchbase scope `membrane`, nine collections: `events`, `sentences`
+A seat's store is SQLite (one WAL file in the seat's `.membrane/`) by default since 0.7.5 (a Couchbase Lite seat
+moves to it at its first start); the collections are the same in each kind (SQLite, Couchbase Lite, or a
+cluster's scope `membrane`). Nine collections: `events`, `sentences`
 (content-addressed embeddings, shared by all origins), `terms` (seeds),
 `entity_states`, `entity_deltas`, `relations`, `claims`, `annotations`
 (replay A/B, trust), `origin_stats` (backgrounds, the coherence null, the
@@ -683,7 +683,7 @@ as tags, an observation as the fn stamp), and user messages vote on the
 dreamer's quarantined timeline branches. The dreamer proposes from the
 model's recent sentences and vets a candidate by its surprise against the
 entity states: on topic, but not already said. The NightClock (15 min) runs
-the entity scripts; **births** (entities with mass ≥ 8 whose use drifted
+**births** (entities with mass ≥ 8 whose use drifted
 from the everyday sense, announced once); **junk** (words said ≥ 24 times
 that never took a direction); activity; the commons; and the coherence null
 once a day. The capture worker's idle hook runs the claim judge and the A/B
@@ -714,7 +714,10 @@ embedding model: every live event is re-embedded and re-applied.
 | e24 | Tool output mixed into conversation text poisons every word statistic. Split into discourse and observations, 77% of discourse entities have observed evidence. |
 | e25 | Action and test claims can be checked mechanically (test-count claims match their run in ≥ 83%); the port note's contrary evidence existed only in the code, hence code events; mxbai is order-blind for relations (0.975), VSA role binding is not. |
 
-## The entity-scripts covenant (2026-10-03)
+## The entity-scripts covenant (2026-10-03; retired in 0.7.5)
+
+> Entity scripts are retired in 0.7.5: behaviour is a `.c1f` pack, and the seat's boot upgrade
+> (`membrane/scriptport.py`) ports the scripts it recognises. This section records the old contract.
 
 Everything is an entity; the model sees entities; a script is a **part** of
 its entity. The script's only ways outward are its own shape:
@@ -736,11 +739,10 @@ refreshed when fixed (so it drifts back in time on the updated axis by
 itself). The event pool never hears engine lanes: what the model's
 watchers watch is the model's own choice.
 
-## Sensors, getters and setters as fields (draft, #994)
+## Sensors, getters and setters as fields (#994, live in 0.7.5)
 
-Design: [cliffhanger-fields.md](cliffhanger-fields.md). DRAFT: nothing here switches on a
-live seat without the operator's go; `every`, cached getters and two-phase setters are
-MEMBRANE EXTENSIONS, not cliffhanger syntax.
+Design and language: [cliffhanger-fields.md](cliffhanger-fields.md). Cached getters and setters are
+membrane's extensions to cliffhanger, run by the native field engine.
 
 - A sensor, a getter and a setter are not separate script kinds but parts of a **field**
   declared once on a class: a cached eager getter (the field's own name is its previous
@@ -751,9 +753,9 @@ MEMBRANE EXTENSIONS, not cliffhanger syntax.
   effects and writes to other fields). A setter chain that loops back is refused.
 - Events come only from outside as writes. Time is the clock tick, itself a write; a timed
   rule reads the clock field (no `every`). This supersedes the getter/tick_script split
-  in the covenant and budgets below once switched on; until then they stay as written.
+  in the covenant and budgets below (both kept as history).
 
-## Script budgets (the resource matrix)
+## Script budgets (the resource matrix; history: scripts are retired in 0.7.5)
 
 | trigger | budget | pacing | gravity? |
 |---|---|---|---|
@@ -811,8 +813,8 @@ The field's flush IS the event source: every dirty pass checks the
 filters, and a pass where a filter CROSSES delivers ONE `field:changed` event (kind/entity/verb/
 n_changes/span) to the ordinary event pool — the drainer admits it like
 any watch fire (3 slots, the loops' turns, the verdict stamps
-`watch_last_decision`). The entity carries `change_script` — the reaction
-runs under the same engine covenants (0.25s budget, gravity, freeze,
+`watch_last_decision`). The entity carried `change_script` (retired in 0.7.5: the reaction is a pack setter on its class) — the reaction
+ran under the same engine covenants (0.25s budget, gravity, freeze,
 3-strikes); its verdict obeys the whitelist (position move, links for
 this lane, render).
 

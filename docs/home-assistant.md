@@ -65,7 +65,7 @@ of the seat's version.
 ## The zoo: several seats
 
 One Home Assistant can know several seats — the one it runs itself, a laptop, a
-phone — each with its own Blurp. The house talks to **one at a time** (the
+phone — each with its own Blurp (off in 0.7.5: `MEMBRANE_BLURP=1`). The house talks to **one at a time** (the
 active seat): the chat and membrane home, the field sensors, the Assist agent and
 speech all follow it.
 
@@ -82,13 +82,13 @@ thinks about Blurps, it says "Blurp". A large prediction error is announced as
 - **Add a seat:** Settings → Devices & services → Membrane → *Configure* →
   **Add a seat**: its host (e.g. `192.168.1.107`), the serve port (4096), the
   proxy port (11500), its seat token (`membrane token seat` on that machine) and
-  a name (empty: its Blurp's own name, else the host). *Edit a seat* changes one
+  a name (empty: the seat's own name, else the host). *Edit a seat* changes one
   (Home Assistant's own seat takes a name only); *Remove a seat* drops one (never
   the last one, never Home Assistant's own). An existing setup is a one-seat list
   that works exactly as before.
 - **Switch:** the 🦠 button in membrane home's top bar opens the zoo — a card per
-  seat with its Blurp's name, Lv, rung, awake/asleep, a dot for reachable, its last
-  activity, and its Blurp drawn small (#358: eyes closed while it sleeps; the card the
+  seat with its name, a dot for reachable and its last activity (with Blurp on: its
+  Blurp's name, Lv, rung, awake/asleep, and its Blurp drawn small (#358: eyes closed while it sleeps; the card the
   integration relays has no energy yet, so the zoo's bodies keep a full glow); tap a card to make that seat the house's (an admin's switch; the page
   reloads onto it). Automations use the **`select.membrane_seat`** entity (one
   option per seat). A switch takes effect at once — no restart, the seats keep

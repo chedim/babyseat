@@ -5,7 +5,7 @@ commit) and `5ed6e4e` (the field's file home + the roster fallback); `c0ba419` (
 autonode) sits on top. This doc is the Q→A record the sessions never wrote down.
 
 What it means for an operator today: the field's home is the seat's own folder
-(`efstore.open_backend`: `.membrane/field/`, or `.membrane/field.cblite` with Couchbase
+(`efstore.open_backend`: SQLite by default since 0.7.5, or `.membrane/field/`, or `.membrane/field.cblite` with Couchbase
 Lite fetched); a connected bucket carries only published entities and presence; the
 fully merged team field ([multi-dev-field.md](multi-dev-field.md)) is opt-in with
 `MEMBRANE_FIELD_CLOUD=1`, and a cluster down at boot degrades it to the file home, never

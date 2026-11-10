@@ -17,7 +17,7 @@ A question starts above the bar. When the operator answers it, the work starts o
 
 ## A card is an entity
 
-A card is a `Decision` entity, reusing the existing class. Nothing is stored beside the field, so the map is a subgraph of the field: Blurp feels it like any other entity, recall finds it near the code it touched, and the board is just one view of it.
+A card is a `Decision` entity, reusing the existing class. Nothing is stored beside the field, so the map is a subgraph of the field: Blurp (when on) feels it like any other entity, recall finds it near the code it touched, and the board is just one view of it.
 
 | property | meaning |
 |---|---|

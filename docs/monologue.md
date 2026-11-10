@@ -23,7 +23,7 @@ recitation: the field's health lives in `field state` (an intercept, or
   gave birth to a store doc.
 - **the state diff** (normal mode): which entity states moved since the
   last message the LLM processed — conversation turns counted, everything
-  else (code, entity scripts, other seats) quoted. This is the
+  else (code, packs, other seats) quoted. This is the
   "SINCE YOUR LAST MESSAGE" block; it rides the banner on every turn it
   has something to say.
 - **`[membrane] injecting this turn:`** — the recall block (the entities
