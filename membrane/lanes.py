@@ -1646,7 +1646,11 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = "",
             continue
         name = " ".join(str(props.get("name") or "").split()).lower()
         summary = " ".join(str(props.get("summary") or "").split()).lower()
-        if low and (low == name or low in summary or name in low):
+        # WHOLE-TEXT MATCH: name/summary are display clips (120/600), so a
+        # prefix match merged distinct goals sharing a long opening. Compare
+        # the whole stored text; clips only for goals that never stored one.
+        full = " ".join(str(props.get("text") or "").split()).lower()
+        if low and (low == full if full else (low == name or low == summary)):
             goal = e
             break
     created = False
@@ -1674,7 +1678,7 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = "",
         eid = f"{MEMBRANE_NS}goal:{slug}"
         goal = QuantumEntity(
             eid=eid, cls=CLASS_GOAL,
-            properties={"name": (text or "")[:120], "summary": (text or "")[:600],
+            properties={"name": (text or "")[:120], "summary": (text or "")[:600], "text": text or "",
                         "status": "open", "born": time.time(),
                         # outcome learning: whose goal (operator / auto / loop / model / script:x)
                         "planted_by": planted_by or "model",
