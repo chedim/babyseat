@@ -221,3 +221,35 @@ def test_packs_import_each_other_and_create_their_own_entities(seat):
         "PACK bad 1\nTask.status on-setter meddle:\n  ALWAYS: this.note = 1\n"}))
     settle(seat)
     assert "IMPORT goalgraph 1" in p(seat, BAD, "error")
+
+
+def test_a_pack_file_edited_while_the_seat_runs_reloads_on_the_next_beat(tmp_path, monkeypatch, seat):
+    """Memo, 2026-11-09: a fixed .c1f file didn't load until a restart. A changed file reloads on the next beat."""
+    monkeypatch.setattr(FL, "PACK_DIR", tmp_path)
+    f = tmp_path / "lamps.c1f"
+    f.write_text("PACK lamps 1\nLamp.power on-setter glow:\n  ALWAYS: this.lit = 'v1'\n")
+    seat.live.on_sweep(time.time())                        # the beat sees the new file
+    L = MEMBRANE_NS + "lamp:desk"
+    seat.entity_store.upsert(QuantumEntity(eid=L, cls="Lamp", properties={"power": "off"}))
+    settle(seat)
+    write(seat, L, "power", "on")
+    assert p(seat, L, "lit") == "v1"
+    time.sleep(0.01)
+    f.write_text("PACK lamps 1\nLamp.power on-setter glow:\n  ALWAYS: this.lit = 'v2'\n")
+    os.utime(f, (time.time() + 5, time.time() + 5))       # a later mtime, whatever the clock's resolution
+    seat.live.on_sweep(time.time())
+    write(seat, L, "power", "off")
+    assert p(seat, L, "lit") == "v2"
+
+
+def test_a_pack_is_known_by_its_id_whatever_class_a_tool_gave_it(seat):
+    """Memo's entity tool saves every entity as a Component: a `membrane::pack:<name>` with `c1f` is still a pack."""
+    est = seat.entity_store
+    est.upsert(QuantumEntity(eid=FL.PACK_NS + "lamps", cls="Component", properties={"name": "lamps", "c1f":
+        "PACK lamps 1\nLamp.power on-setter glow:\n  ALWAYS: this.lit = True\n"}))
+    settle(seat)
+    L = MEMBRANE_NS + "lamp:desk"
+    est.upsert(QuantumEntity(eid=L, cls="Lamp", properties={"power": "off"}))
+    settle(seat)
+    write(seat, L, "power", "on")
+    assert p(seat, L, "lit") is True

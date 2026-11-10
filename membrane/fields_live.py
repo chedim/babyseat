@@ -40,6 +40,12 @@ CLASSES = ("Goal", "Task", "Decision", "Wait")
 PACK_DIR = Path(__file__).resolve().parent / "packs"
 PACK_CLASS = "Pack"
 PACK_NS = MEMBRANE_NS + "pack:"
+
+
+def is_pack(eid: str, d) -> bool:
+    """A Pack entity, or any `membrane::pack:<name>` holding `c1f` text (an agent's entity tool may save it under
+    another class)."""
+    return d.cls == PACK_CLASS or (str(eid).startswith(PACK_NS) and "c1f" in (d.properties or {}))
 WRITER = "trigger:field:"
 LLM_EID = MEMBRANE_NS + "llm"
 
@@ -82,10 +88,10 @@ class Live:
         self.swept = False
         self.pack_eids: dict = {}
         self.classes: set = set(CLASSES)
-        for fp in sorted(PACK_DIR.glob("*.c1f")) if PACK_DIR.is_dir() else []:
-            self._pack(fp.stem, fp.read_text(), None)
+        self.file_mtimes: dict = {}
+        self._scan_files()
         for eid, d in list((self.est.docs or {}).items()):
-            if d.cls == PACK_CLASS:
+            if is_pack(eid, d):
                 self._pack_entity(eid, d)
         self.loaded = self._mirror()
         self.f.rebuild(time.time())          # the getters compute once; their values are stored, no setter runs
@@ -140,7 +146,7 @@ class Live:
         if not eid or str(w.get("path") or "").startswith("rel:"):
             return
         d = (self.est.docs or {}).get(eid)
-        if d is None or (d.cls not in self.classes and d.cls != PACK_CLASS):
+        if d is None or (d.cls not in self.classes and not is_pack(eid, d)):
             return
         self.q.put((eid, str(w.get("prop") or ""), w.get("new"), time.time()))
 
@@ -148,7 +154,7 @@ class Live:
         d = (self.est.docs or {}).get(eid)
         if d is None:
             return
-        if d.cls == PACK_CLASS:                      # a pack written: reload it, mirror any new class, rebuild
+        if is_pack(eid, d):                          # a pack written: reload it, mirror any new class, rebuild
             if prop in ("", "c1f", "name") and self._pack_entity(eid, d):
                 self._mirror()
                 self.f.rebuild(now)                  # a new getter on an old world: computed, no setter runs
@@ -215,9 +221,30 @@ class Live:
                 self.errors += 1
                 print(f"[fields] tick failed: {e!r}"[:300], file=sys.stderr)
 
+    def _scan_files(self) -> bool:
+        """Load the pack files that are new or changed since the last scan (their mtime). -> any loaded."""
+        changed = False
+        for fp in sorted(PACK_DIR.glob("*.c1f")) if PACK_DIR.is_dir() else []:
+            try:
+                m = fp.stat().st_mtime
+            except OSError:
+                continue
+            if self.file_mtimes.get(fp.name) == m:
+                continue
+            self.file_mtimes[fp.name] = m
+            if self._pack(fp.stem, fp.read_text(), None):
+                changed = True
+        return changed
+
     def on_sweep(self, now: float) -> None:
-        """The VM's sweep is the clock (the beat the old `every` trigger fired on): the queue first, then a tick."""
+        """The VM's sweep is the clock (the beat the old `every` trigger fired on): the queue first, then a tick.
+        Each beat also reloads pack files edited since the last one."""
         self.settle()
+        with self.busy:
+            if self._scan_files():
+                self._mirror()
+                self.f.rebuild(now)
+                self._apply()
         self.tick(now)
 
     def _worker(self) -> None:
