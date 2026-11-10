@@ -17,14 +17,12 @@ on:
         required: true
 
 jobs:
-  publish:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-      # couchbase: NOT needed here -- the seat package's own extra stays out
-      # of the sdist's build requirements
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -44,16 +42,48 @@ jobs:
             deps=$(python -c "import tomllib; print(' '.join(tomllib.load(open('shim/membrane-seat/pyproject.toml', 'rb'))['project']['dependencies']))")
             [ "$deps" = "babyseat==$ver" ] || { echo "the shim depends on '$deps', not babyseat==$ver"; exit 1; }
           fi
+
+  # babyseat itself: one compiled wheel per platform (the field engine inside) + the sdist (wheels.yml)
+  wheels:
+    needs: check
+    uses: ./.github/workflows/wheels.yml
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+  # the membrane-seat shim, while shim/ carries it (delete the directory to stop publishing it). It ships the same
+  # module as babyseat (see shim/membrane-seat/pyproject.toml for why), copied in here; it pins babyseat==version,
+  # whose wheel carries the compiled engine
+  shim:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - run: pip install build
-      - run: python -m build --outdir dist
-      # the membrane-seat shim, while shim/ carries it (delete the directory
-      # to stop publishing it). It ships the same module as babyseat (see
-      # shim/membrane-seat/pyproject.toml for why), copied in here.
       - run: |
+          mkdir -p dist
           if [ -d shim/membrane-seat ]; then
             cp -R membrane shim/membrane-seat/membrane
             python -m build shim/membrane-seat --outdir dist
           fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shim
+          path: dist/*
+          if-no-files-found: ignore
+
+  publish:
+    needs: [wheels, shim]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       - run: ls -l dist
       # PyPI FIRST, then the GitHub release (2026-10-15): HACS users update
       # from the release, and their HA then pip-installs the pinned seat --

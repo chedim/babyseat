@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=77"]
+# the field engine (native/, Rust) is compiled into the package by setuptools-rust (setup.py): a wheel carries it,
+# a source install builds it (it needs a Rust toolchain; install.sh fetches one user-locally when it is missing)
+requires = ["setuptools>=77", "setuptools-rust>=1.10"]
 build-backend = "setuptools.build_meta"
 
 [project]

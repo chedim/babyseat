@@ -82,3 +82,4 @@ dist/
 
 # the native VM, built by native/build.sh (#971)
 membrane/membrane_vm.so
+membrane/membrane_vm*.so

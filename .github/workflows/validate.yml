@@ -41,8 +41,8 @@ jobs:
       - run: sh scripts/fetch-cbl.sh linux-x86_64
       # living language (language.py, on by default): spaCy, its small English model and lemminflect (verb forms; without it test_generation passed only when another test's boot had installed it)
       - run: pip install "spacy>=3.8.18" lemminflect && python -m spacy download en_core_web_sm
-      # the native (Rust) VM is the only VM: build the extension before the suite
-      - run: PYO3_PYTHON="$(which python)" sh native/build.sh
+      # the native (Rust) field engine is compiled by `pip install -e .` above (setuptools-rust, setup.py)
+      - run: python -c "from membrane import membrane_vm"
       # The seat's suite (tests/) -- live-lane tests skip themselves when the
       # runner has no ollama. (The thinking-indicator file was deselected at
       # e385aec and its tests went stale under a changed wire contract -- the
@@ -72,7 +72,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -e . pytest
-      - run: PYO3_PYTHON="$(which python)" sh native/build.sh
+      - run: python -c "from membrane import membrane_vm"     # compiled by the install (setup.py)
       - run: >-
           pytest -q -p no:cacheprovider
           tests/test_ch_native_971.py tests/test_journal_971.py tests/test_ch_576.py tests/test_ch_index_956.py

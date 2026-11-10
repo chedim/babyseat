@@ -5,6 +5,8 @@
 # truly needs it -- never a root wildcard.
 *
 !pyproject.toml
+!setup.py
+!native/**
 !README.md
 !LICENSE
 !membrane/**
@@ -12,3 +14,6 @@
 # never ship bytecode caches from a dev tree
 **/__pycache__
 **/*.pyc
+# the engine's local build outputs: Rust's target dir and an extension built on the dev machine (wrong platform)
+native/target
+membrane/*.so
