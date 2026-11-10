@@ -3,7 +3,7 @@
 Source: audit `audit:human-ai-ui-guidelines:2026-11-09` (live UI vs the 18 Amershi et al. guidelines, DOM reads).
 Gaps filed: #1029 G15, #1030 G2, #1031 G6, #1032 G9, #1033 G16, #1034 G10, #1035 G1, #1036 G3, plus G11, G5, G13 (partial, no issue yet).
 Pack format: `docs/cliffhanger-fields.md`, #994 (fields, cached getters, setters), #1027 (PACK / IMPORT, class ownership, creation on write).
-Status: design only. Nothing here is implemented.
+Status: first visible slice shipped (reply footer G15/G9, Decision impact G16); the rest is design.
 
 ## 1. Audit scores that drive this
 
@@ -133,3 +133,14 @@ Derived values are getters (cached, eager; a read never writes, #994 rule 2).
 8. Decision `impact` required (recommended) or optional.
 9. Tone control: three fixed levels (recommended) or free text.
 10. Capability list: hand-written or generated from the method/tool catalog.
+
+## Defaults (changeable)
+
+Picked without a card under the owner's standing order (2026-11-10): change any of them freely.
+
+- **Reply footer**: under every finished assistant reply (not live, not errored, not Blurp's): 👍, 👎, ↻ retry. Faint until hovered; full once rated.
+- **👎 asks why** in a plain browser prompt, optional; Cancel aborts the rating. Pressing the same thumb again clears it.
+- **Where a rating lives**: entity `feedback:<message id>`, class `Feedback`, props `kind` (up/down/clear), `why`, `session`, `at`; one per reply, the latest press wins. The tab keeps a local copy (last 500) only to draw the pressed state.
+- **Retry** re-sends the person's preceding message with the same model pick (the existing busy-retry path, #431).
+- **Decision impact**: a card's `var.impact` (or `impact`) maps option -> one line, shown under each option as "→ ..."; a missing line reads "impact not stated" (greyed) so a gap is visible, never silent. The recommended pick wears a "recommended" tag.
+- **Placement**: in the existing chat and board, not a separate route -- the slice is additive and hides nothing that was there.
