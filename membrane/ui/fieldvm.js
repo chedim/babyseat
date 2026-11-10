@@ -160,8 +160,9 @@ export async function connect(root, opts = {}) {
         const data = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).join('\n');
         if (!data) continue;
         let ev; try { ev = JSON.parse(data); } catch { continue; }
-        const e = ev && (ev.type === 'field.write' ? ev : ev.payload && ev.payload.type === 'field.write' ? ev.payload : null);
-        if (!e) continue;
+        const w = ev && ev.type === 'field.write' ? ev : ev && ev.payload && ev.payload.type === 'field.write' ? ev.payload : null;
+        if (!w) continue;
+        const e = { ...w, ...(w.properties || {}) };          // the seat's /event puts an event's fields in `properties`
         host.feed(e.eid, e.cls, e.props || { [e.prop]: e.new });
       }
     }
