@@ -96,7 +96,8 @@ def _find_peer() -> int | None:
 def _device(torch) -> str:
     """Where the reranker runs: a CUDA device when PyTorch reports one (NVIDIA, or an AMD GPU through a ROCm build,
     which PyTorch exposes as `cuda`), else Apple's MPS, else the CPU."""
-    if torch.cuda.is_available():
+    cuda = getattr(torch, "cuda", None)
+    if cuda is not None and cuda.is_available():
         return "cuda"
     mps = getattr(getattr(torch, "backends", None), "mps", None)
     if mps is not None and mps.is_available():

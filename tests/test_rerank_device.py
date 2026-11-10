@@ -24,3 +24,8 @@ def test_cuda_first_then_mps_then_cpu():
 def test_a_torch_without_mps_still_answers():
     t = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False), backends=types.SimpleNamespace())
     assert RR._device(t) == "cpu"
+
+
+def test_a_torch_without_cuda_still_answers():
+    t = types.SimpleNamespace(backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: True)))
+    assert RR._device(t) == "mps"
