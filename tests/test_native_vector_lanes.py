@@ -48,7 +48,9 @@ def test_lane_switch(tmp_path, monkeypatch):
     mx, rng = _field(tmp_path, 100)
     q = _unit(rng, 1)[0]
     monkeypatch.delenv("MEMBRANE_NATIVE_VM", raising=False)
-    assert not S._native_vm()
+    assert S._native_vm()                          # on by default: the field's getter is the lane
+    monkeypatch.setenv("MEMBRANE_NATIVE_VM", "0")
+    assert not S._native_vm()                      # =0 is the kill switch
     monkeypatch.setenv("MEMBRANE_NATIVE_VM", "1")
     assert S._native_vm()
     assert [k for k, _ in mx.native_top(q, 20)] == [k for k, _ in mx.top(q, 20)]

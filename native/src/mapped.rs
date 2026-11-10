@@ -1,5 +1,5 @@
 //! #1025: the sentence vectors read in place. The store's append-only float16 file (`sentences.f16`) is
-//! memory-mapped in fixed, page-aligned chunks. With the `metal` feature and `MEMBRANE_GPU_TOPK=1`, each full
+//! memory-mapped in fixed, page-aligned chunks. With the `metal` feature and Metal on (unless `MEMBRANE_GPU_TOPK=0`), each full
 //! chunk is handed to Metal as a no-copy buffer (`newBufferWithBytesNoCopy`), so the GPU reads the same pages the
 //! store already maps: no second copy and no upload. Rows past the last full chunk (the file's growing tail) are
 //! scored on the CPU from the file. Without a GPU, the CPU scores the mapped chunks the same way.

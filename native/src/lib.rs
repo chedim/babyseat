@@ -227,7 +227,7 @@ impl VecStore {
 }
 
 /// #1025: the sentence vectors read in place from the store's float16 file (Metal no-copy buffers under
-/// MEMBRANE_GPU_TOPK=1, else the CPU over the same mapping).
+/// Metal on (unless MEMBRANE_GPU_TOPK=0), else the CPU over the same mapping).
 #[pyclass]
 struct MappedVecs { m: std::sync::Mutex<mapped::Mapped> }
 

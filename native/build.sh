@@ -3,7 +3,9 @@
 set -e
 cd "$(dirname "$0")"
 PY="${PYO3_PYTHON:-$HOME/.membrane/venv/bin/python}"
-FEAT="${MEMBRANE_VM_FEATURES:-}"
+FEAT="${MEMBRANE_VM_FEATURES-}"
+# On macOS the Metal top-k is part of the default build (MEMBRANE_VM_FEATURES= builds without it).
+if [ -z "${MEMBRANE_VM_FEATURES+x}" ] && [ "$(uname)" = "Darwin" ]; then FEAT=metal; fi
 if [ -n "$FEAT" ]; then
   PYO3_PYTHON="$PY" cargo build --release --features "$FEAT"
 else

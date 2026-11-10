@@ -48,7 +48,7 @@ class _Joined:
 
 def _native_vm() -> bool:
     import os
-    return os.environ.get("MEMBRANE_NATIVE_VM", "").strip() == "1"
+    return os.environ.get("MEMBRANE_NATIVE_VM", "").strip() != "0"   # on by default; =0 is the kill switch
 
 
 class _Matrix:
@@ -124,7 +124,7 @@ class _Matrix:
 
     def native_top(self, q: np.ndarray, want: int):
         """#1001 k3 / #1025: the top `want` from the native VM, reading the vectors in place: the float16 file this
-        matrix appends to is memory-mapped, and under MEMBRANE_GPU_TOPK=1 Metal reads the same pages (no second
+        matrix appends to is memory-mapped, and with Metal (on unless MEMBRANE_GPU_TOPK=0) it reads the same pages (no second
         copy). None when the extension isn't built or the matrix lives in memory (readonly); masked rows are
         filtered here."""
         try:

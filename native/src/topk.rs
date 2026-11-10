@@ -1,5 +1,5 @@
 //! #1001 k2: nearest-sentence recall top-k by cosine. CPU reference always; a wgpu (Metal) kernel behind the
-//! `metal` cargo feature. Runtime switch `MEMBRANE_GPU_TOPK=1` (default OFF); no adapter -> CPU fallback.
+//! `metal` cargo feature. Runtime kill switch `MEMBRANE_GPU_TOPK=0` (default ON); no adapter -> CPU fallback.
 //! Vectors are row-major f32, `dim` wide. Cosine = dot / (|a||b|); the GPU does the dot+norm per row, the host picks top-k.
 
 /// Cosine score of every row against the query (CPU).
@@ -25,7 +25,8 @@ pub fn top_k(scores: &[f32], k: usize) -> Vec<usize> {
 
 pub fn topk_cpu(rows: &[f32], dim: usize, q: &[f32], k: usize) -> Vec<usize> { top_k(&scores_cpu(rows, dim, q), k) }
 
-pub fn gpu_enabled() -> bool { std::env::var("MEMBRANE_GPU_TOPK").map(|v| v == "1").unwrap_or(false) }
+/// On by default (no adapter -> CPU); `MEMBRANE_GPU_TOPK=0` is the kill switch.
+pub fn gpu_enabled() -> bool { std::env::var("MEMBRANE_GPU_TOPK").map(|v| v.trim() != "0").unwrap_or(true) }
 
 /// Dispatcher: GPU when switched on, built with `metal` and an adapter exists; else CPU.
 pub fn topk(rows: &[f32], dim: usize, q: &[f32], k: usize) -> Vec<usize> {
