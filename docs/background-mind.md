@@ -3,7 +3,7 @@
 > Membrane is a **seat-local mind with a shared symbolic layer**. It
 > perceives (capture → events), decides (the gate), sleeps (thinker /
 > dreamer / the NightClock), speaks (planner-gated), and modifies itself
-> (model-authored entity scripts). The foreground composer is rented from
+> (model-authored `.c1f` packs). The foreground composer is rented from
 > the LLM — the background mind is membrane's own.
 
 The field's design lives in [entity-field.md](entity-field.md). This
@@ -22,8 +22,8 @@ broken, kept as history).
 | **Idle hooks** | ~30 s of capture silence | the **claim judge** and the **replay A/B judge** run on the idle local model (`capturer.idle_hooks`) |
 | **Thinker** | 1 s heartbeat, duty-capped | digests the latest stimuli (their entities as tags, an observation as the fn stamp) and eats them into its working memory; in silence, extends open timeline branches |
 | **Dreamer** | 60 s idle waves | solution generation: proposes from the model's own recent sentences, vets a candidate by its **surprise** against the entity states (on topic, but not already said), commits quarantined `Timeline` entities under `session:now` |
-| **NightClock** | 15 min | the entity scripts; **births**; **junk**; activity; the coherence null (once a day); entity-doc materialization + the overlay consolidation |
-| **Self loop** (#161) | change-driven, ≥ 10 s apart, off by default | `self` (`self_loop.py`): try → expect → notice on its own position; the operator's switch; see [The self loop](#the-self-loop-161) |
+| **NightClock** | 15 min | **births**; **junk**; activity; the coherence null (once a day); entity-doc materialization + the overlay consolidation |
+| **Self loop** (#161) | change-driven, ≥ 10 s apart, off by default (Blurp is off in 0.7.5: `MEMBRANE_BLURP=1`) | `self` (`self_loop.py`): try → expect → notice on its own position; the operator's switch; see [The self loop](#the-self-loop-161) |
 
 All cadenced organs use the idle local model for any model calls they
 make (`--idle-cortex-model`), so a wedged background seat can never burn
@@ -97,7 +97,7 @@ the seat's ACTING lanes down — the stable point from which the operator
   continues so resume is automatic), the autonode (the file-tree diff
   accumulates silently; resume fires it as a bounded 64-burst), the claim
   + A/B idle judges, all composed speech (held; delivers on resume),
-  Blurp's own cycle (`self_loop`), and the scripts' model calls
+  the packs' effects, and Blurp's own cycle (`self_loop`) when it is on
   (`llm.request` answers "the seat is paused").
 - **Keeps**: presence (a paused seat is ALIVE to the roster — identity
   metadata, not acting), capture (the operator talking is memory), the
@@ -158,32 +158,19 @@ the seat's ACTING lanes down — the stable point from which the operator
 The banner carries one `PAUSED:` line while paused — the model sees why
 the field's voices are quiet and that its writes are refused.
 
-## Programmatic entities (the scripts — model-authored)
+## Programmatic entities: packs (scripts retired in 0.7.5)
 
-**Scripts are the model's to write** (the doctrine teaches the lane; the
-MCP `entity_edit` is the pen). They run **off-turn** in the night
-pass and its boot-time echo (`run_scripted_entities(..., force=True)` runs
-at boot — a script edited between boots does not wait for the next 15-min
-tick); duty-cycled (`script_every_n`, default 4 passes) and per-pass
-budgeted. Each entity's **delete script** runs first (retirement wins over
-nudge, and deletes also unwatch the entity's track).
+An entity's behaviour is a **`.c1f` pack**: getters that keep a value true and setters that react to a write, run by
+the native field engine on the seat (and, for view packs, in the page). A model writes one with the `pack` tool
+(`exec(action='load', ...)` on the local surface) and acts by writing a property (`entity_write`): an effect -- a
+chat line, a model call, a File or Command verb -- leaves its receipt on the entity. The language and the shipped
+packs: [cliffhanger-fields.md](cliffhanger-fields.md).
 
-A script sees the entity's geometry as `state` plus a **read-only
-`membrane` object** — no mutators, the authorship covenant (`membrane/
-night.py::_script_membrane_api`):
-
-    membrane.field.recall(v, k)         # nearest entities by state vector
-    membrane.field.vitals()             # the field's vitals dict
-    membrane.me.describe/velocity/direction
-    membrane.entities… membrane.timeline… membrane.intents…
-
-It returns `{delete?, render?, data?}` — **the engine applies**: the
-banner fragment, the entity's own properties (bounded, `script_*` keys
-untouchable), or retirement. Scripts analyze and return; the engine
-writes. Per-entity cooldown, 3-strikes auto-disable (retried on a 60s→1h
-backoff; a passing retry re-enables; reads carry the failing state), every application
-audited. A script's change to an entity emits an event, so the normal-mode
-**state diff** (SINCE YOUR LAST MESSAGE) shows it next turn.
+The Python **entity scripts** (`getter_script`, `tick_script`, `watch_script`, `nudge_script`, ...) are retired in
+0.7.5. At a seat's first start on older data, `membrane/scriptport.py` ports the ones it recognises to pack kinds
+(the entity gains a `cls:<kind>` parent), retires finished one-offs (their text stays on the entity as
+`script_port.code`), and marks the rest `script_port.pending` for translation; models are no longer offered them.
+A script that has not been translated yet still runs as before until it is.
 
 ## Births, junk, activity — reading the field's own measures
 

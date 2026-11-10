@@ -35,7 +35,7 @@ name on two classes is two implementations (polymorphism).
 - **Inspect without running:** `exec(action='inspect', object=…, method=…,
   args=…)` shows where the call resolves and the exact command it would run.
 
-The model reads this surface as `help('cliffhanger')` (and `help('exec')`). The
+The model reads this surface as `help('cliffhanger')` (and `help('exec')`); help topics are field entities, `membrane::help:<topic>`, shipped from `membrane/help/*.md`. The
 repo linked above is where the language is defined; this page is only membrane's
 instantiation of it.
 
@@ -187,7 +187,7 @@ missing arguments) aren't told. Membrane still runs nothing on its own; the mode
 and whole clauses as unknown names); `MEMBRANE_TEACH_HINT=1` turns it on until the segmentation is fixed.
 **Membrane answers a read-only message itself** (2026-11-02). A chat message that compiles fully
 to calls of read-only methods (`read_only` on the method; every call's `writes` is false) is run
-by membrane before the model's turn (`language.run`), and its result is posted in the chat
+by membrane before the model's turn (`language.run`; only with `MEMBRANE_ANSWER=1`, off by default since 0.7.5), and its result is posted in the chat
 marked **🧩 membrane (no model):** (`speech.say("membrane-ran")`), so the operator can tell it
 from the model's answer and judge it. The model still answers: it is told membrane already ran
 the message, not to run it again, and to add what it missed or correct it. A message that writes
@@ -257,7 +257,7 @@ everywhere else (the prose the person reads).
   through `/membrane/ask`.
 
 See also: [entity-field.md](entity-field.md) (the executor and its queue),
-[background-mind.md](background-mind.md) (entity scripts).
+[background-mind.md](background-mind.md) (packs; entity scripts retired in 0.7.5).
 
 ## Every write is an event (#576, part A)
 
@@ -303,7 +303,7 @@ An effect happens because something writes a property of a field entity, not bec
 
 ## Triggers: cliffhanger without hatches (#576, part B)
 
-`membrane/ch.py`. A **trigger** is an entity of class `Trigger`: a reified edge from what it watches to what it writes. One line of it reads:
+Since 0.7.5 triggers run on the native field engine (`membrane_vm`, translated to fields); `membrane/ch.py` is the reference the parity tests check. A **trigger** is an entity of class `Trigger`: a reified edge from what it watches to what it writes. One line of it reads:
 
 ```
 WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
@@ -361,7 +361,7 @@ A call is a write of a request to the object's call path: `<obj>.call:<method> =
 
 ## Program the field first (#576, part F)
 
-The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be done by programming the field first and then using it." The model does something in one of three ways: it **runs code**, which becomes a tree kept in the field and re-runnable (#614, 2026-10-27: "executors work as blurp's chat works"); it **defines a method** on the entity the work belongs to (or its class) and **calls** it; or it **writes a property** whose write is the effect (above).
+The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be done by programming the field first and then using it." The model does something in one of three ways: it **runs code**, which becomes a tree kept in the field and re-runnable (#614, 2026-10-27: "executors work as blurp's chat works"); it **defines a method** on the entity the work belongs to (or its class) and **calls** it; or it **writes a property** whose write is the effect (above; `entity_write`). What an entity *is* -- its getters and setters -- is a `.c1f` pack, loaded with `pack` ([cliffhanger-fields.md](cliffhanger-fields.md)).
 
 - **No raw edges.** The `entity_link` / `entity_unlink` tools, `exec(action='link'/'unlink')` and the `POST /membrane/entity/link|unlink` routes are gone. Code reaches an executor only as a tree: `exec(action='run')` mints it and writes its `-execute->` edge (#614).
 - **A call straight at the executor is refused.** `method_call` / `method_each` (and `exec(action='call'/'each')`) refuse, before anything runs, a call whose object is `tool:executor` (or inherits from it), the `remote_executor` interface itself, or an entity implementing `remote_executor` called on the interface's own method (`exec`). The refusal ends with `program the field first: define a method on an entity, then call it`. Other methods of an implementation (e.g. `presence.restart`) are not executor calls and still run. The check sits on the method routes, the model's only door to them (`night.direct_exec_refusal`, `night.direct_each_refusal`).
@@ -378,6 +378,8 @@ The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be don
   - Only `define` sets an owner, and a chain arriving over the relay cannot claim `self`.
 
 ## Learning in the VM (#576, part C)
+
+> Blurp is off in 0.7.5 (`MEMBRANE_BLURP=1` turns it on); this and the next sections describe it when on.
 
 `membrane/ch_learn.py`: Blurp's plasticity, as field physics. Attach it with `vm.learner = Learner(vm, purse, granted)`.
 

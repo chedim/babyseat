@@ -39,7 +39,7 @@ just stops.
 **New page code after a restart.** `/ui/conf` carries `build`, a hash of the files
 under `membrane/ui/` taken at boot. On every reconnect the open tab compares it with
 the build it loaded and, if the seat came back with new code, reloads itself once
-(the open chat, the 👶 panel and the camera mode are remembered in the browser). With
+(the open chat, the 👶 panel when Blurp is on, and the camera mode are remembered in the browser). With
 unsent text in the chat box it shows a "new version · click to reload" chip instead,
 and it never reloads twice for the same build within a minute.
 
@@ -137,7 +137,7 @@ sphere it was the distance to it).
 | `name`, `aliases` | the seat's agreed name (written by the seat when you agree on one) and what speech hears for it |
 | `stt` | `"browser"` (default) or a whisper-server URL |
 | `ui_lan_open` | `true` (default): the page reads without a login on the local network; writes from another machine need the [seat token](auth.md#the-seat-token) either way (ignored in [JWT mode](auth.md), where the token decides) |
-| `self_cpu_share` | Blurp's CPU share, `0 < share <= 1` (default `0.5`); set in the ⚙ options window (#343, #344) |
+| `self_cpu_share` | Blurp's CPU share, `0 < share <= 1` (default `0.5`); set in the ⚙ options window (#343, #344). Used only when Blurp is on (`MEMBRANE_BLURP=1`; off in 0.7.5) |
 
 ## The decision cockpit (🗂)
 
@@ -184,9 +184,9 @@ window fills the screen; × or Escape closes it.
 
 | Option | |
 |---|---|
-| Blurp's CPU share | a slider, 10–100 % (default 50 %): `self_cpu_share`. The self loop and the record cap read the file through one reader, `options.cpu_share(srv)` (the settings.json beside the seat's `self/`), so a change needs no restart (#343 throttles the cycles to it × Blurp's energy) |
+| Blurp's CPU share | (shown only when Blurp is on, `MEMBRANE_BLURP=1`) a slider, 10–100 % (default 50 %): `self_cpu_share`. The self loop and the record cap read the file through one reader, `options.cpu_share(srv)` (the settings.json beside the seat's `self/`), so a change needs no restart (#343 throttles the cycles to it × Blurp's energy) |
 | The field current's fade | read-only, `CURRENT_TAU_S` (180 s today): it is a threshold, and changing it needs the operator's approval |
-| Blurp's energy | read-only: its energy as a percentage and whether it is awake or asleep (#345, #363); "not running yet" before Blurp has run |
+| Blurp's energy | (shown only when Blurp is on) read-only: its energy as a percentage and whether it is awake or asleep (#345, #363); "not running yet" before Blurp has run |
 | Background work: Goal worker | the model the watch and goal loops run on (`loops`); every loop turn runs on it, whatever its session remembers, and is stamped with it. A person's chat keeps its own model |
 | Background work: Idle thinker | the model of the idle cortex (`cortex`): the thinker, the dreamer and the claim judges |
 | Background work: credentials | shown only when that mind's model is a claude-agent rung: Same as the chat (default), API key, CLI login (`loops_auth`, `cortex_auth`). See [claude-agent.md](claude-agent.md) |
@@ -232,7 +232,7 @@ The ⏸ beside 💬 in membrane home's top bar is the seat's pause (#348). Like 
 media player's button, it shows what a click does (#382): ⏸ while the seat
 runs, ▶ while it is paused. Pressing ⏸ stands the seat's acting lanes
 down — the loops, the dreamer, the thinker's ticks, the night pass, the
-autonode, the idle judges, speech, Blurp's cycle and the scripts' model calls —
+autonode, the idle judges, speech, the packs' effects and Blurp's cycle when it is on —
 and the LLM's entity and file writes are refused; reads, memory, `intend` and
 your chat stay. Pressing ▶ resumes, and what the lanes held runs. It is the
 same pause as typing `membrane: pause` / `membrane: resume` in the chat, with

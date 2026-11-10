@@ -66,7 +66,7 @@ The chat routes count as writes: every turn is captured into the field, its
 frames (`membrane: learn`, `forget`, `watch`, ...) change it directly, and the
 turn's tool rounds reach the entity, script and executor lanes.
 
-Fields that hold a script (`tick_script`, `getter_script`, `watch_script`, every
+Fields that hold a script (retired in 0.7.5, still refused here: `tick_script`, `getter_script`, `watch_script`, every
 `*_script`) and a method's command are code: an off-box caller without the
 token never lands one, whatever the settings say. The entity edit and method
 routes check this a second time behind the route's gate.

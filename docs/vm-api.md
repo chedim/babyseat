@@ -1,7 +1,7 @@
 # The cliffhanger VM's API, as it is today (#971 step 1)
 
-#971 moves membrane onto a native (Rust) cliffhanger VM, with Python left only as the
-launcher and the pip wheel. This page writes down the surface that VM has to provide.
+Since 0.7.5 membrane's engine is the native (Rust) VM (#971), with Python left only as the
+launcher and the pip wheel. This page writes down the surface it provides.
 It is taken from the Python code as it stands (`writes.py`, `entities.py`, `ch.py`,
 `adapters.py`, `journal.py`), so a second VM can be built against it and checked by
 replay. Where the code and this page disagree, the code wins and this page gets fixed.

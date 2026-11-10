@@ -55,7 +55,7 @@ rule, not the convention.
 ### 3. Nondeterminism enters only through admitted observations. — DEFERRED (a product decision)
 
 Time, randomness and IO MUST be admitted as logged observations, never read
-directly. Today this does **not** hold: entity scripts are unsandboxed
+directly. Before 0.7.5 this did **not** hold: entity scripts were unsandboxed (retired in 0.7.5; pack effects go through the fs/proc drivers with receipts)
 ("scripts may import/shell anything") and read `time.time()`, RNG and the
 field directly. Until this holds, the replay critic is advisory, not exact —
 the same log replayed twice reads a different clock.

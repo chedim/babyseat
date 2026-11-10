@@ -1,3 +1,25 @@
+## v0.7.5 (2026-11-10) — the field engine
+
+0.7.5 moves membrane's behaviour onto a native field engine: `.c1f` packs run in Rust on the seat and in WebAssembly in the page, the banner is a pack, and the seat gains a small standard library (its store, files, commands, MCP servers). **Defaults that change: SQLite is the store (a Couchbase Lite seat moves to it at its first start); Python entity scripts are retired (the boot upgrade moves them); Blurp is off (`MEMBRANE_BLURP=1`); membrane's own 🧩 answer and the gap call are off (`MEMBRANE_ANSWER=1`, `MEMBRANE_GAP_FILL=1`).**
+
+- **The field engine is native** (#971, #994 and its series #995–#1026). Getters keep values true, setters react to writes, every effect is a write with a receipt; the goal graph, the recall policy, calls as writes and the banner's rules run on it, parity-gated against the old triggers. The Python fallback is gone (#1010).
+- **A language for packs** (#1049): getter arms and setters share the same forms (`WHEN` / `ELSE WHEN` / `ELSE`, bare ifs, `FOR` blocks), text, list and time built-ins, `instances(cls)`; caps apply per arm, string literals excluded. A pending read is an empty list to every list built-in (#1065).
+- **A standard library** (#1044, #1049): `store` (`sql()` / `jsonl()` read the seat's SQLite store directly, async, never blocking the engine), `fs` and `proc` (reads as getters; File and Command effects as writes, with receipts), and **MCP as entities** (#963): MCP servers, their tools, resources and prompts are field entities; a tool call is a write; other clients' configs import; the Claude rung mounts the enabled servers as its own tools.
+- **The banner is a pack** (#994, #1049): one `Banner:<owner>:<chat>` per person per chat, its dials on the instance, every section and the layout in `membrane/packs/banner.c1f`; a model can tune its own or run its own class. Recall and rerank run off the engine, so a slow recall never stalls the seat.
+- **Entity scripts move into packs** (#1044): at the first start a seat's Python `*_script` properties are ported to pack kinds when known, retired when their run is over, or marked for translation; models are no longer offered them.
+- **The field engine in the page** (#1037): the browser follows the seat's field in WebAssembly, the page's own DOM is in the field (`DomNode:page:*`), and view packs draw in it. The **About window** (ⓘ) is the first: version, git short sha and this release's notes (#1060).
+- **The doctrine is a short core; help is in the field** (#1043, #1058): long forms are `membrane::help:<topic>` entities (packs, exec, goals, watches, the page engine, voice…), editable per seat; two tools for the engine, `pack` and `entity_write`; the doctrine and the changelog ship inside the package (an installed seat had no doctrine).
+- **The engine ships compiled** (#1070): `pip install babyseat` gets a wheel with the engine inside on macOS (Apple silicon, Intel) and Linux (x86_64, aarch64), one per platform for every Python ≥ 3.10; `install.sh`, a source install and the Docker image compile it (the installer fetches a user-local Rust toolchain when there is none).
+- **SQLite is the default store** (#971, #975, #1048), and the seat's recall reads the native index (Metal on macOS, #1025).
+- **Seats**: one chat per person for the operator, whatever the door (#966, #967, #770); each seat's cookie is its own, so two seats on one host stay logged in (#1047); your own messages show as yours under JWT mode (#1045); waiting messages join one turn (#970, #974); goals keep their full text (#977, #978).
+- **UI**: a reply footer (👍/👎 + why, ↻ retry) and per-option impact on Decision cards (#1029, #1032, #1033).
+- **Blurp is off in 0.7.5** (`MEMBRANE_BLURP=1` turns it on): its panels and toys are hidden and no toy runs (#1057); it is being rewritten.
+
+### Fixes
+
+- **Speed**: the work graph indexes blockers once per call (#1050); recall scans a chat's turns once per call (#1046); the autonode file scan is one native call (#1049).
+- A removed entity leaves the engine and every page (#1054); the banner's header is its own dial (#1051); a watch planted by a Claude turn is that agent's, and the reply names both limits (#1061, #1063); browser JS errors keep their message in Firefox and Safari (#1055); the reranker runs on a CUDA GPU (NVIDIA, or AMD through ROCm) (#1069); the unknown-words hint is off until its segmentation is fixed (#1052).
+
 ## v0.7.4 (2026-10-30) — code trees, recall as the banner, goals as a graph
 
 0.7.4 is a seat release on the 0.7 line. Code becomes a tree in the field, recall moves into the banner with a reranker, goals become a graph, and Blurp learns toys first. Blurp's six unbuilt skills (expect, turns, speak, shift, change, invent) are not in this release; they go to 0.7.5. **One default changes: no-context is on (#668, #691): the transcript is no longer replayed; the field is the memory.**
