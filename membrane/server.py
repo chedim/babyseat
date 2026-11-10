@@ -1612,7 +1612,7 @@ class TurnRunner:
 
         # -- the loop ---------------------------------------------------------------
 
-    def _prior_history(self, sid: str, exclude_id: str, anchor: bool = False) -> list[dict]:
+    def _prior_history(self, sid: str, exclude_id: str, anchor: bool = False, also=None) -> list[dict]:
         """THE SERVE-MODE NARRATIVE: the seat's turns used to carry the
         current ask ONLY -- the model never saw the conversation, so
         'who created it?' had no antecedent anywhere (the 'it'-word
@@ -1627,6 +1627,8 @@ class TurnRunner:
             info = row.get("info") or {}
             if exclude_id and str(info.get("id") or "") == exclude_id:
                 continue
+            if also and str(info.get("id") or "") in also:
+                continue          # #970: a batched turn's other messages ride its joined text
             role = info.get("role")
             if role not in ("user", "assistant"):
                 continue
@@ -2296,6 +2298,11 @@ class TurnRunner:
                     if len(batch) > 1:
                         nxt["text"] = "\n\n".join(str(b["text"]) for b in batch)
                         nxt["parts_all"] = batch
+                        # every batched message's row is stored already (run() stores it on arrival): the
+                        # turn leaves them ALL out of the replayed history, they are in its joined text
+                        nxt["user_info"] = {**(batch[0]["user_info"] or {}),
+                                            "_batch_ids": [str((b["user_info"] or {}).get("id") or "")
+                                                           for b in batch if (b["user_info"] or {}).get("id")]}
             if nxt is None:
                 return
             ent = nxt
@@ -2629,7 +2636,8 @@ class TurnRunner:
         # message + the session's prior narrative + the user turn, then
         # assistant/tool pairs as they form
         history = self._prior_history(sid, str(user_info.get("id") or ""),
-                                      anchor=bool(user_info.get("continueTurn"))) \
+                                      anchor=bool(user_info.get("continueTurn")),
+                                      also=user_info.get("_batch_ids")) \
             if user_info else []
         # A CONTINUATION (a finished job's turn, jobs.py; auto-chat's rounds
         # used it until #348): no message at all; the next round starts

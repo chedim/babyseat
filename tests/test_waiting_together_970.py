@@ -56,3 +56,64 @@ class TestWaitingMessagesDeliveredTogether(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEachWaitingMessageReachesTheModelOnce(unittest.TestCase):
+    def test_the_batched_turn_does_not_replay_its_own_messages(self):
+        # review 2026-11-10: run() stores every message's row when it arrives; the batched turn must leave ALL of
+        # its messages out of the replayed history (they are in its joined text), not only the first
+        import tempfile
+        d = tempfile.mkdtemp()
+        r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(str(Path(d) / "s.json")), MS.MessageStore(str(Path(d) / "m.json")),
+                          None, None, system="", model="m")
+        sid = r.sessions.create(title="chat")["id"]
+        sent = []
+        orig = r._prior_history
+
+        def spy(s, exclude, anchor=False, also=None):
+            h = orig(s, exclude, anchor=anchor, also=also)
+            sent.append([m["content"] for m in h])
+            return h
+        r._prior_history = spy
+        rows = {}
+        for t in ("B", "C", "D"):
+            info = {"id": "msg_" + t, "sessionID": sid, "role": "user", "time": {"created": time.time()}}
+            parts = [{"id": "prt_" + t, "type": "text", "text": t}]
+            r.messages.append(sid, info, parts)
+            rows[t] = (info, parts)
+        batch_info = dict(rows["B"][0], _batch_ids=["msg_B", "msg_C", "msg_D"])
+        try:
+            r._run_inner(sid, "B\n\nC\n\nD", user_info=batch_info, user_parts=rows["B"][1])
+        except Exception:
+            pass                                  # no model here: only the history it built matters
+        self.assertTrue(sent, "the turn never built its history")
+        for t in ("B", "C", "D"):
+            self.assertNotIn(t, sent[0], f"{t} replayed as an earlier message and sent again in the joined text")
+
+    def test_the_batch_carries_every_message_id(self):
+        calls, infos = [], []
+        r = _runner(calls, hold=0.5)
+
+        def fake_inner(sid, text, user_info=None, user_parts=None):
+            calls.append(text)
+            infos.append(dict(user_info or {}))
+            time.sleep(0.5)
+            return {"info": {"id": "a", "role": "assistant"}, "parts": [], "text": text}
+        r._run_inner = fake_inner
+        sid = r.sessions.create(title="chat")["id"]
+        ths = []
+        for t in ["A", "B", "C"]:
+            th = threading.Thread(target=r.run, args=(sid, t), daemon=True)
+            th.start()
+            ths.append(th)
+            time.sleep(0.05)
+            if t == "A":
+                for _ in range(100):
+                    if calls:
+                        break
+                    time.sleep(0.02)
+        for th in ths:
+            th.join(timeout=15)
+        time.sleep(1.0)
+        self.assertEqual(len(calls), 2, calls)
+        self.assertEqual(len(infos[1].get("_batch_ids") or []), 2, infos[1])
