@@ -398,6 +398,7 @@ dependencies = [
  "pollster",
  "pyo3",
  "serde_json",
+ "wasm-bindgen",
  "wgpu",
 ]
 
