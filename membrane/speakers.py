@@ -34,6 +34,7 @@ _LINE = re.compile(r"^\s*\[(?:HA )?user: ([^\]\n]{1,80})\][ \t]*\n?")
 # so the person entity is keyed by the sub; the forms above never match it
 ID_PREFIX = "[user#"
 _ID_LINE = re.compile(r"^\s*\[user#([a-z0-9][a-z0-9-]{0,79}): ([^\]\n]{1,80})\][ \t]*\n?")
+OWNER_ID = "owner"          # the sub of the seat owner's speaker line: [user#owner: owner]
 SEAT = ("seat:self", "seat")
 VOICE = ("seat:voice", "voice")
 VOICE_PREFIX = "[membrane voice] "         # old auto-chat voice rows (the babble role, gone in #318)
@@ -95,6 +96,8 @@ def speaker_of(ev: dict) -> tuple[str, str] | None:
             return VOICE
         pid, pname, _ = split_speaker_id(ev.get("text") or "")
         if pid:
+            if pid == OWNER_ID:        # the seat owner's line is the operator's, whatever its label
+                return OPERATOR
             return f"person:{pid}", pname or pid
         name, _ = split_speaker(ev.get("text") or "")
         return (f"person:{slug(name)}", name) if name else OPERATOR
