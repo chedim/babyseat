@@ -823,9 +823,10 @@ def teach_hint_on() -> bool:
 
 
 def answer_on() -> bool:
-    """Membrane's own 🧩 answers: on by default; MEMBRANE_ANSWER=0 turns them off."""
+    """Membrane's own 🧩 answers (it answers a read-only message itself, before the model): OFF by default for users
+    (the operator, 2026-11-10); MEMBRANE_ANSWER=1 turns them on."""
     import os
-    return os.environ.get("MEMBRANE_ANSWER", "1").strip().lower() not in ("0", "off", "false", "no")
+    return os.environ.get("MEMBRANE_ANSWER", "0").strip().lower() in ("1", "on", "true", "yes")
 
 
 def respond(srv, sid: str, text: str) -> str:
@@ -932,9 +933,10 @@ _COLON = re.compile(r"^\s*[\"']?([a-z][\w' -]*?)[\"']?\s*:\s*(?!none\b)(\S[^:]*?
 
 
 def gap_fill_on() -> bool:
-    """On by default; MEMBRANE_GAP_FILL=0 turns it off."""
+    """The gap call (a model call that fills a message's unknown words): OFF by default for users (the operator,
+    2026-11-10); MEMBRANE_GAP_FILL=1 turns it on."""
     import os
-    return os.environ.get("MEMBRANE_GAP_FILL", "1").strip().lower() not in ("0", "off", "false", "no")
+    return os.environ.get("MEMBRANE_GAP_FILL", "0").strip().lower() in ("1", "on", "true", "yes")
 
 
 def _gap_eid(word: str) -> str:

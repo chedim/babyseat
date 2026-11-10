@@ -9,6 +9,7 @@ marked "🧩 membrane (no model):"; the model still answers. No sentence types.
 """
 import os
 import sys
+import pytest
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from test_living_language import HAVE, SID, _world  # noqa: E402
 from membrane import language as LL  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _gap_fill_on(monkeypatch):
+    """The operator, 2026-11-10: the gap call is off by default for users; this file tests it, so it is on here."""
+    monkeypatch.setenv("MEMBRANE_GAP_FILL", "1")
+
 
 MARK = "🧩 membrane (no model):"
 
@@ -75,6 +83,16 @@ class _Runner:
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class BeforeTheTurn(unittest.TestCase):
+    def setUp(self):                    # the operator, 2026-11-10: 🧩 answers are off by default; these test them on
+        self._answer_env = os.environ.get("MEMBRANE_ANSWER")
+        os.environ["MEMBRANE_ANSWER"] = "1"
+
+    def tearDown(self):
+        if self._answer_env is None:
+            os.environ.pop("MEMBRANE_ANSWER", None)
+        else:
+            os.environ["MEMBRANE_ANSWER"] = self._answer_env
+
     def _ctx(self, srv, said, reply="frobnicate: none"):
         from membrane import lanes as L
         srv._loop_runner = _Runner()

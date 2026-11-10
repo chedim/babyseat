@@ -135,7 +135,7 @@ the surprise words mean, in the forms the field can keep (a verb it knows, an ad
 property and a value, another name of a thing). What fits is taught at once (`language.teach`);
 every word asked is marked (`membrane::gap:<word>`) and never asked again, kept or not. Only the
 operator's chats teach (a guest's don't, #882); `shadow.filled` keeps what came back and the
-tokens; `MEMBRANE_GAP_FILL=0` turns it off. **Membrane answers from the filled graph** (#887 C): before the
+tokens; **off by default since 0.7.5**, `MEMBRANE_GAP_FILL=1` turns it on. **Membrane answers from the filled graph** (#887 C): before the
 model's turn, the message is scored (the shadow keeps that score, from before the fill), its
 surprise words are filled (build B, now before the turn), and `language.respond` words a reply
 from what it understood: each condition the message names checked on each thing it names ("goal
@@ -145,8 +145,8 @@ program's result, and what it still doesn't know. A run of words that is a thing
 marked **🧩 membrane (no model):** whenever it has anything; the model still answers and is told
 what membrane said (that a program ran only when one did). The gap call is waited for at most
 `GAP_WAIT_S` (30 s): after that the turn goes on and a late answer is still kept, and a word
-already being asked is never asked again at the same time. `MEMBRANE_ANSWER=0` turns every 🧩
-post off, stage 3's too.
+already being asked is never asked again at the same time. **🧩 posts are off by default since
+0.7.5** (the operator: off for users); `MEMBRANE_ANSWER=1` turns them on, stage 3's too.
 
 **Novelty: a new meaning needs two signals** (#891, the operator 2026-11-03 after Memo's
 reviews). What's true of the things a word is said of is not what the word means: people talk

@@ -31,6 +31,16 @@ class Fake:
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class GapFill(unittest.TestCase):
+    def setUp(self):                    # the operator, 2026-11-10: the gap call is off by default; these test it on
+        self._gap_env = os.environ.get("MEMBRANE_GAP_FILL")
+        os.environ["MEMBRANE_GAP_FILL"] = "1"
+
+    def tearDown(self):
+        if self._gap_env is None:
+            os.environ.pop("MEMBRANE_GAP_FILL", None)
+        else:
+            os.environ["MEMBRANE_GAP_FILL"] = self._gap_env
+
     def test_an_answer_is_proposed_and_a_write_synonym_never_taught(self):
         """2026-11-03: the model's answers go through the d-build; "finish means close" maps onto a
         write, so it is only ever a proposal."""
@@ -95,6 +105,16 @@ class GapFill(unittest.TestCase):
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class TheTurn(unittest.TestCase):
+    def setUp(self):                    # the operator, 2026-11-10: the gap call is off by default; these test it on
+        self._gap_env = os.environ.get("MEMBRANE_GAP_FILL")
+        os.environ["MEMBRANE_GAP_FILL"] = "1"
+
+    def tearDown(self):
+        if self._gap_env is None:
+            os.environ.pop("MEMBRANE_GAP_FILL", None)
+        else:
+            os.environ["MEMBRANE_GAP_FILL"] = self._gap_env
+
     def _run(self, owner):
         from test_conversation_graph import _seat
         from membrane import convgraph as CG

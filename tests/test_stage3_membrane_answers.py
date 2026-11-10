@@ -45,6 +45,16 @@ def _read_only_check(srv, f, est, goal):
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class MembraneAnswers(unittest.TestCase):
+    def setUp(self):                    # the operator, 2026-11-10: 🧩 answers are off by default; these test them on
+        self._answer_env = os.environ.get("MEMBRANE_ANSWER")
+        os.environ["MEMBRANE_ANSWER"] = "1"
+
+    def tearDown(self):
+        if self._answer_env is None:
+            os.environ.pop("MEMBRANE_ANSWER", None)
+        else:
+            os.environ["MEMBRANE_ANSWER"] = self._answer_env
+
     def test_a_read_only_message_is_answered_by_membrane_marked(self):
         srv, f, est, goal, g1, g2 = _world()
         _read_only_check(srv, f, est, goal)
