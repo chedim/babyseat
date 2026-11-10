@@ -2028,6 +2028,15 @@ function jsCompile(code, names) {
   return asWritten;                                    // its own return, or no value
 }
 
+// #1055: what a JS run's error says -- its name and message, then the stack (Firefox and Safari put no message in
+// Error.stack; Chrome does, so the message is added only when the stack doesn't already start with it)
+function jsError(err) {
+  if (!err || typeof err !== "object") return String(err).slice(0, 2000);
+  const head = (err.name || "Error") + ": " + (err.message || "");
+  const stack = String(err.stack || "");
+  return (stack.startsWith(head) ? stack : head + (stack ? "\n" + stack : "")).slice(0, 2000);
+}
+
 // a value as text: a string as itself, JSON when JSON can carry it, else
 // what the console would print (a function, a BigInt, a Symbol, a cycle, a
 // Map/Set, an element, an Error)
@@ -3748,7 +3757,7 @@ function definePanel() {
                                       new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after " + ms + " ms")), ms))]);
         out = { id: job.id, ok: true, value: v === undefined ? undefined : jsShow(v).slice(0, 4000), logs: logs.slice(0, 200) };
       } catch (err) {
-        out = { id: job.id, ok: false, error: String((err && err.stack) || err).slice(0, 2000), logs: logs.slice(0, 200) };
+        out = { id: job.id, ok: false, error: jsError(err), logs: logs.slice(0, 200) };
       }
       await this._api(SERVE + "/membrane/jsexec/result", { method: "POST", body: JSON.stringify(out) }).catch(() => {});
     }
