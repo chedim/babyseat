@@ -467,7 +467,7 @@ class Thinker:
                 continue          # no tick of its own, none inherited (opt-in classes)
             if night and not props.get("wakes"):
                 continue          # the body at rest; the whisker listens
-            if str(props.get("name") or "").startswith("toy:") or ":toy:" in ent.eid:
+            if props.get("toybox") or str(props.get("name") or "").startswith("toy:") or ":toy:" in ent.eid:
                 try:
                     from . import self_loop as _SL
                     if _SL.mode(self.srv) == "off":
