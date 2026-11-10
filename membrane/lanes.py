@@ -6247,6 +6247,10 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 _port = getattr(srv, "listen_port", None)
                 if _port is None:
                     _port = (getattr(srv, "server_address", None) or (None, None))[1]
+                # #1061: the turn's agent rides to the rung's tool handler (its watches are that agent's)
+                _sid = str(u2.get("_turn_sid") or "")
+                _CA.TURN_AGENT.set((getattr(getattr(srv, "_loop_runner", None), "_agents", None) or {}).get(_sid)
+                                   if _sid else None)
                 return _CA.open_reply(u2, port=_port)
             u2.pop(_CA.AUTH_KEY, None)         # the rung's own field, never a backend's
             if rec is not None and rec.backend:
@@ -7213,7 +7217,12 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         membrane."""
         from .attention import (ATTENTION_BUDGET, inventory as _inv,
                                 over as _over, render as _render)
-        from .watch import WatchFull
+        from .watch import MAX_WATCHES, WatchFull
+
+        def _limits(n: int) -> str:
+            # #1063: both limits, so 2/12 never reads like the cap that is 7
+            return (f"field watches {len(board.watches)}/{MAX_WATCHES}, attention {n}/{ATTENTION_BUDGET} "
+                    f"(shared with watch_ops and watch_fields)")
         srv = self.server
         board = _watches_board(srv)
         est = getattr(srv, "entity_store", None)
@@ -7240,8 +7249,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                         "label": _clip(topic, 120), "wid": w.wid})
             text = (f"watch #{w.wid} planted: {topic!r}, radius {w.radius:.2f}, "
                     f"owner {owner or 'operator'}. New memories landing inside "
-                    f"report on your next turn. Attention: "
-                    f"{len(_inv(est, board))}/{ATTENTION_BUDGET}.")
+                    f"report on your next turn. {_limits(len(_inv(est, board)))}.")
         elif action == "drop":
             spec = str(body.get("spec") or "").strip()
             n, note = board.drop_watch(spec)
@@ -7249,11 +7257,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                         "origin": "field_watch", "owner": owner,
                                         "spec": _clip(spec, 120), "result": note})
             text = (f"dropped {n} watch(es): {note}" if n else f"nothing dropped: {note}") + \
-                f". Attention: {len(_inv(est, board))}/{ATTENTION_BUDGET}."
+                f". {_limits(len(_inv(est, board)))}."
         else:
             inv = _inv(est, board)
-            text = (f"Attention: {len(inv)}/{ATTENTION_BUDGET}.\n" + _render(inv)) if inv \
-                else f"Attention: 0/{ATTENTION_BUDGET} -- nothing watched."
+            text = (f"{_limits(len(inv))}.\n" + _render(inv)) if inv \
+                else f"{_limits(0)} -- nothing watched."
         self._json_out({"ok": True, "text": text})
 
     def _paused_write_refused(self) -> bool:
