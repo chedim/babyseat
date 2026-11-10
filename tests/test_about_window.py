@@ -70,5 +70,7 @@ def test_the_view_in_the_page_engine():
     assert out.returncode == 0, out.stderr[-2000:]
 
 
-def test_the_top_bar_has_an_id_for_view_packs():
-    assert 'class="top glass" id="topbar"' in (ROOT / "membrane" / "ui" / "home.js").read_text()
+def test_the_top_bar_has_an_id_for_view_packs_and_styles_the_window():
+    src = (ROOT / "membrane" / "ui" / "home.js").read_text()
+    assert 'class="top glass" id="topbar"' in src
+    assert ".top .aboutwrap" in src and ".top .aboutwrap > .about" in src     # under its button, in the panel's own CSS

@@ -22,9 +22,13 @@ for (const [k, v] of [['version', '0.7.5'], ['sha', 'ee08067'], ['changelog', lo
 f.drain();
 const get = (e) => JSON.parse(f.get(e));
 
+// the ⓘ and its window sit together in the top bar: the window opens right under its button
+const anchor = get('DomNode:about:anchor');
+assert.equal(anchor.parent, 'DomNode:page:#topbar'); assert.equal(anchor.class, 'aboutwrap');
 const btn = get('DomNode:about:btn');
-assert.equal(btn.tag, 'button'); assert.equal(btn.parent, 'DomNode:page:#topbar'); assert.equal(btn.text, 'ⓘ');
+assert.equal(btn.tag, 'button'); assert.equal(btn.parent, 'DomNode:about:anchor'); assert.equal(btn.text, 'ⓘ');
 const win = get('DomNode:about:win');
+assert.equal(win.parent, 'DomNode:about:anchor', 'the window opens next to its button, not in the dock');
 assert.equal(win.hidden, true, 'the window starts closed');
 assert.equal(get('DomNode:about:name').text, 'babyseat 0.7.5 · ee08067');
 assert.equal(get('DomNode:about:release').text, 'v0.7.5 (2026-11-10) — the field engine');

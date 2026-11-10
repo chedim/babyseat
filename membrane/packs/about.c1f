@@ -2,7 +2,7 @@ PACK about 1
 IMPORT dom 1
 -- The About window (the operator, 2026-11-10): the seat's version, its git short sha and what changed, as a view in
 -- the page's field engine. The seat feeds one About:seat {version, sha, changelog} (membrane/about.py); this pack
--- draws an ⓘ button in the top bar (DomNode:page:#topbar) and the window in the views dock, and opens / closes it.
+-- draws an ⓘ button in the top bar (DomNode:page:#topbar) with its window right under it, and opens / closes it.
 
 -- the current release's entry as fields to read (the setters below compute it themselves: an on-setter sees the
 -- getters as they were before the write in the same round)
@@ -13,13 +13,17 @@ About.label getter: 'babyseat ' + str(this.version or '?') + (' · ' + this.sha 
 
 About.version on-setter draw:
   ALWAYS:
-    ('DomNode:about:btn').parent = 'DomNode:page:#topbar'
+    ('DomNode:about:anchor').parent = 'DomNode:page:#topbar'
+    ('DomNode:about:anchor').tag = 'span'
+    ('DomNode:about:anchor').class = 'aboutwrap'
+    ('DomNode:about:btn').parent = 'DomNode:about:anchor'
     ('DomNode:about:btn').tag = 'button'
     ('DomNode:about:btn').text = 'ⓘ'
     ('DomNode:about:btn').title = 'About: the version and what changed'
     ('DomNode:about:btn').class = 'aboutbtn'
+    ('DomNode:about:win').parent = 'DomNode:about:anchor'
     ('DomNode:about:win').tag = 'section'
-    ('DomNode:about:win').class = 'about'
+    ('DomNode:about:win').class = 'about glass'
     ('DomNode:about:win').role = 'dialog'
     ('DomNode:about:win').hidden = True
     ('DomNode:about:head').parent = 'DomNode:about:win'
