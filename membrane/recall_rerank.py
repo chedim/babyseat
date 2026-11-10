@@ -92,6 +92,17 @@ def _find_peer() -> int | None:
     return None
 
 
+
+def _device(torch) -> str:
+    """Where the reranker runs: a CUDA device when PyTorch reports one (NVIDIA, or an AMD GPU through a ROCm build,
+    which PyTorch exposes as `cuda`), else Apple's MPS, else the CPU."""
+    if torch.cuda.is_available():
+        return "cuda"
+    mps = getattr(getattr(torch, "backends", None), "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    return "cpu"
+
 def _load() -> None:
     global _state, _model, _peer
     port = _find_peer()                           # one copy per machine (#683)
@@ -103,7 +114,7 @@ def _load() -> None:
     try:
         import torch
         from sentence_transformers import CrossEncoder
-        dev = "mps" if torch.backends.mps.is_available() else "cpu"
+        dev = _device(torch)
         m = CrossEncoder(MODEL, max_length=MAX_LEN, device=dev)   # fp32: fp16/bf16 lost 5 of the 9 points
         # #720: the first predict on a fresh model pays its kernel set-up (2.4 s on
         # mps vs ~1 s after): one full-size batch here, so no turn pays it
