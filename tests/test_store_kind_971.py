@@ -81,13 +81,31 @@ class Choosing(unittest.TestCase):
         self.assertEqual(k, "sqlite")
         self.assertEqual(SK.chosen(Path(f).parent), "sqlite")
 
-    def test_an_existing_couchbase_lite_seat_keeps_its_store_and_is_never_asked(self):
+    def test_a_couchbase_lite_seat_that_can_not_be_migrated_stays_and_says_why(self):
+        # the operator 2026-11-10: an existing CBL seat moves to SQLite at its first start; when the copy fails
+        # (here: the disk is full) the seat stays on CBL, is never asked, and the reason is printed
         f = _seat()
         (Path(f).parent / "field.cblite").mkdir()
-        with _env():
+        out = io.StringIO()
+        with _env(), mock.patch.object(SK, "migrate", side_effect=OSError("no space left on device")):
             self.assertEqual(SK.resolve(f), "cbl")
-            self.assertEqual(SK.ensure_chosen(f, interactive=True, ask=lambda p: self.fail("asked"),
-                                              out=io.StringIO()), "cbl")
+            self.assertEqual(SK.ensure_chosen(f, interactive=True, ask=lambda p: self.fail("asked"), out=out), "cbl")
+        self.assertIn("stays on Couchbase Lite", out.getvalue())
+        self.assertIn("no space left on device", out.getvalue())
+
+    def test_a_seat_that_chose_couchbase_lite_is_never_migrated(self):
+        f = _seat()
+        (Path(f).parent / "field.cblite").mkdir()
+        SK.choose(Path(f).parent, "cbl")
+        with _env(), mock.patch.object(SK, "migrate", side_effect=AssertionError("migrated a chosen store")):
+            self.assertEqual(SK.ensure_chosen(f, out=io.StringIO()), "cbl")
+
+    def test_the_environment_stops_the_automatic_migration(self):
+        f = _seat()
+        (Path(f).parent / "field.cblite").mkdir()
+        with _env(MEMBRANE_EFIELD_STORE="cbl"), \
+                mock.patch.object(SK, "migrate", side_effect=AssertionError("migrated under the override")):
+            self.assertEqual(SK.ensure_chosen(f, out=io.StringIO()), "cbl")
 
     def test_the_environment_overrides_the_choice(self):
         f = _seat()
@@ -142,6 +160,26 @@ class Migrating(unittest.TestCase):
 
     def test_couchbase_lite_to_sqlite(self):
         self._round("cbl", "sqlite")
+
+    def test_an_old_couchbase_lite_seat_moves_to_sqlite_at_its_first_start(self):
+        # a seat from before #971: a CBL store and no choice on record
+        f = _seat()
+        SK.choose(Path(f).parent, "cbl")
+        with _env():
+            be = efstore.open_backend(f)
+            _fill(be)
+            be.close()
+            (Path(f).parent / SK.CHOICE_FILE).unlink()
+            out = io.StringIO()
+            self.assertEqual(SK.ensure_chosen(f, interactive=True, ask=lambda p: self.fail("asked"), out=out), "sqlite")
+            self.assertIn("moved to SQLite", out.getvalue())
+            self.assertTrue((Path(f).parent / "field.cblite").exists())          # the old store stays, a backup
+            be = efstore.open_backend(f)
+        try:
+            self.assertIsInstance(be, SQLiteBackend)
+            self.assertEqual(be.get("entity_states", "e1")["mass"], 2.0)
+        finally:
+            be.close()
 
     def test_a_running_seat_is_never_migrated(self):
         f = _seat()
