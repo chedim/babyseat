@@ -39,12 +39,12 @@ def _ctx(srv, said, owner):
 class OperatorChat(unittest.TestCase):
     def test_the_operators_own_chat_gets_the_gap_note(self):
         srv, *_ = _world()
-        with mock.patch.dict(os.environ, {"MEMBRANE_OPERATOR": "alice"}):
+        with mock.patch.dict(os.environ, {"MEMBRANE_OPERATOR": "alice", "MEMBRANE_TEACH_HINT": "1"}):   # #1052: off by default
             self.assertIn("doesn't know", _ctx(srv, "shut goal one", "alice"))
 
     def test_the_tokenless_owner_is_the_operator(self):
         srv, *_ = _world()
-        with mock.patch.dict(os.environ, {}, clear=False):
+        with mock.patch.dict(os.environ, {"MEMBRANE_TEACH_HINT": "1"}, clear=False):           # #1052: off by default
             os.environ.pop("MEMBRANE_OPERATOR", None)
             self.assertIn("doesn't know", _ctx(srv, "shut goal one", "owner"))
 

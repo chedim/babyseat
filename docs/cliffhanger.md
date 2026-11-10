@@ -183,7 +183,8 @@ object (`<word> means <the name of a thing it knows>`, the word as the lookup re
 "the" or "all"). The model teaches what it can tell (`exec(action='run', lang='en', code='<word>
 means <meaning>')`), runs the message, or asks the person; taught once, the same message
 compiles next time. Gaps no definition fills (no object, a verb with no meaning on that thing,
-missing arguments) aren't told. Membrane still runs nothing on its own; the model decides.
+missing arguments) aren't told. Membrane still runs nothing on its own; the model decides. **Off by default since 0.7.5** (#1052: it mis-segmented ordinary messages, flagging greetings
+and whole clauses as unknown names); `MEMBRANE_TEACH_HINT=1` turns it on until the segmentation is fixed.
 **Membrane answers a read-only message itself** (2026-11-02). A chat message that compiles fully
 to calls of read-only methods (`read_only` on the method; every call's `writes` is false) is run
 by membrane before the model's turn (`language.run`), and its result is posted in the chat

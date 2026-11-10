@@ -4349,7 +4349,7 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
                                 + (f"It would change {sum(len(s['targets']) for s in _many)} things: ask before "
                                    "running it (they confirm by saying 'all'). " if _many else "")
                                 + f"If they want it done, exec(action='run', lang='en', code={said!r}) runs it.")
-                elif steps and (_teach := _LL.teachable(steps)):
+                elif steps and _LL.teach_hint_on() and (_teach := _LL.teachable(steps)):
                     # stage 3 (#802): the model fills only what the field doesn't know, by teaching it
                     _words = "; ".join(f'"{g["word"]}" ({g["word"]} means <{_LL.TEACHABLE[g["type"]]}>)'
                                        for g in _teach)
