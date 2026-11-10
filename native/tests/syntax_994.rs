@@ -58,3 +58,20 @@ fn mistakes_are_named_with_their_line() {
     assert!(err("Task.status on-setter a:\n").contains("no body"));
     assert!(err("  this.y = 1\n").contains("before any setter header"));
 }
+
+#[test]
+fn packs_load_at_runtime_replace_by_name_and_a_broken_one_changes_nothing() {
+    use membrane_vm::fields::Fields;
+    let mut f = Fields::goalgraph();
+    let base = (f.setters.len(), f.getters.len());
+    assert!(!f.classes().contains(&"Lamp".to_string()));
+    f.set_pack("lamps", "Lamp.power on-setter glow:\n  WHEN this.power == 'on': this.lit = True\n  ELSE: this.lit = False\nLamp.watts getter: (this.power == 'on') * 60\n").unwrap();
+    assert_eq!((f.setters.len(), f.getters.len()), (base.0 + 1, base.1 + 1));
+    assert!(f.classes().contains(&"Lamp".to_string()));
+    f.set_pack("lamps", "Lamp.power on-setter glow:\n  ALWAYS: this.lit = True\n").unwrap();     // replaced, not added
+    assert_eq!((f.setters.len(), f.getters.len()), (base.0 + 1, base.1));
+    assert!(f.set_pack("lamps", "Lamp.power on-setter:\n  this.lit = 1\n").unwrap_err().contains("pack lamps"));
+    assert_eq!((f.setters.len(), f.getters.len()), (base.0 + 1, base.1), "a broken pack changes nothing");
+    assert!(f.remove_pack("lamps"));
+    assert_eq!((f.setters.len(), f.getters.len()), base);
+}

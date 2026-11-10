@@ -16,6 +16,10 @@ engine) nothing here runs and `goalgraph.seed` defines the triggers as before.
 - **The clock:** the engine ticks on the VM's sweeps (the beat the old `every` trigger fired on), so armed waits
   come due (`Wait.due`); a seat without a VM ticks every `goalgraph.WAIT_TICK_S`.
 - Writes the engine made are never fed back to it: they carry its writer and are skipped.
+- **Packs:** cliffhanglets in `.c1f` files load at runtime: `membrane/packs/*.c1f`, then `Pack` entities in the field
+  (`membrane::pack:<name>`, the text in `c1f`; a field pack replaces a file pack of the same name). Editing a Pack
+  entity reloads it; a pack that doesn't parse is refused, the last good one stays, and the error is written on the
+  entity (`error`). Every class a loaded pack declares is mirrored, and new getters compute as a rebuild.
 """
 from __future__ import annotations
 
@@ -25,11 +29,17 @@ import queue
 import sys
 import threading
 import time
+from pathlib import Path
 
 from . import writes as W
 from .entities import MEMBRANE_NS
 
 CLASSES = ("Goal", "Task", "Decision", "Wait")
+# cliffhanglet packs (`.c1f`) loaded at runtime: files shipped in membrane/packs/, and Pack entities in the field
+# (`membrane::pack:<name>`, the text in `c1f`), which replace a file pack of the same name and reload when edited
+PACK_DIR = Path(__file__).resolve().parent / "packs"
+PACK_CLASS = "Pack"
+PACK_NS = MEMBRANE_NS + "pack:"
 WRITER = "trigger:field:"
 LLM_EID = MEMBRANE_NS + "llm"
 
@@ -70,14 +80,48 @@ class Live:
         self.stopped = threading.Event()
         self.errors = 0
         self.swept = False
-        n = 0
+        self.classes: set = set(CLASSES)
+        for fp in sorted(PACK_DIR.glob("*.c1f")) if PACK_DIR.is_dir() else []:
+            self._pack(fp.stem, fp.read_text(), None)
         for eid, d in list((self.est.docs or {}).items()):
-            if d.cls in CLASSES:
-                self.f.load(eid, d.cls, _json(dict(d.properties or {})))
-                n += 1
-        self.loaded = n
+            if d.cls == PACK_CLASS:
+                self._pack_entity(eid, d)
+        self.loaded = self._mirror()
         self.f.rebuild(time.time())          # the getters compute once; their values are stored, no setter runs
         self._apply()
+
+    # ---- packs ---------------------------------------------------------------------------------------
+    def _pack(self, name: str, text: str, eid) -> bool:
+        """Load or replace a pack. A broken one is refused (the last good one stays) and the error is written on
+        its entity (`error`), or printed for a file pack."""
+        try:
+            self.f.set_pack(name, text)
+            err = ""
+        except Exception as e:                    # noqa: BLE001
+            err = str(e)
+            print(f"[fields] {err}"[:300], file=sys.stderr)
+        d = (self.est.docs or {}).get(eid) if eid else None
+        if d is not None and (d.properties or {}).get("error", "") != err:
+            with W.as_writer(WRITER + "pack"):
+                d.properties = {**(d.properties or {}), "error": err}
+                self.est.upsert(d, embedder=None)
+        self.classes = set(CLASSES) | set(self.f.classes())
+        return not err
+
+    def _pack_entity(self, eid: str, d) -> bool:
+        p = d.properties or {}
+        name = str(p.get("name") or (eid[len(PACK_NS):] if eid.startswith(PACK_NS) else eid))
+        return self._pack(name, str(p.get("c1f") or ""), eid)
+
+    def _mirror(self) -> int:
+        """Load every entity of a mirrored class the engine hasn't seen (after a pack adds a class too)."""
+        n = 0
+        for eid, d in list((self.est.docs or {}).items()):
+            if d.cls in self.classes:
+                if not self.f.has(eid):
+                    self.f.load(eid, d.cls, _json(dict(d.properties or {})))
+                n += 1
+        return n
 
     # ---- hearing the store ---------------------------------------------------------------------------
     def hear(self, w: dict) -> None:
@@ -89,13 +133,19 @@ class Live:
         if not eid or str(w.get("path") or "").startswith("rel:"):
             return
         d = (self.est.docs or {}).get(eid)
-        if d is None or d.cls not in CLASSES:
+        if d is None or (d.cls not in self.classes and d.cls != PACK_CLASS):
             return
         self.q.put((eid, str(w.get("prop") or ""), w.get("new"), time.time()))
 
     def _one(self, eid: str, prop: str, new, now: float) -> None:
         d = (self.est.docs or {}).get(eid)
         if d is None:
+            return
+        if d.cls == PACK_CLASS:                      # a pack written: reload it, mirror any new class, rebuild
+            if prop in ("", "c1f", "name") and self._pack_entity(eid, d):
+                self._mirror()
+                self.f.rebuild(now)                  # a new getter on an old world: computed, no setter runs
+                self._apply()
             return
         if not prop or not self.f.has(eid):          # a birth, or one the mirror hasn't seen: load its state
             self.f.load(eid, d.cls, _json(dict(d.properties or {})))

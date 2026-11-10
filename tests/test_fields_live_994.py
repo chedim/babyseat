@@ -144,3 +144,58 @@ def test_without_the_engine_the_triggers_stay(monkeypatch):
     monkeypatch.delattr(_pkg, "membrane_vm", raising=False)
     monkeypatch.setitem(sys.modules, "membrane.membrane_vm", None)     # import fails
     assert not FL.enabled()
+
+
+LAMPS = """
+Lamp.power on-setter glow:
+  WHEN this.power == 'on': this.lit = True
+  ELSE: this.lit = False
+"""
+
+
+def test_a_pack_in_the_field_loads_its_class_runs_live_and_reloads_when_edited(seat):
+    est = seat.entity_store
+    L = MEMBRANE_NS + "lamp:desk"
+    est.upsert(QuantumEntity(eid=L, cls="Lamp", properties={"power": "off"}))
+    P = FL.PACK_NS + "lamps"
+    est.upsert(QuantumEntity(eid=P, cls=FL.PACK_CLASS, properties={"name": "lamps", "c1f": LAMPS}))
+    settle(seat)
+    assert "Lamp" in seat.live.classes                         # the pack's class is mirrored now
+    write(seat, L, "power", "on")
+    assert p(seat, L, "lit") is True
+    # edited live: the new text replaces the pack
+    d = est.docs[P]
+    d.properties = {**d.properties, "c1f": "Lamp.power on-setter glow:\n  ALWAYS: this.lit = 'always'\n"}
+    est.upsert(d)
+    settle(seat)
+    write(seat, L, "power", "off")
+    assert p(seat, L, "lit") == "always"
+    # a broken edit is refused and the last good pack stays
+    d = est.docs[P]
+    d.properties = {**d.properties, "c1f": "Lamp.power on-setter:\n  this.lit = 1\n"}
+    est.upsert(d)
+    settle(seat)
+    write(seat, L, "power", "on")
+    assert p(seat, L, "lit") == "always"
+    assert "pack lamps" in p(seat, P, "error")
+
+
+def test_packs_in_the_pack_folder_load_at_start(tmp_path, monkeypatch):
+    (tmp_path / "lamps.c1f").write_text(LAMPS)
+    monkeypatch.setattr(FL, "PACK_DIR", tmp_path)
+    monkeypatch.setenv("MEMBRANE_FIELDS", "1")
+    est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
+    srv = types.SimpleNamespace(entity_store=est)
+    L = MEMBRANE_NS + "lamp:desk"
+    est.upsert(QuantumEntity(eid=L, cls="Lamp", properties={"power": "off"}))
+    live = FL.start(srv, thread=False)
+    try:
+        assert "Lamp" in live.classes and live.f.has(L)
+        d = est.docs[L]
+        with W.as_writer("llm:test"):
+            d.properties = {**d.properties, "power": "on"}
+            est.upsert(d)
+        live.settle()
+        assert est.docs[L].properties.get("lit") is True
+    finally:
+        FL.stop(srv)

@@ -322,6 +322,14 @@ impl Fields {
         f.settle(core, &host, now, &mut s);
         *seq = s;
     }
+    /// Load or replace a named `.c1f` pack (a parse error raises and changes nothing). New getters compute at the
+    /// next `rebuild`, which runs no setter.
+    fn set_pack(&self, name: &str, src: &str) -> PyResult<()> {
+        self.c.lock().unwrap_or_else(|e| e.into_inner()).1.set_pack(name, src).map_err(bad)
+    }
+    fn remove_pack(&self, name: &str) -> bool { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.remove_pack(name) }
+    /// The classes the loaded setters and getters are declared on (what the host mirrors).
+    fn classes(&self) -> Vec<String> { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.classes() }
     /// Is this entity in the field's mirror?
     fn has(&self, eid: &str) -> bool { self.c.lock().unwrap_or_else(|e| e.into_inner()).0.docs.contains_key(eid) }
     fn calls(&self) -> String {

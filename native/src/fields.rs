@@ -108,15 +108,47 @@ pub struct Fields {
     /// entities whose getters are registered; `primed` once the start-up rebuild ran
     known: std::collections::HashSet<String>,
     primed: bool,
+    /// cliffhanglet packs loaded at runtime (name -> its setters and getters), after the built-in goal graph
+    packs: std::collections::BTreeMap<String, (Vec<OnSet>, Vec<Getter>)>,
 }
 
 impl Fields {
     pub fn goalgraph() -> Self {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![],
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
-            known: Default::default(), primed: false };
+            known: Default::default(), primed: false, packs: Default::default() };
         f.set_getters(crate::translate::goalgraph_getters());
         f
+    }
+
+    /// Load (or replace) a named `.c1f` pack. A pack that doesn't parse is refused and nothing changes. The setters
+    /// and getters are the built-in goal graph's, then each pack's in name order.
+    pub fn set_pack(&mut self, name: &str, src: &str) -> Result<(), String> {
+        let p = crate::syntax::parse_pack(src).map_err(|e| format!("pack {}: {}", name, e))?;
+        self.packs.insert(name.to_string(), p);
+        self.compose();
+        Ok(())
+    }
+
+    pub fn remove_pack(&mut self, name: &str) -> bool {
+        let had = self.packs.remove(name).is_some();
+        if had { self.compose(); }
+        had
+    }
+
+    fn compose(&mut self) {
+        let mut setters = on_setters();
+        let mut getters = crate::translate::goalgraph_getters();
+        for (s, g) in self.packs.values() { setters.extend(s.iter().cloned()); getters.extend(g.iter().cloned()); }
+        self.setters = setters;
+        self.set_getters(getters);
+    }
+
+    /// Every class a loaded setter or getter is declared on.
+    pub fn classes(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.setters.iter().map(|s| s.cls.clone()).chain(self.getters.iter().map(|g| g.cls.clone())).collect();
+        v.sort(); v.dedup();
+        v
     }
 
     pub fn set_getters(&mut self, gs: Vec<Getter>) {

@@ -7,7 +7,9 @@ the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
 ## 1. The syntax (the syntax pass, 2026-11-09)
 
 Membrane's syntax, made consistent, plus `ELSE` and `ALWAYS` from the spec. Cliffhanglets (pieces of
-cliffhanger code: setters and getters) are stored in `.c1f` files (decided 2026-11-09). It's parsed by
+cliffhanger code: setters and getters) are stored in `.c1f` files (decided 2026-11-09). Besides the built-in goal
+graph, packs load at runtime from `membrane/packs/*.c1f` and from `Pack` entities in the field
+(`membrane::pack:<name>`, the text in `c1f`), which can be edited live (`membrane/fields_live.py`). It's parsed by
 `native/src/syntax.rs`, and the goal graph ships in it (`native/packs/goalgraph.c1f`):
 
 ```
