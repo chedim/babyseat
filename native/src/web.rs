@@ -1,6 +1,6 @@
 //! The browser binding: the same field engine (getters, setters, `.c1f` packs, imports) running in a page,
 //! compiled to WebAssembly (`wasm-pack build --features wasm --no-default-features`). Values cross as JSON text,
-//! like the Python binding. The page's host (membrane/ui/fieldvm/host.js) mounts DomNode entities as the DOM.
+//! like the Python binding. The page's host (membrane/ui/fieldvm.js) mounts DomNode entities as the DOM.
 use serde_json::{Map, Value as J};
 use wasm_bindgen::prelude::*;
 
@@ -52,6 +52,13 @@ impl Field {
         self.f.react(&mut self.core, &PageHost, w, now, &mut s);
         self.seq = s;
         Ok(())
+    }
+
+    /// An entity leaves (a page element taken out): what read or referenced it recalculates.
+    pub fn remove(&mut self, eid: &str, now: f64) {
+        let mut s = self.seq;
+        self.f.remove(&mut self.core, &PageHost, eid, now, &mut s);
+        self.seq = s;
     }
 
     /// The entity's fields as JSON (`null` when it doesn't exist).

@@ -524,6 +524,21 @@ impl Fields {
     }
 
     /// React to one write (already applied to the mirror): getters, then the on-setters, until quiet.
+    /// An entity leaves (a page element taken out of the DOM): it is gone from the mirror, and what read it or
+    /// referenced it recalculates, live, as after a write of each of its fields to nothing.
+    pub fn remove(&mut self, core: &mut Core, host: &dyn Host, eid: &str, now: f64, seq: &mut i64) {
+        let Some(old) = core.docs.get(eid).map(|e| e.props.clone()) else { return };
+        *seq += 1;
+        core.hear(Write { eid: eid.into(), prop: String::new(), new: J::Null, old: J::Null, writer: "remove".into(),
+                          chain: json!({}), seq: *seq }, None, now);
+        self.known.remove(eid);
+        self.dirty.retain(|(_, e, _)| e != eid);
+        for (p, v) in &old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); }
+        self.dirty.retain(|(_, e, _)| e != eid);
+        self.visited.clear();
+        self.run(core, host, VecDeque::new(), now, seq);
+    }
+
     pub fn react(&mut self, core: &mut Core, host: &dyn Host, w: Write, now: f64, seq: &mut i64) {
         self.visited.clear();
         self.visited.insert((w.eid.clone(), w.prop.clone()));   // the outside write starts the chain: returning to it is a loop

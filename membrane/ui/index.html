@@ -144,7 +144,8 @@
     dock.hidden = true;
     document.body.appendChild(dock);
     new MutationObserver(() => { dock.hidden = !dock.childElementCount; }).observe(dock, { childList: true });
-    window.MEMBRANE_FIELD = await m.connect(dock, { onStatus: (s) => { dock.dataset.status = s; } });
+    // link: the whole page's DOM is in the field too (DomNode:page:*), kept in step as the page changes
+    window.MEMBRANE_FIELD = await m.connect(dock, { link: document.body, onStatus: (s) => { dock.dataset.status = s; } });
   }).catch((e) => console.warn("field VM:", e));
   // the seat adopted a name (naming.py): the page comes back with "Hey <name>"
   setInterval(async () => {

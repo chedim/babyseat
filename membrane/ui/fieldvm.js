@@ -8,6 +8,11 @@
 //   class, title, role, hidden, alt, href (http/https only), aria-label: attributes, from an allow-list
 // A click on an element writes its `clicked` (the time). A round's DOM writes are applied together, in one frame.
 //
+// The page's own DOM links in too (`link`): each element of the page (open shadow roots included) is a
+// `DomNode:page:#<id>` entity (`DomNode:page:<n>` without an id) with page=true and its tag, parent, id, direct text
+// and allow-listed attributes, kept in step as the page changes (an element that appears is born whole, a change is a
+// write, a removal leaves the field). Packs read it, place their nodes in it (parent = a page node) and write to it.
+//
 // Data enters as writes (`feed`): an entity is made empty, then each field is written, so the views' setters
 // fire on it (a birth's own getters compute silently, as everywhere).
 import init, { Field } from './fieldvm_core.js';
@@ -36,6 +41,9 @@ class Host {
   constructor(f, root, errors) {
     this.f = f; this.root = root; this.nodes = new Map(); this.pending = []; this.frame = 0;
     this.errors = errors;
+    this.els = new WeakMap();             // element -> its entity (the page's and the packs')
+    this.page = new Map();                // the page's own elements: entity -> element
+    this.schedule = (fn) => requestAnimationFrame(fn);           // one batch per frame (a test may use a timer)
   }
 
   now() { return Date.now() / 1000; }
@@ -64,7 +72,7 @@ class Host {
   flush() {
     const out = JSON.parse(this.f.drain());
     this.pending.push(...out.writes);
-    if (!this.frame) this.frame = requestAnimationFrame(() => this.apply());
+    if (!this.frame) this.frame = this.schedule(() => this.apply());
   }
 
   /** One frame: make the new elements first, then set fields (a parent may be made in the same round). */
@@ -85,6 +93,8 @@ class Host {
   }
 
   node(eid) {
+    const own = this.page.get(eid);
+    if (own) return own;                                          // the page's element: the page owns its tag
     let el = this.nodes.get(eid);
     const e = this.get(eid) || {};
     const tag = TAGS.has(String(e.tag)) ? String(e.tag) : 'div';
@@ -92,6 +102,7 @@ class Host {
       const nu = document.createElement(tag);
       for (const a of [...el.attributes]) nu.setAttribute(a.name, a.value);
       nu.append(...el.childNodes);
+      this.els.set(nu, eid);
       el.replaceWith(nu);
       this.listen(nu, eid);
       this.nodes.set(eid, nu);
@@ -100,6 +111,7 @@ class Host {
     if (!el) {
       el = document.createElement(tag);
       el.dataset.key = eid;
+      this.els.set(el, eid);
       this.listen(el, eid);
       this.nodes.set(eid, el);
       this.attach(el, e.parent);
@@ -123,6 +135,120 @@ class Host {
     const p = typeof parent === 'string' && parent.startsWith(NODE) ? this.node(parent) : this.root;
     if (el.parentNode !== p) p.appendChild(el);
   }
+
+  /** Link the page's own DOM under `top` into the field, and keep it in step (one batch per frame). */
+  link(top = document.body) {
+    if (this.top) return this;
+    this.top = top; this.n = 0; this.added = new Set(); this.fresh = new Set(); this.removed = false; this.linkFrame = 0;
+    this.watched = new WeakSet();
+    this.mo = new MutationObserver(ms => this.mutated(ms));
+    const host = this, attach = Element.prototype.attachShadow;
+    if (!attach.fieldvm) {                       // a shadow root made later is linked too (open ones: closed are private)
+      Element.prototype.attachShadow = function (...a) { const r = attach.apply(this, a); host.later(this, true); return r; };
+      Element.prototype.attachShadow.fieldvm = true;
+    }
+    document.addEventListener('click', ev => {   // capture: recorded even when the page stops the click
+      for (const t of ev.composedPath()) {
+        const eid = this.els.get(t);
+        if (!eid) continue;
+        if (this.page.has(eid)) this.write(eid, 'clicked', this.now());
+        break;                                   // a pack's node records its own click
+      }
+    }, true);
+    this.watch(top.getRootNode() instanceof ShadowRoot ? top.getRootNode() : top);
+    const now = this.now();
+    this.adopt(top, now);
+    this.f.settle(now);
+    this.flush();
+    return this;
+  }
+
+  watch(root) {
+    if (this.watched.has(root)) return;
+    this.watched.add(root);
+    this.mo.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['id', ...ATTRS] });
+  }
+
+  later(el, subtree) {
+    if (!(el instanceof Element)) return;
+    (subtree ? this.added : this.fresh).add(el);
+    if (!this.linkFrame) this.linkFrame = this.schedule(() => this.linked());
+  }
+
+  mutated(ms) {
+    for (const m of ms) {
+      if (m.type === 'childList') {
+        if (m.removedNodes.length) this.removed = true;
+        for (const n of m.addedNodes) this.later(n, true);
+        this.later(m.target instanceof ShadowRoot ? m.target.host : m.target, false);   // its text may have changed
+      } else this.later(m.type === 'characterData' ? m.target.parentElement : m.target, false);
+    }
+    if (this.removed && !this.linkFrame) this.linkFrame = this.schedule(() => this.linked());
+  }
+
+  /** A frame's page changes: removals leave the field, new elements are born whole, changes are written. */
+  linked() {
+    this.linkFrame = 0;
+    const now = this.now();
+    if (this.removed) {
+      this.removed = false;
+      for (const [eid, el] of this.page) if (!el.isConnected) { this.page.delete(eid); this.els.delete(el); this.f.remove(eid, now); }
+    }
+    const added = [...this.added], fresh = [...this.fresh];
+    this.added.clear(); this.fresh.clear();
+    let born = false;
+    for (const el of added) if (el.isConnected) born = this.adopt(el, now) || born;
+    for (const el of fresh) if (el.isConnected && this.page.has(this.els.get(el))) this.refresh(el, now);
+    if (born) this.f.settle(now);
+    this.flush();
+  }
+
+  /** An element and what is under it (its shadow root too) into the field; returns whether any was born. */
+  adopt(el, now) {
+    let eid = this.els.get(el);
+    if (eid && !this.page.has(eid)) return false;                 // a pack's own node: the pack keeps it
+    if (el !== this.top && !this.page.has(this.els.get(this.up(el)))) return false;   // outside the linked tree
+    let born = false;
+    if (!eid) {
+      eid = this.key(el);
+      this.els.set(el, eid); this.page.set(eid, el);
+      this.f.load(eid, 'DomNode', JSON.stringify(this.read(el)));
+      born = true;
+    } else this.refresh(el, now);
+    for (const c of el.children) born = this.adopt(c, now) || born;
+    if (el.shadowRoot) {
+      this.watch(el.shadowRoot);
+      for (const c of el.shadowRoot.children) born = this.adopt(c, now) || born;
+    }
+    return born;
+  }
+
+  /** A known element changed: what differs from the field is written (so a pack's own write never echoes). */
+  refresh(el, now) {
+    const eid = this.els.get(el), m = this.get(eid) || {}, p = this.read(el);
+    for (const [k, v] of Object.entries(p)) if (JSON.stringify(m[k] ?? null) !== JSON.stringify(v ?? null)) this.f.write(eid, k, JSON.stringify(v ?? null), now);
+  }
+
+  up(el) { const p = el.parentNode; return p instanceof ShadowRoot ? p.host : p; }
+
+  read(el) {
+    const up = el === this.top ? null : this.els.get(this.up(el));
+    const text = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.data).join('').trim();
+    const p = { page: true, tag: el.tagName.toLowerCase(), parent: up || null, id: el.id || null, text: text || null };
+    for (const a of ATTRS) p[a] = a === 'hidden' ? (el.hasAttribute('hidden') || null) : el.getAttribute(a);
+    return p;
+  }
+
+  key(el) {
+    if (el.id) {
+      const k = `${NODE}page:#${el.id}`;
+      if (!this.page.has(k) && this.f.get(k) === 'null') return k;
+      return `${k}~${++this.n}`;                                 // ids repeat across shadow roots
+    }
+    let k;
+    do k = `${NODE}page:${++this.n}`; while (this.f.get(k) !== 'null');
+    return k;
+  }
 }
 
 /**
@@ -133,6 +259,7 @@ class Host {
  */
 export async function connect(root, opts = {}) {
   const host = await start(root, { packs: {}, wasm: opts.wasm });
+  if (opts.link) host.link(opts.link);                       // the page's own DOM in the field too
   const status = opts.onStatus || (() => {});
   let stopped = false;
   host.stop = () => { stopped = true; };

@@ -121,6 +121,17 @@ export class Field {
         wasm.field_rebuild(this.__wbg_ptr, now);
     }
     /**
+     * An entity leaves (a page element taken out): what read or referenced it recalculates.
+     * @param {string} eid
+     * @param {number} now
+     */
+    remove(eid, now) {
+        const val2 = +now;
+        const ptr0 = passStringToWasm0(eid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.field_remove(this.__wbg_ptr, ptr0, len0, val2);
+    }
+    /**
      * Load or replace a named `.c1f` pack. A parse error or a missing import is returned as the error text.
      * @param {string} name
      * @param {string} src

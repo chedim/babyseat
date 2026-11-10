@@ -305,3 +305,22 @@ fn a_dropped_blocker_no_longer_blocks() {
     w.write("d1", "status", json!("dropped"));
     assert_eq!(w.prop("k5", "open_blockers"), json!(0));
 }
+
+#[test]
+fn a_removed_entity_stops_counting_and_a_later_birth_still_registers() {
+    // the page's DOM comes and goes: a removed blocker is gone from what read it, and the next birth is seen
+    let mut w = World::new(Fields::goalgraph());
+    classes(&mut w.c);
+    mk(&mut w.c, "g1", "Goal", json!({"status": "open"}));
+    mk(&mut w.c, "k3", "Task", json!({"goal": "g1", "status": "running", "blocks": ["k4"]}));
+    mk(&mut w.c, "k4", "Task", json!({"goal": "g1", "status": "open", "open_blockers": 1}));
+    w.write("g1", "status", json!("open"));                          // primes the engine
+    w.seq += 1;
+    w.fs.remove(&mut w.c, &H, "k3", 9.0, &mut w.seq);
+    assert!(!w.c.docs.contains_key("k3"));
+    assert_eq!(w.prop("k4", "open_blockers"), json!(0));
+    assert_eq!(w.prop("k4", "status"), json!("owed"));
+    mk(&mut w.c, "k6", "Task", json!({"goal": "g1", "status": "running", "blocks": ["k4"]}));
+    w.write("g1", "status", json!("open"));
+    assert_eq!(w.prop("k4", "open_blockers"), json!(1));
+}
