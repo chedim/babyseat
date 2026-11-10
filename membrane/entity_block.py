@@ -490,9 +490,10 @@ def tool_answers(field, text: str, qvec=None, k: int = 3,
 RRF_K = 60                     # reciprocal-rank fusion (Cormack et al. 2009), borrowed
 
 
-def _machine(field, d: dict) -> bool:
+def _machine(field, d: dict, cache: dict | None = None) -> bool:
+    """`cache`: one per call over many candidates, so a session's user turns are scanned once (#668)."""
     f = globals().get("_to_a_machine")
-    return bool(f and f(field, d))
+    return bool(f and f(field, d, cache))
 
 
 def rrf(lists, key) -> list[tuple[dict, float]]:
@@ -596,12 +597,12 @@ def _rows_from_hits(field, ix, hits, text: str, qv, k: int, tools_ok: bool, how:
         seen_docs += 1
         if seen_docs >= k * 12:
             break
-    out, seen_txt = [], set()
+    out, seen_txt, machine_cache = [], set(), {}
     for ek, dids in by_ev.items():
         if len(out) >= k:
             break
         d = field.b.get("events", ek)
-        if _machine(field, d):
+        if _machine(field, d, machine_cache):
             continue                            # a reply to a receipt or a notice
         # from the index's postings: re-reading each hit's text cost ~600
         # cold reads a turn on the banner's pool of 50 (#668)
@@ -717,9 +718,9 @@ def entity_pool(field, text: str, tools_ok: bool | None = None, named=None,
     if not refs:
         return []
     evs = field.b.get_multi("events", list(refs))
-    keep = []
+    keep, machine_cache = [], {}
     for ek, d in evs.items():
-        if _answer_role(field, d, tools_ok) is None or _machine(field, d):
+        if _answer_role(field, d, tools_ok) is None or _machine(field, d, machine_cache):
             continue
         keep.append((d.get("seq") or 0, ek))
     keep.sort()
