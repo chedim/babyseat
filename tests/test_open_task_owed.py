@@ -22,11 +22,13 @@ def test_a_task_set_back_to_open_is_owed_at_the_recount(seat):
     GG.finish(seat, A, "stuck", "cut off")
     settle(seat)
     write(seat, A, "status", "open")                # what the planners did
-    seat.events_pool.take()
+    # the field engine owes it at once (its ready setter runs on status too); the triggers waited for the recount
+    early = [e["entity"] for e in seat.events_pool.take() if e.get("kind") == "task"]
     GG.recount(seat, GOAL)
     settle(seat)
     assert st(seat, A) == "owed"
-    assert A in [e["entity"] for e in seat.events_pool.take() if e.get("kind") == "task"]
+    late = [e["entity"] for e in seat.events_pool.take() if e.get("kind") == "task"]
+    assert (early + late).count(A) == 1, (early, late)
 
 
 def test_a_wait_set_back_to_open_is_armed_at_the_recount(seat):

@@ -98,9 +98,9 @@ fn a_read_never_fires_a_setter() {
 fn a_looping_setter_chain_is_refused_at_the_revisit() {
     let mut fs = Fields::goalgraph();
     fs.setters = vec![
-        OnSet { name: "side".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "side".into(), "1".into())] },
-        OnSet { name: "ping".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "pong".into(), "x.ping + 1".into())] },
-        OnSet { name: "pong".into(), cls: "Task".into(), prop: "pong".into(), when: "x.pong >= 0".into(), writes: vec![("x".into(), "ping".into(), "x.pong + 1".into())] },
+        OnSet { name: "side".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "side".into(), "1".into())], ..Default::default() },
+        OnSet { name: "ping".into(), cls: "Task".into(), prop: "ping".into(), when: "x.ping >= 0".into(), writes: vec![("x".into(), "pong".into(), "x.ping + 1".into())], ..Default::default() },
+        OnSet { name: "pong".into(), cls: "Task".into(), prop: "pong".into(), when: "x.pong >= 0".into(), writes: vec![("x".into(), "ping".into(), "x.pong + 1".into())], ..Default::default() },
     ];
     let mut w = World::new(fs);
     classes(&mut w.c);
@@ -108,9 +108,11 @@ fn a_looping_setter_chain_is_refused_at_the_revisit() {
     w.write("t9", "ping", json!(0));   // must return
     // refused at the revisit of (t9, ping), before applying: no numeric cap, a handful of writes
     assert!(w.fs.writes <= 6, "the loop was cut at the revisit ({} writes)", w.fs.writes);
-    assert_eq!(w.prop("t9", "pong"), json!(1), "the repeat write (pong=3) was not applied");
+    assert_eq!(w.prop("t9", "pong"), json!(1), "pong was written once");
+    assert_eq!(w.prop("t9", "ping"), json!(0), "the revisit of the outside-written ping (ping=2) was refused, the person's write stands");
     assert_eq!(w.fs.refusals.len(), 1, "one refusal recorded: {:?}", w.fs.refusals);
     assert!(w.fs.refusals[0].to_string().contains("loop"), "with a reason: {:?}", w.fs.refusals);
+    assert_eq!(w.fs.refusals[0]["prop"], json!("ping"), "refused at the revisit of (t9, ping): {:?}", w.fs.refusals);
     assert_eq!(w.prop("t9", "refused").to_string().contains("loop"), true, "recorded as a write on the entity");
     assert_eq!(w.prop("t9", "side"), json!(1), "unrelated work in the same round still ran");
     w.write("t9", "status", json!("done"));
@@ -174,4 +176,93 @@ fn open_blockers_does_not_drift_under_dropped_or_doubled_writes() {
     assert_eq!(w.prop("x", "open_blockers"), json!(1));
     w.write("a", "status", json!("done"));
     assert_eq!(w.prop("x", "open_blockers"), json!(0));
+}
+
+// rule 8: a getter whose input changes twice in one round ends on the last value; getters are never refused as a loop
+#[test]
+fn a_getter_recalculated_twice_in_a_round_is_not_refused() {
+    let mut fs = Fields::goalgraph();
+    // a task that is done gets archived in the same round (archived is not finished: t7 is blocked again)
+    fs.setters.push(OnSet { name: "archive".into(), cls: "Task".into(), prop: "status".into(), when: "x.status == 'done'".into(), writes: vec![("x".into(), "status".into(), "'archived'".into())], ..Default::default() });
+    let mut w = World::new(fs);
+    classes(&mut w.c);
+    mk(&mut w.c, "g1", "Goal", json!({"status": "open"}));
+    mk(&mut w.c, "t8", "Task", json!({"goal": "g1", "status": "running", "open_blockers": 0, "blocks": ["t7"]}));
+    mk(&mut w.c, "d9", "Decision", json!({"goal": "g1", "status": "open", "blocks": ["t7"]}));
+    mk(&mut w.c, "t7", "Task", json!({"goal": "g1", "status": "open", "open_blockers": 2}));
+    w.write("t8", "status", json!("done"));
+    assert_eq!(w.prop("t8", "status"), json!("archived"));
+    assert_eq!(w.prop("t7", "open_blockers"), json!(2), "t8 archived is not finished: both blockers open");
+    assert!(w.fs.refusals.is_empty(), "no refusal: {:?}", w.fs.refusals);
+}
+
+// syntax pass: WHEN / ELSE WHEN / ELSE run the first true branch, only it; a script still written with `x` runs
+#[test]
+fn else_branches_run_the_first_true_one_only() {
+    let mut fs = Fields::goalgraph();
+    fs.setters = membrane_vm::syntax::parse("
+Task.level on-setter grade:
+  WHEN this.level >= 10: this.grade = 'high'
+  ELSE WHEN this.level >= 5: this.grade = 'mid'
+  ELSE: this.grade = 'low'
+Task.old on-setter legacy:
+  WHEN x.old == 1: x.legacy = x.old + 1
+").unwrap();
+    let mut w = World::new(fs);
+    classes(&mut w.c);
+    mk(&mut w.c, "t9", "Task", json!({"status": "open"}));
+    for (lvl, want) in [(12, "high"), (7, "mid"), (1, "low"), (10, "high")] {
+        w.write("t9", "level", json!(lvl));
+        assert_eq!(w.prop("t9", "grade"), json!(want), "level {}", lvl);
+    }
+    w.write("t9", "old", json!(1));
+    assert_eq!(w.prop("t9", "legacy"), json!(2), "an `x` script still runs");
+}
+
+// Memo's review of #1024: a WHEN whose condition errors stops the setter (nothing written, a receipt left);
+// it never falls through to ELSE
+#[test]
+fn an_erroring_condition_stops_the_setter_and_never_runs_else() {
+    let mut fs = Fields::goalgraph();
+    fs.setters = membrane_vm::syntax::parse("
+Task.level on-setter typo:
+  WHEN nope == 1: this.a = 1
+  ELSE: this.note = 'x'
+Task.level on-setter broken:
+  WHEN this.level >>> 3: this.b = 1
+  ELSE: this.note2 = 'x'
+Task.level on-setter fine:
+  WHEN this.level > 0: this.ok = 1
+").unwrap();
+    let mut w = World::new(fs);
+    classes(&mut w.c);
+    mk(&mut w.c, "t9", "Task", json!({"status": "open"}));
+    w.write("t9", "level", json!(2));
+    assert_eq!(w.prop("t9", "note"), J::Null, "ELSE did not run on an error");
+    assert_eq!(w.prop("t9", "note2"), J::Null, "ELSE did not run on a parse error");
+    assert_eq!(w.prop("t9", "a"), J::Null);
+    assert_eq!(w.prop("t9", "ok"), json!(1), "a later, working setter still ran");
+    let errs: Vec<_> = w.fs.refusals.iter().filter(|r| r["reason"].as_str().unwrap_or("").starts_with("error")).collect();
+    assert_eq!(errs.len(), 2, "one receipt per broken setter: {:?}", w.fs.refusals);
+    assert!(w.prop("t9", "refused").as_str().unwrap_or("").contains("error"), "recorded as a write on the entity");
+}
+
+// the replay of the live goal graph (2026-11-09): a status write recounted every task against every blocker
+// (~400 ms per write on 1,073 entities). It recounts only what the blocker blocks.
+#[test]
+fn a_status_write_recounts_only_what_the_blocker_blocks() {
+    let mut w = World::new(Fields::goalgraph());
+    classes(&mut w.c);
+    mk(&mut w.c, "g1", "Goal", json!({"status": "open"}));
+    for i in 0..1500 {
+        mk(&mut w.c, &format!("t{}", i), "Task", json!({"goal": "g1", "status": "open", "open_blockers": 1, "blocks": [format!("t{}", i + 1)]}));
+    }
+    w.write("t500", "status", json!("running"));     // first contact: the getters learn their inputs (not timed)
+    let t = std::time::Instant::now();
+    w.write("t10", "status", json!("done"));
+    let took = t.elapsed();
+    assert_eq!(w.prop("t11", "open_blockers"), json!(0));
+    assert_eq!(w.prop("t11", "status"), json!("owed"));
+    assert_eq!(w.prop("t12", "open_blockers"), json!(1), "untouched");
+    assert!(took < std::time::Duration::from_millis(200), "one status write took {:?}", took);
 }

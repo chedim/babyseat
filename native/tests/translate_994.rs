@@ -4,20 +4,20 @@ use membrane_vm::translate::{goalgraph_counts, goalgraph_setters, specs_of, tran
 use serde_json::json;
 
 fn w(t: &str, p: &str, v: &str) -> (String, String, String) { (t.into(), p.into(), v.into()) }
-const PLAN: &str = "{'about': x.eid, 'prompt': 'plan the goal: ' + x.replan, 'lane': 'planner'}";
+const PLAN: &str = "{'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}";
 
 #[test]
 fn goalgraph_translates_to_the_row_2_setters() {
     let got: Vec<_> = goalgraph_setters().into_iter().map(|s| (s.name, s.cls, s.prop, s.writes)).collect();
-    let arm = vec![w("x", "status", "'armed'"), w("x", "armed_since", "clock")];
+    let arm = vec![w("this", "status", "'armed'"), w("this", "armed_since", "clock")];
     let want = vec![
-        ("ready", "Task", "open_blockers", vec![w("x", "status", "'owed'")]),
-        ("ready-on-status", "Task", "status", vec![w("x", "status", "'owed'")]),
-        ("replan-task", "Task", "status", vec![w("x.goal", "replan", "'task ' + x.eid + ' ' + x.status")]),
-        ("replan-card", "Decision", "status", vec![w("x.goal", "replan", "'card ' + x.eid + ' ' + x.status")]),
+        ("ready", "Task", "open_blockers", vec![w("this", "status", "'owed'")]),
+        ("ready-on-status", "Task", "status", vec![w("this", "status", "'owed'")]),
+        ("replan-task", "Task", "status", vec![w("this.goal", "replan", "'task ' + this.eid + ' ' + this.status")]),
+        ("replan-card", "Decision", "status", vec![w("this.goal", "replan", "'card ' + this.eid + ' ' + this.status")]),
         ("wait-armed", "Wait", "open_blockers", arm.clone()),
         ("wait-armed-on-status", "Wait", "status", arm),
-        ("wait-check", "Wait", "due", vec![w("x", "check", "'due'")]),
+        ("wait-check", "Wait", "due", vec![w("this", "check", "'due'")]),
         ("plan", "Goal", "replan", vec![w("membrane::llm.call", "", PLAN)]),
         ("plan-after-reopen", "Goal", "status", vec![w("membrane::llm.call", "", PLAN)]),
     ];
@@ -28,10 +28,10 @@ fn goalgraph_translates_to_the_row_2_setters() {
 #[test]
 fn conditions_are_translated_not_copied() {
     let m: std::collections::HashMap<_, _> = goalgraph_setters().into_iter().map(|s| (s.name.clone(), s.when)).collect();
-    assert_eq!(m["ready"], "x.open_blockers < 0.5 and x.status == 'open'");
-    assert_eq!(m["wait-check"], "x.due");
-    assert_eq!(m["replan-task"], "(x.status == 'done' or x.status == 'failed' or x.status == 'stuck')");
-    assert_eq!(m["plan"], "(x.status or 'open') == 'open' and x.replan");
+    assert_eq!(m["ready"], "this.open_blockers < 0.5 and this.status == 'open'");
+    assert_eq!(m["wait-check"], "this.due");
+    assert_eq!(m["replan-task"], "(this.status == 'done' or this.status == 'failed' or this.status == 'stuck')");
+    assert_eq!(m["plan"], "(this.status or 'open') == 'open' and this.replan");
 }
 
 #[test]
@@ -52,9 +52,9 @@ fn every_goalgraph_trigger_has_a_field_form() {
 fn a_spec_with_no_field_form_is_refused_not_guessed() {
     let mut sp = specs_of(GOALGRAPH).into_iter().find(|(n, _)| n == "ready").unwrap().1;
     sp.when.push(vec![json!("near"), json!("?t"), json!("?u"), json!(1)]);
-    assert!(translate("x", &sp).unwrap_err().contains("WHEN near"));
+    assert!(translate("this", &sp).unwrap_err().contains("WHEN near"));
     let mut sp = specs_of(GOALGRAPH).into_iter().find(|(n, _)| n == "ready").unwrap().1;
     sp.wh.push(vec![json!("pos"), json!("?t")]);
-    assert!(matches!(translate("x", &sp), Err(_)));
+    assert!(matches!(translate("this", &sp), Err(_)));
     assert!(matches!(translate("ok", &specs_of(GOALGRAPH)[2].1), Ok(Field::Set(_))));
 }

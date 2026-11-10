@@ -228,7 +228,8 @@ fn gg_run(fields: bool) -> Out {
 /// they are masked, and nothing else is.
 fn gg_checksum(c: &Core) -> (u64, Vec<String>) {
     let mut rows: Vec<String> = c.docs.iter().filter(|(eid, _)| *eid != "membrane::llm").map(|(eid, e)| {
-        let mut ps: Vec<String> = e.props.iter().filter(|(k, _)| *k != "armed_since" && *k != "due" && *k != "check").map(|(k, v)| format!("{}={}", k, v)).collect();
+        // `finished` is a getter the fields declare (packs/goalgraph.c1f) that the triggers never had
+        let mut ps: Vec<String> = e.props.iter().filter(|(k, _)| *k != "armed_since" && *k != "due" && *k != "check" && *k != "finished").map(|(k, v)| format!("{}={}", k, v)).collect();
         ps.sort();
         format!("{}|{}|{}|{:?}", eid, e.cls, ps.join(","), e.pos)
     }).collect();

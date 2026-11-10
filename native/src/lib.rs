@@ -5,6 +5,7 @@ pub mod adapters;
 pub mod learn;
 pub mod banner;
 pub mod recall;
+pub mod syntax;
 pub mod mapped;
 pub mod topk;
 pub mod packs;
@@ -259,7 +260,10 @@ impl Fields {
     fn load(&self, eid: String, cls: String, props_json: &str) -> PyResult<()> {
         let p = obj(props_json)?;
         let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
-        g.0.load(eid, cls, p, None, 0.0);
+        let (core, f, _) = &mut *g;
+        let old = core.docs.get(&eid).map(|e| e.props.clone());
+        core.load(eid.clone(), cls, p, None, 0.0);
+        if let (Some(old), Some(new)) = (old, core.docs.get(&eid).map(|e| e.props.clone())) { f.reloaded(&eid, &old, &new); }
         Ok(())
     }
     /// A write: the Core hears it, the fields react (setters, getters, effects). Returns nothing; read back with `get`.
@@ -283,6 +287,51 @@ impl Fields {
         g.0.docs.get(eid).map(|e| J::Object(e.props.clone()).to_string()).unwrap_or_else(|| "null".into())
     }
     fn writes(&self) -> u64 { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.writes }
+    /// Drain what the field did since the last drain: {"writes": [{eid, prop, new, writer}], "calls": [...]}.
+    fn drain(&self) -> String {
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let f = &mut g.1;
+        let out = serde_json::json!({"writes": std::mem::take(&mut f.out), "calls": std::mem::take(&mut f.calls)});
+        out.to_string()
+    }
+    /// The clock input: waits whose check is due fire (Wait.due getter, then its setter).
+    fn tick(&self, py: Python<'_>, now: f64) {
+        let h = self.host.bind(py).clone();
+        let host = PyHost { py, obj: &h };
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let (core, f, seq) = &mut *g;
+        let mut s = *seq;
+        f.tick(core, &host, now, &mut s);
+        *seq = s;
+    }
+    /// Start-up: compute every getter once and keep the values, running no setter (a rebuild runs no effects).
+    fn rebuild(&self, now: f64) {
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let (core, f, seq) = &mut *g;
+        let mut s = *seq;
+        f.rebuild(core, now, &mut s);
+        *seq = s;
+    }
+    /// Run a round with no outside write: a newly loaded entity's getters compute, and what references it recalculates.
+    fn settle(&self, py: Python<'_>, now: f64) {
+        let h = self.host.bind(py).clone();
+        let host = PyHost { py, obj: &h };
+        let mut g = self.c.lock().unwrap_or_else(|e| e.into_inner());
+        let (core, f, seq) = &mut *g;
+        let mut s = *seq;
+        f.settle(core, &host, now, &mut s);
+        *seq = s;
+    }
+    /// Load or replace a named `.c1f` pack (a parse error raises and changes nothing). New getters compute at the
+    /// next `rebuild`, which runs no setter.
+    fn set_pack(&self, name: &str, src: &str) -> PyResult<()> {
+        self.c.lock().unwrap_or_else(|e| e.into_inner()).1.set_pack(name, src).map_err(bad)
+    }
+    fn remove_pack(&self, name: &str) -> bool { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.remove_pack(name) }
+    /// The classes the loaded setters and getters are declared on (what the host mirrors).
+    fn classes(&self) -> Vec<String> { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.classes() }
+    /// Is this entity in the field's mirror?
+    fn has(&self, eid: &str) -> bool { self.c.lock().unwrap_or_else(|e| e.into_inner()).0.docs.contains_key(eid) }
     fn calls(&self) -> String {
         J::Array(self.c.lock().unwrap_or_else(|e| e.into_inner()).1.calls.clone()).to_string()
     }

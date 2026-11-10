@@ -78,7 +78,7 @@ def test_the_expression_language_matches_ch_py(src, env, want):
 
 
 @pytest.mark.parametrize("src", ["x[0]", "lambda: 1", "a if b else c", "__import__('os')", "f(x=1)",
-                                 "x ** 2", "x // 2", "{1, 2}", "[i for i in x]"])
+                                 "x ** 2", "x // 2", "{1, 2}"])
 def test_what_ch_py_refuses_the_native_parser_refuses(src):
     import json
     from membrane import ch as CH
@@ -86,6 +86,13 @@ def test_what_ch_py_refuses_the_native_parser_refuses(src):
         CH._check(CH._parse(src), {"x", "a", "b", "c"})
     with pytest.raises(Exception):
         MV.evaluate(src, json.dumps({"x": [1], "a": 1, "b": 1, "c": 1}))
+
+
+def test_native_parser_takes_a_list_comprehension():
+    """#994 getters (`open_blockers`) compute over other entities with `[x for x in xs if c]`: the native parser
+    takes it on purpose, ahead of ch.py, which still refuses it."""
+    import json
+    assert json.loads(MV.evaluate("[i for i in x if i > 1]", json.dumps({"x": [1, 2, 3]}))) == [2, 3]
 
 
 # ---- Memo's review of 6f9b4de ------------------------------------------------------------------

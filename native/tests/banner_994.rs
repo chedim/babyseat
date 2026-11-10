@@ -84,6 +84,9 @@ fn run(fields_on: bool) -> (Vec<String>, Vec<Vec<String>>, Core) {
     c.load("chat:c1".into(), "Chat".into(), props(json!({"sid": "c1"})), None, 0.0);
     banner::load_seed(&mut c);
     let mut f = Fields::goalgraph();
+    // this journal's task:x is a banner fixture, not a goal task: the goal graph's getters (which make an open task
+    // with no blockers owed) stay off here
+    f.set_getters(vec![]);
     f.banner = fields_on;
     let (mut seq, mut now) = (0i64, 1.0);
     let (mut refs, mut got) = (vec![], vec![]);

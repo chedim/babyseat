@@ -18,6 +18,7 @@ from membrane import adapters as AD  # noqa: E402
 from membrane import ch as CH  # noqa: E402
 from membrane import decision_map as DM  # noqa: E402
 from membrane import goalgraph as GG  # noqa: E402
+from membrane import fields_live as FL  # noqa: E402
 from membrane import llm as LLM  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane import writes as W  # noqa: E402
@@ -42,9 +43,12 @@ def seat(monkeypatch):
     est.upsert(QuantumEntity(eid=MEMBRANE_NS + "llm", cls="Component", properties={"name": "llm"}))
     est.upsert(QuantumEntity(eid=GOAL, cls="Goal", properties={"name": "ship it", "text": "ship it",
                                                                 "status": "open"}))
-    assert GG.seed(srv) == len(GG.TRIGGERS)
+    n = GG.seed(srv)
+    srv.live = FL.start(srv, thread=False)         # #994: the field engine by default; MEMBRANE_FIELDS=0 -> triggers
+    assert n == (0 if srv.live else len(GG.TRIGGERS))
     srv.calls, srv.told = calls, told
     yield srv
+    FL.stop(srv)
     AD.stop()
     srv.ch_vm.detach()
 
@@ -52,6 +56,8 @@ def seat(monkeypatch):
 def settle(srv, rounds=8):
     for _ in range(rounds):
         srv.ch_vm.drain()
+        if getattr(srv, "live", None):
+            srv.live.settle()
         AD.drain()
         time.sleep(0.02)
     srv.ch_vm.drain()
@@ -109,7 +115,10 @@ def test_a_plan_writes_tasks_cards_and_edges_and_escalates_the_card(seat):
     assert est.docs[C].properties["open_blockers"] == 1 and st(seat, C) == "open"
     assert st(seat, A) == "owed"                                          # no blockers: ready
     assert tasks_in_pool(seat) == [A]                                     # to the worker pool
-    assert seat.ch_vm.fired.get(MEMBRANE_NS + "Trigger:goal-graph-ready") == 1
+    if seat.live:                                                          # #994: the field engine did it, no trigger fired
+        assert not seat.ch_vm.fired
+    else:
+        assert seat.ch_vm.fired.get(MEMBRANE_NS + "Trigger:goal-graph-ready") == 1
 
 
 def test_a_card_answered_unblocks_its_task_and_replans(seat):
@@ -286,7 +295,13 @@ def test_the_lanes_have_their_own_slots():
 
 def test_the_machinery_is_seeded_triggers_with_no_scheduling_loop(seat):
     names = {d.properties["name"] for d in seat.entity_store.docs.values() if d.cls == CH.CLASS}
-    assert names == {t[0] for t in GG.TRIGGERS}
+    if seat.live:                          # #994: the triggers stand down; the goal graph is the .c1f pack's fields
+        assert not names
+        pack = (Path(GG.__file__).resolve().parent.parent / "native" / "packs" / "goalgraph.c1f").read_text()
+        for setter in ("ready", "replan-task", "replan-card", "wait-armed", "wait-check", "plan", "plan-after-reopen"):
+            assert f" on-setter {setter}:" in pack, setter
+    else:
+        assert names == {t[0] for t in GG.TRIGGERS}
     src = Path(GG.__file__).read_text()
     assert "threading" not in src and "while " not in src and "sleep" not in src
 
