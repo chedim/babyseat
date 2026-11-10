@@ -52,7 +52,7 @@ the [zoo](home-assistant.md#the-zoo-several-seats) carries its own). A seat Home
   writes (only the shell, `/ui/www/`, `/ui/conf` and health stay open). The
   cookie is minted on loopback only, and the seat's internal readers send
   loopback headers. `POST /ui/login` turns it into the same
-  HttpOnly cookie JWT mode uses (`membrane_jwt`, SameSite=Strict, a 400-day life,
+  HttpOnly cookie JWT mode uses (`membrane_jwt_<8 hex>`, named per seat, SameSite=Strict, a 400-day life,
   Secure over https). The page then asks your name as usual.
 
 **What needs it** (from off-box, JWT mode off):
@@ -135,7 +135,8 @@ with a shared secret can issue them too.
 - **OpenAI-compatible clients (:11500)**: the token is the API key. The client
   sends `Authorization: Bearer <token>`.
 - **The web UI (:4096, standalone)**: open the page and paste the token when it asks.
-  `POST /ui/login` turns it into a cookie (`membrane_jwt`: HttpOnly,
+  `POST /ui/login` turns it into a cookie (`membrane_jwt_<8 hex>`, the seat's own name -- a hash of its secret, so two seats on one host
+  never overwrite each other's cookie; the old `membrane_jwt` is still read: HttpOnly,
   SameSite=Strict, and Secure when the page came over https, including through a
   proxy that sets `X-Forwarded-Proto: https`). The page's script never keeps the
   token. `POST /ui/logout` clears the cookie.
@@ -216,7 +217,7 @@ clients.
 - Base64url is decoded strictly: no padding, no standard-alphabet characters, no
   extra segments, at most 8 KB.
 - An `Authorization` header decides on its own: a bad one never falls back to the
-  cookie, and two `Authorization` headers or two `membrane_jwt` cookies are refused.
+  cookie, and two `Authorization` headers or two cookies of the same name are refused.
 - A refused token is told only `missing or invalid token`, never why.
 - The login only accepts JSON, so a cross-site form can't post a token into
   someone's browser.

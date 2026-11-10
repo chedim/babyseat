@@ -228,7 +228,7 @@ def carries_code(body) -> bool:
 # -- the UI's cookie --------------------------------------------------------------
 
 def login_cookie(token: str, secure: bool) -> str:
-    return (f"{_JWT.COOKIE}={token}; Path=/; Max-Age={COOKIE_AGE}; HttpOnly; SameSite=Strict"
+    return (f"{_JWT.cookie_name()}={token}; Path=/; Max-Age={COOKIE_AGE}; HttpOnly; SameSite=Strict"
             + ("; Secure" if secure else ""))
 
 
