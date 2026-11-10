@@ -107,6 +107,19 @@ fn a_long_string_literal_does_not_count_toward_the_character_cap() {
 }
 
 #[test]
+fn a_pending_read_is_an_empty_list_to_every_list_builtin() {
+    // #1065 (2026-11-10): a getter's sql()/jsonl() reads None until its rows land; group_by(None) raised and the
+    // banner's build stored the error as `refused` ("the banner failed"). None is the empty list everywhere, as FOR has it.
+    let x = json!({"x": null});
+    assert_eq!(ev("group_by(x, 'k')", x.clone()), json!([]));
+    assert_eq!(ev("sort_by(x, 'k')", x.clone()), json!([]));
+    assert_eq!(ev("pluck(x, 'k')", x.clone()), json!([]));
+    assert_eq!(ev("distinct(x)", x.clone()), json!([]));
+    assert_eq!(ev("fit(x, 10, 0)", x.clone()), json!([]));
+    assert_eq!(ev("join(x, ',')", x.clone()), json!(""));
+}
+
+#[test]
 fn replace_swaps_every_occurrence() {
     // the About view (operator 2026-11-10): a changelog line's **bold** markers come off before it is shown
     assert_eq!(ev("replace('- **Code** is a **tree**', '**', '')", json!({})), json!("- Code is a tree"));
