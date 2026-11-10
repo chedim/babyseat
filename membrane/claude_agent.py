@@ -724,7 +724,7 @@ TOOLS_NOTE = _full_names(
     "class; or write a property whose write is the effect. Keep methods small (a sensor reads "
     "one thing, an actuator does one), composed through steps or "
     "parents. A thing in the world is an entity that keeps itself current: "
-    "a .c1f pack getter (@pack load; help: membrane::help:packs); "
+    "a .c1f getter (@pack load; help: membrane::help:packs); "
     "act by @entity_write. Read it back. Code work happens in a temp git "
     "worktree, never the main checkout. "
     "Work you are given goes to @intend (issue link, what done means) "

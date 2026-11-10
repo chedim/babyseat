@@ -42,20 +42,19 @@ FAMILIES: dict[str, dict] = {
     },
     "entity": {
         "description": "Your entities (your model of the world): read (its live value; "
-                       "run=true recomputes it), write (prop = value: how to act; receipt: "
-                       "<prop>_result), add, edit, remove, inherit. Behaviour: the pack tool.",
+                       "run=true recomputes it), write (prop=value: how to act), add, edit, remove, inherit.",
         "actions": {"read": "entity_read", "write": "entity_write", "add": "entity_add", "edit": "entity_edit",
                     "remove": "entity_remove", "inherit": "entity_inherit"},
         "params": {"spec": _S("the entity (eid or name)"), "name": _S("add: its name"),
                    "class": _S("add/edit: its class"), "summary": _S("what it is"),
                    "links": {"type": "array", "items": {"type": "string"}, "description": "related entities"},
-                   "run": _B("read: fire the getter now"),
+                   "run": _B("read: recompute now"),
                    "force": _B("remove: even a live method"),
                    "parents": {"type": "array", "items": {"type": "string"}, "description": "inherit: ISA parents"},
                    "properties": {"type": "object", "description": "edit: properties to set"},
-                   "watch_ops": {"type": "array", "items": {"type": "object"}, "description": "edit: geometric watches (help('watches'))"},
-                   "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: own-motion watches"},
-                   "merged_into": _S("edit: merge into this entity"),
+                   "watch_ops": {"type": "array", "items": {"type": "object"}, "description": "edit: help('watches')"},
+                   "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: motion watches"},
+                   "merged_into": _S("edit: merge into"),
                    "prop": _S("write: property"), "value": {"description": "write: value"}},
         "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name") or a.get("object") or a.get("key"), "run": a.get("run")}, "spec", "run"),
                 # an add keeps what it was given (2026-10-11 sweep: properties and
@@ -74,22 +73,13 @@ FAMILIES: dict[str, dict] = {
                 "remove": lambda a: _pick(a, "spec", "force"),
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
-    "pack": {
-        "description": "The field's programs (.c1f): list, show (name), load (name, c1f; replies with its "
-                       "load error). help('packs').",
-        "actions": {"list": "pack", "show": "pack", "load": "pack"},
-        "params": {"name": _S("the pack's name"), "c1f": _S("write: the pack's whole text")},
-        "map": {"list": lambda a: {"action": "list"},
-                "show": lambda a: {"action": "show", "name": a.get("name")},
-                "load": lambda a: {"action": "load", "name": a.get("name"), "c1f": a.get("c1f")}},
-    },
     "exec": {
-        "description": "run: code becomes a field tree, its executor runs it (node= "
-                       "re-runs). Methods: define, call, each (over a class), inspect. "
-                       "help('cliffhanger').",
-        "actions": {"run": "code_run", "call": "method_call", "each": "method_each",
-                    "define": "method_define", "inspect": "method_inspect"},
+        "description": "load/show/packs: .c1f packs (help('packs')). run: code as a field tree. "
+                       "define/call/each/inspect: methods.",
+        "actions": {"load": "pack", "show": "pack", "packs": "pack", "run": "code_run", "call": "method_call",
+                    "each": "method_each", "define": "method_define", "inspect": "method_inspect"},
         "params": {"args": {"type": "object", "description": "{{param}} values"},
+                   "name": _S("pack"), "c1f": _S("load: text"),
                    "code": _S("run: code"), "lang": _S("run: sh|js"), "node": _S("run: root"),
                    "object": _S("call: target"), "on": _S("define: owner; run: executor"),
                    "over": _S("each: class|pattern"), "max": _I("each: cap (20)"),
@@ -99,6 +89,9 @@ FAMILIES: dict[str, dict] = {
                    "abstract": _B("define: f(a,b), no command"),
                    "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"}},
         "map": {"run": lambda a: _pick(a, "code", "lang", "node", "on"),
+                "load": lambda a: {"action": "load", "name": a.get("name"), "c1f": a.get("c1f")},
+                "show": lambda a: {"action": "show", "name": a.get("name")},
+                "packs": lambda a: {"action": "list"},
                 "call": lambda a: _pick(a, "object", "method", "args"),
                 "inspect": lambda a: _pick(a, "object", "method", "args"),
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),

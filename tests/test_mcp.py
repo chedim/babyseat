@@ -168,6 +168,8 @@ class TestMcpProtocol(unittest.TestCase):
 
                                  "graph",
                                  "entity_inherit",
+                                 # #1043: the field engine's hands
+                                 "pack", "entity_write",
                                  # Cliffhanger: define a method on a class, call it
                                  # on an object or each member, inspect a call
                                  "method_define", "method_call",
@@ -244,9 +246,9 @@ class TestMcpTools(unittest.TestCase):
         # (proxy contract tested endpoint-side; here just no crash)
 
     def test_entity_edit_relays_and_writes_tick_scripts(self):
-        """The tick authorship path end to end THROUGH the MCP surface:
-        the tool's schema carries tick_script, the call relays it in
-        the POST body, and the reply teaches the tick's contract."""
+        """The tick authorship path through the MCP surface: a call that still carries tick_script relays it
+        (the seat runs what exists until it is translated), but the schema no longer offers it (#1043:
+        behaviour is a .c1f pack)."""
         del _StubProxy.edits[:]
         _call("entity_edit",
               {"spec": "tool:clock",
@@ -255,12 +257,9 @@ class TestMcpTools(unittest.TestCase):
         body = _StubProxy.edits[0]
         self.assertIn("tick_script", body)
         self.assertEqual(body["properties"], {"tick_every": 2})
-        # the SCHEMA names the trigger too (the model discovers it)
         edit_tool = next(t for t in M.TOOLS
                          if t["name"] == "entity_edit")
-        self.assertIn("tick_script", edit_tool["description"])
-        self.assertIn("tick_script", json.dumps(
-            edit_tool["inputSchema"]))
+        self.assertNotIn("tick_script", json.dumps(edit_tool["inputSchema"]))
 
     def test_entity_add_schema_names_properties(self):
         # the add applies `properties` itself (tool_entity_add's follow-up

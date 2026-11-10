@@ -97,9 +97,10 @@ class TestTheContractSaysItself(unittest.TestCase):
 
     def test_the_tool_text_gives_the_shape(self):
         from membrane import mcp_server as M
+        # #1043: behaviour is a .c1f pack; entity_edit no longer advertises Python getter scripts
         add = next(t for t in M.TOOLS if t["name"] == "entity_edit")
-        desc = add["inputSchema"]["properties"]["getter_script"]["description"]
-        self.assertIn("result = {'state':", desc)
+        self.assertNotIn("getter_script", add["inputSchema"]["properties"])
+        self.assertIn("help('packs')", add["description"])
 
 
 if __name__ == "__main__":
