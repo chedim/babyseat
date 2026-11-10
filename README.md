@@ -243,7 +243,7 @@ it), `STABLE` (facts seen in 3 chats over 2 days, never contradicted),
 alerts and a pointer to `state(section=...)`. Each record line says its
 source and age, e.g. `(person · 2h ago)` ([details](docs/entity-field.md#this-conversation)).
 After it, a `RECALL` block (#668): the 12 best rows the field holds for your latest
-message, one fact line each, ordered by a scorer whose weights live in the field and are refit at night from the rows the model's own searches end up using. With the `rerank` extra (`pip install 'babyseat[rerank]'`), a reranker (bge-reranker-v2-m3) re-orders the scorer's top 20; the model's `query` tool reads the same ranking.
+message, one fact line each, ordered by a scorer whose weights live in the field and are refit at night from the rows the model's own searches end up using. With the `rerank` extra (`pip install 'babyseat[rerank]'`), a reranker (bge-reranker-v2-m3) re-orders the scorer's top 20 (on a CUDA GPU -- NVIDIA, or AMD through a ROCm build of PyTorch -- else Apple's MPS, else the CPU); the model's `query` tool reads the same ranking.
 
 **With tools,** the model gets membrane's MCP surface: `query` and `state` to
 read the field (`state(section=...)` pulls one part of the seat's WHERE WE ARE:
