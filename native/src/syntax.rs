@@ -78,7 +78,59 @@ fn statement(s: &str, at: usize) -> Result<W, String> {
 }
 
 /// Parse setters in cliffhanger's text form (getters are skipped: `parse_pack` returns both).
-pub fn parse(src: &str) -> Result<Vec<OnSet>, String> { parse_pack(src).map(|p| p.0) }
+pub fn parse(src: &str) -> Result<Vec<OnSet>, String> { parse_full(src).map(|p| p.setters) }
+
+/// A pack: its header (`PACK <name> <version>`, `IMPORT <name> <major>` lines) and its setters and getters.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Pack {
+    pub name: Option<String>,
+    pub version: String,
+    pub imports: Vec<(String, u32)>,
+    pub setters: Vec<OnSet>,
+    pub getters: Vec<Getter>,
+}
+
+impl Pack {
+    /// The major version (`2` of `2.1`); a pack without a `PACK` line is version 1.
+    pub fn major(&self) -> u32 { self.version.split('.').next().and_then(|m| m.parse().ok()).unwrap_or(1) }
+    /// The classes this pack declares setters or getters on.
+    pub fn classes(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.setters.iter().map(|s| s.cls.clone()).chain(self.getters.iter().map(|g| g.cls.clone())).collect();
+        v.sort(); v.dedup(); v
+    }
+}
+
+/// Parse a whole pack: header lines, then setters and getters.
+pub fn parse_full(src: &str) -> Result<Pack, String> {
+    let mut pack = Pack { version: "1".into(), ..Default::default() };
+    let mut body = String::new();
+    for (n, raw) in src.lines().enumerate() {
+        let line = strip_comment(raw).trim_end();
+        if let Some(rest) = line.strip_prefix("PACK ") {
+            let mut it = rest.split_whitespace();
+            let name = it.next().ok_or(format!("line {}: PACK needs a name", n + 1))?;
+            pack.name = Some(name.to_string());
+            if let Some(v) = it.next() {
+                if v.split('.').any(|p| p.parse::<u32>().is_err()) { return Err(format!("line {}: a version is numbers and dots: `{}`", n + 1, v)); }
+                pack.version = v.to_string();
+            }
+            body.push('\n');
+        } else if let Some(rest) = line.strip_prefix("IMPORT ") {
+            let mut it = rest.split_whitespace();
+            let name = it.next().ok_or(format!("line {}: IMPORT needs a pack name", n + 1))?;
+            let major = match it.next() { Some(m) => m.parse::<u32>().map_err(|_| format!("line {}: IMPORT {} needs a major version number", n + 1, name))?, None => 1 };
+            pack.imports.push((name.to_string(), major));
+            body.push('\n');
+        } else {
+            body.push_str(raw);
+            body.push('\n');
+        }
+    }
+    let (setters, getters) = parse_pack(&body)?;
+    pack.setters = setters;
+    pack.getters = getters;
+    Ok(pack)
+}
 
 /// Parse a pack: its setters and its getters (`<Class>.<field> getter: <expr>`, the expression on the header line
 /// or on indented lines under it). Errors name the line and say what was expected.

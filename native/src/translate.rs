@@ -63,7 +63,7 @@ pub fn translate(name: &str, sp: &Spec) -> Result<Field, String> {
     if sp.when.len() == 1 && kind(&sp.when[0]) == "every" {
         let cls = cls_of(&tv).ok_or(format!("{}: no class for ?{}", name, tv))?;
         return Ok(Field::Set(OnSet { name: name.into(), cls, prop: "due".into(), when: "this.due".into(),
-            writes: vec![("this".into(), tp, rename(&sp.expr, &tv, None))], els: vec![] }));
+            writes: vec![("this".into(), tp, rename(&sp.expr, &tv, None))], els: vec![], pack: String::new() }));
     }
     let mut ch: Option<(String, String)> = None;
     let mut conds: Vec<String> = vec![];
@@ -105,7 +105,7 @@ pub fn translate(name: &str, sp: &Spec) -> Result<Field, String> {
     let target = if tv == v { "this".to_string() } else if Some(&tv) == sec.as_ref() { "this.goal".to_string() } else if tv.is_empty() { if tp == LLM_CALL { LLM_CALL.to_string() } else { return Err(format!("{}: target {}", name, tp)) } } else { return Err(format!("{}: target ?{}", name, tv)) };
     let prop_w = if target == LLM_CALL { String::new() } else { tp };
     Ok(Field::Set(OnSet { name: name.into(), cls, prop, when: if conds.is_empty() { "True".into() } else { conds.join(" and ") },
-        writes: vec![(target, prop_w, rename(&sp.expr, &v, sec.as_deref()))], els: vec![] }))
+        writes: vec![(target, prop_w, rename(&sp.expr, &v, sec.as_deref()))], els: vec![], pack: String::new() }))
 }
 
 /// A pack of triggers (JSON: [{name, when, where, write:[target, expr]}]) -> specs.
@@ -124,12 +124,12 @@ pub const GOALGRAPH_CH: &str = include_str!("../packs/goalgraph.c1f");
 
 /// The goal graph's setters, read from its cliffhanger text (packs/goalgraph.c1f).
 pub fn goalgraph_setters() -> Vec<OnSet> {
-    crate::syntax::parse(GOALGRAPH_CH).expect("packs/goalgraph.c1f parses (tests/syntax_994.rs)")
+    crate::syntax::parse_full(GOALGRAPH_CH).expect("packs/goalgraph.c1f parses (tests/syntax_994.rs)").setters
 }
 
 /// The goal graph's getters, read from its cliffhanger text (packs/goalgraph.c1f).
 pub fn goalgraph_getters() -> Vec<crate::fields::Getter> {
-    crate::syntax::parse_pack(GOALGRAPH_CH).expect("packs/goalgraph.c1f parses").1
+    crate::syntax::parse_full(GOALGRAPH_CH).expect("packs/goalgraph.c1f parses").getters
 }
 
 /// The same setters translated from the old WHEN/WHERE/WRITE triggers (packs/goalgraph.json): the migration path,

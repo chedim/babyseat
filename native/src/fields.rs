@@ -27,6 +27,8 @@ pub struct OnSet {
     pub when: String,
     pub writes: Vec<(String, String, String)>,
     pub els: Vec<(String, Vec<(String, String, String)>)>,
+    /// the pack it came from ("" for one built outside a pack: no class checks)
+    pub pack: String,
 }
 
 /// The names a setter's expressions use for the entity written: `this`, and `x` for scripts written before the rename.
@@ -109,39 +111,120 @@ pub struct Fields {
     known: std::collections::HashSet<String>,
     primed: bool,
     /// cliffhanglet packs loaded at runtime (name -> its setters and getters), after the built-in goal graph
-    packs: std::collections::BTreeMap<String, (Vec<OnSet>, Vec<Getter>)>,
+    packs: std::collections::BTreeMap<String, crate::syntax::Pack>,
+    /// class -> the pack that owns it; pack -> the packs it imports; packs that aren't active, and why
+    owner: std::collections::HashMap<String, String>,
+    imports: std::collections::HashMap<String, Vec<String>>,
+    pub pack_errors: std::collections::BTreeMap<String, String>,
+    /// the order packs were first loaded in: earlier packs keep the classes they own (a pack can't take a class
+    /// by its name sorting first)
+    load_order: Vec<String>,
 }
 
 impl Fields {
     pub fn goalgraph() -> Self {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![],
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
-            known: Default::default(), primed: false, packs: Default::default() };
-        f.set_getters(crate::translate::goalgraph_getters());
+            known: Default::default(), primed: false, packs: Default::default(),
+            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![] };
+        let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
+        f.packs.insert("goalgraph".into(), gg);
+        f.load_order.push("goalgraph".into());
+        f.compose();
         f
     }
 
     /// Load (or replace) a named `.c1f` pack. A pack that doesn't parse is refused and nothing changes. The setters
     /// and getters are the built-in goal graph's, then each pack's in name order.
     pub fn set_pack(&mut self, name: &str, src: &str) -> Result<(), String> {
-        let p = crate::syntax::parse_pack(src).map_err(|e| format!("pack {}: {}", name, e))?;
-        self.packs.insert(name.to_string(), p);
+        let p = crate::syntax::parse_full(src).map_err(|e| format!("pack {}: {}", name, e))?;
+        if let Some(n) = &p.name { if n != name { return Err(format!("pack {}: its PACK line says {}", name, n)); } }
+        let old = self.packs.insert(name.to_string(), p);
+        if !self.load_order.iter().any(|n| n == name) { self.load_order.push(name.to_string()); }
         self.compose();
+        if let Some(e) = self.pack_errors.get(name).cloned() {
+            // an import problem: a pack that was active stays as it was; a new one waits for its imports
+            match old {
+                Some(o) => { self.packs.insert(name.to_string(), o); self.compose(); }
+                None if e.contains("belongs to pack") => { self.packs.remove(name); self.load_order.retain(|n| n != name); self.compose(); }
+                None => {}                           // a new pack waiting for an import stays, and activates when it arrives
+            }
+            return Err(e);
+        }
         Ok(())
     }
 
     pub fn remove_pack(&mut self, name: &str) -> bool {
         let had = self.packs.remove(name).is_some();
+        self.load_order.retain(|n| n != name);
         if had { self.compose(); }
         had
     }
 
+    /// Activate packs in import order: a pack is active once every pack it imports is active with the same major
+    /// version, and it doesn't declare on a class another pack owns without importing that pack. A pack owns the
+    /// classes it is first to declare on. The rest wait, each with its reason.
     fn compose(&mut self) {
-        let mut setters = on_setters();
-        let mut getters = crate::translate::goalgraph_getters();
-        for (s, g) in self.packs.values() { setters.extend(s.iter().cloned()); getters.extend(g.iter().cloned()); }
+        use std::collections::{HashMap, HashSet};
+        self.pack_errors.clear();
+        let mut owner: HashMap<String, String> = HashMap::new();
+        let mut active: Vec<String> = vec![];
+        let mut done: HashSet<String> = HashSet::new();
+        let names: Vec<String> = self.load_order.iter().filter(|n| self.packs.contains_key(*n)).cloned().collect();
+        loop {
+            let mut moved = false;
+            for n in &names {
+                if done.contains(n) { continue; }
+                let p = &self.packs[n];
+                let ready = p.imports.iter().all(|(i, maj)| active.contains(i) && self.packs.get(i).map(|q| q.major()) == Some(*maj));
+                if !ready { continue; }
+                done.insert(n.clone());
+                moved = true;
+                let foreign: Vec<String> = p.classes().into_iter().filter(|c| owner.get(c).map(|o| o != n && !p.imports.iter().any(|(i, _)| i == o)).unwrap_or(false)).collect();
+                if let Some(c) = foreign.first() {
+                    let o = &owner[c];
+                    let maj = self.packs.get(o).map(|q| q.major()).unwrap_or(1);
+                    self.pack_errors.insert(n.clone(), format!("pack {}: declares on {}, which belongs to pack {}: add IMPORT {} {}", n, c, o, o, maj));
+                    continue;
+                }
+                for c in p.classes() { owner.entry(c).or_insert_with(|| n.clone()); }
+                active.push(n.clone());
+            }
+            if !moved { break; }
+        }
+        for n in &names {
+            if done.contains(n) { continue; }
+            let p = &self.packs[n];
+            let why = p.imports.iter().find_map(|(i, maj)| match self.packs.get(i) {
+                None => Some(format!("imports {} {}, which isn't loaded", i, maj)),
+                Some(q) if q.major() != *maj => Some(format!("imports {} {}, but {} {} is loaded", i, maj, i, q.version)),
+                Some(_) if !active.contains(i) => Some(format!("imports {}, which isn't active", i)),
+                _ => None,
+            }).unwrap_or_else(|| "its imports form a cycle".into());
+            self.pack_errors.insert(n.clone(), format!("pack {}: {}", n, why));
+        }
+        let mut setters = vec![];
+        let mut getters = vec![];
+        for n in &active {
+            let p = &self.packs[n];
+            setters.extend(p.setters.iter().cloned().map(|mut s| { s.pack = n.clone(); s }));
+            getters.extend(p.getters.iter().cloned());
+        }
+        self.imports = active.iter().map(|n| (n.clone(), self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect())).collect();
+        self.owner = owner;
         self.setters = setters;
         self.set_getters(getters);
+    }
+
+    /// May a setter from `pack` write an entity of class `cls`? Its own classes, an imported pack's, or a class no
+    /// pack owns. A setter built outside a pack ("") is not checked.
+    fn may_write(&self, pack: &str, cls: &str) -> Result<(), String> {
+        if pack.is_empty() { return Ok(()); }
+        match self.owner.get(cls) {
+            None => Ok(()),
+            Some(o) if o == pack || self.imports.get(pack).map(|v| v.contains(o)).unwrap_or(false) => Ok(()),
+            Some(o) => Err(format!("pack {} can't write {} (pack {} owns it): add IMPORT {}", pack, cls, o, o)),
+        }
     }
 
     /// Every class a loaded setter or getter is declared on.
@@ -165,23 +248,7 @@ impl Fields {
         let mut new: Vec<String> = core.docs.keys().filter(|k| !self.known.contains(*k)).cloned().collect();
         if new.is_empty() { return; }
         new.sort();
-        for e in new {
-            self.known.insert(e.clone());
-            // a birth: its own getters compute silently (stored, no setter runs), as at a rebuild. An entity made
-            // in parts (a plan written entity by entity) must not fire on a half-made state.
-            for gi in self.getters_of(core, &e) {
-                let Some(v) = self.compute(core, &e, gi, now, seq) else { continue };
-                let prop = self.getters[gi].prop.clone();
-                if core.docs.get(&e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
-                *seq += 1;
-                let w = Write { eid: e.clone(), prop: prop.clone(), new: v, old: J::Null, writer: "field:rebuild".into(), chain: json!({}), seq: *seq };
-                self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
-                core.hear(w, None, now);
-            }
-            // what references it recalculates live
-            let props: Vec<String> = core.docs.get(&e).map(|d| d.props.keys().cloned().collect()).unwrap_or_default();
-            for p in props { self.mark(&e, &p); }
-        }
+        for e in new { self.birth(core, &e, now, seq); }
     }
 
     fn has_getter(&self, cls: &str, prop: &str) -> bool { self.getters.iter().any(|g| g.cls == cls && g.prop == prop) }
@@ -220,6 +287,23 @@ impl Fields {
         for k in [(eid.to_string(), prop.to_string()), (crate::vm::REFS.to_string(), prop.to_string())] {
             if let Some(s) = self.deps.get(&k) { for (e, gi) in s.clone() { self.dirty.insert((self.glevel[gi], e, gi)); } }
         }
+    }
+
+    /// A birth: its own getters compute silently (stored, no setter runs), as at a rebuild. An entity made in parts (a
+    /// plan written entity by entity) must not fire on a half-made state. What references it recalculates live.
+    fn birth(&mut self, core: &mut Core, e: &str, now: f64, seq: &mut i64) {
+        self.known.insert(e.to_string());
+        for gi in self.getters_of(core, e) {
+            let Some(v) = self.compute(core, e, gi, now, seq) else { continue };
+            let prop = self.getters[gi].prop.clone();
+            if core.docs.get(e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
+            *seq += 1;
+            let w = Write { eid: e.to_string(), prop: prop.clone(), new: v, old: J::Null, writer: "field:rebuild".into(), chain: json!({}), seq: *seq };
+            self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+            core.hear(w, None, now);
+        }
+        let props: Vec<String> = core.docs.get(e).map(|d| d.props.keys().cloned().collect()).unwrap_or_default();
+        for p in props { self.mark(e, &p); }
     }
 
     /// First contact without a rebuild (an engine that started on a live field): every getter computes once to
@@ -485,7 +569,20 @@ impl Fields {
                     let tgt = if is_me(&target) { Some(w.eid.clone()) } else {
                         match core.eval_json(&target, &me(&w.eid), &[]) { Ok(J::String(g)) => Some(g), _ => None } };
                     let Some(tgt) = tgt else { continue };
-                    if !core.docs.contains_key(&tgt) { continue; }
+                    let pack = self.setters[i].pack.clone();
+                    if !core.docs.contains_key(&tgt) {
+                        // creation: `<Class>:<key>` of a class the pack owns or imports
+                        let Some((cls, _)) = tgt.split_once(':') else { continue };
+                        if self.owner.get(cls).is_none() || self.may_write(&pack, cls).is_err() { continue; }
+                        core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
+                        self.out.push(json!({"eid": tgt, "born": cls}));
+                        self.birth(core, &tgt, now, seq);
+                    }
+                    let cls = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
+                    if let Err(why) = self.may_write(&pack, &cls) {
+                        self.receipt(core, &w.eid, &name, why, J::Null, seq, now);
+                        continue;
+                    }
                     if tgt == w.eid && prop == w.prop {   // rule 6: own name inside its setter stores directly
                         self.emit_unchecked(core, work, &tgt, &prop, v, &format!("direct:{}", name), seq, now);
                     } else {

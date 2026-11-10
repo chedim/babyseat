@@ -266,3 +266,25 @@ fn a_status_write_recounts_only_what_the_blocker_blocks() {
     assert_eq!(w.prop("t12", "open_blockers"), json!(1), "untouched");
     assert!(took < std::time::Duration::from_millis(200), "one status write took {:?}", took);
 }
+
+// imports: a pack writes its own or imported classes (or ones no pack owns); it creates `<Class>:<key>` entities of
+// those classes; writing another pack's class without importing it is refused with a receipt
+#[test]
+fn a_pack_writes_and_creates_only_in_classes_it_owns_or_imports() {
+    let mut fs = Fields::goalgraph();
+    fs.set_pack("dom", "PACK dom 1\nDomNode.html getter: this.text\n").unwrap();
+    fs.set_pack("inflight", "PACK inflight 1\nIMPORT goalgraph 1\nIMPORT dom 1\nTask.status on-setter row:\n  ALWAYS: ('DomNode:inflight:' + this.eid).text = this.status\n").unwrap();
+    fs.set_pack("lamps", "PACK lamps 1\nLamp.power on-setter meddle:\n  ALWAYS: this.target.note = 'touched'\n").unwrap();
+    let mut w = World::new(fs);
+    classes(&mut w.c);
+    mk(&mut w.c, "t9", "Task", json!({"status": "open"}));
+    mk(&mut w.c, "lamp1", "Lamp", json!({"power": "off", "target": "t9"}));
+    w.write("t9", "status", json!("running"));
+    assert_eq!(w.prop("DomNode:inflight:t9", "text"), json!("running"), "created as a DomNode, through the import");
+    assert_eq!(w.c.docs["DomNode:inflight:t9"].cls, "DomNode");
+    assert_eq!(w.prop("DomNode:inflight:t9", "html"), json!("running"), "its own getters run on it");
+    assert!(w.fs.out.iter().any(|o| o["born"] == json!("DomNode")), "the host is told to create it");
+    w.write("lamp1", "power", json!("on"));
+    assert_eq!(w.prop("t9", "note"), J::Null, "lamps doesn't import goalgraph: no write to a Task");
+    assert!(w.fs.refusals.iter().any(|r| r["reason"].as_str().unwrap_or("").contains("pack lamps can't write Task")), "{:?}", w.fs.refusals);
+}

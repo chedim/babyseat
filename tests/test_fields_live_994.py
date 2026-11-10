@@ -199,3 +199,25 @@ def test_packs_in_the_pack_folder_load_at_start(tmp_path, monkeypatch):
         assert est.docs[L].properties.get("lit") is True
     finally:
         FL.stop(srv)
+
+
+def test_packs_import_each_other_and_create_their_own_entities(seat):
+    """A pack waits for its import, then runs; it creates DomNode entities through `IMPORT dom` and they land in
+    the store; a pack touching Task without IMPORT goalgraph is refused with the reason on its entity."""
+    est = seat.entity_store
+    INF, DOM, BAD = FL.PACK_NS + "inflight", FL.PACK_NS + "dom", FL.PACK_NS + "bad"
+    est.upsert(QuantumEntity(eid=INF, cls=FL.PACK_CLASS, properties={"name": "inflight", "c1f":
+        "PACK inflight 1\nIMPORT goalgraph 1\nIMPORT dom 1\nTask.status on-setter row:\n"
+        "  ALWAYS: ('DomNode:inflight:' + this.eid).text = this.status\n"}))
+    settle(seat)
+    assert "imports dom 1, which isn't loaded" in p(seat, INF, "error")
+    est.upsert(QuantumEntity(eid=DOM, cls=FL.PACK_CLASS, properties={"name": "dom", "c1f": "PACK dom 1\nDomNode.html getter: this.text\n"}))
+    settle(seat)
+    assert not p(seat, INF, "error") and not p(seat, DOM, "error")         # the import arrived: inflight is active
+    write(seat, A, "status", "done")
+    node = est.docs.get("DomNode:inflight:" + A)
+    assert node is not None and node.cls == "DomNode" and node.properties.get("text") == "done"
+    est.upsert(QuantumEntity(eid=BAD, cls=FL.PACK_CLASS, properties={"name": "bad", "c1f":
+        "PACK bad 1\nTask.status on-setter meddle:\n  ALWAYS: this.note = 1\n"}))
+    settle(seat)
+    assert "IMPORT goalgraph 1" in p(seat, BAD, "error")

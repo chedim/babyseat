@@ -80,6 +80,7 @@ class Live:
         self.stopped = threading.Event()
         self.errors = 0
         self.swept = False
+        self.pack_eids: dict = {}
         self.classes: set = set(CLASSES)
         for fp in sorted(PACK_DIR.glob("*.c1f")) if PACK_DIR.is_dir() else []:
             self._pack(fp.stem, fp.read_text(), None)
@@ -100,11 +101,17 @@ class Live:
         except Exception as e:                    # noqa: BLE001
             err = str(e)
             print(f"[fields] {err}"[:300], file=sys.stderr)
-        d = (self.est.docs or {}).get(eid) if eid else None
-        if d is not None and (d.properties or {}).get("error", "") != err:
-            with W.as_writer(WRITER + "pack"):
-                d.properties = {**(d.properties or {}), "error": err}
-                self.est.upsert(d, embedder=None)
+        if eid:
+            self.pack_eids[name] = eid
+        # every Pack entity shows its pack's state: an import that arrived later clears a waiting pack's error
+        waiting = json.loads(self.f.pack_errors())
+        for n, e in list(self.pack_eids.items()):
+            want = err if n == name and err else waiting.get(n, "")
+            d = (self.est.docs or {}).get(e)
+            if d is not None and (d.properties or {}).get("error", "") != want:
+                with W.as_writer(WRITER + "pack"):
+                    d.properties = {**(d.properties or {}), "error": want}
+                    self.est.upsert(d, embedder=None)
         self.classes = set(CLASSES) | set(self.f.classes())
         return not err
 
@@ -161,6 +168,12 @@ class Live:
     def _apply(self) -> None:
         out = json.loads(self.f.drain())
         for w in out.get("writes") or []:
+            if "born" in w:                          # a setter created it (`<Class>:<key>` of its own or imported class)
+                if w["eid"] not in (self.est.docs or {}):
+                    from .entities import QuantumEntity
+                    with W.as_writer(WRITER + "create"):
+                        self.est.upsert(QuantumEntity(eid=w["eid"], cls=w["born"], properties={"silent_birth": True}), embedder=None)
+                continue
             d = (self.est.docs or {}).get(w["eid"])
             if d is None or (d.properties or {}).get(w["prop"]) == w["new"]:
                 continue
