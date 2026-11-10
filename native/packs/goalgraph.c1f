@@ -44,9 +44,10 @@ Goal.status on-setter plan-after-reopen:
     membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
 
 -- getters (#994 rule 2): computed fields, recalculated when what they read changes
-Task.finished getter: this.status == 'done'
-Wait.finished getter: this.status == 'done'
-Decision.finished getter: this.status == 'closed'
+-- a dropped blocker blocks nothing (Memo's live check, 2026-11-09: it used to block forever)
+Task.finished getter: this.status in ('done', 'dropped')
+Wait.finished getter: this.status in ('done', 'dropped')
+Decision.finished getter: this.status in ('closed', 'dropped')
 Task.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.finished])
 Wait.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.finished])
 -- from the first beat after it armed, an armed wait's `due` is the beat's time: it changes every beat, so its check

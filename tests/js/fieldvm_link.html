@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- the page's DOM linked into the field VM (run by fieldvm_link.test.mjs in headless Chrome) -->
+<body>
+<div id="src">a</div><div id="out"></div><ul id="list"><li>one</li></ul><x-shadow id="sh"></x-shadow>
+<pre id="result">pending</pre>
+<script type="module">
+import { start } from '/membrane/ui/fieldvm.js';
+const frame = () => new Promise(r => setTimeout(r, 50));
+const PACK = `PACK t 1
+IMPORT dom 1
+DomNode.text on-setter echo:
+  WHEN this.id == 'src': ('DomNode:page:#out').text = 'saw ' + this.text
+`;
+const res = {}; const step = (s) => { res.step = s; document.getElementById('result').textContent = JSON.stringify(res); };
+try {
+  customElements.define('x-shadow', class extends HTMLElement {
+    constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = '<b id="inner">deep</b>'; }
+  });
+  step('start'); const host = await start(document.getElementById('out'), { packs: { t: PACK } });
+  res.errors = host.errors; host.schedule = (fn) => setTimeout(fn, 0);   // headless draws no frames
+  step('link'); host.link(document.body); step('frame');
+  await frame();
+  res.linked = !!host.get('DomNode:page:#src') && host.get('DomNode:page:#src').text === 'a';
+  res.parent = host.get('DomNode:page:#src').parent;
+  res.shadow = (host.get('DomNode:page:#inner') || {}).parent;
+  document.getElementById('src').textContent = 'hello';
+  await frame(); await frame();
+  res.reacted = document.getElementById('out').textContent;
+  res.mirror_out = host.get('DomNode:page:#out').text;
+  const li = document.createElement('li'); li.id = 'two'; li.className = 'new'; li.textContent = 'two';
+  document.getElementById('list').append(li);
+  await frame();
+  res.born = host.get('DomNode:page:#two');
+  li.remove();
+  await frame();
+  res.gone = host.get('DomNode:page:#two');
+} catch (e) { res.error = String(e && e.stack || e); }
+res.done = true;
+document.getElementById('result').textContent = JSON.stringify(res);
+</script>

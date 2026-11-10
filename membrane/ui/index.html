@@ -32,6 +32,10 @@
   .who button { margin-top: 12px; width: 100%; font: inherit; font-size: 16px; padding: 10px; border: 0; border-radius: 10px;
     background: var(--primary-color); color: var(--text-primary-color); cursor: pointer; }
   .who .note { margin-top: 12px; font-size: 12px; opacity: .6; }
+  #field-views { position: fixed; right: 16px; bottom: 16px; z-index: 20; max-width: min(420px, calc(100vw - 32px));
+    max-height: 50vh; overflow: auto; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--divider-color);
+    background: var(--card-background-color, var(--primary-background-color)); color: var(--primary-text-color);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .15); font-size: 14px; }
 </style>
 </head>
 <body>
@@ -132,6 +136,17 @@
   el.narrow = false;
   el.hass = makeHost(name);
   document.body.appendChild(el);
+  // THE FIELD ENGINE IN THE CLIENT: the same VM as the seat (WebAssembly) follows the seat's field and runs its
+  // view packs (packs importing `dom`); what they draw shows in this dock, hidden while nothing is drawn
+  import("/ui/www/fieldvm.js").then(async (m) => {
+    const dock = document.createElement("section");
+    dock.id = "field-views";
+    dock.hidden = true;
+    document.body.appendChild(dock);
+    new MutationObserver(() => { dock.hidden = !dock.childElementCount; }).observe(dock, { childList: true });
+    // link: the whole page's DOM is in the field too (DomNode:page:*), kept in step as the page changes
+    window.MEMBRANE_FIELD = await m.connect(dock, { link: document.body, onStatus: (s) => { dock.dataset.status = s; } });
+  }).catch((e) => console.warn("field VM:", e));
   // the seat adopted a name (naming.py): the page comes back with "Hey <name>"
   setInterval(async () => {
     const n = (await conf()).name;
