@@ -327,6 +327,10 @@ impl Fields {
     fn set_pack(&self, name: &str, src: &str) -> PyResult<()> {
         self.c.lock().unwrap_or_else(|e| e.into_inner()).1.set_pack(name, src).map_err(bad)
     }
+    /// Packs that aren't active, and why: {name: reason}.
+    fn pack_errors(&self) -> String {
+        serde_json::to_string(&self.c.lock().unwrap_or_else(|e| e.into_inner()).1.pack_errors).unwrap_or_else(|_| "{}".into())
+    }
     fn remove_pack(&self, name: &str) -> bool { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.remove_pack(name) }
     /// The classes the loaded setters and getters are declared on (what the host mirrors).
     fn classes(&self) -> Vec<String> { self.c.lock().unwrap_or_else(|e| e.into_inner()).1.classes() }

@@ -38,7 +38,7 @@ Goal.status on-setter bare:
     assert_eq!(got[0], OnSet { name: "tidy".into(), cls: "Task".into(), prop: "status".into(),
         when: "this.status == 'done'".into(), writes: vec![w("this", "note", "'done -- not a comment'")],
         els: vec![("this.status == 'stuck'".into(), vec![w("this", "note", "'stuck'"), w("this.goal", "replan", "'stuck: ' + this.eid")]),
-                  ("True".into(), vec![w("this", "note", "''")])] });
+                  ("True".into(), vec![w("this", "note", "''")])], pack: String::new() });
     assert_eq!(got[1].when, "True");
     assert_eq!(got[1].writes, vec![w(LLM_CALL, "", "{'about': this.eid, 'lane': 'planner'}")]);
     assert_eq!(got[2].when, "True");
@@ -74,4 +74,40 @@ fn packs_load_at_runtime_replace_by_name_and_a_broken_one_changes_nothing() {
     assert_eq!((f.setters.len(), f.getters.len()), (base.0 + 1, base.1), "a broken pack changes nothing");
     assert!(f.remove_pack("lamps"));
     assert_eq!((f.setters.len(), f.getters.len()), base);
+}
+
+#[test]
+fn a_pack_declaring_on_another_packs_class_must_import_it() {
+    use membrane_vm::fields::Fields;
+    let mut f = Fields::goalgraph();
+    let e = f.set_pack("inflight", "PACK inflight 1\nTask.status on-setter row:\n  ALWAYS: this.shown = True\n").unwrap_err();
+    assert!(e.contains("belongs to pack goalgraph") && e.contains("IMPORT goalgraph 1"), "{}", e);
+    f.set_pack("inflight", "PACK inflight 1\nIMPORT goalgraph 1\nTask.status on-setter row:\n  ALWAYS: this.shown = True\n").unwrap();
+    assert!(f.setters.iter().any(|s| s.name == "row" && s.pack == "inflight"));
+    assert!(f.pack_errors.is_empty(), "{:?}", f.pack_errors);
+}
+
+#[test]
+fn a_pack_waits_for_its_imports_and_refuses_a_wrong_major() {
+    use membrane_vm::fields::Fields;
+    let mut f = Fields::goalgraph();
+    let e = f.set_pack("inflight", "PACK inflight 1\nIMPORT dom 1\nDomNode.text on-setter echo:\n  ALWAYS: this.seen = True\n").unwrap_err();
+    assert!(e.contains("imports dom 1, which isn't loaded"), "{}", e);
+    assert!(!f.setters.iter().any(|s| s.name == "echo"), "inactive until dom loads");
+    f.set_pack("dom", "PACK dom 2\nDomNode.html getter: this.text\n").unwrap();
+    assert!(f.pack_errors["inflight"].contains("imports dom 1, but dom 2 is loaded"), "{:?}", f.pack_errors);
+    f.set_pack("dom", "PACK dom 1.4\nDomNode.html getter: this.text\n").unwrap();
+    assert!(f.pack_errors.is_empty(), "{:?}", f.pack_errors);
+    assert!(f.setters.iter().any(|s| s.name == "echo"), "active once dom 1.x loaded");
+    assert!(f.set_pack("dom", "PACK other 1\n").unwrap_err().contains("its PACK line says other"));
+}
+
+#[test]
+fn a_pack_can_not_take_a_class_by_its_name_sorting_first() {
+    use membrane_vm::fields::Fields;
+    let mut f = Fields::goalgraph();
+    let e = f.set_pack("aaa", "PACK aaa 1\nTask.status on-setter hijack:\n  ALWAYS: this.note = 1\n").unwrap_err();
+    assert!(e.contains("belongs to pack goalgraph"), "{}", e);
+    assert!(f.pack_errors.is_empty(), "the goal graph stays active, the refused pack isn't kept: {:?}", f.pack_errors);
+    assert!(f.setters.iter().any(|s| s.name == "ready") && !f.setters.iter().any(|s| s.name == "hijack"));
 }

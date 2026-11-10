@@ -40,6 +40,21 @@ CLASSES = ("Goal", "Task", "Decision", "Wait")
 PACK_DIR = Path(__file__).resolve().parent / "packs"
 PACK_CLASS = "Pack"
 PACK_NS = MEMBRANE_NS + "pack:"
+
+
+def is_pack(eid: str, d) -> bool:
+    """A Pack entity, or any entity holding `c1f` text: an agent's entity tool may give it another class and id
+    (`Component:pack:inflight`)."""
+    return d.cls == PACK_CLASS or "c1f" in (d.properties or {})
+
+
+def pack_name(eid: str, d) -> str:
+    """Its `name`, else what follows the last `pack:` in its id, else the id."""
+    p = d.properties or {}
+    if p.get("name"):
+        return str(p["name"])
+    e = str(eid)
+    return e.rsplit("pack:", 1)[1] if "pack:" in e else e
 WRITER = "trigger:field:"
 LLM_EID = MEMBRANE_NS + "llm"
 
@@ -80,11 +95,12 @@ class Live:
         self.stopped = threading.Event()
         self.errors = 0
         self.swept = False
+        self.pack_eids: dict = {}
         self.classes: set = set(CLASSES)
-        for fp in sorted(PACK_DIR.glob("*.c1f")) if PACK_DIR.is_dir() else []:
-            self._pack(fp.stem, fp.read_text(), None)
+        self.file_mtimes: dict = {}
+        self._scan_files()
         for eid, d in list((self.est.docs or {}).items()):
-            if d.cls == PACK_CLASS:
+            if is_pack(eid, d):
                 self._pack_entity(eid, d)
         self.loaded = self._mirror()
         self.f.rebuild(time.time())          # the getters compute once; their values are stored, no setter runs
@@ -100,17 +116,23 @@ class Live:
         except Exception as e:                    # noqa: BLE001
             err = str(e)
             print(f"[fields] {err}"[:300], file=sys.stderr)
-        d = (self.est.docs or {}).get(eid) if eid else None
-        if d is not None and (d.properties or {}).get("error", "") != err:
-            with W.as_writer(WRITER + "pack"):
-                d.properties = {**(d.properties or {}), "error": err}
-                self.est.upsert(d, embedder=None)
+        if eid:
+            self.pack_eids[name] = eid
+        # every Pack entity shows its pack's state: an import that arrived later clears a waiting pack's error
+        waiting = json.loads(self.f.pack_errors())
+        for n, e in list(self.pack_eids.items()):
+            want = err if n == name and err else waiting.get(n, "")
+            d = (self.est.docs or {}).get(e)
+            if d is not None and (d.properties or {}).get("error", "") != want:
+                with W.as_writer(WRITER + "pack"):
+                    d.properties = {**(d.properties or {}), "error": want}
+                    self.est.upsert(d, embedder=None)
         self.classes = set(CLASSES) | set(self.f.classes())
         return not err
 
     def _pack_entity(self, eid: str, d) -> bool:
         p = d.properties or {}
-        name = str(p.get("name") or (eid[len(PACK_NS):] if eid.startswith(PACK_NS) else eid))
+        name = pack_name(eid, d)
         return self._pack(name, str(p.get("c1f") or ""), eid)
 
     def _mirror(self) -> int:
@@ -133,7 +155,7 @@ class Live:
         if not eid or str(w.get("path") or "").startswith("rel:"):
             return
         d = (self.est.docs or {}).get(eid)
-        if d is None or (d.cls not in self.classes and d.cls != PACK_CLASS):
+        if d is None or (d.cls not in self.classes and not is_pack(eid, d)):
             return
         self.q.put((eid, str(w.get("prop") or ""), w.get("new"), time.time()))
 
@@ -141,7 +163,7 @@ class Live:
         d = (self.est.docs or {}).get(eid)
         if d is None:
             return
-        if d.cls == PACK_CLASS:                      # a pack written: reload it, mirror any new class, rebuild
+        if is_pack(eid, d):                          # a pack written: reload it, mirror any new class, rebuild
             if prop in ("", "c1f", "name") and self._pack_entity(eid, d):
                 self._mirror()
                 self.f.rebuild(now)                  # a new getter on an old world: computed, no setter runs
@@ -161,6 +183,12 @@ class Live:
     def _apply(self) -> None:
         out = json.loads(self.f.drain())
         for w in out.get("writes") or []:
+            if "born" in w:                          # a setter created it (`<Class>:<key>` of its own or imported class)
+                if w["eid"] not in (self.est.docs or {}):
+                    from .entities import QuantumEntity
+                    with W.as_writer(WRITER + "create"):
+                        self.est.upsert(QuantumEntity(eid=w["eid"], cls=w["born"], properties={"silent_birth": True}), embedder=None)
+                continue
             d = (self.est.docs or {}).get(w["eid"])
             if d is None or (d.properties or {}).get(w["prop"]) == w["new"]:
                 continue
@@ -202,9 +230,30 @@ class Live:
                 self.errors += 1
                 print(f"[fields] tick failed: {e!r}"[:300], file=sys.stderr)
 
+    def _scan_files(self) -> bool:
+        """Load the pack files that are new or changed since the last scan (their mtime). -> any loaded."""
+        changed = False
+        for fp in sorted(PACK_DIR.glob("*.c1f")) if PACK_DIR.is_dir() else []:
+            try:
+                m = fp.stat().st_mtime
+            except OSError:
+                continue
+            if self.file_mtimes.get(fp.name) == m:
+                continue
+            self.file_mtimes[fp.name] = m
+            if self._pack(fp.stem, fp.read_text(), None):
+                changed = True
+        return changed
+
     def on_sweep(self, now: float) -> None:
-        """The VM's sweep is the clock (the beat the old `every` trigger fired on): the queue first, then a tick."""
+        """The VM's sweep is the clock (the beat the old `every` trigger fired on): the queue first, then a tick.
+        Each beat also reloads pack files edited since the last one."""
         self.settle()
+        with self.busy:
+            if self._scan_files():
+                self._mirror()
+                self.f.rebuild(now)
+                self._apply()
         self.tick(now)
 
     def _worker(self) -> None:
@@ -219,6 +268,11 @@ class Live:
             if time.time() >= next_tick:
                 if not self.swept:                   # no VM sweeping: keep our own beat
                     self.tick()
+                with self.busy:                      # pack files reload on this timer too (sweeps stop while the thinker is paused)
+                    if self._scan_files():
+                        self._mirror()
+                        self.f.rebuild(time.time())
+                        self._apply()
                 next_tick = time.time() + GG.WAIT_TICK_S
 
 

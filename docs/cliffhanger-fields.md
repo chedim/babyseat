@@ -9,7 +9,25 @@ the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
 Membrane's syntax, made consistent, plus `ELSE` and `ALWAYS` from the spec. Cliffhanglets (pieces of
 cliffhanger code: setters and getters) are stored in `.c1f` files (decided 2026-11-09). Besides the built-in goal
 graph, packs load at runtime from `membrane/packs/*.c1f` and from `Pack` entities in the field
-(`membrane::pack:<name>`, the text in `c1f`), which can be edited live (`membrane/fields_live.py`). It's parsed by
+(`membrane::pack:<name>`, the text in `c1f`), which can be edited live (`membrane/fields_live.py`).
+
+**Packs, imports and ownership (decided 2026-11-09).** A pack starts with its header:
+```
+PACK inflight 1
+IMPORT goalgraph 1
+IMPORT dom 1
+```
+- **A pack owns the classes it declares setters or getters on,** and the pack loaded first keeps them. The built-in
+  goal graph (`PACK goalgraph 1`) is always first.
+- **Declaring on a class another pack owns needs an `IMPORT` of that pack;** otherwise the pack is refused with the
+  reason (`declares on Task, which belongs to pack goalgraph: add IMPORT goalgraph 1`).
+- **Load order follows imports.** A pack whose import isn't loaded, or is loaded with another major version, waits
+  inactive with the reason, and activates when the import arrives. A field holds one version of each pack.
+- **Writes:** a setter may write entities of its pack's classes, of imported packs' classes, or of classes no pack
+  owns. Writing another pack's class without importing it is refused with a receipt.
+- **Creation:** a write to an entity that doesn't exist creates it when its id is `<Class>:<key>` and the class is
+  the pack's own or imported (`('DomNode:inflight:' + this.eid).text = ...`). Its getters compute as a birth.
+- **Reads** (getters, conditions) may read any entity. It's parsed by
 `native/src/syntax.rs`, and the goal graph ships in it (`native/packs/goalgraph.c1f`):
 
 ```
