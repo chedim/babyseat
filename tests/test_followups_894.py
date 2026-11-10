@@ -2,6 +2,7 @@
 a guess (learned/unlearnable in code); unlearning in a message is not undone by the same message."""
 import os
 import sys
+import pytest
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from test_living_language import _add  # noqa: E402
 from test_invent_891 import HAVE, SID, Model, _learned, _say, _seat  # noqa: E402
 from membrane import language as LL  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _gap_fill_on(monkeypatch):
+    """The operator, 2026-11-10: the gap call is off by default for users; this file tests it, so it is on here."""
+    monkeypatch.setenv("MEMBRANE_GAP_FILL", "1")
+
 
 
 def _legacy(srv, est):

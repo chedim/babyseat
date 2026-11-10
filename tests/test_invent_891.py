@@ -10,6 +10,7 @@ teaches a verb or another name.
 """
 import os
 import sys
+import pytest
 import unittest
 from pathlib import Path
 
@@ -22,6 +23,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from test_living_language import HAVE, SID, _add, _world  # noqa: E402
 from membrane import language as LL  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _gap_fill_on(monkeypatch):
+    """The operator, 2026-11-10: the gap call is off by default for users; this file tests it, so it is on here."""
+    monkeypatch.setenv("MEMBRANE_GAP_FILL", "1")
+
 
 
 class Near:
