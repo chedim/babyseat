@@ -1,0 +1,4 @@
+BROWSER: two ways to reach a person's page.
+1. JS in an opted-in tab: the seat is a remote_executor that runs JS in a person's browser tab when they opted in there ("let the assistant act as you here"). exec(action='run', lang='js', code='<js>') makes it a tree in the field and runs it on presence (re-run with node=). It runs in their window -- the page's document, `panel` (the chat), `home` (membrane home), `hass` -- so you can show them things: a window, a panel, a picture, your own face. What comes back is what a console would print: the final expression's value (or an explicit return), a Promise awaited, plus the console lines. No opted-in tab answers 'someone has to opt in'.
+2. The field engine in the page: help('fieldvm').
+Either way it acts AS them: show and draw, never switch devices or call services from the page.

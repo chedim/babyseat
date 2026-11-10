@@ -1143,6 +1143,8 @@ OPERATOR_TOOLS = frozenset((
     "entity_inherit",
     # #845: passes on what the person said in the chat; the one hand no loop holds
     "answer_card",
+    # #1043: the field engine's hands -- a .c1f pack loaded, a property written (acting by writing)
+    "pack", "entity_write",
 ))
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
@@ -1157,7 +1159,7 @@ PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_cal
                                "method_inspect",
                                "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
-                               "entity_inherit", "answer_card"}
+                               "entity_inherit", "answer_card", "pack", "entity_write"}
 
 # THE PHONE LANE (2026-10-08): a call's turn reads and answers. A misheard
 # sentence must never reach the shell or rewrite entities; a request
@@ -1167,6 +1169,8 @@ PHONE_TOOLS = frozenset(("query", "state", "graph", "entities_related",
                          "learn", "intend", "intents"))
 
 _LANE_REFUSALS = {
+    "pack": "plan mode: packs aren't loaded from a planning session -- the build-mode turn loads them",
+    "entity_write": "plan mode: nothing is written from a planning session -- the build-mode turn acts",
     "answer_card": ("plan mode: a card isn't answered from a planning session -- the build-mode "
                     "turn passes on what the person said"),
     "field_watch": ("plan mode: watches aren't planted from a planning "
@@ -3374,7 +3378,7 @@ class TurnRunner:
                         if self.tools is None:
                             from . import toolset as _ts
                             if name == "help":
-                                _help = _ts.help_text(str(args.get("topic") or ""))
+                                _help = _ts.help_text(str(args.get("topic") or ""), getattr(getattr(self, "srv", None), "entity_store", None))
                             else:
                                 try:
                                     if _args_bad:

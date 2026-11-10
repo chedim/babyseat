@@ -249,6 +249,57 @@ class Live:
                     if m != "DomNode"}
         return out
 
+    def pack_op(self, action: str, name: str = "", c1f: str = "") -> dict:
+        """The `pack` tool (#1043): list | show | load a pack (read / write are the same), its load error in the reply. A written pack is the
+        entity membrane::pack:<name> (class Pack), loaded now; a broken one is refused and the last good one stays.
+        A shipped pack (membrane/packs) is the release's: a seat adds to its classes from its own pack instead."""
+        shipped = {fp.stem for fp in PACK_DIR.glob("*.c1f")} if PACK_DIR.is_dir() else set()
+        action = {"show": "read", "load": "write"}.get(action, action)
+        with self.busy:
+            waiting = json.loads(self.f.pack_errors())
+            if action == "list":
+                rows = []
+                for n in sorted(set(self.pack_texts) | shipped):
+                    e = self.pack_eids.get(n)
+                    err = waiting.get(n) or (((self.est.docs or {}).get(e).properties or {}).get("error", "")
+                                             if e and (self.est.docs or {}).get(e) is not None else "")
+                    rows.append({"name": n, "source": "shipped" if n in shipped else "entity", "eid": e,
+                                 "error": err or ""})
+                return {"ok": True, "packs": rows}
+            name = str(name or "").strip()
+            if not name:
+                return {"ok": False, "error": "a pack needs its name"}
+            if action == "read":
+                if name not in self.pack_texts:
+                    return {"ok": False, "error": f"no pack {name!r} (pack action=list names them)"}
+                e = self.pack_eids.get(name)
+                d = (self.est.docs or {}).get(e) if e else None
+                err = waiting.get(name) or (((d.properties or {}).get("error") or "") if d is not None else "")
+                return {"ok": True, "name": name, "c1f": self.pack_texts[name], "error": err}
+            if action != "write":
+                return {"ok": False, "error": "action is list, show or load"}
+            if name in shipped:
+                return {"ok": False, "error": f"{name} is a shipped pack (the release's): write your own pack with "
+                                              f"`IMPORT {name} 1` and your own class, e.g. My{name.capitalize()}"}
+            from .entities import QuantumEntity
+            eid = PACK_NS + name
+            d = (self.est.docs or {}).get(eid)
+            with W.as_writer(WRITER + "pack"):
+                if d is None:
+                    self.est.upsert(QuantumEntity(eid=eid, cls=PACK_CLASS, properties={"name": name, "c1f": c1f}),
+                                    embedder=None)
+                else:
+                    d.properties = {**(d.properties or {}), "name": name, "c1f": c1f}
+                    self.est.upsert(d, embedder=None)
+            ok = self._pack(name, c1f, eid)
+            if ok:
+                self._mirror()
+                self._apply()
+            err = "" if ok else ((self.est.docs[eid].properties or {}).get("error") or "refused")
+            if ok:
+                err = json.loads(self.f.pack_errors()).get(name, "")      # loaded, but waiting on an IMPORT
+            return {"ok": not err, "name": name, "eid": eid, "error": err, "classes": sorted(self.f.classes())}
+
     def _pack_entity(self, eid: str, d) -> bool:
         p = d.properties or {}
         name = pack_name(eid, d)

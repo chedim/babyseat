@@ -24,7 +24,9 @@ def test_the_doctrine_declares_no_body():
 
 
 def test_the_doctrine_carries_the_self_guard():
-    d = DOCTRINE.lower()
+    # #1043 (the operator 2026-11-10): the guard moved from the always-sent doctrine to help('blurp')
+    from membrane.help_pack import packaged
+    d = packaged("blurp").lower()
     assert "self (#161)" in d
     assert "never speak as it" in d
     assert "record.jsonl" in d                       # its state is its record, cite it
