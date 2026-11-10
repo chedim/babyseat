@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import claude_agent as CA  # noqa: E402
-from membrane.toolset import HELP  # noqa: E402
+from membrane.help_pack import packaged  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCTRINE = (ROOT / "doctrine.md").read_text()
@@ -31,7 +31,7 @@ def test_the_doctrine_carries_the_rule():
 
 
 def test_the_goals_help_carries_the_rule():
-    _carries_the_rule(HELP["goals"])
+    _carries_the_rule(packaged("goals"))
 
 
 def test_the_tools_note_points_work_at_a_goal():

@@ -484,7 +484,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_edit",
-        "description": ("Edit an entity (eid or exact name); only the given fields change. merged_into marks a subsumption (the source stays, pointing at its survivor). *_script properties are python that reads `state` and sets `result` ({render, patch, run, delete, intent, chat, voice}): getter_script on a read, tick_script on the heartbeat, nudge_script at consolidation, the others at their hooks (budgets: getter 10s, triggers 0.25s-2s), with a read-only `membrane` object. publish=True exports it. Contract: help('scripts')."),
+        "description": ("Edit an entity (eid or exact name); only the given fields change. merged_into marks a subsumption (the source stays, pointing at its survivor). Behaviour is a .c1f pack (the pack tool, help('packs')), never a script property; `class` may be any class a loaded pack declares. To act, entity_write the property whose write is the effect (chat:<person>.say, membrane::llm.call, a File or Command verb). publish=True exports it (state only)."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -495,19 +495,9 @@ TOOLS: list[dict] = [
                 "links": {"type": "array"},
                 "class": {"type": "string"},
                 "merged_into": {"type": "string", "description": "the survivor's eid or name."},
-                "nudge_script": {"type": "string", "description": "python; at consolidation."},
-                "delete_script": {"type": "string", "description": "python; result.delete=True retires."},
-                "mention_script": {"type": "string", "description": "python; on a mention."},
-                "thought_script": {"type": "string", "description": "python; when the thinker extends under it."},
-                "dreamed_script": {"type": "string", "description": "python; on a dream under it."},
-                "tick_script": {"type": "string", "description": "python; on the ~1s heartbeat, paced by `tick_every`."},
-                "watch_script": {"type": "string", "description": "python; on a watched external event."},
-                "watch": {"type": "object", "description": "{kind: 'file'|'signal', glob/name}: what fires watch_script."},
-                "getter_script": {"type": "string",
-                                  "description": "python; on a read: set result = {'state': {...live values...}}."},
                 "watch_ops": {"type": "array", "description": "[{op: near|away|around, rel, z|y}]; help('watches')."},
                 "watch_fields": {"type": "array", "description": "[{verb: pos|align|vel, arg}]; help('watches')."},
-                "properties": {"type": "object", "description": "bounded property patch (script_* keys are the engine's)."},
+                "properties": {"type": "object", "description": "bounded property patch (a pack's c1f text, the fields its getters read)."},
             },
             "required": ["spec"],
         },
@@ -616,6 +606,39 @@ TOOLS: list[dict] = [
                 },
             },
             "required": ["spec", "parents"],
+        },
+    },
+    {
+        "name": "pack",
+        "description": ("THE FIELD'S PROGRAMS: a .c1f pack gives a class its behaviour -- getters that keep a value true, "
+                        "setters that react to a write (help('packs')). action list | show (name) | load (name, c1f: the "
+                        "whole text, `PACK <name> <n>` first): a load runs at once and the reply carries its load "
+                        "error (a broken pack is refused; the last good one keeps running). Shipped packs (banner, mcp, "
+                        "...) are the release's: extend one from your own pack (`IMPORT banner 1`, your own class)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "show", "load"]},
+                "name": {"type": "string", "description": "the pack's name"},
+                "c1f": {"type": "string", "description": "load: the pack's whole text"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "entity_write",
+        "description": ("ACT BY WRITING: set one property of an entity; the write runs whatever reacts to it -- a pack's "
+                        "setters, or an adapter's effect (chat:<person>.say speaks to them, membrane::llm.call wakes a "
+                        "model turn, McpTool:<server>:<tool>.call:run calls a tool, a File's write / Command's run). An "
+                        "effect's receipt lands on the entity as <prop>_result: read it back."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "string", "description": "the entity (eid or exact name)"},
+                "prop": {"type": "string", "description": "the property"},
+                "value": {"description": "the value (any JSON)"},
+            },
+            "required": ["spec", "prop"],
         },
     },
     {
@@ -761,7 +784,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_read",
-        "description": ("READ an entity's value after processing: a getter_script fires (run=true bypasses its 5s cache), and the reply carries the current properties, script_data and any run the getter triggered. The properties blob is clipped at ~800 chars: read one in full with prop= (tail=N pages a list from its newest end; lines=A-B pages text, such as a run's kept output)."),
+        "description": ("READ an entity's value after processing: its pack getters' current values with its properties (run=true reads through any cache). The properties blob is clipped at ~800 chars: read one in full with prop= (tail=N pages a list from its newest end; lines=A-B pages text, such as a run's kept output)."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1755,6 +1778,36 @@ def tool_entity_read(args: dict, port: int) -> str:
 
 
 
+def tool_pack(args: dict, port: int) -> str:
+    """#1043: list / read / write a .c1f pack on the seat's field engine."""
+    body = {"action": str(args.get("action") or "list")}
+    for f in ("name", "c1f"):
+        if args.get(f) not in (None, ""):
+            body[f] = str(args[f])
+    out = _http(port, "POST", "/membrane/pack", body)
+    if body["action"] == "list" and out.get("ok"):
+        return "\n".join(f"- {p['name']} ({p['source']})" + (f" ERROR: {p['error']}" if p.get("error") else "")
+                         for p in out.get("packs") or []) or "no packs"
+    if body["action"] in ("show", "read") and out.get("ok"):
+        return out.get("c1f", "") + (f"\n-- ERROR: {out['error']}" if out.get("error") else "")
+    if out.get("ok"):
+        return f"Pack {out.get('name')} loaded ({out.get('eid')}); classes now: {', '.join(out.get('classes') or [])}"
+    err = out.get("error")
+    return f"Pack refused: {err.get('message') if isinstance(err, dict) else err}"
+
+
+def tool_write(args: dict, port: int) -> str:
+    """#1043: entity.prop = value -- acting by writing (an entity edit of one property)."""
+    spec, prop = _arg(args, "spec", "eid", "entity", "name"), str(args.get("prop") or "").strip()
+    if not spec or not prop:
+        return "write needs spec and prop"
+    out = _http(port, "POST", "/membrane/entity/edit", {"spec": spec, "properties": {prop: args.get("value")}})
+    if not out.get("ok"):
+        return f"Write failed: {out.get('error', 'unknown error')}"
+    return (f"Wrote {out.get('eid') or spec}.{prop}. Whatever reacts to it runs now; an effect's receipt lands as "
+            f"{prop}_result on the entity -- read it back before you claim it happened.")
+
+
 TOOL_IMPLS = {
     "query": tool_query,
     "state": tool_state,
@@ -1772,6 +1825,8 @@ TOOL_IMPLS = {
     "entities_related": tool_related_entities,
     "entity_add": tool_entity_add,
     "entity_edit": tool_entity_edit,
+    "pack": tool_pack,
+    "entity_write": tool_write,
     "entity_remove": tool_entity_remove,
     "junk_cut": tool_set_junk_cut,
     "peer_post": tool_peer_post,

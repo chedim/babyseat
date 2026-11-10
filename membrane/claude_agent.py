@@ -724,8 +724,8 @@ TOOLS_NOTE = _full_names(
     "class; or write a property whose write is the effect. Keep methods small (a sensor reads "
     "one thing, an actuator does one), composed through steps or "
     "parents. A thing in the world is an entity that keeps itself current: "
-    "@entity_edit with a getter_script (runs when read) or a tick_script "
-    "(paced by tick_every); read it back. Code work happens in a temp git "
+    "a .c1f getter (@pack load; help: membrane::help:packs); "
+    "act by @entity_write. Read it back. Code work happens in a temp git "
     "worktree, never the main checkout. "
     "Work you are given goes to @intend (issue link, what done means) "
     "instead of doing it in your own turn; answer with the goal's id. "
@@ -757,7 +757,7 @@ TOOLS_NOTE = _full_names(
     "person are Decision cards. A turn ends after 5 minutes of silence and a "
     "running tool call is silent, so a command that may run longer than about "
     "4 minutes must start detached (a method whose command is "
-    "'nohup <command> > <log> 2>&1 &') or as an entity script, and checked after.")
+    "'nohup <command> > <log> 2>&1 &'), and checked after.")
 
 
 # the seat card's lines this note replaces on the Claude rung: EXEC (the note

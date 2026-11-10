@@ -4679,6 +4679,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._membrane_attention(); return
         if path == "/membrane/entity/edit":
             self._entity_edit(); return
+        if path == "/membrane/pack":
+            self._pack_op(); return
         if path == "/membrane/entity/inherit":
             self._entity_inherit(); return
         if path in ("/membrane/method/define", "/membrane/method/call", "/membrane/method/each",
@@ -7784,6 +7786,17 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         except Exception:
             pass
         self._json_out({"ok": True, "eid": goal.eid, "name": name})
+
+    def _pack_op(self) -> None:
+        """POST /membrane/pack (#1043, the `pack` tool): {action: list|read|write, name, c1f} on the field engine;
+        a write's load error comes back in the reply."""
+        from . import fields_live as _FL
+        live = _FL.CURRENT
+        if live is None:
+            self._json_err_raw(503, "the field engine is off on this seat"); return
+        body = self._json_body()
+        out = live.pack_op(str(body.get("action") or "list"), str(body.get("name") or ""), str(body.get("c1f") or ""))
+        self._json_out(out)
 
     def _entity_inherit(self) -> None:
         """POST /membrane/entity/inherit: the multi-parent ISA relation

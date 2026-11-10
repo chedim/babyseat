@@ -266,7 +266,8 @@ class TestTheRoute(unittest.TestCase):
 
 class TestTheDoctrine(unittest.TestCase):
     def test_it_says_the_name_is_per_seat(self):
-        doctrine = (ROOT / "doctrine.md").read_text()
+        from membrane.help_pack import packaged
+        doctrine = packaged("blurp")                       # #1043: the Blurp paragraph is a help topic now
         self.assertIn("Blurp", doctrine)
         self.assertIn("per seat", doctrine)
 

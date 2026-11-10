@@ -1,0 +1,1 @@
+CONSEQUENCES: what followed your decisions comes back to you -- 1 h, 24 h and 72 h after a decision that acted, a line of facts (the entity then and now, what else moved it, whether it was decided again) lands on the entity as `consequences` and in your diff as "+ settled:". Read it before deciding on that entity again.

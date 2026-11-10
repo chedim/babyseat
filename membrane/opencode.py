@@ -1362,6 +1362,12 @@ def main() -> None:
             _seed_recall_dials(srv.entity_store)
         except Exception as e:
             print(f"[seat] recall dials skipped ({e})", file=sys.stderr)
+        # THE HELP ENTITIES (#1043): the long-form docs as membrane::help:<topic>, read by help(topic)
+        try:
+            from .help_pack import install as _install_help
+            _install_help(srv.entity_store)
+        except Exception as e:
+            print(f"[seat] help entities skipped ({e})", file=sys.stderr)
         # THE WARM-UP (2026-10-10: the first turn after a restart paid 11.8 s
         # for the intent seeds -- a full scan + every seed embedded cold):
         # done in the background right after boot, nobody waits for it
