@@ -153,6 +153,7 @@ class Live:
         self.srv, self.est = srv, srv.entity_store
         self.f = MV.Fields(_Host(self))
         self.ctxs: dict = {}                       # banner eid -> its build's context while its getters run
+        self.cls_of: dict = {}                     # mirrored eid -> its class (a removal's event names it, #1054)
         self.store_path = _store_file(srv)
         if self.store_path:                        # the store driver: `sql(...)` in packs reads it, read-only
             try:
@@ -247,6 +248,7 @@ class Live:
         for eid, d in list((self.est.docs or {}).items()):
             if self.mirrored(d):
                 if not self.f.has(eid):
+                    self.cls_of[eid] = d.cls
                     self.f.load(eid, d.cls, _json(dict(d.properties or {})))
                 n += 1
         return n
@@ -266,9 +268,18 @@ class Live:
         if hub is None or not eid or str(w.get("path") or "").startswith("rel:"):
             return
         d = (self.est.docs or {}).get(eid)
-        if d is None or not self.mirrored(d) or is_pack(eid, d):
-            return
         prop = str(w.get("prop") or "")
+        if d is None:
+            # #1054: a removal (prop "", new None): the pages drop it too, when the engine held it
+            if not prop and w.get("new") is None and eid in self.cls_of:
+                cls = self.cls_of.get(eid) or ""
+                try:
+                    hub.publish({"type": "field.remove", "eid": eid, "cls": cls})
+                except Exception:                  # noqa: BLE001
+                    pass
+            return
+        if not self.mirrored(d) or is_pack(eid, d):
+            return
         ev = ({"type": "field.write", "eid": eid, "cls": d.cls, "prop": prop, "new": w.get("new")} if prop
               else {"type": "field.write", "eid": eid, "cls": d.cls, "props": dict(d.properties or {})})
         try:
@@ -286,8 +297,14 @@ class Live:
         if not eid or str(w.get("path") or "").startswith("rel:"):
             return
         d = (self.est.docs or {}).get(eid)
-        if d is None or (not self.mirrored(d) and not is_pack(eid, d)):
+        if d is None:
+            if not w.get("prop") and w.get("new") is None and eid in self.cls_of:
+                self.q.put((eid, "", None, time.time(), writer))       # #1054: removed -> it leaves the engine
             return
+        if not self.mirrored(d) and not is_pack(eid, d):
+            return
+        if not is_pack(eid, d):
+            self.cls_of[eid] = d.cls                 # its class outlives it (a removal's event names it)
         self.q.put((eid, str(w.get("prop") or ""), w.get("new"), time.time(), writer))
 
     def _one(self, eid: str, prop: str, new, now: float, writer: str = "py") -> None:
@@ -297,6 +314,10 @@ class Live:
             return
         d = (self.est.docs or {}).get(eid)
         if d is None:
+            if not prop and self.f.has(eid):         # #1054: removed from the store -> it leaves the engine
+                self.f.remove(eid, now)
+                self._apply()
+            self.cls_of.pop(eid, None)
             return
         if is_pack(eid, d):                          # a pack written: reload it, mirror any new class, rebuild
             if prop in ("", "c1f", "name") and self._pack_entity(eid, d):

@@ -55,6 +55,12 @@ class Host {
     this.flush();
   }
 
+  /** An entity the seat removed (#1054): it leaves the page's field; what read or referenced it recalculates. */
+  drop(eid) {
+    this.f.remove(eid, this.now());
+    this.flush();
+  }
+
   /** An outside write (a click, a value from the seat). */
   write(eid, prop, value) {
     this.f.write(eid, prop, JSON.stringify(value ?? null), this.now());
@@ -293,6 +299,7 @@ export async function connect(root, opts = {}) {
         const e = w && { ...w, ...(w.properties || {}) };     // the seat's /event puts an event's fields in `properties`
         if (!e) continue;
         if (e.type === 'field.pack') { if (e.name !== 'goalgraph') host.pack(e.name, e.c1f); status(`pack ${e.name} reloaded`); continue; }
+        if (e.type === 'field.remove') { host.drop(e.eid); continue; }   // #1054
         if (e.type !== 'field.write') continue;
         host.feed(e.eid, e.cls, e.props || { [e.prop]: e.new });
       }

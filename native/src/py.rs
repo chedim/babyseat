@@ -361,6 +361,14 @@ impl Fields {
         });
         Ok(())
     }
+    /// An entity left the store (#1054): it leaves the engine; what read or referenced it recalculates.
+    fn remove(&self, py: Python<'_>, eid: String, now: f64) {
+        let host = self.host(py);
+        self.with(py, move |g| {
+            let (core, f, seq) = g;
+            f.remove(core, &host, &eid, now, seq);
+        });
+    }
     /// A write: the Core hears it, the fields react (setters, getters, effects). Returns nothing; read back with `get`.
     #[pyo3(signature = (eid, prop, new_json, now, writer="py".to_string()))]
     fn write(&self, py: Python<'_>, eid: String, prop: String, new_json: &str, now: f64, writer: String) -> PyResult<()> {
