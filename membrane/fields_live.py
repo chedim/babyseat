@@ -43,9 +43,18 @@ PACK_NS = MEMBRANE_NS + "pack:"
 
 
 def is_pack(eid: str, d) -> bool:
-    """A Pack entity, or any `membrane::pack:<name>` holding `c1f` text (an agent's entity tool may save it under
-    another class)."""
-    return d.cls == PACK_CLASS or (str(eid).startswith(PACK_NS) and "c1f" in (d.properties or {}))
+    """A Pack entity, or any entity holding `c1f` text: an agent's entity tool may give it another class and id
+    (`Component:pack:inflight`)."""
+    return d.cls == PACK_CLASS or "c1f" in (d.properties or {})
+
+
+def pack_name(eid: str, d) -> str:
+    """Its `name`, else what follows the last `pack:` in its id, else the id."""
+    p = d.properties or {}
+    if p.get("name"):
+        return str(p["name"])
+    e = str(eid)
+    return e.rsplit("pack:", 1)[1] if "pack:" in e else e
 WRITER = "trigger:field:"
 LLM_EID = MEMBRANE_NS + "llm"
 
@@ -123,7 +132,7 @@ class Live:
 
     def _pack_entity(self, eid: str, d) -> bool:
         p = d.properties or {}
-        name = str(p.get("name") or (eid[len(PACK_NS):] if eid.startswith(PACK_NS) else eid))
+        name = pack_name(eid, d)
         return self._pack(name, str(p.get("c1f") or ""), eid)
 
     def _mirror(self) -> int:
@@ -259,6 +268,11 @@ class Live:
             if time.time() >= next_tick:
                 if not self.swept:                   # no VM sweeping: keep our own beat
                     self.tick()
+                with self.busy:                      # pack files reload on this timer too (sweeps stop while the thinker is paused)
+                    if self._scan_files():
+                        self._mirror()
+                        self.f.rebuild(time.time())
+                        self._apply()
                 next_tick = time.time() + GG.WAIT_TICK_S
 
 

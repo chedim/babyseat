@@ -253,3 +253,17 @@ def test_a_pack_is_known_by_its_id_whatever_class_a_tool_gave_it(seat):
     settle(seat)
     write(seat, L, "power", "on")
     assert p(seat, L, "lit") is True
+
+
+def test_any_entity_holding_c1f_is_a_pack_named_after_pack_colon(seat):
+    """Memo's entity tool names it `Component:pack:inflight` and forces class Component: still a pack, `inflight`."""
+    est = seat.entity_store
+    PE = "Component:pack:lamps"
+    est.upsert(QuantumEntity(eid=PE, cls="Component", properties={"c1f":
+        "PACK lamps 1\nLamp.power on-setter glow:\n  ALWAYS: this.lit = 'from Component'\n"}))
+    settle(seat)
+    L = MEMBRANE_NS + "lamp:desk"
+    est.upsert(QuantumEntity(eid=L, cls="Lamp", properties={"power": "off"}))
+    settle(seat)
+    write(seat, L, "power", "on")
+    assert p(seat, L, "lit") == "from Component"
