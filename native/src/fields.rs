@@ -172,9 +172,13 @@ impl Fields {
     }
 
     /// The getter: every Task/Wait's open_blockers, recomputed when a blocker's status moved.
-    fn recount(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
-        let mut targets: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == "Task" || e.cls == "Wait").map(|(k, _)| k.clone()).collect();
-        targets.sort();
+    /// The open-blockers getter, recalculated for what a blocker's status write can change: the tasks and waits it
+    /// blocks (its `blocks`). Each is counted from the whole field, so a missed write is still picked up.
+    fn recount(&mut self, core: &mut Core, work: &mut VecDeque<Write>, blocker: &str, seq: &mut i64, now: f64) {
+        let mut targets: Vec<String> = core.docs.get(blocker).and_then(|e| e.props.get("blocks")).and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+        targets.retain(|t| core.docs.get(t).map(|e| e.cls == "Task" || e.cls == "Wait").unwrap_or(false));
+        targets.sort(); targets.dedup();
         let mut blockers: Vec<String> = core.docs.iter().filter(|(_, e)| BLOCKER_CLASSES.contains(&e.cls.as_str())).map(|(k, _)| k.clone()).collect();
         blockers.sort();
         for t in targets {
@@ -195,7 +199,7 @@ impl Fields {
         let mut work: VecDeque<Write> = VecDeque::from([w]);
         while let Some(w) = work.pop_front() {
             if w.prop == "status" && core.docs.get(&w.eid).map(|e| BLOCKER_CLASSES.contains(&e.cls.as_str())).unwrap_or(false) {
-                self.recount(core, &mut work, seq, now);
+                self.recount(core, &mut work, &w.eid, seq, now);
             }
             if self.banner && w.prop != "banner" {   // any write can move a line (a card's status, a name): the getter reads the whole field
                 self.banner_on(core, &mut work, seq, now);

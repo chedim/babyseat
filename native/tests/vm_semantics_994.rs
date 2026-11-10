@@ -246,3 +246,22 @@ Task.level on-setter fine:
     assert_eq!(errs.len(), 2, "one receipt per broken setter: {:?}", w.fs.refusals);
     assert!(w.prop("t9", "refused").as_str().unwrap_or("").contains("error"), "recorded as a write on the entity");
 }
+
+// the replay of the live goal graph (2026-11-09): a status write recounted every task against every blocker
+// (~400 ms per write on 1,073 entities). It recounts only what the blocker blocks.
+#[test]
+fn a_status_write_recounts_only_what_the_blocker_blocks() {
+    let mut w = World::new(Fields::goalgraph());
+    classes(&mut w.c);
+    mk(&mut w.c, "g1", "Goal", json!({"status": "open"}));
+    for i in 0..1500 {
+        mk(&mut w.c, &format!("t{}", i), "Task", json!({"goal": "g1", "status": "open", "open_blockers": 1, "blocks": [format!("t{}", i + 1)]}));
+    }
+    let t = std::time::Instant::now();
+    w.write("t10", "status", json!("done"));
+    let took = t.elapsed();
+    assert_eq!(w.prop("t11", "open_blockers"), json!(0));
+    assert_eq!(w.prop("t11", "status"), json!("owed"));
+    assert_eq!(w.prop("t12", "open_blockers"), json!(1), "untouched");
+    assert!(took < std::time::Duration::from_millis(200), "one status write took {:?}", took);
+}
