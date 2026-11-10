@@ -144,7 +144,11 @@
     dock.id = "field-views";
     dock.hidden = true;
     document.body.appendChild(dock);
-    new MutationObserver(() => { dock.hidden = !dock.childElementCount; }).observe(dock, { childList: true });
+    // shown while something in it is shown: a closed view (the About window, hidden) leaves the dock hidden
+    // set only on a change: a write of the same value is still a mutation, and this observer sees the dock's own
+    // attributes -- writing it every time looped forever (80 GB in a Firefox tab, 2026-11-10)
+    const fit = () => { const h = ![...dock.children].some((c) => !c.hidden); if (dock.hidden !== h) dock.hidden = h; };
+    new MutationObserver(fit).observe(dock, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
     // link: the whole page's DOM is in the field too (DomNode:page:*), kept in step as the page changes
     window.MEMBRANE_FIELD = await m.connect(dock, { link: document.body, onStatus: (s) => { dock.dataset.status = s; } });
   }).catch((e) => console.warn("field VM:", e));

@@ -117,4 +117,9 @@ fn a_pending_read_is_an_empty_list_to_every_list_builtin() {
     assert_eq!(ev("distinct(x)", x.clone()), json!([]));
     assert_eq!(ev("fit(x, 10, 0)", x.clone()), json!([]));
     assert_eq!(ev("join(x, ',')", x.clone()), json!(""));
+fn replace_swaps_every_occurrence() {
+    // the About view (operator 2026-11-10): a changelog line's **bold** markers come off before it is shown
+    assert_eq!(ev("replace('- **Code** is a **tree**', '**', '')", json!({})), json!("- Code is a tree"));
+    assert_eq!(ev("replace('a-b-c', '-', ' ')", json!({})), json!("a b c"));
+    assert_eq!(ev("replace('abc', '', 'x')", json!({})), json!("abc"));       // an empty pattern changes nothing
 }

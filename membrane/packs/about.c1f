@@ -1,0 +1,62 @@
+PACK about 1
+IMPORT dom 1
+-- The About window (the operator, 2026-11-10): the seat's version, its git short sha and what changed, as a view in
+-- the page's field engine. The seat feeds one About:seat {version, sha, changelog} (membrane/about.py); this pack
+-- draws an ⓘ button in the top bar (DomNode:page:#topbar) with its window right under it, and opens / closes it.
+
+-- the current release's entry as fields to read (the setters below compute it themselves: an on-setter sees the
+-- getters as they were before the write in the same round)
+About.notes getter: before(after(this.changelog or '', '## '), '\n## ')
+About.release getter: before(this.notes, '\n')
+About.body getter: distinct([strip(l) for l in lines(after(this.notes, '\n')) if strip(l)])
+About.label getter: 'babyseat ' + str(this.version or '?') + (' · ' + this.sha if this.sha else '')
+
+About.version on-setter draw:
+  ALWAYS:
+    ('DomNode:about:anchor').parent = 'DomNode:page:#topbar'
+    ('DomNode:about:anchor').tag = 'span'
+    ('DomNode:about:anchor').class = 'aboutwrap'
+    ('DomNode:about:btn').parent = 'DomNode:about:anchor'
+    ('DomNode:about:btn').tag = 'button'
+    ('DomNode:about:btn').text = 'ⓘ'
+    ('DomNode:about:btn').title = 'About: the version and what changed'
+    ('DomNode:about:btn').class = 'aboutbtn'
+    ('DomNode:about:win').parent = 'DomNode:about:anchor'
+    ('DomNode:about:win').tag = 'section'
+    ('DomNode:about:win').class = 'about glass'
+    ('DomNode:about:win').role = 'dialog'
+    ('DomNode:about:win').hidden = True
+    ('DomNode:about:head').parent = 'DomNode:about:win'
+    ('DomNode:about:head').tag = 'header'
+    ('DomNode:about:name').parent = 'DomNode:about:head'
+    ('DomNode:about:name').tag = 'strong'
+    ('DomNode:about:name').text = this.label
+    ('DomNode:about:x').parent = 'DomNode:about:head'
+    ('DomNode:about:x').tag = 'button'
+    ('DomNode:about:x').text = '×'
+    ('DomNode:about:x').title = 'Close'
+    ('DomNode:about:release').parent = 'DomNode:about:win'
+    ('DomNode:about:release').tag = 'h3'
+    ('DomNode:about:list').parent = 'DomNode:about:win'
+    ('DomNode:about:list').tag = 'ul'
+    ('DomNode:about:full').parent = 'DomNode:about:win'
+    ('DomNode:about:full').tag = 'a'
+    ('DomNode:about:full').text = 'the whole changelog'
+    ('DomNode:about:full').href = this.changelog_url or 'https://github.com/chedim/babyseat/blob/main/CHANGELOG.md'
+
+About.sha on-setter name:
+  ALWAYS: ('DomNode:about:name').text = 'babyseat ' + str(this.version or '?') + (' · ' + this.sha if this.sha else '')
+
+About.changelog on-setter notes:
+  ALWAYS:
+    ('DomNode:about:release').text = before(before(after(this.changelog or '', '## '), '\n## '), '\n')
+    -- a line as shown: a `### ` heading, a `- ` list item, else a paragraph; **bold** markers come off
+    FOR l IN distinct([strip(x) for x in lines(after(before(after(this.changelog or '', '## '), '\n## '), '\n')) if strip(x)]):
+      ('DomNode:about:l:' + l).parent = 'DomNode:about:list'
+      ('DomNode:about:l:' + l).tag = 'h4' if startswith(l, '### ') else ('li' if startswith(l, '- ') else 'p')
+      ('DomNode:about:l:' + l).text = replace(after(l, '### ') if startswith(l, '### ') else (after(l, '- ') if startswith(l, '- ') else l), '**', '')
+
+-- the ⓘ opens and closes it; the × closes it
+DomNode.clicked on-setter about-open:
+  WHEN this.eid == 'DomNode:about:btn': ('DomNode:about:win').hidden = not prop('DomNode:about:win', 'hidden')
+  ELSE WHEN this.eid == 'DomNode:about:x': ('DomNode:about:win').hidden = True

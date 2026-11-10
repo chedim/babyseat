@@ -42,21 +42,20 @@ FAMILIES: dict[str, dict] = {
     },
     "entity": {
         "description": "Your entities (your model of the world): read (its live value; "
-                       "run=true fires its getter), add, edit, remove, inherit (ISA parents). "
-                       "Scripts: help('scripts').",
-        "actions": {"read": "entity_read", "add": "entity_add", "edit": "entity_edit",
+                       "run=true recomputes it), write (prop=value: how to act), add, edit, remove, inherit.",
+        "actions": {"read": "entity_read", "write": "entity_write", "add": "entity_add", "edit": "entity_edit",
                     "remove": "entity_remove", "inherit": "entity_inherit"},
         "params": {"spec": _S("the entity (eid or name)"), "name": _S("add: its name"),
                    "class": _S("add/edit: its class"), "summary": _S("what it is"),
                    "links": {"type": "array", "items": {"type": "string"}, "description": "related entities"},
-                   "run": _B("read: fire the getter now"),
+                   "run": _B("read: recompute now"),
                    "force": _B("remove: even a live method"),
                    "parents": {"type": "array", "items": {"type": "string"}, "description": "inherit: ISA parents"},
-                   "scripts": {"type": "object", "description": "kind -> python: " + ", ".join(SCRIPT_KINDS)},
                    "properties": {"type": "object", "description": "edit: properties to set"},
-                   "watch_ops": {"type": "array", "items": {"type": "object"}, "description": "edit: geometric watches (help('watches'))"},
-                   "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: own-motion watches"},
-                   "merged_into": _S("edit: merge into this entity")},
+                   "watch_ops": {"type": "array", "items": {"type": "object"}, "description": "edit: help('watches')"},
+                   "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: motion watches"},
+                   "merged_into": _S("edit: merge into"),
+                   "prop": _S("write: property"), "value": {"description": "write: value"}},
         "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name") or a.get("object") or a.get("key"), "run": a.get("run")}, "spec", "run"),
                 # an add keeps what it was given (2026-10-11 sweep: properties and
                 # watches were stripped here -- the add 'succeeded' with nothing set)
@@ -70,16 +69,17 @@ FAMILIES: dict[str, dict] = {
                                    **({"properties": {**(a.get("properties") or {}),
                                                       **({"parents": a["parents"]} if "parents" in a else {})}}
                                       if (a.get("properties") or "parents" in a) else {})},
+                "write": lambda a: {"spec": a.get("spec") or a.get("name"), "prop": a.get("prop"), "value": a.get("value")},
                 "remove": lambda a: _pick(a, "spec", "force"),
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {
-        "description": "run: code becomes a field tree, its executor runs it (node= "
-                       "re-runs). Methods: define, call, each (over a class), inspect. "
-                       "help('cliffhanger').",
-        "actions": {"run": "code_run", "call": "method_call", "each": "method_each",
-                    "define": "method_define", "inspect": "method_inspect"},
+        "description": "load/show/packs: .c1f packs (help('packs')). run: code as a field tree. "
+                       "define/call/each/inspect: methods.",
+        "actions": {"load": "pack", "show": "pack", "packs": "pack", "run": "code_run", "call": "method_call",
+                    "each": "method_each", "define": "method_define", "inspect": "method_inspect"},
         "params": {"args": {"type": "object", "description": "{{param}} values"},
+                   "name": _S("pack"), "c1f": _S("load: text"),
                    "code": _S("run: code"), "lang": _S("run: sh|js"), "node": _S("run: root"),
                    "object": _S("call: target"), "on": _S("define: owner; run: executor"),
                    "over": _S("each: class|pattern"), "max": _I("each: cap (20)"),
@@ -89,6 +89,9 @@ FAMILIES: dict[str, dict] = {
                    "abstract": _B("define: f(a,b), no command"),
                    "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"}},
         "map": {"run": lambda a: _pick(a, "code", "lang", "node", "on"),
+                "load": lambda a: {"action": "load", "name": a.get("name"), "c1f": a.get("c1f")},
+                "show": lambda a: {"action": "show", "name": a.get("name")},
+                "packs": lambda a: {"action": "list"},
                 "call": lambda a: _pick(a, "object", "method", "args"),
                 "inspect": lambda a: _pick(a, "object", "method", "args"),
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
@@ -154,159 +157,19 @@ FAMILIES: dict[str, dict] = {
     },
 }
 
-HELP = {
-    "scripts": (
-        "Entity scripts are python, set with entity(action='edit', scripts={kind: code}). Kinds: "
-        "getter (runs on a read; set a TOP-LEVEL result = {'state': {...live values...}}, also "
-        "'render' for the banner and 'patch' = {script_data, position} only (other keys are refused, "
-        "noted as patch_refused) -- a function's return or stdout is "
-        "not read; run=true forces a read, else a 5s LRU paces it; 10s budget), tick (periodic), "
-        "nudge, mention (on each mention), thought (when the thinker concludes about it), dreamed "
-        "(when a dream names it), delete, watch (on external events). "
-        "Inside a script, `membrane` reads: membrane.entities.get(spec, run=False) (a read FIRES the "
-        "target's getter -- a tick that reads an entity keeps it live; run=True runs it now), "
-        "membrane.timeline.walk(n), membrane.field.recall/vitals, membrane.me, membrane.intents.open, "
-        "membrane.speak(text), membrane.call_llm(prompt), membrane.wake(at, prompt). "
-        "Rewriting a script clears its cooldowns. A real cooldown says 'retry in Ns'. "
-        "Budgets: the getter 10s; the trigger scripts are narrow (tick 0.25s, mention/thought/dreamed "
-        "0.25s/1s/2s). The rest of `result`: run=true (the engine runs the entity's own command), "
-        "delete (a delete_script only: retires the entity, tombstoned and announced), intent (a goal "
-        "text your script plants when it sees the shape of ongoing work: the engine creates or pins a "
-        "shared Goal and pins the seat's active set -- the dream loop's steering; plant sparingly), "
-        "chat / voice (a message to a person, to: '<person>', default whoever chatted last: posted "
-        "into their latest chat or spoken on their voice:out; at most once per 30s per entity, never "
-        "the same line twice). A nudge's render replaces the track's default banner line. "
-        "Publishing: your entity store is LOCAL (authoritative, never auto-synced); publish=True "
-        "exports the entity under pub:<origin>:<eid> with a version line (republishing bumps it); "
-        "seats that imported it take each newer STATE within a minute (a seat that edited its copy "
-        "keeps its edit), never your code; unpublish=True retracts your export (imports freeze at "
-        "their last version). membrane::presence is published for you once a minute. "
-        "tick: the THINKER's ~1s heartbeat, paced by the entity's tick_every (default 1 = every beat), "
-        "cooldown-free; the seat's own clock, tool:clock, is seeded with one. watch: the autonode's "
-        "watcher body, fired by the entity's `watch` ({kind: 'file'|'signal', glob/name} -- the cheap "
-        "pre-filter, file by default; the script does the real filtering); it may block, but only 4 run "
-        "at once and a >10s fire strikes (the thread can't be killed); the payload rides "
-        "state.extra.payload (path/event/topic/name); the seeded tool:filetree is the template. "
-        "3 failures disable a script (backoff 60s..1h); an empty string clears it."),
-    "exec": (
-        "RUN CODE: exec(action='run', code='ls -la ..') -- the code becomes a tree of entities in "
-        "the field (one per node, shared wherever the same code appears) and its root is linked "
-        "to its language's executor (sh: tool:executor; js, lang='js': presence, an opted-in "
-        "browser tab): -execute-> owed, -executing-> running, "
-        "-result-> a result entity for that run; you get rc + output, the root and the result. "
-        "Re-run: exec(action='run', node=<root>). entity(action='read') on a root shows its code, "
-        "state and runs. PROGRAM THE FIELD FIRST: what you will do again is a method -- define it "
-        "on the entity it belongs to (or its class), then call it: exec(action='define', "
-        "on='ha light', method='turn_on', command='curl ... {{self.entity_id}} {{level}}'), then "
-        "exec(action='call', object='ha:light.port_strip', method='turn_on', args={'level': 40}) -- "
-        "it returns rc + output (dash shell on this seat: use '.' not 'source'); or write a "
-        "property whose write is the effect (help('cliffhanger')). A run's SHAPE (its tree with "
-        "the paths, numbers, strings and expansions as holes) runs at most 3 times as a one-shot; "
-        "the 4th is refused with the earlier roots: define it as a method then. A call straight at the "
-        "executor (tool:executor, remote_executor, an implementation's exec) is refused. "
-        "COMPOSITION: steps=[...] on a define, or entity(action='inherit', spec=<method>, "
-        "parents=[...]) -- the parents run first and feed {{parent.head}} / {{parent.tail}}; a "
-        "failed step halts. entity(action='read') on a method shows its last run (rc/head/tail). "
-        "Your methods ride your context ('your methods: ...')."),
-    "goals": (
-        "goal(action='plant') makes a commitment; the watch loops take it up. A loop ends each pass "
-        "with one line: DONE <receipt> / STEP <what moved> / BLOCKED <on whom, or 'on <entity>', or "
-        "'retry after 2h'> / ignored: <reason>. Close with goal(action='close', spec=<id>, "
-        "evidence=<receipt>) -- no receipt, no close. An EMPTY board leaves membrane's dream loop and "
-        "think-ahead unsteered (nothing guides the idle mind's branches): when your work has a "
-        "direction worth keeping across sessions, plant it; plant only when it serves the work. "
-        "WORK GIVEN IN THE CHAT (an issue to build, a fix, a multi-step task): plant it as a goal "
-        "carrying the issue link and what done means, instead of doing it in your own turn, and "
-        "answer with the goal's id: the planner splits it, its decision cards go to the person, "
-        "and the workers run its tasks. Questions, reviews and lookups you can answer in a few "
-        "calls stay in your turn."),
-    "state": (
-        "state() is membrane's vitals plus the seat's whole WHERE WE ARE. state(section=...) pulls "
-        "one part: tracks (the watched entities' stories), commands (your methods, most called first),"
-        "interfaces, classes (class proposals), loops (the thinking loops), timelines (open "
-        "branches), frame (the watch frame), digest (watch events past your alert budget), "
-        "changes (what moved since your last message). Other seats: peer(action='seats' / "
-        "'unread')."),
-    "watches": (
-        "Three ways to watch, one budget of 12: track (header lines, entity_watch boundaries), "
-        "field_watch (spatial: new memories near a topic), and an entity's watch_ops "
-        "({op: near|away|around, rel: <entity>|self, z|y: distance}) / watch_fields "
-        "({verb: pos|vel|align, arg}). At the limit membrane refuses with the inventory: drop what "
-        "you no longer need. watch_ops: away {rel, y} (moved from rel by more than y), near {rel, z} "
-        "(closed to within z), around {rel: '*', z} (anything within z; bursts group into one event); "
-        "cap 8, '[]' clears; each change fires a watch-attached/detached event to the pool. "
-        "watch_fields: pos (moved > arg), align (coherence fell below arg), vel (velocity rose above "
-        "arg); each fires on the crossing and re-arms on return; cap 3 per entity, '[]' clears. "
-        "WHERE AN EVENT GOES (#729): set escalate_when on the watched entity in the same call you plant "
-        "the watch (entity_edit properties={escalate_when: 'the suite fails, or anything needs the "
-        "operator'}). Its events then go to a read-only triage pass on the seat's local model, which "
-        "answers ignored: <reason> (dropped) or ESCALATE <line> (one message into the latest chat, "
-        "where your turn does the work). An entity with no escalate_when sends every event straight "
-        "to the chat."),
-    "voice": (
-        "Membrane's own voice learns from your 'It meant:' lessons (x2) and Dmitrii's rewrites. A "
-        "mistake that is GENERAL belongs in a VOICE RULE, which fixes every future sentence: "
-        "entity(action='add', name='voice rule: <what>', summary=...), then "
-        "entity(action='edit', spec=<it>, properties={'voice_rule': \"result = {'ok': <a python test "
-        "on state['text']>}\"}) -- e.g. {'ok': not state['text'].rstrip().endswith((',', ':'))}. "
-        "Put the rule on a CLASS (an entity others inherit from) and it applies only to sentences "
-        "about that class's members. A sentence that breaks a rule is never said. Precedence: a "
-        "member's own rule, then its classes nearest-first, then global rules; the first veto wins; "
-        "every veto is logged with its sentence."),
-    "cliffhanger": (
-        "Cliffhanger is membrane as an OOP language: entities are objects, ISA parents are classes, "
-        "METHODS are commands attached to a class or object, a CALL is an event on an object. "
-        "Define once: exec(action='define', on='ha light', method='turn_on', command='. "
-        "~/.config/membrane/hass.env; curl -s -X POST -H \"Authorization: Bearer $HASS_TOKEN\" -d "
-        "\"{\\\"entity_id\\\": \\\"{{self.entity_id}}\\\"}\" $HASS_URL/api/services/light/turn_on'). Call it on any "
-        "member: exec(action='call', object='ha:light.port_strip', method='turn_on'). {{self.<prop>}} "
-        "fills from the object (its own values over its classes'); other {{params}} come from args -- "
-        "ONLY {{name}} binds ({name}, $name, $1 do not): an arg the command never names is refused, a "
-        "positional list args=[a, b] binds to the {{params}} in order, and args.timeout (seconds) only "
-        "ever shortens the run. INSPECT (runs nothing): exec(action='inspect', object=..., "
-        "method=..., args=...) shows where the call resolves (via, the resolution order, who defines "
-        "it along it), the stored command, params and steps, and with args the exact command it "
-        "WOULD run or the refusal it WOULD give -- look before you redefine a broken method. "
-        "Dispatch: the object's own method, then its classes (ISA order), then global methods -- "
-        "the same name on another class is its own implementation. The receipt lands on the "
-        "object. Compose methods with parents (help('exec')). A missing or empty value BLOCKS the "
-        "call (nothing runs); outcomes: ok | blocked | error | timeout | partial. The receipt shows "
-        "which implementation answered (via), the resolution order and the exact command that ran. "
-        "Mark reads read_only=true. GUARDS: define(..., guard=\"result = {'ok': state['self'].get('reachable') "
-        "== 'yes'}\") runs first; false = blocked, nothing runs. COMPOSITES: define(..., steps=[{'name': "
-        "'soc', 'call': 'read', 'object': 'seat:battery'}, {'name': 'lights', 'call': 'turn_off', 'object': "
-        "'self'}]) -- steps run in order, stop on failure (partial if earlier ones ran), nest at most 3 "
-        "deep; {{steps.soc.state.soc}} reads a step's captured result (JSON output becomes .state), "
-        "{{entities.<spec>.<field>}} reads an entity now. Every node is an entity you can read. "
-        "FAN-OUT: exec(action='each', over='ha light', method='status', dry_run=true) lists who would "
-        "be hit; without dry_run it runs on every member (cap max=20, raise it explicitly; ceiling 150), "
-        "on_fail='abort' (default) | 'continue', one summary receipt; as a step: {'name': 'all', "
-        "'each': 'ha light', 'call': 'turn_off'}. INTERFACES: exec(action='define', on='remote_executor', "
-        "method='exec(code, timeout)', abstract=true) declares a required method (no command) and makes "
-        "its owner an interface; an entity that inherits it must implement each one (own or a class "
-        "between) -- until then the call is blocked with what is missing, and inherit says what it owes. "
-        "remote_executor (exec(code, timeout)) is the first: an environment that runs code; give each "
-        "implementation lang / env / trust properties."),
-    "classes": (
-        "Inheritance: an entity without its own getter/mention/thought/dreamed script runs its "
-        "nearest class's, ON ITSELF (state['eid'], its own properties merged over its classes' "
-        "defaults -- the member's own values win). Resolution: parents in declared order, all "
-        "parents before any grandparent; first found wins. Ticks inherit only where the class sets "
-        "tick_inherits: true, staggered across members. inherit_disabled: true on a class stops it "
-        "for all members at once. Classify a family in one call: entity(action='inherit', "
-        "spec='ha:light.*', parents=['ha light']). New members are never adopted automatically."),
-    "lanes": (
-        "Your chat holds every hand. Watch loops hold the same but never plant goals. A phone call "
-        "reads and answers (no exec or entity writes; plant a caller's request as a goal). Plan "
-        "mode only reads."),
-}
+def _help_topics(est=None) -> list[str]:
+    from . import help_pack
+    return help_pack.listing(est)
 
 
-def help_text(topic: str) -> str:
+def help_text(topic: str, est=None) -> str:
+    """#1043: the topic's help entity (membrane::help:<topic>, this seat's edits included), else its packaged text."""
+    from . import help_pack
     t = (topic or "").strip().lower()
-    if t in HELP:
-        return HELP[t]
-    return "help topics: " + ", ".join(sorted(HELP)) + " -- e.g. help(topic='scripts')"
+    txt = help_pack.read(t, est) if t else None
+    if txt:
+        return txt
+    return "help topics: " + ", ".join(_help_topics(est)) + " -- e.g. help(topic='packs')"
 
 
 def _family_def(name: str, fam: dict, actions: list[str]) -> dict:
@@ -327,7 +190,7 @@ def advertised(lane_tools) -> list[dict]:
         acts = [a for a, leg in fam["actions"].items() if leg in allowed and leg not in RETIRED]
         if acts:
             out.append(_family_def(name, fam, acts))
-    out.append({"name": "help", "description": "The long-form docs: " + ", ".join(sorted(HELP)) + ".",
+    out.append({"name": "help", "description": "The long-form docs (packs, exec, goals, watches, ...); help() lists every topic.",
                 "inputSchema": {"type": "object", "properties": {"topic": _S("which topic")}}})
     return out
 

@@ -218,6 +218,14 @@ refresh never scans the whole history. The background comes from
 day. The last hour is therefore up to 10 minutes longer for background calls, and
 background calls made before this version are not in today's numbers.
 
+## The About window (ⓘ)
+
+The ⓘ in the top bar opens what this seat runs: its version, the git short sha when it runs from a checkout (an
+installed package has none), and the current release's notes from the changelog, with a link to the whole changelog.
+It is a cliffhanger app: `membrane/packs/about.c1f` draws it in the page's own field engine (a view pack: it imports
+`dom`), and the seat only feeds it one entity, `About:seat` {version, sha, changelog}, written at boot
+(`membrane/about.py`). The changelog ships inside the package (`membrane/CHANGELOG.md`; the repo root links to it).
+
 ## The pause (⏸ / ▶)
 
 The ⏸ beside 💬 in membrane home's top bar is the seat's pause (#348). Like a

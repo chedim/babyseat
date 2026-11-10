@@ -46,7 +46,7 @@ HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding",
 _RAG_SYSTEM = None      # loaded at import-end (see _load_doctrine())
 
 def _load_doctrine() -> str:
-    """THE DOCTRINE'S SINGLE SOURCE OF TRUTH: the repo's doctrine.md,
+    """THE DOCTRINE'S SINGLE SOURCE OF TRUTH: membrane/doctrine.md (the repo root's doctrine.md links to it),
     read at import — no more duplicated doctrine text inside code (the
     stale-exec-line exhibit: the code's copy outlived the repo's
     corrections and the model obeyed demolished tools)."""
@@ -57,8 +57,8 @@ def _load_doctrine() -> str:
     except Exception:
         return _LEGACY_DOCTRINE_FALLBACK
 
-_REPO_DOCTRINE = str(pathlib.Path(__file__).resolve().parent.parent
-                     / "doctrine.md")
+_REPO_DOCTRINE = str(pathlib.Path(__file__).resolve().parent
+                     / "doctrine.md")       # in the package, so every install carries it (#1043)
 _LEGACY_DOCTRINE_FALLBACK = ""
 _RAG_SYSTEM = _load_doctrine()
 

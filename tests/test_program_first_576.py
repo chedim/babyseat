@@ -61,7 +61,8 @@ class TestTheSurfaceIsGone(unittest.TestCase):
 
     def test_no_text_the_model_reads_offers_link(self):
         from membrane import claude_agent as CA
-        texts = [CA.TOOLS_NOTE, json.dumps(M.TOOLS), json.dumps(T.HELP),
+        from membrane import help_pack as HP
+        texts = [CA.TOOLS_NOTE, json.dumps(M.TOOLS), json.dumps({t: HP.packaged(t) for t in HP.topics()}),
                  json.dumps({f: d["description"] for f, d in T.FAMILIES.items()}),
                  Path(__file__).resolve().parent.parent.joinpath("doctrine.md").read_text()]
         for t in texts:

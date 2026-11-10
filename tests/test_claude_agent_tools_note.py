@@ -55,9 +55,10 @@ def test_the_note_says_how_to_work():
 
 def test_the_note_teaches_programming_the_field():
     note = CA.TOOLS_NOTE
+    assert "getter_script" not in note and "tick_script" not in note     # #1043: packs, never Python scripts
     for phrase in ("programming the field", "method_define", "method_call",
                    "method_each", "method_inspect", "entity_query",
-                   "getter_script", "tick_script", "tick_every", "doctrine",
+                   ".c1f getter", "membrane::help:packs", "doctrine",
                    "worktree", "no one-shot", "program the field first", "code_run"):
         assert phrase in note, phrase
     # reuse comes BEFORE defining something new

@@ -99,7 +99,8 @@ class TestResolve(unittest.TestCase):
 
 class TestHelp(unittest.TestCase):
     def test_help_carries_the_long_form(self):
-        self.assertIn("result = {'state'", T.help_text("scripts"))
+        self.assertIn("help('packs')", T.help_text("scripts"))        # #1043: behaviour is a pack
+        self.assertIn("getter", T.help_text("packs"))
         self.assertIn("parents", T.help_text("exec"))
         self.assertIn("topics", T.help_text(""))
         self.assertIn("help", {d["name"] for d in T.advertised(S.OPERATOR_TOOLS)})
