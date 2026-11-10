@@ -97,3 +97,13 @@ def test_a_long_value_is_reported_truncated():
     assert res["ok"]
     assert len(est.docs[e.eid].properties["notes"]) == 2000
     assert res["properties_truncated"] == ["notes"]
+
+
+def test_a_pack_is_never_cut():
+    # a .c1f pack is a whole program (Memo's uifeedback pack was 2146 chars and lost its last rule at the cap)
+    est, e = _est_with()
+    src = "PACK big 1\n" + "".join(f"Task.f{i} getter: this.status == 'x{i}'\n" for i in range(120))
+    assert len(src) > 4000
+    res = est.edit(e.eid, properties={"c1f": src})
+    assert res["ok"] and "properties_truncated" not in res
+    assert est.docs[e.eid].properties["c1f"] == src

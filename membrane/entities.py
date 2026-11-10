@@ -2846,9 +2846,12 @@ class EntityStore(MultiParentOps, TimelineOps):
                     props_set.append("parents")
                     continue
                 props2 = ent.properties or {}
-                if isinstance(v, str) and len(v) > 2000:
+                if kk == "c1f":                     # a pack is a whole program: never cut (a pack file has no cap)
+                    pass
+                elif isinstance(v, str) and len(v) > 2000:
                     props_truncated.append(kk)      # said, never silent (#158)
-                props2[kk] = (v if not isinstance(v, str) else v[:2000])
+                    v = v[:2000]
+                props2[kk] = v
                 if kk == "status" and v == "dropped" and _was_open:    # #758
                     from .decision_map import stamp_agent_drop
                     stamp_agent_drop(props2)

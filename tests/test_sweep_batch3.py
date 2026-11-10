@@ -81,6 +81,20 @@ class TestScriptRefusalsAreVisible(unittest.TestCase):
         self.assertTrue(any("delete" in k for k in pr["keys"]))
         self.assertEqual(e.properties["script_data"]["v"], 1)
 
+    def test_a_refused_tick_patch_raises_an_error_bubble(self):
+        # Memo's pack-sync tick ran every 5 s, its c1f patch was refused, and nothing said so where one looks:
+        # the refusal is an error like any script's (a bubble near the entity), naming what a tick may patch
+        est = _est()
+        e = QuantumEntity(eid=MEMBRANE_NS + "Component:pack:t", cls="Component", properties={"name": "t"})
+        est.docs[e.eid] = e
+        srv = type("S", (), {"entity_store": est, "efield": None, "membrane": None})()
+        N.apply_entity_update(srv, e, {"patch": {"c1f": "PACK t 1"}}, "tick", silent=True)
+        bubbles = [d for d in est.docs.values() if d.eid.startswith(MEMBRANE_NS + "error:")
+                   and d.properties.get("errored") == e.eid]
+        self.assertEqual(len(bubbles), 1)
+        self.assertIn("c1f", bubbles[0].properties["error"])
+        self.assertIn("script_data", bubbles[0].properties["error"])
+
     def test_a_clean_run_clears_the_refusal_and_a_new_one_sets_it_again(self):
         est = _est()
         e = QuantumEntity(eid=MEMBRANE_NS + "Component:t2", cls="Component", properties={"name": "t2"})
