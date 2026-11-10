@@ -287,3 +287,17 @@ def test_the_page_gets_a_snapshot_and_a_field_write_per_change(seat):
     settle(seat)
     born = [e for e in events if e.get("eid") == C and "props" in e]
     assert born and born[0]["props"]["status"] == "open", "a birth carries its fields"
+
+
+def test_view_packs_waiting_for_dom_reach_the_page_and_stream_their_edits(seat):
+    """A view pack imports `dom`, which only pages have: on the seat it waits, but the page's snapshot carries its
+    text, and an edit streams to open pages as `field.pack`."""
+    events = []
+    seat._loop_runner = types.SimpleNamespace(hub=types.SimpleNamespace(publish=events.append))
+    VIEW = "PACK view 1\nIMPORT goalgraph 1\nIMPORT dom 1\nTask.status on-setter row:\n  ALWAYS: ('DomNode:view:' + this.eid).text = this.status\n"
+    P = FL.PACK_NS + "view"
+    seat.entity_store.upsert(QuantumEntity(eid=P, cls=FL.PACK_CLASS, properties={"name": "view", "c1f": VIEW}))
+    settle(seat)
+    assert "imports dom 1, which isn't loaded" in p(seat, P, "error")       # waits on the seat
+    assert FL.CURRENT.snapshot()["packs"]["view"] == VIEW                     # but the page gets it
+    assert {"type": "field.pack", "name": "view", "c1f": VIEW} in events

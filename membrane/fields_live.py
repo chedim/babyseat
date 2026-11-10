@@ -115,10 +115,18 @@ class Live:
     def _pack(self, name: str, text: str, eid) -> bool:
         """Load or replace a pack. A broken one is refused (the last good one stays) and the error is written on
         its entity (`error`), or printed for a file pack."""
+        # every pack's text goes to pages, active or waiting: a view pack waits here for `dom`, which pages have
+        if self.pack_texts.get(name) != text:
+            self.pack_texts[name] = text
+            hub = getattr(getattr(self.srv, "_loop_runner", None), "hub", None)
+            if hub is not None:
+                try:
+                    hub.publish({"type": "field.pack", "name": name, "c1f": text})
+                except Exception:                  # noqa: BLE001
+                    pass
         try:
             self.f.set_pack(name, text)
             err = ""
-            self.pack_texts[name] = text
         except Exception as e:                    # noqa: BLE001
             err = str(e)
             print(f"[fields] {err}"[:300], file=sys.stderr)

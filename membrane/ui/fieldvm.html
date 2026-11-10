@@ -54,7 +54,9 @@ const note = document.getElementById('errors');
 let host;
 if (new URLSearchParams(location.search).has('live')) {
   // ?live: follow the seat's own goal graph (snapshot + /event), drawn by the same view pack
-  host = await connect(view, { packs: { demo: DEMO }, onStatus: s => { document.querySelector('p.note').textContent = 'Live: ' + s; } });
+  // the seat's own view packs draw it (packs importing dom: on the seat they wait for the page); &demo adds the demo list
+  const extra = new URLSearchParams(location.search).has('demo') ? { demo: DEMO } : {};
+  host = await connect(view, { packs: extra, onStatus: s => { document.querySelector('p.note').textContent = 'Live: ' + s; } });
 } else {
   host = await start(view, { packs: { demo: DEMO } });
   host.feed('g1', 'Goal', { name: 'ship the browser VM', status: 'open' });
