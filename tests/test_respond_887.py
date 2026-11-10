@@ -75,6 +75,16 @@ class _Runner:
 
 @unittest.skipUnless(HAVE, "spaCy and en_core_web_sm not installed (pip install babyseat[nlp])")
 class BeforeTheTurn(unittest.TestCase):
+    def setUp(self):                    # the operator, 2026-11-10: 🧩 answers are off by default; these test them on
+        self._answer_env = os.environ.get("MEMBRANE_ANSWER")
+        os.environ["MEMBRANE_ANSWER"] = "1"
+
+    def tearDown(self):
+        if self._answer_env is None:
+            os.environ.pop("MEMBRANE_ANSWER", None)
+        else:
+            os.environ["MEMBRANE_ANSWER"] = self._answer_env
+
     def _ctx(self, srv, said, reply="frobnicate: none"):
         from membrane import lanes as L
         srv._loop_runner = _Runner()

@@ -823,9 +823,10 @@ def teach_hint_on() -> bool:
 
 
 def answer_on() -> bool:
-    """Membrane's own 🧩 answers: on by default; MEMBRANE_ANSWER=0 turns them off."""
+    """Membrane's own 🧩 answers (it answers a read-only message itself, before the model): OFF by default for users
+    (the operator, 2026-11-10); MEMBRANE_ANSWER=1 turns them on."""
     import os
-    return os.environ.get("MEMBRANE_ANSWER", "1").strip().lower() not in ("0", "off", "false", "no")
+    return os.environ.get("MEMBRANE_ANSWER", "0").strip().lower() in ("1", "on", "true", "yes")
 
 
 def respond(srv, sid: str, text: str) -> str:

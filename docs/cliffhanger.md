@@ -145,8 +145,8 @@ program's result, and what it still doesn't know. A run of words that is a thing
 marked **🧩 membrane (no model):** whenever it has anything; the model still answers and is told
 what membrane said (that a program ran only when one did). The gap call is waited for at most
 `GAP_WAIT_S` (30 s): after that the turn goes on and a late answer is still kept, and a word
-already being asked is never asked again at the same time. `MEMBRANE_ANSWER=0` turns every 🧩
-post off, stage 3's too.
+already being asked is never asked again at the same time. **🧩 posts are off by default since
+0.7.5** (the operator: off for users); `MEMBRANE_ANSWER=1` turns them on, stage 3's too.
 
 **Novelty: a new meaning needs two signals** (#891, the operator 2026-11-03 after Memo's
 reviews). What's true of the things a word is said of is not what the word means: people talk
