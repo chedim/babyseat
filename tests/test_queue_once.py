@@ -63,7 +63,7 @@ class TestQueuedTurnsRunOnce(unittest.TestCase):
         sid = r.sessions.create(title="chat")["id"]
         self._go(r, sid, ["A", "B", "C"])
         time.sleep(1.2)                         # any re-armed replay would land here
-        self.assertEqual(calls, ["A", "B", "C"])
+        self.assertEqual(calls, ["A", "B\n\nC"])  # B, C waited together: one joint turn (#970)
         self.assertEqual(r._queued_depth(sid), 0)
 
     def test_the_waiting_caller_gets_its_own_result(self):
