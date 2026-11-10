@@ -42,9 +42,9 @@ FAMILIES: dict[str, dict] = {
     },
     "entity": {
         "description": "Your entities (your model of the world): read (its live value; "
-                       "run=true recomputes it), add, edit, remove, inherit (ISA parents). "
-                       "Behaviour: a .c1f pack, help('packs').",
-        "actions": {"read": "entity_read", "add": "entity_add", "edit": "entity_edit",
+                       "run=true recomputes it), write (prop = value: how to act; receipt: "
+                       "<prop>_result), add, edit, remove, inherit. Behaviour: the pack tool.",
+        "actions": {"read": "entity_read", "write": "entity_write", "add": "entity_add", "edit": "entity_edit",
                     "remove": "entity_remove", "inherit": "entity_inherit"},
         "params": {"spec": _S("the entity (eid or name)"), "name": _S("add: its name"),
                    "class": _S("add/edit: its class"), "summary": _S("what it is"),
@@ -55,7 +55,8 @@ FAMILIES: dict[str, dict] = {
                    "properties": {"type": "object", "description": "edit: properties to set"},
                    "watch_ops": {"type": "array", "items": {"type": "object"}, "description": "edit: geometric watches (help('watches'))"},
                    "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: own-motion watches"},
-                   "merged_into": _S("edit: merge into this entity")},
+                   "merged_into": _S("edit: merge into this entity"),
+                   "prop": _S("write: property"), "value": {"description": "write: value"}},
         "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name") or a.get("object") or a.get("key"), "run": a.get("run")}, "spec", "run"),
                 # an add keeps what it was given (2026-10-11 sweep: properties and
                 # watches were stripped here -- the add 'succeeded' with nothing set)
@@ -69,8 +70,18 @@ FAMILIES: dict[str, dict] = {
                                    **({"properties": {**(a.get("properties") or {}),
                                                       **({"parents": a["parents"]} if "parents" in a else {})}}
                                       if (a.get("properties") or "parents" in a) else {})},
+                "write": lambda a: {"spec": a.get("spec") or a.get("name"), "prop": a.get("prop"), "value": a.get("value")},
                 "remove": lambda a: _pick(a, "spec", "force"),
                 "inherit": lambda a: _pick(a, "spec", "parents")},
+    },
+    "pack": {
+        "description": "The field's programs (.c1f): list, show (name), load (name, c1f; replies with its "
+                       "load error). help('packs').",
+        "actions": {"list": "pack", "show": "pack", "load": "pack"},
+        "params": {"name": _S("the pack's name"), "c1f": _S("write: the pack's whole text")},
+        "map": {"list": lambda a: {"action": "list"},
+                "show": lambda a: {"action": "show", "name": a.get("name")},
+                "load": lambda a: {"action": "load", "name": a.get("name"), "c1f": a.get("c1f")}},
     },
     "exec": {
         "description": "run: code becomes a field tree, its executor runs it (node= "
@@ -186,7 +197,7 @@ def advertised(lane_tools) -> list[dict]:
         acts = [a for a, leg in fam["actions"].items() if leg in allowed and leg not in RETIRED]
         if acts:
             out.append(_family_def(name, fam, acts))
-    out.append({"name": "help", "description": "The long-form docs (field entities, membrane::help:<topic>): " + ", ".join(_help_topics()) + ".",
+    out.append({"name": "help", "description": "The long-form docs (packs, exec, goals, watches, ...); help() lists every topic.",
                 "inputSchema": {"type": "object", "properties": {"topic": _S("which topic")}}})
     return out
 
