@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from membrane import goalgraph as GG  # noqa: E402
 from membrane.entities import MEMBRANE_NS, QuantumEntity  # noqa: E402
 from test_goal_graph_738 import GOAL, seat, settle, st, write  # noqa: E402,F401
+from test_goal_graph_738 import beat  # noqa: E402
 from test_goal_wait_773 import CI, _plan, _push_done, _sweep, DEADLINE  # noqa: E402,F401
 
 DONE_X = MEMBRANE_NS + "Component:done:x"
@@ -58,8 +59,11 @@ def test_a_wait_left_at_check_due_is_checked_again_after_a_restart(seat):  # (c)
     seat.ch_vm.attach()
     AD.start(seat)
     settle(seat)
-    seat.ch_vm.sweep(now=time.time() + 3 * GG.WAIT_TICK_S)
-    settle(seat)
+    for _ in range(40):                                   # the check runs on the adapter worker: poll, don't guess
+        beat(seat, time.time() + 3 * GG.WAIT_TICK_S)
+        settle(seat)
+        if float(seat.entity_store.docs[CI].properties.get("last_check_ts") or 0) > time.time() - 60:
+            break
     p = seat.entity_store.docs[CI].properties
     assert float(p["last_check_ts"]) > time.time() - 60, "never checked again"
     assert st(seat, CI) == "failed"

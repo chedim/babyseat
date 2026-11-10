@@ -5,6 +5,11 @@
 -- blockers are counted, never decremented, so a dropped or doubled write can't make them drift. The engine's
 -- built-in recount and due stand down because this pack declares them.
 
+-- a task made owed before a later edge arrived goes back to open while something is open in its way
+Task.open_blockers on-setter unready:
+  WHEN this.open_blockers > 0.5 and this.status == 'owed':
+    this.status = 'open'
+
 -- a task with nothing open in its way is owed (on the count, and on its own status)
 Task.open_blockers on-setter ready:
   WHEN this.open_blockers < 0.5 and this.status == 'open':

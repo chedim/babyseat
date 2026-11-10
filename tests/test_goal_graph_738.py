@@ -53,6 +53,14 @@ def seat(monkeypatch):
     srv.ch_vm.detach()
 
 
+def beat(srv, now):
+    """The clock's beat at `now`: the field engine's tick, or the triggers' sweep when the engine is off."""
+    if getattr(srv, "live", None):
+        srv.live.tick(now)
+    else:
+        srv.ch_vm.sweep(now=now)
+
+
 def settle(srv, rounds=8):
     for _ in range(rounds):
         srv.ch_vm.drain()
@@ -115,7 +123,8 @@ def test_a_plan_writes_tasks_cards_and_edges_and_escalates_the_card(seat):
     assert est.docs[C].properties["open_blockers"] == 1 and st(seat, C) == "open"
     assert st(seat, A) == "owed"                                          # no blockers: ready
     assert tasks_in_pool(seat) == [A]                                     # to the worker pool
-    assert seat.ch_vm.fired.get(MEMBRANE_NS + "Trigger:goal-graph-ready") == 1
+    if not seat.live:                                                     # triggers path only; the field engine has none
+        assert seat.ch_vm.fired.get(MEMBRANE_NS + "Trigger:goal-graph-ready") == 1
 
 
 def test_a_card_answered_unblocks_its_task_and_replans(seat):
@@ -292,7 +301,7 @@ def test_the_lanes_have_their_own_slots():
 
 def test_the_machinery_is_seeded_triggers_with_no_scheduling_loop(seat):
     names = {d.properties["name"] for d in seat.entity_store.docs.values() if d.cls == CH.CLASS}
-    assert names == {t[0] for t in GG.TRIGGERS}
+    assert names == (set() if seat.live else {t[0] for t in GG.TRIGGERS})   # the field engine stands the triggers down
     src = Path(GG.__file__).read_text()
     assert "threading" not in src and "while " not in src and "sleep" not in src
 

@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from membrane import goalgraph as GG  # noqa: E402
 from membrane import night as N  # noqa: E402
 from membrane.entities import MEMBRANE_NS, QuantumEntity  # noqa: E402
-from test_goal_graph_738 import GOAL, seat, settle, st, tasks_in_pool, write  # noqa: E402,F401
+from test_goal_graph_738 import GOAL, beat, seat, settle, st, tasks_in_pool, write  # noqa: E402,F401
 
 PR = MEMBRANE_NS + "Component:pr-757"
 PUSH, ANSWER = GG.task_eid(GOAL, "push"), GG.task_eid(GOAL, "answer")
@@ -38,7 +38,11 @@ def _sweep(srv, dt, due=True):
     if due and d is not None and d.properties.get("last_check_ts"):
         d.properties = {**d.properties, "last_check_ts": time.time() - EVERY - 1}
         srv.entity_store.upsert(d, embedder=None)
-    srv.ch_vm.sweep(now=time.time() + dt)
+        if getattr(srv, "live", None):                                    # the engine's mirror must hear it too
+            write(srv, CI, "last_check_ts", time.time() - EVERY - 1)
+    elif due and d is not None and getattr(srv, "live", None) and d.properties.get("armed_since"):
+        write(srv, CI, "armed_since", time.time() - EVERY - 1)           # armed, never checked: its interval has passed
+    beat(srv, time.time() + dt)
     settle(srv)
 
 

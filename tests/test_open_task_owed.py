@@ -21,8 +21,8 @@ def test_a_task_set_back_to_open_is_owed_at_the_recount(seat):
     assert GG.take(seat, A)
     GG.finish(seat, A, "stuck", "cut off")
     settle(seat)
-    write(seat, A, "status", "open")                # what the planners did
     seat.events_pool.take()
+    write(seat, A, "status", "open")                # what the planners did
     GG.recount(seat, GOAL)
     settle(seat)
     assert st(seat, A) == "owed"
