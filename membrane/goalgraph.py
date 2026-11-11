@@ -614,20 +614,25 @@ def on_status(srv, task: str, status: str) -> None:
 
 
 def close_parent(srv, task: str) -> bool:
-    """A split task is done when every sub-task has ended done or dropped and at least one is done; its own parent
-    is checked next (the adapter's own writes fire no adapter, so the tree closes bottom-up here). -> closed."""
+    """A split task ends when every sub-task has ended done or dropped: done when at least one is done, dropped
+    when all were dropped (operator 2026-11-11: every piece dropped means the task was). Its own parent is checked
+    next (the adapter's own writes fire no adapter, so the tree closes bottom-up here). -> closed."""
     est = srv.entity_store
     d = (est.docs or {}).get(task)
     if d is None or (d.properties or {}).get("status") != SPLIT:
         return False
     subs = subtasks(est, task)
     sts = [str((s.properties or {}).get("status") or OPEN) for s in subs]
-    if not subs or any(x not in TASK_ENDED for x in sts) or DONE not in sts:
+    if not subs or any(x not in TASK_ENDED for x in sts):
         return False
-    d.properties = {**(d.properties or {}), "status": DONE, "ended_ts": time.time(),
-                    "receipt": ("its sub-tasks are done: " + "; ".join(
-                        f"{s.eid}: {str((s.properties or {}).get('receipt') or '')[:120]}" for s in subs
-                        if (s.properties or {}).get("status") == DONE))[:600]}
+    if DONE not in sts:
+        d.properties = {**(d.properties or {}), "status": DROPPED, "ended_ts": time.time(),
+                        "receipt": "all its sub-tasks were dropped"}
+    else:
+        d.properties = {**(d.properties or {}), "status": DONE, "ended_ts": time.time(),
+                        "receipt": ("its sub-tasks are done: " + "; ".join(
+                            f"{s.eid}: {str((s.properties or {}).get('receipt') or '')[:120]}" for s in subs
+                            if (s.properties or {}).get("status") == DONE))[:600]}
     est.upsert(d, embedder=None)
     if (d.properties or {}).get("parent"):
         close_parent(srv, d.properties["parent"])
