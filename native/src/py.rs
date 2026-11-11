@@ -315,6 +315,12 @@ impl crate::store::SqlExec for PySqlExec {
             }
         })
     }
+    fn check(&self, sql: &str, nargs: usize) -> Result<(), String> {
+        Python::attach(|py| {
+            self.obj.bind(py).call_method1("check", (sql, nargs)).map(|_| ())
+                .map_err(|e| e.value(py).str().map(|s| s.to_string()).unwrap_or_else(|_| "sql: failed".into()))
+        })
+    }
     fn interrupt(&self, token: u64) {
         Python::attach(|py| { let _ = self.obj.bind(py).call_method1("interrupt", (token,)); });
     }

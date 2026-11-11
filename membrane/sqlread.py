@@ -19,6 +19,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from urllib.parse import quote
 
 BUSY_TIMEOUT_S = 5.0          # the drivers' default (Python sqlite3 timeout=5.0, rusqlite 5 s)
@@ -78,6 +79,31 @@ class Reader:
         except sqlite3.Error as e:
             raise SqlError(f"store {self.path}: {e}") from None
 
+    def check(self, sql: str, nargs: int) -> None:
+        """Compile the statement without running it (the old driver's prepare step, on the engine's call so a bad
+        query -- a write, a missing table, the wrong argument count -- is refused at once). Raises SqlError."""
+        if sql.lstrip()[:7].upper() == "EXPLAIN":
+            return                                 # EXPLAIN EXPLAIN is no statement: its run says what's wrong
+        with self._lock:
+            conn = self._idle.pop() if self._idle else None
+        if conn is None:
+            conn = self._open()
+        try:
+            conn.execute("EXPLAIN " + sql, [None] * nargs).close()
+        except (sqlite3.ProgrammingError, sqlite3.Warning) as e:
+            m = _BINDINGS.search(str(e))
+            if m:
+                raise SqlError(f"sql: the query takes {m.group(1)} argument(s), got {m.group(2)}") from None
+            raise SqlError(f"sql: {e}") from None
+        except sqlite3.DatabaseError as e:
+            msg = str(e)
+            if "not authorized" in msg or "readonly" in msg or "read-only" in msg:
+                raise SqlError(ONLY_READS) from None
+            raise SqlError(f"sql: {msg}") from None
+        finally:
+            with self._lock:
+                self._idle.append(conn)
+
     def run(self, token: int, sql: str, args_json: str) -> str:
         """Run one read; the rows as JSON text (a list of {column: value}). Raises SqlError."""
         try:
@@ -124,10 +150,21 @@ class Reader:
             self._cancelled.add(token)             # kept until its run ends: a run not started yet sees it too
             c = self._running.get(token)
         if c is not None:
-            try:
-                c.interrupt()
-            except sqlite3.Error:
-                pass
+            # SQLite drops an interrupt that comes while no statement runs (between the cancelled check above and
+            # the statement's start): fire it again until the run ends
+            threading.Thread(target=self._keep_interrupting, args=(token, c), name="membrane-sql-interrupt",
+                             daemon=True).start()
+
+    def _keep_interrupting(self, token: int, conn) -> None:
+        while True:
+            with self._lock:                       # under the lock: never reaches the connection's next query
+                if self._running.get(token) is not conn:
+                    return
+                try:
+                    conn.interrupt()
+                except sqlite3.Error:
+                    return
+            time.sleep(0.02)
 
     def close(self) -> None:
         with self._lock:

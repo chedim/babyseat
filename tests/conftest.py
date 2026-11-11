@@ -7,6 +7,9 @@ os.environ.setdefault("MEMBRANE_OFFLINE_PROBE", "0")
 os.environ.setdefault("MEMBRANE_JWT", "0")
 # a test seat installs nothing at boot (the reranker would pull torch, GBs); CI installs spaCy itself
 os.environ.setdefault("MEMBRANE_NO_AUTOINSTALL", "1")
+# a test seat never loads the reranker (bge via hf_xet: a seat killed mid-download aborts at exit -> a macOS
+# crash dialog, 2026-11-11); the reranker's own tests turn it on explicitly
+os.environ.setdefault("MEMBRANE_RERANK", "0")
 # the seat token (seatauth.py, #253): a test seat never writes the operator's
 # ~/.membrane/seat-token -- one throwaway file for the whole run (and its subprocesses)
 import tempfile as _tempfile
