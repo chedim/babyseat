@@ -560,7 +560,12 @@ def save_warm(srv) -> None:
         return
     t0 = time.time()
     try:
-        man = fn()
+        import inspect
+        lex = None
+        if "lex" in inspect.signature(fn).parameters:     # #1115: the word index rides the hot rows
+            from . import lexical
+            lex = lexical.dump(srv.efield)
+        man = fn(lex=lex) if lex is not None else fn()
         if man.get("unsupported"):
             print(f"[seat] warm snapshot skipped: {man['unsupported']}", file=sys.stderr, flush=True)
             return

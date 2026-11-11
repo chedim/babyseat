@@ -255,7 +255,11 @@ class CBLiteBackend(MemBackend):
         return {**self._rows_stamp(), "file": self.ROWS_FILE, "bytes": len(blob), "proof": proof,
                 "counts": {c: len(v[0]) for c, v in colls.items()}}
 
-    def save_warm(self) -> dict:
+    LEX_FILE = "lex.marshal"
+
+    def save_warm(self, lex: bytes | None = None) -> dict:
+        """The vector matrices (MemBackend), then the hot rows, then -- only beside the rows, whose
+        proof it shares -- the field's word index as `lexical.dump` gave it (#1115)."""
         man = super().save_warm()
         d = self._warm_dir()
         if man.get("unsupported") or d is None:
@@ -263,6 +267,9 @@ class CBLiteBackend(MemBackend):
         rows = self._save_rows(d)
         if rows:
             man["rows"] = rows
+            if lex:
+                (d / self.LEX_FILE).write_bytes(lex)
+                man["lex"] = {"file": self.LEX_FILE, "bytes": len(lex)}
             tmp = d / "manifest.json.tmp"
             tmp.write_text(json.dumps(man))
             os.replace(tmp, d / "manifest.json")
@@ -302,6 +309,12 @@ class CBLiteBackend(MemBackend):
         if why:
             print(f"[efield] warm rows dropped ({why}): reading the database", file=sys.stderr)
             return False
+        lx = man.get("lex") or {}
+        try:                                         # the word index rides the rows' proof (lexical.warm takes it)
+            blob = (d / str(lx.get("file") or self.LEX_FILE)).read_bytes() if lx else None
+            self._warm_lex = blob if blob is not None and len(blob) == lx.get("bytes") else None
+        except OSError:
+            self._warm_lex = None
         n = sum(len(v) for c, v in self.colls.items() if c not in COLD)
         print(f"[efield] {self.LABEL}: {n} hot rows loaded from the warm snapshot in {time.time() - t:.1f}s "
               f"({self.db.count('sentences')} sentences on disk)", file=sys.stderr)
