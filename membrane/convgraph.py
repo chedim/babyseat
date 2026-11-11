@@ -122,6 +122,16 @@ def _mint(est, sid: str, mid: str, role: str, text: str, ts=None, speaker=None) 
     return eid
 
 
+def _said_ts(info) -> float | None:
+    """When a message was said (its client's time, ms or s), or None."""
+    t = ((info or {}).get("time") or {}).get("created")
+    try:
+        t = float(t)
+    except (TypeError, ValueError):
+        return None
+    return t / 1000.0 if t > 1e11 else t
+
+
 def _row_before(runner, sid: str, mid: str, role: str | None = None):
     rows = runner.messages.list(sid) if runner is not None else []
     idx = next((i for i, r in enumerate(rows) if (r.get("info") or {}).get("id") == mid), None)
@@ -461,11 +471,16 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
         return
     person = from_person(user_text)
     who, user_text = _words(user_text)
-    u = _mint(est, sid, u_mid, "user" if person else "membrane", user_text, speaker=who)
+    said = _said_ts(user_info)
+    u = _mint(est, sid, u_mid, "user" if person else "membrane", user_text, ts=said, speaker=who)
     _link_pending_answers(srv, est, sid, u_mid, u, be, origin, person)
     if person:
         _shadow(srv, runner, sid, u, a_mid, user_text)
-    a = _mint(est, sid, a_mid, "assistant", reply)
+    a = _mint(est, sid, a_mid, "assistant", reply, ts=_said_ts(a_info) or said)
+    if getattr(srv, "structures", None) is not None:      # #932: the messages' facts, on the spine
+        from . import facts as F
+        F.write(srv, u, user_text, who or "user", said, sid)
+        F.write(srv, a, reply, "assistant", _said_ts(a_info) or said, sid)
     prev = _row_before(runner, sid, u_mid)
     prev_a = _row_before(runner, sid, u_mid, "assistant")
     if prev is not None and msg_eid(prev.get("id")) in (est.docs or {}):

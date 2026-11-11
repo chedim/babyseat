@@ -482,6 +482,10 @@ class EntityField:
     def __init__(self, backend, embedder, origin: str, graph_fn=None,
                  phrase_vocab=None, holder: str | None = None):
         self._lock = threading.RLock()
+        self.moves: dict = {}            # event key -> entity -> how far it moved it (this process's ingests)
+        self.worldlines: dict = {}       # entity -> [(ts, event key, step)] in the order ingested
+        self.episodes: dict = {}         # event key -> (chat id, its place in the chat): one episode each, in order
+        self._ep_n: dict = {}            # chat id -> episodes so far
         # called (key, event doc, message vector) after each live event is
         # applied -- the watch and intent boards; must be cheap, never raise
         self.listeners: list = []
@@ -1244,6 +1248,11 @@ class EntityField:
                  if st.mean is not None else 0.0)
         # every value kept at its STORED precision, so a restart (a reload
         # from the backend) never changes a later result
+        # THE MOVE LOG (#932, the operator 2026-11-05: "the history of movement is our spine"): how far this
+        # event moved this entity, and when -- the entity's worldline, read in time order
+        step = float(np.linalg.norm(GAIN * (np.asarray(x, dtype=np.float32) - np.asarray(before, dtype=np.float32))))
+        self.moves.setdefault(evkey, {})[st.eid] = self.moves.get(evkey, {}).get(st.eid, 0.0) + step
+        self.worldlines.setdefault(st.eid, []).append((float(ts), evkey, step))
         st.state = at_stored(unit(before + GAIN * (x - before)))
         st.mean = f32(x if st.mean is None else st.mean + (x - st.mean) / (st.n + 1))
         if st.eid.split(":", 1)[0] not in ("w", "p", "e"):
@@ -1321,6 +1330,10 @@ class EntityField:
 
     def _apply(self, key: str, ev: dict) -> None:
         stream, seq, ts = ev["stream"], int(ev["seq"]), ev.get("ts")
+        if key not in self.episodes:              # #932 settling: each event one episode, in its chat's order
+            chat = str(ev.get("session") or "")
+            self.episodes[key] = (chat, self._ep_n.get(chat, 0))
+            self._ep_n[chat] = self._ep_n.get(chat, 0) + 1
         for fn in self.event_listeners:           # #337: who is listening hears every event
             try:
                 fn(key, ev)
