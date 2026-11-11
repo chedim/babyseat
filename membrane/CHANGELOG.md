@@ -1,3 +1,18 @@
+## v0.7.53 (2026-11-11) — Big fields answer again
+
+A hotfix on 0.7.52.
+
+- **Recall no longer stalls on a big field** (#1107). On a seat with a large field (Memo's copy: about 412K delta rows), one recall question timed out at 3 minutes. The per-entity deltas index was rebuilt from scratch (about 11 s) under the field lock, on the asking thread, every time it was invalidated — and 0.7.52's one-time move-log backfill invalidated it with every batch. Now:
+  - the backfill keeps the index current as it writes, so no rebuild runs;
+  - once warm, the index is never rebuilt on a caller's path — an unknown change is served from the current index while one background rebuild runs;
+  - it is built in the background at seat start, so the first question doesn't pay for it;
+  - a forget leaves the index at once;
+  - the vote's episode matrix is rebuilt in one numpy pass;
+  - the move-log backfill and the spaCy parse pause between batches (50 ms), so questions get in.
+
+  On the field copy, an index lookup after an invalidation went from 10.8 s (holding the lock) to 0.007 s.
+- **Test runs never load the reranker** (the suite runs with `MEMBRANE_RERANK=0`): a test seat killed mid-download of the model made `hf_xet` abort at exit, with a crash dialog on macOS. No change for users.
+
 ## v0.7.52 (2026-11-11) — The best recall we have measured, now in the product
 
 A recall hotfix on 0.7.51: what we measured, users now get.
