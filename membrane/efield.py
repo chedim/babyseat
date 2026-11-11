@@ -1074,6 +1074,8 @@ class EntityField:
         for k, d in list(self.b.scan("entity_deltas", {"origin": self.origin})):
             if d.get("eid") in g:
                 self.b.delete("entity_deltas", k); n["deltas"] += 1
+        with self._lock:
+            self._index_drop(eids=g)                  # gone from the index at once (#1107 review)
         for k, d in list(self.b.scan("relations", {"origin": self.origin})):
             if d.get("subj") in g or d.get("obj") in g:
                 self.b.delete("relations", k); n["relations"] += 1
@@ -1954,6 +1956,37 @@ class EntityField:
             if self._wgen != w0:                       # flushed while we read: their rows may be missing
                 self._deltas_stale = True
 
+    def note_delta_rows(self, rows: dict) -> None:
+        """Write delta rows the field didn't flush itself (the move-log backfill) and keep the index current, the
+        way flush() does with its own rows: merged in under the field lock, and when the index was current before
+        the write, still current after it -- no full rebuild (#1107 review: every backfill batch moved write_gen
+        and set off a ~10 s rebuild on a big field)."""
+        with self._lock:
+            g0 = self._dgen()
+            self.b.upsert_multi("entity_deltas", rows)
+            self._wgen += 1
+            if self._deltas_index is None:
+                return
+            self._index_merge(rows.values())
+            if g0 is not None and self._deltas_index_gen == g0 and not self._deltas_stale:
+                self._deltas_index_gen = self._dgen()
+
+    def _index_drop(self, rows=(), eids=()) -> None:
+        """Deleted delta rows leave the index NOW (#1107 review: a forget must never be served from a stale index).
+        rows: delta docs (eid, seq, sidx); eids: whole entities. Called under the field lock."""
+        idx = self._deltas_index
+        if idx is None:
+            return
+        for e in eids:
+            idx.pop(e, None)
+        gone: dict = {}
+        for d in rows:
+            gone.setdefault(d.get("eid") or "", set()).add((d.get("seq"), d.get("sidx")))
+        for e, keys in gone.items():
+            lst = idx.get(e)
+            if lst:
+                idx[e] = [x for x in lst if (x.get("seq"), x.get("sidx")) not in keys]
+
     def warm_delta_index(self) -> None:
         """Seat boot (0.7.53): build the deltas index in the background, so the first ask doesn't pay a cold build
         (~10 s on a big field). An ask that comes first still builds it itself."""
@@ -2154,9 +2187,13 @@ class EntityField:
             return {"n": n, "key": key, "entities": [], "already": True}
         self.flush()
         touched = []
+        dropped = []
         for dk, d in list(self.b.scan("entity_deltas", {"origin": self.origin, "event": key})):
             self.b.delete("entity_deltas", dk)
             touched.append(d["eid"])
+            dropped.append(d)
+        with self._lock:
+            self._index_drop(rows=dropped)            # a forget vanishes from deltas_of at once (#1107 review)
         touched = list(dict.fromkeys(touched))
         self.move_log.drop(key)                       # a forgotten event moves nothing
         # a nursery entity may hold the event's mention in its pending buffer
@@ -2365,6 +2402,7 @@ class EntityField:
         ds = self.deltas_of(eid)
         for d in ds:
             self.b.delete("entity_deltas", f"d:{self.o}:{h16(eid)}:{d['seq']}:{d['sidx']}")
+        self._index_drop(eids=[eid])                  # the replay re-adds what remains (#1107 review)
         st = EntityState(eid=eid, kind=old.kind, surface=old.surface,
                          conflicts=list(old.conflicts), activity=old.activity)
         self._states[eid] = st

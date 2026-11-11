@@ -283,7 +283,7 @@ class MoveLog:
                 out[rk] = new
                 done += 1
             if out:
-                field.b.upsert_multi("entity_deltas", out)
+                field.note_delta_rows(out)            # #1107 review: the field's index stays current (no rebuild)
         field.b.upsert("annotations", DONE_KEY + field.origin, {"_k": "mvdone", "origin": field.origin, "n": done})
         return done
 

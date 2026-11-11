@@ -189,3 +189,74 @@ class Warm(unittest.TestCase):
     def test_the_seat_warms_it_at_boot(self):
         src = (Path(__file__).parent.parent / "membrane" / "opencode.py").read_text()
         self.assertIn("srv.efield.warm_delta_index()", src)
+
+
+class ReviewFixes(unittest.TestCase):
+    """#1107 review: (1) the move-log backfill keeps the index current itself -- no full rebuilds; (2) a forget
+    vanishes from deltas_of at once, never served stale; (3) the move flush's rewrites add no duplicates."""
+
+    def _count_builds(self, f):
+        real = f._build_delta_index
+        n = {"builds": 0}
+
+        def counted():
+            n["builds"] += 1
+            return real()
+        return n, mock.patch.object(f, "_build_delta_index", side_effect=counted)
+
+    def test_the_backfill_triggers_no_full_rebuild(self):
+        f = _world(60)
+        f.flush()
+        eid = next(e for e in f._states if e.startswith("f:"))
+        for k, d in list(f.b.scan("entity_deltas", {"origin": f.origin})):
+            if str(d.get("eid") or "").startswith("e:") and d.get("mv"):
+                f.b.upsert("entity_deltas", k, {kk: vv for kk, vv in d.items() if kk not in ("mv", "moves", "msum")})
+        f.b.delete("annotations", "mvdone:" + f.origin)
+        f.rebuild_delta_index()                        # warm and current before the backfill
+        n, patch = self._count_builds(f)
+        real_um = f.b.upsert_multi
+
+        def bumping(coll, docs):                       # a backend whose rewrites move write_gen (the review's trigger)
+            real_um(coll, docs)
+            if coll == "entity_deltas" and any(str(d.get("eid") or "").startswith("e:") and d.get("mv")
+                                               for d in docs.values()):
+                f.b.write_gen["entity_deltas"] = f.b.write_gen.get("entity_deltas", 0) + 1
+        with patch, mock.patch.object(f.b, "upsert_multi", side_effect=bumping):
+            done = f.move_log.backfill(f, batch=5)     # many batches
+            for i in range(3):
+                _say(f, ["the release of membrane/mod1.py needs the gradle fix again"], t0=9000.0 + i)
+                f.flush()
+                f.deltas_of(eid)
+            f.wait_delta_rebuild(5.0)
+        self.assertGreater(done, 5)
+        self.assertEqual(n["builds"], 0)
+        self.assertFalse(f._deltas_stale)
+
+    def test_a_forget_vanishes_at_once(self):
+        f = _world(20)
+        f.flush()
+        eid = next(e for e in f._states if e.startswith("f:"))
+        rows = f.deltas_of(eid)
+        ev_key = rows[0]["event"]
+        num = f.b.get("events", ev_key).get("n")
+        real = f._build_delta_index
+        gate = threading.Event()
+
+        def slow():                                    # a big field: the background rebuild lags
+            gate.wait(5.0)
+            return real()
+        with mock.patch.object(f, "_build_delta_index", side_effect=slow):
+            f.forget(num)
+            got = f.deltas_of(eid)                     # immediately, the rebuild still blocked
+            self.assertNotIn(ev_key, [d["event"] for d in got])
+            gate.set()
+            f.wait_delta_rebuild(5.0)
+
+    def test_the_move_flush_adds_no_duplicates(self):
+        f = _world(30)
+        f.flush()
+        for e in list(f._states):
+            f.deltas_of(e)
+        for e, lst in (f._deltas_index or {}).items():
+            pos = [(d.get("seq"), d.get("sidx")) for d in lst]
+            self.assertEqual(len(pos), len(set(pos)), e)
