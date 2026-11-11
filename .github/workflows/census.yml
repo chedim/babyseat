@@ -36,11 +36,19 @@ jobs:
           json.dump(badge("🐣 Blurps alive (est.)", f"~{alive:,}",
                           f"known-OS PyPI downloads in the 3 days from release {ver} ({day0})"),
                     open(".github/census/alive.json", "w"), ensure_ascii=False, indent=1)
+          # the README's badges carry the numbers themselves (static shields badges): no CDN cache between
+          import re, urllib.parse
+          q = lambda t: urllib.parse.quote(t.replace("-", "--").replace("_", "__"), safe="")
+          static = lambda label, msg: f"https://img.shields.io/badge/{q(label)}-{q(msg)}-f5a623"
+          r = open("README.md").read()
+          r = re.sub(r"\(https://img\.shields\.io/[^)]*(?:hatched|Blurps%20hatched)[^)]*\)", "(" + static("🐣 Blurps hatched (est.)", f"{n:,}") + ")", r, count=1)
+          r = re.sub(r"\(https://img\.shields\.io/[^)]*(?:alive|Blurps%20alive)[^)]*\)", "(" + static("🐣 Blurps alive (est.)", f"~{alive:,}") + ")", r, count=1)
+          open("README.md", "w").write(r)
           print(n, alive, sorted(days))
           PY
       - name: commit
         run: |
           git config user.name "census-bot"
           git config user.email "census-bot@users.noreply.github.com"
-          git add .github/census/
+          git add .github/census/ README.md
           git diff --cached --quiet || (git commit -m "census: Blurps hatched (est.)" && git push)
