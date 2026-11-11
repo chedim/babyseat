@@ -1234,17 +1234,30 @@ class EntityField:
         self._ep_rows()
         idx = self._ep_index
         if idx["M"] is None:
+            # 0.7.53: one numpy pass (the background read once), not _centered() per point -- an episode closes
+            # often on a busy seat, and every close drops the matrix
             owner, pts = [], []
             for eid, row in idx["rows"].items():
                 for v in row["pts"]:
-                    owner.append(eid); pts.append(self._centered(v))
+                    owner.append(eid); pts.append(v)
             idx["owner"] = np.asarray(owner, dtype=object)
-            idx["M"] = np.asarray(pts, dtype=np.float32) if pts else np.zeros((0, 1), np.float32)
+            if pts:
+                P = np.asarray(pts, dtype=np.float64)
+                bg = self._bg("discourse")
+                if bg is not None:
+                    P = P - np.asarray(bg, dtype=np.float64)
+                nrm = np.linalg.norm(P, axis=1, keepdims=True)
+                nrm[nrm == 0] = 1.0
+                idx["M"] = (P / nrm).astype(np.float32)
+            else:
+                idx["M"] = np.zeros((0, 1), np.float32)
         if not len(idx["M"]):
             return []
         sims = idx["M"] @ np.asarray(qc, dtype=np.float32)
         best: dict = {}
-        for i in np.argsort(-sims)[:k * 8]:
+        top = min(k * 8, len(sims))
+        cand = np.argpartition(-sims, top - 1)[:top] if top < len(sims) else np.arange(len(sims))
+        for i in cand[np.argsort(-sims[cand])]:
             e = idx["owner"][i]
             if e not in best:
                 best[e] = float(sims[i])
@@ -1709,6 +1722,9 @@ class EntityField:
             if self._deltas_index is not None and g0 is not None and self._deltas_index_gen == g0:
                 self._index_merge(self._deltas.values())
                 self._deltas_index_gen = self._dgen()
+            elif self._deltas_index is not None:
+                self._index_merge(self._deltas.values())     # 0.7.53: this flush's own rows stay visible...
+                self._invalidate_delta_index()                # ...and the rest comes with the background rebuild
             else:
                 self._invalidate_delta_index()
             self._deltas = {}
@@ -1811,10 +1827,10 @@ class EntityField:
                 lst.insert(i, d)
 
     def _invalidate_delta_index(self) -> None:
-        """The index stales on every flush (the deltas changed); the
-        next deltas_of() rebuilds once (one pass over the collection,
-        amortized across ALL lookups)."""
-        self._deltas_index = None
+        """The index stales (a delete, an out-of-order write): the next deltas_of() serves the stale copy and ONE
+        background rebuild runs (0.7.53: a cold rebuild on a big field took ~11 s under the field lock, on the ask
+        path, again and again). Cold (never built) it is built on the caller's path, as before."""
+        self._deltas_stale = True
 
     def rebuild_delta_index(self) -> int:
         """Force the index rebuild NOW (tests + the caller after a
@@ -1828,6 +1844,7 @@ class EntityField:
                 idx.setdefault(d.get("eid") or "", []).append(d)
             self._deltas_index = idx
             self._deltas_index_gen = gen
+            self._deltas_stale = False
             return sum(len(v) for v in idx.values())
 
     def relabel_roles(self, now: float | None = None, batch: int = 200) -> dict:
@@ -1887,21 +1904,78 @@ class EntityField:
 
     def deltas_of(self, eid: str) -> list[dict]:
         """THE DELTAS INDEX (the CPU-bomb's load-bearing fix):
-        deltas_by_eid is rebuilt on access when staled (the invalidator
-        bumps on flush); O(1) per-entity lookups replace per-entity
-        full scans (the night's 63M row-checks per tick)."""
+        deltas_by_eid is built once; O(1) per-entity lookups replace per-entity
+        full scans (the night's 63M row-checks per tick). 0.7.53: once warm it is
+        never rebuilt on the caller's path -- a stale index (the backend's
+        write_gen moved, or an invalidation) is served while ONE background
+        rebuild runs, outside the field lock."""
         with self._lock:
             gen = self._dgen()
-            if self._deltas_index is None or (gen is not None and gen != self._deltas_index_gen):
-                idx: dict[str, list[dict]] = {}
-                for k, d in self.b.scan("entity_deltas",
-                                        {"origin": self.origin},
-                                        order=("seq", "sidx")):
-                    idx.setdefault(d.get("eid") or "", []).append(d)
-                self._deltas_index = idx
-                self._deltas_index_gen = gen
+            idx = self._deltas_index
+            if idx is not None:
+                if self._deltas_stale or (gen is not None and gen != self._deltas_index_gen):
+                    self._start_delta_rebuild()
+                return list(idx.get(eid) or [])
+        built, bgen, w0 = self._build_delta_index()        # cold: nothing to serve yet
+        with self._lock:
+            if self._deltas_index is None:
+                self._deltas_index, self._deltas_index_gen = built, bgen
+                self._deltas_stale = self._wgen != w0
             return list(self._deltas_index.get(eid) or [])
 
+    def _build_delta_index(self):
+        """One pass over the collection (no field lock held): (index, the write_gen it saw, the field's write clock)."""
+        gen, w0 = self._dgen(), self._wgen
+        idx: dict[str, list[dict]] = {}
+        for _k, d in self.b.scan("entity_deltas", {"origin": self.origin}, order=("seq", "sidx")):
+            idx.setdefault(d.get("eid") or "", []).append(d)
+        return idx, gen, w0
+
+    def _start_delta_rebuild(self) -> None:
+        """At most one background rebuild at a time (the caller holds the field lock)."""
+        t = self._delta_rebuild
+        if t is not None and t.is_alive():
+            return
+        self._deltas_stale = False                     # a later invalidation starts the next one
+        self._delta_rebuild = threading.Thread(target=self._delta_rebuild_run, name="deltas-index", daemon=True)
+        self._delta_rebuild.start()
+
+    def _delta_rebuild_run(self) -> None:
+        try:
+            built, bgen, w0 = self._build_delta_index()
+        except Exception as e:
+            import sys
+            print(f"[efield] deltas index rebuild failed ({e})", file=sys.stderr)
+            with self._lock:
+                self._deltas_stale = True
+            return
+        with self._lock:
+            self._deltas_index, self._deltas_index_gen = built, bgen
+            if self._wgen != w0:                       # flushed while we read: their rows may be missing
+                self._deltas_stale = True
+
+    def warm_delta_index(self) -> None:
+        """Seat boot (0.7.53): build the deltas index in the background, so the first ask doesn't pay a cold build
+        (~10 s on a big field). An ask that comes first still builds it itself."""
+        with self._lock:
+            if self._deltas_index is None:
+                self._deltas_stale = False
+                t = self._delta_rebuild
+                if t is None or not t.is_alive():
+                    self._delta_rebuild = threading.Thread(target=self._delta_rebuild_run, name="deltas-index",
+                                                           daemon=True)
+                    self._delta_rebuild.start()
+
+    def wait_delta_rebuild(self, timeout: float | None = None) -> bool:
+        """Tests and offline tools: wait for a running background rebuild (True when none is running)."""
+        t = self._delta_rebuild
+        if t is not None:
+            t.join(timeout)
+            return not t.is_alive()
+        return True
+
+    _deltas_stale = False
+    _delta_rebuild = None
     _deltas_index: dict | None = None
     _deltas_index_gen = None
 

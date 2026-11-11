@@ -26,11 +26,13 @@ import bisect
 import math
 import re
 import threading
+import time
 
 from . import eids as E
 
 ROUNDS = 1                 # round 2 floods on LoCoMo (the operator 2026-11-06: 1)
 DONE_KEY = "mvdone:"       # annotations: the backfill's done-marker, per origin
+BACKFILL_YIELD_S = 0.05    # 0.7.53: backfills sleep this long between batches, so asks on a big field aren't starved
 
 
 class MoveLog:
@@ -236,6 +238,8 @@ class MoveLog:
         for lo in range(0, len(todo), max(1, batch)):
             if stop is not None and stop():
                 return 0
+            if lo:
+                time.sleep(BACKFILL_YIELD_S)
             got = field.b.get_multi("events", [ev for ev, _ in todo[lo:lo + batch]])
             for ev, d in got.items():
                 docs[ev] = {"session": d.get("session"), "seq": d.get("seq"), "stream": d.get("stream"),
@@ -263,6 +267,8 @@ class MoveLog:
                 sv = move_to(sv, x)
         done = 0
         for lo in range(0, len(todo), max(1, batch)):
+            if lo:
+                time.sleep(BACKFILL_YIELD_S)
             out = {}
             for ev, (rk, row) in todo[lo:lo + batch]:
                 doc = docs.get(ev)

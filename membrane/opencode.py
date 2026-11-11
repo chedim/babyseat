@@ -1129,6 +1129,7 @@ def main() -> None:
             try:
                 from . import lexical as _LX
                 _LX.warm(srv.efield)
+                srv.efield.warm_delta_index()      # 0.7.53: the deltas index builds now, off any ask
             except Exception as e:
                 print(f"[seat] word index off ({e})", file=sys.stderr)
             # THE VOTE (0.7.52): the move log loads, the instance parser attaches
