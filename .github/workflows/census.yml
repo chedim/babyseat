@@ -1,6 +1,6 @@
 name: census
-# The README's rough Blurp badge (until #1096 counts seats once each): PyPI downloads that pypistats
-# reports with a known OS and without mirrors -- the mirrors and the OS-less CI/bot fetches left out.
+# The README's rough Blurp badges (until #1096 counts seats once each), from the PyPI downloads that
+# pypistats reports with a known OS and without mirrors -- the mirrors and OS-less CI/bot fetches left out.
 on:
   schedule: [{cron: "17 6 * * *"}]
   workflow_dispatch: {}
@@ -14,18 +14,29 @@ jobs:
       - name: count
         run: |
           python3 - <<'PY'
-          import json, urllib.request
-          url = "https://pypistats.org/api/packages/babyseat/system"
-          rows = json.load(urllib.request.urlopen(url, timeout=30))["data"]
-          n = sum(r["downloads"] for r in rows if r["category"] not in (None, "null"))
-          out = {"schemaVersion": 1, "label": "🐣 Blurps hatched (est.)", "message": f"{n:,}", "color": "f5a623",
-                 "note": "PyPI downloads with a known OS, no mirrors, last 180 days (pypistats)"}
-          json.dump(out, open(".github/census/hatched.json", "w"), ensure_ascii=False, indent=1)
-          print(out)
+          import datetime as dt, json, urllib.request
+          get = lambda u: json.load(urllib.request.urlopen(u, timeout=30))
+          rows = [r for r in get("https://pypistats.org/api/packages/babyseat/system")["data"]
+                  if r["category"] not in (None, "null")]
+          n = sum(r["downloads"] for r in rows)
+          badge = lambda label, msg, note: {"schemaVersion": 1, "label": label, "message": msg, "color": "f5a623", "note": note}
+          json.dump(badge("🐣 Blurps hatched (est.)", f"{n:,}",
+                          "PyPI downloads with a known OS, no mirrors, last 180 days (pypistats)"),
+                    open(".github/census/hatched.json", "w"), ensure_ascii=False, indent=1)
+          # ALIVE (est.): seats upgrade when a release lands -- the known-OS downloads on the latest
+          # release's day and the two days after it (our own release checks included)
+          pj = get("https://pypi.org/pypi/babyseat/json")
+          day0 = min(dt.date.fromisoformat(f["upload_time"][:10]) for f in pj["urls"])
+          days = {str(day0 + dt.timedelta(d)) for d in range(3)}
+          alive = sum(r["downloads"] for r in rows if r["date"] in days)
+          json.dump(badge("🐣 Blurps alive (est.)", f"~{alive:,}",
+                          f"known-OS PyPI downloads in the 3 days from the latest release ({pj['info']['version']}, {day0})"),
+                    open(".github/census/alive.json", "w"), ensure_ascii=False, indent=1)
+          print(n, alive, sorted(days))
           PY
       - name: commit
         run: |
           git config user.name "census-bot"
           git config user.email "census-bot@users.noreply.github.com"
-          git add .github/census/hatched.json
+          git add .github/census/
           git diff --cached --quiet || (git commit -m "census: Blurps hatched (est.)" && git push)
