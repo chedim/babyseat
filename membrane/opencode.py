@@ -2728,7 +2728,7 @@ def main() -> None:
             except Exception:
                 pass
             _td_mark(f"{getattr(closer, '__qualname__', 'store')} done")
-        try:                           # #720: a planned restart keeps the warm matrices
+        try:                           # #720, #1115: every clean stop keeps the warm snapshot
             from .restarts import save_warm
             save_warm(srv)
         except Exception:

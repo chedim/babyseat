@@ -546,14 +546,13 @@ def pin_ports(argv: list[str], listen: int | None, serve: int | None) -> list[st
 
 
 def save_warm(srv) -> None:
-    """#720: a planned restart keeps the field's warm vector matrices for
+    """#720: a clean stop keeps the field's warm vector matrices for
     the next boot (efstore.MemBackend.save_warm: FileBackend and, #748,
     CBLiteBackend). A backend that cannot snapshot says so in one line. Called after the
-    teardown's last store close, so nothing writes after the snapshot; a
-    plain stop saves nothing."""
-    if not RESTART["requested"]:
-        return
-    be = getattr(getattr(srv, "efield", None), "b", None)
+    teardown's last store close, so nothing writes after the snapshot. #1115 (operator,
+    2026-11-11): every clean stop saves, not only a planned restart; a stop cut by the
+    teardown lease saves nothing (the next boot rebuilds, as before)."""
+    be =getattr(getattr(srv, "efield", None), "b", None)
     fn = getattr(be, "save_warm", None)
     if fn is None:
         print(f"[seat] warm snapshot skipped: {type(be).__name__} cannot snapshot",
