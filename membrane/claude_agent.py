@@ -311,6 +311,12 @@ class _Answer:
         self.steps: list = []           # #1120: [message id, it only read] of each step that called tools
         # #1120 (operator 2026-11-11): a person's chat answer gets CHAT_STEP_CEILING acting steps
         self.step_limit = CHAT_STEP_CEILING if _DR.current().get("lane") == "chat" else None
+        # #1120 ("using getters?"): a worker's step is judged by what its calls did -- the writes they made in the
+        # field, counted on the turn's chain while this answer runs (stop() ends the count)
+        from . import writes as _W
+        self.chain = (_W.current() or {}).get("id") if self.one_step else None
+        if self.chain:
+            _W.watch_chain(self.chain)
         self.acting_steps = 0
         self._step_mid = None
         self.over = False
@@ -329,12 +335,30 @@ class _Answer:
             return
         if self.acting is None:
             self.acting = mid
+        # [mid, read by its calls' names, read by what its calls did (None until one ran)]
         if self.steps and self.steps[-1][0] == mid:
             self.steps[-1][1] = self.steps[-1][1] and bool(reads)
         else:
-            self.steps.append([mid, bool(reads)])
-        if len(self.steps) > 2 or (len(self.steps) == 2 and not self.steps[0][1]):
+            self.steps.append([mid, bool(reads), None])
+        first = self.steps[0]
+        first_read = first[2] if first[2] is not None else first[1]
+        if len(self.steps) > 2 or (len(self.steps) == 2 and not first_read):
             self.split = True
+
+    def call_done(self, name: str, args, wrote: bool) -> None:
+        """#1120: one call of the current step ran; a call that acted makes its step an acting one."""
+        if not self.one_step or not self.steps:
+            return
+        from .adapters import _SEAT
+        from .server import call_reads
+        did = call_reads(_SEAT.get("srv"), name, args, wrote)
+        cur = self.steps[-1]
+        cur[2] = did if cur[2] is None else (cur[2] and did)
+
+    def stop(self) -> None:
+        if self.chain:
+            from . import writes as _W
+            _W.watch_chain(self.chain, False)
 
     async def hook(self, hook_input, tool_use_id=None, context=None):
         tid = str((hook_input or {}).get("tool_use_id") or tool_use_id or "")
@@ -752,7 +776,12 @@ def _tool_handler(name: str, port, answer=None):
             if agent:
                 from .server import stamp_watch_owner
                 call = stamp_watch_owner(name, call, agent)
+            from . import writes as _W
+            _cid = getattr(answer, "chain", None)
+            _w0 = _W.chain_writes(_cid)
             text = await asyncio.to_thread(impl, call, int(port))
+            if answer is not None and hasattr(answer, "call_done"):     # #1120: what the call did
+                answer.call_done(name, call, _W.chain_writes(_cid) > _w0 if _cid else True)
             return {"content": [{"type": "text",
                                  "text": str(text) + _footer(answer)}]}
         except _mcp.ProxyError as e:
@@ -1018,7 +1047,8 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                 raise RuntimeError(why)
             if any(type(b).__name__ == "ToolUseBlock" for b in getattr(m, "content", None) or []):
                 answer.saw_step(getattr(m, "message_id", None) or f"after-{results}",   # #1116
-                                reads=step_reads(getattr(m, "content", None) or []))   # #1120
+                                reads=step_reads(getattr(m, "content", None) or []))   # #1120: what its calls
+                # did (call_done) decides once they ran; their names until then
             for b in getattr(m, "content", None) or []:
                 bk = type(b).__name__
                 if bk == "ToolUseBlock":
@@ -1061,6 +1091,7 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                 raise RuntimeError(f"claude-agent: {why}")
             _Q.ok(model)                     # it answered: a probing pause is over
             put(("usage", _usage(getattr(m, "usage", None))))
+    answer.stop()
     if capped or answer.ceiling:
         _count("ceiling_hits")
         put(("capped", {"session": session, "calls": answer.limit,
