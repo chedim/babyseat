@@ -1037,7 +1037,8 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
     wrapper only shapes the MCP registry's own rows (2026-10-13: an
     explicit set used to die here on a bare KeyError('name'))."""
     from . import toolset as _ts
-    tools = _mcp.TOOLS if mcp_tools is None else mcp_tools
+    from . import cliffhanger_only as _CO
+    tools = _CO.strip_tools(_mcp.TOOLS if mcp_tools is None else mcp_tools)
     return [t if isinstance(t, dict) and "function" in t else
             {"type": "function",
              "function": {"name": t["name"],
@@ -1344,7 +1345,8 @@ def _openai_tools_for(agent: str | None) -> list:
     if os.environ.get("MEMBRANE_TOOL_FAMILIES", "1") != "0":
         from . import toolset as _ts
         return _ts.advertised(names)
-    return [t for t in _mcp.TOOLS if t["name"] in names]
+    from . import cliffhanger_only as _CO
+    return [t for t in _CO.strip_tools(_mcp.TOOLS) if t["name"] in names]
 
 
 def _tool_title(name: str, args: dict) -> str:
