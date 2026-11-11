@@ -141,7 +141,8 @@ class Pronouns(unittest.TestCase):
         self.assertEqual(CC.pronoun(srv, "it"), "membrane::goal:g")
         CC.exit_(srv)
         with mock.patch("membrane.convgraph.register", return_value=None):
-            self.assertIsNone(CC.pronoun(srv, "it"))
+            # no frame left: the chat level -- the last turn's promoted subject
+            self.assertEqual(CC.pronoun(srv, "it"), "Command:gradle")
 
     def test_the_turn_frame_beats_the_entered_frame(self):
         srv = self.srv()
@@ -160,6 +161,49 @@ class Pronouns(unittest.TestCase):
         reg.assert_called_once()
         with mock.patch("membrane.convgraph.register", return_value="membrane::concept:thing"):
             self.assertIsNone(CC.pronoun(srv, "it"))      # a concept never binds, at any level
+
+
+class TurnEndPromotion(unittest.TestCase):
+    def test_turn_one_works_on_x_turn_two_it_is_x(self):
+        srv = seat([])
+        CC.new_turn(srv, "s1")
+        CC.touch(srv, "membrane::worktree:map-1105")
+        CC.touch(srv, "f:membrane/momentum_map.py")
+        CC.touch(srv, "membrane::worktree:map-1105")       # touched most: the turn's subject
+        CC.new_turn(srv, "s1")                              # turn 2, nothing mentioned
+        with mock.patch("membrane.convgraph.register", return_value=None):
+            self.assertEqual(CC.pronoun(srv, "it"), "membrane::worktree:map-1105")
+            self.assertIn("it=worktree:map-1105", CC.line(srv))
+
+    def test_that_is_the_previous_it(self):
+        srv = seat([])
+        CC.new_turn(srv, "s1")
+        CC.touch(srv, "membrane::issue:1105")
+        CC.new_turn(srv, "s1")
+        CC.touch(srv, "membrane::pr:1106")
+        CC.new_turn(srv, "s1")
+        with mock.patch("membrane.convgraph.register", return_value=None):
+            self.assertEqual(CC.pronoun(srv, "it"), "membrane::pr:1106")
+            self.assertEqual(CC.pronoun(srv, "that"), "membrane::issue:1105")
+
+    def test_expires_after_three_turns_unrefreshed(self):
+        srv = seat([])
+        CC.new_turn(srv, "s1")
+        CC.touch(srv, "membrane::goal:x")
+        for _ in range(CC.PROMOTE_TTL_TURNS):
+            CC.new_turn(srv, "s1")
+        with mock.patch("membrane.convgraph.register", return_value=None):
+            self.assertEqual(CC.pronoun(srv, "it"), "membrane::goal:x")
+            CC.new_turn(srv, "s1")
+            self.assertIsNone(CC.pronoun(srv, "it"))
+
+    def test_a_concept_is_never_promoted(self):
+        srv = seat([])
+        CC.new_turn(srv, "s1")
+        CC.touch(srv, "membrane::concept:pr")
+        CC.new_turn(srv, "s1")
+        with mock.patch("membrane.convgraph.register", return_value=None):
+            self.assertIsNone(CC.pronoun(srv, "it"))
 
 
 class Names(unittest.TestCase):
