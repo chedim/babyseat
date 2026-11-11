@@ -454,6 +454,7 @@ def apply_plan(srv, goal: str, plan) -> dict:
             d.properties = {**(d.properties or {}), "status": DROPPED}
             est.upsert(d, embedder=None)
             dropped.append(eid)
+    dups = _flag_duplicates(est, goal, made)   # #1120: applied, but the planner hears of it
     recount(srv, goal)                  # the counts, last (each write may fire `ready`)
     g = est.docs[goal]
     g.properties = {**(g.properties or {}), "planned_ts": time.time()}
@@ -462,12 +463,38 @@ def apply_plan(srv, goal: str, plan) -> dict:
         _escalate_card(srv, goal, c)
     out = {"ok": True, "tasks": made, "cards": new_cards, "waits": made_waits, "dropped": dropped,
            "updated": updated, "reopened": reopened}
+    if dups:
+        out["duplicates"] = {new: f"duplicate of {old}: drop one in your next plan" for new, old in dups.items()}
     nodes = [d for d in list((est.docs or {}).values())
              if (d.properties or {}).get("goal") == goal and d.cls in (TASK, WAIT, "Decision")]
     if nodes and not any(_moving(d) for d in nodes):
         # #867: a plan that leaves nothing to run says so (never a bare `tasks: []`)
         out["nothing runnable"] = ("every task has ended; to run one again list its key with redo: true, "
                                    "or write a new task under a new key")
+    return out
+
+
+def _flag_duplicates(est, goal: str, made: list) -> dict:
+    """#1120: each task this plan made whose title is like an open, owed or running task of the goal (made before
+    this plan) gets `dup_of: <that task>`. Likeness: the seat's own line likeness (recall_banner: the same word
+    stems, DEDUPE_JACCARD). -> {new: old}."""
+    from . import recall_banner as _RB
+    live = [d for d in list((est.docs or {}).values())
+            if d.cls == TASK and (d.properties or {}).get("goal") == goal and d.eid not in made
+            and (d.properties or {}).get("status") in (OPEN, OWED, RUNNING)]
+    out = {}
+    for eid in made:
+        d = (est.docs or {}).get(eid)
+        if d is None:
+            continue
+        sig = _RB._sig(str((d.properties or {}).get("title") or ""))
+        for o in live:
+            if o.eid != (d.properties or {}).get("parent") and \
+                    _RB._alike(sig, _RB._sig(str((o.properties or {}).get("title") or ""))):
+                d.properties = {**(d.properties or {}), "dup_of": o.eid}
+                est.upsert(d, embedder=None)
+                out[eid] = o.eid
+                break
     return out
 
 
@@ -990,7 +1017,7 @@ def view(est, goal: str) -> dict:
         if p.get("goal") != goal:
             continue
         if d.cls == TASK:
-            tasks.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"), "parent": p.get("parent"),
+            tasks.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"), "parent": p.get("parent"), "dup_of": p.get("dup_of"),
                           "waits_on": [b.eid for b in _blockers_of(est, d.eid, idx) if _unfinished(b)],
                           "open_blockers": p.get("open_blockers"), "result": p.get("result"),
                           "receipt": p.get("receipt")})
@@ -1016,7 +1043,7 @@ The goal's graph now:
 
 Work the goal as a graph. Write ONE plan with entity_edit on the goal:
   entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"], "parent": "<a split task's key, for its sub-task>"}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
-A task is ONE worker step: one reading round (calls that only read) if it needs one, then one batch of acting calls, then its verdict; "read X, then write from it" is one task. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth; after, cards and waits work on them as on any task); it is done when its sub-tasks are, and what waits on it waits until then. You can split a task before it runs the same way. Listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, and `nothing runnable` when the plan leaves nothing to run.
+A task is ONE worker step: one reading round (calls that only read) if it needs one, then one batch of acting calls, then its verdict; "read X, then write from it" is one task. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth; after, cards and waits work on them as on any task); it is done when its sub-tasks are, and what waits on it waits until then. You can split a task before it runs the same way. Listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (a reply, a delivery, a long job finishing) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: a long job takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, duplicates = new tasks like an open or running one (drop one of each pair; the graph marks them "duplicate of"), and `nothing runnable` when the plan leaves nothing to run.
 When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
 End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
 
@@ -1034,6 +1061,7 @@ def _graph_lines(est, goal: str) -> str:
     v = view(est, goal)
     out = [f"- task {t['eid']} [{t['status']}] {t['title']}"
            + (f" (sub-task of {t['parent']})" if t.get("parent") else "")
+           + (f" (duplicate of {t['dup_of']})" if t.get("dup_of") else "")
            + (f" (waits on {', '.join(t['waits_on'])})" if t["waits_on"] else "")
            + (f" -- receipt: {str(t['receipt'])[:160]}" if t.get("receipt") else "") for t in v["tasks"]]
     out += [f"- wait {w['eid']} [{w['status']}] {w['title']}"
