@@ -115,12 +115,14 @@ MAX_TOOL_CALLS_PER_ANSWER = 2048    # the hard ceiling per answer; Continue
                                     # 2026-10-23, #467)
 MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: sized
                                     # never to bind before the ceiling (#425)
-WORKER_CEILING = 20                 # a goal worker's chunk: each its own session (#857)
+WORKER_CEILING = 20                 # a goal worker's one step: at most this many calls (#857; #1116: then it splits)
 CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
                    f"person can press Continue.")
-CHUNK_MESSAGE = (f"This chunk reached its limit of {WORKER_CEILING} tool "
-                 f"calls. Stop here; the work resumes in a fresh chunk.")
+CHUNK_MESSAGE = (f"This step reached its limit of {WORKER_CEILING} tool "
+                 f"calls. Stop here; the task goes back to the planner to be split.")
+STEP_MESSAGE = ("A goal task gets ONE step: this second batch of tool calls is "
+                "refused. Stop here; the task goes back to the planner to be split.")
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
@@ -277,10 +279,27 @@ class _Answer:
             else CEILING_MESSAGE
         self.denied: set = set()        # tool_use ids the hook refused
         self.ceiling = False
+        # #1116 (the operator's option A): a goal worker's answer is ONE step -- the calls of its first API step
+        # that carries tool calls; a later step's call is refused and the answer ends capped (the task splits)
+        self.one_step = self.limit == WORKER_CEILING
+        self.acting = None              # the message id of that acting step
+        self.split = False
+
+    def saw_step(self, mid) -> None:
+        """An assistant message carrying tool calls, by its API step's message id (the CLI sends one message per
+        content block, all with their step's id): a second acting step means more than one step."""
+        if not self.one_step:
+            return
+        if self.acting is None:
+            self.acting = mid
+        elif mid != self.acting:
+            self.split = True
 
     async def hook(self, hook_input, tool_use_id=None, context=None):
         tid = str((hook_input or {}).get("tool_use_id") or tool_use_id or "")
-        if self.calls >= self.limit:
+        if self.split:
+            self.message = STEP_MESSAGE
+        if self.calls >= self.limit or self.split:
             self.ceiling = True
             self.denied.add(tid)
             return {"continue_": False, "stopReason": self.message,
@@ -906,6 +925,7 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
     steps_seen: set = set()              # #450: one API response, counted once
     started: set = set()                 # tool_use ids whose start went out
     rejected_until = None                # the CLI's rejected rate-limit event's reset
+    results = 0                          # tool results seen: a step's key when the SDK gives no message id
 
     def start(tid, name, args):
         # THE CALL'S START (2026-10-24): said as soon as the SDK reports the
@@ -950,6 +970,8 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                 if err in QUOTA_ERRORS or _Q.is_quota_error(words):
                     raise _quota_paused(model, why, rejected_until)
                 raise RuntimeError(why)
+            if any(type(b).__name__ == "ToolUseBlock" for b in getattr(m, "content", None) or []):
+                answer.saw_step(getattr(m, "message_id", None) or f"after-{results}")   # #1116
             for b in getattr(m, "content", None) or []:
                 bk = type(b).__name__
                 if bk == "ToolUseBlock":
@@ -968,6 +990,7 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
             for b in getattr(m, "content", None) or []:
                 if type(b).__name__ != "ToolResultBlock":
                     continue
+                results += 1
                 tid = str(getattr(b, "tool_use_id", ""))
                 name, args = pending.pop(tid, ("", {}))
                 if tid in answer.denied:
