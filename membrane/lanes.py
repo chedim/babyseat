@@ -4390,6 +4390,13 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     _st = types.SimpleNamespace(mark=mark)
     _is_tool_round = is_tool_round
     ctx = None
+    try:                                   # THROWAWAY EXPERIMENT: no banner, no recall, nothing but the map
+        from . import momentum_map as _MM
+        if _MM.on():
+            mark("recall+banner")
+            return None, None
+    except ImportError:
+        pass
     # #768 / #776: a loop's task text carries what it needs; its banner's
     # recall only queued a person's turn behind it
     _no_banner = getattr(srv, "no_banner", False) or _is_loop_turn(srv, body)

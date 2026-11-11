@@ -92,4 +92,14 @@ def rewrite(messages: list, fld) -> list:
     if last_user is None:
         return messages
     head = [m for m in msgs[:last_user] if m.get("role") == "system"][:1]
-    return head + [{"role": "system", "content": block(fld)}] + msgs[last_user:]
+    out = head + [{"role": "system", "content": block(fld)}] + msgs[last_user:]
+    try:                                   # what the model got, for the operator to look at
+        import json
+        with open(os.path.join(".membrane", "exp-map-last.json"), "w") as f:
+            json.dump({"t": time.time(), "dropped": len(msgs) - (len(out) - 1),
+                       "messages": [{"role": m.get("role"), "chars": len(str(m.get("content") or "")),
+                                     **({"content": m.get("content")} if i == len(head) else {})}
+                                    for i, m in enumerate(out)]}, f, indent=1, ensure_ascii=False)
+    except OSError:
+        pass
+    return out
