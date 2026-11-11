@@ -11,8 +11,8 @@ identifiers:
     value: "10.5281/zenodo.23550667"
     description: "Concept DOI: all versions, resolves to the newest"
   - type: doi
-    value: "10.5281/zenodo.24143379"
-    description: "Version DOI of 0.7.52"
+    value: "10.5281/zenodo.24146755"
+    description: "Version DOI of 0.7.53"
 repository-code: "https://github.com/chedim/babyseat"
 license: MIT
 abstract: >-
