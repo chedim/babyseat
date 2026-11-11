@@ -539,7 +539,8 @@ def _layout(messages):
     context block); the first n_head of them are whole earlier messages, the
     rest is the tail (the context blocks before the latest message, the
     latest message, and any block placed after it)."""
-    from .rag import _RAG_SYSTEM
+    from .rag import doctrine_text
+    doctrine = doctrine_text().strip()
     system, convo, ctx = [], [], []      # ctx: (blocks before convo item #i, text)
     for m in messages or []:
         if not isinstance(m, dict):
@@ -548,7 +549,7 @@ def _layout(messages):
         text = _text_of(m.get("content")).strip()
         if role == "system":
             if text and _volatile(m, bool(convo)):
-                head = _RAG_SYSTEM.strip()
+                head = doctrine
                 if head and text.startswith(head):     # the undelivered doctrine
                     if head not in system:
                         system.append(head)
@@ -761,9 +762,9 @@ TOOLS_NOTE = _full_names(
     "instead of doing it in your own turn; answer with the goal's id. "
     "Ask the person for a decision with a card on their decision "
     "board, not a list in chat, in one call, e.g. @entity_add class='Decision' "
-    "name='Which test runner' summary='pytest or unittest for the new suite' "
+    "name='Which marina for Saturday' summary='where to tie up on the weekend trip' "
     "properties={'status': 'open', 'var': {'type': 'option', 'options': "
-    "['pytest', 'unittest']}, 'pick': 'pytest'}. The name is the question, "
+    "['Harbor Point', 'Mill Cove']}, 'pick': 'Mill Cove'}. The name is the question, "
     "with no quotes or apostrophes (refused); var.type is int, "
     "float, bool, string or option; pick is your recommendation; add 'blocks': "
     "[<eids>] when it holds work up. One variable per card; only "

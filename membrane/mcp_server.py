@@ -230,8 +230,8 @@ TOOLS: list[dict] = [
         "description": (
             "Close an OPEN goal you have PROVEN done: its status flips to "
             "fulfilled on the shared board (every seat's active set drops "
-            "it). Requires evidence -- the receipt (a method call's "
-            "rc=0 output, the entity state you read back). Never close on "
+            "it). Requires evidence -- the receipt (a value or entity "
+            "state you read back, a confirmation, a method call's rc=0 output). Never close on "
             "intent or a plan; an unfinished goal stays open and you take "
             "its next concrete step instead."),
         "inputSchema": {
@@ -282,7 +282,7 @@ TOOLS: list[dict] = [
             "no code dumps, no fenced blocks. The proxy applies the same "
             "guards as any learned turn (dedup, variety gate) and may skip "
             "it. Use when you EARNED something durable (a fixed quirk, the "
-            "command that worked, why a gate exists)."),
+            "setting or command that worked, why a rule exists)."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -416,12 +416,13 @@ TOOLS: list[dict] = [
             "Read the entity graph: entities related to a free-text query "
             "(named hits first, then semantic nearness), each with its "
             "mention count and co-occurrence neighbors. Use to explore what "
-            "the field knows about a component before acting on it."),
+            "the field knows about a thing (a device, a place, a project, "
+            "a file) before acting on it."),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string",
-                          "description": "Free text: names, paths, symbols."},
+                          "description": "Free text: names, places, devices, paths."},
                 "k": {"type": "integer",
                       "description": "Max entities (1-20, default 8)."},
             },

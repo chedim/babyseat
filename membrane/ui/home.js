@@ -837,6 +837,10 @@ function optionsRows(o) {
       `<input id="opt-keep" class="onum" type="number" min="1" step="1" value="${zooEsc(keep)}" data-opt="code_runs_keep" ` +
       `aria-describedby="opt-keep-h"><p class="ohint" id="opt-keep-h">per code tree, method and executor; ` +
       `older runs are deleted each night (default ${zooEsc(keepDef)})</p></div>` +
+    `<div class="orow"><label class="olab" for="opt-improve">Propose babyseat improvements</label>` +
+      `<input id="opt-improve" type="checkbox" data-opt="improve_babyseat"${o.improve_babyseat ? " checked" : ""} ` +
+      `aria-describedby="opt-improve-h"><p class="ohint" id="opt-improve-h">the model may open pull requests ` +
+      `to the babyseat repo on its own (default off)</p></div>` +
     backgroundRows(o.background);
 }
 
@@ -3449,7 +3453,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._opt.panel.addEventListener("change", (e) => {         // let go: save it
         if (e.target.classList.contains("oshare")) this._opt.setShare(e.target.value);
         else if (e.target.dataset && e.target.dataset.opt)
-          this._opt.setOption(e.target.dataset.opt, e.target.type === "number" ? Number(e.target.value) : e.target.value);
+          this._opt.setOption(e.target.dataset.opt, e.target.type === "number" ? Number(e.target.value)
+            : e.target.type === "checkbox" ? !!e.target.checked : e.target.value);
       });
       this._zooList.addEventListener("click", (e) => {
         const c = e.target.closest(".zcard");

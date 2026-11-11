@@ -52,7 +52,7 @@ def test_the_doctrine_is_a_core_with_pointers():
     low = DOCTRINE.lower()
     assert "draft, not yet live" not in low                   # fields are live
     assert "trust the field" in low                           # the operator: read the field before the disk
-    assert "pull request" in low                              # Bobs may improve babyseat
+    assert "pull request" not in low                          # #1128: a seat option now (options.improve_babyseat)
     assert ".c1f" in DOCTRINE and "help('packs')" in DOCTRINE  # behaviour is a pack
     assert "write a property whose write is the effect" not in low or "default" in low
     for gone in ("THE CLOCK:", "VOICE:", "BROWSER:", "SCHEDULED READS:"):

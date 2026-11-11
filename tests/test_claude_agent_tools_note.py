@@ -107,20 +107,20 @@ def test_the_note_is_fixed_text():
 # an entity/edit), so the note teaches the ONE-CALL form, with a concrete
 # option card -- and that a name can't hold quotes or apostrophes.
 
-CARD = {"class": "Decision", "name": "Which test runner",
-        "summary": "pytest or unittest for the new suite",
+CARD = {"class": "Decision", "name": "Which marina for Saturday",
+        "summary": "where to tie up on the weekend trip",
         "properties": {"status": "open",
-                       "var": {"type": "option", "options": ["pytest", "unittest"]},
-                       "pick": "pytest"}}
+                       "var": {"type": "option", "options": ["Harbor Point", "Mill Cove"]},
+                       "pick": "Mill Cove"}}
 
 
 def test_the_note_teaches_the_one_call_card():
     note = CA.TOOLS_NOTE
     assert "in one call" in note
-    assert ("entity_add class='Decision' name='Which test runner' "
-            "summary='pytest or unittest for the new suite' "
+    assert ("entity_add class='Decision' name='Which marina for Saturday' "
+            "summary='where to tie up on the weekend trip' "
             "properties={'status': 'open', 'var': {'type': 'option', "
-            "'options': ['pytest', 'unittest']}, 'pick': 'pytest'}") in note
+            "'options': ['Harbor Point', 'Mill Cove']}, 'pick': 'Mill Cove'}") in note
     assert "no quotes or apostrophes" in note
     assert "then entity_edit" not in note          # the two-call form is gone
 
@@ -154,8 +154,8 @@ def test_the_one_call_card_lands_on_a_real_store():
     [doc] = [dc for dc in est.docs.values() if dc.cls == "Decision"]
     assert doc.cls == "Decision"
     p = doc.properties
-    assert (p["status"], p["pick"]) == ("open", "pytest")
-    assert p["var"] == {"type": "option", "options": ["pytest", "unittest"]}
+    assert (p["status"], p["pick"]) == ("open", "Mill Cove")
+    assert p["var"] == {"type": "option", "options": ["Harbor Point", "Mill Cove"]}
 
 
 # ---- the name map (2026-10-23): the doctrine names the seat's tool FAMILIES
