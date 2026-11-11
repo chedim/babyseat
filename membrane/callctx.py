@@ -28,12 +28,13 @@ import threading
 
 _LOCK = threading.Lock()
 TURN_MAX = 8
+PROMOTE_TTL_TURNS = 3      # a promoted subject expires after 3 person turns unrefreshed (the registers' approved TTL)
 
 
 def _st(srv) -> dict:
     d = srv.__dict__.setdefault("_callctx", None)
     if d is None:
-        d = {"cur": "", "turn": {}, "chat": _load(srv)}
+        d = {"cur": "", "turn": {}, "chat": _load(srv), "counts": {}, "promoted": {}}
         srv.__dict__["_callctx"] = d
     return d
 
@@ -60,11 +61,27 @@ def _save(srv, chat: dict) -> None:
 
 
 def new_turn(srv, sid: str) -> None:
-    """A person's turn starts in chat `sid`: it becomes the current chat; its turn frame is empty."""
+    """A person's turn starts in chat `sid`: it becomes the current chat; its turn frame is empty.
+    TURN-END PROMOTION: the turn that just ended in this chat hands its main subject (the concrete entity it
+    touched most; ties -> the last touched) to the chat level as "it", the previous "it" becoming "that"; an
+    unrefreshed promotion expires after PROMOTE_TTL_TURNS person turns."""
     with _LOCK:
         s = _st(srv)
-        s["cur"] = str(sid or "")
-        s["turn"][s["cur"]] = []
+        k = str(sid or "")
+        s["cur"] = k
+        prev = [e for e in s["turn"].get(k, []) if concrete(e)]
+        counts = s["counts"].pop(k, {})
+        p = s["promoted"].get(k)
+        if prev:
+            order = {e: i for i, e in enumerate(prev)}
+            main = max(prev, key=lambda e: (counts.get(e, 0), order[e]))
+            that = p["it"] if p and p.get("it") != main else (p or {}).get("that")
+            s["promoted"][k] = {"it": main, "that": that, "age": 0}
+        elif p:
+            p["age"] = p.get("age", 0) + 1
+            if p["age"] >= PROMOTE_TTL_TURNS:
+                s["promoted"].pop(k, None)
+        s["turn"][k] = []
 
 
 def current(srv) -> str:
@@ -126,6 +143,8 @@ def touch(srv, eid: str, sid: str | None = None) -> None:
             fr.remove(eid)
         fr.append(eid)
         del fr[:-TURN_MAX]
+        c = s["counts"].setdefault(k, {})
+        c[eid] = c.get(eid, 0) + 1
         frames = _frames(s, k)
         if frames and concrete(eid):              # the innermost entered frame rebinds while it is innermost
             _bind_touch(frames[-1]["bind"], eid)
@@ -189,6 +208,13 @@ def pronoun(srv, word: str, sid: str | None = None):
         b = f.get("bind") or {}
         if b.get(key):
             return b[key]
+    p = s["promoted"].get(k)                      # the chat level: the last turns' promoted subjects
+    if p and key == "it":
+        w = str(word or "").lower()
+        if w == "that" and p.get("that"):
+            return p["that"]
+        if p.get("it"):
+            return p["it"]
     try:                                          # the person/chat level: convgraph's registers (their expiry)
         from .convgraph import register
         got = register(srv, k, word)
@@ -209,7 +235,7 @@ def line(srv, sid: str | None = None) -> str:
     frames = _frames(s, k)
     parts = ["chat"] + [_short(f["eid"]) for f in frames]
     shown = []
-    if s["turn"].get(k) or frames:                # the bindings that are set (registers alone don't show)
+    if s["turn"].get(k) or frames or s["promoted"].get(k):   # the bindings that are set (registers alone don't show)
         for w in ("it", "they", "he", "there"):
             v = pronoun(srv, w, k)
             if not v:

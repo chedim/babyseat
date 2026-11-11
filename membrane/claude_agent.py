@@ -781,7 +781,8 @@ _CARD_LINES_REPLACED = ("- EXEC:", "- ROUTING:")
 NO_SHELL_NOTE = ("THIS SEAT HAS NO SHELL (cliffhanger only): code_run and bash are gone. Read the world through "
                  "the field -- an entity whose getter is read(path), listdir(path) or stat(path) -- and change it "
                  "with File:<name>.write/move/delete and Command:<name>.run = {args} (rc and output land on the "
-                 "entity). help('stdlib') has the details.")
+                 "entity). No shell does not mean no programs: define a method (method_define) or a Command: "
+                 "entity for git, gh, pytest..., then call it. help('stdlib') has the details.")
 
 
 def _tools_note() -> str:
