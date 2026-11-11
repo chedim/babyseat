@@ -121,8 +121,9 @@ CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"person can press Continue.")
 CHUNK_MESSAGE = (f"This step reached its limit of {WORKER_CEILING} tool "
                  f"calls. Stop here; the task goes back to the planner to be split.")
-STEP_MESSAGE = ("A goal task gets ONE step: this second batch of tool calls is "
-                "refused. Stop here; the task goes back to the planner to be split.")
+STEP_MESSAGE = ("A goal task gets one reading round and one acting round: this "
+                "batch of tool calls is past them and is refused. Stop here; the "
+                "task goes back to the planner to be split.")
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
@@ -140,6 +141,13 @@ MAX_TURNS_SUBTYPE = "error_max_turns"   # the SDK's result subtype at the cap
 NO_AUTO_MEMORY_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"   # the CLI's own switch (build_options)
 QUOTA_ERRORS = ("rate_limit", "billing_error")   # an AssistantMessage error that
                                     # means out of tokens: the rung pauses (quota.py)
+
+
+def step_reads(blocks) -> bool:
+    """#1120: a step's tool calls only read (server.reads_only over its ToolUseBlocks)."""
+    from .server import reads_only
+    return reads_only((getattr(b, "name", ""), getattr(b, "input", None) or {})
+                      for b in blocks or [] if type(b).__name__ == "ToolUseBlock")
 
 
 def cap_of(info) -> dict | None:
@@ -294,15 +302,21 @@ class _Answer:
         self.one_step = self.limit == WORKER_CEILING
         self.acting = None              # the message id of that acting step
         self.split = False
+        self.steps: list = []           # #1120: [message id, it only read] of each step that called tools
 
-    def saw_step(self, mid) -> None:
+    def saw_step(self, mid, reads: bool = False) -> None:
         """An assistant message carrying tool calls, by its API step's message id (the CLI sends one message per
-        content block, all with their step's id): a second acting step means more than one step."""
+        content block, all with their step's id). #1120: one reading step (every call read-only) and then one
+        acting step make one leaf; a step past them means more than one step."""
         if not self.one_step:
             return
         if self.acting is None:
             self.acting = mid
-        elif mid != self.acting:
+        if self.steps and self.steps[-1][0] == mid:
+            self.steps[-1][1] = self.steps[-1][1] and bool(reads)
+        else:
+            self.steps.append([mid, bool(reads)])
+        if len(self.steps) > 2 or (len(self.steps) == 2 and not self.steps[0][1]):
             self.split = True
 
     async def hook(self, hook_input, tool_use_id=None, context=None):
@@ -995,7 +1009,8 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                     raise _quota_paused(model, why, rejected_until)
                 raise RuntimeError(why)
             if any(type(b).__name__ == "ToolUseBlock" for b in getattr(m, "content", None) or []):
-                answer.saw_step(getattr(m, "message_id", None) or f"after-{results}")   # #1116
+                answer.saw_step(getattr(m, "message_id", None) or f"after-{results}",   # #1116
+                                reads=step_reads(getattr(m, "content", None) or []))   # #1120
             for b in getattr(m, "content", None) or []:
                 bk = type(b).__name__
                 if bk == "ToolUseBlock":

@@ -1314,6 +1314,14 @@ def _lane_of(agent: str | None) -> str:
     return "listener"
 
 
+def _json_args(raw) -> dict:
+    try:
+        a = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return a if isinstance(a, dict) else {}
+
+
 def _lane_tools(lane: str) -> frozenset:
     if _lane_gate_off():
         return _mcp_names()
@@ -1329,6 +1337,25 @@ def _mcp_names() -> frozenset:
 PARALLEL_READS = frozenset(("find", "query", "state", "graph", "entities_related", "entity_query",
                             "entity_read", "entity_tracks", "intents"))
 PARALLEL_READS_MAX = 4
+
+
+def reads_only(calls) -> bool:
+    """#1120: a round of tool calls that only reads -- every call, resolved like the round runs it, is one the seat
+    marks read-only (PARALLEL_READS: the calls safe to run together). [(name, args)]; an empty round reads nothing."""
+    calls = list(calls or [])
+    if not calls:
+        return False
+    from . import toolset as _ts
+    for name, args in calls:
+        n = str(name or "")
+        n = n[len("mcp__membrane__"):] if n.startswith("mcp__membrane__") else n
+        try:
+            n, _ = _ts.resolve(n, args if isinstance(args, dict) else {})
+        except Exception:
+            return False
+        if n not in PARALLEL_READS:
+            return False
+    return True
 
 
 def _thinking(runner, sid: str, phase: str) -> None:
@@ -2929,7 +2956,7 @@ class TurnRunner:
         # told so, and the next round goes out without tools: it can only answer.
         _refused: set = set()
         _text_only = False
-        _acted = False                     # #1116: a worker's round of tool calls ran
+        _acted = []                        # #1116/#1120: a worker's rounds of tool calls (True = it only read)
         while not err_done and rounds < MAX_ROUNDS:
             rounds += 1
             self._turn_activity[sid] = time.time()   # THE ROUND'S TOUCH
@@ -3475,15 +3502,17 @@ class TurnRunner:
                                   "time": int(time.time() * 1000),
                                   "sessionID": sid})
             if tcs and not _ca_round and str((self._agents or {}).get(sid) or "").lower().startswith("worker"):
-                # #1116 (the operator's option A): a goal worker gets ONE step -- one round of tool calls, then
-                # its verdict. A second round of calls never runs: the answer ends capped (as the Claude rung's
-                # does) and the task goes back to the planner to be split
-                if _acted:
+                # #1116 (the operator's option A) and #1120 (read, then act): a goal worker gets one READING
+                # round (every call read-only) and then one acting round, then its verdict. A round past that
+                # never runs: the answer ends capped (as the Claude rung's does) and the task is split
+                if len(_acted) >= 2 or (_acted and not _acted[0]):
                     a_info[_CA.CAP_MARK] = {"session": "", "calls": 0, "continued": False, "split": True}
                     mkpart({"type": "step-finish", "reason": "stop", "cost": 0,
                             "tokens": _step_tokens(a_info, history, parts)})
                     break
-                _acted = True
+                _acted.append(reads_only(((tc.get("function") or {}).get("name"),
+                                          _json_args((tc.get("function") or {}).get("arguments")))
+                                         for tc in tcs))
             if tcs:
                 a_info["time"].setdefault("start", int(time.time() * 1000))
                 asst_msg = {"role": "assistant", "content": content or "",
