@@ -30,7 +30,7 @@ keywords:
   - Home Assistant
   - real-time learning
   - child machine
-version: "0.7.51"
+version: "0.7.52"
 date-released: "2026-11-11"
 references:
   - type: article

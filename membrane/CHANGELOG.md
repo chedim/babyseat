@@ -1,3 +1,27 @@
+## v0.7.52 (2026-11-11) — The best recall we have measured, now in the product
+
+A recall hotfix on 0.7.51: what we measured, users now get.
+
+- **The vote** (from the 2026-11-07 full LoCoMo test, the best ranking measured so far): recall's pool is ranked by a weighted Borda over finders that each read the field differently —
+  - the move log (weight 2): what the question's things did, and when;
+  - instance histories with the tense rule (3): which instance a "my/the/that X" means, and whether the sentence reports a happening;
+  - entity recall (¾), the embedder (⅛) and the word lane (⅛).
+  The weights are the mean of the two held-out halves of the 11-07 fit, approved by the operator. Nothing is trained on labels: the learned answer map and the learned readers stay out, and spaCy reads directly. It covers the seat's own field: every chat, tool outputs and entity lines. VOTE_DETAILS_TBD
+- **The reranker is on for users** (#1092): bge-reranker-v2-m3 re-reads the top 20. The seat installs it at boot when it is missing (wheels only; CPU torch on Linux without an NVIDIA driver), Home Assistant on glibc included, under HA's own package pins. It is not installed on musl (Home Assistant OS and Container: torch has no musl builds) or under 8 GB of RAM. The Docker image has it baked in (CPU). `MEMBRANE_RERANK=0` turns it off. Until 0.7.51 it was an opt-in extra, so most seats ranked without it.
+- **No more pronoun intercepts:** when "run it" could mean two things, membrane still shows `"it": a or b?`, but the model's turn runs, told the readings. Until now the turn stopped and the model never ran. The model asking instead is #1093.
+
+## v0.7.52 (2026-11-11) — The best recall we have measured, now in the product
+
+A recall hotfix on 0.7.51: what we measured, users now get.
+
+- **The vote** (from the 2026-11-07 full LoCoMo test, the best ranking measured so far): recall's pool is ranked by a weighted Borda over finders that each read the field differently —
+  - the move log (weight 2): what the question's things did, and when;
+  - instance histories with the tense rule (3): which instance a "my/the/that X" means, and whether the sentence reports a happening;
+  - entity recall (¾), the embedder (⅛) and the word lane (⅛).
+  The weights are the mean of the two held-out halves of the 11-07 fit, approved by the operator. Nothing is trained on labels: the learned answer map and the learned readers stay out, and spaCy reads directly. It covers the seat's own field: every chat, tool outputs and entity lines. VOTE_DETAILS_TBD
+- **The reranker is on for users** (#1092): bge-reranker-v2-m3 re-reads the top 20. The seat installs it at boot when it is missing (wheels only; CPU torch on Linux without an NVIDIA driver), Home Assistant on glibc included, under HA's own package pins. It is not installed on musl (Home Assistant OS and Container: torch has no musl builds) or under 8 GB of RAM. The Docker image has it baked in (CPU). `MEMBRANE_RERANK=0` turns it off. Until 0.7.51 it was an opt-in extra, so most seats ranked without it.
+- **No more pronoun intercepts:** when "run it" could mean two things, membrane still shows `"it": a or b?`, but the model's turn runs, told the readings. Until now the turn stopped and the model never ran. The model asking instead is #1093.
+
 ## v0.7.51 (2026-11-11) — Home Assistant: the logo, musl wheels, HACS checks
 
 A Home Assistant and packaging patch on 0.7.5.
