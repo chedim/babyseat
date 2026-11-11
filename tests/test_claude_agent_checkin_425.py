@@ -178,10 +178,26 @@ class TestNoCheckins(_Case):
 class TestManySilentMessages(_Case):
     plans = [[("tools", 1)] * 30 + [("tools", 20), ("text", "done")]]
 
+    def _on(self, lane):
+        from membrane import diag_requests as DR
+        DR.context(lane=lane)              # pinned: the lane is thread-local, a test before this one may leave one
+        try:
+            self._items(stream=True)
+        finally:
+            DR.context(None)
+
     def test_fifty_silent_calls_run_unrefused(self):
-        self._items(stream=True)
+        # 31 API steps (30 one-call steps, then one of 20): off the chat lane all of them run, none refused
+        self._on("loop")
         self.assertEqual(self.sdk.seen_by_model, [])
         self.assertEqual(len(self.sdk.tool_runs), 50)
+
+    def test_a_chat_answer_stops_at_the_step_ceiling_not_for_silence(self):
+        # #1120 (operator 2026-11-11): a chat answer gets CHAT_STEP_CEILING acting steps; the 13th step's call is
+        # refused by the step ceiling (checkpoint + Continue), never for silence
+        self._on("chat")
+        self.assertEqual(len(self.sdk.tool_runs), CA.CHAT_STEP_CEILING)
+        self.assertEqual(self.sdk.seen_by_model, [CA.CHAT_STEP_MESSAGE])
 
 
 # ---- the ceiling ---------------------------------------------------------------
