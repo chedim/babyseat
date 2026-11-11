@@ -633,7 +633,7 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     """The person's pronouns, before the turn: an answer to a re-ask loads its register; a
     pronoun reads the reply before, then its register. One reading: recorded, loaded, told to
     the model. Several, in a command ("delete it", "yes, merge it and restart"): asked back
-    and the turn doesn't run. Several elsewhere ("is it done?"): left to the model.
+    and the turn still runs, the model told the readings. Several elsewhere ("is it done?"): left to the model.
     -> None | {"resolved": ...} | {"reask": line}."""
     (getattr(srv, "_cg_notes", None) or {}).pop(sid, None)    # a note lives for its own message only
     if not from_person(text):
@@ -703,7 +703,14 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     if not verb:
         return None
     from . import speech as SP
-    line = SP.say("reask", word=word, options=[_label(est, c) for c in cands])
+    labels = [_label(est, c) for c in cands]
+    line = SP.say("reask", word=word, options=labels)
+    # NOT AN INTERCEPT (operator 2026-11-11): the line is shown, the turn still runs and the
+    # model is told the readings. TODO: the model asks instead of membrane (no line at all).
+    srv.__dict__.setdefault("_cg_notes", {})[sid] = (
+        f"In the person's last message, \"{word}\" may mean " + " or ".join(labels) +
+        f"; membrane asked them which ({line}). Use the chat to tell which they mean; "
+        "if you cannot, ask them before acting.")
     _mint(est, sid, mid, "user", text, speaker=who)
     d = est.docs[u]
     d.properties = {**(d.properties or {}), "reask": {"word": word, "readings": cands}}

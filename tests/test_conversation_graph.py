@@ -306,7 +306,7 @@ class TheReferent(unittest.TestCase):
 
 
 class TheRunnerWiring(unittest.TestCase):
-    def test_a_real_turn_lands_in_the_graph_and_a_tie_skips_the_model(self):
+    def test_a_real_turn_lands_in_the_graph_and_a_tie_still_runs_the_model(self):
         import threading
         from membrane import server as MS
         calls = []
@@ -331,12 +331,11 @@ class TheRunnerWiring(unittest.TestCase):
         msgs = [d for d in srv.entity_store.docs.values() if d.cls == CG.CLASS_MESSAGE]
         self.assertEqual(sorted(d.properties["role"] for d in msgs), ["assistant", "user"])
         n = len(calls)
-        out = r.run(sid, "delete it")
-        self.assertEqual(out.get("reask"), '"it": membrane/a.py or membrane/b.py?')
-        self.assertEqual(len(calls), n)                       # the model was not called
-        last = r.messages.list(sid)[-1]
-        self.assertEqual(last["info"]["role"], "assistant")
-        self.assertIn('"it":', last["parts"][-1]["text"])
+        r.run(sid, "delete it")
+        self.assertEqual(len(calls), n + 1)                   # no intercept: the model ran (2026-11-11)
+        texts = [p.get("text") or "" for m in r.messages.list(sid) for p in m["parts"]]
+        self.assertIn('"it": membrane/a.py or membrane/b.py?', texts)   # the line is still shown
+        self.assertIn("membrane/a.py or membrane/b.py", str(calls[-1]))  # and the model is told
 
 
 if __name__ == "__main__":
