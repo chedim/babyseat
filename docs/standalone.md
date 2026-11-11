@@ -308,7 +308,7 @@ The seat measures itself, without root (`membrane/diag.py`). Both ports answer
 rung's turn-cap hits and Continues, and sums its prompt-cache split (uncached
 input, cache reads, cache writes, output) ([claude-agent.md](claude-agent.md)).
 `deliver` counts `busy_timeouts`: turns whose model didn't answer inside the
-rung's budget (`rung_budget_s`, 90 s).
+rung's budget (`rung_budget_s`, 90 s; `MEMBRANE_TURN_BUDGET_S` sets it, for a slow local model that writes long replies).
 
 **What the seat sent to each model.** `requests` lists the last 5 requests
 the seat sent to a model, newest first: `ts`, `model`, `lane` (`chat`, `loop`,

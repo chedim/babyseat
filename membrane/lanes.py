@@ -57,7 +57,19 @@ from .entities import (EntityStore, QuantumEntity, MEMBRANE_NS,
 CLOUD_DEFAULT_PRICE = 3.0   # an unknown cloud model's relative money/turn
 # THE PER-RUNG BUDGET: a rung that doesn't answer inside it is DOWN for this
 # turn. Its value predates #431 (named there so a test can shorten its clock).
-RUNG_BUDGET_S = 90
+# MEMBRANE_TURN_BUDGET_S sets it (a slow local model writing a long reply needs
+# longer); unset or unreadable keeps 90.
+def turn_budget(env=None) -> float:
+    import math
+    raw = (os.environ if env is None else env).get("MEMBRANE_TURN_BUDGET_S", "")
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 90
+    return v if math.isfinite(v) and v > 0 else 90
+
+
+RUNG_BUDGET_S = turn_budget()
 
 
 def _is_timeout(e) -> bool:
