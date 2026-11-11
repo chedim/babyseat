@@ -28,6 +28,9 @@ pub const BUSY_TIMEOUT_MS: u64 = 5000;  // the drivers' default (Python sqlite3 
 /// Runs the store's reads (the host's SQLite: one copy per process). `token` names a running query for `interrupt`.
 pub trait SqlExec: Send + Sync {
     fn run(&self, token: u64, sql: &str, args: &[J]) -> Result<Vec<J>, String>;
+    /// Compile without running, on the engine's call: a write, a missing table or the wrong argument count is
+    /// refused at once (never reaches a thread), as the driver's prepare step always did.
+    fn check(&self, _sql: &str, _nargs: usize) -> Result<(), String> { Ok(()) }
     fn interrupt(&self, token: u64);
 }
 
@@ -105,6 +108,8 @@ impl Store {
             sh.results.insert(k.clone(), State::Pending);
         }
         let exec = match self.exec() { Ok(x) => x, Err(e) => return self.finish(&k, Err(e)) };
+        // check it here, so a bad query is refused at once and never reaches a thread
+        if let Err(e) = exec.check(sql, args.len()) { return self.finish(&k, Err(e)); }
         let token = {
             let mut sh = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
             sh.next_token += 1;
@@ -266,6 +271,7 @@ impl Store {
     /// Run one read now, on this thread (tests and tools; the engine uses `request`).
     pub fn query(&self, sql: &str, args: &[J]) -> Result<Vec<J>, String> {
         let exec = self.exec()?;
+        exec.check(sql, args.len())?;
         let token = { let mut sh = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); sh.next_token += 1; sh.next_token };
         exec.run(token, sql, args)
     }

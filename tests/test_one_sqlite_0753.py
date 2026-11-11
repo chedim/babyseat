@@ -83,6 +83,51 @@ def test_reader_matches_the_old_driver_rules(tmp_path):
         sqlread.Reader(str(tmp_path / "missing" / "nope.sqlite3"))
 
 
+def test_a_bad_query_is_refused_at_once_never_on_a_thread(tmp_path):
+    """As the old driver's prepare step: a write, a missing table or the wrong argument count is refused on the
+    engine's call, before any thread (the banner's refusal order depends on it)."""
+    from membrane import sqlread
+    r = sqlread.Reader(_db(tmp_path))
+    with pytest.raises(sqlread.SqlError, match="no such table"):
+        r.check("SELECT * FROM nope", 0)
+    with pytest.raises(sqlread.SqlError, match="only reads"):
+        r.check("DELETE FROM c_events", 0)
+    with pytest.raises(sqlread.SqlError, match="takes 1 argument"):
+        r.check("SELECT * FROM c_events WHERE k = ?", 0)
+    r.check("SELECT * FROM c_events WHERE k = ?", 1)
+    f = MV.Fields(_Host())
+    f.set_store(_db(tmp_path / "x") if (tmp_path / "x").mkdir() is None else None)
+    f.set_pack("t", "PACK t 1\nChat.n getter: sql(\"SELECT * FROM nope\") if this.go else None\n")
+    f.load("Chat:a", "Chat", "{}")
+    f.rebuild(1.0)
+    f.write("Chat:a", "go", "true", 2.0)
+    assert f.sql_pending() == 0                    # answered on the call: nothing went to a thread
+
+
+def test_an_interrupt_always_stops_its_query_whenever_it_lands(tmp_path):
+    """Before the run, at its start (SQLite drops an interrupt while no statement runs) or mid-query: it stops."""
+    import threading
+    import time
+    from membrane import sqlread
+    r = sqlread.Reader(_db(tmp_path))
+    forever = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n"
+    r.interrupt(1)                                 # before it runs
+    with pytest.raises(sqlread.SqlError, match="interrupted"):
+        r.run(1, forever, "[]")
+    for i, delay in enumerate((0.0, 0.0, 0.001, 0.01, 0.1)):   # at once (the start window) and mid-query
+        token, err = 10 + i, []
+        t = threading.Thread(target=lambda: err.append(pytest.raises(sqlread.SqlError, r.run, token, forever, "[]")))
+        t.start()
+        time.sleep(delay)
+        while token not in r._running and t.is_alive():
+            time.sleep(0)
+        r.interrupt(token)
+        t.join(timeout=10)
+        assert not t.is_alive(), f"a query interrupted after {delay}s kept running"
+        assert "interrupted" in str(err[0].value)
+    assert r.run(99, "SELECT 1 AS one", "[]") == '[{"one": 1}]'   # the pooled connection is not left interrupted
+
+
 STRESS = textwrap.dedent("""
     import json, sqlite3, sys, threading, time
     from membrane import membrane_vm as MV
