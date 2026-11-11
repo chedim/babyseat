@@ -6,8 +6,19 @@ name: publish
 # the secret, no credentials on any machine or in any checkout. A GitHub
 # release going published triggers it; workflow-dispatch covers the catch-up
 # case (a version released before the lane existed).
+#
+# MERGING THE RELEASE PR IS THE RELEASE (operator 2026-11-11): a push to main
+# or a release-* patch branch that changes pyproject.toml's version, with no
+# tag for that version yet, runs the whole lane: check, wheels, PyPI, then the
+# tag + the GitHub release (notes = the version's CHANGELOG section; Zenodo
+# archives it) + the Docker image. A push that leaves the version alone, or
+# whose version is already tagged, does nothing. Releases and dispatches keep
+# working as before (catch-ups, re-runs; PyPI skips what exists).
 
 on:
+  push:
+    branches: [main, "release-*"]
+    paths: [pyproject.toml]
   release:
     types: [published]
   workflow_dispatch:
@@ -17,12 +28,40 @@ on:
         required: true
 
 jobs:
+  # which tag this run publishes, from what ref, and whether to run at all
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.d.outputs.tag }}
+      ref: ${{ steps.d.outputs.ref }}
+      go: ${{ steps.d.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            ver=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+            tag="v$ver"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              echo "$tag is already tagged: nothing to release"; go=false
+            else
+              echo "a new version on ${{ github.ref_name }}: releasing $tag"; go=true
+            fi
+            ref="${{ github.sha }}"
+          else
+            tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+            ref="$tag"; go=true
+          fi
+          { echo "tag=$tag"; echo "ref=$ref"; echo "go=$go"; } >> "$GITHUB_OUTPUT"
+
   check:
+    needs: detect
+    if: needs.detect.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ needs.detect.outputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -31,7 +70,7 @@ jobs:
       # refused it. A tag that is not the package's version stops here.
       - name: the tag is the package's version
         run: |
-          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          tag="${{ needs.detect.outputs.tag }}"
           ver=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           [ "${tag#v}" = "$ver" ] || { echo "tag $tag is not the package version $ver: bump pyproject.toml before releasing"; exit 1; }
           # the shim is the same version and pins exactly it (#303); a tag cut
@@ -45,21 +84,21 @@ jobs:
 
   # babyseat itself: one compiled wheel per platform (the field engine inside) + the sdist (wheels.yml)
   wheels:
-    needs: check
+    needs: [detect, check]
     uses: ./.github/workflows/wheels.yml
     with:
-      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      ref: ${{ needs.detect.outputs.ref }}
 
   # the membrane-seat shim, while shim/ carries it (delete the directory to stop publishing it). It ships the same
   # module as babyseat (see shim/membrane-seat/pyproject.toml for why), copied in here; it pins babyseat==version,
   # whose wheel carries the compiled engine
   shim:
-    needs: check
+    needs: [detect, check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ needs.detect.outputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -94,3 +133,46 @@ jobs:
           password: ${{ secrets.PYPI_TOKEN }}
           packages-dir: dist
           skip-existing: true
+
+  # MERGE = RELEASE (2026-11-11): after PyPI, tag the merged commit and publish the GitHub release from the version's
+  # CHANGELOG section. A release made with the workflow token starts no other workflow, so the Docker image is
+  # dispatched explicitly (a dispatch does start one). A patch line (release-*) is never marked latest.
+  release:
+    needs: [detect, publish]
+    if: github.event_name == 'push' && needs.detect.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.detect.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect.outputs.ref }}
+      - name: notes and title from the CHANGELOG
+        run: |
+          python3 - <<'PY'
+          import os, re
+          tag = os.environ["TAG"]
+          text = open("membrane/CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## " + re.escape(tag) + r"\b(.*)$", text, re.M)
+          if not m:
+              raise SystemExit(f"CHANGELOG.md has no '## {tag}' section: add it in the release PR")
+          rest = text[m.end():]
+          nxt = re.search(r"^## v", rest, re.M)
+          body = (rest[:nxt.start()] if nxt else rest).strip() + "\n"
+          head = m.group(1)
+          name = head.split("\u2014", 1)[1].strip() if "\u2014" in head else ""
+          open("notes.md", "w", encoding="utf-8").write(body)
+          open("title.txt", "w", encoding="utf-8").write(f"{tag} \u2014 {name}" if name else tag)
+          PY
+      - name: tag + GitHub release
+        run: |
+          latest=true
+          case "${{ github.ref_name }}" in release-*) latest=false ;; esac
+          gh release create "$TAG" --target "${{ needs.detect.outputs.ref }}" --title "$(cat title.txt)" \
+            --notes-file notes.md --latest="$latest"
+      - name: the Docker image
+        run: gh workflow run docker.yml -f tag="$TAG"
