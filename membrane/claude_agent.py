@@ -32,7 +32,7 @@ the ceiling.
 
 THE CEILING AND CONTINUE (#389's machinery): an answer that stops at the
 ceiling (or the backstop) is neither an error nor a silent cut. The reply
-carries CAPPED_KEY {session, calls}; the transcript row keeps it as CAP_MARK
+carries CAPPED_KEY {session, calls}; the transcript row keeps it as CAP_MARK (`capped`)
 and the chat offers Continue. Continue is a person's action only (never
 automatic, never on a background lane): it resumes the SAME SDK session
 (the SDK's `resume`, RESUME_KEY on the turn) with the same tools and options
@@ -129,7 +129,8 @@ TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
 TOOL_START_KEY = "membrane_tool_start"  # a streamed chunk: a call started (or was dropped)
 TOOLS_KEY = "membrane_tools"        # a buffered response: every tool Claude ran
 CAPPED_KEY = "membrane_capped"      # reply: the answer stopped at the ceiling (#425)
-CAP_MARK = "claudeCapped"           # transcript row: {session, turns, continued}
+CAP_MARK = "capped"                 # transcript row: {session, turns, continued} (#1120: local leaves too)
+OLD_CAP_MARK = "claudeCapped"       # its name before #1120: stored rows still carry it
 RESUME_KEY = "claude_resume"        # turn/body: resume this SDK session
 CONTINUE_FIELD = "claudeContinue"   # a person's POST: the capped message's id
 CONTINUE_TEXT = "Continue"          # the person's row a Continue adds
@@ -139,6 +140,15 @@ MAX_TURNS_SUBTYPE = "error_max_turns"   # the SDK's result subtype at the cap
 NO_AUTO_MEMORY_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"   # the CLI's own switch (build_options)
 QUOTA_ERRORS = ("rate_limit", "billing_error")   # an AssistantMessage error that
                                     # means out of tokens: the rung pauses (quota.py)
+
+
+def cap_of(info) -> dict | None:
+    """A transcript row's cap mark: `capped`, or the `claudeCapped` a row stored before #1120 carries."""
+    info = info if isinstance(info, dict) else {}
+    cap = info.get(CAP_MARK)
+    if not isinstance(cap, dict):
+        cap = info.get(OLD_CAP_MARK)
+    return cap if isinstance(cap, dict) else None
 
 
 class ContinueRefused(ValueError):
@@ -1076,6 +1086,7 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
     # #576: the SDK thread runs in the turn's context, so its tool calls carry the turn's chain
     threading.Thread(target=_W.carry(run), daemon=True, name="claude-agent").start()
     so_far: dict = {}                       # the answer's usage, step by step (#472)
+    steps = 0                               # #1120: the answer's API steps, on its usage
     while True:
         item = q.get()
         if item is _END:
@@ -1084,7 +1095,9 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
             raise item[1]
         if item[0] == "usage":
             _record_usage(item[1])
+            item = ("usage", {**item[1], "steps": steps})
         if item[0] == "step":                # the ledger (#450) and the usage so far (#472)
+            steps += 1
             u = item[1]["usage"]
             _record_step(u, item[1]["first"])
             for k in ("input_tokens", "cache_read_input_tokens",

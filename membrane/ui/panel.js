@@ -389,8 +389,9 @@ function isMove(p) {
  *  tool-call ceiling says so, with a Continue the person can press (once per
  *  answer; it gives a fresh ceiling). A row from before #425 says turns. */
 function capHtml(info) {
-  const cap = info && info.claudeCapped;
+  const cap = info && (info.capped || info.claudeCapped);    // #1120: `capped`; rows stored before it
   if (!cap || typeof cap !== "object") return "";
+  if (cap.split) return '<div class="ccap">⏸ stopped after its one step: the task goes back to the planner to be split.</div>';
   const calls = !cap.turns || !!cap.calls;
   const n = String(cap.calls || cap.turns || 50);
   const what = calls ? "the tool-call ceiling (" + escText(n) + " calls)" : "the turn cap (" + escText(n) + " turns)";

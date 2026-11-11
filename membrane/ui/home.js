@@ -787,6 +787,7 @@ function optShareFromPct(pct) {
 const BG_MINDS = [
   ["loops", "Goal worker", "the model that works your open goals"],
   ["cortex", "Idle thinker", "thinks ahead between your messages"],
+  ["workers", "Leaf tasks", "runs each goal task's one step (unset: the Goal worker's model)"],   // #1120
 ];
 const BG_AUTH = [["chat", "Same as the chat"], ["api-key", "API key"], ["login", "CLI login"]];
 
@@ -799,12 +800,14 @@ function backgroundRows(bg) {
   const opt = (v, label, cur) => `<option value="${zooEsc(v)}"${v === cur ? " selected" : ""}>${zooEsc(label)}</option>`;
   let html = '<h3 class="osec">Background work</h3>';
   for (const [mind, label, hint] of BG_MINDS) {
+    if (!(mind in bg)) continue;                       // a seat from before #1120 has no workers pick
     const cur = String(bg[mind] || "");
     const models = (bg.models || []).slice();
     if (cur && !models.includes(cur)) models.unshift(cur);
+    if (mind === "workers") models.unshift("");        // unset = the Goal worker's model
     html += `<div class="orow"><label class="olab" for="opt-${mind}">${zooEsc(label)}</label>` +
       `<select id="opt-${mind}" class="osel" data-opt="${mind}" aria-describedby="opt-${mind}-h">` +
-      models.map((m) => opt(m, m + (/:cloud$|-cloud$/.test(m) ? " ☁" : ""), cur)).join("") + "</select>" +
+      models.map((m) => opt(m, m === "" ? "same as the Goal worker" : m + (/:cloud$|-cloud$/.test(m) ? " ☁" : ""), cur)).join("") + "</select>" +
       `<p class="ohint" id="opt-${mind}-h">${zooEsc(hint)}</p>`;
     if (claude.has(cur)) {
       const a = String(bg[mind + "_auth"] || "chat");

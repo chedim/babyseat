@@ -118,13 +118,26 @@ def test_the_planner_can_split_a_task_before_it_runs(seat):
     assert st(seat, A) == "done" and st(seat, B) == "done"
 
 
-def test_a_parent_whose_sub_tasks_were_all_dropped_is_not_done(seat):
+def test_a_parent_whose_sub_tasks_were_all_dropped_is_dropped_too(seat):
+    # operator 2026-11-11: every piece dropped -> the task itself was dropped (not done, not left split)
     _workers(seat, {A: [CAPPED]})
     write(seat, GOAL, "plan", PLAN)
     _work(seat)
-    write(seat, GOAL, "plan", {"tasks": [{"key": "a1", "parent": "a"}]})
+    write(seat, GOAL, "plan", {"tasks": [{"key": "a1", "parent": "a"}, {"key": "a2", "parent": "a"}]})
     write(seat, GOAL, "plan", {"drop": ["a1"]})
-    assert st(seat, A) == "split"
+    assert st(seat, A) == "split"                           # a2 still open: not yet
+    write(seat, GOAL, "plan", {"drop": ["a2"]})
+    assert st(seat, A) == "dropped"
+
+
+def test_a_parent_with_one_done_and_the_rest_dropped_is_done(seat):
+    _workers(seat, {A: [CAPPED], A1: [{"text": "DONE a1"}], B: [{"text": "DONE b"}]})
+    write(seat, GOAL, "plan", PLAN)
+    _work(seat)
+    write(seat, GOAL, "plan", {"tasks": [{"key": "a1", "parent": "a"}, {"key": "a2", "parent": "a"}]})
+    write(seat, GOAL, "plan", {"drop": ["a2"]})
+    _work(seat)
+    assert st(seat, A) == "done"
 
 
 def test_bad_parents_are_refused_whole(seat):

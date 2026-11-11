@@ -6521,7 +6521,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                              "finish_reason": "stop"}],
                                 "usage": {"prompt_tokens": est_in,
                                           "completion_tokens": est_out,
-                                          "total_tokens": est_in + est_out}}))
+                                          "total_tokens": est_in + est_out,
+                                          "estimated": True}}))   # #1120: the ledger says so
                             self.wfile.flush()
                         continue
                     try:
@@ -6653,7 +6654,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 est_out = len(str(m0.get("content") or "")) // 4
                 resp_obj["usage"] = {"prompt_tokens": est_in,
                                      "completion_tokens": est_out,
-                                     "total_tokens": est_in + est_out}
+                                     "total_tokens": est_in + est_out,
+                                     "estimated": True}           # #1120: the ledger says so
                 resp_bytes = json.dumps(resp_obj).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

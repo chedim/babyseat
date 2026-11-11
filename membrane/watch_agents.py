@@ -1011,7 +1011,7 @@ class _LoopDrainer:
                         _note = str((out.get("capped") or {}).get("progress") or "").strip()
                         taken = False
                         GG.finish(srv, ent, GG.SPLIT, ("more than one step; what its one step did:\n" + _note)
-                                  if _note else "more than one step", session=sid)
+                                  if _note else "more than one step", session=sid, usage=out.get("usage"))
                         return GG.SPLIT
                     if isinstance(out.get("quota"), dict):
                         d = est.docs.get(ent)
@@ -1026,7 +1026,7 @@ class _LoopDrainer:
                         return "restart"         # #777: cut off by a restart -- left running, boot re-owes it
                     verdict, detail = GG.parse_worker(text)
                     taken = False
-                    GG.finish(srv, ent, verdict, detail, session=sid)
+                    GG.finish(srv, ent, verdict, detail, session=sid, usage=out.get("usage"))
                     return verdict
                 from . import llm as _LLM
                 _replan = ((est.docs.get(ent) or QuantumEntity(eid="")).properties or {}).get("replan")
@@ -1040,6 +1040,11 @@ class _LoopDrainer:
                     self._quota_park(ev, str(out["quota"].get("model") or ""))
                     return "held"
                 text = str(out.get("text") or out.get("verdict_text") or "")
+                try:
+                    with _W.as_writer("adapter:tasks"):
+                        GG.note_planner_usage(srv, ent, out.get("usage"))   # #1120: the goal's ledger
+                except Exception:
+                    pass
                 try:
                     _LLM.answered(srv, ev, text, model=out.get("model"))
                     est.stamp_watch_decision(ent, {"verdict": "planned", "decision": text.strip()[-240:],

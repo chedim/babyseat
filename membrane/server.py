@@ -1470,8 +1470,13 @@ def _tokens_fill(a_info: dict, resp: dict) -> None:
                                      "reasoning": 0,
                                      "cache": {"read": 0, "write": 0}})
     u = (resp or {}).get("usage")
+    # #1120: the model's API steps -- a round is one, a claude-agent round reports its own count
+    _st = u.get("steps") if isinstance(u, dict) else None
+    a_info["steps"] = int(a_info.get("steps") or 0) + (int(_st) if isinstance(_st, int) and _st > 0 else 1)
     if not isinstance(u, dict) or not u:
         return
+    if u.get("estimated"):
+        a_info["tokensEstimated"] = True      # #1120: the seat's estimate, not the model's count
 
     def _i(v):
         try:
@@ -1884,11 +1889,12 @@ class TurnRunner:
         with lock:
             row = self.messages.get_msg(sid, str(mid or ""))
             info = (row or {}).get("info") or {}
-            cap = info.get(_CA.CAP_MARK)
+            cap = _CA.cap_of(info)
             if not isinstance(cap, dict) or not cap.get("session"):
                 raise _CA.ContinueRefused("that message did not stop at the tool-call ceiling")
             if cap.get("continued"):
                 raise _CA.ContinueRefused("that answer was already continued")
+            info.pop(_CA.OLD_CAP_MARK, None)
             info[_CA.CAP_MARK] = dict(cap, continued=True)
             self.messages.append(sid, info, list(row.get("parts") or []))
         self.hub.publish({"type": "message.updated", "info": dict(info),
@@ -1983,9 +1989,15 @@ class TurnRunner:
             field_call = str(agent or "").strip().lower().startswith("field-call")
             # #729: a watch triage pass runs on the local idle model, never on Claude
             triage = str(agent or "").strip().lower().startswith("triage")
+            # #1120: a goal leaf (the worker lane) runs on the workers' pick when one is set
+            _wm = str(getattr(srv, "_workers_model", "") or "") \
+                if str(agent or "").strip().lower().startswith("worker") else ""
+            if _wm:
+                turn_model = _wm
+            mind = "workers" if _wm else "loops"
             if (lane == "listener" or field_call) and not triage and _CA.is_claude_rung(srv, turn_model) \
-                    and _MM.claude_allowed(srv, "loops", turn_model):
-                auth = _MM.credential_mode(srv, "loops")
+                    and _MM.claude_allowed(srv, mind, turn_model):
+                auth = _MM.credential_mode(srv, mind)
             else:
                 # THE CLAUDE-AGENT RUNG IS A PERSON'S (issue #384): a loop
                 # or a mind not picked onto it falls back to the seat's model
@@ -3695,6 +3707,7 @@ class TurnRunner:
             a_info.pop("finish", None)
         if not (a_info.get("tokens") or {}).get("total"):
             a_info["tokens"] = _tokens_estimate(history, parts)
+            a_info["tokensEstimated"] = True       # #1120: the ledger says when it is a guess
         # A TOOL CALL THAT NEVER RAN IS CLOSED (2026-10-11: a cut turn left an
         # `exec` 'pending' forever -- the operator saw it hang for minutes)
         _cut_now = int(time.time() * 1000)
@@ -4941,7 +4954,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     out = _MM.apply(psrv, loops=b.get("loops"), cortex=b.get("cortex"),
                                     think=b.get("think"), known=known or None,
                                     loops_auth=b.get("loops_auth"),
-                                    cortex_auth=b.get("cortex_auth"))
+                                    cortex_auth=b.get("cortex_auth"),
+                                    workers=b.get("workers"), workers_auth=b.get("workers_auth"))
                 except ValueError as e:
                     body = json.dumps({"error": str(e)}).encode()
                     self.send_response(400); self.send_header("Content-Type", "application/json")
