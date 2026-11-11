@@ -1339,6 +1339,41 @@ PARALLEL_READS = frozenset(("find", "query", "state", "graph", "entities_related
 PARALLEL_READS_MAX = 4
 
 
+# #1120 (operator 2026-11-11, "using getters?"): the tool families whose effects are the field's own writes -- a call
+# of theirs that wrote nothing in the field only read (a getter evaluated, an entity looked at). Calls of the others
+# (memory, peers, the shell) are judged by the read-only set alone.
+FIELD_FAMILIES = ("find", "entity", "exec", "goal", "track", "field_watch", "state")
+
+
+def call_reads(srv, name: str, args, wrote: bool) -> bool:
+    """#1120: did this call only read, judged by what it did? The read-only set (PARALLEL_READS) reads; a shell run
+    (code_run) acts; a method call reads when the field marks its method read_only (method bookkeeping is always
+    written); a call of the field's own families reads when it wrote nothing in the field."""
+    from . import toolset as _ts
+    n = str(name or "")
+    n = n[len("mcp__membrane__"):] if n.startswith("mcp__membrane__") else n
+    args = args if isinstance(args, dict) else {}
+    try:
+        n, args = _ts.resolve(n, args)
+    except Exception:
+        return False
+    if n in PARALLEL_READS:
+        return True
+    if n == "code_run":
+        return False
+    if n == "method_call":
+        try:
+            from . import night as _N
+            est = getattr(srv, "entity_store", None)
+            obj = est.resolve(str(args.get("object") or "")) if est is not None else None
+            m, _ = _N.resolve_method(est, obj, str(args.get("method") or "")) if obj is not None else (None, None)
+            return bool(m is not None and (m.properties or {}).get("read_only"))
+        except Exception:
+            return False
+    fams = {f for f, v in _ts.FAMILIES.items() if isinstance(v, dict) and n in set((v.get("actions") or {}).values())}
+    return bool(fams & set(FIELD_FAMILIES)) and not wrote
+
+
 def reads_only(calls) -> bool:
     """#1120: a round of tool calls that only reads -- every call, resolved like the round runs it, is one the seat
     marks read-only (PARALLEL_READS: the calls safe to run together). [(name, args)]; an empty round reads nothing."""
@@ -2957,6 +2992,8 @@ class TurnRunner:
         _refused: set = set()
         _text_only = False
         _acted = []                        # #1116/#1120: a worker's rounds of tool calls (True = it only read)
+        from . import writes as _WC
+        _wcid, _w0 = None, 0               # #1120: the worker turn's chain, its writes before the current call
         while not err_done and rounds < MAX_ROUNDS:
             rounds += 1
             self._turn_activity[sid] = time.time()   # THE ROUND'S TOUCH
@@ -3411,6 +3448,7 @@ class TurnRunner:
                     a_info[_CA.CAP_MARK] = {"session": str(_cap["session"]),
                                             "calls": int(_cap.get("calls")
                                                          or _CA.MAX_TOOL_CALLS_PER_ANSWER),
+                                            **({"steps": int(_cap["steps"])} if _cap.get("steps") else {}),
                                             "continued": False}
             _tokens_fill(a_info, resp)
             # A CUT IS NOT AN ANSWER (#449): a round the person's message (or
@@ -3515,9 +3553,10 @@ class TurnRunner:
                     mkpart({"type": "step-finish", "reason": "stop", "cost": 0,
                             "tokens": _step_tokens(a_info, history, parts)})
                     break
-                _acted.append(reads_only(((tc.get("function") or {}).get("name"),
-                                          _json_args((tc.get("function") or {}).get("arguments")))
-                                         for tc in tcs))
+                _acted.append(True)            # #1120: judged by what its calls did (below)
+                _wcid = (_WC.current() or {}).get("id")
+                if _wcid:
+                    _WC.watch_chain(_wcid)
             if tcs:
                 a_info["time"].setdefault("start", int(time.time() * 1000))
                 asst_msg = {"role": "assistant", "content": content or "",
@@ -3669,6 +3708,7 @@ class TurnRunner:
                                                    session=sid, kind=name_l)
                             except Exception:
                                 pass
+                            _w0 = _WC.chain_writes(_wcid)
                             _p = _pre.get(call_id)
                             if _p is not None and _p[0] == name_l:
                                 output = _p[1].result()
@@ -3682,6 +3722,10 @@ class TurnRunner:
                                 output = self.executor(name_l, args, call_id)
                             output = _claim_note(getattr(self, "srv", None), (self._agents or {}).get(sid),
                                                  name_l, args, output)
+                            if _acted:               # #1120: a worker's call that wrote in the field acted
+                                _acted[-1] = _acted[-1] and call_reads(
+                                    getattr(self, "srv", None), name_l, args,
+                                    _WC.chain_writes(_wcid) > _w0 if _wcid else True)
                         # THE TOOL'S TOUCH (the activity clock): a
                         # completed tool = the turn moved
                         self._turn_activity[sid] = time.time()
@@ -3748,6 +3792,8 @@ class TurnRunner:
             mkpart({"type": "step-finish", "reason": "stop", "cost": 0,
                     "tokens": _step_tokens(a_info, history, parts)})
             break
+        if _wcid:
+            _WC.watch_chain(_wcid, False)
         if "error" in a_info:
             a_info.pop("finish", None)
         if not (a_info.get("tokens") or {}).get("total"):
