@@ -70,6 +70,15 @@ def _bench_arm(name):
 
 HAVE_BENCH = THINGS_SETTLE.exists() and (BENCH / "58_voting_eight.py").exists()
 
+# words crossing K_MAT=3 mid-talk ("pottery", "glaze"), and ones said once or twice
+TALK = [("user", "I started a pottery class this spring."),
+        ("model", "Pottery sounds relaxing, what do you make?"),
+        ("user", "Mostly bowls with a green glaze for my pottery shelf."),
+        ("model", "A green glaze on bowls sounds lovely."),
+        ("user", "The glaze cracked once in the kiln."),
+        ("user", "My cousin's wedding is in June."),
+        ("model", "Will you make pottery for the wedding?")]
+
 # a fixed move log: (event, chat, [(thing, sentence step), ...]); every event a turn, in capture order
 LOG = [("k1", "c1", [("w:pottery", 0.9), ("w:pottery", 0.5), ("w:class", 0.4)]),
        ("k2", "c1", [("w:wedding", 0.7)]),
@@ -117,6 +126,27 @@ class Golden(unittest.TestCase):
             got = [k for k, _s in ML.settle(_port_field(), q, rounds=1)]
             self.assertEqual(got, want, q)
 
+    def test_settle_on_a_k_mat_3_field_matches_the_bench_on_a_k_mat_1_field(self):
+        from membrane import movelog as ML
+        BS = _bench_settle()
+        with mock.patch.object(EF, "K_MAT", 1):
+            f1 = _field()
+            keys = _say(f1, "c", TALK)
+        f3 = _field()
+        _say(f3, "c", TALK)
+        ml = f1.move_log                      # the bench's field: its moves (sum), worldlines (max), episodes
+        bf = types.SimpleNamespace(
+            moves={k: dict(ml.msum[k]) for k in keys if k in ml.msum},
+            worldlines={}, episodes={k: ("c", i) for i, k in enumerate(keys)},
+            graph_fn=f1.graph_fn, phrases=f1.phrases)
+        for k in keys:
+            for e, v in ml.moves.get(k, {}).items():
+                bf.worldlines.setdefault(e, []).append((float(keys.index(k)), k, v))
+        for q in ("What did I make in my pottery class?", "Which glaze cracked?", "When is the wedding?"):
+            want = [k for k, _s in BS.settle(bf, q, rounds=1, neighbors=True, move="max")]
+            got = [k for k, _s in ML.settle(f3, q, rounds=1)]
+            self.assertEqual(got, want, q)
+
     def test_entity_recall_matches_the_bench(self):
         from membrane import recall_vote as RV
         b58 = _bench_arm("58_voting_eight.py")
@@ -159,10 +189,45 @@ class Golden(unittest.TestCase):
 
 # ---- 1, 2: what the move log records -----------------------------------------------------------
 class Moves(unittest.TestCase):
-    def test_a_word_said_once_moves_nothing(self):
-        f = _field()                                     # K_MAT 3: a word lives at its third mention
+    def test_a_word_said_once_moves_as_on_the_bench(self):
+        f = _field()                                     # K_MAT 3: the field keeps it in the nursery ...
         k = _say(f, "c", [("user", "I saw a zebra.")])[0]
-        self.assertNotIn("w:zebra", f.move_log.moves.get(k, {}))
+        self.assertEqual(f.get("w:zebra").tier, "nursery")
+        self.assertGreater(f.move_log.moves[k]["w:zebra"], 0.0)   # ... and the move log moves it from its seed
+
+    def test_the_moves_match_a_k_mat_1_field_exactly(self):
+        f3 = _field()
+        with mock.patch.object(EF, "K_MAT", 1):
+            f1 = _field()
+            _say(f1, "c", TALK)
+        _say(f3, "c", TALK)
+        self.assertEqual(f3.get("w:pottery").tier, "live")             # crossed K_MAT=3 mid-talk
+        for name in ("moves", "msum"):
+            a, b = getattr(f1.move_log, name), getattr(f3.move_log, name)
+            self.assertEqual(set(a), set(b))
+            for k in a:
+                self.assertEqual(set(a[k]), set(b[k]), k)
+                for e in a[k]:
+                    self.assertAlmostEqual(a[k][e], b[k][e], places=5, msg=(name, k, e))
+
+    def test_the_backfill_matches_too(self):
+        from membrane import movelog as ML
+        be = MemBackend()
+        f = _field(be)
+        keys = _say(f, "c", TALK)
+        want = {k: dict(f.move_log.moves[k]) for k in keys}
+        f.flush()
+        for dk, d in list(be.scan("entity_deltas", {"origin": f.origin, "mv": 1})):   # as 0.7.51 wrote it
+            be.upsert("entity_deltas", dk, {x: v for x, v in d.items()
+                                            if x not in ("mv", "moves", "msum", "chat", "turn")})
+        g = _field(be)
+        calls = g.emb.calls
+        ML.of(g).backfill(g)
+        self.assertEqual(g.emb.calls, calls)                           # no embedder: stored vectors and seeds only
+        for k in keys:
+            self.assertEqual(set(ML.of(g).moves[k]), set(want[k]), k)
+            for e, v in want[k].items():
+                self.assertAlmostEqual(ML.of(g).moves[k][e], v, places=4, msg=(k, e))
 
     @mock.patch.object(EF, "K_MAT", 1)
     def test_settle_reads_the_max_entity_recall_the_sum(self):

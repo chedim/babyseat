@@ -137,6 +137,16 @@ def at_stored(v) -> np.ndarray:
     return np.asarray(unpack_f16(v), dtype=float)
 
 
+def move_step(before, x) -> float:
+    """How far an update moves a state: |GAIN (x - before)| (the move log, 0.7.52)."""
+    return float(np.linalg.norm(GAIN * (np.asarray(x, dtype=np.float32) - np.asarray(before, dtype=np.float32))))
+
+
+def move_to(before, x) -> np.ndarray:
+    """The state after an update, at its stored precision (EntityField._update's own rule)."""
+    return at_stored(unit(before + GAIN * (x - before)))
+
+
 def f32(v) -> np.ndarray:
     return np.asarray(v, dtype=np.float32).astype(np.float64)
 
@@ -340,7 +350,7 @@ class EntityState:
                                                # exactly like accr on replay)
     last_pos: tuple = (-1, -1)                 # (seq, sentence index) applied
     recent: list = field(default_factory=list)
-    pending: list = field(default_factory=list)  # nursery: [sid, seq, sidx, stream, ev, ts, role]
+    pending: list = field(default_factory=list)  # nursery: [sid, seq, sidx, stream, ev, ts, role, logged]
     distinct: list = field(default_factory=list)
     conflicts: list = field(default_factory=list)
     activity: float | None = None
@@ -484,6 +494,7 @@ class EntityField:
         self._lock = threading.RLock()
         from .movelog import MoveLog
         self.move_log = MoveLog()        # 0.7.52: how far each event moved each thing (movelog.py)
+        self._mv_replay = False          # this update replays a mention the move log already holds
         # called (key, event doc, message vector) after each live event is
         # applied -- the watch and intent boards; must be cheap, never raise
         self.listeners: list = []
@@ -1249,9 +1260,10 @@ class EntityField:
         before = st.state
         align = (float(unit(st.mean) @ x) - float(self._ostats["pair"])
                  if st.mean is not None else 0.0)
-        # THE MOVE LOG (0.7.52, movelog.py): how far this event moved this thing
-        self.move_log.note(evkey, st.eid, float(np.linalg.norm(GAIN * (np.asarray(x, dtype=np.float32)
-                                                                        - np.asarray(before, dtype=np.float32)))))
+        # THE MOVE LOG (0.7.52, movelog.py): how far this event moved this thing (a materialization's replay
+        # is already in it: those mentions moved it from its seed as they landed, _nursery_move)
+        if not self._mv_replay:
+            self.move_log.note(evkey, st.eid, move_step(before, x))
         # every value kept at its STORED precision, so a restart (a reload
         # from the backend) never changes a later result
         st.state = at_stored(unit(before + GAIN * (x - before)))
@@ -1308,6 +1320,23 @@ class EntityField:
             st.last_x = unpack_f16(pack_f16(x))      # the stored precision
         self._deltas[dkey] = row
 
+    def _nursery_move(self, st: EntityState, key: str, x) -> bool:
+        """THE MOVE LOG for a thing still in the nursery (0.7.52): the move a K_MAT=1 field's _update makes -- from
+        the seed, through the thing's earlier pending mentions in order, to this one -- without materializing it
+        (the field's own K_MAT is unchanged). Recomputed from the pending list (under K_MAT entries), so nothing
+        is held between mentions and a restart gives the same steps."""
+        try:
+            sv = at_stored(self._seed(st.surface or st.eid.split(":", 1)[-1]))
+            pend = sorted(st.pending, key=lambda p: (p[1], p[2]))
+            vecs = self.b.get_multi("sentences", [p[0] for p in pend]) if pend else {}
+            for p in pend:
+                if p[0] in vecs:
+                    sv = move_to(sv, unit(vecs[p[0]]["vec"]))
+            self.move_log.note(key, st.eid, move_step(sv, x))
+            return True
+        except Exception:
+            return False
+
     def _materialize(self, st: EntityState, seed=None) -> None:
         st.seed = self._seed(st.surface or st.eid.split(":", 1)[-1]) if seed is None else seed
         st.state = at_stored(st.seed)
@@ -1315,11 +1344,16 @@ class EntityField:
         pend = sorted(st.pending, key=lambda p: (p[1], p[2]))
         vecs = self.b.get_multi("sentences", [p[0] for p in pend])
         st.pending, st.distinct = [], []
-        for p in pend:
-            sid, seq, sidx, stream, evkey, ts = p[:6]
-            role = p[6] if len(p) > 6 else ""        # pre-split pendings: no role
-            if sid in vecs:
-                self._update(st, unit(vecs[sid]["vec"]), stream, sid, seq, sidx, evkey, ts, role)
+        try:
+            for p in pend:
+                sid, seq, sidx, stream, evkey, ts = p[:6]
+                role = p[6] if len(p) > 6 else ""        # pre-split pendings: no role
+                # a mention the move log already holds (logged as it landed) is not logged twice
+                self._mv_replay = bool(len(p) > 7 and p[7])
+                if sid in vecs:
+                    self._update(st, unit(vecs[sid]["vec"]), stream, sid, seq, sidx, evkey, ts, role)
+        finally:
+            self._mv_replay = False
         self._dirty.add(st.eid)
         _born = getattr(self, "pulse_born", None)
         if _born is not None:
@@ -1407,8 +1441,9 @@ class EntityField:
             if st is None:
                 continue                  # the dust cap: no state born
             if st.tier == "nursery":
+                logged = self._nursery_move(st, key, X[sidx])
                 st.pending.append([sids[sidx], seq, sidx, stream, key, ts,
-                                   ev.get("role") or ""])
+                                   ev.get("role") or "", logged])
                 if sids[sidx] not in st.distinct:
                     st.distinct.append(sids[sidx])
                 self._dirty.add(eid)
@@ -1470,7 +1505,8 @@ class EntityField:
             if i in skip or X[i] is None:
                 continue
             if st.tier == "nursery":
-                st.pending.append([sid, seq, i, stream, key, ts, ev.get("role") or ""])
+                logged = self._nursery_move(st, key, X[i])
+                st.pending.append([sid, seq, i, stream, key, ts, ev.get("role") or "", logged])
                 if sid not in st.distinct:
                     st.distinct.append(sid)
                 self._dirty.add(st.eid)

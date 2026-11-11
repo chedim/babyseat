@@ -315,10 +315,12 @@ DATE / TIME + dateparser); the original read the trained readers' TIME labels.
 Each voter is filtered to answerable events before its cut to 20 and reads the plain question vector (the
 banner's blend with the previous turn shapes the pool, not the vote). The pool is the seat's own field, all of it:
 every chat, every person, internal chats, tool outputs. The move log is recorded as each event applies
-(`EntityField._update` only: a thing still in the nursery -- said fewer than K_MAT times -- moves nothing, so a word
-said once is no cue), keeps both the largest and the summed move, and rides the event's index delta row; a
-materialization that replays older mentions re-writes their rows, a restart loads them in capture order, and
-events from before 0.7.52 are backfilled once (specific things only) behind a done-marker. Each event's text is
+(`EntityField._update`; a thing still in the nursery -- said fewer than K_MAT times -- moves exactly as a K_MAT=1
+field's update would, from its seed through its earlier mentions, as on the bench, which ran with K_MAT=1; the
+field's own K_MAT is unchanged), keeps both the largest and the summed move, and rides the event's index delta row;
+a materialization that replays older mentions re-writes their rows (a mention already logged is not logged twice),
+a restart loads them in capture order, and events from before 0.7.52 are backfilled once behind a done-marker
+(specific things from their delta rows, words from their stored seeds and sentence vectors -- no embedder). Each event's text is
 parsed once by spaCy when it lands (a background worker, `annotations` rows `ih:<key>`, with its moments: each
 DATE / TIME phrase placed by dateparser from when it was said, else when it was said); at ask time only the
 question is parsed, under one spaCy lock, and only once spaCy is loaded -- never loaded in a turn. An ask reads

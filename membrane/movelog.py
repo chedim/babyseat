@@ -2,7 +2,7 @@
 field (every chat, every person, tool outputs), recorded at capture and kept with the field.
 
   moves      event key -> {thing: its largest single-sentence move} (|GAIN (x - before)|, the field's own update,
-             recorded in EntityField._update only -- a thing still in the nursery moves nothing, as on the bench)
+             recorded in EntityField._update, and for a nursery thing as a K_MAT=1 field's update would)
   msum       event key -> {thing: the sum of its sentences' moves} (the bench's field.moves; entity recall reads it)
   turns      each event's place in its chat by seq; its neighbor is the previous TURN (a person's or the model's
              discourse line) in that chat, never a tool output
@@ -10,8 +10,11 @@ field (every chat, every person, tool outputs), recorded at capture and kept wit
   kept       both maps ride the event's one index delta row ('e:<key>': `mv`, `moves`, `msum`, `chat`, `turn`); a
              materialization replay that raises an older event's moves re-writes that row at the next flush; a
              restart loads the rows in capture order (seq), nothing is replayed. Events applied before 0.7.52 are
-             backfilled once (a done-marker keeps later boots from scanning again) from their stored delta rows:
-             specific things only (words and phrases keep no delta row)
+             backfilled once (a done-marker keeps later boots from scanning again): specific things from their
+             stored delta rows, words and phrases as a K_MAT=1 field moves them (stored seed and sentence vectors)
+  nursery    the bench ran with K_MAT=1 (every word lives at its first mention), so a thing still in this field's
+             nursery moves too: exactly as a K_MAT=1 _update would, from its seed through its earlier mentions
+             (EntityField._nursery_move) -- the field's own K_MAT is unchanged
 
 settle(): the question's things (eids.mentions_of), each weighed by its rarity log(events / events holding it);
 round 1 scores each event by its cued things' held moves x their rarity. Ask time reads only the cued things'
@@ -184,13 +187,22 @@ class MoveLog:
         self.gen += 1
 
     def backfill(self, field, batch: int = 500, stop=None) -> int:
-        """Events applied before the move log (no `mv` on their index row): their moves from their stored delta rows
-        (a specific thing's row keeps gain and cos_before: step = gain x sqrt(2 - 2 cos); max and sum over its
-        sentences). Words and phrases keep no delta row: they get nothing (a word said before 0.7.52 is no cue
-        until it is said again). Once: a done-marker skips the scan on later boots. Background only."""
+        """Events applied before the move log (no `mv` on their index row), once (a done-marker skips the scan on
+        later boots); background only, no embedder:
+          a specific thing   its stored delta rows (gain and cos_before: step = gain x sqrt(2 - 2 cos))
+          a word or phrase   (no delta row) the K_MAT=1 field's moves: from its STORED seed through its mentions in
+                             order, each step |GAIN (x - state)| on the STORED sentence vector; a word whose seed
+                             is not stored is skipped"""
+        from .efield import move_step, move_to, unit, at_stored
+        from .efstore import unpack_f16
         if field.b.get("annotations", DONE_KEY + field.origin):
             return 0
         idx, mx, sm = {}, {}, {}
+
+        def put(ev, e, s):
+            a, b = mx.setdefault(ev, {}), sm.setdefault(ev, {})
+            a[e] = max(a.get(e, 0.0), s)
+            b[e] = b.get(e, 0.0) + s
         for k, d in field.b.scan("entity_deltas", {"origin": field.origin}):
             ev, e = d.get("event"), str(d.get("eid") or "")
             if not ev or not e:
@@ -200,25 +212,49 @@ class MoveLog:
                     idx[ev] = (k, d)
                 continue
             c = float(d.get("cos_before", 1.0))
-            s = float(d.get("gain", 0.0)) * math.sqrt(max(0.0, 2.0 - 2.0 * c))
-            a, b = mx.setdefault(ev, {}), sm.setdefault(ev, {})
-            a[e] = max(a.get(e, 0.0), s)
-            b[e] = b.get(e, 0.0) + s
-        done = 0
+            put(ev, e, float(d.get("gain", 0.0)) * math.sqrt(max(0.0, 2.0 - 2.0 * c)))
         todo = sorted(idx.items(), key=lambda kv: int(kv[1][1].get("seq") or 0))
+        docs: dict = {}
+        words: dict = {}                       # word -> [(seq, sidx, event, sid, surface)]
         for lo in range(0, len(todo), max(1, batch)):
             if stop is not None and stop():
-                return done
-            part = todo[lo:lo + batch]
-            evs = field.b.get_multi("events", [ev for ev, _ in part])
+                return 0
+            got = field.b.get_multi("events", [ev for ev, _ in todo[lo:lo + batch]])
+            for ev, d in got.items():
+                docs[ev] = {"session": d.get("session"), "seq": d.get("seq"), "stream": d.get("stream"),
+                            "role": d.get("role"), "mentions": d.get("mentions") or []}
+                sids = d.get("sids") or []
+                for m in d.get("mentions") or []:
+                    e, sidx = m[0], int(m[1])
+                    if e.split(":", 1)[0] in ("w", "p") and sidx < len(sids):
+                        words.setdefault(e, []).append((int(d.get("seq") or 0), sidx, ev, sids[sidx],
+                                                        m[2] if len(m) > 2 else ""))
+        for e, ms in words.items():
+            if stop is not None and stop():
+                return 0
+            ms.sort(key=lambda t: (t[0], t[1]))
+            t = field.b.get("terms", field._term_key(ms[0][4] or e.split(":", 1)[-1]))
+            if not t or t.get("vec") is None:
+                continue
+            sv = at_stored(unpack_f16(t["vec"]))
+            vecs = field.b.get_multi("sentences", list({m[3] for m in ms}))
+            for _seq, _sidx, ev, sid, _surf in ms:
+                if sid not in vecs:
+                    continue
+                x = unit(vecs[sid]["vec"])
+                put(ev, e, move_step(sv, x))
+                sv = move_to(sv, x)
+        done = 0
+        for lo in range(0, len(todo), max(1, batch)):
             out = {}
-            for ev, (rk, row) in part:
-                doc = evs.get(ev)
+            for ev, (rk, row) in todo[lo:lo + batch]:
+                doc = docs.get(ev)
                 if not doc:
                     continue
+                order = list(dict.fromkeys([m[0] for m in doc["mentions"]] + list(mx.get(ev, {}))))
                 new = dict(row, mv=1, chat=str(doc.get("session") or ""), turn=is_turn(doc),
-                           moves={e: round(v, 5) for e, v in mx.get(ev, {}).items()},
-                           msum={e: round(v, 5) for e, v in sm.get(ev, {}).items()})
+                           moves={e: round(mx[ev][e], 5) for e in order if e in mx.get(ev, {})},
+                           msum={e: round(sm[ev][e], 5) for e in order if e in sm.get(ev, {})})
                 with self.lock:
                     self._take(ev, new)
                 out[rk] = new
