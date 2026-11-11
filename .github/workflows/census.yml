@@ -25,12 +25,16 @@ jobs:
                     open(".github/census/hatched.json", "w"), ensure_ascii=False, indent=1)
           # ALIVE (est.): seats upgrade when a release lands -- the known-OS downloads on the latest
           # release's day and the two days after it (our own release checks included)
+          # the newest release whose 3 days pypistats already has (it lags a day)
           pj = get("https://pypi.org/pypi/babyseat/json")
-          day0 = min(dt.date.fromisoformat(f["upload_time"][:10]) for f in pj["urls"])
+          have = max(dt.date.fromisoformat(r["date"]) for r in rows)
+          rels = sorted(((min(dt.date.fromisoformat(f["upload_time"][:10]) for f in fs), v)
+                         for v, fs in pj["releases"].items() if fs), reverse=True)
+          day0, ver = next((d, v) for d, v in rels if d + dt.timedelta(2) <= have)
           days = {str(day0 + dt.timedelta(d)) for d in range(3)}
           alive = sum(r["downloads"] for r in rows if r["date"] in days)
           json.dump(badge("🐣 Blurps alive (est.)", f"~{alive:,}",
-                          f"known-OS PyPI downloads in the 3 days from the latest release ({pj['info']['version']}, {day0})"),
+                          f"known-OS PyPI downloads in the 3 days from release {ver} ({day0})"),
                     open(".github/census/alive.json", "w"), ensure_ascii=False, indent=1)
           print(n, alive, sorted(days))
           PY
