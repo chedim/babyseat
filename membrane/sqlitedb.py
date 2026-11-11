@@ -94,6 +94,35 @@ def _parse_select(sql: str):
 
 
 class Database:
+    """The field's SQLite store (#1111): the native engine's `membrane_vm.Db` (one SQLite per process, in
+    Rust); the Python sqlite3 module is not used. Same API and `<dir>/<name>.sqlite3` layout as before.
+    Without the native extension it falls back to `PyDatabase` (the old Python implementation)."""
+
+    def __new__(cls, name: str, directory: str, scope: str = "membrane"):
+        try:
+            from . import membrane_vm as MV
+            native = getattr(MV, "Db", None)
+        except ImportError:
+            native = None
+        if native is None:
+            return PyDatabase(name, directory, scope)
+        self = object.__new__(cls)
+        self._native = native(name, str(directory))
+        self.scope = scope
+        self.file = self._native.file
+        self.h = self._native
+        return self
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __getattr__(self, attr):
+        if attr.startswith("__") or attr == "_native":
+            raise AttributeError(attr)
+        return getattr(self._native, attr)
+
+
+class PyDatabase:
     """One SQLite database: ONE connection, ONE thread (cblite.Database's contract)."""
 
     def __init__(self, name: str, directory: str, scope: str = "membrane"):

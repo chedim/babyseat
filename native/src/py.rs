@@ -464,6 +464,7 @@ fn membrane_vm(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<VecStore>()?;
     m.add_class::<MappedVecs>()?;
     m.add_class::<Fields>()?;
+    m.add_class::<crate::db::Db>()?;
     m.add_function(wrap_pyfunction!(evaluate, m)?)?;
     m.add_function(wrap_pyfunction!(fingerprints, m)?)?;
     Ok(())

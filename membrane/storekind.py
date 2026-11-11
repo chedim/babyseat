@@ -167,8 +167,11 @@ def _lock(d: Path):
 
 def _colls(db, kind: str) -> list[str]:
     if kind == "sqlite":
-        rows = db.cx.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'c_%'").fetchall()
-        have = [r[0][2:] for r in rows]
+        if hasattr(db, "tables"):
+            have = [t[2:] for t in db.tables()]
+        else:
+            rows = db.cx.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'c_%'").fetchall()
+            have = [r[0][2:] for r in rows]
         return [c for c in SEAT_COLLECTIONS if c in have] + [c for c in have if c not in SEAT_COLLECTIONS]
     return list(SEAT_COLLECTIONS)
 
