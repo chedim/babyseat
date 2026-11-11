@@ -730,7 +730,7 @@ def _close_listeners(servers) -> None:
 
 def main() -> None:
     from .bootprof import Laps
-    _boot_laps = Laps("boot")          # #1115: each step's wall time, one [boot] line once up
+    _boot_laps = Laps("boot", cpu=time.thread_time)   # #1115: each step's wall (+ cpu) time, one [boot] line
     _boot_laps.step("setup")
     args = _build_ap().parse_args()
     # JWT MODE (jwtauth.py, docs/auth.md): off unless a secret is set; a bad
@@ -1247,6 +1247,7 @@ def main() -> None:
             srv.entity_store._events_pool = srv.events_pool
         if getattr(srv, "efield", None) is not None:
             srv.efield._est_sink = srv.entity_store
+        _boot_laps.step("entity seeds")
         # THE BOOT ENTITY (the operator's ask): one immutable record
         # per boot (host/root/field/pid/argv/boot_ts) + the lineage
         # link + the presence's current-boot facts:
@@ -1411,6 +1412,7 @@ def main() -> None:
                 print("[seat] interface planted: remote_executor (exec(code, timeout))", file=sys.stderr)
         except Exception as e:
             print(f"[seat] interface seeding skipped ({e})", file=sys.stderr)
+        _boot_laps.step("autonode")
         srv.autonode = None
         if not args.no_autonode:
             try:
@@ -1443,6 +1445,7 @@ def main() -> None:
         #      goal) -- the listeners wake on the board's authority, not
         #      on runtime state. The pool is live by now (the field's
         #      boot wired it); the loops drain it when the day starts.
+        _boot_laps.step("goal board")
         try:
             _ib = _intents_board(srv)
             if _ib is not None and _ib.selection is not None:
@@ -1487,6 +1490,7 @@ def main() -> None:
         # + the PEER CHANNEL (permanent, a chat lane between the LLMs,
         # visible on every seat's banner). Degraded silently when
         # couchbase is down (the same covenant as the entity layer).
+        _boot_laps.step("peers")
         try:
             from .peers import PeerSubstrate
             # THE ROSTER FALLBACK (stage 5): when the ephemeral registry
@@ -1509,6 +1513,7 @@ def main() -> None:
         # the conversation's direction is the thing worth watching. The
         # story renders from the fresh tail (nothing tags 'now'; everything
         # is now); the position drifts with the momentum EMA + fresh states.
+        _boot_laps.step("tracks + scripts")
         evicted_boot = srv.entity_store._enforce_cap()
         if evicted_boot:
             print(f"[opencode] track cap: evicted {evicted_boot} "

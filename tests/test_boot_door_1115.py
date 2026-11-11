@@ -163,7 +163,7 @@ class ARealBoot(unittest.TestCase):
                 if "[boot] " in log:
                     break
                 time.sleep(0.1)
-            self.assertRegex(log, r"\[boot\] [\d.]+s: .*field rows [\d.]+s, .*serve [\d.]+s")
+            self.assertRegex(log, r"\[boot\] [\d.]+s: .*field rows [\d.]+s \(cpu [\d.]+s\), .*serve [\d.]+s")
         finally:
             proc.terminate()
             try:

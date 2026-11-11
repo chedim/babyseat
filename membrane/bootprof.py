@@ -11,10 +11,14 @@ import time
 
 
 class Laps:
-    def __init__(self, tag: str, clock=time.monotonic, echo=None):
-        self.tag, self.clock, self.echo = tag, clock, echo
+    def __init__(self, tag: str, clock=time.monotonic, echo=None, cpu=None):
+        """`cpu`: a second clock (the boot passes time.thread_time: its own thread's CPU time),
+        shown beside each lap -- wall far above cpu = the step waited (other threads, the disk)."""
+        self.tag, self.clock, self.echo, self.cpu = tag, clock, echo, cpu
         self.t0 = self.t = clock()
+        self.c = cpu() if cpu else 0.0
         self.laps: list[tuple[str, float]] = []
+        self.cpus: list[float] = []
         self.now: str | None = None
 
     def mark(self, step: str) -> float:
@@ -22,6 +26,10 @@ class Laps:
         t = self.clock()
         dt = t - self.t
         self.t = t
+        if self.cpu:
+            c = self.cpu()
+            self.cpus.append(c - self.c)
+            self.c = c
         self.laps.append((step, dt))
         if self.echo is not None:
             print(f"[{self.tag}] {step} {dt:.1f}s", file=self.echo, flush=True)
@@ -41,7 +49,8 @@ class Laps:
         if self.now is not None:
             self.mark(self.now)
             self.now = None
-        steps = ", ".join(f"{s} {dt:.1f}s" for s, dt in self.laps)
+        steps = ", ".join(f"{s} {dt:.1f}s" + (f" (cpu {self.cpus[i]:.1f}s)" if self.cpu else "")
+                          for i, (s, dt) in enumerate(self.laps))
         return f"[{self.tag}] {self.t - self.t0:.1f}s: {steps}"
 
 

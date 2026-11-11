@@ -56,7 +56,27 @@ class TheLaps(unittest.TestCase):
         self.assertEqual(laps.done(), "[boot] 4.0s: start 3.0s, a 1.0s")
 
 
+class TheCpuColumn(unittest.TestCase):
+    """Memo's first profile: `entities 206.3s` -- wall time alone cannot say whether the step
+    computes or waits (other threads holding the GIL, the disk). With a cpu clock (the boot thread's
+    own CPU time) each lap shows both."""
+
+    def test_each_lap_shows_the_boot_threads_cpu(self):
+        c, cpu = _Clock(), _Clock()
+        laps = Laps("boot", clock=c, cpu=cpu)
+        laps.step("entities")
+        c.t += 200.0
+        cpu.t += 40.0
+        self.assertEqual(laps.done(), "[boot] 200.0s: entities 200.0s (cpu 40.0s)")
+
+
 class TheSeatUsesThem(unittest.TestCase):
+    def test_the_boot_counts_its_threads_cpu_and_splits_the_entities_step(self):
+        main = SRC[SRC.index("\ndef main() -> None:"):]
+        self.assertIn('Laps("boot", cpu=time.thread_time)', main)
+        for step in ("entity seeds", "goal board", "tracks + scripts"):
+            self.assertIn(f'_boot_laps.step("{step}")', main)
+
     def test_the_boot_prints_its_profile_before_the_signals(self):
         main = SRC[SRC.index("\ndef main() -> None:"):]
         line = main.index("_boot_laps.done()")
