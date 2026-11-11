@@ -407,6 +407,39 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
     return "\n".join(L) + "\n"
 
 
+def _message_in_full(srv, spec: str, ent) -> dict | None:
+    """A message entity (membrane::msg:<id>, or the spec naming one) -> the stored
+    chat message whole: role, who, time, chat and text (the serve runner's
+    MessageStore); the entity's own kept text when the store has no such row.
+    None when the spec isn't a message."""
+    from .convgraph import MSG, msg_eid
+    mid = ""
+    if ent is not None and getattr(ent, "cls", None) == "Message":
+        mid = str((ent.properties or {}).get("mid") or "")
+    else:
+        s = str(spec or "").strip()
+        for pre in (MSG, MSG.split("::", 1)[-1]):
+            if s.startswith(pre):
+                mid = s[len(pre):]
+                break
+    if not mid:
+        return None
+    runner = getattr(srv, "_loop_runner", None)
+    got = None
+    try:
+        got = runner.find_message_id(mid) if runner is not None else None
+    except Exception:
+        got = None
+    if got is None and ent is not None:
+        p = ent.properties or {}
+        ts = float(p.get("ts") or 0)
+        got = {"id": mid, "session": p.get("sid") or "", "role": p.get("role") or "",
+               "who": p.get("speaker") or p.get("role") or "",
+               "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else "",
+               "title": "", "text": str(p.get("text") or "")}
+    return {**got, "eid": msg_eid(mid)} if got else None
+
+
 def _efield_of(srv):
     from .efield import EntityField
     fld = getattr(srv, "efield", None)
@@ -7769,6 +7802,13 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                          "fragment)")
             self._json_err_raw(400, hint); return
         ent = est._resolve_spec(spec)
+        full = _message_in_full(srv, spec, ent)
+        if full is not None and (ent is None or ent.cls == "Message"):
+            # A CHAT MESSAGE (2026-11-11, Rosie forgot): the history index lists message
+            # entities; the read returns the stored message whole, not field fragments
+            self._json_out({"ok": True, "eid": full.pop("eid"), "cls": "Message",
+                            "properties": {k: full[k] for k in ("role", "who", "time", "session") if full.get(k)},
+                            "message": full, "getter": {"fired": False}}); return
         if ent is None:
             hint = est.miss_hint(spec) if hasattr(est, "miss_hint") else ""
             if hint:

@@ -41,6 +41,7 @@ import math
 import queue
 import sys
 import threading
+import time
 
 DEPTH = 20
 KIND_MODS = ("amod", "compound", "nmod")
@@ -413,6 +414,7 @@ class Store:
         if m is None:
             return
         for key, ev in items:
+            time.sleep(0)                              # 0.7.53: let an ask's thread in between texts
             with NLP_LOCK:
                 doc = m(_text_of(ev))
             row = read(doc)
@@ -429,6 +431,8 @@ class Store:
             except queue.Empty:
                 pass
             try:
+                from .movelog import BACKFILL_YIELD_S
+                time.sleep(BACKFILL_YIELD_S)           # 0.7.53: the backfill yields between batches
                 self.parse(batch)
                 if self.q.empty():                     # caught up: the next boot scans only past this seq
                     self.field.b.upsert("annotations", DONE_KEY + self.field.origin,

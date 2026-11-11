@@ -167,6 +167,13 @@ class TestDeltaIndexKeeps(unittest.TestCase):
                 if keys:
                     f.b.delete("entity_deltas", rnd.choice(keys))
             if step % 41 == 0:
+                # 0.7.53: after a delete the stale index is served while ONE background rebuild runs -- it
+                # converges to a rebuild once that settles (no rebuild on the caller's path)
+                for _ in range(10):
+                    f.deltas_of(eids[0])
+                    self.assertTrue(f.wait_delta_rebuild(5.0))
+                    if not f._deltas_stale and f._deltas_index_gen == f._dgen():
+                        break
                 got = {e: f.deltas_of(e) for e in eids}
                 kept_gen = f._deltas_index_gen
                 f.rebuild_delta_index()

@@ -11,8 +11,8 @@ identifiers:
     value: "10.5281/zenodo.23550667"
     description: "Concept DOI: all versions, resolves to the newest"
   - type: doi
-    value: "10.5281/zenodo.24120968"
-    description: "Version DOI of 0.7.5"
+    value: "10.5281/zenodo.24143379"
+    description: "Version DOI of 0.7.52"
 repository-code: "https://github.com/chedim/babyseat"
 license: MIT
 abstract: >-
@@ -30,7 +30,7 @@ keywords:
   - Home Assistant
   - real-time learning
   - child machine
-version: "0.7.51"
+version: "0.7.52"
 date-released: "2026-11-11"
 references:
   - type: article
