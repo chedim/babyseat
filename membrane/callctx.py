@@ -203,6 +203,14 @@ def pronoun(srv, word: str, sid: str | None = None):
     return None
 
 
+def held(srv, sid: str | None = None) -> list:
+    """#1105: what the chat's stack holds -- its entered frames, then this turn's touched -- for the map's rows."""
+    s = _st(srv)
+    k = sid if sid is not None else s["cur"]
+    out = [f["eid"] for f in _frames(s, k)] + list(s["turn"].get(k, []))
+    return list(dict.fromkeys(out))
+
+
 def line(srv, sid: str | None = None) -> str:
     s = _st(srv)
     k = sid if sid is not None else s["cur"]
