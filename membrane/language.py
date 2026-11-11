@@ -39,6 +39,9 @@ SEED_ADJECTIVES = {"open": "x.status == 'open'",
 _FIRST_SEEDS = {"closed": "x.status == 'closed'"}    # #812's first seeds, before the `seeded` marker
 _NLP: dict = {"m": None}
 MODEL = "en_core_web_sm"
+# ONE lock around every call into the shared spaCy model (this module's and instances.py's): blis aborts the
+# process when two threads parse at once on its memory pool (the 2026-11-01 crash dialog)
+NLP_LOCK = threading.Lock()
 
 
 def _nlp():
@@ -136,7 +139,8 @@ def _doc(text: str):
     if nlp is None:
         from .lang import NoGrammar
         raise NoGrammar(INSTALL)
-    return nlp(str(text or ""))
+    with NLP_LOCK:
+        return nlp(str(text or ""))
 
 
 # ---- the tree ------------------------------------------------------------------------------

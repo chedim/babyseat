@@ -293,6 +293,48 @@ operator-approved). The block sits outside the 900-char chat budget: at most
 Cost: the warm build is ~60-90 ms on a 4,500-event field (recall's pool scan
 indexes each session once and tests IN lists as sets).
 
+### The vote (0.7.52)
+
+The banner and `/membrane/ask` share one ranking path (`recall_banner.rank`): recall's pool (50) -> the scorer
+(current recall) -> **the vote** -> the reranker over the top 20 -> top k. The vote is the best recall of the
+2026-11-07 bench (`longmemeval/full_offline.py`), ported with nothing trained (`recall_vote.py`):
+
+| voter | weight | what it ranks |
+|---|---|---|
+| embedder | 0.125 | the direct lane's own top 20 |
+| entity recall | 0.75 | the 8 field things nearest the question, then the events that moved them most (Σ sim × the summed move) |
+| instance histories | 3 | `instances.py`: the tense rule's instances, Borda'd with the person timelines, the time ballot, the place ballot and current recall (91's order) |
+| move log | 2 | `movelog.py`: settling, one round -- the question's things weighed by rarity, each event by its largest move of them, the previous turn in its chat held (a person's or the model's line, never a tool output) |
+| word lane | 0.125 | the word lane's own top 20 (tool outputs too) |
+
+Borda: each voter's top 20 earns w × (20 − i), voters in alphabetical order, a stable sort. The weights are the
+mean of the two held-out folds (approved 2026-11-11); the bench's learned map (a ridge map fitted on LoCoMo's gold
+answers) and latest mentions (weight 0) are not ported. The time ballot is rebuilt without training (spaCy
+DATE / TIME + dateparser); the original read the trained readers' TIME labels.
+
+Each voter is filtered to answerable events before its cut to 20 and reads the plain question vector (the
+banner's blend with the previous turn shapes the pool, not the vote). The pool is the seat's own field, all of it:
+every chat, every person, internal chats, tool outputs. The move log is recorded as each event applies
+(`EntityField._update`; a thing still in the nursery -- said fewer than K_MAT times -- moves exactly as a K_MAT=1
+field's update would, from its seed through its earlier mentions, as on the bench, which ran with K_MAT=1; the
+field's own K_MAT is unchanged; never the embedder inside an apply: a word whose seed is not stored yet is seeded
+by a background worker in one batched call, then its move is noted), keeps both the largest and the summed move (a
+note is set per event, thing and sentence, so a re-apply, a rebuild or a re-embed never counts it twice), and rides
+the event's index delta row;
+a materialization that replays older mentions re-writes their rows (a mention already logged is not logged twice),
+a restart loads them in capture order, and events from before 0.7.52 are backfilled once behind a done-marker
+(specific things from their delta rows, words from their stored seeds and sentence vectors -- no embedder). Each event's text is
+parsed once by spaCy when it lands (a background worker, `annotations` rows `ih:<key>`, with its moments, one
+per verb clause as the bench's facts did: the clause's DATE / TIME phrase placed by dateparser from when it was
+said, else when it was said; no verb clause, no moment); at ask time only the question is parsed, under one spaCy
+lock shared with language.py (the worker takes it one text at a time, so an ask waits for one text at most), and
+only once spaCy is loaded -- never loaded in a turn; dateparser is imported at boot. An ask reads
+postings and indexes (the cued things, the heads, the speakers, the lemmas, the moments, the places by lemma and
+their seeds), never the whole field; a long person timeline or a wide time span is read through the question's
+lemma postings and a bounded first run. The banner's asker is kept per chat as lines apply.
+Without spaCy the vote runs without instance histories; without dateparser, without the time ballot. Not covered:
+the global field and peers (the seat's own field is the pool, operator 2026-11-11).
+
 ### The banner learns from use (#668, step 6)
 
 When the model **searches** (`query`, or `find` on memory) after the banner, the

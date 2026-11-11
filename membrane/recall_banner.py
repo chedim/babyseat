@@ -158,24 +158,43 @@ def score(feat: dict, weights: dict) -> float:
     return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z))))
 
 
-def rank(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True) -> list[dict]:
+def rank(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True,
+         field=None, asker: str = "") -> list[dict]:
     """The pool, best first: the policy (weights choice, rerank depth) is the field's (recall_policy, #980);
-    the old path runs when the field method fails."""
+    the old path runs when the field method fails. With the field (0.7.52), the scorer's order is current
+    recall, the vote (recall_vote.py) re-orders it over the whole field, and the reranker reads the vote's top."""
     from . import recall_policy as RPO
     if RPO.native_only():
-        return _rank_native(rows, text, weights, rerank)
+        return _rank_native(rows, text, weights, rerank, field, asker)
     try:
-        return _rank_policy(rows, text, weights, rerank, RPO)
+        return _rank_policy(rows, text, weights, rerank, RPO, field, asker)
     except Exception as e:
         RPO.fell_back("rank", e)
-        return _rank_native(rows, text, weights, rerank)
+        return _rank_native(rows, text, weights, rerank, field, asker)
 
 
-def _rank_policy(rows, text, weights, rerank, RPO):
+def _voted(out: list[dict], text: str, field, asker: str = "") -> list[dict]:
+    """The scorer's order (current recall) -> the vote's (0.7.52); the features follow the new order (inv_rank
+    is the vote's rank). Unchanged without the field, with MEMBRANE_VOTE=0, or when the vote fails."""
+    if field is None:
+        return out
+    from . import recall_vote as RV
+    if not RV.enabled():
+        return out
+    try:
+        voted = RV.vote(field, out, text, asker)
+    except Exception as e:
+        RV._once(f"vote: failed ({type(e).__name__}: {e}); the scorer's order kept")
+        return out
+    return [dict(r, feat=f) for r, f in zip(voted, features(voted, text))]
+
+
+def _rank_policy(rows, text, weights, rerank, RPO, field=None, asker=""):
     w, rr_weights = RPO.call("rank_policy", rows, weights)
     scored = [(score(f, w), i, r, f) for i, (f, r) in enumerate(zip(features(rows, text), rows))]
     scored.sort(key=lambda t: (-t[0], t[1]))
     out = [dict(r, score=s, feat=f) for s, _i, r, f in scored]
+    out = _voted(out, text, field, asker)
     top_n = RPO.call("rerank_top", rerank)
     if top_n and out:
         from . import recall_rerank as RR
@@ -202,7 +221,8 @@ def _policy_weights(w: dict) -> dict:
     return sub if isinstance(sub, dict) else {}
 
 
-def _rank_native(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True) -> list[dict]:
+def _rank_native(rows: list[dict], text: str, weights: dict | None = None, rerank: bool = True,
+                 field=None, asker: str = "") -> list[dict]:
     """The old path. The pool, best first by the scorer (ties keep recall's order). With the
     reranker ready (#680), the scorer's top RERANK_TOP rows are re-ordered by
     RERANK_WEIGHTS, which add its `bge` score; the rows below keep their place.
@@ -218,6 +238,7 @@ def _rank_native(rows: list[dict], text: str, weights: dict | None = None, reran
     scored = [(score(f, w), i, r, f) for i, (f, r) in enumerate(zip(features(rows, text), rows))]
     scored.sort(key=lambda t: (-t[0], t[1]))
     out = [dict(r, score=s, feat=f) for s, _i, r, f in scored]
+    out = _voted(out, text, field, asker)
     if rerank and out:
         from . import recall_rerank as RR
         top = out[:RR.RERANK_TOP]
@@ -276,6 +297,13 @@ def recent_ns(field, session: str, n: int = RECENT_TURNS) -> set:
             if d.get("stream") == "discourse" and d.get("n") is not None]
     rows.sort(key=lambda d: d.get("seq") or 0)
     return {d["n"] for d in rows[-n:]}
+
+
+def asker_of(field, session: str) -> str:
+    """Who asks in this chat: the speaker of its latest person line ('' when none), kept by the field as each line
+    applies (movelog.MoveLog.asker) -- never a scan of the chat."""
+    ml = getattr(field, "move_log", None)
+    return (ml.asker.get(session, "") if ml is not None and session else "") or ""
 
 
 def history_texts(field, session: str, text: str, n: int = HISTORY_TURNS) -> list[str]:
@@ -362,7 +390,8 @@ def build(field, text: str, session: str = "", prev: dict | None = None, n: int 
     t3 = _t.monotonic()
     skip = recent_ns(field, session)
     t4 = _t.monotonic()
-    ranked = rank(spk, text, load_weights(field))
+    # the vote reads the plain question (its own vector), never the blend above; the asker owns "my"
+    ranked = rank(spk, text, load_weights(field), field=field, asker=asker_of(field, session))
     rows = pick(ranked, text, n=n, skip=skip, ranked=ranked)
     t5 = _t.monotonic()
     lines = [line_of(r, now) for r in rows]
@@ -458,7 +487,8 @@ def c1f_call(ctx: dict, name: str, args: list):
     if name == "rerank":                          # rerank(rows, text, weights): best first, with score
         text = str(args[1] or ctx.get("text", "")) if len(args) > 1 else ctx.get("text", "")
         w = _policy_weights(args[2]) if len(args) > 2 and isinstance(args[2], dict) else None   # Memo's fix
-        ranked = rank(_full(ctx, args[0] if args else None), text, w if w is not None else load_weights(field))
+        ranked = rank(_full(ctx, args[0] if args else None), text, w if w is not None else load_weights(field),
+                      field=field)
         ctx["ranked"] = ranked
         ctx["timing"]["rank"] = _t.monotonic() - t0
         return [_light(ctx, r) for r in ranked]
