@@ -13,13 +13,18 @@ models), OpenAI-compatible cloud APIs, and Claude through the Claude Code engine
 Any OpenAI, Ollama or MCP client, Claude Code included, can talk to it
 ([models and clients](#models-and-clients)).
 
-> **The names.** **babyseat** is the whole project: the seat, its web UI,
+> **The names.**
+> **babyseat** is the whole project: the seat, its web UI,
 > Blurp (off in 0.7.5: `MEMBRANE_BLURP=1` turns it on), the Home Assistant integration and the Docker image
-> (`pip install babyseat`, `chedim/babyseat`). **membrane** is its memory and
+> (`pip install babyseat`, `chedim/babyseat`).
+>
+> **membrane** is its memory and
 > proxy, so the `membrane` command, Python module, `MEMBRANE_*` variables and
 > `.membrane` folders keep that name. Why "membrane": a living boundary that
 > absorbs what it already understands and passes the rest on
 > ([the maths](docs/math-findings.md)).
+>
+> **cliffhanger** is a reactive graph programming language that allows your LLM to program your field.
 
 ---
 
