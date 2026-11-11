@@ -177,11 +177,15 @@ class TestWindowSteps(unittest.TestCase):
                       [{"id": f"p{i}", "type": "text", "text": f"m{i}"}])
         return SV.TurnRunner(SV.SSEHub(), ss, ms, None, None, system="", model="glm")
 
+    CAP = 12            # 2026-11-11: the window is a token budget; MEMBRANE_HISTORY_MAX still caps the count
+
     def window(self, n):
-        return [m["content"] for m in self.runner(n)._prior_history("ses_t", "")]
+        with mock.patch.dict(os.environ, {"MEMBRANE_HISTORY_MAX": str(self.CAP)}):
+            return [m["content"] for m in self.runner(n)._prior_history("ses_t", "")
+                    if m["role"] != "system"]               # the older-messages index rides first
 
     def test_the_window_starts_on_a_step(self):
-        step, cap = SV.history_anchor_step(), SV.history_max_messages()
+        step, cap = SV.history_anchor_step(), self.CAP
         for n in range(cap, cap + 3 * step):
             w = self.window(n)
             first = int(w[0][1:])
@@ -192,7 +196,7 @@ class TestWindowSteps(unittest.TestCase):
 
     def test_the_start_holds_while_the_chat_grows_within_a_step(self):
         step = SV.history_anchor_step()
-        n0 = SV.history_max_messages() + 1                         # just past a step
+        n0 = self.CAP + 1                                          # just past a step
         firsts = {self.window(n)[0] for n in range(n0, n0 + step)}
         self.assertEqual(len(firsts), 1)
 
@@ -200,13 +204,14 @@ class TestWindowSteps(unittest.TestCase):
         self.assertEqual(self.window(5), [f"m{i}" for i in range(5)])
 
     def test_the_env_overrides(self):
-        with mock.patch.dict(os.environ, {"MEMBRANE_HISTORY_ANCHOR": "1",
-                                          "MEMBRANE_HISTORY_MAX": "6"}):
+        with mock.patch.dict(os.environ, {"MEMBRANE_HISTORY_ANCHOR": "1"}):
+            self.CAP = 6
             self.assertEqual(self.window(20), [f"m{i}" for i in range(14, 20)])
 
     def test_the_defaults(self):
         self.assertEqual(SV.history_anchor_step(), 4)
-        self.assertEqual(SV.history_max_messages(), 12)
+        self.assertIsNone(SV.history_max_messages())               # no count cap unless MEMBRANE_HISTORY_MAX
+        self.assertEqual(SV.history_token_budget(), 1500)
 
 
 if __name__ == "__main__":

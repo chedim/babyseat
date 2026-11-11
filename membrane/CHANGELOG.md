@@ -1,3 +1,21 @@
+## v0.7.52 (2026-11-11) — The best recall we have measured, now in the product
+
+A recall hotfix on 0.7.51: what we measured, users now get.
+
+- **The vote** (#1094): the best ranking measured so far, from the 2026-11-07 full LoCoMo test, now ranks recall's pool. The banner and `/membrane/ask` both use it. It is a weighted Borda over finders that each read the field differently:
+  - **the move log (weight 2):** how far each message moved the things the question names, with words moving from their first mention as in the bench;
+  - **instance histories (3):** which instance a "my / the / her X" means, the tense rule (did the sentence report a happening), and the person, time and place ballots;
+  - **entity recall (¾), the embedder (⅛) and the word lane (⅛).**
+  The weights are the mean of the two held-out halves of the 11-07 fit, approved by the operator. The pipeline is: pool → scorer → the vote → the reranker over the top 20.
+  - **Nothing is trained:** the learned answer map and the learned readers stay out, and spaCy reads directly. The time ballot was rebuilt from spaCy dates and dateparser (a new dependency); the original read the trained readers' TIME labels.
+  - **It covers the seat's whole field:** every chat, tool outputs and entity lines. Each message is parsed once, when it lands, and kept; nothing is re-parsed at ask time or on restart. Older events are backfilled once in the background.
+  - Ported against the bench's own code (golden tests on settle, entity recall and the instance build). Not re-measured for this release. `MEMBRANE_VOTE=0` turns it off. Follow-ups: #1099.
+- **History that doesn't forget** (#1100): a turn carries the recent messages in full up to 1,500 tokens, and before them an index of older messages (their `membrane::msg:` id, who, when) up to 500 tokens; `entity read` on a message id returns that message whole from the chat store. Goal, watch and loop notices no longer take history space in a person's chat. Until now the history was the last 12 messages, notices included, so a long chat lost its own earlier answers. `MEMBRANE_HISTORY_TOKENS` / `MEMBRANE_HISTORY_INDEX_TOKENS` override the budgets.
+- **The reranker is on for users** (#1092): bge-reranker-v2-m3 re-reads the top 20. The seat installs it at boot when it is missing (wheels only; CPU torch on Linux without an NVIDIA driver), Home Assistant on glibc included, under HA's own package pins. It is not installed on musl (Home Assistant OS and Container: torch has no musl builds) or under 8 GB of RAM. The Docker image has it baked in (CPU). `MEMBRANE_RERANK=0` turns it off. Until 0.7.51 it was an opt-in extra, so most seats ranked without it.
+- **A Blurp population badge** in the README: a rough estimate for now (all-time PyPI downloads and Docker pulls). A real count of seats, each counted once, replaces it later.
+- **Pronoun registers that make sense** (#1103): a register holds only real pronouns ("then" and "there" were registered as pronouns) and only concrete things (a file, goal, message, person, command), never a vague concept; it follows the person across their chats and expires after 3 of their messages that don't mention or touch the thing. Old bad registers are emptied the first time they're touched.
+- **No more pronoun intercepts:** when "run it" could mean two things, membrane still shows `"it": a or b?`, but the model's turn runs, told the readings. Until now the turn stopped and the model never ran. The model asking instead is #1093.
+
 ## v0.7.51 (2026-11-11) — Home Assistant: the logo, musl wheels, HACS checks
 
 A Home Assistant and packaging patch on 0.7.5.

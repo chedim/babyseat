@@ -1712,6 +1712,14 @@ def tool_entity_read(args: dict, port: int) -> str:
     out = _http(port, "GET", qs)
     if not out.get("ok"):
         return f"read failed: {out.get('error', 'unknown error')}"
+    m = out.get("message")
+    if isinstance(m, dict) and m.get("text") and not prop and not span:
+        # a chat message (2026-11-11, Rosie forgot): the stored text in full, not field fragments
+        head = " · ".join(x for x in (str(out.get("eid") or ""), m.get("role") or "", m.get("who") or "",
+                                      m.get("time") or "",
+                                      f"in {m.get('title') or m.get('session')}" if (m.get('title') or m.get('session')) else "")
+                          if x)
+        return f"message {head}\n{m['text']}"
     props = out.get("properties") or {}
     if span and not isinstance(props.get(prop), str):
         return (f"lines={span!r}: {out.get('eid')} has no text property {prop!r} to page"

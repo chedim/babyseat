@@ -478,12 +478,16 @@ class TestServeHistory(unittest.TestCase):
             w["msgs"].append(sid, {"id": NS._gen_id("msg"), "role": "user"},
                              [{"id": f"n{i}", "type": "text",
                                "text": f"go {i}"}])
-        w["t"].run(sid, "and now?")
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"MEMBRANE_HISTORY_TOKENS": "40"}):
+            w["t"].run(sid, "and now?")
         msgs = w["calls"][0]["messages"]
-        # system + the LAST HISTORY_MAX_MESSAGES prior rows + the ask
-        self.assertEqual(len(msgs), 2 + NS.HISTORY_MAX_MESSAGES)
-        self.assertEqual(msgs[-2]["content"],
-                         f"go {total - 1}")
+        # 2026-11-11: the recent part is a token budget (any count), the older ones an index
+        convo = [m for m in msgs if m["role"] in ("user", "assistant")]
+        self.assertLess(len(convo) - 1, 3 * total)               # bounded: not every prior row
+        self.assertLessEqual(sum(NS.history_tokens(m["content"]) for m in convo[:-1]), 40)
+        self.assertTrue(any(m["role"] == "system" and NS.INDEX_HEAD in str(m["content"]) for m in msgs))
+        self.assertEqual(convo[-2]["content"], f"go {total - 1}")
         self.assertEqual(msgs[-1], {"role": "user", "content": "and now?"})
 
     def test_machinery_parts_never_replay(self):

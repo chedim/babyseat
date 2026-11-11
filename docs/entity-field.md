@@ -573,22 +573,40 @@ open answers nothing: matching free text to a card would need a cut-off that has
 set. The cockpit stays the default view.
 
 **Pronouns are registers.** Each pronoun of each person is a field entity,
-`membrane::register:<person>:<pronoun>` (the chat is the person), whose live `holds` edge is
-what it means now. Forms share a register (`him` → `he`, `them`/`these`/`those` → `they`,
-`that one` → `that`). Loading a register supersedes its old edge, so its history stays, and
-the message that loaded it gets `sets:<pronoun>` to the same target. The register entity
-mirrors what it holds in its properties (`holds`, `holds_names`, `set_by`, `set_ts`), so a
-reader of properties sees it. Nothing is typed: a register holds whatever the conversation
-last put in it.
+`membrane::register:<person>:<pronoun>`, whose live `holds` edge is what it means now. The
+person is the speaker (`person:<name>` from the message's speaker line), else the chat's
+owner, else the chat itself, so "it" follows a person across their chats. Forms share a
+register (`him` → `he`, `them`/`these`/`those` → `they`, `that one` → `that`). Loading a
+register supersedes its old edge, so its history stays, and the message that loaded it gets
+`sets:<pronoun>` to the same target. The register entity mirrors what it holds in its
+properties (`holds`, `holds_names`, `set_by`, `set_ts`, `set_n`, `seen_n`), so a reader of
+properties sees it.
+
+Since the fix of 2026-11-11 (the operator: "our pronoun registers are bad"; Rosie's held
+`then` → `concept:net` and `there` → `concept:restart`):
+- **Real pronouns only:** it, this, that, they / them / these / those, he / him, she / her.
+  `then` and `there` are not registers.
+- **Concrete holders only:** a register holds a thing — a file, a symbol, a URL, a command,
+  a goal / task / decision, a message, a person, a `File:` / `Command:` entity — never a
+  living-language `Concept`, a word or another register. A bare concept is not a reading:
+  nothing is held and nothing is told.
+- **Expiry:** `REGISTER_TTL_TURNS` (3, the operator's) of the person's messages in which the
+  held thing was neither mentioned by the person nor touched by the turn (named in the reply,
+  or a code root the turn ran) and the reading expires: an expired register holds and tells
+  nothing. A per-person counter entity (`membrane::register:<person>`, class
+  `RegisterTurns`) is the clock.
+- **Old registers:** registers from before the fix were per chat; a chat's old ones are emptied
+  the first time the chat is touched, and a concept-only holder is ignored on read and emptied
+  when its register is next used.
 
 Before a chat turn, the person's pronoun is read: first the person's own message (the
 nearest thing it names before the pronoun: "on the UI redesign -- park that until later"),
 then the reply before (its `refers-to` targets), then the register when neither names
 anything that applies. When the person's message has its own words before the pronoun
 (beyond the command's verb) but names nothing the field knows ("pronouns should be fixed
-now. Claude fixed them"), nothing is borrowed from the reply before. With living language
-on (the default, [cliffhanger.md](cliffhanger.md#living-language-2026-11-01-on-by-default))
-the pronoun holds that noun phrase as a `Concept` entity; without it there is no note, no
+now. Claude fixed them"), nothing is borrowed from the reply before. Living language (the
+default, [cliffhanger.md](cliffhanger.md#living-language-2026-11-01-on-by-default)) may name
+that noun phrase as a `Concept` entity, but a concept is not a reading: there is no note, no
 register load, no re-ask, and the pronoun's register is unloaded (its old reading is superseded, so
 its history stays): a reading the person's own words contradict must not go on being
 offered. Only a message that is just the command ("merge it", "can you benchmark it?",

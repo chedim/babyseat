@@ -2,6 +2,7 @@
 (POST /membrane/rerank -> serve); a seat that needs it asks the same-host
 seats first and calls the one that serves instead of loading a copy."""
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +11,22 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).parent))
 
 from membrane import recall_rerank as RR  # noqa: E402
+
+
+# the suite runs with MEMBRANE_RERANK=0 (conftest: test seats never load bge); these tests are the reranker's
+# own (the model is mocked, nothing downloads), so they run with it on
+_SAVED_RERANK = None
+
+
+def setUpModule():
+    global _SAVED_RERANK
+    _SAVED_RERANK = os.environ.pop("MEMBRANE_RERANK", None)
+
+
+def tearDownModule():
+    if _SAVED_RERANK is not None:
+        os.environ["MEMBRANE_RERANK"] = _SAVED_RERANK
+
 
 
 class _M:

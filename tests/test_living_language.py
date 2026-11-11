@@ -207,27 +207,29 @@ class TheChat(unittest.TestCase):
         self.assertIn("compiles to: close goal one", ctx)
         self.assertNotIn("Running it", ctx)
 
-    def test_a_plain_words_antecedent_is_a_concept(self):
+    def test_a_plain_words_antecedent_is_a_concept_but_not_a_reading(self):
+        """Living language still finds the noun phrase ("field ui redesign" as a Concept); since the
+        register fix (operator 2026-11-11) a bare Concept is not a reading: nothing held or told."""
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from test_conversation_graph import _seat
         from test_pronoun_registers import _say
         srv, runner = _seat()
-        _say(srv, runner, 1, "cards?", "Dropping membrane/a.py, membrane/b.py and membrane/c.py.")
-        out = _say(srv, runner, 2, "on field ui redesign -- yes, replace both please. But I think we "
-                                   "should park that until we have membrane field shape finalized?", "ok")
-        eid = (out or {}).get("resolved")
+        text = ("on field ui redesign -- yes, replace both please. But I think we "
+                "should park that until we have membrane field shape finalized?")
+        eid = LL.concept_before(srv.entity_store, text, text.index("that until"))
         self.assertTrue(eid and eid.startswith(LL.CONCEPT))
         self.assertEqual(srv.entity_store.docs[eid].properties["name"], "field ui redesign")
-        self.assertEqual(CG.register(srv, SID, "that"), eid)
+        _say(srv, runner, 1, "cards?", "Dropping membrane/a.py, membrane/b.py and membrane/c.py.")
+        out = _say(srv, runner, 2, text, "ok")
+        self.assertFalse((out or {}).get("resolved"))
+        self.assertIsNone(CG.register(srv, SID, "that"))
 
     def test_a_pronoun_is_never_its_own_clauses_subject_and_agrees_in_number(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from test_conversation_graph import _seat
-        from test_pronoun_registers import _say
         srv, runner = _seat()
-        _say(srv, runner, 1, "cards?", "Dropping membrane/a.py, membrane/b.py and membrane/c.py.")
-        out = _say(srv, runner, 2, "ok, pronouns should be fixed now. Claude fixed them.", "ok")
-        eid = (out or {}).get("resolved")
+        text = "ok, pronouns should be fixed now. Claude fixed them."
+        eid = LL.concept_before(srv.entity_store, text, text.index("them"))
         self.assertEqual(srv.entity_store.docs[eid].properties["name"], "pronouns")
 
 

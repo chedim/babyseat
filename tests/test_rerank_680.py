@@ -3,6 +3,7 @@ RERANK_TOP rows; one ranking path for the banner and /membrane/ask. Optional
 (the `rerank` extra), loaded in the background and kept; until it is ready, or
 without it, the order is today's."""
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -15,6 +16,22 @@ from membrane import recall_banner as RB  # noqa: E402
 from membrane import recall_rerank as RR  # noqa: E402
 from membrane.efstore import MemBackend  # noqa: E402
 from _ef_fakes import FakeEmbedder  # noqa: E402
+
+
+# the suite runs with MEMBRANE_RERANK=0 (conftest: test seats never load bge); these tests are the reranker's
+# own (the model is mocked, nothing downloads), so they run with it on
+_SAVED_RERANK = None
+
+
+def setUpModule():
+    global _SAVED_RERANK
+    _SAVED_RERANK = os.environ.pop("MEMBRANE_RERANK", None)
+
+
+def tearDownModule():
+    if _SAVED_RERANK is not None:
+        os.environ["MEMBRANE_RERANK"] = _SAVED_RERANK
+
 
 
 def rows_of(n):
