@@ -111,15 +111,124 @@ class Database:
         self.scope = scope
         self.file = self._native.file
         self.h = self._native
+        self.lock = threading.RLock()
+        self.turns = TurnFirst()
+        self.colls: dict[str, str] = {}
+        self._ops: queue.PriorityQueue = queue.PriorityQueue()
+        self._n = itertools.count()
+        self._tid = None
+        self._caller = None
+        self._txn_owner = None
+        self._txn_depth = 0
+        self._deferred: list = []
+        threading.Thread(target=self._serve, name="sqlite-db", daemon=True).start()
         return self
 
     def __init__(self, *a, **k):
         pass
 
-    def __getattr__(self, attr):
-        if attr.startswith("__") or attr == "_native":
-            raise AttributeError(attr)
-        return getattr(self._native, attr)
+    # ---- the database thread: cblite.Database's contract, kept by the native store too -----------
+    # ONE thread runs every operation from a priority queue (a turn's before queued background work);
+    # the native Db holds the connection, this thread is the only one that calls it.
+    _serve = CB.Database._serve
+    _open_or_raise = CB.Database._open_or_raise
+    _run = CB.Database._run
+
+    def _call(self, name, *a, **k):
+        try:
+            return getattr(self._native, name)(*a, **k)
+        except RuntimeError as e:
+            raise SQLiteException(str(e)) from None
+
+    def _outside_txn(self, fn):
+        depth = self._txn_depth
+        nd = self._call("suspend") if depth else 0
+        owner, self._txn_owner, self._txn_depth = self._txn_owner, None, 0
+        try:
+            return fn()
+        finally:
+            if depth:
+                self._call("resume", nd)
+            self._txn_owner, self._txn_depth = owner, depth
+
+    def coll(self, name: str):
+        t = self.colls.get(name)
+        if t is None:
+            t = self.colls[name] = self._run(lambda: (self._open_or_raise(), self._call("coll", name))[1])
+        return t
+
+    @_queued
+    def tables(self):
+        return self._call("tables")
+
+    @_queued_write
+    def begin(self):
+        self._call("begin")
+        if not self._txn_depth:
+            self._txn_owner = self._caller
+        self._txn_depth += 1
+
+    @_queued
+    def end(self, commit=True):
+        try:
+            self._call("end", commit)
+        finally:
+            self._txn_depth = max(0, self._txn_depth - 1)
+            if not self._txn_depth:
+                self._txn_owner = None
+
+    @_queued_write
+    def put_json(self, coll: str, key: str, js: str):
+        self._call("put_json", coll, key, js)
+
+    @_queued
+    def get_json(self, coll: str, key: str) -> bytes | None:
+        return self._call("get_json", coll, key)
+
+    @_queued
+    def exists(self, coll: str, key: str) -> bool:
+        return self._call("exists", coll, key)
+
+    @_queued_write
+    def purge(self, coll: str, key: str):
+        self._call("purge", coll, key)
+
+    @_queued
+    def count(self, coll: str) -> int:
+        return int(self._call("count", coll))
+
+    @_queued
+    def value_index(self, coll: str, name: str, exprs: str):
+        self._call("value_index", coll, name, exprs)
+
+    @_queued
+    def has_index(self, coll: str, name: str) -> bool:
+        return self._call("has_index", coll, name)
+
+    @_queued
+    def vector_index(self, coll: str, name: str, expr: str, dims: int, centroids: int,
+                     probes: int = 0, sq: int = 8, lazy: bool = True):
+        self._call("vector_index", coll, name, expr, dims, centroids, probes, sq, lazy)
+
+    @_queued_write
+    def update_lazy(self, coll: str, name: str, to_vec, limit: int = 500) -> int:
+        return 0
+
+    @_queued
+    def query(self, sql: str, params: dict | None = None) -> list[dict]:
+        return self._call("query", sql, params)
+
+    def iter_query(self, sql: str, params: dict | None = None):
+        """Rows as dicts (the native store reads the whole answer in one operation)."""
+        yield from self.query(sql, params)
+
+    def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._run(lambda: self._call("close"))
+        self.h = None
+        self._closed = True
+        self._ops.put((2, next(self._n), None, None))
 
 
 class PyDatabase:

@@ -285,6 +285,7 @@ impl Db {
 
     /// Recorded only: the backend searches its vectors itself.
     #[pyo3(signature = (coll, name, expr, dims, centroids, probes=0, sq=8, lazy=true))]
+    #[allow(clippy::too_many_arguments)] // the Python contract's signature (sqlitedb.PyDatabase.vector_index)
     fn vector_index(&self, py: Python<'_>, coll: String, name: String, expr: String, dims: i64, centroids: i64,
                     probes: i64, sq: i64, lazy: bool) -> PyResult<()> {
         let _ = (expr, dims, centroids, probes, sq, lazy);
