@@ -316,4 +316,4 @@ pub(crate) fn child_slot(sh: &Arc<(Mutex<Shared>, Condvar)>, eid: &str) -> Arc<M
 pub(crate) fn child_done(sh: &Arc<(Mutex<Shared>, Condvar)>, eid: &str) {
     sh.0.lock().unwrap_or_else(|e| e.into_inner()).children.remove(eid);
 }
-pub(crate) type Sh = Arc<(Mutex<Shared>, Condvar)>;
+
