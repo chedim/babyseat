@@ -1,3 +1,13 @@
+## v0.7.51 (2026-11-11) — Home Assistant: the logo, musl wheels, HACS checks
+
+A Home Assistant and packaging patch on 0.7.5.
+
+- **The Home Assistant integration shows the babyseat logo** (#1081): it ships its own `brand/` icon, so HACS and HA show the logo instead of "no image".
+- **Wheels for musl Linux** (#1080): Alpine-based installs (Home Assistant OS, the HA container) get a compiled wheel instead of building the engine from source. Added to 0.7.5 on PyPI too.
+- **HACS validation runs every check** (#1082), ahead of the request to list babyseat in HACS's default store.
+- **The turn budget is a setting** (#1083): `MEMBRANE_TURN_BUDGET_S` gives a slow local model longer than the default 90 s to answer before the turn fails as "seat busy".
+- The citation names 0.7.5's version DOI (#1072).
+
 ## v0.7.5 (2026-11-10) — the field engine
 
 0.7.5 moves membrane's behaviour onto a native field engine: `.c1f` packs run in Rust on the seat and in WebAssembly in the page, the banner is a pack, and the seat gains a small standard library (its store, files, commands, MCP servers). **Defaults that change: SQLite is the store (a Couchbase Lite seat moves to it at its first start); Python entity scripts are retired (the boot upgrade moves them); Blurp is off (`MEMBRANE_BLURP=1`); membrane's own 🧩 answer and the gap call are off (`MEMBRANE_ANSWER=1`, `MEMBRANE_GAP_FILL=1`).**
