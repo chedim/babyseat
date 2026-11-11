@@ -6042,7 +6042,14 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         try:
             from . import momentum_map as _MM
             if _MM.on() and getattr(srv, "efield", None) is not None:
-                up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield)
+                from . import callctx as _CC
+                _sid = str(body.get("_turn_sid") or "")
+                if _sid and not any(isinstance(m, dict) and m.get("role") == "tool"
+                                    for m in (body.get("messages") or [])[-1:]):
+                    _CC.new_turn(srv, _sid)
+                _cl = _CC.line(srv)
+                up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield,
+                                             getattr(srv, "entity_store", None), _cl)
         except Exception as _e:
             print(f"[exp-map] skipped ({_e})", file=sys.stderr)
         # ---- the orchestration router: model-vs-model on escalations ----
