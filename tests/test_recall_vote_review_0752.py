@@ -94,8 +94,8 @@ def _port_field():
     ml = MoveLog()
     for i, (k, chat, steps) in enumerate(LOG):
         ml.place(k, chat, i + 1, True)
-        for e, s in steps:
-            ml.note(k, e, s)
+        for j, (e, s) in enumerate(steps):
+            ml.note(k, e, s, j)                      # each step its own sentence
     docs = {k: {"origin": "o", "status": "applied", "stream": "discourse", "role": "user", "n": i + 1}
             for i, (k, _c, _s) in enumerate(LOG)}
     b = types.SimpleNamespace(get_multi=lambda coll, keys: {k: docs[k] for k in keys if k in docs})

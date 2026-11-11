@@ -300,15 +300,10 @@ def recent_ns(field, session: str, n: int = RECENT_TURNS) -> set:
 
 
 def asker_of(field, session: str) -> str:
-    """Who asks in this chat: the speaker of its latest person line ('' when none)."""
-    if not session:
-        return ""
-    rows = [d for _k, d in field.b.scan("events", {"origin": field.origin, "session": session})
-            if d.get("stream") == "discourse" and d.get("role") == "user"]
-    if not rows:
-        return ""
-    spk = max(rows, key=lambda d: d.get("seq") or 0).get("speaker") or []
-    return str(spk[1]).lower() if len(spk) > 1 and spk[1] else ""
+    """Who asks in this chat: the speaker of its latest person line ('' when none), kept by the field as each line
+    applies (movelog.MoveLog.asker) -- never a scan of the chat."""
+    ml = getattr(field, "move_log", None)
+    return (ml.asker.get(session, "") if ml is not None and session else "") or ""
 
 
 def history_texts(field, session: str, text: str, n: int = HISTORY_TURNS) -> list[str]:

@@ -215,7 +215,7 @@ def vote(field, pool: list, text: str, asker: str = "") -> list:
     return out
 
 
-def warm(field, stop=None) -> None:
+def warm(field, stop=None):
     """At boot, after the field is up (opencode.py): the move log loads from the store (and backfills once), the
     instance parser attaches (every new event is read once, as it lands; spaCy loads here, on this thread) -- all
     on one background thread, never a turn."""
@@ -224,6 +224,10 @@ def warm(field, stop=None) -> None:
     def run():
         from . import instances as IN
         from . import movelog as ML
+        try:                                   # imported here, never inside the first ask (its import is slow)
+            import dateparser  # noqa: F401
+        except Exception:
+            _once("vote: dateparser is not installed; the time ballot is skipped")
         try:
             ml = ML.of(field)
             ml.load(field)
@@ -235,4 +239,6 @@ def warm(field, stop=None) -> None:
                 IN.attach(field)
         except Exception as e:
             _once(f"vote: the instance parser did not attach ({type(e).__name__}: {e})")
-    threading.Thread(target=run, name="vote-warm", daemon=True).start()
+    t = threading.Thread(target=run, name="vote-warm", daemon=True)
+    t.start()
+    return t

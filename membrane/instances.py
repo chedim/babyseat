@@ -22,9 +22,10 @@ WHOLE field: every chat, every person, tool outputs.
   indexes    every row lands in the indexes as it is kept (who said it, its lemmas, its places, the instances):
              an ask reads postings, never every row
 
-  time       rebuilt without training: each event's MOMENTS, computed once in the same parse -- each DATE / TIME
-             phrase spaCy finds, placed by dateparser from when the event was said (facts.span_of); no phrase: when
-             it was said. A question's own DATE / TIME words name a span (infer.own_span: the date as fine as it
+  time       rebuilt without training: each event's MOMENTS, computed once in the same parse, one per verb clause
+             as the bench's facts.write did -- a clause's DATE / TIME phrase placed by dateparser from when the event
+             was said (facts.span_of), a clause without one: when it was said; an event with no verb clause has no
+             moment. A question's own DATE / TIME words name a span (infer.own_span: the date as fine as it
              stays fixed when "now" changes); the ballot is the events with a moment in it. The original read the
              trained readers' TIME labels. Without dateparser the time ballot is skipped
 
@@ -35,6 +36,7 @@ not on main).
 from __future__ import annotations
 
 import bisect
+import heapq
 import math
 import queue
 import sys
@@ -54,7 +56,7 @@ _BASES = (1.0e9, 1.61e9)    # two "now"s (Sep 2001, Jan 2021) differing in year,
 PLACE_NEAR = 0.5           # a statement's place this near the question's (the bench's rule)
 TEXT_MAX = 4000            # chars of an event read (a tool output's head); approved by the operator 2026-11-11
 DONE_KEY = "ihdone:"       # annotations: the parse backfill's high-water mark, per origin
-NLP_LOCK = threading.Lock()   # every spaCy call here: the parse worker and the ask (blis, see language.py)
+from .language import NLP_LOCK  # noqa: E402  ONE lock for every spaCy call (language.py, this module: blis)
 _SAID: set = set()
 
 
@@ -231,17 +233,41 @@ def time_fits(span, moment) -> bool:
     return moment is not None and span[0] <= float(moment) < span[1]
 
 
+CLAUSE_DEPS = ("ROOT", "conj", "ccomp", "advcl", "relcl", "xcomp", "parataxis", "csubj", "acl")
+
+
+def _clause_heads(doc) -> list:
+    """The verb clauses (facts.write kept a clause only when it held a verb): each verb heading one."""
+    return [t for t in doc if t.pos_ == "VERB" or (t.pos_ == "AUX" and t.dep_ == "ROOT")
+            if t.dep_ in CLAUSE_DEPS or t.head.i == t.i]
+
+
 def moments_of(doc, ts) -> list:
-    """An event's moments: each DATE / TIME phrase placed from when it was said; none placed: when it was said."""
+    """An event's moments, one per verb clause (the bench's facts.write): the clause's own DATE / TIME words placed
+    from when it was said, else when it was said; no verb clause, no moment."""
     if ts is None:
         return []
-    got = []
+    heads = _clause_heads(doc)
+    if not heads:
+        return []
+    hs = {h.i for h in heads}
+
+    def clause_of(tok):
+        t = tok
+        while t.i not in hs and t.head.i != t.i:
+            t = t.head
+        return t.i if t.i in hs else heads[0].i
+    words: dict = {h.i: [] for h in heads}
     for e in doc.ents:
         if e.label_ in TIME_LABELS:
-            sp = place_phrase(e.text, float(ts))
-            if sp is not None and sp[0] not in got:
-                got.append(sp[0])
-    return got or [float(ts)]
+            words[clause_of(e.root)].append(e.text)
+    got = []
+    for h in heads:
+        sp = place_phrase(" ".join(words[h.i]), float(ts)) if words[h.i] else None
+        m = sp[0] if sp is not None else float(ts)
+        if m not in got:
+            got.append(m)
+    return got
 
 
 def lemmas(word: str) -> set:
@@ -287,6 +313,9 @@ class Store:
         self.by_who: dict = {}        # speaker -> [keys]
         self.by_lemma: dict = {}      # lemma -> [keys]
         self.by_place: dict = {}      # place -> [keys]
+        self.by_place_lemma: dict = {}  # a lemma of a place -> the places
+        self.place_vec: dict = {}     # place -> its stored seed (unit), read at parse time
+        self._pmat = None             # (gen, places, matrix) of the place seeds
         self.by_moment: list = []     # sorted [(moment, key)]
         self.names: set = set()
         self.inst: dict = {}          # instance key -> {ladder, owner, mods, line}
@@ -311,8 +340,14 @@ class Store:
                 self.names.add(who)
                 self.by_who.setdefault(who, []).append(key)
             for pl in row.get("places") or []:
+                if pl not in self.by_place:
+                    for lm in lemmas(pl):
+                        self.by_place_lemma.setdefault(lm, []).append(pl)
+                    v = self._seed_of(pl)
+                    if v is not None:
+                        self.place_vec[pl] = v
                 self.by_place.setdefault(pl, []).append(key)
-            for m in row.get("moments") or ([row["ts"]] if row.get("ts") is not None else []):
+            for m in row.get("moments") or []:
                 bisect.insort(self.by_moment, (float(m), key))
             self._absorb(key, row)
             self.upto = max(self.upto, int(row.get("seq") or 0))
@@ -323,6 +358,19 @@ class Store:
                                     dict(row, _k="ih", origin=self.field.origin, event=key))
             except Exception as e:
                 _say_once(f"a row was not kept ({type(e).__name__})")
+
+    def _seed_of(self, word: str):
+        """A word's STORED seed (the field's term cache; never the embedder), unit, or None."""
+        try:
+            import numpy as np
+            from .efstore import unpack_f16
+            d = self.field.b.get("terms", self.field._term_key(word))
+            if d and d.get("vec") is not None:
+                v = unpack_f16(d["vec"])
+                return v / (np.linalg.norm(v) + 1e-12)
+        except Exception:
+            pass
+        return None
 
     def _latest(self, head, mods, owner):
         for k in reversed(self.by_head.get(head, [])):
@@ -360,14 +408,13 @@ class Store:
             self.by_head.setdefault(head, []).append(k)
 
     def parse(self, items: list) -> None:
-        """[(key, light event)] -> rows, one pipe call under the spaCy lock."""
+        """[(key, light event)] -> rows. The spaCy lock is taken per text, so an ask waits at most one text."""
         m = nlp(load=True)
         if m is None:
             return
-        texts = [_text_of(ev) for _k, ev in items]
-        with NLP_LOCK:
-            docs = list(m.pipe(texts, batch_size=64))
-        for (key, ev), doc in zip(items, docs):
+        for key, ev in items:
+            with NLP_LOCK:
+                doc = m(_text_of(ev))
             row = read(doc)
             row.update(n=ev.get("n"), chat=str(ev.get("session") or ""), seq=int(ev.get("seq") or 0),
                        ts=ev.get("ts"), who=_who(ev), moments=moments_of(doc, ev.get("ts")))
@@ -483,20 +530,81 @@ def _idf(st, w: str) -> float:
     return math.log(max(1, len(st.rows)) / c) if c else 0.0
 
 
-def _scored(st, keys: set, want: list) -> list:
-    """Event ns from `keys`, ordered by the question's lemmas they hold (summed rarity; ties: capture order), read
-    from the lemma postings -- never every row."""
+def _ranked(st, member, want: list, firsts) -> list:
+    """Event ns: the events `member` accepts, ordered by the question's lemmas they hold (summed rarity; ties:
+    capture order), read from those lemmas' postings; fewer than DEPTH such: `firsts` (a bounded run of members,
+    best order first) fill the rest. Never the whole member set."""
     sc: dict = {}
     for w in want:
         a = _idf(st, w)
         if a <= 0:
             continue
         for k in st.by_lemma.get(w, ()):
-            if k in keys:
+            if member(k):
                 sc[k] = sc.get(k, 0.0) + a
-    hit = sorted(sc, key=lambda k: (-sc[k], st.pos[k]))
-    rest = sorted((k for k in keys if k not in sc), key=lambda k: st.pos[k])[:DEPTH] if len(hit) < DEPTH else []
-    return [st.rows[k].get("n") for k in (hit + rest)[:DEPTH]]
+    hit = heapq.nsmallest(DEPTH, sc, key=lambda k: (-sc[k], st.pos[k]))
+    out = list(hit)
+    for k in firsts:
+        if len(out) >= DEPTH:
+            break
+        if k not in sc and k not in out:
+            out.append(k)
+    return [st.rows[k].get("n") for k in out[:DEPTH]]
+
+
+def person_ballot(st, p: str, want: list) -> list:
+    """A person's timeline (what they said, what names them), by the question's rare lemmas."""
+    def member(k):
+        r = st.rows[k]
+        return r.get("who") == p or p in (r.get("lemmas") or ())
+    firsts = heapq.merge(st.by_who.get(p, [])[:DEPTH], st.by_lemma.get(p, [])[:DEPTH], key=lambda k: st.pos[k])
+    return _ranked(st, member, want, firsts)
+
+
+def span_ballot(st, span, want: list) -> list:
+    """The events with a moment in the span, by the question's rare lemmas (ties: moment order)."""
+    def member(k):
+        return any(time_fits(span, m) for m in st.rows[k].get("moments") or ())
+    lo = bisect.bisect_left(st.by_moment, (span[0], ""))
+
+    def firsts():
+        for m, k in st.by_moment[lo:]:
+            if m >= span[1]:
+                return
+            yield k
+    return _ranked(st, member, want, firsts())
+
+
+def place_ballot(field, st, places: list, want: list) -> list:
+    """The events naming a place near the question's: the same place or a shared lemma (the place-lemma postings),
+    or its stored seed within PLACE_NEAR of the question place's (one matrix product over the places' seeds read at
+    parse time; the question place's seed from the term cache, never the embedder)."""
+    import numpy as np
+    near_places: list = []
+    for a in places:
+        for lm in lemmas(a):
+            near_places += st.by_place_lemma.get(lm, [])
+        qv = st._seed_of(a) if getattr(st.field, "b", None) is not None else None
+        if qv is None and field is not None and field is not st.field:
+            try:
+                from .efstore import unpack_f16
+                d = field.b.get("terms", field._term_key(a))
+                qv = unpack_f16(d["vec"]) if d and d.get("vec") is not None else None
+                qv = qv / (np.linalg.norm(qv) + 1e-12) if qv is not None else None
+            except Exception:
+                qv = None
+        if qv is not None and st.place_vec:
+            if st._pmat is None or st._pmat[0] != len(st.place_vec):
+                names = list(st.place_vec)
+                st._pmat = (len(names), names, np.stack([st.place_vec[x] for x in names]))
+            _n, names, M = st._pmat
+            for i in np.nonzero(M @ qv >= PLACE_NEAR)[0]:
+                near_places.append(names[int(i)])
+    keys = list(dict.fromkeys(k for pl in dict.fromkeys(near_places) for k in st.by_place.get(pl, ())))
+    if not keys:
+        return []
+    ks = set(keys)
+    return _ranked(st, lambda k: k in ks, want, sorted(keys, key=lambda k: st.pos[k])[:DEPTH])
 
 
 def question(text: str):
@@ -560,16 +668,8 @@ def time_ballot(field, qdoc, want: list | None = None):
     if span is None:
         return None
     with st.lock:
-        lo = bisect.bisect_left(st.by_moment, (span[0], ""))
-        keys = set()
-        for m, k in st.by_moment[lo:]:
-            if m >= span[1]:
-                break
-            keys.add(k)
-        if not keys:
-            return []
         want = want if want is not None else [w for w in _lemmas(qdoc) if w not in st.names]
-        return _scored(st, keys, want)
+        return span_ballot(st, span, want)
 
 
 def class_ballots(field, text: str, current: list, qdoc=None, people_cues=()) -> list:
@@ -580,27 +680,22 @@ def class_ballots(field, text: str, current: list, qdoc=None, people_cues=()) ->
     qdoc = qdoc if qdoc is not None else question(text)
     out = []
     if st is not None and qdoc is not None:
-        near = _near_fn(field)
         with st.lock:
             names = set(st.names)
             people = {t.text.lower() for t in qdoc if t.text.lower() in names} | \
                 {p for p in (str(x).lower() for x in people_cues) if p}
             want = [w for w in _lemmas(qdoc) if w not in people]
             for p in sorted(people):
-                mine = set(st.by_who.get(p, ())) | set(st.by_lemma.get(p, ()))
-                if mine:
-                    out.append(_scored(st, mine, want))
+                if st.by_who.get(p) or st.by_lemma.get(p):
+                    out.append(person_ballot(st, p, want))
             tb = time_ballot(field, qdoc, want)                       # 91's order: person, time, place
             if tb:
                 out.append(tb)
             places = [e.text.lower() for e in qdoc.ents if e.label_ in PLACE_LABELS]
             if places:
-                got: set = set()
-                for b, ks in st.by_place.items():
-                    if any(near(a, b) >= PLACE_NEAR for a in places):
-                        got |= set(ks)
+                got = place_ballot(field, st, places, want)
                 if got:
-                    out.append(_scored(st, got, want))
+                    out.append(got)
     out.append(list(current)[:DEPTH])
     return out
 

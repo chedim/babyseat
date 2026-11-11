@@ -495,6 +495,8 @@ class EntityField:
         from .movelog import MoveLog
         self.move_log = MoveLog()        # 0.7.52: how far each event moved each thing (movelog.py)
         self._mv_replay = False          # this update replays a mention the move log already holds
+        self._seed_q = None              # nursery moves waiting for a seed (seeded in the background)
+        self._seed_thread = None
         # called (key, event doc, message vector) after each live event is
         # applied -- the watch and intent boards; must be cheap, never raise
         self.listeners: list = []
@@ -1263,7 +1265,7 @@ class EntityField:
         # THE MOVE LOG (0.7.52, movelog.py): how far this event moved this thing (a materialization's replay
         # is already in it: those mentions moved it from its seed as they landed, _nursery_move)
         if not self._mv_replay:
-            self.move_log.note(evkey, st.eid, move_step(before, x))
+            self.move_log.note(evkey, st.eid, move_step(before, x), sidx)
         # every value kept at its STORED precision, so a restart (a reload
         # from the backend) never changes a later result
         st.state = at_stored(unit(before + GAIN * (x - before)))
@@ -1320,22 +1322,75 @@ class EntityField:
             st.last_x = unpack_f16(pack_f16(x))      # the stored precision
         self._deltas[dkey] = row
 
-    def _nursery_move(self, st: EntityState, key: str, x) -> bool:
+    def _seed_stored(self, surface: str):
+        """A seed already in the term cache (never the embedder), or None."""
+        d = self.b.get("terms", self._term_key(surface))
+        return at_stored(unpack_f16(d["vec"])) if d and d.get("vec") is not None else None
+
+    def _nursery_move(self, st: EntityState, key: str, x, sidx: int = 0) -> bool:
         """THE MOVE LOG for a thing still in the nursery (0.7.52): the move a K_MAT=1 field's _update makes -- from
         the seed, through the thing's earlier pending mentions in order, to this one -- without materializing it
-        (the field's own K_MAT is unchanged). Recomputed from the pending list (under K_MAT entries), so nothing
-        is held between mentions and a restart gives the same steps."""
+        (the field's own K_MAT is unchanged). Never the embedder here (this runs inside an apply, under the field
+        lock): a thing whose seed is not stored yet is queued, and a background worker seeds the queued words in
+        one batched call, then notes their moves (recall reads what is there meanwhile)."""
+        surface = st.surface or st.eid.split(":", 1)[-1]
+        pend = [(p[0], p[1], p[2]) for p in sorted(st.pending, key=lambda p: (p[1], p[2]))]
+        sv = self._seed_stored(surface)
+        if sv is None:
+            self._queue_seed((key, st.eid, surface, pend, np.asarray(x, dtype=np.float64), sidx))
+            return False
         try:
-            sv = at_stored(self._seed(st.surface or st.eid.split(":", 1)[-1]))
-            pend = sorted(st.pending, key=lambda p: (p[1], p[2]))
-            vecs = self.b.get_multi("sentences", [p[0] for p in pend]) if pend else {}
-            for p in pend:
-                if p[0] in vecs:
-                    sv = move_to(sv, unit(vecs[p[0]]["vec"]))
-            self.move_log.note(key, st.eid, move_step(sv, x))
+            self.move_log.note(key, st.eid, move_step(self._walk(sv, pend), x), sidx)
             return True
         except Exception:
             return False
+
+    def _walk(self, sv, pend):
+        """A seed moved through pending mentions [(sid, seq, sidx)] in order (K_MAT=1's updates)."""
+        vecs = self.b.get_multi("sentences", [p[0] for p in pend]) if pend else {}
+        for p in pend:
+            if p[0] in vecs:
+                sv = move_to(sv, unit(vecs[p[0]]["vec"]))
+        return sv
+
+    def _queue_seed(self, item) -> None:
+        import queue as _queue
+        if self._seed_q is None:
+            self._seed_q = _queue.Queue()
+        self._seed_q.put(item)
+        if self._seed_thread is None or not self._seed_thread.is_alive():
+            self._seed_thread = threading.Thread(target=self._seed_run, name="move-seeds", daemon=True)
+            self._seed_thread.start()
+
+    def _seed_run(self) -> None:
+        import queue as _queue
+        q = self._seed_q
+        while True:
+            try:
+                batch = [q.get(timeout=30)]
+            except _queue.Empty:
+                return
+            try:
+                while len(batch) < 256:
+                    batch.append(q.get_nowait())
+            except _queue.Empty:
+                pass
+            try:
+                self._prefetch_seeds(list(dict.fromkeys(it[2] for it in batch)))   # one batched embed
+                for key, eid, surface, pend, x, sidx in batch:
+                    sv = self._seed_stored(surface)
+                    if sv is not None:
+                        self.move_log.note(key, eid, move_step(self._walk(sv, pend), x), sidx)
+            except Exception as e:
+                print(f"[efield] nursery moves not seeded ({type(e).__name__}: {e})", file=__import__("sys").stderr)
+            finally:
+                for _ in batch:
+                    q.task_done()
+
+    def drain_moves(self) -> None:
+        """Wait for the queued nursery moves (tests; the seat never waits)."""
+        if self._seed_q is not None:
+            self._seed_q.join()
 
     def _materialize(self, st: EntityState, seed=None) -> None:
         st.seed = self._seed(st.surface or st.eid.split(":", 1)[-1]) if seed is None else seed
@@ -1367,6 +1422,10 @@ class EntityField:
         stream, seq, ts = ev["stream"], int(ev["seq"]), ev.get("ts")
         from .movelog import is_turn as _is_turn
         self.move_log.place(key, str(ev.get("session") or ""), seq, _is_turn(ev))
+        if ev.get("stream") == "discourse" and ev.get("role") == "user":        # the chat's asker, kept
+            _spk = ev.get("speaker") or []
+            if len(_spk) > 1 and _spk[1]:
+                self.move_log.asker[str(ev.get("session") or "")] = str(_spk[1]).lower()
         for fn in self.event_listeners:           # #337: who is listening hears every event
             try:
                 fn(key, ev)
@@ -1441,7 +1500,7 @@ class EntityField:
             if st is None:
                 continue                  # the dust cap: no state born
             if st.tier == "nursery":
-                logged = self._nursery_move(st, key, X[sidx])
+                logged = self._nursery_move(st, key, X[sidx], sidx)
                 st.pending.append([sids[sidx], seq, sidx, stream, key, ts,
                                    ev.get("role") or "", logged])
                 if sids[sidx] not in st.distinct:
@@ -1505,7 +1564,7 @@ class EntityField:
             if i in skip or X[i] is None:
                 continue
             if st.tier == "nursery":
-                logged = self._nursery_move(st, key, X[i])
+                logged = self._nursery_move(st, key, X[i], i)
                 st.pending.append([sid, seq, i, stream, key, ts, ev.get("role") or "", logged])
                 if sid not in st.distinct:
                     st.distinct.append(sid)
@@ -1686,6 +1745,7 @@ class EntityField:
         self._ostats["seq_last"], self._ostats["null_coh"] = keep_seq, null
         self._ostats.update(fw)
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
+        self.move_log.reset()                         # re-made by the re-apply, never added to
         self._now_w, self._now_ts = {}, {}
         self._thing_ctx, self._thing_w, self._thing_ts = {}, {}, {}
         self._wgen += 1
@@ -2061,6 +2121,7 @@ class EntityField:
         self._ostats = self._fresh_ostats()
         self._ostats.update({k: v for k, v in keep.items() if v is not None})
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
+        self.move_log.reset()                         # re-made by the re-apply, never added to
         self._now_w, self._now_ts = {}, {}
         self._thing_ctx, self._thing_w, self._thing_ts = {}, {}, {}
         self._wgen += 1
@@ -2242,7 +2303,7 @@ class EntityField:
             except Exception:
                 _roles[_k] = ""
         st.pending = [[d["sid"], d["seq"], d["sidx"], d["stream"], d["event"], d["ts"],
-                       _roles.get(d["event"], "")] for d in ds]
+                       _roles.get(d["event"], ""), True] for d in ds]   # the move log holds them already
         st.distinct = list(dict.fromkeys(d["sid"] for d in ds))
         if st.pending and len(st.distinct) >= self._mat_bar(eid):
             self._materialize(st)

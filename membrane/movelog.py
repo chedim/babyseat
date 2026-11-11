@@ -36,6 +36,12 @@ DONE_KEY = "mvdone:"       # annotations: the backfill's done-marker, per origin
 class MoveLog:
     def __init__(self):
         self.lock = threading.RLock()
+        self.reset()
+
+    def reset(self) -> None:
+        """Empty (a rebuild or re-embed re-applies every event: the log is re-made, never added to)."""
+        self._parts: dict = {}           # key -> {eid: {sentence: step}} (a note is a set: never counted twice)
+        self.asker: dict = {}            # chat -> its latest person (the banner's asker, no scan)
         self.moves: dict = {}            # key -> {eid: max step}
         self.msum: dict = {}             # key -> {eid: summed step}
         self.by_thing: dict = {}         # eid -> {key: None} (capture order), over msum
@@ -51,14 +57,23 @@ class MoveLog:
         self.loaded = False
 
     # ---- capture --------------------------------------------------------------------------------
-    def note(self, key: str, eid: str, step: float) -> None:
+    def note(self, key: str, eid: str, step: float, part=0) -> None:
+        """This event moved this thing `step` in sentence `part`: SET (a re-apply of the same sentence is the same
+        note); the event's max and sum are over its sentences."""
         with self.lock:
+            c = self._parts.setdefault(key, {}).setdefault(eid, {})
+            if "*" in c:                                  # loaded aggregates: a re-apply re-makes them
+                c.clear()
+            if c.get(part) == float(step):
+                return
+            c[part] = float(step)
+            mx, sm = max(c.values()), sum(c.values())
             m = self.moves.setdefault(key, {})
-            s = self.msum.setdefault(key, {})
-            s[eid] = s.get(eid, 0.0) + float(step)
+            old = m.get(eid)
+            m[eid] = mx
+            self.msum.setdefault(key, {})[eid] = sm
             self._post(eid, key)
-            if float(step) > m.get(eid, -1.0):
-                m[eid] = float(step)
+            if old != mx:
                 self._rehold(key)
                 for k in self._next.get(key, ()):
                     self._rehold(k)
@@ -140,6 +155,7 @@ class MoveLog:
 
     def drop(self, key: str) -> None:
         with self.lock:
+            self._parts.pop(key, None)
             for e in self.msum.pop(key, {}):
                 self.by_thing.get(e, {}).pop(key, None)
                 self._idx.pop((e, key), None)
@@ -178,6 +194,7 @@ class MoveLog:
         mx, sm = d.get("moves") or {}, d.get("msum") or d.get("moves") or {}
         self.moves[key] = {e: float(v) for e, v in mx.items()}
         self.msum[key] = {e: float(v) for e, v in sm.items()}
+        self._parts[key] = {e: {"*": (self.moves[key].get(e, 0.0), v)} for e, v in self.msum[key].items()}
         for e in self.msum[key]:
             self._post(e, key)
         self._rehold(key)
