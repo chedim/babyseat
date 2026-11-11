@@ -90,6 +90,7 @@ proxy answers `GET /membrane/state` (the healthcheck allows a 90 s start period)
 | `MEMBRANE_JWT_SECRET_FILE` | | unset | the secret read from a mounted file instead (a Docker / Kubernetes secret); set one or the other |
 | `MEMBRANE_JWT` | | unset (on) | `0` turns JWT mode off |
 | `MEMBRANE_JWT_ISSUER` / `MEMBRANE_JWT_AUDIENCE` | | unset | optional `iss` / `aud` every token must carry |
+| `MEMBRANE_RERANK` | | unset (on) | `0` turns the recall reranker off (bge-reranker-v2-m3, CPU torch baked into the image; the model, about 2.3 GB, downloads into the volume on first boot and needs about 3 GB of RAM loaded) |
 
 Set in the image, all `1`: `MEMBRANE_NO_UPDATE_CHECK` (no boot-time update
 check; upgrade by pulling a newer tag), `MEMBRANE_NO_AUTOINSTALL` (no skills

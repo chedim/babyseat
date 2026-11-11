@@ -5,6 +5,8 @@ import os
 os.environ.setdefault("MEMBRANE_OFFLINE_PROBE", "0")
 # JWT is on by default (#762); the suite runs with it off unless a test turns it on
 os.environ.setdefault("MEMBRANE_JWT", "0")
+# a test seat installs nothing at boot (the reranker would pull torch, GBs); CI installs spaCy itself
+os.environ.setdefault("MEMBRANE_NO_AUTOINSTALL", "1")
 # the seat token (seatauth.py, #253): a test seat never writes the operator's
 # ~/.membrane/seat-token -- one throwaway file for the whole run (and its subprocesses)
 import tempfile as _tempfile
