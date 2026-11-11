@@ -1956,7 +1956,8 @@ class TurnRunner:
         if (self.sessions.get(sid) or {}).get("blurp"):
             return self.blurp_message(sid, text, user_info)   # #337: no turn in Blurp's private chat
         # THE REFERENT (convgraph.before_turn): "delete it" with two things "it" could be is
-        # asked back in the chat and this turn does not run; the person's reply reads normally
+        # asked back in the chat, and the turn STILL runs (operator 2026-11-11: no intercepts),
+        # the model told the readings; the person's reply reads normally
         try:
             _psrv = getattr(self, "srv", None)
             from . import convgraph as _CG
@@ -1985,8 +1986,6 @@ class TurnRunner:
                         else:
                             _D.setdefault(k, {})[sid] = v
                     self.__dict__.setdefault("_glue_pre", {})[str((user_info or {}).get("id") or "")] = _pre
-                if _ref and _ref.get("reask"):
-                    return {"info": user_info, "parts": [], "reask": _ref["reask"]}
         except Exception as e:
             print(f"[convgraph] referent {sid[:16]}: {e}", file=sys.stderr)
         # OUT OF TOKENS (quota.py): the turn's model is paused -- a person's
