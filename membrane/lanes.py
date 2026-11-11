@@ -6069,7 +6069,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                     _CC.new_turn(srv, _sid)
                 _cl = _CC.line(srv)
                 up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield,
-                                             getattr(srv, "entity_store", None), _cl)
+                                             getattr(srv, "entity_store", None), _cl,
+                                             chat=_CC.current(srv), held=_CC.held(srv))
         except Exception as _e:
             print(f"[exp-map] skipped ({_e})", file=sys.stderr)
         # ---- the orchestration router: model-vs-model on escalations ----
