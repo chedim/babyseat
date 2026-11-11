@@ -192,11 +192,20 @@ system prompt.
 blocks, one per earlier message, with a cache breakpoint on the last of them.
 The per-turn blocks (the banner) and the latest message follow it. The next
 answer starts with the same blocks, so the prompt cache reads the head the
-answer before wrote, instead of writing it again. The serve window advances in
-steps of `HISTORY_ANCHOR_STEP = 4` messages (`membrane/server.py`): its first
-row is a multiple of 4, so the window holds 9-12 earlier messages instead of
-exactly 12, and its start (the head's first block) stays put for a few
-answers. The bundled CLI keeps our `cache_control` and adds its own on its
+answer before wrote, instead of writing it again. The serve history has two
+parts (2026-11-11; `membrane/server.py`):
+- **Recent, in full:** the newest messages while they fit
+  `HISTORY_TOKEN_BUDGET = 1500` tokens (`MEMBRANE_HISTORY_TOKENS`), any number
+  of them, each capped at 4,000 characters. Its start advances in steps of
+  `HISTORY_ANCHOR_STEP = 4` messages, so the head's first block stays put for a
+  few answers.
+- **Older, as an index:** one line per earlier message (its message entity
+  `membrane::msg:<id>`, who said it, when; no text), newest first, while it fits
+  `HISTORY_INDEX_TOKENS = 500` (`MEMBRANE_HISTORY_INDEX_TOKENS`). It rides as a
+  per-turn block, outside the cached head. `entity read` on one of those
+  entities returns the stored message whole.
+
+In a person's chat, goal, watch and loop notices are in neither part. The bundled CLI keeps our `cache_control` and adds its own on its
 trailing environment message. With the system prompt's 2 that is 4, the API's
 maximum, checked by capturing the CLI's requests. It is on by default on an API
 key and off on the CLI login (the development opt-in below): on the live seat
@@ -205,8 +214,9 @@ If a head answer fails for any reason before its first word, it is sent again as
 one plain text prompt, and the head stays off until the seat restarts
 (`head_refused` in the diag). Switches: `MEMBRANE_CLAUDE_CACHE_HEAD=1` forces the head on (the login
 included), `MEMBRANE_CLAUDE_CACHE_HEAD=0` forces it off (an API key included),
-`MEMBRANE_HISTORY_ANCHOR=1` restores the plain last-12 window, and
-`MEMBRANE_HISTORY_MAX` sets the window's size (default 12).
+`MEMBRANE_HISTORY_ANCHOR=1` moves the recent part's start one message at a
+time, and `MEMBRANE_HISTORY_MAX` (unset by default) also caps how many messages
+the recent part may hold.
 
 **Aborted answers keep their usage (#472).** After every API step the reply
 streams the answer's usage so far (cumulative; its last chunk still carries

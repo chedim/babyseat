@@ -82,15 +82,22 @@ VERSION = "1.0"
 PROJECT_ID = "membrane"
 CLOUD_TIMEOUT_S = 1800.0              # a model turn is allowed minutes
 MAX_ROUNDS = 24                       # tool-loop budget per turn
-HISTORY_MAX_MESSAGES = 12             # prior conversation rows replayed
-                                      # into a serve turn's history (the
-                                      # narrative: 'it' needs an
-                                      # antecedent in the transcript)
-HISTORY_TEXT_CAP = 4000               # per-prior-message text cap
+HISTORY_TOKEN_BUDGET = 1500           # the RECENT part, in full (operator, 2026-11-11):
+                                      # any number of messages, newest first, cut at the
+                                      # first that no longer fits -- Rosie forgot with a
+                                      # fixed 12 (MEMBRANE_HISTORY_TOKENS overrides)
+HISTORY_INDEX_TOKENS = 500            # the OLDER part, as an index (operator, 2026-11-11):
+                                      # one line per message (id, who, time), newest
+                                      # first (MEMBRANE_HISTORY_INDEX_TOKENS overrides)
+HISTORY_MAX_MESSAGES = 12             # the old fixed window; now only a count cap
+                                      # when MEMBRANE_HISTORY_MAX is set (unset: none)
+HISTORY_TEXT_CAP = 4000               # per-prior-message text cap: one giant message
+                                      # can't eat the budget (find message reads it whole)
+HISTORY_CHARS_PER_TOKEN = 4           # the seat's estimate (_tokens_estimate, stats)
 HISTORY_ANCHOR_STEP = 4               # the window's first row is a multiple of
                                       # this (#450): its start holds while the
                                       # chat grows, so a cached prompt head is
-                                      # read again; 9-12 rows instead of 12
+                                      # read again
 
 
 def _env_int(name: str, default: int, low: int = 1) -> int:
@@ -100,9 +107,75 @@ def _env_int(name: str, default: int, low: int = 1) -> int:
         return default
 
 
-def history_max_messages() -> int:
-    """The replay window's size (MEMBRANE_HISTORY_MAX overrides, #450)."""
+def history_max_messages() -> int | None:
+    """An optional cap on the replayed message COUNT (MEMBRANE_HISTORY_MAX, #450);
+    unset: none -- the token budget alone decides (2026-11-11)."""
+    if not (os.environ.get("MEMBRANE_HISTORY_MAX") or "").strip():
+        return None
     return _env_int("MEMBRANE_HISTORY_MAX", HISTORY_MAX_MESSAGES)
+
+
+def history_token_budget() -> int:
+    """The replayed history's total token budget (MEMBRANE_HISTORY_TOKENS overrides)."""
+    return _env_int("MEMBRANE_HISTORY_TOKENS", HISTORY_TOKEN_BUDGET)
+
+
+def history_tokens(text: str) -> int:
+    """A replayed message's size by the seat's ~4 chars/token estimate (+1 for its frame)."""
+    return len(text or "") // HISTORY_CHARS_PER_TOKEN + 1
+
+
+def history_index_tokens() -> int:
+    """The older part's index budget (MEMBRANE_HISTORY_INDEX_TOKENS overrides)."""
+    return _env_int("MEMBRANE_HISTORY_INDEX_TOKENS", HISTORY_INDEX_TOKENS)
+
+
+INDEX_HEAD = ("Earlier in this chat, newest first -- message entities; "
+              "entity read one for its full text:")
+
+
+def _who(role, text: str) -> str:
+    """Who said a message: the speaker line's name for a person, else the role."""
+    if role == "user":
+        try:
+            from .speakers import split_speaker
+            return split_speaker(text or "")[0] or "user"
+        except Exception:
+            return "user"
+    return str(role or "")
+
+
+def _index_line(m: dict) -> str:
+    """One older message as an index line: its message entity, who said it,
+    when. No text (operator, 2026-11-11): entity read gives it whole."""
+    from .convgraph import msg_eid
+    ts = float(m.get("_ts") or 0) / 1000
+    when = time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else ""
+    return " · ".join(x for x in (msg_eid(m.get("_id") or ""), _who(m["role"], m.get("_text") or ""), when) if x)
+
+
+def _history_index(older: list) -> str:
+    """The older messages as one index block, newest first, while it fits
+    history_index_tokens(); '' when there is nothing older."""
+    lines, total = [], history_tokens(INDEX_HEAD)
+    for m in reversed(older):
+        if not m.get("_id"):
+            continue
+        ln = _index_line(m)
+        t = history_tokens(ln)
+        if total + t > history_index_tokens():
+            break
+        lines.append(ln)
+        total += t
+    return INDEX_HEAD + "\n" + "\n".join(lines) if lines else ""
+
+
+def _is_notice(text: str) -> bool:
+    try:
+        from .convgraph import from_person
+        return not from_person(text)
+    except Exception:
+        return False
 
 
 def history_anchor_step() -> int:
@@ -1654,11 +1727,18 @@ class TurnRunner:
         'who created it?' had no antecedent anywhere (the 'it'-word
         complaint). The stored conversation is replayed as real history:
         prior user/assistant TEXT parts in order (the machinery -- tool
-        rounds, reasoning -- never replays), bounded to the last
-        HISTORY_MAX_MESSAGES rows, each text capped."""
+        rounds, reasoning -- never replays). TWO PARTS (operator, 2026-11-11,
+        Rosie forgot): the RECENT messages in full, newest first while they
+        fit history_token_budget(); the OLDER ones as an index block before
+        them -- one line each (id, who, time, a verbatim gist), newest first
+        while it fits history_index_tokens() -- any of which `find message`
+        reads in full. In a person's chat, goal/watch/loop notices are in
+        neither part."""
         out: list[dict] = []
-        if str((self.sessions.get(sid) or {}).get("agent") or "").lower().startswith("worker"):
+        agent = (self.sessions.get(sid) or {}).get("agent")
+        if str(agent or "").lower().startswith("worker"):
             return out            # #857: a worker's task text carries what it needs; its earlier chunks' rows stay unreplayed
+        person_chat = _lane_of(agent) in ("operator", "plan", "phone")
         for row in self.messages.list(sid):
             info = row.get("info") or {}
             if exclude_id and str(info.get("id") or "") == exclude_id:
@@ -1681,14 +1761,29 @@ class TurnRunner:
                 if isinstance(p, dict) and p.get("type") == "text").strip()
             if not text:
                 continue
-            out.append({"role": role, "content": text[:HISTORY_TEXT_CAP]})
-        # THE STEPPED WINDOW (#450): the last N rows, its first row rounded
-        # UP to a multiple of the anchor step -- the start holds for a few
-        # turns, so the prompt's head is the same bytes and its cache is read
-        start = max(0, len(out) - history_max_messages())
+            if person_chat and role == "user" and _is_notice(text):
+                continue          # a goal/watch/loop notice: not the person's conversation (2026-11-11)
+            out.append({"role": role, "content": text[:HISTORY_TEXT_CAP],
+                        "_id": str(info.get("id") or ""), "_text": text,
+                        "_ts": ((info.get("time") or {}).get("created") or 0)})
+        # THE RECENT PART (2026-11-11, Rosie forgot): newest first, whole messages while
+        # the total fits the token budget; the first that doesn't fit cuts it there
+        budget, total, start = history_token_budget(), 0, len(out)
+        while start > 0:
+            t = history_tokens(out[start - 1]["content"])
+            if total + t > budget:
+                break
+            total += t
+            start -= 1
+        cap = history_max_messages()
+        if cap is not None:
+            start = max(start, len(out) - cap)
+        # THE STEPPED START (#450): rounded UP to a multiple of the anchor step -- the
+        # start holds for a few turns, so the prompt's head is the same bytes and its
+        # cache is read (rounding up only ever drops, so the budget still holds)
         step = history_anchor_step()
         if start and step > 1:
-            start = -(-start // step) * step
+            start = min(len(out), -(-start // step) * step)
         win = out[start:]
         # THE ANCHOR (2026-10-11, "why is auto-chat not auto-chatting?"): a
         # continuation (auto-chat's rounds until #348; a job's turn) adds
@@ -1698,7 +1793,42 @@ class TurnRunner:
         if anchor and win and not any(m["role"] == "user" for m in win):
             last_user = next((m for m in reversed(out) if m["role"] == "user"), None)
             win = [last_user or {"role": "user", "content": "(continue)"}] + win[1:]
+        # THE OLDER PART: an index of what left the recent part, newest first
+        index = _history_index(out[:start])
+        win = [{"role": m["role"], "content": m["content"]} for m in win]
+        if index:
+            from .rag import Injected
+            win = [Injected(role="system", content=index)] + win
         return win
+
+    # -- A PAST MESSAGE IN FULL (2026-11-11, Rosie forgot) ------------------------
+    # The history index lists message entities (membrane::msg:<id>); `entity read`
+    # on one returns the stored message whole, not the field's sentence fragments.
+    MESSAGE_TEXT_MAX = 60000              # a generous cap on one message read whole
+
+    @staticmethod
+    def _row_text(row: dict) -> str:
+        return "\n".join(str(p.get("text") or "") for p in row.get("parts") or []
+                         if isinstance(p, dict) and p.get("type") == "text").strip()
+
+    def _found(self, sid: str, row: dict) -> dict:
+        info = row.get("info") or {}
+        created = ((info.get("time") or {}).get("created")) or 0
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(created / 1000)) if created else ""
+        text = self._row_text(row)
+        return {"id": str(info.get("id") or ""), "session": sid, "role": info.get("role"),
+                "who": _who(info.get("role"), text), "time": when,
+                "title": (self.sessions.get(sid) or {}).get("title") or "",
+                "text": text[:self.MESSAGE_TEXT_MAX]}
+
+    def find_message_id(self, mid: str) -> dict | None:
+        """The stored message with this id, in whatever chat it lives."""
+        mid = str(mid or "").strip()
+        for sid in list(getattr(self.messages, "msgs", {}) or {}):
+            for row in self.messages.list(sid):
+                if str((row.get("info") or {}).get("id") or "") == mid:
+                    return self._found(sid, row)
+        return None
 
     # -- THE BUSY CONTRACT ----------------------------------------------------
     def _guard(self, sid: str):
