@@ -1,6 +1,5 @@
-"""#857: a worker answer runs in chunks of at most 20 tool calls, each a NEW SDK
-session (no resume); the task's state comes from the field. Chat and other lanes
-are unchanged. RED first."""
+"""#857: a worker answer stops at 20 tool calls (marked capped). #1116 replaced the chunks that followed: a
+capped worker's task ends split and its goal plans it into sub-tasks. Chat and other lanes are unchanged."""
 import os
 import sys
 import unittest
@@ -97,29 +96,19 @@ def _go(seat):
     return log
 
 
-def test_45_calls_run_as_3_chunks_of_at_most_20_and_keep_their_rows(seat):
-    """Memo on #913: loop_session wiped the earlier chunks' rows, so /membrane/stats counted only the
-    last chunk. Later chunks reuse the task's session with keep=True."""
+
+
+
+
+
+
+def test_a_capped_worker_does_not_chunk_on_it_splits(seat):
+    """#1116 (option A) replaced the chunks: a worker cut at its one step is not run again; the task ends split
+    with what its step did, and its goal plans it into sub-tasks (tests/test_goal_split_1116.py)."""
     log = _go(seat)
-    assert [t["calls"] for t in log["turns"]] == [20, 20, 5]
-    assert log["keeps"][1:] == [True, True]
-
-
-def test_later_chunks_do_not_resume_the_first(seat):
-    log = _go(seat)
-    assert len(log["turns"]) == 3
-    for t in log["turns"]:
-        assert not t["kw"], "a resume/session argument was passed"
-        assert "sdk-" not in t["text"]                 # no old session id carried in
-    assert A in log["turns"][1]["text"]                # the task as worker_text builds it
-
-
-def test_the_task_finishes_with_its_result_on_the_entity(seat):
-    _go(seat)
-    p = seat.entity_store.docs[A].properties
-    assert st(seat, A) == "done"
-    assert p.get("result")
-    assert "45" in (p.get("receipt") or "")
+    assert len(log["turns"]) == 1
+    assert st(seat, A) == "split"
+    assert "chunk 1" in (seat.entity_store.docs[A].properties.get("receipt") or "")
 
 
 def test_a_worker_keeps_the_loop_toolset():
@@ -137,45 +126,8 @@ def test_a_worker_keeps_the_loop_toolset():
     assert worker == loop
 
 
-def test_chunks_stop_at_the_answers_old_ceiling(seat, monkeypatch):
-    """A task that never finishes doesn't chunk forever: all its chunks together stay within
-    MAX_TOOL_CALLS_PER_ANSWER."""
-    monkeypatch.setattr(CA, "MAX_TOOL_CALLS_PER_ANSWER", 60)
-    log = _chunked_turn(seat, total=10_000)
-    write(seat, GOAL, "plan", PLAN)
-    ev = [e for e in seat.events_pool.take() if e.get("kind") == "task"][0]
-    WA._LoopDrainer(seat)._handle(ev)
-    settle(seat)
-    assert sum(t["calls"] for t in log["turns"]) <= 60
-    assert len(log["turns"]) == 3
 
 
-def test_the_next_chunk_is_told_what_the_last_one_did(seat):
-    """Without it a chunk starts the task over, redoes the first 20 calls, and is cut again."""
-    log = {"left": 45, "turns": []}
-    n = [0]
-
-    def create(agent, title=None, keep=False):
-        n[0] += 1
-        return f"ses_{n[0]}"
-
-    def run(sid, text, agent, **kw):
-        k = min(WORKER_CEILING, log["left"])
-        log["left"] -= k
-        log["turns"].append(text)
-        if log["left"] > 0:
-            return {"text": "", "capped": {"session": f"sdk-{sid}", "calls": k,
-                                           "progress": "- bash step %d -> completed: ok" % len(log["turns"])}}
-        return {"text": "DONE all landed"}
-    seat.loops = WA.LoopRunner(3)
-    seat.create_loop_session, seat.run_loop_turn = create, run
-    write(seat, GOAL, "plan", PLAN)
-    ev = [e for e in seat.events_pool.take() if e.get("kind") == "task"][0]
-    WA._LoopDrainer(seat)._handle(ev)
-    settle(seat)
-    assert "earlier session" not in log["turns"][0]
-    assert "step 1" in log["turns"][1] and "Continue from there" in log["turns"][1]
-    assert "step 1" in log["turns"][2] and "step 2" in log["turns"][2]
 
 
 def test_a_redo_is_not_told_to_skip_the_work(seat):
@@ -185,22 +137,6 @@ def test_a_redo_is_not_told_to_skip_the_work(seat):
     assert "earlier session" not in GG.worker_text(seat.entity_store, A)
 
 
-def test_a_restart_between_chunks_keeps_that_chunks_progress(seat, monkeypatch):
-    """Memo on #913: the restart check returned before the note was written."""
-    log = _chunked_turn(seat)
-    calls = {"n": 0}
-
-    def restarting():
-        calls["n"] += 1
-        return True                                   # the seat restarts right after the first chunk
-    monkeypatch.setattr(WA, "_restarting", restarting)
-    write(seat, GOAL, "plan", PLAN)
-    ev = [e for e in seat.events_pool.take() if e.get("kind") == "task"][0]
-    WA._LoopDrainer(seat)._handle(ev)
-    settle(seat)
-    assert len(log["turns"]) == 1
-    prog = seat.entity_store.docs[A].properties.get("progress") or []
-    assert prog and prog[0].startswith("session 1:")
 
 
 def test_the_progress_note_keeps_the_first_calls_too():

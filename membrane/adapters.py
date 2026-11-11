@@ -319,10 +319,13 @@ def _replan(srv, est, ent, prop, new, by) -> None:
 
 
 def _tasks(srv, est, ent, prop, new, by) -> None:
-    """#738: a task whose status became owed goes to the worker pool."""
+    """#738: a task whose status became owed goes to the worker pool. #1116: a split task asks for its plan; a
+    sub-task that ended may finish its parent."""
     from . import goalgraph as GG
     if new == GG.OWED:
         GG.owe(srv, ent.eid)
+    else:
+        GG.on_status(srv, ent.eid, new)
 
 
 def _wait(srv, est, ent, prop, new, by) -> None:

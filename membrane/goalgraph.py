@@ -22,6 +22,11 @@ THE GRAPH
 - Task state, the code trees' executor pattern (#614): open -> owed (-execute->
   tool:workers) -> running (-executing->) -> done / failed / stuck, with
   -result-> a result entity carrying the worker's receipt (a failure is one too).
+- Sub-tasks (#1116): a task is a leaf when its worker finishes it in ONE step. A worker
+  that can't ends it `split` (its one step was cut, or it said SPLIT), and the task's
+  goal replans: the planner gives it sub-tasks, tasks of the same goal whose `parent`
+  is the split task, to any depth. A split task blocks what waits on it until every
+  sub-task has ended done or dropped (at least one done): then it is done.
 
 THE CASCADE (each step a write firing the next trigger -- never a loop):
   a blocker's status becomes done (a task) or closed / dropped (a card)
@@ -60,6 +65,7 @@ WORKERS_EID = MEMBRANE_NS + "tool:workers"
 WORKERS = 3                 # the worker pool's size (approved by the operator 2026-10-30, #738)
 PLANNERS = 2                # the planner lane: two goals planned at once, never one goal twice (operator 2026-10-30)
 OPEN, OWED, RUNNING, DONE, FAILED, STUCK = "open", "owed", "running", "done", "failed", "stuck"
+SPLIT = "split"             # #1116: more than one worker step; its sub-tasks carry the work
 ENDED = (DONE, FAILED, STUCK)
 DROPPED = "dropped"
 TASK_ENDED = (DONE, DROPPED)   # no longer blocking its dependents
@@ -278,6 +284,33 @@ def apply_plan(srv, goal: str, plan) -> dict:
         if why:
             return {"ok": False, "error": f"wait {w['key']}: {why}"}
     keys = {str(t["key"]): task_eid(goal, str(t["key"])) for t in tasks}
+    parents = {}                                 # #1116: sub-task -> the task it splits
+    for t in tasks:
+        if t.get("parent") in (None, ""):
+            continue
+        par = keys.get(str(t["parent"])) or (task_eid(goal, str(t["parent"]))
+                                            if (est.docs or {}).get(task_eid(goal, str(t["parent"]))) is not None
+                                            else str(t["parent"]))
+        pd = (est.docs or {}).get(par)
+        if par not in keys.values() and (pd is None or pd.cls != TASK or (pd.properties or {}).get("goal") != goal):
+            return {"ok": False, "error": f"task {t['key']}: parent {t['parent']!r} is not a task of this goal"}
+        pst = str((pd.properties or {}).get("status") or OPEN) if pd is not None else OPEN
+        if pst in (RUNNING, DONE, DROPPED):
+            return {"ok": False, "error": f"task {t['key']}: parent {t['parent']!r} is {pst}; "
+                                          "only a task not running and not ended gets sub-tasks"}
+        parents[keys[str(t["key"])]] = par
+    up = {d.eid: (d.properties or {}).get("parent") for d in list((est.docs or {}).values())
+          if d.cls == TASK and (d.properties or {}).get("parent")}
+    up.update(parents)
+    for sub in parents:
+        seen, x = {sub}, up.get(sub)
+        for _ in range(len(up) + 1):             # a parent chain that comes back to itself is refused
+            if x is None:
+                break
+            if x in seen:
+                return {"ok": False, "error": f"refused: a parent chain closes a cycle at {x}"}
+            seen.add(x)
+            x = up.get(x)
     wkeys = {str(w["key"]): wait_eid(goal, str(w["key"])) for w in waits}
     card_keys = {str(c["key"]): None for c in cards}
     for c in cards:
@@ -341,9 +374,11 @@ def apply_plan(srv, goal: str, plan) -> dict:
         eid = keys[str(t["key"])]
         d = (est.docs or {}).get(eid)
         p = {"name": str(t.get("title") or t["key"])[:120], "title": str(t.get("title") or t["key"])[:200],
-             "detail": str(t.get("detail") or ""), "goal": goal, "plan_key": str(t["key"])}
+             "detail": str(t.get("detail") or ""), "goal": goal, "plan_key": str(t["key"]),
+             **({"parent": parents[eid]} if eid in parents else {})}
         if d is None:
-            est.upsert(QuantumEntity(eid=eid, cls=TASK, properties={**p, "status": OPEN, "blocks": [],
+            born = SPLIT if eid in parents.values() else OPEN     # #1116: born with its sub-tasks: never owed
+            est.upsert(QuantumEntity(eid=eid, cls=TASK, properties={**p, "status": born, "blocks": [],
                                                                     "silent_birth": True}), embedder=None)
             made.append(eid)
         else:
@@ -356,6 +391,12 @@ def apply_plan(srv, goal: str, plan) -> dict:
             d.properties = {**(d.properties or {}), **p,
                             **({"status": OPEN, "open_blockers": None} if again else {})}
             est.upsert(d, embedder=None)
+    # #1116: a task given sub-tasks is split (its sub-tasks exist first, so it asks for no plan)
+    for par in sorted(set(parents.values())):
+        pd = (est.docs or {}).get(par)
+        if pd is not None and (pd.properties or {}).get("status") in (OPEN, OWED, STUCK, FAILED):
+            pd.properties = {**(pd.properties or {}), "status": SPLIT}
+            est.upsert(pd, embedder=None)
     # waits: made or updated (an armed or ended wait keeps its state)
     made_waits = []
     for w in waits:
@@ -409,7 +450,7 @@ def apply_plan(srv, goal: str, plan) -> dict:
             eid = wait_eid(goal, str(k))
         d = (est.docs or {}).get(eid)
         # a stuck or failed node drops too: its dependents must never wait on it for good
-        if d is not None and (d.properties or {}).get("status") in (OPEN, OWED, ARMED, STUCK, FAILED):
+        if d is not None and (d.properties or {}).get("status") in (OPEN, OWED, ARMED, STUCK, FAILED, SPLIT):
             d.properties = {**(d.properties or {}), "status": DROPPED}
             est.upsert(d, embedder=None)
             dropped.append(eid)
@@ -511,7 +552,7 @@ def take(srv, task: str) -> bool:
     return True
 
 
-_VERDICT = re.compile(r"^\s*(DONE|FAILED|STUCK)\b[:\s-]*(.*)$", re.I | re.M)
+_VERDICT = re.compile(r"^\s*(DONE|FAILED|STUCK|SPLIT)\b[:\s-]*(.*)$", re.I | re.M)
 
 
 def has_verdict(text: str) -> bool:
@@ -520,7 +561,7 @@ def has_verdict(text: str) -> bool:
 
 
 def parse_worker(text: str) -> tuple[str, str]:
-    """The worker's last verdict line: (done | failed | stuck, its detail). No line: stuck."""
+    """The worker's last verdict line: (done | failed | stuck | split, its detail). No line: stuck."""
     hits = _VERDICT.findall(str(text or ""))
     if not hits:
         return STUCK, "the worker ended without DONE / FAILED / STUCK: " + str(text or "").strip()[-200:]
@@ -535,7 +576,7 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str 
     d = (est.docs or {}).get(task)
     if d is None:
         return None
-    verdict = verdict if verdict in ENDED else STUCK
+    verdict = verdict if verdict in ENDED + (SPLIT,) else STUCK
     p = d.properties or {}
     n = int(p.get("runs") or 0) + 1
     res = f"{MEMBRANE_NS}result:{task[len(MEMBRANE_NS):].replace(':', '-')}:{n}"
@@ -550,6 +591,52 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str 
                     "ended_ts": time.time()}
     est.upsert(d, embedder=None)
     return res
+
+
+def subtasks(est, task: str) -> list:
+    """#1116: the tasks whose `parent` is this task."""
+    return [d for d in list((est.docs or {}).values())
+            if d.cls == TASK and (d.properties or {}).get("parent") == task]
+
+
+def on_status(srv, task: str, status: str) -> None:
+    """#1116, from the tasks adapter (a task's status written): a task split with no sub-tasks yet asks its goal
+    to plan it; a sub-task that ended done or dropped may finish its parent."""
+    est = srv.entity_store
+    d = (est.docs or {}).get(task)
+    if d is None:
+        return
+    p = d.properties or {}
+    if status == SPLIT and p.get("goal") and not subtasks(est, task):
+        plan_wanted(srv, p["goal"], f"task {task} split")
+    elif status in TASK_ENDED and p.get("parent"):
+        close_parent(srv, p["parent"])
+
+
+def close_parent(srv, task: str) -> bool:
+    """A split task ends when every sub-task has ended done or dropped: done when at least one is done, dropped
+    when all were dropped (operator 2026-11-11: every piece dropped means the task was). Its own parent is checked
+    next (the adapter's own writes fire no adapter, so the tree closes bottom-up here). -> closed."""
+    est = srv.entity_store
+    d = (est.docs or {}).get(task)
+    if d is None or (d.properties or {}).get("status") != SPLIT:
+        return False
+    subs = subtasks(est, task)
+    sts = [str((s.properties or {}).get("status") or OPEN) for s in subs]
+    if not subs or any(x not in TASK_ENDED for x in sts):
+        return False
+    if DONE not in sts:
+        d.properties = {**(d.properties or {}), "status": DROPPED, "ended_ts": time.time(),
+                        "receipt": "all its sub-tasks were dropped"}
+    else:
+        d.properties = {**(d.properties or {}), "status": DONE, "ended_ts": time.time(),
+                        "receipt": ("its sub-tasks are done: " + "; ".join(
+                            f"{s.eid}: {str((s.properties or {}).get('receipt') or '')[:120]}" for s in subs
+                            if (s.properties or {}).get("status") == DONE))[:600]}
+    est.upsert(d, embedder=None)
+    if (d.properties or {}).get("parent"):
+        close_parent(srv, d.properties["parent"])
+    return True
 
 
 def _wait_error(w: dict) -> str | None:
@@ -780,7 +867,7 @@ def view(est, goal: str) -> dict:
         if p.get("goal") != goal:
             continue
         if d.cls == TASK:
-            tasks.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"),
+            tasks.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"), "parent": p.get("parent"),
                           "waits_on": [b.eid for b in _blockers_of(est, d.eid, idx) if _unfinished(b)],
                           "open_blockers": p.get("open_blockers"), "result": p.get("result"),
                           "receipt": p.get("receipt")})
@@ -805,8 +892,8 @@ The goal's graph now:
 {graph}
 
 Work the goal as a graph. Write ONE plan with entity_edit on the goal:
-  entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"]}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
-A task is one worker turn of concrete work; listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, and `nothing runnable` when the plan leaves nothing to run.
+  entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"], "parent": "<a split task's key, for its sub-task>"}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
+A task is ONE worker step: one batch of tool calls, then its verdict. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth; after, cards and waits work on them as on any task); it is done when its sub-tasks are, and what waits on it waits until then. You can split a task before it runs the same way. Listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, and `nothing runnable` when the plan leaves nothing to run.
 When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
 End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
 
@@ -816,13 +903,14 @@ Task: {title}
 
 What it waited on is done: {done}
 
-Do this task now, with your tools, to the end of this turn. Do not plan other work.
-End with one line: DONE <the receipt that proves it> / FAILED <what went wrong> / STUCK <what you need: a decision or other work>."""
+Do this task now in ONE step: one batch of tool calls, then your verdict. Do not plan other work. A second batch of calls is refused and the task goes back to the planner to be split; if one step can't finish it, don't start it: end with SPLIT.
+End with one line: DONE <the receipt that proves it> / FAILED <what went wrong> / STUCK <what you need: a decision or other work> / SPLIT <the parts it needs>."""
 
 
 def _graph_lines(est, goal: str) -> str:
     v = view(est, goal)
     out = [f"- task {t['eid']} [{t['status']}] {t['title']}"
+           + (f" (sub-task of {t['parent']})" if t.get("parent") else "")
            + (f" (waits on {', '.join(t['waits_on'])})" if t["waits_on"] else "")
            + (f" -- receipt: {str(t['receipt'])[:160]}" if t.get("receipt") else "") for t in v["tasks"]]
     out += [f"- wait {w['eid']} [{w['status']}] {w['title']}"
