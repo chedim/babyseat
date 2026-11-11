@@ -650,6 +650,8 @@ def ledger(est) -> dict:
                 total[k] = total.get(k, 0) + n
         outcomes: dict = {}
         for r in results:
+            if (r.properties or {}).get("escalated"):
+                continue                       # a first run that went up: its cost counts, its outcome doesn't
             o = str((r.properties or {}).get("outcome"))
             outcomes[o] = outcomes.get(o, 0) + 1
         statuses: dict = {}
@@ -664,9 +666,54 @@ def ledger(est) -> dict:
                     "runs_by_outcome": outcomes, "tasks_by_status": statuses, "leaves": len(leaves), "runs": runs,
                     "runs_per_leaf": round(runs / len(leaves), 2) if leaves else 0,
                     "replanned": sum(1 for t in leaves if int((t.properties or {}).get("runs") or 0) > 1),
+                    "escalated": sum(1 for r in results if (r.properties or {}).get("escalated")),
                     "held": "not recorded: a goal does not count its reopens yet (#867 reopens a closed goal on a "
                             "send-back without a counter)"})
     return {"goals": out}
+
+
+# ---- escalation (#1120, operator 2026-11-11): a leaf the workers model couldn't do runs once on the loops ----------
+ESCALATED = "worker-loops"
+
+
+def escalated_agent(task: str) -> str:
+    """The agent of a leaf's one re-run: still a worker (one step, the worker lane) but on the loops' model."""
+    return f"{ESCALATED}: {task}"
+
+
+def escalates(srv) -> bool:
+    """A `workers` model is set and it isn't the loops' own: a failed leaf has somewhere else to go."""
+    wm = str(getattr(srv, "_workers_model", "") or "")
+    lm = str(getattr(getattr(srv, "_loop_runner", None), "model", "") or "")
+    return bool(wm) and wm != lm
+
+
+def sample_verdict(out) -> tuple | None:
+    """(verdict, detail) of a worker run that should go up once (capped, failed, stuck, or no verdict at all), or
+    None (done, or out of tokens: that one waits)."""
+    out = out if isinstance(out, dict) else {}
+    if isinstance(out.get("quota"), dict):
+        return None
+    if isinstance(out.get("capped"), dict):
+        return SPLIT, "capped: more than one step"
+    v, detail = parse_worker(str(out.get("text") or out.get("verdict_text") or ""))
+    return None if v == DONE else (v, detail)
+
+
+def record_sample(srv, task: str, verdict: str, detail: str, session: str = "", usage: dict | None = None) -> str:
+    """The first run of an escalated leaf, in the ledger only: a result entity marked `escalated`; the task keeps
+    running (its status and run count are the second run's). -> its eid."""
+    est = srv.entity_store
+    d = (est.docs or {}).get(task)
+    p = (d.properties or {}) if d is not None else {}
+    n = int(p.get("runs") or 0) + 1
+    res = f"{MEMBRANE_NS}result:{task[len(MEMBRANE_NS):].replace(':', '-')}:{n}-escalated"
+    est.upsert(QuantumEntity(eid=res, cls=CLASS_COMPONENT, properties={
+        "name": f"{verdict} {p.get('title') or task} (escalated)"[:80], "task": task, "goal": p.get("goal"),
+        "outcome": verdict, "escalated": True, "receipt": str(detail or "")[:2000], "session": session,
+        "ts": time.time(), **({"usage": dict(usage)} if isinstance(usage, dict) else {}),
+        "silent_birth": True}), embedder=None)
+    return res
 
 
 def subtasks(est, task: str) -> list:

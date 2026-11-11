@@ -1005,6 +1005,16 @@ class _LoopDrainer:
                         return "skip"
                     taken = True
                     out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
+                    _first = GG.sample_verdict(out)
+                    if _first is not None and GG.escalates(srv) and not _restarting():
+                        # #1120 (operator 2026-11-11): a leaf on the workers model that ended failed / stuck /
+                        # empty / capped runs ONCE more on the loops model; that run's result is the task's
+                        GG.record_sample(srv, ent, _first[0], _first[1], session=sid, usage=out.get("usage"))
+                        agent = GG.escalated_agent(ent)
+                        sid = srv.create_loop_session(agent, agent)
+                        if _fp is not None:
+                            _fp.loop_session(agent, ent, sid)
+                        out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
                     if isinstance(out.get("capped"), dict) and not isinstance(out.get("quota"), dict):
                         # #1116 (the operator's option A): cut at its one step -- the worker does not go on;
                         # the task ends split, with what the step did, and its goal plans it into sub-tasks
