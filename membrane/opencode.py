@@ -898,8 +898,8 @@ def main() -> None:
     _boot_door = None
     if _serve_socket is not None and os.environ.get("MEMBRANE_LEGACY_SERVE") != "1":
         try:
-            from .bootprof import BootDoor
-            _boot_door = BootDoor(_serve_socket, _boot_laps)
+            from .bootprof import BootDoor, read_shape
+            _boot_door = BootDoor(_serve_socket, _boot_laps, shape=read_shape(args.field))
         except Exception as e:
             print(f"[seat] the boot's loading door did not open ({e})", file=sys.stderr)
     try:                               # #648: a restart keeps the ports this boot holds

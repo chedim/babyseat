@@ -570,8 +570,22 @@ def save_warm(srv) -> None:
             print(f"[seat] warm snapshot skipped: {man['unsupported']}", file=sys.stderr, flush=True)
             return
         mats = ", ".join(f"{m['coll']}.{m['field']} {m['rows']}" for m in man.get("mats") or [])
-        print(f"[seat] warm snapshot saved in {time.time() - t0:.1f}s: {mats or 'nothing built'}",
-              file=sys.stderr, flush=True)
+        extra = []
+        if man.get("rows"):
+            extra.append(f"hot rows {sum(man['rows']['counts'].values())}")
+        if man.get("lex"):
+            extra.append("word index")
+        try:                                              # #1115: the loading page's field shape
+            d = be._warm_dir()
+            if d is not None and d.exists():
+                from .bootprof import save_shape
+                pts = save_shape(srv, d)
+                if pts:
+                    extra.append(f"shape {pts} points")
+        except Exception as e:
+            print(f"[seat] boot shape not saved ({e})", file=sys.stderr, flush=True)
+        print(f"[seat] warm snapshot saved in {time.time() - t0:.1f}s: {mats or 'nothing built'}"
+              + "".join(f", {x}" for x in extra), file=sys.stderr, flush=True)
     except Exception as e:
         print(f"[seat] warm snapshot skipped ({e})", file=sys.stderr, flush=True)
 

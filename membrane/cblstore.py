@@ -320,6 +320,21 @@ class CBLiteBackend(MemBackend):
               f"({self.db.count('sentences')} sentences on disk)", file=sys.stderr)
         return True
 
+    def _progress(self) -> dict:
+        """#1115: the boot's load counts for the loading page (bootprof.PROGRESS); a read-only open
+        (a tool beside the seat) counts into a throwaway dict."""
+        if self.readonly:
+            return {}
+        from .bootprof import PROGRESS
+        PROGRESS.clear()
+        try:
+            PROGRESS["rows_total"] = sum(self.db.count(c) for c in COLLECTIONS if c not in COLD)
+            PROGRESS["states_total"] = self.db.count("entity_states")
+        except Exception:
+            pass
+        PROGRESS["rows"] = PROGRESS["states"] = 0
+        return PROGRESS
+
     def _install_rows(self, colls) -> str | None:
         """Checks the loaded rows, then puts them in RAM; the reason when they do not fit."""
         hot = [c for c in COLLECTIONS if c not in COLD]
@@ -340,16 +355,21 @@ class CBLiteBackend(MemBackend):
                 self.colls[c] = dict(zip(keys, docs))
                 self._ord[c] = dict(zip(keys, ords))
                 self._next[c] = (max(ords) + 1) if ords else 0
+        prog = self._progress()
+        prog["rows"] = sum(len(colls[c][0]) for c in hot)
+        prog["states"] = len(colls["entity_states"][0])
         return None
 
     def _load_hot_db(self) -> None:
         t = time.time()
         n = 0
+        prog = self._progress()
         with self._ram_lock:
             for c in COLLECTIONS:
                 if c in COLD:
                     continue
                 rows, ords = self.colls[c], self._ord[c]
+                states = c == "entity_states"
                 it = iter(self.db.iter_query(f"SELECT META().id AS k, o, d FROM membrane.{c} ORDER BY o"))
                 try:
                     first = next(it, None)
@@ -367,6 +387,9 @@ class CBLiteBackend(MemBackend):
                     rows[k] = d
                     ords[k] = int(r.get("o") or 0)
                     n += 1
+                    prog["rows"] = n
+                    if states:
+                        prog["states"] = prog.get("states", 0) + 1
                 self._next[c] = (max(ords.values()) + 1) if ords else 0
         print(f"[efield] {self.LABEL}: {n} hot rows loaded in {time.time() - t:.1f}s "
               f"({self.db.count('sentences')} sentences on disk)", file=sys.stderr)
