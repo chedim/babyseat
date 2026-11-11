@@ -515,8 +515,8 @@ def _build_ap():
                          "seat never burns cloud tokens. --compact-model "
                          "overrides for both lanes.")
     ap.add_argument("--no-banner", dest="no_banner", action="store_true",
-                    help="the ablation arm: inject NO banner -- and so NO "
-                         "recall (recall is the banner since 0.7.4): the "
+                    help="the ablation arm: inject NO banner -- recall off "
+                         "too (recall is the banner since 0.7.4): the "
                          "turn runs without memory. port-notes 24's "
                          "measurement flag")
     ap.set_defaults(no_banner=False)
