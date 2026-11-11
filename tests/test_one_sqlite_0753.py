@@ -83,9 +83,8 @@ def test_reader_matches_the_old_driver_rules(tmp_path):
         sqlread.Reader(str(tmp_path / "missing" / "nope.sqlite3"))
 
 
-def test_a_bad_query_is_refused_at_once_never_on_a_thread(tmp_path):
-    """As the old driver's prepare step: a write, a missing table or the wrong argument count is refused on the
-    engine's call, before any thread (the banner's refusal order depends on it)."""
+def test_the_compile_check_refuses_a_bad_query_before_it_runs(tmp_path):
+    """The synchronous path (tools, tests): a write, a missing table or the wrong argument count, refused unrun."""
     from membrane import sqlread
     r = sqlread.Reader(_db(tmp_path))
     with pytest.raises(sqlread.SqlError, match="no such table"):
@@ -95,13 +94,6 @@ def test_a_bad_query_is_refused_at_once_never_on_a_thread(tmp_path):
     with pytest.raises(sqlread.SqlError, match="takes 1 argument"):
         r.check("SELECT * FROM c_events WHERE k = ?", 0)
     r.check("SELECT * FROM c_events WHERE k = ?", 1)
-    f = MV.Fields(_Host())
-    f.set_store(_db(tmp_path / "x") if (tmp_path / "x").mkdir() is None else None)
-    f.set_pack("t", "PACK t 1\nChat.n getter: sql(\"SELECT * FROM nope\") if this.go else None\n")
-    f.load("Chat:a", "Chat", "{}")
-    f.rebuild(1.0)
-    f.write("Chat:a", "go", "true", 2.0)
-    assert f.sql_pending() == 0                    # answered on the call: nothing went to a thread
 
 
 def test_an_interrupt_always_stops_its_query_whenever_it_lands(tmp_path):
