@@ -28,7 +28,6 @@ import time
 
 RING = 30
 SAY_GAP_S = 1.5
-DUP_S = 300.0                    # a reply already spoken this recently is not spoken again
 SAY_MAX = 400
 IN_MODES = ("off", "ptt", "lock", "hotword", "addressed")
 
@@ -166,15 +165,6 @@ def on_edit(srv, ent, stream: bool = False) -> dict | None:
         pp["say_refused"] = f"too soon after the last line ({SAY_GAP_S}s apart)"
         ent.properties = pp
         return {"spoken": False, "why": "gap"}
-    if not stream:
-        # the speaker lane already spoke this reply sentence by sentence: the chat path's
-        # voice:out write of the same text must not speak it a second time
-        recent = [str(x.get("text") or "") for x in (pp.get("said") or [])
-                  if now - float(x.get("ts") or 0) < DUP_S]
-        if text and (text in recent or text in " ".join(recent)):
-            pp["say_refused"] = "already spoken (the speaker lane said this reply)"
-            ent.properties = pp
-            return {"spoken": False, "why": "dup"}
     pp.pop("say_refused", None)
     pp["said_ts"] = now
     _ring(pp, "said", {"ts": now, "text": text})
