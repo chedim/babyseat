@@ -6102,9 +6102,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                     for m in (body.get("messages") or [])[-1:]):
                     _CC.new_turn(srv, _sid)
                 _cl = _CC.line(srv)
+                _st.mark("ctx")                   # the context stack's in: line
                 up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield,
                                              getattr(srv, "entity_store", None), _cl,
                                              chat=_CC.current(srv), held=_CC.held(srv))
+                _st.mark("map")                   # the 'What is moving' block (was timed as 'router')
         except Exception as _e:
             print(f"[exp-map] skipped ({_e})", file=sys.stderr)
         # ---- the orchestration router: model-vs-model on escalations ----
