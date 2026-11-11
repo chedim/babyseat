@@ -3403,6 +3403,7 @@ class TurnRunner:
                     a_info[_CA.CAP_MARK] = {"session": str(_cap["session"]),
                                             "calls": int(_cap.get("calls")
                                                          or _CA.MAX_TOOL_CALLS_PER_ANSWER),
+                                            **({"steps": int(_cap["steps"])} if _cap.get("steps") else {}),
                                             "continued": False}
             _tokens_fill(a_info, resp)
             # A CUT IS NOT AN ANSWER (#449): a round the person's message (or
