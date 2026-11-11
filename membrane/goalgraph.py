@@ -569,7 +569,7 @@ def parse_worker(text: str) -> tuple[str, str]:
     return v.lower(), detail.strip()[:600]
 
 
-def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str | None:
+def finish(srv, task: str, verdict: str, detail: str, session: str = "", usage: dict | None = None) -> str | None:
     """The worker's result onto the task: a result entity (-result->), and the status
     the triggers react to. -> the result's eid."""
     est = srv.entity_store
@@ -583,6 +583,7 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str 
     est.upsert(QuantumEntity(eid=res, cls=CLASS_COMPONENT, properties={
         "name": f"{verdict} {p.get('title') or task}"[:80], "task": task, "goal": p.get("goal"),
         "outcome": verdict, "receipt": str(detail or "")[:2000], "session": session, "ts": time.time(),
+        **({"usage": dict(usage)} if isinstance(usage, dict) else {}),      # #1120: what the run cost
         "silent_birth": True}), embedder=None)
     _edge(srv, task, EXECUTING, WORKERS_EID, receipt={"op": verdict, "why": str(detail)[:160]}, drop=True)
     _edge(srv, task, RESULT, res)
@@ -591,6 +592,81 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str 
                     "ended_ts": time.time()}
     est.upsert(d, embedder=None)
     return res
+
+
+# ---- the ledger (#1120): what a goal cost, and how its leaves ended --------------------------------------------
+_COST = ("input", "cache_read", "cache_write", "output", "steps")
+
+
+def _add_cost(into: dict, usage: dict) -> None:
+    for k in _COST:
+        try:
+            into[k] = int(into.get(k) or 0) + int(usage.get(k) or 0)
+        except (TypeError, ValueError):
+            pass
+    into["runs"] = int(into.get("runs") or 0) + 1
+    into["estimated"] = int(into.get("estimated") or 0) + (1 if usage.get("estimated") else 0)
+
+
+def note_planner_usage(srv, goal: str, usage) -> None:
+    """A planner run's usage, summed on the goal by model (`planner_usage`)."""
+    est = srv.entity_store
+    g = (est.docs or {}).get(goal)
+    if g is None or not isinstance(usage, dict):
+        return
+    led = {m: dict(v) for m, v in ((g.properties or {}).get("planner_usage") or {}).items()}
+    _add_cost(led.setdefault(str(usage.get("model") or "?"), {}), usage)
+    g.properties = {**(g.properties or {}), "planner_usage": led}
+    est.upsert(g, embedder=None)
+
+
+def ledger(est) -> dict:
+    """The per-goal report (GET /membrane/diag/goals-ledger, read-only): tokens by model (worker runs from their
+    result entities, planner runs from the goal), each worker run's outcome, the tasks by status, leaves (tasks with
+    no sub-tasks), runs per leaf, re-planned (leaves that ran more than once), open or not."""
+    docs = list((est.docs or {}).values())
+    out = []
+    for g in docs:
+        if g.cls != "Goal":
+            continue
+        gp = g.properties or {}
+        tasks = [d for d in docs if d.cls == TASK and (d.properties or {}).get("goal") == g.eid]
+        results = [d for d in docs if (d.properties or {}).get("goal") == g.eid
+                   and (d.properties or {}).get("task") and (d.properties or {}).get("outcome")]
+        if not tasks and not results and not gp.get("planner_usage"):
+            continue
+        tokens: dict = {}
+        for r in results:
+            u = (r.properties or {}).get("usage")
+            if isinstance(u, dict):
+                _add_cost(tokens.setdefault(str(u.get("model") or "?"), {}), u)
+        for m, v in (gp.get("planner_usage") or {}).items():
+            t = tokens.setdefault(m, {})
+            for k in _COST + ("runs", "estimated"):
+                t[k] = int(t.get(k) or 0) + int(v.get(k) or 0)
+        total: dict = {}
+        for v in tokens.values():
+            for k, n in v.items():
+                total[k] = total.get(k, 0) + n
+        outcomes: dict = {}
+        for r in results:
+            o = str((r.properties or {}).get("outcome"))
+            outcomes[o] = outcomes.get(o, 0) + 1
+        statuses: dict = {}
+        for t in tasks:
+            s = str((t.properties or {}).get("status") or OPEN)
+            statuses[s] = statuses.get(s, 0) + 1
+        parents = {(t.properties or {}).get("parent") for t in tasks}
+        leaves = [t for t in tasks if t.eid not in parents]
+        runs = sum(int((t.properties or {}).get("runs") or 0) for t in leaves)
+        out.append({"goal": g.eid, "name": gp.get("name"), "status": gp.get("status") or OPEN,
+                    "open": (gp.get("status") or OPEN) == OPEN, "tokens": tokens, "total": total,
+                    "runs_by_outcome": outcomes, "tasks_by_status": statuses, "leaves": len(leaves), "runs": runs,
+                    "runs_per_leaf": round(runs / len(leaves), 2) if leaves else 0,
+                    "replanned": sum(1 for t in leaves if int((t.properties or {}).get("runs") or 0) > 1),
+                    "held": "not recorded: a goal does not count its reopens yet (#867 reopens a closed goal on a "
+                            "send-back without a counter)"})
+    return {"goals": out}
 
 
 def subtasks(est, task: str) -> list:

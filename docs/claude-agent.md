@@ -273,7 +273,7 @@ it is not cut off without a word:
 - The reply carries `membrane_capped: {session, calls}` (an SSE chunk when
   streamed, a top-level key when buffered). `session` is the SDK's session
   id.
-- The transcript row keeps it as `claudeCapped: {session, calls, continued}`.
+- The transcript row keeps it as `capped: {session, calls, continued}` (`claudeCapped` before #1120, still read).
   The chat shows "Claude stopped at the tool-call ceiling (50 calls)" under
   the answer, with a **Continue** button. Rows from before #425's ceiling
   (`turns`) still show the old turn-cap line.

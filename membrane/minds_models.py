@@ -3,6 +3,8 @@ at runtime (the chat's picker only sets one session's model).
 
   loops   the watch loops' turns (the serve's loop runner model)
   cortex  the idle cortex: the thinker, the dreamer, the claim / A-B judges
+  workers the goal graph's leaf tasks (the worker lane, #1120); unset ('') =
+          the loops' pick -- the watch loops and the planner stay on `loops`
 
 Applied live, saved beside the field (models.json), reapplied at boot. The
 think dial rides the same surface (`think`: on|off|auto -- 2026-10-15,
@@ -24,7 +26,7 @@ import json
 import os
 import re
 
-MINDS = ("loops", "cortex")
+MINDS = ("loops", "cortex", "workers")
 AUTH_CHOICES = ("chat", "api-key", "login")    # chat = the chat rung's own mode
 _AUTH_KEYS = tuple(m + "_auth" for m in MINDS)
 _THINK = ("on", "off", "auto")
@@ -37,7 +39,9 @@ def read(srv) -> dict:
     return {"loops": str(getattr(getattr(srv, "_loop_runner", None), "model", "") or ""),
             "cortex": str(getattr(srv, "idle_cortex_model", "") or ""),
             "seat_default": str(getattr(srv, "default_seat_model", "") or ""),
+            "workers": str(getattr(srv, "_workers_model", "") or ""),     # '' = the loops' pick (#1120)
             "loops_auth": _auth_of(srv, "loops"), "cortex_auth": _auth_of(srv, "cortex"),
+            "workers_auth": _auth_of(srv, "workers"),
             "think": "on" if think is True else "off" if think is False else "auto"}
 
 
@@ -96,6 +100,8 @@ def _set(srv, mind: str, model: str) -> None:
         runner = getattr(srv, "_loop_runner", None)
         if runner is not None:
             runner.model = model
+    elif mind == "workers":
+        srv._workers_model = model           # '' = unset: the leaves run on the loops' pick
     elif mind == "cortex":
         srv.idle_cortex_model = model
         judge = getattr(srv, "_claim_judge", None)
@@ -106,17 +112,20 @@ def _set(srv, mind: str, model: str) -> None:
 def apply(srv, loops: str | None = None, cortex: str | None = None,
           think: str | None = None, known=None, persist: bool = True,
           mirror: bool = True, loops_auth: str | None = None,
-          cortex_auth: str | None = None) -> dict:
+          cortex_auth: str | None = None, workers: str | None = None,
+          workers_auth: str | None = None) -> dict:
     """Set either mind's model, its credentials and/or the think dial;
     ValueError on a bad name (or one not in `known`, when the caller passes
     the models it sees), with nothing set."""
-    want = {k: v for k, v in (("loops", loops), ("cortex", cortex)) if v is not None}
-    auths = {k: v for k, v in (("loops_auth", loops_auth), ("cortex_auth", cortex_auth))
-             if v is not None}
+    want = {k: v for k, v in (("loops", loops), ("cortex", cortex), ("workers", workers)) if v is not None}
+    auths = {k: v for k, v in (("loops_auth", loops_auth), ("cortex_auth", cortex_auth),
+                               ("workers_auth", workers_auth)) if v is not None}
     for k, v in auths.items():
         if v not in AUTH_CHOICES:
             raise ValueError(f"{k}: one of {'|'.join(AUTH_CHOICES)}, not: {v!r}")
     for mind, model in want.items():
+        if mind == "workers" and model == "":
+            continue                     # #1120: unset -- back to the loops' pick
         if not isinstance(model, str) or not _NAME.match(model):
             raise ValueError(f"{mind}: not a model name: {model!r}")
         if known is not None and model not in known:
@@ -125,7 +134,7 @@ def apply(srv, loops: str | None = None, cortex: str | None = None,
         raise ValueError(f"think: one of {'|'.join(_THINK)}, not: {think!r}")
     for mind, model in want.items():
         _set(srv, mind, model)
-        if mirror:                       # the active-model entity follows the operator's switch
+        if mirror and mind != "workers":   # the active-model entities name the loops and the cortex only                       # the active-model entity follows the operator's switch
             try:
                 from . import active_models as _AM
                 _AM.mirror(srv, mind, model)
@@ -168,7 +177,7 @@ def prime(srv) -> None:
         return
     for mind in MINDS:
         model = saved.get(mind)
-        if isinstance(model, str) and _NAME.match(model):
+        if isinstance(model, str) and (_NAME.match(model) or (mind == "workers" and model == "")):
             _set(srv, mind, model)
 
 
