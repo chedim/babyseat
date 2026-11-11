@@ -584,13 +584,24 @@ def _rows_from_hits(field, ix, hits, text: str, qv, k: int, tools_ok: bool, how:
     sentence pool's size)."""
     from . import lexical as LX
     qwords = set(LX.tokens(text))
+    # 0.7.52 (the operator, 2026-11-11): a person's own line joins the WORD lane only where it carries a name the
+    # ask writes (lexical.exact_words: Rrrr, Caroline, MEMBRANE_JWT_SECRET) -- "Rrrr's real name is Krabbs" said
+    # in a long message was otherwise lost; anything else of theirs stays in the direct lane (2026-11-08)
+    names = LX.exact_words(text) if how == "words" else set()
     roles: dict = {}
+    person: dict = {}                            # event -> a person's own line (may join on a name)
     by_ev: dict = {}
     seen_docs = 0
     for did, _sc in hits:
         ek = ix.ev[did]
         if ek not in roles:
-            roles[ek] = _answer_role(field, field.b.get("events", ek), tools_ok)
+            d0 = field.b.get("events", ek)
+            roles[ek] = _answer_role(field, d0, tools_ok)
+            person[ek] = bool(roles[ek] is None and names and d0 is not None and d0.get("origin") == field.origin
+                              and d0.get("role") == "user" and d0.get("status") == "applied"
+                              and _direct_ok(d0) and not _title_like(d0))
+        if roles[ek] is None and person[ek] and ix.words_in(did, names):
+            roles[ek] = "user"                   # this sentence carries a name the ask writes
         if roles[ek] is None:
             continue
         by_ev.setdefault(ek, []).append(did)

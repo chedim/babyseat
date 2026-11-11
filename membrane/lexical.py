@@ -87,15 +87,24 @@ _WRITTEN = re.compile(r"[A-Za-z0-9]+(?:[_.\-/:][A-Za-z0-9]+)*")
 
 def exact_words(text: str) -> set:
     """The ask's words written as names, not prose: with a digit or a
-    separator (MEMBRANE_JWT_SECRET, #277, seat-token, self_loop.py), or a
-    capital past the first letter (PolyForm, MIT). A row that matches one
-    of these is recalled past the similarity floor."""
+    separator (MEMBRANE_JWT_SECRET, #277, seat-token, self_loop.py), a
+    capital past the first letter (PolyForm, MIT), or a capitalized word
+    that does not open a sentence (Rrrr, Caroline) -- the rule the entity
+    lane already reads names by (entity_block.named_entities). A slash
+    control a client appends (qwen's ` /no_think`) is never a name. A row
+    that matches one of these is recalled past the similarity floor."""
+    t = text or ""
     out = set()
-    for m in _WRITTEN.finditer(text or ""):
+    for m in _WRITTEN.finditer(t):
         w = m.group(0)
         if len(w) > MAX_TOKEN:
             continue
-        if not w.isalpha() or (len(w) > 1 and any(c.isupper() for c in w[1:])):
+        before = t[:m.start()]
+        if before.endswith("/") and (len(before) == 1 or before[-2:-1].isspace() or len(before.rstrip("/")) == 0):
+            continue                                       # /no_think, /think: a control, not a word
+        opener = not before.strip(" \t\"'(") or before.rstrip()[-1:] in ".?!"
+        if (not w.isalpha() or (len(w) > 1 and any(c.isupper() for c in w[1:]))
+                or (w[:1].isupper() and not opener)):
             out.update(tokens(w)[:1])
     return out
 
