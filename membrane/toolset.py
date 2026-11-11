@@ -44,7 +44,8 @@ FAMILIES: dict[str, dict] = {
         "description": "Your entities (your model of the world): read (its live value; "
                        "run=true recomputes it), write (prop=value: how to act), add, edit, remove, inherit.",
         "actions": {"read": "entity_read", "write": "entity_write", "add": "entity_add", "edit": "entity_edit",
-                    "remove": "entity_remove", "inherit": "entity_inherit"},
+                    "remove": "entity_remove", "inherit": "entity_inherit",
+                    "enter": "ctx_enter", "exit": "ctx_exit"},
         "params": {"spec": _S("the entity (eid or name)"), "name": _S("add: its name"),
                    "class": _S("add/edit: its class"), "summary": _S("what it is"),
                    "links": {"type": "array", "items": {"type": "string"}, "description": "related entities"},
@@ -71,7 +72,9 @@ FAMILIES: dict[str, dict] = {
                                       if (a.get("properties") or "parents" in a) else {})},
                 "write": lambda a: {"spec": a.get("spec") or a.get("name"), "prop": a.get("prop"), "value": a.get("value")},
                 "remove": lambda a: _pick(a, "spec", "force"),
-                "inherit": lambda a: _pick(a, "spec", "parents")},
+                "inherit": lambda a: _pick(a, "spec", "parents"),
+                "enter": lambda a: {"spec": a.get("spec") or a.get("name")},
+                "exit": lambda a: {}},
     },
     "exec": {
         "description": "load/show/packs: .c1f packs (help('packs')). run: code as a field tree. "
@@ -242,6 +245,44 @@ _NS = re.compile(r"^(?:(?:membranes?|mcp_tool|mcp|mem|functions|m:tool|tool)[-_.
 _FAM_ACT = re.compile(r"^([a-z_]+)[/.:](?:action[-_=:]?)?([a-z_]*)$", re.I)
 
 
+_READ_NAMES = {"read", "read_file", "readfile", "cat", "view"}
+_WRITE_NAMES = {"write", "write_file", "writefile", "create_file"}
+_EDIT_NAMES = {"edit", "edit_file", "str_replace", "replace", "multiedit"}
+_LIST_NAMES = {"glob", "ls", "list_dir", "list_files", "listdir", "find_files"}
+
+
+def _usual_tool(name: str, args: dict):
+    """#1101: with no shell (MEMBRANE_CLIFFHANGER_ONLY) the usual tools' names reach the field's file doors."""
+    from . import cliffhanger_only as _CO
+    if not _CO.on():
+        return None
+    n = str(name or "").lower()
+    path = args.get("path") or args.get("file_path") or args.get("file") or args.get("filename")
+    if n in _READ_NAMES:
+        return "fs_read", {"path": path, **({"offset": args["offset"]} if args.get("offset") else {}),
+                           **({"limit": args["limit"]} if args.get("limit") else {})}
+    if n in _WRITE_NAMES:
+        return "fs_write", {"path": path, "content": args.get("content") if args.get("content") is not None
+                            else args.get("text", "")}
+    if n in _EDIT_NAMES:
+        return "fs_edit", {"path": path, "old": args.get("old_string", args.get("old")),
+                           "new": args.get("new_string", args.get("new")),
+                           "all": bool(args.get("replace_all"))}
+    if n in _LIST_NAMES:
+        return "fs_list", {"path": path or args.get("dir") or ".", "pattern": args.get("pattern")}
+    return None
+
+
+def _known_tool(name: str) -> bool:
+    if name in _LEGACY_FAMILY or name == "help" or name.startswith(("__", "fs_", "ctx_")):
+        return True
+    try:
+        from .mcp_server import TOOL_IMPLS
+        return name in TOOL_IMPLS
+    except Exception:                 # noqa: BLE001 -- unknown stays unknown
+        return True
+
+
 def canonical(name: str, args: dict) -> tuple[str, dict]:
     """THE NAMES THE MODEL INVENTS (2026-10-10, the operator: "why are
     entity/action-read and exec/action-link not the operator's lane?"): the
@@ -251,6 +292,9 @@ def canonical(name: str, args: dict) -> tuple[str, dict]:
     # ISSUE #60 (Memo): a route string reused as a tool name kept its leading
     # slash -- '/exec' on a headless seat's watch pulse, refused though exec is mounted
     name = _NS.sub("", str(name or "").strip().lstrip("/").strip())
+    alias = _usual_tool(name, args or {})          # #1101: Read/Write/Edit/Glob/LS on a no-bash seat
+    if alias is not None:
+        return alias
     if name.lower() == "bash":                   # the shell tool's familiar name is code_run
         return "code_run", bash_args(args or {})
     m = _FAM_ACT.match(name)
@@ -562,6 +606,10 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
                 if kind in SCRIPT_KINDS:
                     args[f"{kind}_script"] = code
             args.pop("scripts", None)
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(name)) and not _known_tool(name):
+            # #1101 __call: a name no tool has is a cliffhanger method of that name, its arguments the params,
+            # resolved through the context stack (callctx) -- never created
+            return "__call", {"method": name, "args": {k: v for k, v in args.items() if k != "action"}}
         return name, args
     action = str(args.pop("action", "") or "")
     if action not in fam["actions"]:

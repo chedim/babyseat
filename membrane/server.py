@@ -1147,6 +1147,10 @@ OPERATOR_TOOLS = frozenset((
     # #1043: the field engine's hands -- a .c1f pack loaded, a property written (acting by writing)
     "pack", "entity_write",
 ))
+# #1101: the context stack (enter/exit), unknown names as method calls, the usual file tools on a no-bash seat
+CTX_TOOLS = frozenset(("ctx_enter", "ctx_exit", "__call", "fs_read", "fs_write", "fs_edit", "fs_list",
+                       "call", "entity_enter", "entity_exit", "read_file", "write_file", "edit_file", "list_dir"))
+CTX_WRITES = frozenset(("__call", "call", "fs_write", "fs_edit", "write_file", "edit_file"))
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
@@ -1294,6 +1298,8 @@ def _lane_refusal(name: str, lane: str) -> str | None:
         return None
     if name in _lane_tools(lane):
         return None
+    if name in CTX_TOOLS and lane not in ("phone",) and not (lane == "plan" and name in CTX_WRITES):
+        return None                    # #1101: the context stack, __call and the no-bash file tools
     # the plan-mode texts are for the PLAN lane only: a listener told
     # "plan mode: ..." concluded its seat was in plan mode (2026-10-08)
     if lane == "phone":
