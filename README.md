@@ -1,4 +1,4 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23550667.svg)](https://doi.org/10.5281/zenodo.23550667)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23550667.svg)](https://doi.org/10.5281/zenodo.23550667) [![Blurps hatched (est.)](https://img.shields.io/pepy/dt/babyseat?label=%F0%9F%90%A3%20Blurps%20hatched%20(est.)&color=f5a623)](https://pepy.tech/projects/babyseat) [![Blurps in Docker](https://img.shields.io/docker/pulls/chedim/babyseat?label=%F0%9F%90%B3%20Blurps%20in%20Docker&color=f5a623)](https://hub.docker.com/r/chedim/babyseat)
 ![babyseat](docs/logo/logo-1280x640.png)
 
 **Talk to it. It remembers.**
