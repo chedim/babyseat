@@ -1990,8 +1990,9 @@ class TurnRunner:
             # #729: a watch triage pass runs on the local idle model, never on Claude
             triage = str(agent or "").strip().lower().startswith("triage")
             # #1120: a goal leaf (the worker lane) runs on the workers' pick when one is set
+            # (an escalated leaf, `worker-loops:`, runs on the loops' pick)
             _wm = str(getattr(srv, "_workers_model", "") or "") \
-                if str(agent or "").strip().lower().startswith("worker") else ""
+                if str(agent or "").strip().lower().startswith("worker:") else ""
             if _wm:
                 turn_model = _wm
             mind = "workers" if _wm else "loops"
@@ -3011,6 +3012,16 @@ class TurnRunner:
             body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}
+            # #1120: a goal leaf on a local model runs with thinking off -- the think dial's own key (rag.
+            # apply_think_dial keeps a body's think:false whatever the seat's dial says); qwen3 thought 117 s
+            # and answered nothing on a one-step leaf
+            if str((self._agents or {}).get(sid) or "").lower().startswith("worker"):
+                try:
+                    from . import claude_agent as _CA
+                    if not _CA.is_claude_rung(getattr(self, "srv", None), turn_model):
+                        body["think"] = False
+                except Exception:
+                    pass
             if _turn_auth:                 # a mind's own Claude credentials
                 from . import claude_agent as _CA
                 body[_CA.AUTH_KEY] = _turn_auth
