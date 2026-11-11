@@ -781,7 +781,7 @@ TOOLS_NOTE = _full_names(
     "a .c1f getter (@pack load; help: membrane::help:packs); "
     "act by @entity_write. Read it back. Code work happens in a temp git "
     "worktree, never the main checkout. "
-    "Work you are given goes to @intend (issue link, what done means) "
+    "Work you are given goes to @intend (where it came from, what done means) "
     "instead of doing it in your own turn; answer with the goal's id. "
     "Ask the person for a decision with a card on their decision "
     "board, not a list in chat, in one call, e.g. @entity_add class='Decision' "
