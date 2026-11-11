@@ -74,7 +74,7 @@ class TheSeatUsesThem(unittest.TestCase):
     def test_the_boot_counts_its_threads_cpu_and_splits_the_entities_step(self):
         main = SRC[SRC.index("\ndef main() -> None:"):]
         self.assertIn('Laps("boot", cpu=time.thread_time)', main)
-        for step in ("entity seeds", "goal board", "tracks + scripts"):
+        for step in ("entity seeds", "goal board", "tracks + scripts", "loop sessions", "serve wiring"):
             self.assertIn(f'_boot_laps.step("{step}")', main)
 
     def test_the_boot_prints_its_profile_before_the_signals(self):

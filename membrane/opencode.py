@@ -2221,6 +2221,7 @@ def main() -> None:
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
+            _boot_laps.step("loop sessions")
             try:                                   # #570: an older seat's session per wake, collapsed
                 _gone = collapse_loop_sessions(runner)
                 if _gone:
@@ -2228,6 +2229,7 @@ def main() -> None:
                           file=sys.stderr)
             except Exception as e:
                 print(f"[opencode] loop session collapse failed ({e})", file=sys.stderr)
+            _boot_laps.step("serve wiring")
             # THE MINDS' MODELS: the saved picks for the loops + the cortex
             # (+ the think dial; an explicit CLI on/off beats the file, auto defers)
             try:
