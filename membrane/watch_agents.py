@@ -1042,10 +1042,17 @@ class _LoopDrainer:
                 _replan = ((est.docs.get(ent) or QuantumEntity(eid="")).properties or {}).get("replan")
                 _prev = getattr(_LLM._ctx, "depth", 0)
                 _LLM._ctx.depth = int(ev.get("depth") or 1)
+                _snap = GG.planner_snapshot(est, ent)    # #1120: what this pass sees, the next pass's baseline
                 try:
                     out = srv.run_loop_turn(sid, GG.planner_text(est, ent, str(ev.get("prompt") or "")), agent) or {}
                 finally:
                     _LLM._ctx.depth = _prev
+                if not isinstance(out.get("quota"), dict):
+                    try:
+                        with _W.as_writer("adapter:tasks"):
+                            GG.planner_seen(est, ent, _snap)
+                    except Exception:
+                        pass
                 if isinstance(out.get("quota"), dict):
                     self._quota_park(ev, str(out["quota"].get("model") or ""))
                     return "held"

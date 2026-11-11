@@ -3049,6 +3049,11 @@ class TurnRunner:
                         body["think"] = False
                 except Exception:
                     pass
+            # #1120 (the lean planner): a goal's planner runs on its own short system prompt, not the chat doctrine
+            if str((self._agents or {}).get(sid) or "").lower().startswith("planner") and body["messages"] \
+                    and body["messages"][0].get("role") == "system":
+                from . import goalgraph as _GG
+                body["messages"][0] = {"role": "system", "content": _GG.PLANNER_SYSTEM}
             if _turn_auth:                 # a mind's own Claude credentials
                 from . import claude_agent as _CA
                 body[_CA.AUTH_KEY] = _turn_auth
