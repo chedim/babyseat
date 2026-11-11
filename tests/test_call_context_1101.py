@@ -96,7 +96,7 @@ class Resolution(unittest.TestCase):
         CC.new_turn(srv, "s1")
         CC.enter(srv, g.eid)
         CC.touch(srv, "membrane::Command:gradle")
-        self.assertEqual(CC.line(srv), "in: chat › goal:dfa55447 › Command:gradle")
+        self.assertEqual(CC.line(srv), "in: chat › goal:dfa55447 (it=Command:gradle)")
 
     def test_the_chat_frame_persists(self):
         g = doc("membrane::goal:a")
@@ -106,6 +106,60 @@ class Resolution(unittest.TestCase):
         srv2 = NS(entity_store=srv.entity_store, data_dir=srv.data_dir)
         CC.new_turn(srv2, "s1")
         self.assertEqual(CC.line(srv2), "in: chat › goal:a")
+
+
+class Pronouns(unittest.TestCase):
+    def srv(self):
+        return seat([doc("membrane::goal:g"), doc("membrane::goal:h")])
+
+    def test_the_turn_frame_binds_the_last_concrete_touch(self):
+        srv = self.srv()
+        CC.new_turn(srv, "s1")
+        CC.touch(srv, "membrane::concept:file")          # a generic concept never binds
+        CC.touch(srv, "f:server.py")
+        CC.touch(srv, "membrane::concept:server")
+        self.assertEqual(CC.pronoun(srv, "it"), "f:server.py")
+        self.assertEqual(CC.pronoun(srv, "this"), "f:server.py")
+        CC.touch(srv, "person:dima")
+        self.assertEqual(CC.pronoun(srv, "him"), "person:dima")
+        self.assertEqual(CC.pronoun(srv, "it"), "f:server.py")
+        self.assertEqual(CC.pronoun(srv, "they"), ["person:dima", "f:server.py"])
+        self.assertIsNone(CC.pronoun(srv, "then"))
+        self.assertIsNone(CC.pronoun(srv, "there"))       # no place touched
+
+    def test_innermost_first_and_exit_restores(self):
+        srv = self.srv()
+        CC.new_turn(srv, "s1")
+        CC.enter(srv, "membrane::goal:g")
+        self.assertEqual(CC.pronoun(srv, "it"), "membrane::goal:g")
+        CC.enter(srv, "membrane::goal:h")
+        CC.touch(srv, "Command:gradle")                   # rebinds in the innermost entered frame (h)
+        CC.new_turn(srv, "s1")                            # the turn frame is gone, h's binding stays
+        self.assertEqual(CC.pronoun(srv, "it"), "Command:gradle")
+        self.assertEqual(CC.line(srv), "in: chat › goal:g › goal:h (it=Command:gradle)")
+        CC.exit_(srv)                                     # h's bindings go: g's are back
+        self.assertEqual(CC.pronoun(srv, "it"), "membrane::goal:g")
+        CC.exit_(srv)
+        with mock.patch("membrane.convgraph.register", return_value=None):
+            self.assertIsNone(CC.pronoun(srv, "it"))
+
+    def test_the_turn_frame_beats_the_entered_frame(self):
+        srv = self.srv()
+        CC.new_turn(srv, "s1")
+        CC.enter(srv, "membrane::goal:g")
+        CC.new_turn(srv, "s1")
+        with mock.patch.object(CC, "_frames", wraps=CC._frames):
+            CC.touch(srv, "File:notes")
+        self.assertEqual(CC.pronoun(srv, "it"), "File:notes")
+
+    def test_the_person_level_comes_from_the_registers(self):
+        srv = self.srv()
+        CC.new_turn(srv, "s1")
+        with mock.patch("membrane.convgraph.register", return_value="membrane::goal:h") as reg:
+            self.assertEqual(CC.pronoun(srv, "it"), "membrane::goal:h")
+        reg.assert_called_once()
+        with mock.patch("membrane.convgraph.register", return_value="membrane::concept:thing"):
+            self.assertIsNone(CC.pronoun(srv, "it"))      # a concept never binds, at any level
 
 
 class Names(unittest.TestCase):

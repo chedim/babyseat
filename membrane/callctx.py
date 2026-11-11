@@ -10,7 +10,16 @@ stack, like scopes in code.
   names both. Never creates anything.
 - `in: chat › <entered…> › <last touched>` -- one line in the model's context.
 
-The "current chat" of a tool call is the chat whose turn the seat staged last (a tool call carries no chat id)."""
+The "current chat" of a tool call is the chat whose turn the seat staged last (a tool call carries no chat id).
+
+PRONOUNS ARE SCOPED in the same stack (operator 2026-11-11), innermost first, like variables:
+- turn frame: it/this/that = the last CONCRETE entity touched this turn; they/them/these/those = the concrete ones
+  touched this turn; he/him/she/her = the last person touched;
+- entered frames: an entered entity binds it/this/that to itself, and what is touched while it is the innermost
+  frame rebinds there; exit drops its bindings, so the outer ones are back;
+- the person/chat level: convgraph's registers (the flat ones, with their own expiry) -- not a second store.
+Only concrete entities bind (files, symbols, goals/tasks/decisions, msg:, person:, Command:/File:, named things),
+never a generic concept. "there/here" bind only a place entity; "then" binds nothing."""
 from __future__ import annotations
 
 import json
@@ -62,54 +71,153 @@ def current(srv) -> str:
     return _st(srv)["cur"]
 
 
-def touch(srv, eid: str, sid: str | None = None) -> None:
-    eid = str(eid or "").strip()
-    if not eid:
-        return
-    with _LOCK:
-        s = _st(srv)
-        fr = s["turn"].setdefault(sid if sid is not None else s["cur"], [])
-        if eid in fr:
-            fr.remove(eid)
-        fr.append(eid)
-        del fr[:-TURN_MAX]
-
-
-def enter(srv, eid: str, sid: str | None = None) -> list:
-    with _LOCK:
-        s = _st(srv)
-        k = sid if sid is not None else s["cur"]
-        fr = s["chat"].setdefault(k, [])
-        if eid in fr:
-            fr.remove(eid)
-        fr.append(eid)
-        _save(srv, s["chat"])
-        return list(fr)
-
-
-def exit_(srv, sid: str | None = None) -> list:
-    with _LOCK:
-        s = _st(srv)
-        k = sid if sid is not None else s["cur"]
-        fr = s["chat"].setdefault(k, [])
-        if fr:
-            fr.pop()
-        _save(srv, s["chat"])
-        return list(fr)
+SINGULAR = {"it", "this", "that"}
+PLURAL = {"they", "them", "these", "those"}
+PERSONAL = {"he", "him", "she", "her"}
+PLACE = {"there", "here"}
+PRONOUNS = SINGULAR | PLURAL | PERSONAL | PLACE
 
 
 def _short(eid: str) -> str:
     return str(eid).replace("membrane::", "")
 
 
+def concrete(eid: str) -> bool:
+    """Only concrete things bind a pronoun -- never a generic concept (or a word, a session, a register)."""
+    e = _short(eid).lower()
+    return bool(e) and not e.startswith(("concept:", "w:", "word:", "register:", "session:", "s:?", "seat:"))
+
+
+def _person(eid: str) -> bool:
+    return _short(eid).lower().startswith(("person:", "p:"))
+
+
+def _place(eid: str) -> bool:
+    return _short(eid).lower().startswith(("place:", "loc:", "location:"))
+
+
+def _frames(s: dict, k: str) -> list:
+    """The chat stack's frames as dicts {eid, bind} (old saves were bare eids)."""
+    fr = s["chat"].setdefault(k, [])
+    for i, f in enumerate(fr):
+        if isinstance(f, str):
+            fr[i] = {"eid": f, "bind": {"it": f}}
+    return fr
+
+
+def _bind_touch(bind: dict, eid: str) -> None:
+    if _person(eid):
+        bind["he"] = eid
+    elif _place(eid):
+        bind["there"] = eid
+    else:
+        bind["it"] = eid
+
+
+def touch(srv, eid: str, sid: str | None = None) -> None:
+    eid = str(eid or "").strip()
+    if not eid:
+        return
+    with _LOCK:
+        s = _st(srv)
+        k = sid if sid is not None else s["cur"]
+        fr = s["turn"].setdefault(k, [])
+        if eid in fr:
+            fr.remove(eid)
+        fr.append(eid)
+        del fr[:-TURN_MAX]
+        frames = _frames(s, k)
+        if frames and concrete(eid):              # the innermost entered frame rebinds while it is innermost
+            _bind_touch(frames[-1]["bind"], eid)
+            _save(srv, s["chat"])
+
+
+def enter(srv, eid: str, sid: str | None = None) -> list:
+    with _LOCK:
+        s = _st(srv)
+        k = sid if sid is not None else s["cur"]
+        fr = _frames(s, k)
+        fr[:] = [f for f in fr if f["eid"] != eid]
+        fr.append({"eid": eid, "bind": ({"it": eid} if concrete(eid) and not _person(eid) else
+                                        {"he": eid} if _person(eid) else {})})
+        _save(srv, s["chat"])
+        return [f["eid"] for f in fr]
+
+
+def exit_(srv, sid: str | None = None) -> list:
+    with _LOCK:
+        s = _st(srv)
+        k = sid if sid is not None else s["cur"]
+        fr = _frames(s, k)
+        if fr:
+            fr.pop()                              # its bindings go with it: the outer ones are back
+        _save(srv, s["chat"])
+        return [f["eid"] for f in fr]
+
+
+def _key(word: str) -> str:
+    w = str(word or "").lower().strip()
+    if w in SINGULAR:
+        return "it"
+    if w in PLURAL:
+        return "they"
+    if w in PERSONAL:
+        return "he"
+    if w in PLACE:
+        return "there"
+    return ""
+
+
+def pronoun(srv, word: str, sid: str | None = None):
+    """What a pronoun means here, innermost first: turn frame -> entered frames -> the person/chat registers.
+    One eid, a list (they), or None."""
+    key = _key(word)
+    if not key:
+        return None
+    s = _st(srv)
+    k = sid if sid is not None else s["cur"]
+    turn = [e for e in s["turn"].get(k, []) if concrete(e)]
+    if key == "they":
+        if len(turn) > 1:
+            return list(reversed(turn))
+    else:
+        for e in reversed(turn):
+            if (key == "he" and _person(e)) or (key == "there" and _place(e)) or \
+                    (key == "it" and not _person(e) and not _place(e)):
+                return e
+    for f in reversed(_frames(s, k)):
+        b = f.get("bind") or {}
+        if b.get(key):
+            return b[key]
+    try:                                          # the person/chat level: convgraph's registers (their expiry)
+        from .convgraph import register
+        got = register(srv, k, word)
+        if got:
+            got = list(got) if isinstance(got, (list, tuple)) else got
+            if key == "they":
+                return got if isinstance(got, list) else [got]
+            one = got[0] if isinstance(got, list) else got
+            return one if concrete(str(one)) else None
+    except Exception:
+        pass
+    return None
+
+
 def line(srv, sid: str | None = None) -> str:
     s = _st(srv)
     k = sid if sid is not None else s["cur"]
-    parts = ["chat"] + [_short(e) for e in s["chat"].get(k, [])]
-    turn = s["turn"].get(k, [])
-    if turn and _short(turn[-1]) != parts[-1]:
-        parts.append(_short(turn[-1]))
-    return "in: " + " › ".join(parts)
+    frames = _frames(s, k)
+    parts = ["chat"] + [_short(f["eid"]) for f in frames]
+    shown = []
+    if s["turn"].get(k) or frames:                # the bindings that are set (registers alone don't show)
+        for w in ("it", "they", "he", "there"):
+            v = pronoun(srv, w, k)
+            if not v:
+                continue
+            v = ", ".join(_short(x) for x in v[:3]) if isinstance(v, list) else _short(v)
+            if v != parts[-1]:                    # entering X makes it=X: no need to say so
+                shown.append(f"{w}={v}")
+    return "in: " + " › ".join(parts) + (f" ({'; '.join(shown)})" if shown else "")
 
 
 def _doc(est, spec: str):
@@ -138,7 +246,7 @@ def resolve(srv, method: str, sid: str | None = None) -> dict:
     s = _st(srv)
     k = sid if sid is not None else s["cur"]
     levels = [("this turn", list(reversed(s["turn"].get(k, [])))),
-              ("this chat's stack", list(reversed(s["chat"].get(k, []))))]
+              ("this chat's stack", [f["eid"] for f in reversed(_frames(s, k))])]
     reach: list[str] = []
     for label, specs in levels:
         for spec in specs:                       # innermost first: the first owner at this level wins,

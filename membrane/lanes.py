@@ -7474,7 +7474,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         if _SA.carries_code(body) and not _SA.owner(self):
             from . import jwtauth as _JWT
             _JWT.send_unauthorized(self); return
-        spec = str(body.get("spec") or "").strip()
+        spec = _ctx_pronoun(srv, str(body.get("spec") or "").strip())
         if not spec:
             self._json_err_raw(400, "spec required (eid or name fragment)")
             return
@@ -7675,6 +7675,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_out({"ok": True, "line": _CC.line(srv)}); return
         if op == "line":
             self._json_out({"ok": True, "line": _CC.line(srv)}); return
+        if op == "pronoun":
+            self._json_out({"ok": True, "word": body.get("word"), "means": _CC.pronoun(srv, str(body.get("word") or ""))})
+            return
         if op == "call":
             meth = str(body.get("method") or "")
             r = _CC.resolve(srv, meth)
@@ -7732,7 +7735,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_err_raw(503, "entity layer unavailable"); return
         import urllib.parse as _up
         qs = _up.parse_qs(self.path.split("?", 1)[-1])
-        spec = (qs.get("spec") or [""])[0].strip()
+        spec = _ctx_pronoun(srv, (qs.get("spec") or [""])[0].strip())   # #1101: "it" means what it means here
         if spec:
             _ctx_touch(srv, est, spec)                 # #1101: what this turn touched is its innermost context
         if not spec:
@@ -8284,6 +8287,19 @@ def _inject_to_primary_impl(srv, runner, text):
         post_line(runner, sid, text)
     except Exception:
         pass
+
+
+def _ctx_pronoun(srv, spec: str) -> str:
+    """#1101: a pronoun as an entity spec ("it", "them"...) is what it is bound to in the context stack."""
+    try:
+        from . import callctx as _CC
+        if spec.lower() in _CC.PRONOUNS:
+            v = _CC.pronoun(srv, spec)
+            if v:
+                return v[0] if isinstance(v, list) else v
+    except Exception:
+        pass
+    return spec
 
 
 def _ctx_touch(srv, est, spec: str) -> None:
