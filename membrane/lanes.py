@@ -4278,6 +4278,15 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     if is_tool_round:
         return ctx
     adds = []
+    if sid:                         # #1101: a person turn opens a new turn frame; the stack rides as one line
+        try:
+            from . import callctx as _CC
+            _CC.new_turn(srv, sid)
+            _ln = _CC.line(srv, sid)
+            if _ln != "in: chat":       # a bare chat is no news
+                adds.append(_ln)
+        except Exception as e:
+            print(f"[ctx] {sid[:16]}: {e}", file=sys.stderr)
     if sid and sid in (getattr(srv, "_cg_turn", None) or {}):
         try:
             from . import graphbanner as _GB
@@ -4705,6 +4714,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         if path in ("/membrane/method/define", "/membrane/method/call", "/membrane/method/each",
                     "/membrane/method/inspect"):
             self._method(path.rsplit("/", 1)[-1]); return
+        if path == "/membrane/ctx":                    # #1101: the context stack and __call
+            self._ctx_op(); return
         if path == "/membrane/code/run":
             self._code_run(); return
         if path == "/membrane/entity/remove":
@@ -7460,6 +7471,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         if not spec:
             self._json_err_raw(400, "spec required (eid or name fragment)")
             return
+        _ctx_touch(srv, est, spec)                     # #1101
         _props = body.get("properties")
         if isinstance(_props, str):
             try:
@@ -7630,6 +7642,49 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
 
+    def _ctx_op(self) -> None:
+        """POST /membrane/ctx {op: enter|exit|line|call, spec, method, args} (#1101). `call` resolves a bare method
+        name through the context stack and calls it like method_call (owner only)."""
+        body = self._json_body()
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        from . import seatauth as _SA
+        if not _SA.owner(self):
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
+        from . import callctx as _CC
+        op = str(body.get("op") or "")
+        if op == "enter":
+            spec = str(body.get("spec") or "")
+            d = est._resolve_spec(spec) if spec else None
+            if d is None:
+                self._json_out({"ok": False, "error": f"no entity {spec!r} to enter"}); return
+            _CC.enter(srv, d.eid)
+            self._json_out({"ok": True, "line": _CC.line(srv)}); return
+        if op == "exit":
+            _CC.exit_(srv)
+            self._json_out({"ok": True, "line": _CC.line(srv)}); return
+        if op == "line":
+            self._json_out({"ok": True, "line": _CC.line(srv)}); return
+        if op == "call":
+            meth = str(body.get("method") or "")
+            r = _CC.resolve(srv, meth)
+            if "miss" in r:
+                self._json_out({"ok": False, "error": r["miss"]}); return
+            from .night import method_call, direct_exec_refusal
+            why = direct_exec_refusal(est, r["object"], meth)
+            if why:
+                self._json_out({"ok": False, "error": why}); return
+            a = body.get("args")
+            res = method_call(srv, est, _efield_on(srv), srv.membrane, r["object"], meth,
+                              a if isinstance(a, (dict, list)) else {})
+            res["resolved"] = {"object": r["object"], "level": r["level"]}
+            _CC.touch(srv, r["object"])
+            self._json_out(res); return
+        self._json_out({"ok": False, "error": f"ctx: unknown op {op!r} (enter, exit, line, call)"})
+
     def _stranger(self, path: str) -> None:
         """GET /membrane/stranger/visit|view|event|leave: the login page's
         visitors (membrane/strangers.py) -- numbers in, shape out."""
@@ -7671,6 +7726,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         import urllib.parse as _up
         qs = _up.parse_qs(self.path.split("?", 1)[-1])
         spec = (qs.get("spec") or [""])[0].strip()
+        if spec:
+            _ctx_touch(srv, est, spec)                 # #1101: what this turn touched is its innermost context
         if not spec:
             got = {k: v[0] for k, v in qs.items() if v}
             hint = ("spec required (you sent "
@@ -8218,6 +8275,17 @@ def _inject_to_primary_impl(srv, runner, text):
         _updated, sid = max(sids)
         from .server import post_line
         post_line(runner, sid, text)
+    except Exception:
+        pass
+
+
+def _ctx_touch(srv, est, spec: str) -> None:
+    """#1101: an entity the model reads or writes joins this turn's frame (innermost = last touched)."""
+    try:
+        d = est._resolve_spec(spec)
+        if d is not None:
+            from . import callctx as _CC
+            _CC.touch(srv, d.eid)
     except Exception:
         pass
 
