@@ -240,7 +240,7 @@ it), `STABLE` (facts seen in 3 chats over 2 days, never contradicted),
 alerts and a pointer to `state(section=...)`. Each record line says its
 source and age, e.g. `(person · 2h ago)` ([details](docs/entity-field.md#this-conversation)).
 After it, a `RECALL` block (#668): the 12 best rows the field holds for your latest
-message, one fact line each, ordered by a scorer whose weights live in the field and are refit at night from the rows the model's own searches end up using. With the `rerank` extra (`pip install 'babyseat[rerank]'`), a reranker (bge-reranker-v2-m3) re-orders the scorer's top 20 (on a CUDA GPU -- NVIDIA, or AMD through a ROCm build of PyTorch -- else Apple's MPS, else the CPU); the model's `query` tool reads the same ranking.
+message, one fact line each, ordered by a scorer whose weights live in the field and are refit at night from the rows the model's own searches end up using. A reranker (bge-reranker-v2-m3) re-orders the scorer's top 20 (on a CUDA GPU -- NVIDIA, or AMD through a ROCm build of PyTorch -- else Apple's MPS, else the CPU); the model's `query` tool reads the same ranking. It is on by default: when `sentence-transformers` is missing the seat installs it at boot in the background (wheels only; CPU-only torch on Linux without an NVIDIA driver), Home Assistant on glibc too (under HA's own package pins); not on musl (Home Assistant OS / Container: torch has no musl builds) or under 8 GB of RAM; the Docker image has it baked in (CPU). `pip install 'babyseat[rerank]'` installs it up front, `MEMBRANE_RERANK=0` turns it off.
 
 **With tools,** the model gets membrane's MCP surface: `query` and `state` to
 read the field (`state(section=...)` pulls one part of the seat's WHERE WE ARE:

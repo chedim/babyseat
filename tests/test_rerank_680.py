@@ -63,7 +63,9 @@ class TestLoader(unittest.TestCase):
         st.assert_not_called()
 
     def test_missing_package_is_off_without_a_crash(self):
-        with mock.patch.object(RR, "_installed", return_value=False), mock.patch.object(RR, "_start") as st:
+        with mock.patch.object(RR, "_installed", return_value=False), \
+                mock.patch.object(RR, "may_install", return_value=(False, "musl")), \
+                mock.patch.object(RR, "_start") as st:
             self.assertIsNone(RR.scores("q", ["d"]))
         st.assert_not_called()
 
@@ -106,7 +108,9 @@ class TestBootWarm(unittest.TestCase):
                 mock.patch.object(RR, "_installed", return_value=True), mock.patch.object(RR, "_start") as st:
             RR.warm()
         st.assert_not_called()
-        with mock.patch.object(RR, "_installed", return_value=False), mock.patch.object(RR, "_start") as st:
+        with mock.patch.object(RR, "_installed", return_value=False), \
+                mock.patch.object(RR, "may_install", return_value=(False, "musl")), \
+                mock.patch.object(RR, "_start") as st:
             RR.warm()
         st.assert_not_called()
 

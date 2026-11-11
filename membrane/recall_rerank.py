@@ -7,8 +7,14 @@ Measured on LoCoMo 0-1: hit@8 169 -> 178 over the top 20, ~0.25 s a call warm
 on the Mac's GPU, ~3.3 GB of GPU memory while loaded (fp32; fp16 and bf16
 scored 173 and saved no memory as loaded).
 
-Optional: on where `sentence-transformers` is installed (the `rerank` extra),
-off with MEMBRANE_RERANK=0. The seat starts the load in the background at
+On by default (operator, 2026-11-11): when `sentence-transformers` is missing the
+seat installs it at boot on the load thread (ensure()), the way living language
+installs spaCy -- wheels only; on Linux without an NVIDIA driver torch comes from
+the CPU-only index first. No install where it would hurt (may_install()): Home
+Docker (MEMBRANE_NO_AUTOINSTALL, unless MEMBRANE_RERANK=1), musl (no torch wheels:
+Home Assistant OS / Container), under MIN_RAM_GB of RAM. Home Assistant on glibc
+(Core, proot Debian) installs it under HA's own package_constraints.txt. The `rerank` extra still
+installs it up front. Off with MEMBRANE_RERANK=0. The seat starts the load in the background at
 boot, right after the field is up (warm()); until the model is ready, or
 without it, a call returns None and the banner keeps the scorer's order.
 Once loaded it stays loaded (operator, 2026-10-29: no release). Calls are
@@ -32,6 +38,8 @@ import threading
 
 MODEL = "BAAI/bge-reranker-v2-m3"
 RERANK_TOP = 20           # rows reranked: the scorer's top 20 (operator-approved)
+MIN_RAM_GB = 8            # no auto-install below this much RAM (FLAGGED: awaits the operator)
+CPU_TORCH = "https://download.pytorch.org/whl/cpu"
 MAX_LEN = 128             # tokens per (message, answer) pair (operator-approved): LoCoMo
                           # 179 at 128, 256 and 512; 20 long seat rows 0.42 s at 128, 1.72 s at 512
 
@@ -48,8 +56,88 @@ def _installed() -> bool:
     import importlib.util
     try:
         return importlib.util.find_spec("sentence_transformers") is not None
-    except (ImportError, ValueError):
+    except ValueError:                           # loaded with no spec: it is there
+        return "sentence_transformers" in sys.modules
+    except ImportError:
         return False
+
+
+def _libc() -> tuple:
+    import platform
+    return platform.libc_ver()
+
+
+def _ram_gb() -> float:
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
+    except (ValueError, OSError, AttributeError):
+        return 0.0
+
+
+def _ha_constraints() -> str | None:
+    """Home Assistant's own pins (homeassistant/package_constraints.txt) when this Python
+    has HA: the install keeps every package HA pins, the way HA installs its requirements."""
+    import importlib.util
+    try:
+        spec = importlib.util.find_spec("homeassistant")
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    p = os.path.join(list(spec.submodule_search_locations)[0], "package_constraints.txt")
+    return p if os.path.exists(p) else None
+
+
+def _nvidia() -> bool:
+    return os.path.exists("/proc/driver/nvidia") or os.path.exists("/dev/nvidia0")
+
+
+def may_install() -> tuple[bool, str]:
+    """(may the seat install the reranker here, why not)."""
+    if (os.environ.get("MEMBRANE_NO_AUTOINSTALL") and os.environ.get("MEMBRANE_RERANK") != "1"
+            and _ha_constraints() is None):
+        return False, "installs are off here (MEMBRANE_NO_AUTOINSTALL; MEMBRANE_RERANK=1 overrides)"
+    if sys.platform.startswith("linux") and _libc()[0] != "glibc":
+        return False, "musl (torch has no wheels for it)"
+    ram = _ram_gb()
+    if ram and ram < MIN_RAM_GB:
+        return False, f"{ram:.0f} GB RAM (under {MIN_RAM_GB} GB)"
+    return True, ""
+
+
+def ensure(log=None) -> bool:
+    """sentence-transformers installed (or installed now, wheels only). Runs on the load
+    thread, never a turn. A failure logs one line and leaves the reranker off."""
+    import importlib
+    import subprocess
+    log = log or (lambda m: print(m, file=sys.stderr))
+    if _installed():
+        return True
+    ok, why = may_install()
+    if not ok:
+        log(f"[rerank] off: sentence-transformers is not installed, and not installed here: {why}")
+        return False
+    pip = [sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", "--only-binary=:all:"]
+    ha = _ha_constraints()
+    if ha:
+        pip += ["-c", ha]
+    steps = []
+    if sys.platform.startswith("linux") and not _nvidia():
+        steps.append(pip + ["--index-url", CPU_TORCH, "torch"])
+    steps.append(pip + ["sentence-transformers"])
+    log("[rerank] installing sentence-transformers (the recall reranker) in the background")
+    for cmd in steps:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        except Exception as e:
+            log(f"[rerank] off: install failed ({type(e).__name__})")
+            return False
+        if r.returncode != 0:
+            tail = ((r.stderr or r.stdout or "").strip().splitlines() or ["?"])[-1]
+            log(f"[rerank] off: install failed ({tail})")
+            return False
+    importlib.invalidate_caches()
+    return _installed()
 
 
 def _say(msg: str) -> None:
@@ -112,6 +200,10 @@ def _load() -> None:
             _peer, _state = port, "remote"
         print(f"[rerank] served by the seat on :{port}", file=sys.stderr)
         return
+    if not _installed() and not ensure():
+        with _lock:
+            _state = "off"
+        return
     try:
         import torch
         from sentence_transformers import CrossEncoder
@@ -137,8 +229,10 @@ def _wanted() -> bool:
     if os.environ.get("MEMBRANE_RERANK", "1") == "0":
         return False
     if not _installed():
-        _say("off: sentence-transformers is not installed (pip install 'babyseat[rerank]')")
-        return False
+        ok, why = may_install()
+        if not ok:
+            _say(f"off: sentence-transformers is not installed ({why}; pip install 'babyseat[rerank]')")
+        return ok
     return True
 
 

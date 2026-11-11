@@ -50,6 +50,10 @@ ENV PYTHONUNBUFFERED=1 \
 COPY --from=build /wheels /wheels
 RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels \
     && python -c "from membrane import membrane_vm"
+# the recall reranker (#680), baked in (a container installs nothing at boot): CPU-only torch,
+# not GBs of CUDA; its model (bge-reranker-v2-m3) downloads into the /data volume on first boot
+RUN pip install --no-cache-dir --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu torch \
+    && pip install --no-cache-dir --only-binary=:all: sentence-transformers
 
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh \
