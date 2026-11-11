@@ -1035,17 +1035,26 @@ def view(est, goal: str) -> dict:
 
 
 # ---- the lanes' texts ------------------------------------------------------------------------------
+# #1120 (the lean planner): the rules are the planner's own system prompt, byte-stable (formatted once, here), so the
+# prompt cache reads them; the per-call message carries the goal, why, and what changed since its last plan
+PLANNER_SYSTEM = ("""You are the PLANNER of a goal: you turn it into a graph of tasks, decision cards and waits that
+workers, the person and the clock carry out. Your message names the goal, why you were called, and its graph:
+what changed since your last plan in full, the rest as one line each (key [status] title).
+
+Work the goal as a graph. Write ONE plan with entity_edit on the goal:
+  entity_edit spec='<the goal's id>' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"], "parent": "<a split task's key, for its sub-task>"}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
+A task is ONE worker step: one reading round (calls that only read) if it needs one, then one batch of acting calls, then its verdict; "read X, then write from it" is one task. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth; after, cards and waits work on them as on any task); it is done when its sub-tasks are, and what waits on it waits until then. You can split a task before it runs the same way. Listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (a reply, a delivery, a long job finishing) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: a long job takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, duplicates = new tasks like an open or running one (drop one of each pair; the graph marks them "duplicate of"), and `nothing runnable` when the plan leaves nothing to run.
+When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
+End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>.""").format(tick_s=WAIT_TICK_S)
+
 PLANNER_TEXT = """You are the PLANNER for goal {goal}: {text}
 Why you were called: {why}
 
-The goal's graph now:
 {graph}
 
-Work the goal as a graph. Write ONE plan with entity_edit on the goal:
-  entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"], "parent": "<a split task's key, for its sub-task>"}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
-A task is ONE worker step: one reading round (calls that only read) if it needs one, then one batch of acting calls, then its verdict; "read X, then write from it" is one task. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth; after, cards and waits work on them as on any task); it is done when its sub-tasks are, and what waits on it waits until then. You can split a task before it runs the same way. Listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (a reply, a delivery, a long job finishing) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: a long job takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, duplicates = new tasks like an open or running one (drop one of each pair; the graph marks them "duplicate of"), and `nothing runnable` when the plan leaves nothing to run.
-When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
-End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
+Write at most one plan with entity_edit on the goal (the rules, the plan's shape and how a split task gets
+sub-tasks by `parent`: your system prompt). End with one line: PLANNED / FULFILLED / UNCHANGED."""
+
 
 WORKER_TEXT = """You are a WORKER on task {task} of goal {goal}.
 Task: {title}
@@ -1073,12 +1082,55 @@ def _graph_lines(est, goal: str) -> str:
     return "\n".join(out) or "(empty: nothing planned yet)"
 
 
+def planner_snapshot(est, goal: str) -> dict:
+    """{node: its status and receipt} for the goal's tasks, waits and cards: what the planner has seen."""
+    out = {}
+    for d in list((est.docs or {}).values()):
+        p = d.properties or {}
+        if p.get("goal") == goal and d.cls in (TASK, WAIT, "Decision"):
+            out[d.eid] = hashlib.sha1(json.dumps([p.get("status"), p.get("receipt"), p.get("value")],
+                                                 default=str).encode()).hexdigest()[:12]
+    return out
+
+
+def planner_seen(est, goal: str, snap: dict | None = None) -> None:
+    """A planner pass ran: what it saw (taken before it ran) is the next pass's baseline."""
+    g = (est.docs or {}).get(goal)
+    if g is None:
+        return
+    g.properties = {**(g.properties or {}), "planner_seen": snap if snap is not None else planner_snapshot(est, goal)}
+    est.upsert(g, embedder=None)
+
+
+def _index_line(est, eid: str) -> str:
+    d = (est.docs or {}).get(eid)
+    p = (d.properties or {}) if d is not None else {}
+    kind = {TASK: "task", WAIT: "wait"}.get(getattr(d, "cls", ""), "card")
+    title = " ".join(str(p.get("title") or p.get("name") or "").split())
+    return (f"- {kind} {p.get('plan_key') or eid} [{p.get('status') or OPEN}] {title[:60]}"
+            + (" (sub-task)" if p.get("parent") else ""))
+
+
 def planner_text(est, goal: str, why: str) -> str:
+    """#1120: the first pass sees the whole graph; a later pass what changed since the last (new nodes, a changed
+    status or receipt), in full, and the rest as one index line each."""
     g = (est.docs or {}).get(goal)
     p = (g.properties or {}) if g is not None else {}
     text = p.get("text") or p.get("summary") or p.get("name") or goal
-    return PLANNER_TEXT.format(goal=goal, text=str(text), why=str(why)[:400], graph=_graph_lines(est, goal),
-                               tick_s=WAIT_TICK_S)
+    seen = p.get("planner_seen")
+    full = _graph_lines(est, goal)
+    if isinstance(seen, dict) and seen:
+        now = planner_snapshot(est, goal)
+        changed = {e for e, sig in now.items() if seen.get(e) != sig}
+        lines = full.split("\n")
+        hit = [ln for ln in lines if any(f" {e} [" in ln for e in changed)]
+        rest = sorted((e for e in now if e not in changed), key=lambda e: (len(e), e))
+        graph = ("What changed since your last plan:\n" + ("\n".join(hit) or "(nothing)")
+                 + "\n\nThe rest of the graph (unchanged):\n" + ("\n".join(_index_line(est, e) for e in rest)
+                                                               or "(nothing)"))
+    else:
+        graph = "The goal's graph now:\n" + full
+    return PLANNER_TEXT.format(goal=goal, text=str(text), why=str(why)[:400], graph=graph)
 
 
 def worker_text(est, task: str) -> str:
