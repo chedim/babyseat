@@ -2,7 +2,8 @@ name: wheels
 
 # THE FIELD ENGINE SHIPS COMPILED (0.7.5, the operator: "don't make users build half the project"): babyseat's
 # native engine (native/, Rust + PyO3) is built into one wheel per platform with PyO3's stable ABI, so each wheel
-# serves every Python >= 3.10. macOS (arm64, Intel) and Linux (x86_64, aarch64); anything else builds from the sdist
+# serves every Python >= 3.10. macOS (arm64, Intel) and Linux (x86_64, aarch64), glibc (manylinux) AND musl
+# (musllinux: Home Assistant's container is Alpine, and 0.7.5 shipped without these); anything else builds from the sdist
 # (install.sh fetches a Rust toolchain when it is missing). Each wheel is installed into a clean environment and must
 # import the engine before it can be published. publish.yml calls this workflow; a PR that touches the engine or the
 # build runs it too, so a broken wheel never reaches a release.
@@ -30,21 +31,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x86_64, os: ubuntu-latest, archs: x86_64 }
-          - { name: linux-aarch64, os: ubuntu-24.04-arm, archs: aarch64 }
-          - { name: macos-arm64, os: macos-latest, archs: arm64 }
-          - { name: macos-x86_64, os: macos-latest, archs: x86_64 }      # cross-built on Apple silicon
+          - { name: linux-x86_64, os: ubuntu-latest, archs: x86_64, build: "cp310-manylinux_*" }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm, archs: aarch64, build: "cp310-manylinux_*" }
+          - { name: linux-musl-x86_64, os: ubuntu-latest, archs: x86_64, build: "cp310-musllinux_*" }
+          - { name: linux-musl-aarch64, os: ubuntu-24.04-arm, archs: aarch64, build: "cp310-musllinux_*" }
+          - { name: macos-arm64, os: macos-latest, archs: arm64, build: "cp310-*" }
+          - { name: macos-x86_64, os: macos-latest, archs: x86_64, build: "cp310-*" }      # cross-built on Apple silicon
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
       - uses: pypa/cibuildwheel@v2.23
         env:
-          CIBW_BUILD: "cp310-*"                     # abi3: the one cp310 build serves every newer Python
-          CIBW_SKIP: "*-musllinux_*"
+          CIBW_BUILD: ${{ matrix.build }}           # abi3: the one cp310 build serves every newer Python
           CIBW_ARCHS: ${{ matrix.archs }}
           CIBW_BEFORE_ALL_LINUX: "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
-          CIBW_ENVIRONMENT_LINUX: 'PATH="$HOME/.cargo/bin:$PATH"'
+          # musl: Rust links the C runtime statically by default, and a static-CRT cdylib can't be a Python extension
+          CIBW_ENVIRONMENT_LINUX: 'PATH="$HOME/.cargo/bin:$PATH" RUSTFLAGS="-C target-feature=-crt-static"'
           CIBW_BEFORE_ALL_MACOS: "rustup target add x86_64-apple-darwin aarch64-apple-darwin"
           CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=11.0"
           # the wheel alone, in a clean environment: the engine must import (no dependencies needed for it)
