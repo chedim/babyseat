@@ -150,4 +150,5 @@ def test_the_graph_and_the_planner_show_waits(seat):
     assert [w["eid"] for w in v["waits"]] == [CI]
     text = GG.planner_text(seat.entity_store, GOAL, "test")
     assert f"wait {CI} [open] CI green" in text
-    assert '"waits"' in GG.PLANNER_TEXT and "every_s" in text and "deadline_min" in text
+    rules = GG.PLANNER_SYSTEM                   # #1120: the plan's shape is the planner's system prompt
+    assert '"waits"' in rules and "every_s" in rules and "deadline_min" in rules
