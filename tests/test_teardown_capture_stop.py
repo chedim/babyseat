@@ -60,7 +60,9 @@ class TheTeardownOrder(unittest.TestCase):
         self.assertLess(stop.start(), fin.index("_fld.flush()"))
 
     def test_each_step_is_timed_into_the_log(self):
-        self.assertIn("[teardown]", self._fin())
+        # #1115: the per-step lines come from bootprof.Laps("teardown") ("[teardown] <step> Ns",
+        # pinned in tests/test_boot_profile_1115.py)
+        self.assertIn('Laps("teardown", echo=sys.__stderr__)', self._fin())
 
 
 if __name__ == "__main__":
