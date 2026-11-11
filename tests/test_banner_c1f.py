@@ -178,7 +178,11 @@ def test_the_pack_lays_out_the_same_block_as_the_python_banner(seat, tmp_path, m
     store_dir = tmp_path / "store"
     store_dir.mkdir()
     import sqlite3
-    sqlite3.connect(store_dir / "field.sqlite3").execute("CREATE TABLE c_events (k TEXT PRIMARY KEY, body TEXT)").connection.commit()
+    c = sqlite3.connect(store_dir / "field.sqlite3")
+    for t in ("c_events", "c_entity_deltas", "c_sentences"):    # the seat's tables (an empty store, not a broken one:
+        c.execute(f"CREATE TABLE {t} (k TEXT PRIMARY KEY, body TEXT)")   # a missing one is a getter error)
+    c.commit()
+    c.close()
     FL.stop(seat)
     live = FL.start(seat, thread=False)
     r = live.banner(object(), "owner", "ses_op", "ses_op", "", now=now,
