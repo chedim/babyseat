@@ -28,8 +28,8 @@ pub const BUSY_TIMEOUT_MS: u64 = 5000;  // the drivers' default (Python sqlite3 
 /// Runs the store's reads (the host's SQLite: one copy per process). `token` names a running query for `interrupt`.
 pub trait SqlExec: Send + Sync {
     fn run(&self, token: u64, sql: &str, args: &[J]) -> Result<Vec<J>, String>;
-    /// Compile without running, on the engine's call: a write, a missing table or the wrong argument count is
-    /// refused at once (never reaches a thread), as the driver's prepare step always did.
+    /// Compile without running (`query`, the synchronous path of tools and tests): a write, a missing table or the
+    /// wrong argument count is refused before the run. Never on the engine's call (it would wait for the GIL).
     fn check(&self, _sql: &str, _nargs: usize) -> Result<(), String> { Ok(()) }
     fn interrupt(&self, token: u64);
 }
@@ -89,6 +89,7 @@ impl Store {
     /// instance): a different query from the same asker interrupts its previous one.
     pub fn request(&self, asker: &str, sql: &str, args: &[J]) -> Poll {
         let k = scoped(asker, &key(sql, args));
+        let mut stop: Option<(Arc<dyn SqlExec>, u64)> = None;
         {
             let mut sh = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
             match sh.results.get(&k) {
@@ -101,15 +102,18 @@ impl Store {
             if let Some(prev) = sh.asked.insert(asker.to_string(), k.clone()) {
                 if prev != k && !sh.asked.values().any(|v| *v == prev) {
                     // superseded and wanted by no one: stop it, and forget an answer that came in for it
-                    if let (Some(t), Some(x)) = (sh.running.get(&prev), sh.exec.as_ref()) { x.interrupt(*t); }
+                    if let (Some(t), Some(x)) = (sh.running.get(&prev), sh.exec.as_ref()) { stop = Some((x.clone(), *t)); }
                     if matches!(sh.results.get(&prev), Some(State::Done(_))) { sh.results.remove(&prev); }
                 }
             }
             sh.results.insert(k.clone(), State::Pending);
         }
+        // never call the executor under the store's lock: it takes the GIL, and a Python thread holding the GIL
+        // takes this lock (sql_pending) -- a lock-order deadlock
+        if let Some((x, t)) = stop { x.interrupt(t); }
         let exec = match self.exec() { Ok(x) => x, Err(e) => return self.finish(&k, Err(e)) };
-        // check it here, so a bad query is refused at once and never reaches a thread
-        if let Err(e) = exec.check(sql, args.len()) { return self.finish(&k, Err(e)); }
+        // no check here: compiling needs the host's SQLite (the GIL), and the engine's call never waits for Python;
+        // a bad query is refused by its run, on its thread
         let token = {
             let mut sh = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
             sh.next_token += 1;
@@ -290,8 +294,11 @@ impl Waiter {
 }
 
 fn interrupt_all(sh: &Arc<(Mutex<Shared>, Condvar)>) {
-    let g = sh.0.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(x) = g.exec.as_ref() { for t in g.running.values() { x.interrupt(*t); } }
+    let (x, tokens) = {                                // collected under the lock, interrupted outside it
+        let g = sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        (g.exec.clone(), g.running.values().copied().collect::<Vec<u64>>())
+    };
+    if let Some(x) = x { for t in tokens { x.interrupt(t); } }
 }
 
 /// Queries, file reads and effects not landed yet: still running, or finished with their rows not taken by a round (the
