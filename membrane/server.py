@@ -2916,6 +2916,7 @@ class TurnRunner:
         # told so, and the next round goes out without tools: it can only answer.
         _refused: set = set()
         _text_only = False
+        _acted = False                     # #1116: a worker's round of tool calls ran
         while not err_done and rounds < MAX_ROUNDS:
             rounds += 1
             self._turn_activity[sid] = time.time()   # THE ROUND'S TOUCH
@@ -3450,6 +3451,16 @@ class TurnRunner:
                                   "part": dict(lpart),
                                   "time": int(time.time() * 1000),
                                   "sessionID": sid})
+            if tcs and not _ca_round and str((self._agents or {}).get(sid) or "").lower().startswith("worker"):
+                # #1116 (the operator's option A): a goal worker gets ONE step -- one round of tool calls, then
+                # its verdict. A second round of calls never runs: the answer ends capped (as the Claude rung's
+                # does) and the task goes back to the planner to be split
+                if _acted:
+                    a_info[_CA.CAP_MARK] = {"session": "", "calls": 0, "continued": False, "split": True}
+                    mkpart({"type": "step-finish", "reason": "stop", "cost": 0,
+                            "tokens": _step_tokens(a_info, history, parts)})
+                    break
+                _acted = True
             if tcs:
                 a_info["time"].setdefault("start", int(time.time() * 1000))
                 asst_msg = {"role": "assistant", "content": content or "",
