@@ -12,13 +12,8 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # brands: the integration is not in home-assistant/brands yet (it is
-          # not published); the check re-arms when it is. license: PolyForm
-          # Noncommercial is not a license GitHub's detector names, so HACS's
-          # repository license check reads NOASSERTION and refuses.
-          # SPACE separated (the action splits INPUT_IGNORE on " ", not on
-          # ","); every other check (hassfest, validate) runs.
-          ignore: brands license
+          # every check runs, as the HACS default list requires (2026-11-10): the license is MIT (GitHub detects it)
+          # and the integration ships its own brand/ icon (#1081)
   hassfest:
     runs-on: ubuntu-latest
     steps:
