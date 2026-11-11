@@ -113,6 +113,7 @@ class BootDoor:
         self.httpd = ThreadingHTTPServer(sock.getsockname()[:2], _H, bind_and_activate=False)
         self.httpd.socket = sock          # the reservation: answered here, never rebound
         self.httpd.daemon_threads = True
+        self.httpd.handle_error = lambda request, client_address: None   # a tab that hung up: nothing to log
         self._th = threading.Thread(target=self.httpd.serve_forever, name="boot-door", daemon=True)
         self._th.start()
 
