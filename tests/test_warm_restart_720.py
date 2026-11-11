@@ -165,15 +165,17 @@ class TestABackendThatCannotSnapshotSaysSo(unittest.TestCase):
         self.assertIn("object", out)
 
 
-class TestTeardownSavesOnlyOnAPlannedRestart(unittest.TestCase):
+class TestTeardownSavesOnEveryCleanStop(unittest.TestCase):
+    """#1115 (operator, 2026-11-11): every clean stop keeps the snapshot, not only a planned restart --
+    a stop then a start skips the rebuild too."""
     def _srv(self, be):
         return type("S", (), {"efield": type("F", (), {"b": be})()})()
 
-    def test_no_restart_no_snapshot(self):
+    def test_a_plain_stop_saves_too(self):
         be = mock.Mock()
         with mock.patch.dict(restarts.RESTART, {"requested": False}):
             restarts.save_warm(self._srv(be))
-        be.save_warm.assert_not_called()
+        be.save_warm.assert_called_once()
 
     def test_a_planned_restart_saves(self):
         be = mock.Mock()

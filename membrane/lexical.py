@@ -7,7 +7,8 @@ license name (PolyForm), an issue number (#277) or a file name
 the rows that carry the very word. It lives in RAM only: built from the
 events (already in RAM) at boot, on a background thread, and kept current
 by capture (efield.embed_pending and the chunker call `add_event` /
-`add_chunk`). Nothing is stored; a restart rebuilds it.
+`add_chunk`). A clean stop keeps it in the warm snapshot (#1115); a boot
+whose snapshot does not match rebuilds it.
 
 A document is one sentence of one event (its sid, which the event already
 holds) or one tool-output chunk (a tool result's own observation line is
@@ -284,9 +285,94 @@ def index_of(field) -> LexIndex | None:
     return field._lex
 
 
+LEX_VERSION = 1      # the snapshot's format (#1115); a change to LexIndex or to what build() indexes bumps it
+
+
+def dump(field) -> bytes | None:
+    """#1115: the built index as bytes for the warm snapshot (marshal: plain values only), or None
+    while it builds or when there is none."""
+    import marshal
+    ix = getattr(field, "_lex", None)
+    if not isinstance(ix, LexIndex) or not ix.ready:
+        return None
+    with ix.lock:
+        pi, pa = {}, {}
+        for w, p in ix.post.items():
+            if isinstance(p, int):
+                pi[w] = p
+            else:
+                pa[w] = p.tobytes()
+        return marshal.dumps({"v": LEX_VERSION, "isz": array("I").itemsize, "lens": ix.lens.tobytes(),
+                              "ref": list(ix.ref), "ev": list(ix.ev), "seen": list(ix.seen),
+                              "total": ix.total, "pi": pi, "pa": pa})
+
+
+def load(blob: bytes) -> LexIndex | None:
+    """The index back from dump()'s bytes; None for another format or anything unreadable."""
+    import marshal
+    try:
+        d = marshal.loads(blob)
+        if not isinstance(d, dict) or d.get("v") != LEX_VERSION or d.get("isz") != array("I").itemsize:
+            return None
+        ix = LexIndex()
+        ix.lens = array("I")
+        ix.lens.frombytes(d["lens"])
+        ix.ref, ix.ev, ix.seen, ix.total = list(d["ref"]), list(d["ev"]), set(d["seen"]), int(d["total"])
+        if not (len(ix.ref) == len(ix.ev) == len(ix.lens)):
+            return None
+        post = dict(d["pi"])
+        for w, b in d["pa"].items():
+            a = array("I")
+            a.frombytes(b)
+            post[w] = a
+        ix.post = post
+        ix.ready = True
+        return ix
+    except Exception:
+        return None
+
+
+def covers(field, ix: LexIndex) -> bool:
+    """Does `ix` index exactly what build() would index now: the same events and chunks, and per
+    event as many sentences as it has sentence ids (anything changed since: False, rebuild)."""
+    from collections import Counter
+    want = set()
+    per_ev = Counter(ix.ev)
+    for key, ev in list(field.b.scan("events", {"origin": field.origin})):
+        if not ev.get("sids") or ev.get("status") == "forgotten" or ev.get("stream") == "observation":
+            continue
+        want.add(key)
+        if per_ev.get(key, 0) != len(ev["sids"]):
+            return False
+    try:
+        for cid, row in list(field.b.scan("chunks", None)):
+            if row.get("event"):
+                want.add(cid)
+    except Exception:
+        pass
+    with _LOCK:                                   # what capture noted during the boot joins at install
+        noted = {args[0] for args in getattr(field, "_lex_pending", None) or ()}
+    return want - noted == ix.seen - noted
+
+
+def _from_snapshot(field) -> LexIndex | None:
+    """The index the warm snapshot handed the backend (once), when it covers the field."""
+    b = getattr(field, "b", None)
+    blob = getattr(b, "_warm_lex", None)
+    if blob is None:
+        return None
+    b._warm_lex = None
+    ix = load(blob)
+    if ix is None or not covers(field, ix):
+        print("[efield] word index snapshot dropped: rebuilding", file=sys.stderr)
+        return None
+    return ix
+
+
 def warm(field) -> threading.Thread | None:
     """The seat's boot: build on a background thread, so the first turns
-    never wait (they run without the word lane until it is ready)."""
+    never wait (they run without the word lane until it is ready). #1115: the
+    warm snapshot's index when it covers the field, else the build."""
     with _LOCK:
         if getattr(field, "_lex", None) is not None:
             return None
@@ -294,6 +380,15 @@ def warm(field) -> threading.Thread | None:
 
     def run():
         t = time.time()
+        try:
+            ix = _from_snapshot(field)
+        except Exception:
+            ix = None
+        if ix is not None:
+            _install(field, ix)
+            print(f"[efield] word index: {len(ix)} sentences, {len(ix.post)} words from the warm "
+                  f"snapshot in {time.time() - t:.1f}s", file=sys.stderr)
+            return
         try:
             ix = build(field)
         except Exception as e:

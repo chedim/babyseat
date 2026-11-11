@@ -31,6 +31,7 @@ import base64
 import fcntl
 import itertools
 import json
+import marshal
 import math
 import os
 import sys
@@ -212,13 +213,163 @@ class CBLiteBackend(MemBackend):
         self.db.put_json(META, key, dumps(doc))
 
     def _load_hot(self) -> None:
+        """The hot rows into RAM: from the warm snapshot when it provably matches the database
+        (#1115), else read back from the database."""
+        if not self.readonly and self._load_rows_snapshot():
+            return
+        self._load_hot_db()
+
+    # ---- #1115 the hot rows in the warm snapshot ------------------------------
+    ROWS_VERSION = 1                                # the rows file's format (a change here bumps it)
+    ROWS_FILE = "rows.marshal"
+
+    def _rows_stamp(self) -> dict:
+        return {"version": self.ROWS_VERSION, "python": list(sys.version_info[:2]),
+                "marshal": marshal.version}
+
+    def _save_rows(self, d: Path) -> dict | None:
+        """The hot rows as they are in RAM (the write-behind has written them: none may be pending,
+        or the snapshot is skipped) + the database's proof. None when skipped."""
+        with self._pend_lock:
+            if self._pending:
+                print(f"[efield] warm rows skipped: {len(self._pending)} write(s) still pending",
+                      file=sys.stderr)
+                return None
+        with self._ram_lock:
+            colls = {}
+            for c in COLLECTIONS:
+                if c in COLD:
+                    continue
+                keys = list(self.colls[c])
+                ords = self._ord[c]
+                colls[c] = [keys, [ords.get(k, 0) for k in keys], [self.colls[c][k] for k in keys]]
+        proof = self._warm_proof(None)
+        if proof is None:
+            return None
+        try:
+            blob = marshal.dumps(colls)
+        except ValueError as e:                      # a value marshal cannot hold: no rows snapshot
+            print(f"[efield] warm rows skipped ({e})", file=sys.stderr)
+            return None
+        (d / self.ROWS_FILE).write_bytes(blob)
+        return {**self._rows_stamp(), "file": self.ROWS_FILE, "bytes": len(blob), "proof": proof,
+                "counts": {c: len(v[0]) for c, v in colls.items()}}
+
+    LEX_FILE = "lex.marshal"
+
+    def save_warm(self, lex: bytes | None = None) -> dict:
+        """The vector matrices (MemBackend), then the hot rows, then -- only beside the rows, whose
+        proof it shares -- the field's word index as `lexical.dump` gave it (#1115)."""
+        man = super().save_warm()
+        d = self._warm_dir()
+        if man.get("unsupported") or d is None:
+            return man
+        rows = self._save_rows(d)
+        if rows:
+            man["rows"] = rows
+            if lex:
+                (d / self.LEX_FILE).write_bytes(lex)
+                man["lex"] = {"file": self.LEX_FILE, "bytes": len(lex)}
+            tmp = d / "manifest.json.tmp"
+            tmp.write_text(json.dumps(man))
+            os.replace(tmp, d / "manifest.json")
+        return man
+
+    def _load_rows_snapshot(self) -> bool:
+        """The hot rows from the warm snapshot, only when everything matches: the format, this
+        Python and marshal, the database file's proof, the file's length and shape, and the row
+        count of every hot collection in the database. Anything else: False (the caller reads the
+        database, as before). The folder itself is consumed by _load_warm right after."""
+        d = self._warm_dir()
+        if d is None:
+            return False
+        t = time.time()
+        try:
+            man = json.loads((d / "manifest.json").read_text())
+            r = man.get("rows") or {}
+        except (OSError, ValueError):
+            return False
+        if not r:
+            return False
+        why = None
+        try:
+            stamp = self._rows_stamp()
+            if any(r.get(k) != v for k, v in stamp.items()):
+                why = "another format or Python"
+            elif r.get("proof") != self._warm_proof(None):
+                why = "the database changed since"
+            else:
+                blob = (d / str(r.get("file") or self.ROWS_FILE)).read_bytes()
+                if len(blob) != r.get("bytes"):
+                    why = "the file is damaged"
+                else:
+                    why = self._install_rows(marshal.loads(blob))
+        except Exception as e:                       # damaged/odd file: never trusted
+            why = f"unreadable ({type(e).__name__})"
+        if why:
+            print(f"[efield] warm rows dropped ({why}): reading the database", file=sys.stderr)
+            return False
+        lx = man.get("lex") or {}
+        try:                                         # the word index rides the rows' proof (lexical.warm takes it)
+            blob = (d / str(lx.get("file") or self.LEX_FILE)).read_bytes() if lx else None
+            self._warm_lex = blob if blob is not None and len(blob) == lx.get("bytes") else None
+        except OSError:
+            self._warm_lex = None
+        n = sum(len(v) for c, v in self.colls.items() if c not in COLD)
+        print(f"[efield] {self.LABEL}: {n} hot rows loaded from the warm snapshot in {time.time() - t:.1f}s "
+              f"({self.db.count('sentences')} sentences on disk)", file=sys.stderr)
+        return True
+
+    def _progress(self) -> dict:
+        """#1115: the boot's load counts for the loading page (bootprof.PROGRESS); a read-only open
+        (a tool beside the seat) counts into a throwaway dict."""
+        if self.readonly:
+            return {}
+        from .bootprof import PROGRESS
+        PROGRESS.clear()
+        try:
+            PROGRESS["rows_total"] = sum(self.db.count(c) for c in COLLECTIONS if c not in COLD)
+            PROGRESS["states_total"] = self.db.count("entity_states")
+        except Exception:
+            pass
+        PROGRESS["rows"] = PROGRESS["states"] = 0
+        return PROGRESS
+
+    def _install_rows(self, colls) -> str | None:
+        """Checks the loaded rows, then puts them in RAM; the reason when they do not fit."""
+        hot = [c for c in COLLECTIONS if c not in COLD]
+        if not isinstance(colls, dict) or set(colls) != set(hot):
+            return "not this store's collections"
+        for c in hot:
+            v = colls[c]
+            if not (isinstance(v, list) and len(v) == 3 and all(isinstance(x, list) for x in v)
+                    and len(v[0]) == len(v[1]) == len(v[2])):
+                return f"{c}: not rows"
+            if len(v[0]) != self.db.count(c):
+                return f"{c}: {len(v[0])} rows here, {self.db.count(c)} in the database"
+            if not all(isinstance(x, dict) for x in v[2]) or not all(type(o) is int for o in v[1]):
+                return f"{c}: not rows"
+        with self._ram_lock:
+            for c in hot:
+                keys, ords, docs = colls[c]
+                self.colls[c] = dict(zip(keys, docs))
+                self._ord[c] = dict(zip(keys, ords))
+                self._next[c] = (max(ords) + 1) if ords else 0
+        prog = self._progress()
+        prog["rows"] = sum(len(colls[c][0]) for c in hot)
+        prog["states"] = len(colls["entity_states"][0])
+        return None
+
+    def _load_hot_db(self) -> None:
         t = time.time()
         n = 0
+        prog = self._progress()
         with self._ram_lock:
             for c in COLLECTIONS:
                 if c in COLD:
                     continue
                 rows, ords = self.colls[c], self._ord[c]
+                states = c == "entity_states"
                 it = iter(self.db.iter_query(f"SELECT META().id AS k, o, d FROM membrane.{c} ORDER BY o"))
                 try:
                     first = next(it, None)
@@ -236,6 +387,9 @@ class CBLiteBackend(MemBackend):
                     rows[k] = d
                     ords[k] = int(r.get("o") or 0)
                     n += 1
+                    prog["rows"] = n
+                    if states:
+                        prog["states"] = prog.get("states", 0) + 1
                 self._next[c] = (max(ords.values()) + 1) if ords else 0
         print(f"[efield] {self.LABEL}: {n} hot rows loaded in {time.time() - t:.1f}s "
               f"({self.db.count('sentences')} sentences on disk)", file=sys.stderr)

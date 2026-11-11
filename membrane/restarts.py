@@ -546,14 +546,13 @@ def pin_ports(argv: list[str], listen: int | None, serve: int | None) -> list[st
 
 
 def save_warm(srv) -> None:
-    """#720: a planned restart keeps the field's warm vector matrices for
+    """#720: a clean stop keeps the field's warm vector matrices for
     the next boot (efstore.MemBackend.save_warm: FileBackend and, #748,
     CBLiteBackend). A backend that cannot snapshot says so in one line. Called after the
-    teardown's last store close, so nothing writes after the snapshot; a
-    plain stop saves nothing."""
-    if not RESTART["requested"]:
-        return
-    be = getattr(getattr(srv, "efield", None), "b", None)
+    teardown's last store close, so nothing writes after the snapshot. #1115 (operator,
+    2026-11-11): every clean stop saves, not only a planned restart; a stop cut by the
+    teardown lease saves nothing (the next boot rebuilds, as before)."""
+    be =getattr(getattr(srv, "efield", None), "b", None)
     fn = getattr(be, "save_warm", None)
     if fn is None:
         print(f"[seat] warm snapshot skipped: {type(be).__name__} cannot snapshot",
@@ -561,13 +560,32 @@ def save_warm(srv) -> None:
         return
     t0 = time.time()
     try:
-        man = fn()
+        import inspect
+        lex = None
+        if "lex" in inspect.signature(fn).parameters:     # #1115: the word index rides the hot rows
+            from . import lexical
+            lex = lexical.dump(srv.efield)
+        man = fn(lex=lex) if lex is not None else fn()
         if man.get("unsupported"):
             print(f"[seat] warm snapshot skipped: {man['unsupported']}", file=sys.stderr, flush=True)
             return
         mats = ", ".join(f"{m['coll']}.{m['field']} {m['rows']}" for m in man.get("mats") or [])
-        print(f"[seat] warm snapshot saved in {time.time() - t0:.1f}s: {mats or 'nothing built'}",
-              file=sys.stderr, flush=True)
+        extra = []
+        if man.get("rows"):
+            extra.append(f"hot rows {sum(man['rows']['counts'].values())}")
+        if man.get("lex"):
+            extra.append("word index")
+        try:                                              # #1115: the loading page's field shape
+            d = be._warm_dir()
+            if d is not None and d.exists():
+                from .bootprof import save_shape
+                pts = save_shape(srv, d)
+                if pts:
+                    extra.append(f"shape {pts} points")
+        except Exception as e:
+            print(f"[seat] boot shape not saved ({e})", file=sys.stderr, flush=True)
+        print(f"[seat] warm snapshot saved in {time.time() - t0:.1f}s: {mats or 'nothing built'}"
+              + "".join(f", {x}" for x in extra), file=sys.stderr, flush=True)
     except Exception as e:
         print(f"[seat] warm snapshot skipped ({e})", file=sys.stderr, flush=True)
 

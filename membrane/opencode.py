@@ -763,7 +763,7 @@ def _close_listeners(servers) -> None:
 
 def main() -> None:
     from .bootprof import Laps
-    _boot_laps = Laps("boot")          # #1115: each step's wall time, one [boot] line once up
+    _boot_laps = Laps("boot", cpu=time.thread_time)   # #1115: each step's wall (+ cpu) time, one [boot] line
     _boot_laps.step("setup")
     args = _build_ap().parse_args()
     # JWT MODE (jwtauth.py, docs/auth.md): off unless a secret is set; a bad
@@ -931,8 +931,8 @@ def main() -> None:
     _boot_door = None
     if _serve_socket is not None and os.environ.get("MEMBRANE_LEGACY_SERVE") != "1":
         try:
-            from .bootprof import BootDoor
-            _boot_door = BootDoor(_serve_socket, _boot_laps)
+            from .bootprof import BootDoor, read_shape
+            _boot_door = BootDoor(_serve_socket, _boot_laps, shape=read_shape(args.field))
         except Exception as e:
             print(f"[seat] the boot's loading door did not open ({e})", file=sys.stderr)
     try:                               # #648: a restart keeps the ports this boot holds
@@ -1280,6 +1280,7 @@ def main() -> None:
             srv.entity_store._events_pool = srv.events_pool
         if getattr(srv, "efield", None) is not None:
             srv.efield._est_sink = srv.entity_store
+        _boot_laps.step("entity seeds")
         # THE BOOT ENTITY (the operator's ask): one immutable record
         # per boot (host/root/field/pid/argv/boot_ts) + the lineage
         # link + the presence's current-boot facts:
@@ -1444,6 +1445,7 @@ def main() -> None:
                 print("[seat] interface planted: remote_executor (exec(code, timeout))", file=sys.stderr)
         except Exception as e:
             print(f"[seat] interface seeding skipped ({e})", file=sys.stderr)
+        _boot_laps.step("autonode")
         srv.autonode = None
         if not args.no_autonode:
             try:
@@ -1476,6 +1478,7 @@ def main() -> None:
         #      goal) -- the listeners wake on the board's authority, not
         #      on runtime state. The pool is live by now (the field's
         #      boot wired it); the loops drain it when the day starts.
+        _boot_laps.step("goal board")
         try:
             _ib = _intents_board(srv)
             if _ib is not None and _ib.selection is not None:
@@ -1520,6 +1523,7 @@ def main() -> None:
         # + the PEER CHANNEL (permanent, a chat lane between the LLMs,
         # visible on every seat's banner). Degraded silently when
         # couchbase is down (the same covenant as the entity layer).
+        _boot_laps.step("peers")
         try:
             from .peers import PeerSubstrate
             # THE ROSTER FALLBACK (stage 5): when the ephemeral registry
@@ -1542,6 +1546,7 @@ def main() -> None:
         # the conversation's direction is the thing worth watching. The
         # story renders from the fresh tail (nothing tags 'now'; everything
         # is now); the position drifts with the momentum EMA + fresh states.
+        _boot_laps.step("tracks + scripts")
         evicted_boot = srv.entity_store._enforce_cap()
         if evicted_boot:
             print(f"[opencode] track cap: evicted {evicted_boot} "
@@ -2227,6 +2232,7 @@ def main() -> None:
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
+            _boot_laps.step("loop sessions")
             try:                                   # #570: an older seat's session per wake, collapsed
                 _gone = collapse_loop_sessions(runner)
                 if _gone:
@@ -2234,6 +2240,7 @@ def main() -> None:
                           file=sys.stderr)
             except Exception as e:
                 print(f"[opencode] loop session collapse failed ({e})", file=sys.stderr)
+            _boot_laps.step("serve wiring")
             # THE MINDS' MODELS: the saved picks for the loops + the cortex
             # (+ the think dial; an explicit CLI on/off beats the file, auto defers)
             try:
@@ -2731,7 +2738,10 @@ def main() -> None:
         # (a live _core.so thread at finalize is a SIGSEGV).
         for closer in (
                 getattr(getattr(srv, "peers", None), "close", None),
-                getattr(getattr(srv, "entity_store", None), "close", None)):
+                getattr(getattr(srv, "entity_store", None), "close", None),
+                # #1115: the field's store last (the entities write into it): drained and its
+                # file settled before the warm snapshot proves it
+                getattr(getattr(getattr(srv, "efield", None), "b", None), "close", None)):
             if closer is None:
                 continue
             try:
@@ -2739,7 +2749,7 @@ def main() -> None:
             except Exception:
                 pass
             _td_mark(f"{getattr(closer, '__qualname__', 'store')} done")
-        try:                           # #720: a planned restart keeps the warm matrices
+        try:                           # #720, #1115: every clean stop keeps the warm snapshot
             from .restarts import save_warm
             save_warm(srv)
         except Exception:

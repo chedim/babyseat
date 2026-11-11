@@ -102,6 +102,19 @@ class TheDoor(unittest.TestCase):
         finally:
             real.shutdown()
 
+    def test_a_client_that_hangs_up_leaves_no_traceback(self):
+        """Memo's first boot with the door: a tab that hung up mid-answer printed a BrokenPipe
+        traceback per request into the seat's log."""
+        import io
+        from unittest import mock
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err):
+            try:
+                raise BrokenPipeError(32, "Broken pipe")
+            except BrokenPipeError:
+                self.door.httpd.handle_error(None, ("127.0.0.1", 1))
+        self.assertEqual(err.getvalue(), "")
+
     def test_handover_twice_is_harmless(self):
         self.door.handover()
         self.door.handover()
@@ -163,7 +176,7 @@ class ARealBoot(unittest.TestCase):
                 if "[boot] " in log:
                     break
                 time.sleep(0.1)
-            self.assertRegex(log, r"\[boot\] [\d.]+s: .*field rows [\d.]+s, .*serve [\d.]+s")
+            self.assertRegex(log, r"\[boot\] [\d.]+s: .*field rows [\d.]+s \(cpu [\d.]+s\), .*serve [\d.]+s")
         finally:
             proc.terminate()
             try:
