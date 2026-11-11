@@ -46,6 +46,17 @@ def test_the_shared_doctrine_has_no_babyseat_pr_line():
             "https://github.com/chedim/cliffhanger", "")
 
 
+def test_the_code_change_rule_lives_in_help_exec():
+    """Operator 2026-11-11: dev workflow rules leave the shared doctrine; the
+    WHEN YOU CHANGE CODE line moves, text unchanged, to help('exec')."""
+    from membrane.help_pack import packaged
+    rule = ("WHEN YOU CHANGE CODE: reuse an existing command or entity first; failing test, "
+            "then the fix; work on a copy, never the live checkout; narrow tests, then the full "
+            "suite detached; publish only when it is green and the person asked.")
+    assert "WHEN YOU CHANGE CODE" not in R._RAG_SYSTEM
+    assert rule in packaged("exec")
+
+
 def test_the_line_keeps_its_text():
     assert R.IMPROVE_BABYSEAT_LINE == LINE
 
