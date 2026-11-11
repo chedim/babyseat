@@ -2720,7 +2720,10 @@ def main() -> None:
         # (a live _core.so thread at finalize is a SIGSEGV).
         for closer in (
                 getattr(getattr(srv, "peers", None), "close", None),
-                getattr(getattr(srv, "entity_store", None), "close", None)):
+                getattr(getattr(srv, "entity_store", None), "close", None),
+                # #1115: the field's store last (the entities write into it): drained and its
+                # file settled before the warm snapshot proves it
+                getattr(getattr(getattr(srv, "efield", None), "b", None), "close", None)):
             if closer is None:
                 continue
             try:
