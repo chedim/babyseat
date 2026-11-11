@@ -6020,6 +6020,13 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             _msgs = up.get("messages") or (body.get("messages") or [])
             up["messages"] = _inject_after(_msgs, speak_block)
         _st.mark("assemble")
+        # THROWAWAY EXPERIMENT (operator 2026-11-11): the map of what moves, no history, no banners
+        try:
+            from . import momentum_map as _MM
+            if _MM.on() and getattr(srv, "efield", None) is not None:
+                up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield)
+        except Exception as _e:
+            print(f"[exp-map] skipped ({_e})", file=sys.stderr)
         # ---- the orchestration router: model-vs-model on escalations ----
         # Score proposes (fit_hat - delay - price); the REVERSED cost-floor
         # disposes (cheapest eligible cloud holds the floor; locals must
