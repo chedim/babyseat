@@ -1331,7 +1331,8 @@ class EntityField:
 
     def _apply(self, key: str, ev: dict) -> None:
         stream, seq, ts = ev["stream"], int(ev["seq"]), ev.get("ts")
-        self.move_log.place(key, str(ev.get("session") or ""), seq)
+        from .movelog import is_turn as _is_turn
+        self.move_log.place(key, str(ev.get("session") or ""), seq, _is_turn(ev))
         for fn in self.event_listeners:           # #337: who is listening hears every event
             try:
                 fn(key, ev)
@@ -1406,14 +1407,6 @@ class EntityField:
             if st is None:
                 continue                  # the dust cap: no state born
             if st.tier == "nursery":
-                # the move log (0.7.52): a thing not yet materialized moves from its seed, as its first
-                # update will (materialize: state = seed); recorded now, at capture
-                try:
-                    sv = self._seed(st.surface or eid.split(":", 1)[-1])
-                    self.move_log.note(key, eid, float(np.linalg.norm(GAIN * (np.asarray(X[sidx], dtype=np.float32)
-                                                                              - np.asarray(sv, dtype=np.float32)))))
-                except Exception:
-                    pass
                 st.pending.append([sids[sidx], seq, sidx, stream, key, ts,
                                    ev.get("role") or ""])
                 if sids[sidx] not in st.distinct:
@@ -1450,9 +1443,9 @@ class EntityField:
                               "seq": seq, "sidx": 0, "gain": 0.0,
                               "align": 0.0, "cos_before": 1.0,
                               # the move log rides this row (0.7.52): a restart loads it, no replay
-                              "mv": 1, "chat": str(ev.get("session") or ""),
-                              "moves": {e: round(v, 5) for e, v in
-                                        (self.move_log.moves.get(key) or {}).items()}}
+                              "chat": str(ev.get("session") or ""), "turn": _is_turn(ev),
+                              **self.move_log.row_fields(key)}
+        self.move_log.dirty.discard(key)
         self._dirty.add(idx_eid)
         if stream == "observation":
             from . import relations as R
@@ -1557,6 +1550,23 @@ class EntityField:
     _wgen = 0
 
     @_locked
+    def _flush_moves(self) -> None:
+        """The move log's restart parity (0.7.52): an event whose moves changed after its index row was built (a
+        materialization replays a thing's pending mentions under their own events) gets its row re-written."""
+        ml = self.move_log
+        with ml.lock:
+            keys = list(ml.dirty)
+            ml.dirty.clear()
+        for key in keys:
+            pl = ml._place.get(key)
+            if pl is None:
+                continue
+            dkey = f"d:{self.o}:{h16('e:' + key)}:{pl[1]}:0"
+            row = self._deltas.get(dkey) or self.b.get("entity_deltas", dkey)
+            if row is None:
+                continue
+            self._deltas[dkey] = dict(row, **ml.row_fields(key))
+
     def flush(self) -> None:
         self._wgen += 1
         if self._dirty:
@@ -1593,6 +1603,7 @@ class EntityField:
                         except Exception:
                             pass
             self._dirty -= _dirty
+        self._flush_moves()
         if self._deltas:
             g0 = self._dgen()
             self.b.upsert_multi("entity_deltas", self._deltas)

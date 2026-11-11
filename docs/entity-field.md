@@ -302,21 +302,29 @@ The banner and `/membrane/ask` share one ranking path (`recall_banner.rank`): re
 | voter | weight | what it ranks |
 |---|---|---|
 | embedder | 0.125 | the direct lane's own top 20 |
-| entity recall | 0.75 | the 8 field things nearest the question, then the events that moved them most (Σ sim × move) |
-| instance histories | 3 | `instances.py`: the tense rule's instances, Borda'd with the person timelines, the place ballot and current recall |
-| move log | 2 | `movelog.py`: settling, one round -- the question's things weighed by rarity, each event by how far it moved them, the turn before it held |
+| entity recall | 0.75 | the 8 field things nearest the question, then the events that moved them most (Σ sim × the summed move) |
+| instance histories | 3 | `instances.py`: the tense rule's instances, Borda'd with the person timelines, the time ballot, the place ballot and current recall (91's order) |
+| move log | 2 | `movelog.py`: settling, one round -- the question's things weighed by rarity, each event by its largest move of them, the previous turn in its chat held (a person's or the model's line, never a tool output) |
 | word lane | 0.125 | the word lane's own top 20 (tool outputs too) |
 
 Borda: each voter's top 20 earns w × (20 − i), voters in alphabetical order, a stable sort. The weights are the
 mean of the two held-out folds (approved 2026-11-11); the bench's learned map (a ridge map fitted on LoCoMo's gold
-answers) and latest mentions (weight 0) are not ported.
+answers) and latest mentions (weight 0) are not ported. The time ballot is rebuilt without training (spaCy
+DATE / TIME + dateparser); the original read the trained readers' TIME labels.
 
-The pool is the seat's own field, all of it: every chat, every person, internal chats, tool outputs. The move
-log is recorded as each event applies (`EntityField._update`; a nursery thing moves from its seed) and rides the
-event's index delta row, so a restart loads it; events from before 0.7.52 are backfilled once in the background.
-Each event's text is parsed once by spaCy when it lands (a background worker, `annotations` rows `ih:<key>`); at
-ask time only the question is parsed. Without spaCy the vote runs without instance histories. Not covered: the
-global field and peers.
+Each voter is filtered to answerable events before its cut to 20 and reads the plain question vector (the
+banner's blend with the previous turn shapes the pool, not the vote). The pool is the seat's own field, all of it:
+every chat, every person, internal chats, tool outputs. The move log is recorded as each event applies
+(`EntityField._update` only: a thing still in the nursery -- said fewer than K_MAT times -- moves nothing, so a word
+said once is no cue), keeps both the largest and the summed move, and rides the event's index delta row; a
+materialization that replays older mentions re-writes their rows, a restart loads them in capture order, and
+events from before 0.7.52 are backfilled once (specific things only) behind a done-marker. Each event's text is
+parsed once by spaCy when it lands (a background worker, `annotations` rows `ih:<key>`, with its moments: each
+DATE / TIME phrase placed by dateparser from when it was said, else when it was said); at ask time only the
+question is parsed, under one spaCy lock, and only once spaCy is loaded -- never loaded in a turn. An ask reads
+postings and indexes (the cued things, the heads, the speakers, the lemmas, the moments), never the whole field.
+Without spaCy the vote runs without instance histories; without dateparser, without the time ballot. Not covered:
+the global field and peers (the seat's own field is the pool, operator 2026-11-11).
 
 ### The banner learns from use (#668, step 6)
 

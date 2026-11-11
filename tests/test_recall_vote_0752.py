@@ -93,12 +93,14 @@ class MoveLog(unittest.TestCase):
         for e, v in want.items():
             self.assertAlmostEqual(g.move_log.moves[k][e], v, places=4)
 
+    @mock.patch.object(EF, "K_MAT", 1)      # the bench's field: a word lives at its first mention
     def test_settle_finds_the_event_that_moved_the_rare_thing(self):
         from membrane import movelog as ML
         f = _field()
-        keys = _say(f, "chat-a", [("user", "The weather was nice today."),
-                                  ("user", "I started a pottery class on Tuesday."),
-                                  ("user", "The weather was cold yesterday.")])
+        # three chats: no turn holds another's things (the next turn in a chat holds them -- the bench's rule)
+        keys = [_say(f, c, [("user", t)])[0] for c, t in (("a", "The weather was nice today."),
+                                                          ("b", "I started a pottery class on Tuesday."),
+                                                          ("c", "The weather was cold yesterday."))]
         got = [k for k, _s in ML.settle(f, "What class did I start?")]
         self.assertTrue(got)
         self.assertEqual(got[0], keys[1])
@@ -108,7 +110,7 @@ class MoveLog(unittest.TestCase):
         f = _field()
         keys = _say(f, "chat-a", [("user", "Tell me about the pottery class."),
                                   ("model", "It meets every week and it is fun.")])
-        held = ML.held(f.move_log)
+        held = f.move_log.held
         self.assertTrue(set(f.move_log.moves[keys[0]]) <= set(held[keys[1]]))
 
 
@@ -120,7 +122,8 @@ class Backfill(unittest.TestCase):
         k = _say(f, "chat-a", [("user", "I started a pottery class with Mia on Tuesday.")])[0]
         f.flush()
         for dk, d in list(be.scan("entity_deltas", {"origin": f.origin, "mv": 1})):   # as 0.7.51 wrote it
-            be.upsert("entity_deltas", dk, {x: v for x, v in d.items() if x not in ("mv", "moves", "chat")})
+            be.upsert("entity_deltas", dk, {x: v for x, v in d.items()
+                                            if x not in ("mv", "moves", "msum", "chat", "turn")})
         g = _field(be)
         ml = ML.of(g)
         self.assertEqual(ml.load(g), 0)
@@ -146,7 +149,7 @@ class EntityRecall(unittest.TestCase):
 class TenseRule(unittest.TestCase):
     def _phr(self, text):
         from membrane import instances as IN
-        return IN.phrases(IN.nlp()(text))
+        return IN.phrases(IN.nlp(load=True)(text))
 
     def test_a_past_clause_starts_an_instance_a_generic_one_is_the_class(self):
         new = {p[0][0]: p[2] for p in self._phr("I adopted a dog last week.")}
@@ -178,7 +181,7 @@ class Instances(unittest.TestCase):
         IN.drain(f)
         store = IN.store_of(f)
         self.assertEqual(len(store.rows), 2)
-        nlp = IN.nlp()
+        nlp = IN.nlp(load=True)
         with mock.patch.object(nlp, "pipe", side_effect=AssertionError("the field re-parsed at ask time")):
             IN.ballot(f, "What is the dog called?")          # ask time: the question only, never the field
         g = _field(be)                                         # restart: the rows load, nothing re-parsed
