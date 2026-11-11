@@ -893,6 +893,15 @@ def main() -> None:
             _serve_socket.setsockopt(_sk.SOL_SOCKET, _sk.SO_REUSEADDR, 1)
             _serve_socket.bind((_serve_bind, serve_port))
             _serve_socket.listen(128)
+    # #1115: the reserved port answers "loading the field... (step)" (503) until the native serve
+    # adopts the socket, instead of minutes of silence
+    _boot_door = None
+    if _serve_socket is not None and os.environ.get("MEMBRANE_LEGACY_SERVE") != "1":
+        try:
+            from .bootprof import BootDoor
+            _boot_door = BootDoor(_serve_socket, _boot_laps)
+        except Exception as e:
+            print(f"[seat] the boot's loading door did not open ({e})", file=sys.stderr)
     try:                               # #648: a restart keeps the ports this boot holds
         from . import restarts as _RS648
         _RS648.RESTART["ports"] = (listen, serve_port)
@@ -2251,6 +2260,8 @@ def main() -> None:
             runner._audit_mem = srv.membrane   # the lane-refusal audits
             _ladder_cell["runner"] = runner   # the runner's late binding
 
+            if _boot_door is not None:
+                _boot_door.handover()      # #1115: the loading door steps aside, the serve adopts the socket
             runner._httpd, _ = start(serve_port or 4096, surf_host, cfg, runner,
                                      sess_store, msg_store)   # kept: the teardown closes it first
             native_up = True
@@ -2342,6 +2353,8 @@ def main() -> None:
             # Claude Code / OpenCode session -- an imported transcript became a seat
             # chat, the goal graph's messages landed in it and its turns held restarts
         except Exception as e:
+            if _boot_door is not None:
+                _boot_door.handover()      # a failed serve never says "loading" forever
             print(f"[opencode] native serve FAILED ({e}) -- seat keeps "
                   "running without the room-facing surface",
                   file=sys.stderr)
