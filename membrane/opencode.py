@@ -1153,14 +1153,6 @@ def main() -> None:
                 recall_vote.warm(srv.efield)
             except Exception as e:
                 print(f"[seat] vote warm skipped ({e})", file=sys.stderr)
-            # THE RERANKER (#680): its model loads in the background now,
-            # not on the first topical turn after a restart
-            try:
-                from . import recall_rerank
-                recall_rerank.warm(peers=lambda: srv.gpeers.livelist()
-                                   if getattr(srv, "gpeers", None) else [])
-            except Exception as e:
-                print(f"[seat] reranker warm skipped ({e})", file=sys.stderr)
             # the tool-output chunks (#429) are read only on question-like
             # asks: build their vector matrix now, not on the first question
             _wv = getattr(srv.efield.b, "warm_vectors", None)
@@ -2373,6 +2365,16 @@ def main() -> None:
     # both pids survived a direct SIGINT to their process group). Only a
     # TUI-launch seat has a child whose ctrl+c the seat must not steal.
     print(_boot_laps.done(), file=sys.stderr, flush=True)   # #1115: the boot's profile
+    # THE RERANKER (#680): its model loads in the background, not on the first topical turn
+    # after a restart -- and (#1115) once the boot is done, not beside it (a recall before
+    # this starts the load itself; until it is loaded recall keeps the scorer's order)
+    if getattr(srv, "efield", None) is not None:
+        try:
+            from . import recall_rerank
+            recall_rerank.warm(peers=lambda: srv.gpeers.livelist()
+                               if getattr(srv, "gpeers", None) else [])
+        except Exception as e:
+            print(f"[seat] reranker warm skipped ({e})", file=sys.stderr)
     def _term(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _term)
