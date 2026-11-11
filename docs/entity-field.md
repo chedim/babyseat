@@ -276,7 +276,7 @@ field holds for the person's **latest message** (no model call, no new lane).
    512, 0.4 s at 128, with the same LoCoMo score). Cost: ~0.25 s per topical turn
    on the Mac's GPU and ~3.3 GB of GPU memory while loaded (fp32: fp16 and bf16 scored 173
    and saved no memory as loaded). The model loads in the background
-   at boot, right after the field is up, and stays loaded; until it is ready, or without the extra, or with
+   once the boot is done (or on the first recall before that), and stays loaded; until it is ready, or without the extra, or with
    `MEMBRANE_RERANK=0`, the order is the scorer's (`recall_rerank.py`).
    One copy per machine (#683): the seat that has the model loaded serves it to the other
    seats on the machine (`POST /membrane/rerank`); a seat that needs it asks the same-host

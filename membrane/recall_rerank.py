@@ -15,7 +15,7 @@ Docker (MEMBRANE_NO_AUTOINSTALL, unless MEMBRANE_RERANK=1), musl (no torch wheel
 Home Assistant OS / Container), under MIN_RAM_GB of RAM. Home Assistant on glibc
 (Core, proot Debian) installs it under HA's own package_constraints.txt. The `rerank` extra still
 installs it up front. Off with MEMBRANE_RERANK=0. The seat starts the load in the background at
-boot, right after the field is up (warm()); until the model is ready, or
+boot, once the boot is otherwise done (warm(); #1115), or on the first recall before that; until the model is ready, or
 without it, a call returns None and the banner keeps the scorer's order.
 Once loaded it stays loaded (operator, 2026-10-29: no release). Calls are
 serialized: one model, one device.
@@ -245,7 +245,7 @@ def _kick() -> None:
 
 
 def warm(peers=None) -> None:
-    """Start the load now (the seat calls it at boot, right after the field
+    """Start the load now (the seat calls it once its boot is done, #1115 -- the field
     is up), so the first topical turn after a restart does not pay for it.
     `peers` returns the live peer rows (a serving seat is used, not loaded)."""
     global _peers_fn

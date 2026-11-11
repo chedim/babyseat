@@ -62,7 +62,8 @@ it cuts in-flight turns off.
 
 1. The boot log shows `[seat] restarting (re-exec)`, then the field load
    (`couchbase lite: N hot rows loaded in Ns`) and `[replies] built from N
-   messages`. Then run `field state` (the membrane-state skill) once and read it.
+   messages`. One `[boot] Ns: setup Ns, field rows Ns, ...` line closes the boot
+   with each step's wall time. Then run `field state` (the membrane-state skill) once and read it.
 2. If code changed, the boot update check may print a changelog + prompt:
    answer it in the terminal, or run `membrane update` explicitly.
 3. A migration warning at boot (`field file vN envelope -> ...`) is normal

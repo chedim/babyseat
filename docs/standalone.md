@@ -36,6 +36,14 @@ lease cuts the process. A restart that was asked for still comes back: on the cu
 the same command starts as a fresh process, then the old one exits. A plain stop
 just stops.
 
+**While the seat boots.** The serve port is reserved at the top of the boot and
+answers at once: every request gets `503` with `Retry-After` and the step the boot
+is on (`{"loading": true, "step": ...}`; a browser gets a "loading the field…" page
+that reloads itself) until the seat is up and the real surface takes the port over.
+Nothing reads a booting seat as ready: `/global/health` (Home Assistant's readiness)
+is `200` only from the real surface. The boot ends with one `[boot]` log line, each
+step's wall time.
+
 **New page code after a restart.** `/ui/conf` carries `build`, a hash of the files
 under `membrane/ui/` taken at boot. On every reconnect the open tab compares it with
 the build it loaded and, if the seat came back with new code, reloads itself once

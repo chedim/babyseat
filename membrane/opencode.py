@@ -762,6 +762,9 @@ def _close_listeners(servers) -> None:
             pass
 
 def main() -> None:
+    from .bootprof import Laps
+    _boot_laps = Laps("boot")          # #1115: each step's wall time, one [boot] line once up
+    _boot_laps.step("setup")
     args = _build_ap().parse_args()
     # JWT MODE (jwtauth.py, docs/auth.md): off unless a secret is set; a bad
     # secret (short, empty, unreadable) refuses the boot -- never half-open
@@ -923,6 +926,15 @@ def main() -> None:
             _serve_socket.setsockopt(_sk.SOL_SOCKET, _sk.SO_REUSEADDR, 1)
             _serve_socket.bind((_serve_bind, serve_port))
             _serve_socket.listen(128)
+    # #1115: the reserved port answers "loading the field... (step)" (503) until the native serve
+    # adopts the socket, instead of minutes of silence
+    _boot_door = None
+    if _serve_socket is not None and os.environ.get("MEMBRANE_LEGACY_SERVE") != "1":
+        try:
+            from .bootprof import BootDoor
+            _boot_door = BootDoor(_serve_socket, _boot_laps)
+        except Exception as e:
+            print(f"[seat] the boot's loading door did not open ({e})", file=sys.stderr)
     try:                               # #648: a restart keeps the ports this boot holds
         from . import restarts as _RS648
         _RS648.RESTART["ports"] = (listen, serve_port)
@@ -1105,6 +1117,7 @@ def main() -> None:
     # worker thread -- never in the chat
     # path. Couchbase for a real seat; RAM for lab paths or an unreachable
     # cluster (open_backend degrades, never raises).
+    _boot_laps.step("field rows")
     srv.capturer = srv.efield = None
     srv.efield_locked = False
     try:
@@ -1125,6 +1138,7 @@ def main() -> None:
                 # that belongs to the chat thread
                 graph_fn=lambda: getattr(srv, "_codegraph", None))
             srv.capturer = Capturer(srv.efield)
+            _boot_laps.step("field warm-up")
             # #799: the seat's small data files live in the same store when it is one
             from . import datafiles as _DF
             _DF.use(getattr(be, "db", None), Path(args.field).resolve().parent)
@@ -1172,14 +1186,6 @@ def main() -> None:
                 recall_vote.warm(srv.efield)
             except Exception as e:
                 print(f"[seat] vote warm skipped ({e})", file=sys.stderr)
-            # THE RERANKER (#680): its model loads in the background now,
-            # not on the first topical turn after a restart
-            try:
-                from . import recall_rerank
-                recall_rerank.warm(peers=lambda: srv.gpeers.livelist()
-                                   if getattr(srv, "gpeers", None) else [])
-            except Exception as e:
-                print(f"[seat] reranker warm skipped ({e})", file=sys.stderr)
             # the tool-output chunks (#429) are read only on question-like
             # asks: build their vector matrix now, not on the first question
             _wv = getattr(srv.efield.b, "warm_vectors", None)
@@ -1246,6 +1252,7 @@ def main() -> None:
         print(f"[efield] capture off ({e})", file=sys.stderr)
     # (srv.receipts is set above from --no-receipts; a re-assignment here
     # to True used to silently kill the kill switch)
+    _boot_laps.step("entities")
     srv.entity_store = None
     srv._presence_roster = []
     try:
@@ -1607,6 +1614,7 @@ def main() -> None:
     # elected by reality's vote, GC'd by the ephemeral clock. The cell
     # pool's replacement (the same idle-cognition role, on the main
     # field, no parallel Membranes). --no-dreamer stands it down.
+    _boot_laps.step("minds")
     srv.dreamer = None
     if not getattr(args, "no_dreamer", False):
         try:
@@ -1733,6 +1741,7 @@ def main() -> None:
     # entity. Serve mode: the loops ride the TurnRunner (a loop's turn
     # IS a serve turn); proxy-only: the loop turns ride _model_chat
     # (one deliberation per loop, no tools -- the honest degrade).
+    _boot_laps.step("loops + goal graph")
     srv.loops = None
     if getattr(srv, "events_pool", None) is not None:
         srv.loops = LoopRunner(max_loops=max(1, int(os.environ.get("MEMBRANE_LOOPS_MAX") or 3)))   # an HA box: fewer
@@ -1821,6 +1830,7 @@ def main() -> None:
     # the orchestration router (model-vs-model): discovered from the live
     # Ollama (locals AND remote-backed cloud entries), imprints seeded in the
     # background, records persisted beside the field. OFF with --no-router.
+    _boot_laps.step("router")
     srv.router = None
     if args.router:
         try:
@@ -1921,6 +1931,7 @@ def main() -> None:
     # the embed role early rather than on the first chat).
     # a backend that doesn't answer at all fails every probe -- after up to 180 s
     # each (an HA child waited minutes for nothing): one quick check first
+    _boot_laps.step("embedder")
     _backend_up = True
     try:
         with urllib.request.urlopen(backend + "/api/version", timeout=8):
@@ -1963,6 +1974,7 @@ def main() -> None:
         srv.router.embedder = mem.embedder
 
     srv.cell_pool = None
+    _boot_laps.step("config")
 
     # ---- the opencode config + launch ----
     # first-class cloud backends join the picker: any router record with an
@@ -2167,6 +2179,7 @@ def main() -> None:
                     f"  serve: {f'http://{serve_addr}:{serve_port} (native serve)' if serve_wanted else 'off'}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)
+    _boot_laps.step("serve")
     if args.serve:
         _serve_board(serve_port, args.serve_host)
     native_up = False
@@ -2250,9 +2263,12 @@ def main() -> None:
             runner._audit_mem = srv.membrane   # the lane-refusal audits
             _ladder_cell["runner"] = runner   # the runner's late binding
 
+            if _boot_door is not None:
+                _boot_door.handover()      # #1115: the loading door steps aside, the serve adopts the socket
             runner._httpd, _ = start(serve_port or 4096, surf_host, cfg, runner,
                                      sess_store, msg_store)   # kept: the teardown closes it first
             native_up = True
+            _boot_laps.step("after serve")
             if naming_on:
                 try:                       # the entity `name`: agreed with the operator, never picked alone
                     from . import naming as _NM
@@ -2340,6 +2356,8 @@ def main() -> None:
             # Claude Code / OpenCode session -- an imported transcript became a seat
             # chat, the goal graph's messages landed in it and its turns held restarts
         except Exception as e:
+            if _boot_door is not None:
+                _boot_door.handover()      # a failed serve never says "loading" forever
             print(f"[opencode] native serve FAILED ({e}) -- seat keeps "
                   "running without the room-facing surface",
                   file=sys.stderr)
@@ -2357,6 +2375,17 @@ def main() -> None:
     # serve read ctrl+c or a group kill -INT as "keep serving" (the exhibit:
     # both pids survived a direct SIGINT to their process group). Only a
     # TUI-launch seat has a child whose ctrl+c the seat must not steal.
+    print(_boot_laps.done(), file=sys.stderr, flush=True)   # #1115: the boot's profile
+    # THE RERANKER (#680): its model loads in the background, not on the first topical turn
+    # after a restart -- and (#1115) once the boot is done, not beside it (a recall before
+    # this starts the load itself; until it is loaded recall keeps the scorer's order)
+    if getattr(srv, "efield", None) is not None:
+        try:
+            from . import recall_rerank
+            recall_rerank.warm(peers=lambda: srv.gpeers.livelist()
+                               if getattr(srv, "gpeers", None) else [])
+        except Exception as e:
+            print(f"[seat] reranker warm skipped ({e})", file=sys.stderr)
     def _term(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _term)
@@ -2593,12 +2622,8 @@ def main() -> None:
         _teardown_halt = threading.Timer(TEARDOWN_LEASE_S, _lease_cut)
         _teardown_halt.start()
         # each step's time into the log, so a slow one names itself (the 90 s hang, 2026-11-02)
-        _td = {"t": time.monotonic()}
-
-        def _td_mark(step: str) -> None:
-            now = time.monotonic()
-            print(f"[teardown] {step} {now - _td['t']:.1f}s", file=sys.__stderr__, flush=True)
-            _td["t"] = now
+        from .bootprof import Laps as _Laps
+        _td_mark = _Laps("teardown", echo=sys.__stderr__).mark
         # the listeners close first: the loops' requests kept being served through the
         # teardown, each saving the whole entity store after its close (the 90 s cut, 2026-11-02)
         _close_listeners([(getattr(getattr(srv, "_loop_runner", None), "_httpd", None), True),
