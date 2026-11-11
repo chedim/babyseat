@@ -196,11 +196,10 @@ class TheOwnMessageFirst(unittest.TestCase):
             for p in ("that", "they", "it"):
                 held = _holds(srv, p)
                 self.assertFalse(set([held] if isinstance(held, str) else held or []) & borrowed, text)
-            if _living():          # living language: the pronoun holds the message's own noun phrase
-                self.assertTrue(str((out or {}).get("resolved") or "").startswith(_LL().CONCEPT), text)
-            else:
-                self.assertIsNone(out, text)
-                self.assertIsNone(CG.take_note(srv, SID), text)
+            # the fix (operator 2026-11-11): the message's own noun phrase is a bare Concept, and a
+            # concept alone is not a reading -- nothing resolved, held or told, living language or not
+            self.assertFalse((out or {}).get("resolved"), text)
+            self.assertIsNone(CG.take_note(srv, SID), text)
 
     def test_only_the_command_before_the_pronoun_falls_back_to_the_reply(self):
         for text in ("merge it", "can you benchmark it?", "yes, delete it"):

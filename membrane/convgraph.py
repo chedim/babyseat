@@ -461,11 +461,16 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
     if prev is not None and msg_eid(prev.get("id")) in (est.docs or {}):
         _edge(be, origin, u, "follows", msg_eid(prev.get("id")))
     _edge(be, origin, a, "follows", u)
+    touched = set()
     for eid, text in ((u, user_text), (a, reply)):
         for t in _mentions(srv, text):
             _edge(be, origin, eid, "refers-to", t)
+            touched.add(t)
     for root in (getattr(runner, "_cg_roots", None) or {}).pop(sid, []) if runner is not None else []:
         _edge(be, origin, u, "led-to", root)
+        touched.add(root)
+    if person:                            # the turn touched it: the person's registers holding it stay fresh
+        _refresh(srv, person_key(srv, sid, who), touched)
     pa = msg_eid(prev_a.get("id")) if prev_a is not None else None
     if person:
         _answer(srv, sid, u_mid, u, user_text, pa if pa in (est.docs or {}) else None, be, origin)
@@ -473,23 +478,31 @@ def on_turn_end(srv, runner, sid: str, user_info: dict, user_text: str,
 
 
 # ---- the referent: pronouns are registers ------------------------------------------------------
-# A person's pronouns are field entities, register:<person>:<pronoun> (the chat is the person),
-# each with live -holds-> edges to what it means now. A resolution loads it (the old edge is
-# superseded, so its history stays) and the message that loaded it -sets:<pronoun>-> the same
-# target. Reading: the reply before first (the freshest mention), the register when that reply
-# names nothing that applies. No types: a register holds whatever the conversation last put in it.
+# A person's pronouns are field entities, register:<person>:<pronoun> (per PERSON: the speaker,
+# else the chat's owner, else the chat), each with live -holds-> edges to what it means now. A
+# resolution loads it (the old edge is superseded, so its history stays) and the message that
+# loaded it -sets:<pronoun>-> the same target. Reading: the reply before first (the freshest
+# mention), the register when that reply names nothing that applies.
+# FIXED (operator 2026-11-11, "our pronoun registers are bad"): real pronouns only ("then" and
+# "there" are not); a register holds only CONCRETE things (a file, a goal, a message, a person, a
+# URL, a command...), never a living-language Concept; a reading EXPIRES after
+# REGISTER_TTL_TURNS of the person's messages in which the held thing was neither mentioned by
+# the person nor touched by the turn; an expired or concept-only register holds and tells nothing.
 
 REG = MEMBRANE_NS + "register:"
 CLASS_REGISTER = "Register"
+CLASS_REGISTER_TURNS = "RegisterTurns"
+REGISTER_TTL_TURNS = 3   # the operator (2026-11-11): a reading lives 3 of the person's messages
+                         # without its thing being mentioned or touched
 FORMS = {"it": "it", "this": "this", "this one": "this", "that": "that", "that one": "that",
          "they": "they", "them": "they", "these": "they", "those": "they",
-         "he": "he", "him": "he", "she": "she", "her": "she", "there": "there", "then": "then"}
+         "he": "he", "him": "he", "she": "she", "her": "she"}
 PLURAL = {"they"}
 _PRON = re.compile(r"\b(this one|that one|" + "|".join(sorted((f for f in FORMS if " " not in f), key=len,
                                                               reverse=True)) + r")\b", re.I)
 _LEAD = re.compile(r"^(?:(?:yes|yep|yeah|ok|okay|sure|pls|please|so|and|then|now|(?:can|could|would|will) you)"
                    r"\b[\s,.!-]*)+", re.I)
-_VERB_PRON = re.compile(r"^([a-z][a-z-]*)\s+(this one|that one|it|this|that|them|him|her|these|those|there)\b",
+_VERB_PRON = re.compile(r"^([a-z][a-z-]*)\s+(this one|that one|it|this|that|them|him|her|these|those)\b",
                         re.I)
 # "this / that / these / those" are pronouns only when nothing starting a noun or a clause
 # follows: "park that until later", "do that" -- not "I think that we", "merge this PR"
@@ -503,33 +516,170 @@ REASK_MAX = 3            # the operator's cap (2026-11-01): more readings than t
 _ORDINAL = {"first": 1, "1": 1, "one": 1, "second": 2, "2": 2, "two": 2, "third": 3, "3": 3}
 
 
-def register_eid(sid: str, pronoun: str) -> str:
-    return f"{REG}{sid}:{FORMS.get(pronoun.lower(), pronoun.lower())}"
+def register_eid(key: str, pronoun: str) -> str:
+    """The register of one person's pronoun (`key`: person_key's answer)."""
+    return f"{REG}{key}:{FORMS.get(pronoun.lower(), pronoun.lower())}"
+
+
+def _concrete(eid: str) -> bool:
+    """A thing a pronoun can mean: a file, a symbol, a URL, a command, a goal / task / decision,
+    a message, a person, a File: / Command: entity... -- not a living-language Concept, a word or
+    another register (a concept alone is not a reading)."""
+    e = str(eid or "")
+    bare = e[len(MEMBRANE_NS):] if e.startswith(MEMBRANE_NS) else e
+    return bool(bare) and not bare.startswith(("concept:", "register:", "w:"))
+
+
+_PERSON_SLUG = re.compile(r"[^a-z0-9]+")
+
+
+def _person_slug(name: str) -> str:
+    return "person:" + (_PERSON_SLUG.sub("-", str(name).strip().lower()).strip("-") or "someone")
+
+
+def person_key(srv, sid: str, person: str | None = None) -> str:
+    """Whose registers: the named person, else the speaker last seen in this chat, else the
+    chat's owner, else the chat itself."""
+    if person:
+        return _person_slug(person)
+    known = (getattr(srv, "_cg_person", None) or {}).get(sid)
+    if known:
+        return known
+    runner = getattr(srv, "_loop_runner", None)
+    try:
+        owner = ((runner.sessions.get(sid) or {}).get("owner")) if runner is not None and \
+            getattr(runner, "sessions", None) is not None else None
+    except Exception:
+        owner = None
+    return _person_slug(owner) if owner else str(sid)
+
+
+def _turns_eid(key: str) -> str:
+    return f"{REG}{key}"
+
+
+def _turns(est, key: str) -> int:
+    d = (est.docs or {}).get(_turns_eid(key))
+    return int(((d.properties or {}) if d is not None else {}).get("turns") or 0)
+
+
+def _tick(est, key: str) -> int:
+    """One more message from this person: the clock the readings expire on."""
+    eid = _turns_eid(key)
+    d = (est.docs or {}).get(eid)
+    n = _turns(est, key) + 1
+    if d is None:
+        est.upsert(QuantumEntity(eid=eid, cls=CLASS_REGISTER_TURNS, properties={
+            "name": f"turns ({key})", "person": key, "turns": n, "silent_birth": True}), embedder=None)
+    else:
+        d.properties = {**(d.properties or {}), "turns": n}
+        est.upsert(d, embedder=None)
+    return n
 
 
 def _held(be, origin, reg: str) -> list[str]:
     return [r["obj"] for r in _out(be, origin, reg, "holds")]
 
 
-def register(srv, sid: str, pronoun: str):
-    """What the person's pronoun means now: one eid, a tuple for several, or None."""
+def _expired(est, reg: str, key: str) -> bool:
+    d = (est.docs or {}).get(reg)
+    p = (d.properties or {}) if d is not None else {}
+    last = max(int(p.get("set_n") or 0), int(p.get("seen_n") or 0))
+    return _turns(est, key) - last >= REGISTER_TTL_TURNS
+
+
+def _valid_held(srv, key: str, pronoun: str) -> list[str]:
+    """What the register holds that still counts: concrete things, not expired."""
+    est = getattr(srv, "entity_store", None)
     be, origin = _rel(srv)
-    if be is None:
-        return None
-    got = sorted(_held(be, origin, register_eid(sid, pronoun)))
+    if est is None or be is None:
+        return []
+    reg = register_eid(key, pronoun)
+    if _expired(est, reg, key):
+        return []
+    return [t for t in _held(be, origin, reg) if _concrete(t)]
+
+
+def register(srv, sid: str, pronoun: str, person: str | None = None):
+    """What the person's pronoun means now: one eid, a tuple for several, or None."""
+    got = sorted(_valid_held(srv, person_key(srv, sid, person), pronoun))
     return None if not got else got[0] if len(got) == 1 else tuple(got)
 
 
-def _load(srv, sid: str, pronoun: str, targets: list[str], by: str = "") -> None:
+def _empty(srv, reg: str, by: str = "", op: str = "unloaded") -> None:
+    """The register holds nothing (its old edges superseded, their history kept)."""
     from .night import _supersede_edge
     est = srv.entity_store
     be, origin = _rel(srv)
+    if be is None:
+        return
+    for old in _held(be, origin, reg):
+        _supersede_edge(be, origin, reg, old, rel="holds", receipt={"op": op, "by": by})
+    d = (est.docs or {}).get(reg)
+    if d is not None and ((d.properties or {}).get("holds") or _held(be, origin, reg)):
+        d.properties = {**(d.properties or {}), "holds": [], "holds_names": []}
+        est.upsert(d, embedder=None)
+
+
+def _clean_stale(srv, key: str, pronoun: str, by: str = "") -> None:
+    """A register that holds only what no longer counts (expired, or a concept from before the
+    fix) is emptied the first time it is touched."""
+    est = srv.entity_store
+    be, origin = _rel(srv)
+    if be is None:
+        return
+    reg = register_eid(key, pronoun)
+    d = (est.docs or {}).get(reg)
+    held = _held(be, origin, reg) or list(((d.properties or {}) if d is not None else {}).get("holds") or [])
+    if held and not _valid_held(srv, key, pronoun):
+        _empty(srv, reg, by=by, op="expired" if _expired(est, reg, key) else "not-concrete")
+
+
+def _clean_legacy(srv, sid: str) -> None:
+    """Registers from before the fix were per CHAT and had non-pronoun keys ("then", "there"):
+    the chat's are emptied once, the first time the chat is touched."""
+    done = srv.__dict__.setdefault("_cg_legacy_clean", set())
+    if sid in done:
+        return
+    done.add(sid)
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return
+    pre = f"{REG}{sid}:"
+    for eid, d in list((est.docs or {}).items()):
+        if eid.startswith(pre) and getattr(d, "cls", None) == CLASS_REGISTER:
+            _empty(srv, eid, op="legacy")
+
+
+def _refresh(srv, key: str, things) -> None:
+    """The person mentioned it, or the turn touched it: a register holding it stays fresh."""
+    est = getattr(srv, "entity_store", None)
+    be, origin = _rel(srv)
+    things = set(things or ())
+    if est is None or be is None or not things:
+        return
+    n = _turns(est, key)
+    for pron in sorted(set(FORMS.values())):
+        reg = register_eid(key, pron)
+        d = (est.docs or {}).get(reg)
+        if d is None or _expired(est, reg, key):
+            continue
+        if things & set(_held(be, origin, reg)):
+            d.properties = {**(d.properties or {}), "seen_n": n}
+            est.upsert(d, embedder=None)
+
+
+def _load(srv, key: str, pronoun: str, targets: list[str], by: str = "") -> None:
+    from .night import _supersede_edge
+    est = srv.entity_store
+    be, origin = _rel(srv)
+    targets = [t for t in targets if _concrete(t)]
     if be is None or not targets:
         return
-    reg = register_eid(sid, pronoun)
+    reg = register_eid(key, pronoun)
     if reg not in (est.docs or {}):
         est.upsert(QuantumEntity(eid=reg, cls=CLASS_REGISTER, properties={
-            "name": f"{FORMS.get(pronoun.lower(), pronoun)} ({sid})", "person": sid,
+            "name": f"{FORMS.get(pronoun.lower(), pronoun)} ({key})", "person": key,
             "pronoun": FORMS.get(pronoun.lower(), pronoun), "silent_birth": True}), embedder=None)
     for old in _held(be, origin, reg):
         if old not in targets:
@@ -539,8 +689,10 @@ def _load(srv, sid: str, pronoun: str, targets: list[str], by: str = "") -> None
         if by:
             _edge(be, origin, by, f"sets:{FORMS.get(pronoun.lower(), pronoun)}", t, source="register")
     d = est.docs[reg]                    # mirrored onto the entity: a reader of properties sees it
+    n = _turns(est, key)
     d.properties = {**(d.properties or {}), "holds": list(targets),
-                    "holds_names": [_label(est, t) for t in targets], "set_by": by, "set_ts": time.time()}
+                    "holds_names": [_label(est, t) for t in targets], "set_by": by, "set_ts": time.time(),
+                    "set_n": n, "seen_n": n}
     est.upsert(d, embedder=None)
 
 
@@ -584,11 +736,14 @@ def _applicable(est, cands: list[str], verb: str | None) -> list[str]:
                                        .get("status") or "").lower() not in _CLOSED]
 
 
-def _resolved(srv, sid, est, be, origin, u, word, targets, source="resolver") -> dict:
+def _resolved(srv, sid, est, be, origin, u, word, targets, source="resolver") -> dict | None:
+    targets = [t for t in targets if _concrete(t)]
+    if not targets:                       # a concept alone is not a reading: nothing held, nothing told
+        return None
     for t in targets:
         if u:
             _edge(be, origin, u, "refers-to", t, source=source)
-    _load(srv, sid, word, targets, by=u)
+    _load(srv, person_key(srv, sid), word, targets, by=u)
     shown = " and ".join(f"{_label(est, t)} ({t})" for t in targets)
     srv.__dict__.setdefault("_cg_notes", {})[sid] = \
         f'In the person\'s last message, "{word}" means {shown}.'
@@ -645,6 +800,12 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
     if est is None or be is None or not mid:
         return None
     u = msg_eid(mid)
+    if who:                               # the registers are the SPEAKER's, across their chats
+        srv.__dict__.setdefault("_cg_person", {})[sid] = _person_slug(who)
+    key = person_key(srv, sid)
+    _tick(est, key)                       # one more message from this person: the expiry clock
+    _clean_legacy(srv, sid)
+    _refresh(srv, key, _mentions(srv, text))   # the person names it again: still fresh
     prev_u = _row_before(runner, sid, mid, "user")
     got = _answer_reask(srv, sid, est, be, origin, u, text, prev_u)
     if got is not None:
@@ -667,7 +828,7 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
         word = cmd.group(2).lower()
     plural = FORMS.get(word) in PLURAL
     # the person's own message first: the nearest thing it names before the pronoun
-    own = _applicable(est, list(reversed(_mentions(srv, text[:found.start()]))), verb)
+    own = _applicable(est, [m for m in reversed(_mentions(srv, text[:found.start()])) if _concrete(m)], verb)
     if own:
         return _resolved(srv, sid, est, be, origin, u, word, own if plural else own[:1])
     if _says_something(text[:found.start()]):
@@ -676,21 +837,15 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
             c = _LL.concept_before(est, text, found.start())
         except Exception:
             c = None
-        if c:
+        if c and _concrete(c):                     # a named thing; a bare Concept is not a reading
             return _resolved(srv, sid, est, be, origin, u, word, [c])
-        from .night import _supersede_edge        # a reading known to be wrong must not stay loaded
-        reg = register_eid(sid, word)
-        for old in _held(be, origin, reg):
-            _supersede_edge(be, origin, reg, old, rel="holds", receipt={"op": "unloaded", "by": u})
-        d = (est.docs or {}).get(reg)
-        if d is not None:
-            d.properties = {**(d.properties or {}), "holds": [], "holds_names": []}
-            est.upsert(d, embedder=None)
+        _empty(srv, register_eid(key, word), by=u)  # a reading known to be wrong must not stay loaded
         return None          # its own words name what it means (unnamed in the field): borrow nothing
     prev_a = _row_before(runner, sid, mid, "assistant")
-    fresh = list(dict.fromkeys(r["obj"] for r in _out(be, origin, msg_eid(prev_a.get("id")), "refers-to"))) \
-        if prev_a is not None else []
-    cands = _applicable(est, fresh, verb) or _applicable(est, _held(be, origin, register_eid(sid, word)), verb)
+    fresh = list(dict.fromkeys(r["obj"] for r in _out(be, origin, msg_eid(prev_a.get("id")), "refers-to")
+                               if _concrete(r["obj"]))) if prev_a is not None else []
+    _clean_stale(srv, key, word, by=u)
+    cands = _applicable(est, fresh, verb) or _applicable(est, _valid_held(srv, key, word), verb)
     if not cands:
         return None
     if len(cands) == 1 or plural:
