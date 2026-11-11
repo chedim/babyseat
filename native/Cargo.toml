@@ -15,8 +15,6 @@ bytemuck = { version = "1.25.2", optional = true }
 pollster = { version = "1.0.1", optional = true }
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
-# the store driver: .c1f reads the seat's SQLite store directly (read-only), no Python in the data path
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 serde_json = { version = "1", features = ["preserve_order"] }
 wgpu = { version = "30.0.1", optional = true }
 objc2 = { version = "0.6.5", optional = true }
@@ -31,9 +29,10 @@ opt-level = 3
 
 [features]
 default = ["python"]
-python = ["dep:pyo3", "dep:rusqlite"]   # the seat: Python binding + the store driver (sql() built-in)
+python = ["dep:pyo3"]   # the seat: Python binding (sql() runs on the seat's own sqlite3: one SQLite per process, 0.7.53)
 wasm = ["dep:wasm-bindgen"]
 metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:objc2", "dep:objc2-foundation", "dep:objc2-metal"]
 
 [dev-dependencies]
+# the Rust tests' own executor (a test binary is its own process: it never shares a WAL file with the seat)
 rusqlite = { version = "0.32", features = ["bundled"] }
