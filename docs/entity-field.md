@@ -293,6 +293,31 @@ operator-approved). The block sits outside the 900-char chat budget: at most
 Cost: the warm build is ~60-90 ms on a 4,500-event field (recall's pool scan
 indexes each session once and tests IN lists as sets).
 
+### The vote (0.7.52)
+
+The banner and `/membrane/ask` share one ranking path (`recall_banner.rank`): recall's pool (50) -> the scorer
+(current recall) -> **the vote** -> the reranker over the top 20 -> top k. The vote is the best recall of the
+2026-11-07 bench (`longmemeval/full_offline.py`), ported with nothing trained (`recall_vote.py`):
+
+| voter | weight | what it ranks |
+|---|---|---|
+| embedder | 0.125 | the direct lane's own top 20 |
+| entity recall | 0.75 | the 8 field things nearest the question, then the events that moved them most (Σ sim × move) |
+| instance histories | 3 | `instances.py`: the tense rule's instances, Borda'd with the person timelines, the place ballot and current recall |
+| move log | 2 | `movelog.py`: settling, one round -- the question's things weighed by rarity, each event by how far it moved them, the turn before it held |
+| word lane | 0.125 | the word lane's own top 20 (tool outputs too) |
+
+Borda: each voter's top 20 earns w × (20 − i), voters in alphabetical order, a stable sort. The weights are the
+mean of the two held-out folds (approved 2026-11-11); the bench's learned map (a ridge map fitted on LoCoMo's gold
+answers) and latest mentions (weight 0) are not ported.
+
+The pool is the seat's own field, all of it: every chat, every person, internal chats, tool outputs. The move
+log is recorded as each event applies (`EntityField._update`; a nursery thing moves from its seed) and rides the
+event's index delta row, so a restart loads it; events from before 0.7.52 are backfilled once in the background.
+Each event's text is parsed once by spaCy when it lands (a background worker, `annotations` rows `ih:<key>`); at
+ask time only the question is parsed. Without spaCy the vote runs without instance histories. Not covered: the
+global field and peers.
+
 ### The banner learns from use (#668, step 6)
 
 When the model **searches** (`query`, or `find` on memory) after the banner, the

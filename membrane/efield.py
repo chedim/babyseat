@@ -482,6 +482,8 @@ class EntityField:
     def __init__(self, backend, embedder, origin: str, graph_fn=None,
                  phrase_vocab=None, holder: str | None = None):
         self._lock = threading.RLock()
+        from .movelog import MoveLog
+        self.move_log = MoveLog()        # 0.7.52: how far each event moved each thing (movelog.py)
         # called (key, event doc, message vector) after each live event is
         # applied -- the watch and intent boards; must be cheap, never raise
         self.listeners: list = []
@@ -1247,6 +1249,9 @@ class EntityField:
         before = st.state
         align = (float(unit(st.mean) @ x) - float(self._ostats["pair"])
                  if st.mean is not None else 0.0)
+        # THE MOVE LOG (0.7.52, movelog.py): how far this event moved this thing
+        self.move_log.note(evkey, st.eid, float(np.linalg.norm(GAIN * (np.asarray(x, dtype=np.float32)
+                                                                        - np.asarray(before, dtype=np.float32)))))
         # every value kept at its STORED precision, so a restart (a reload
         # from the backend) never changes a later result
         st.state = at_stored(unit(before + GAIN * (x - before)))
@@ -1326,6 +1331,7 @@ class EntityField:
 
     def _apply(self, key: str, ev: dict) -> None:
         stream, seq, ts = ev["stream"], int(ev["seq"]), ev.get("ts")
+        self.move_log.place(key, str(ev.get("session") or ""), seq)
         for fn in self.event_listeners:           # #337: who is listening hears every event
             try:
                 fn(key, ev)
@@ -1400,6 +1406,14 @@ class EntityField:
             if st is None:
                 continue                  # the dust cap: no state born
             if st.tier == "nursery":
+                # the move log (0.7.52): a thing not yet materialized moves from its seed, as its first
+                # update will (materialize: state = seed); recorded now, at capture
+                try:
+                    sv = self._seed(st.surface or eid.split(":", 1)[-1])
+                    self.move_log.note(key, eid, float(np.linalg.norm(GAIN * (np.asarray(X[sidx], dtype=np.float32)
+                                                                              - np.asarray(sv, dtype=np.float32)))))
+                except Exception:
+                    pass
                 st.pending.append([sids[sidx], seq, sidx, stream, key, ts,
                                    ev.get("role") or ""])
                 if sids[sidx] not in st.distinct:
@@ -1434,7 +1448,11 @@ class EntityField:
                               "sid": sids[0] if sids else "",
                               "event": key, "stream": stream, "ts": ts,
                               "seq": seq, "sidx": 0, "gain": 0.0,
-                              "align": 0.0, "cos_before": 1.0}
+                              "align": 0.0, "cos_before": 1.0,
+                              # the move log rides this row (0.7.52): a restart loads it, no replay
+                              "mv": 1, "chat": str(ev.get("session") or ""),
+                              "moves": {e: round(v, 5) for e, v in
+                                        (self.move_log.moves.get(key) or {}).items()}}
         self._dirty.add(idx_eid)
         if stream == "observation":
             from . import relations as R
@@ -1959,6 +1977,7 @@ class EntityField:
             self.b.delete("entity_deltas", dk)
             touched.append(d["eid"])
         touched = list(dict.fromkeys(touched))
+        self.move_log.drop(key)                       # a forgotten event moves nothing
         # a nursery entity may hold the event's mention in its pending buffer
         for eid, _i, _s in ev.get("mentions") or []:
             st = self.get(eid)

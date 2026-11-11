@@ -1131,6 +1131,13 @@ def main() -> None:
                 _LX.warm(srv.efield)
             except Exception as e:
                 print(f"[seat] word index off ({e})", file=sys.stderr)
+            # THE VOTE (0.7.52): the move log loads, the instance parser attaches
+            # (each event read once as it lands), older events backfill -- background
+            try:
+                from . import recall_vote
+                recall_vote.warm(srv.efield)
+            except Exception as e:
+                print(f"[seat] vote warm skipped ({e})", file=sys.stderr)
             # THE RERANKER (#680): its model loads in the background now,
             # not on the first topical turn after a restart
             try:

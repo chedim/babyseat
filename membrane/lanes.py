@@ -6885,9 +6885,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             try:
                 from .entity_block import DIRECT_LABEL, recall_answers
                 from . import recall_banner as RB
-                # the banner's ranking (#680): pool -> scorer -> reranker -> top k
+                # the banner's ranking (#680, 0.7.52): pool -> scorer -> the vote -> reranker -> top k
                 pool = recall_answers(fld, q, k=max(k, RB.POOL), sim_min=sim_min)
-                rows = RB.rank(RB.with_speakers(fld, pool), q, RB.load_weights(fld))[:k]
+                rows = RB.rank(RB.with_speakers(fld, pool), q, RB.load_weights(fld), field=fld)[:k]
                 out["hits"] = [{"sim": r["sim"],
                                 "situation": (r["q"][:400] if r.get("via") != "direct" else
                                               f"{DIRECT_LABEL.get(r.get('role'), r.get('role'))} "
