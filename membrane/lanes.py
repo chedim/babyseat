@@ -303,7 +303,27 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
                  "the doctrine's Blurp is the default name.")
     except Exception:
         pass
-    if getattr(srv, "no_context", False):
+    try:
+        from . import momentum_map as _MMc
+        _map_mode = _MMc.on()
+    except ImportError:
+        _map_mode = False
+    if _map_mode:                          # THROWAWAY EXPERIMENT: the card must not promise history or banners
+        L.append(
+            "- CONTEXT: MAP MODE. No chat history is sent. Your memory is the field: the 'What is moving' "
+            "block shows what is live; the in: line shows where you are and what 'it' means. Read any id "
+            "with entity read. Missing earlier context is expected: look it up in the field, never guess. "
+            "There is no banner, recall block or transcript on this seat, whatever else here mentions one. "
+            "help('map') has the details.")
+        L.append(
+            "- KEEP WHAT MATTERS: anything that must outlive this turn goes into the field: a decision → a "
+            "decision card; a fact → a property on its entity; work → a method or goal on the thing it is "
+            "about. What isn't saved is gone next turn.")
+        if _efield_on(srv) is not None:
+            L.append("- ENTITY FIELD: on. Membrane remembers per ENTITY (every file, symbol, command, goal, "
+                     "person, phrase and word), not per exchange.")
+            L.append(_ENTITY_CARD_COMMON[1])
+    elif getattr(srv, "no_context", False):
         keep = int(getattr(srv, "tool_keep", 3))
         L.append(
             "- CONTEXT: FIELD-ONLY (--no-context). opencode's transcript "
@@ -327,7 +347,7 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
             "- CONTEXT: full transcript. opencode's history reaches you as "
             "usual; recalled memories ride as a system block just before "
             "the latest user message.")
-    if _efield_on(srv) is not None:
+    if _efield_on(srv) is not None and not _map_mode:
         L.extend(_ENTITY_CARD_NO_CONTEXT if getattr(srv, "no_context", False)
                  else _ENTITY_CARD_NORMAL)
         L.extend(_ENTITY_CARD_COMMON)
