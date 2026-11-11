@@ -1,0 +1,7 @@
+{
+ "schemaVersion": 1,
+ "label": "🐣 Blurps hatched (est.)",
+ "message": "231",
+ "color": "f5a623",
+ "note": "PyPI downloads with a known OS, no mirrors, last 180 days (pypistats)"
+}
