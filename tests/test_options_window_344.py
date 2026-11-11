@@ -163,3 +163,14 @@ def test_the_energy_row_shows_percent_and_asleep_363():
     r = dict(OPTS, energy={"energy": 0.2, "asleep": True})
     out = _run("await w.toggle(); return { html: body.innerHTML };", reply=r)
     assert "20%" in out["html"] and "asleep" in out["html"]
+
+
+@NODE
+def test_the_improve_babyseat_box_1128():
+    """#1128: the seat option is a checkbox, off by default; ticking it posts a bool."""
+    out = _run("await w.toggle(); const off = body.innerHTML;"
+               "await w.setOption('improve_babyseat', true); return { off, on: body.innerHTML, calls };")
+    assert 'data-opt="improve_babyseat"' in out["off"]
+    assert 'data-opt="improve_babyseat" checked' not in out["off"]
+    assert 'data-opt="improve_babyseat" checked' in out["on"]
+    assert ["POST", "/membrane/options", {"improve_babyseat": True}] in out["calls"]

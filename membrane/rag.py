@@ -64,6 +64,25 @@ _RAG_SYSTEM = _load_doctrine()
 
 _DOCTRINE_STAMP = "membrane-doctrine: v2"
 
+# #1128: right for the operator's own seat, wrong for a user's -- a seat
+# option (options.improve_babyseat, off by default), never the shared doctrine
+IMPROVE_BABYSEAT_LINE = (
+    "IMPROVE BABYSEAT: you may propose improvements to babyseat itself (its code, packs, "
+    "help topics) as pull requests to https://github.com/chedim/babyseat, without being "
+    "asked -- same rules as any code change: failing test first, full suite green, the "
+    "owner reviews and merges.")
+
+
+def doctrine_text() -> str:
+    """The doctrine as this seat hands it to the model: doctrine.md, plus the
+    IMPROVE BABYSEAT line when the seat's option is on (#1128)."""
+    try:
+        from .options import improve_babyseat
+        on = improve_babyseat()
+    except Exception:
+        on = False
+    return _RAG_SYSTEM + ("\n" + IMPROVE_BABYSEAT_LINE + "\n" if on else "")
+
 
 def _has_doctrine_stamp(messages) -> bool:
     """True when a system message already carries the doctrine stamp (i.e.
@@ -78,7 +97,7 @@ def _has_doctrine_stamp(messages) -> bool:
 def doctrine_instructions_text() -> str:
     """The instructions-file form of the doctrine: same text plus the stamp
     line, so _inject can recognize delivered doctrine and skip re-stamping."""
-    return _DOCTRINE_STAMP + "\n" + _RAG_SYSTEM
+    return _DOCTRINE_STAMP + "\n" + doctrine_text()
 
 
 def _clip(s: str, cap: int) -> str:
@@ -134,7 +153,7 @@ def _inject(messages, block: str) -> list:
     if getattr(_inject, "doctrine_delivered", False) or _has_doctrine_stamp(msgs):
         content = block
     else:
-        content = _RAG_SYSTEM + "\n\n" + block
+        content = doctrine_text() + "\n\n" + block
     i = len(msgs)
     while i > 0 and msgs[i - 1].get("role") == "user":
         i -= 1

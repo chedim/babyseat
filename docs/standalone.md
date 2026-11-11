@@ -138,6 +138,7 @@ sphere it was the distance to it).
 | `stt` | `"browser"` (default) or a whisper-server URL |
 | `ui_lan_open` | `true` (default): the page reads without a login on the local network; writes from another machine need the [seat token](auth.md#the-seat-token) either way (ignored in [JWT mode](auth.md), where the token decides) |
 | `self_cpu_share` | Blurp's CPU share, `0 < share <= 1` (default `0.5`); set in the ⚙ options window (#343, #344). Used only when Blurp is on (`MEMBRANE_BLURP=1`; off in 0.7.5) |
+| `improve_babyseat` | `false` (default): when `true`, the doctrine the model reads carries the IMPROVE BABYSEAT line -- the model may propose improvements to babyseat itself as pull requests to its GitHub repo, unasked. Meant for the operator's own development seat; set in the ⚙ options window (#1128) |
 
 ## The decision cockpit (🗂)
 
@@ -185,6 +186,7 @@ window fills the screen; × or Escape closes it.
 | Option | |
 |---|---|
 | Blurp's CPU share | (shown only when Blurp is on, `MEMBRANE_BLURP=1`) a slider, 10–100 % (default 50 %): `self_cpu_share`. The self loop and the record cap read the file through one reader, `options.cpu_share(srv)` (the settings.json beside the seat's `self/`), so a change needs no restart (#343 throttles the cycles to it × Blurp's energy) |
+| Propose babyseat improvements | a checkbox, off by default: `improve_babyseat`. On, the doctrine gains the IMPROVE BABYSEAT line (pull requests to the babyseat repo); read on every turn, though the seat's doctrine instructions file is written at boot, so a restart makes it whole (#1128) |
 | The field current's fade | read-only, `CURRENT_TAU_S` (180 s today): it is a threshold, and changing it needs the operator's approval |
 | Blurp's energy | (shown only when Blurp is on) read-only: its energy as a percentage and whether it is awake or asleep (#345, #363); "not running yet" before Blurp has run |
 | Background work: Goal worker | the model the watch and goal loops run on (`loops`); every loop turn runs on it, whatever its session remembers, and is stamped with it. A person's chat keeps its own model |

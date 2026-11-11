@@ -161,15 +161,16 @@ def _mcp_tool_lines() -> list[str]:
 
 
 _ENTITY_CARD_NORMAL = [
-    "- ENTITY FIELD: on. Membrane remembers per ENTITY (every file, symbol, "
-    "command, port, model, phrase and word), not per exchange. A 'SINCE YOUR "
+    "- ENTITY FIELD: on. Membrane remembers per ENTITY (every place, device, "
+    "file, command, model, phrase and word), not per exchange. A 'SINCE YOUR "
     "LAST MESSAGE' block rides a turn when entities changed after the last "
-    "message you processed: changes from OUTSIDE this conversation (code "
-    "edits, entity scripts, other sessions) are quoted; your own turns only "
+    "message you processed: changes from OUTSIDE this conversation (a "
+    "reading that moved, an edit made elsewhere, entity scripts, other "
+    "sessions) are quoted; your own turns only "
     "count. No block = nothing changed."]
 _ENTITY_CARD_NO_CONTEXT = [
-    "- ENTITY FIELD: on. Membrane remembers per ENTITY (every file, symbol, "
-    "command, port, model, phrase and word), not per exchange. Each turn "
+    "- ENTITY FIELD: on. Membrane remembers per ENTITY (every place, device, "
+    "file, command, model, phrase and word), not per exchange. Each turn "
     "carries 'THE CONVERSATION SO FAR' (the session's messages and one-line "
     "tool facts from the event log) and an 'ENTITIES' block for what the "
     "ask names."]

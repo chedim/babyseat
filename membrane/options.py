@@ -17,6 +17,12 @@ Per-device state (the last open chat tab, the camera) stays in the browser.
                    (the operator, 2026-10-27): results per root, bound trees
                    per method, one-off trees per executor. A whole number
                    >= 1, default 30; lang.collect deletes the older ones.
+  improve_babyseat whether this seat may propose improvements to babyseat
+                   itself as pull requests to its GitHub repo (#1128): a
+                   bool, default off -- the operator's own seat turns it
+                   on. On, rag.doctrine_text() adds the IMPROVE BABYSEAT
+                   line to the doctrine the model reads; read on every
+                   call (the seat's instructions file is written at boot).
   current_tau_s    the field current's fade (efield.CURRENT_TAU_S, seconds):
                    READ-ONLY here. It is a threshold; changing it needs the
                    operator's approval (a code change, not an option).
@@ -43,7 +49,9 @@ CPU_SHARE_KEY = "self_cpu_share"
 CPU_SHARE_DEFAULT = 0.5
 RUNS_KEEP_KEY = "code_runs_keep"
 RUNS_KEEP_DEFAULT = 30          # the operator, 2026-10-27
-WRITABLE = (CPU_SHARE_KEY, RUNS_KEEP_KEY)
+IMPROVE_KEY = "improve_babyseat"
+IMPROVE_DEFAULT = False         # #1128: only the operator's own seat turns it on
+WRITABLE = (CPU_SHARE_KEY, RUNS_KEEP_KEY, IMPROVE_KEY)
 READ_ONLY = {
     "current_tau_s": "current_tau_s is read-only: changing the current's fade needs the operator's approval",
     "energy": "energy is read-only: it is Blurp's to report (#345), not a setting",
@@ -93,6 +101,17 @@ def code_runs_keep(srv=None) -> int:
     return int(v) if _keep_ok(v) else RUNS_KEEP_DEFAULT
 
 
+def improve_babyseat(srv=None) -> bool:
+    """Whether the doctrine carries the IMPROVE BABYSEAT line (#1128): the
+    settings file's value when it is a bool, else off. Read on every call."""
+    try:
+        raw = json.loads(_settings_path(srv).read_text())
+    except (OSError, ValueError):
+        raw = {}
+    v = raw.get(IMPROVE_KEY) if isinstance(raw, dict) else None
+    return v if isinstance(v, bool) else IMPROVE_DEFAULT
+
+
 def _energy(srv):
     """Blurp's energy and asleep (#363), or None: no seat, or no self yet."""
     if srv is None:
@@ -131,7 +150,9 @@ def _background(srv):
 def read(srv=None) -> dict:
     from .efield import CURRENT_TAU_S
     return {CPU_SHARE_KEY: cpu_share(), RUNS_KEEP_KEY: code_runs_keep(srv),
-            "defaults": {CPU_SHARE_KEY: CPU_SHARE_DEFAULT, RUNS_KEEP_KEY: RUNS_KEEP_DEFAULT},
+            IMPROVE_KEY: improve_babyseat(srv),
+            "defaults": {CPU_SHARE_KEY: CPU_SHARE_DEFAULT, RUNS_KEEP_KEY: RUNS_KEEP_DEFAULT,
+                         IMPROVE_KEY: IMPROVE_DEFAULT},
             "writable": list(WRITABLE) + (list(MIND_KEYS) if _background(srv) is not None else []),
             "current_tau_s": float(CURRENT_TAU_S), "current_tau_note": TAU_NOTE,
             "energy": _energy(srv), "background": _background(srv)}
@@ -162,6 +183,10 @@ def apply(body, srv=None) -> dict:
             if not _keep_ok(v):
                 raise ValueError(f"code_runs_keep must be a whole number >= 1, got {v!r}")
             changes[k] = int(v)
+        if k == IMPROVE_KEY:
+            if not isinstance(v, bool):
+                raise ValueError(f"improve_babyseat must be true or false, got {v!r}")
+            changes[k] = v
     if minds:                            # validates every mind key before setting any
         from . import minds_models as MM
         MM.apply(srv, known=MM.pickable(srv), **minds)
