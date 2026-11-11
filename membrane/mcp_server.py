@@ -1887,7 +1887,8 @@ def _handle(req: dict, port: int) -> dict | None:
     if method == "ping":
         return _rpc_result(req_id, {})
     if method == "tools/list":
-        return _rpc_result(req_id, {"tools": TOOLS})
+        from . import cliffhanger_only as _CO
+        return _rpc_result(req_id, {"tools": _CO.strip_tools(TOOLS)})
     if method == "tools/call":
         # ISSUE #60 (Memo): a route string as a tool name ('/exec') -- the slash
         # is no part of the name the registry advertises
