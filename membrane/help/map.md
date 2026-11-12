@@ -42,3 +42,6 @@ Read the cards and goals the map shows before asking the person. The person's "i
 There is no shell, but there are programs: define a method (method_define) or a `Command:` entity for git,
 gh, pytest…, then call it. Files: read_file / write_file / edit_file / list_dir, or read(path) in cliffhanger
 (help('stdlib')).
+
+## A message's words in a getter
+A Message entity that carries its chat (`sid`) and time (`ts`) has `body`: its words, read back from the store (a message minted with `text` has that). To read other messages, query the store yourself: `sql("SELECT json_extract(body,'$.d.text') AS text FROM c_events WHERE json_extract(body,'$.d.stream') = 'discourse' AND json_extract(body,'$.d.conv') = ? ORDER BY json_extract(body,'$.d.seq') DESC LIMIT 20", 'sid:<chat>')` -- every message the seat hears is a `discourse` row (`text`, `conv`, `role`, `ts`, `seq`).
