@@ -312,6 +312,14 @@ _KIND_HEAD_FAMILIES = {
 }
 
 
+def _drift_wanted(eid: str, only_keys) -> bool:
+    """The drift pass's own key filter, by eid alone (so an unbuilt entity can be judged without being built)."""
+    key = eid[len(MEMBRANE_NS):] if eid.startswith(MEMBRANE_NS) else ""
+    if key == "session:now" or key == "global:now":
+        return False
+    return key in only_keys or (":" in key and key.split(":", 1)[1] in only_keys)
+
+
 def consolidate_entities(fld, est, mem=None, materialize: int = 8,
                          only_keys=None) -> dict:
     """Drift every overlay entity's position toward the field cells that
@@ -418,7 +426,10 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
     # -- the drift pass --
     drifted = 0
     total_moved = 0.0
-    for ent in list(est.docs.values()):
+    _docs = est.docs
+    _cands = ([e for _k, e in _docs.scan(lambda eid, _c, _p: _drift_wanted(eid, only_keys))]   # only the asked-for are built
+              if only_keys and hasattr(_docs, "scan") else list(_docs.values()))
+    for ent in _cands:
         key = ent.eid[len(MEMBRANE_NS):] \
             if ent.eid.startswith(MEMBRANE_NS) else ""
         if key == "session:now" or key == "global:now":

@@ -310,3 +310,16 @@ def test_the_due_goals_pass_builds_only_goals(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_the_drift_pass_filter_judges_by_eid_and_builds_nothing(tmp):
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        from membrane import night
+        assert night._drift_wanted("membrane::thing:7", {"thing:7"}) and night._drift_wanted("membrane::Component:t", {"t"})
+        assert not night._drift_wanted("membrane::session:now", {"session:now"}) and not night._drift_wanted("membrane::x", {"y"})
+        assert st.docs.scan(lambda eid, _c, _p: night._drift_wanted(eid, {"nothing-here"})) == [] and built == []
+    finally:
+        _restore(real)
+        db.close()
