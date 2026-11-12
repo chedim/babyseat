@@ -14,13 +14,13 @@ IMPORT door 1
 -- dict keyed by model name and c1f has no way to build a dict with data-driven keys: a design fork, see docs/python-to-c1f.md),
 -- /membrane/quota (quota.py's RAM state and
 -- the loop runner's held chats), /membrane/minds (fieldpulse's loop sessions, the thinker's and dreamer's logs),
--- /membrane/self/sheet and /membrane/self/recent (the self record, the sheet's computed numbers, the supervisor), and the
--- /membrane/state ?section= pull (where_we_are).
+-- and the /membrane/state ?section= pull (where_we_are). (/membrane/self/sheet and /membrane/self/recent are the self family's:
+-- door_self.c1f.)
 
 -- the class is declared here so the engine mirrors the presence entity
 Seat.is_presence getter: this.eid == 'membrane::presence'
 
-Request.o_state getter: this.path in ['/membrane/seat', '/membrane/seat/pause', '/membrane/seat/control', '/membrane/state', '/state', '/membrane/self/card', '/membrane/stats', '/membrane/quota', '/membrane/minds', '/membrane/self/sheet', '/membrane/self/recent']
+Request.o_state getter: this.path in ['/membrane/seat', '/membrane/seat/pause', '/membrane/seat/control', '/membrane/state', '/state', '/membrane/self/card', '/membrane/stats', '/membrane/quota', '/membrane/minds']
 
 -- ---- the presence entity's facts ------------------------------------------------------------------------------------------------
 Request.st_seat getter: ([s for s in instances('Seat') if s.eid == 'membrane::presence'] or [None])[0]
@@ -61,7 +61,7 @@ Request.st_ask on-setter st-control:
     ('membrane::presence').control = this.st_ask
 
 -- ---- the reply ---------------------------------------------------------------------------------------------------------------------------
-Request.st_gap getter: this.path in ['/membrane/stats', '/membrane/quota', '/membrane/minds', '/membrane/self/sheet', '/membrane/self/recent'] or (this.path in ['/membrane/state', '/state'] and 'section=' in this.query)
+Request.st_gap getter: this.path in ['/membrane/stats', '/membrane/quota', '/membrane/minds'] or (this.path in ['/membrane/state', '/state'] and 'section=' in this.query)
 Request.st_post getter: this.method == 'POST' and this.path in ['/membrane/seat/pause', '/membrane/seat/control']
 Request.st_read getter:
   WHEN this.path == '/membrane/seat': this.st_seat_body

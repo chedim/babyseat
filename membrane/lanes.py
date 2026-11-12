@@ -4753,8 +4753,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._entity_add(); return
         if path == "/membrane/item-chat/say":
             self._item_say(); return
-        if path == "/membrane/feedback":
-            self._reply_feedback(); return
         if path == "/membrane/peer/read":
             self._peer_read(); return
         if path == "/membrane/junk-cut":
@@ -7294,24 +7292,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         body = self._json_body()
         res = _DM.item_say(self.server, str(body.get("spec") or ""), str(body.get("text") or ""),
                            who=str(body.get("who") or ""))
-        if not res.get("ok"):
-            self._json_err_raw(400, str(res.get("error"))); return
-        self._json_out(res)
-
-    def _reply_feedback(self) -> None:
-        """POST /membrane/feedback {message, kind, why, session}: a person's verdict on a
-        reply (G15/G9, docs/ui-pack-design.md). Owner only, like every board write."""
-        if self._paused_write_refused():
-            return
-        from . import seatauth as _SA
-        if not _SA.owner(self):
-            from . import jwtauth as _JWT
-            _JWT.send_unauthorized(self); return
-        from . import reply_feedback as _RF
-        body = self._json_body()
-        res = _RF.record(getattr(self.server, "entity_store", None), str(body.get("message") or ""),
-                         str(body.get("kind") or ""), why=str(body.get("why") or ""),
-                         session=str(body.get("session") or ""))
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)

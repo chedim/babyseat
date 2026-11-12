@@ -1,0 +1,78 @@
+PACK door_voice 1
+IMPORT door 1
+IMPORT fs 1
+-- VOICE AS A DOOR ROUTE FAMILY (#1143, the porting brief's `voice` family):
+--   POST /membrane/voice        the person's two voice entities (state + their rings): the voice log's read
+--   POST /membrane/voice/state  the mic and speaker buttons' report
+--   POST /ui/stt                a recording to the seat's speech server
+--   POST /ui/log                one line of the page's voice log, appended to <data dir>/page-voice.log
+-- WHO: the verified person (Request.person); a caller with no token (this machine, bare loopback) is the person the page stamps
+-- in the body. The voice entities are the Python seat's (`membrane::Config:voice:in|out:<slug>`, voice_io.py): the read is a
+-- `sql()` over the store's entity rows, so it sees exactly what the Python seat wrote.
+-- NOT PORTED (501, with the reason; docs/python-to-c1f.md):
+--   /membrane/voice/state is a WRITE of those entities. The engine mirrors only the classes a pack declares, and the voice
+--   entities are class Config (everything the extractor does not recognise): declaring a getter on Config would mirror all of them.
+--   A write to an eid the engine does not hold creates nothing under that name. The way out is a design fork (a class of its own,
+--   or the `parents` kind-mirror), not a port: see the report of #1143's voice piece.
+--   /ui/stt: a recording is bytes; the door's body is text (lossy for a WAV), and the forward is a multipart upload.
+-- /ui/log is a File write per request: rotate to .log.old past 2 MB (File.move), then append (File.write), 204 when the receipt is in.
+-- The launcher tells Boot:seat.seat_data_dir (the seat's data folder).
+
+Request.o_voice getter: this.path in ['/membrane/voice', '/membrane/voice/state', '/ui/stt', '/ui/log']
+Request.m_voice getter: ['POST']
+
+-- ---- /membrane/voice --------------------------------------------------------------------------------------------------------------
+Request.vo_person getter: str(this.person or prop(this.jbody, 'person') or '')
+-- slug: lowercase, every run of other characters one '-' (speakers.slug); nothing left = 'unknown'
+Request.vo_slug getter: join(words(plain(replace(replace(replace(replace(replace(replace(lower(this.vo_person), '_', ' '), '#', ' '), '.', ' '), '/', ' '), ':', ' '), '-', ' '))), '-') or 'unknown'
+Request.vo_go getter: this.path == '/membrane/voice' and this.method == 'POST' and this.vo_person != ''
+Request.vo_in_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", 'membrane::Config:voice:in:' + this.vo_slug) if this.vo_go else None
+Request.vo_out_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", 'membrane::Config:voice:out:' + this.vo_slug) if this.vo_go else None
+Request.vo_in getter: (json(prop(this.vo_in_q[0], 'p')) or {}) if len(this.vo_in_q or []) > 0 else {}
+Request.vo_out getter: (json(prop(this.vo_out_q[0], 'p')) or {}) if len(this.vo_out_q or []) > 0 else {}
+Request.vo_in_view getter: {'on': prop(this.vo_in, 'on'), 'mode': prop(this.vo_in, 'mode'), 'device': prop(this.vo_in, 'device'), 'session': prop(this.vo_in, 'session'), 'log': prop(this.vo_in, 'heard') or []}
+Request.vo_out_view getter: {'on': prop(this.vo_out, 'on'), 'mode': prop(this.vo_out, 'mode'), 'device': prop(this.vo_out, 'device'), 'session': prop(this.vo_out, 'session'), 'log': prop(this.vo_out, 'said') or []}
+Request.vo_body getter: {'ok': True, 'in': this.vo_in_view, 'out': this.vo_out_view}
+Request.vo_reply getter:
+  WHEN this.vo_person == '': {'status': 200, 'body': {'ok': False, 'error': 'no person'}}
+  ELSE WHEN this.vo_in_q == None or this.vo_out_q == None: None
+  ELSE: {'status': 200, 'body': this.vo_body}
+
+-- ---- /ui/stt ------------------------------------------------------------------------------------------------------------------------
+Request.stt_reply getter:
+  WHEN this.c_stt != 'server': {'status': 501, 'body': {'error': 'no speech server: the page listens itself'}}
+  ELSE: {'status': 501, 'body': {'error': "not ported yet: a recording is bytes and the door's body is text"}}
+
+-- ---- /ui/log ----------------------------------------------------------------------------------------------------------------------
+Request.pl_dir getter: str(prop(this.facts, 'seat_data_dir') or '')
+Request.pl_path getter: this.pl_dir + '/page-voice.log'
+-- a line is kept when it is at most 4096 bytes of JSON; the body's newlines go (one record per line)
+Request.pl_ok getter: this.path == '/ui/log' and len(this.body or '') <= 4096 and json(this.body or '') != None and this.pl_dir != ''
+Request.pl_file getter: ([f for f in instances('File') if f.eid == 'File:' + str(this.conn)] or [None])[0]
+Request.pl_info getter: this.pl_file.info if this.pl_file != None else None
+Request.pl_big getter: prop(this.pl_info, 'exists') == True and prop(this.pl_info, 'size') > 2000000
+Request.pl_open getter: ({'id': this.eid} if this.pl_ok and this.pl_file == None else None)
+Request.pl_open on-setter log-open:
+  WHEN this.pl_open != None:
+    ('File:' + str(this.conn)).path = this.pl_path
+Request.pl_rotate getter: True if (this.pl_ok and this.pl_info != None and this.pl_big and this.pl_rotated != True) else None
+Request.pl_rotate on-setter log-rotate:
+  WHEN this.pl_rotate == True:
+    this.pl_rotated = True
+    ('File:' + str(this.conn)).move = {'id': 'rot', 'to': this.pl_path + '.old'}
+Request.pl_ready getter: this.pl_ok and this.pl_info != None and (not this.pl_big or prop(this.pl_file.move_result, 'id') == 'rot')
+Request.pl_write getter: True if (this.pl_ready and this.pl_written != True) else None
+Request.pl_write on-setter log-write:
+  WHEN this.pl_write == True:
+    this.pl_written = True
+    ('File:' + str(this.conn)).write = {'id': 'w', 'content': replace(replace(this.body, '\n', ' '), '\r', ' ') + '\n', 'append': True}
+Request.pl_reply getter:
+  WHEN not this.pl_ok: {'status': 204}
+  ELSE WHEN prop(this.pl_file.write_result, 'id') != 'w': None
+  ELSE: {'status': 204}
+
+Request.r_voice getter:
+  WHEN this.path == '/membrane/voice': this.vo_reply
+  ELSE WHEN this.path == '/membrane/voice/state': {'status': 501, 'body': {'error': 'not ported yet: the voice entities are written by the Python seat (voice_io)'}}
+  ELSE WHEN this.path == '/ui/stt': this.stt_reply
+  ELSE: this.pl_reply

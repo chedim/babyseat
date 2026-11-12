@@ -1,0 +1,527 @@
+[
+ {
+  "name": "GET /membrane/voice is a 405 with allow POST",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/voice",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "POST /membrane/voice with no person at all says no person (200, as the page expects)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/voice",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": false,
+     "auth_error": "no token"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body",
+    "equals": {
+     "ok": false,
+     "error": "no person"
+    }
+   }
+  ]
+ },
+ {
+  "name": "POST /membrane/voice/state is a 501: the voice entities are the Python seat's",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/voice/state",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"in_on\": true}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 501
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "not ported yet: the voice entities are written by the Python seat (voice_io)"
+   }
+  ]
+ },
+ {
+  "name": "GET /membrane/voice/state is a 405",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/voice/state",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   }
+  ]
+ },
+ {
+  "name": "POST /ui/stt with no speech server: the page listens itself (501)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/ui/stt",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "RIFF"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 501
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "no speech server: the page listens itself"
+   }
+  ]
+ },
+ {
+  "name": "POST /ui/stt with a speech server is a 501: a WAV is not text",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_stt": "http://127.0.0.1:9/inference"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/ui/stt",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "RIFF"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 501
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "not ported yet: a recording is bytes and the door's body is text"
+   }
+  ]
+ },
+ {
+  "name": "GET /ui/stt is a 405",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/ui/stt",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "POST /ui/log appends the line to page-voice.log and answers 204",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "facts": {
+      "seat_data_dir": "/d"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/ui/log",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     },
+     "conn": 7
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"t\":1,\"heard\":\"hey\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 204
+   },
+   {
+    "eid": "File:7",
+    "prop": "path",
+    "equals": "/d/page-voice.log"
+   },
+   {
+    "eid": "File:7",
+    "prop": "write_result.id",
+    "equals": "w"
+   }
+  ]
+ },
+ {
+  "name": "POST /ui/log with a body that is not JSON writes nothing and still answers 204",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "facts": {
+      "seat_data_dir": "/d"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/ui/log",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     },
+     "conn": 7
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "not json"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 204
+   }
+  ]
+ },
+ {
+  "name": "POST /ui/log over 4096 bytes is dropped (204, no write)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_voice.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "facts": {
+      "seat_data_dir": "/d"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/ui/log",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     },
+     "conn": 7
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"t\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 204
+   }
+  ]
+ }
+]
