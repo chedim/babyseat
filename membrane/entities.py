@@ -1306,19 +1306,111 @@ class TimelineOps:
                     break
         return out
 
+class _Raw:
+    """An entity the store knows but has not built yet: its raw database record. Built on first access (_Docs)."""
+    __slots__ = ("rec",)
+
+    def __init__(self, rec):
+        self.rec = rec
+
+
+_SCAN_LOGGED: set = set()
+
+
 class _Docs(dict):
     """#576: the store's docs, where a birth (docs[eid] = ent for a new eid) and
     a removal (pop / del) are writes -- the ~25 direct assignments around the
     seat included. Replacing an existing doc object is the upsert's to diff.
     Only __setitem__, pop and del are watched: clear / update / setdefault /
-    popitem are not (no caller uses them on the store's docs)."""
+    popitem are not (no caller uses them on the store's docs).
+
+    LAZY HYDRATION (the boot): an entity read from the database is held as its raw record (`_Raw`) and built into a
+    QuantumEntity the first time anything asks for it. Keys, length and membership never build; `docs[eid]` / `.get`
+    build one; iterating values or items builds each as it goes, so a caller that scans everything sees what the
+    eager load gave it. `unbuilt()` / `built_items()` let the boot's own scans skip what was never touched."""
 
     def __init__(self, init, store):
         super().__init__(init)
         self._store = store
+        self._build_lock = threading.RLock()
+        self._n_raw = sum(1 for v in dict.values(self) if type(v) is _Raw)       # how many are not built yet
 
+    # -- building -------------------------------------------------------------------------------------
+    def _built(self, eid, v):
+        """The entity for a stored value: a `_Raw` is built now (once), anything else is already one."""
+        if type(v) is not _Raw:
+            return v
+        with self._build_lock:
+            cur = dict.get(self, eid)
+            if type(cur) is not _Raw:                      # another thread built it meanwhile
+                if cur is None:
+                    raise KeyError(eid)
+                return cur
+            ent = self._store._build_entity(eid, cur.rec)
+            if ent is None:                                # a record that is no entity after all: it was never there
+                dict.pop(self, eid, None)
+                self._n_raw -= 1
+                raise KeyError(eid)
+            dict.__setitem__(self, eid, ent)
+            self._n_raw -= 1
+            return ent
+
+    def __getitem__(self, eid):
+        return self._built(eid, dict.__getitem__(self, eid))
+
+    def get(self, eid, default=None):
+        try:
+            return self._built(eid, dict.__getitem__(self, eid))
+        except KeyError:
+            return default
+
+    def setdefault(self, eid, default=None):
+        try:
+            return self[eid]
+        except KeyError:
+            self[eid] = default
+            return default
+
+    def unbuilt(self) -> int:
+        return self._n_raw
+
+    def built_items(self) -> list:
+        """The entities that exist as objects (nothing is built to answer)."""
+        return [(k, v) for k, v in list(dict.items(self)) if type(v) is not _Raw]
+
+    def _note_scan(self, what: str) -> None:
+        """A scan of everything builds every entity: say which caller, once, so the boot's own scans can be found."""
+        n = self.unbuilt()
+        if n < 200:
+            return
+        import traceback
+        fr = traceback.extract_stack(limit=4)[:-2]
+        key = tuple((f.filename, f.lineno) for f in fr[-1:])
+        if key in _SCAN_LOGGED:
+            return
+        _SCAN_LOGGED.add(key)
+        where = " <- ".join(f"{Path(f.filename).name}:{f.lineno}" for f in reversed(fr))
+        _safe_err(f"[entities] a full scan ({what}) builds {n} entities: {where}")
+
+    def values(self):
+        self._note_scan("values")
+        return _LazyValues(self)
+
+    def items(self):
+        self._note_scan("items")
+        return _LazyItems(self)
+
+    def copy(self):
+        return {k: v for k, v in self.items()}
+
+    def __iter__(self):
+        return dict.__iter__(self)
+
+    # -- writes (#576) --------------------------------------------------------------------------------
     def __setitem__(self, eid, ent):
         new = eid not in self
+        if type(dict.get(self, eid)) is _Raw:
+            self._n_raw -= 1                               # a replaced record is never built
         super().__setitem__(eid, ent)
         if new:
             from . import writes as _W
@@ -1327,23 +1419,67 @@ class _Docs(dict):
                 snaps[eid] = _W.snapshot(ent)
             _W.emit(eid, None, eid)
 
-    def _gone(self, eid):
+    def _gone(self, eid, was_raw=False):
         snaps = getattr(self._store, "_snap", None)
         if snaps is not None:
             snaps.pop(eid, None)
+        if was_raw:                                        # never built: no signature knows it, the save must purge it
+            gone = getattr(self._store, "_cbl_gone", None)
+            if gone is not None:
+                gone.add(eid)
         from . import writes as _W
         _W.emit(eid, eid, None)
 
     def pop(self, eid, *default):
         had = eid in self
+        raw = type(dict.get(self, eid)) is _Raw
         out = super().pop(eid, *default)
         if had:
-            self._gone(eid)
+            if raw:                                        # what a caller of pop gets is an entity
+                self._n_raw -= 1
+                out = self._store._build_entity(eid, out.rec)
+            self._gone(eid, raw)
         return out
 
     def __delitem__(self, eid):
+        raw = type(dict.get(self, eid)) is _Raw
         super().__delitem__(eid)
-        self._gone(eid)
+        if raw:
+            self._n_raw -= 1
+        self._gone(eid, raw)
+
+
+class _LazyValues:
+    """docs.values(): builds each entity as it is reached; a record that turns out to be no entity is skipped."""
+
+    def __init__(self, docs):
+        self._d = docs
+
+    def __iter__(self):
+        for k in list(dict.keys(self._d)):
+            try:
+                yield self._d[k]
+            except KeyError:
+                continue
+
+    def __len__(self):
+        return len(self._d)
+
+    def __contains__(self, v):
+        return any(v is x or v == x for x in self)
+
+
+class _LazyItems(_LazyValues):
+    def __iter__(self):
+        for k in list(dict.keys(self._d)):
+            try:
+                yield k, self._d[k]
+            except KeyError:
+                continue
+
+    def __contains__(self, kv):
+        k, v = kv
+        return k in self._d and self._d.get(k) == v
 
 
 class EntityStore(MultiParentOps, TimelineOps):
@@ -1371,6 +1507,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         # whole every 10 s). The JSON file migrates once and stays as a backup.
         self._cbl = cbl
         self._cbl_sig: dict = {}
+        self._cbl_gone: set = set()                # eids removed before they were ever built: the save purges them
         self._migrate = False
         self.bucket = bucket
         # THE TEST-ISOLATION GUARD (the 'doomed.py in the fork's banner'
@@ -1421,7 +1558,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         # #576: what each entity last held -- an in-place edit + upsert diffs against it;
         # from here on a birth or removal straight through docs is a write too (#577 review)
         from . import writes as _W
-        self._snap = {eid: _W.snapshot(e) for eid, e in list(self.docs.items())}
+        self._snap = {eid: _W.snapshot(e) for eid, e in list(dict.items(self.docs)) if type(e) is not _Raw}
         self.docs = _Docs(self.docs, self)
         self._seed_junk_anchors()
 
@@ -1548,14 +1685,9 @@ class EntityStore(MultiParentOps, TimelineOps):
                     if k == self.CBL_TRACKS and isinstance(rec, dict):
                         self._mirror = {"tracks": rec}
                     continue
-                q = QuantumEntity.from_doc(k, self._geometry(self._geometry_copy(rec), self._unpack))
-                if q is None:
-                    continue
-                q.properties = sanitize_properties(q.properties)
-                _stamp_guest_flavor(k, q.properties)
-                self.docs[k] = q
-            for eid, q in list(self.docs.items()):
-                self._cbl_sig[eid] = self._sig(q)
+                if not isinstance(rec, dict) or not isinstance(rec.get("data"), dict):
+                    continue                                   # no entity shape (from_doc's own first test): not one
+                self.docs[k] = _Raw(rec)                       # LAZY: built on first access (_Docs), signature then
             self._cbl_tsig = json.dumps(((self._mirror or {}).get("tracks") or {}), sort_keys=True, default=str)
             if rows:
                 if self._mirror is None:
@@ -1576,6 +1708,22 @@ class EntityStore(MultiParentOps, TimelineOps):
                 self.docs[k] = q
         except Exception as e:
             _safe_err(f"[entities] side-index load failed ({e})")
+
+    def _build_entity(self, k: str, rec: dict):
+        """A stored record -> its entity, with what the eager load did for each one at boot: the geometry unpacked,
+        the properties screened, the guest flavour stamped, the save's signature and the #576 snapshot taken
+        (the record is unchanged since the load, so these are what the load would have recorded)."""
+        q = QuantumEntity.from_doc(k, self._geometry(self._geometry_copy(rec), self._unpack))
+        if q is None:
+            return None
+        q.properties = sanitize_properties(q.properties)
+        _stamp_guest_flavor(k, q.properties)
+        self._cbl_sig[k] = self._sig(q)
+        snaps = getattr(self, "_snap", None)
+        if snaps is not None:
+            from . import writes as _W
+            snaps[k] = _W.snapshot(q)
+        return q
 
     def save(self) -> None:
         """THE SIDE-INDEX SAVE, rebuilt (the 45s-PENDING exhibit):
@@ -1673,12 +1821,12 @@ class EntityStore(MultiParentOps, TimelineOps):
         from . import cblite as _CB
         try:
             with self._store_lock:
-                live = {eid: ent for eid, ent in list(self.docs.items())
+                live = {eid: ent for eid, ent in self.docs.built_items()          # an unbuilt entity cannot have changed
                         if not ((ent.properties or {}).get("ephemeral"))}
                 sigs = {eid: self._sig(ent) for eid, ent in live.items()}
                 tracks = dict(self.tracks) if self.tracks else {}
             changed = [eid for eid, sg in sigs.items() if self._cbl_sig.get(eid) != sg]
-            gone = [eid for eid in self._cbl_sig if eid not in sigs]
+            gone = [eid for eid in self._cbl_sig if eid not in sigs] + sorted(self._cbl_gone)
             tsig = json.dumps(tracks, sort_keys=True, default=str)
             if not changed and not gone and tsig == getattr(self, "_cbl_tsig", None) and not self._migrate:
                 self._side_saved = True
@@ -1703,6 +1851,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                 finally:
                     self._cbl.end()
             self._cbl_sig = {eid: sg for eid, sg in sigs.items() if eid in sigs}
+            self._cbl_gone.clear()
             self._cbl_tsig = tsig
             if self._migrate and self.path and self.path.exists():
                 self.path.rename(self.path.with_name(
