@@ -234,7 +234,7 @@ the things it names. On later turns it sees only what changed since the last
 message: which entities moved, and whether the change came from the
 conversation, the code, another seat or a script.
 
-**The conversation block** (the default since #429's measurement; since 0.7.5 made by the `banner` pack, `Banner:<owner>:<chat>`, which each model can tune or replace for its own chats;
+**The conversation block** (the default since #429's measurement; since 0.7.5 made by the `banner` pack, `Banner:<owner>:<chat>`, which each model can tune or replace for its own chats (on a map-mode seat the banner is the whole state message: a class of the model's own with a `text` getter replaces it completely, 3 s for its reads, the default shows headed by the error if it fails: help('map'));
 `MEMBRANE_INJECTION=banner` restores the WHERE WE ARE banner) replaces that state with one small block about *this*
 chat, built from records only (no model call), at most 900 chars, sent every
 turn while it has content: `NOW`, `WORKING ON` (the person's latest earlier

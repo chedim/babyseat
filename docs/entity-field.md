@@ -703,7 +703,7 @@ serves the replay on a fraction P of eligible turns.
 
 ## Storage
 
-A seat's store is SQLite (one WAL file in the seat's `.membrane/`) by default since 0.7.5 (a Couchbase Lite seat
+The store belongs to the native engine (`membrane_vm.Db`): one SQLite per process, which the engine's `sql()` reads too (`native/src/sqlexec.rs`); Python's `sqlite3` is not used for the field (#1111). A seat's store is SQLite (one WAL file in the seat's `.membrane/`) by default since 0.7.5 (a Couchbase Lite seat
 moves to it at its first start); the collections are the same in each kind (SQLite, Couchbase Lite, or a
 cluster's scope `membrane`). Nine collections: `events`, `sentences`
 (content-addressed embeddings, shared by all origins), `terms` (seeds),
