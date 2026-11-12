@@ -1,11 +1,11 @@
 //! THE STORE DRIVER (the operator, 2026-11-10: "build the sqlite driver c1f pack"): `.c1f` reads the seat's SQLite
 //! store. `sql(query, args...)` is a built-in of the engine.
 //!
-//! ONE SQLITE PER PROCESS (0.7.53, data safety): this module never opens a database. It used to, with a copy of SQLite
-//! compiled in (rusqlite "bundled"), on the very WAL file the seat's Python opens with CPython's sqlite3: two SQLite
-//! copies in one process on one WAL database (POSIX locks are per process: a close in one copy drops the other's
-//! locks, and the -shm/-wal can be truncated under the other's mmap -> SIGBUS in walFindFrame). Every query now runs
-//! through an `SqlExec` the host hands in -- in the seat, membrane/sqlread.py on the seat's own sqlite3.
+//! ONE SQLITE PER PROCESS (data safety, 0.7.53 / #1111): this module never opens a database itself. Two SQLite copies
+//! in one process on one WAL database corrupt it (POSIX locks are per process: a close in one copy drops the other's
+//! locks, and the -shm/-wal can be truncated under the other's mmap -> SIGBUS in walFindFrame). Every query runs
+//! through an `SqlExec` the host hands in -- in the seat, `sqlexec::NativeSqlExec`, on the same SQLite the native store
+//! (`db.rs`) writes through; Python's `sqlite3` is not used for the field.
 //!
 //! - Read-only: the executor opens read-only connections with `query_only` on and refuses a statement that is not a
 //!   pure read before it runs. Arguments are bound, never spliced.
@@ -316,4 +316,4 @@ pub(crate) fn child_slot(sh: &Arc<(Mutex<Shared>, Condvar)>, eid: &str) -> Arc<M
 pub(crate) fn child_done(sh: &Arc<(Mutex<Shared>, Condvar)>, eid: &str) {
     sh.0.lock().unwrap_or_else(|e| e.into_inner()).children.remove(eid);
 }
-pub(crate) type Sh = Arc<(Mutex<Shared>, Condvar)>;
+

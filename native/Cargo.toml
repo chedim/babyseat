@@ -16,6 +16,8 @@ pollster = { version = "1.0.1", optional = true }
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 serde_json = { version = "1", features = ["preserve_order"] }
+# the field store (#1111): the process's one SQLite, owned by the native engine
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 wgpu = { version = "30.0.1", optional = true }
 objc2 = { version = "0.6.5", optional = true }
 objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSString", "NSError"] }
@@ -29,7 +31,7 @@ opt-level = 3
 
 [features]
 default = ["python"]
-python = ["dep:pyo3"]   # the seat: Python binding (sql() runs on the seat's own sqlite3: one SQLite per process, 0.7.53)
+python = ["dep:pyo3", "dep:rusqlite"]   # the seat: Python binding + the native field store (one SQLite per process, #1111)
 wasm = ["dep:wasm-bindgen"]
 metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:objc2", "dep:objc2-foundation", "dep:objc2-metal"]
 
