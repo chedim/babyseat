@@ -28,6 +28,11 @@ entity: `('Fetch:' + this.conn).request = {...}` and read its `request_result`.
 ## Boot facts
 The launcher writes each fact as a property of `Boot:seat` and also the whole set as the dict `facts`; a pack reads
 `prop(this.facts, 'seat_name')` instead of a comprehension over `instances('Boot')`.
+They are assembled by ONE pure function, `fields_live.seat_facts(env, settings, srv, known)` (tests/test_seat_facts.py): a missing
+source leaves its fact out (never None); `door_port` exists only when `MEMBRANE_DOOR_PORT` is set (no door by default);
+`door_secret_file` is a path, never the secret. The router's facts (`router_on`, `cloud_models`, `minds`) are only known after the
+router step: they are added then (`boot_started(..., announce=False)`), after `started` was said, so a setter on `started` sees
+them empty (see the router pack's `router-rungs` / `router-minds`).
 
 ## Builtins proposed (each needs the operator's approval; none is added yet)
 | builtin | why a pack cannot work around it |

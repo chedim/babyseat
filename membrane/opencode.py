@@ -1902,8 +1902,13 @@ def main() -> None:
                     except Exception as e:     # noqa: BLE001 -- the seat starts; scripts stay Python
                         print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
                     _boot_laps.step('loops: field engine')
+                    def _facts_now():          # the facts packs read (fields_live.seat_facts); the router's come late (below, after its step)
+                        from . import server as _SV, settings as _ST, ui_serve as _UI
+                        return _FL.seat_facts(os.environ, _ST.load(), srv, {"ui_dir": _UI.UI_DIR, "build_id": _UI.build_id(), "seat_version": _SV.VERSION,
+                                              "seat_cwd": os.getcwd(), "seat_home": os.path.expanduser("~"), "seat_project": _SV.PROJECT_ID})
+                    srv._facts_now = _facts_now
                     _FL.start(srv)
-                    _FL.boot_started(srv.entity_store, ledger=getattr(getattr(srv, "user_ledger", None), "path", None), facts={"agent_writes": bool(getattr(srv, "agent_writes", True)), "nerve_pause_off": os.environ.get("MEMBRANE_NERVE_PAUSE") == "0"})   # Boot:seat.started: the packs that start something answer (dev commands, the decisions' ledger file)
+                    _FL.boot_started(srv.entity_store, ledger=getattr(getattr(srv, "user_ledger", None), "path", None), facts={"agent_writes": bool(getattr(srv, "agent_writes", True)), "nerve_pause_off": os.environ.get("MEMBRANE_NERVE_PAUSE") == "0", **_facts_now()})   # Boot:seat.started: the packs that start something answer (dev commands, the decisions' ledger file)
                     _boot_laps.step('loops: owed tasks')             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
                     _r = _GG.reowe(srv)
                     _p = _GG.replan_lost(srv)
@@ -2022,6 +2027,12 @@ def main() -> None:
         # the embed role early rather than on the first chat).
         # a backend that doesn't answer at all fails every probe -- after up to 180 s
         # each (an HA child waited minutes for nothing): one quick check first
+        try:                           # the router's facts (router_on, cloud_models, minds) exist only now; added, `started` not said again
+            if getattr(srv, "fields_live", None) is not None and getattr(srv, "_facts_now", None):
+                from . import fields_live as _FL2
+                _FL2.boot_started(srv.entity_store, facts={k: v for k, v in srv._facts_now().items() if k in ("router_on", "cloud_models", "minds")}, announce=False)
+        except Exception as e:         # noqa: BLE001 -- the seat starts without them
+            print(f"[opencode] router facts not told ({e})", file=sys.stderr)
     _STEPS['router'] = _step_router
     def _step_embedder():
         nonlocal e
