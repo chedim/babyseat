@@ -43,7 +43,7 @@ def test_a_map_mode_seat_shows_a_tiny_placeholder_that_instructs(seat, monkeypat
     text = r["text"] or ""
     assert text.startswith("BANNER")
     assert FL.banner_eid("owner", "ses_op") in text            # where its settings are
-    assert "mine" in text and "entity edit" in text and "class=MyBanner" in text   # and how to do it
+    assert "MyBanner.text getter" in text and "entity edit" in text and "class=MyBanner" in text and "replaces" in text   # how to do it
     assert len(text) < 900                                     # short
     assert "#3 the bilge pump ran twice" not in text           # no recalled facts
     assert "recall" not in calls and "rerank" not in calls     # and nothing was recalled for it
