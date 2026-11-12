@@ -88,7 +88,7 @@ fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
 }
 
 /// The driver verbs the engine runs: (class, verb).
-pub const VERBS: [(&str, &str); 6] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run")];
+pub const VERBS: [(&str, &str); 8] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond")];
 
 /// Run one effect (the engine calls this for a write of a driver verb). `props` are the entity's.
 pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map<String, J>) {
@@ -96,6 +96,14 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
     let dir = st.dir.clone();
     let path = props.get("path").and_then(|v| v.as_str()).map(|p| resolve(&dir, p));
     match (cls, verb) {
+        ("Http", "listen") | ("Request", "respond") => {   // the HTTP door (http.rs): a listener, and the answer to a held request
+            let (req2, verb2) = (req.clone(), verb.to_string());
+            let conn = props.get("conn").and_then(|c| c.as_u64());          // the request entity holds its own connection
+            st.effect(eid, verb, Box::new(move |sh, eid| {
+                let h = Store::from_shared(sh);
+                if verb2 == "listen" { crate::http::listen(&h, eid, &req2) } else { crate::http::respond(&h, &req2, conn) }
+            }));
+        }
         ("Store", "run") => {                   // the store's writes: bound statements in one transaction, a receipt
             let stmts: Vec<(String, Vec<J>)> = match req.get("statements").and_then(|s| s.as_array()) {
                 Some(a) => a.iter().map(|x| (x.get("sql").and_then(|s| s.as_str()).unwrap_or("").to_string(),

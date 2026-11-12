@@ -54,6 +54,12 @@ pub struct Shared {
     /// effects run by the drivers (fs, proc): (entity, verb, receipt), taken by the engine's next round
     receipts: Vec<(String, String, J)>,
     effects_running: usize,
+    /// the HTTP door (http.rs): requests that arrived (taken by the engine's next round as entities), the connections held
+    /// open until a pack answers, and the listeners' stop flags by their entity
+    inbound: Vec<(String, String, serde_json::Map<String, J>)>,
+    conns: HashMap<u64, std::net::TcpStream>,
+    next_conn: u64,
+    listeners: HashMap<String, Arc<std::sync::atomic::AtomicBool>>,
     /// a running command's child process, by its entity (Command.stop kills it)
     children: HashMap<String, Arc<Mutex<Option<std::process::Child>>>>,
     done: u64,
@@ -239,6 +245,39 @@ impl Store {
         }
     }
 
+    pub(crate) fn from_shared(sh: &Arc<(Mutex<Shared>, Condvar)>) -> Store { Store { path: String::new(), dir: Default::default(), sh: sh.clone() } }
+
+    /// A handle on the same shared state (the door's threads hold one).
+    pub fn clone_handle(&self) -> Store { Store { path: self.path.clone(), dir: self.dir.clone(), sh: self.sh.clone() } }
+
+    /// A listener's stop flag by its entity: the previous one (a second listen replaces the first).
+    pub fn set_listener(&self, eid: &str, stop: Arc<std::sync::atomic::AtomicBool>) -> Option<Arc<std::sync::atomic::AtomicBool>> {
+        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).listeners.insert(eid.to_string(), stop)
+    }
+
+    /// Keep an accepted connection open until a pack answers it: -> its number.
+    pub fn hold_conn(&self, s: std::net::TcpStream) -> u64 {
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.next_conn += 1;
+        let n = g.next_conn;
+        g.conns.insert(n, s);
+        n
+    }
+    pub fn take_conn(&self, n: u64) -> Option<std::net::TcpStream> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).conns.remove(&n) }
+
+    /// A request arrived (an entity born in the engine's next round); wakes the waiter.
+    pub fn push_inbound(&self, eid: String, cls: String, props: serde_json::Map<String, J>) {
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.inbound.push((eid, cls, props));
+        g.done += 1;
+        self.sh.1.notify_all();
+    }
+
+    /// The entities that arrived since the last round.
+    pub fn take_inbound(&self) -> Vec<(String, String, serde_json::Map<String, J>)> {
+        std::mem::take(&mut self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).inbound)
+    }
+
     /// The effects' receipts since the last round.
     pub fn take_receipts(&self) -> Vec<(String, String, J)> {
         std::mem::take(&mut self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).receipts)
@@ -310,7 +349,7 @@ fn interrupt_all(sh: &Arc<(Mutex<Shared>, Condvar)>) {
 /// Queries, file reads and effects not landed yet: still running, or finished with their rows not taken by a round (the
 /// engine takes them at its next round) -- so a waiter never stops between a read finishing and its rows landing.
 fn outstanding(sh: &Shared) -> usize {
-    sh.results.values().filter(|v| matches!(v, State::Pending)).count() + sh.ready.len() + sh.effects_running + sh.receipts.len()
+    sh.results.values().filter(|v| matches!(v, State::Pending)).count() + sh.ready.len() + sh.effects_running + sh.receipts.len() + sh.inbound.len()
 }
 
 /// The drivers' access to a running command's slot (proc.rs).

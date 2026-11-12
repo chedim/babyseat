@@ -604,6 +604,13 @@ impl Fields {
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
         self.sync(core, now, seq);
         for k in core.sql_ready() { self.mark_key(&(crate::vm::SQL.to_string(), k)); }   // a query's rows are in
+        for (e, cls, props) in core.inbound() {                                              // the door pushed an entity (a request): born
+            let keys: Vec<String> = props.keys().cloned().collect();
+            core.load(e.clone(), cls, props, None, now);
+            self.known.insert(e.clone());
+            for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
+            for p in keys { self.mark(&e, &p); }
+        }
         for (e, verb, rec) in core.effect_receipts() {                                       // a driver effect finished
             if !core.docs.contains_key(&e) { continue; }
             let rc = rec.get("rc").cloned().unwrap_or(J::Null);

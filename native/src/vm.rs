@@ -600,6 +600,13 @@ impl Core {
         vec![]
     }
 
+    /// The entities the HTTP door pushed since the last round: (eid, class, properties).
+    pub fn inbound(&self) -> Vec<(String, String, Map<String, J>)> {
+        #[cfg(feature = "python")]
+        { if let Some(st) = &self.store { return st.take_inbound(); } }
+        vec![]
+    }
+
     /// The queries whose rows arrived since the last round (their getters are dirty).
     pub fn sql_ready(&self) -> Vec<String> {
         #[cfg(feature = "python")]
