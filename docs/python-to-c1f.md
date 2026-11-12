@@ -73,7 +73,8 @@ forwarding to Python; writes into entities through setters, not function calls; 
 | 4 sweeps and loops | not started |
 | 5 goals and decisions | decisions and the board's pen are c1f; the selection (pin, cap, ranking) stays with the dream loop |
 | 6 turn path and serve | the Rust door (`http.rs`, `jwt.rs`), the UI shell and files (`door.c1f`); every request is an entity a pack answers; 0 of ~140 routes ported; the message turn is untouched |
-| 7 the rest | not started |
+| 7 the rest | **models (router data + routes):** `Model:<name>` entities and the opencode screen, owner and autoselect lanes are c1f (`packs/router.c1f`, `fetch.c1f`); `/v1/models` and `/membrane/models` (GET, POST) are a door family (`packs/door_models.c1f`, `Request.o_models`); the minds' models are `Minds:seat`. **Still Python, on purpose:** the live scoring/ladder/outages/ceilings/spend (`router.py`, needs embeddings), the `/membrane/options` route (reads settings.json, energy and the live runner), and what *applies* a minds pick (runner.model, models.json) in `minds_models.py`. The launcher must tell `Boot:seat.seat_backend`, `.router_on`, `.cloud_models` ([{name, backend}]) and `.minds` before `started`; later rung registrations need a write too. The Python handlers stay until the door takes over those paths; nothing is deleted yet. Not ported: owner-only writes (the door has no owner check yet), the `/v1/models` order of local tags is entity order |
+| 7 the rest (others) | not started |
 | 8 entity store and field engine | not started; the SQLite store is native (`db.rs`), `Store:<x>.run` writes from c1f |
 
 **"All" for the door** is the routes the UI, Memo, `opencode attach` and Home Assistant actually use; the routes that call the old

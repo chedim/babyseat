@@ -1,0 +1,74 @@
+PACK router 1
+IMPORT boot 1
+IMPORT door 1
+IMPORT fetch 1
+-- THE MODELS (docs/python-to-c1f.md, piece 7: the router's data and the rules the routes need). A model is the entity `Model:<name>`:
+--   name, backend ('ollama' for the local backend's tags -- its own cloud tags included -- else the provider's tag), kind
+--   (local | cloud), size (bytes), capabilities, rung (True for a provider's cloud rung the launcher registered), listed (the
+--   backend still lists it). The rules below (the opencode screen, the owner) are getters on it.
+-- WHO makes them: the launcher tells `Boot:seat.seat_backend` (the local backend's url), `.router_on` and `.cloud_models` (a list
+--   of {name, backend}: the rungs); the backend's own list is a fetch (GET <backend>/api/tags) a request asks for with
+--   `Router:seat.refresh = {id: <the request's eid>}` -- the tag rows become Model entities and the request is told (models_ready).
+-- Not here (still the Python router): the live scoring and the ladder (embeddings), outages, ceilings, spend, imprints.
+
+Router.backend getter: ([b.seat_backend for b in instances('Boot') if b.seat_backend != None] or [''])[0]
+Router.on getter: ([b.router_on for b in instances('Boot')] or [False])[0] == True
+
+Router.refresh on-setter router-fetch:
+  WHEN this.refresh != None:
+    ('Fetch:tags').request = {'id': prop(this.refresh, 'id'), 'url': this.backend + '/api/tags', 'timeout_s': 10}
+
+-- the receipt of a tag fetch (its id names the request that asked): stamp the rows (a setter sees getters as they were before the
+-- round, so the rows are carried in a property), then rows -> entities and the asker is told
+Fetch.request_result on-setter models-stamp:
+  WHEN startswith(str(prop(this.request_result, 'id') or ''), 'Request:'):
+    this.tags_in = {'ask': prop(this.request_result, 'id'), 'rows': [r for r in (prop(json(str(prop(this.request_result, 'body') or '{}')), 'models') or []) if prop(r, 'name')]}
+Fetch.tags_in on-setter models-upsert:
+  WHEN this.tags_in != None:
+    FOR r IN prop(this.tags_in, 'rows'):
+      ('Model:' + prop(r, 'name')).name = prop(r, 'name')
+      ('Model:' + prop(r, 'name')).backend = 'ollama'
+      ('Model:' + prop(r, 'name')).kind = 'cloud' if (prop(r, 'remote_host') or not prop(r, 'size')) else 'local'
+      ('Model:' + prop(r, 'name')).size = prop(r, 'size') or 0
+      ('Model:' + prop(r, 'name')).capabilities = prop(r, 'capabilities') or []
+      ('Model:' + prop(r, 'name')).listed = True
+    FOR m IN [m for m in instances('Model') if m.rung != True and not (m.name in [prop(r, 'name') for r in prop(this.tags_in, 'rows')])]:
+      m.listed = False
+    (prop(this.tags_in, 'ask')).models_ready = True
+
+-- the launcher's rungs
+Boot.started on-setter router-rungs:
+  ALWAYS:
+    FOR c IN (this.cloud_models or []):
+      ('Model:' + prop(c, 'name')).name = prop(c, 'name')
+      ('Model:' + prop(c, 'name')).backend = prop(c, 'backend')
+      ('Model:' + prop(c, 'name')).kind = 'cloud'
+      ('Model:' + prop(c, 'name')).rung = True
+      ('Model:' + prop(c, 'name')).listed = True
+
+-- the opencode screen (what a picker may SEE and select): a cloud entry always passes; a local one needs a chat-looking name, the
+-- completion + tools capabilities when it declares any, and a size of at most 12 GiB
+Model.is_cloud getter: this.kind == 'cloud'
+Model.markers getter: ['embed', 'minilm', 'bge', 'whisper']
+Model.name_marked getter: len([x for x in this.markers if x in lower(str(this.name or ''))]) > 0
+Model.caps_known getter: len(this.capabilities or []) > 0
+Model.caps_ok getter: (not this.caps_known) or (('completion' in this.capabilities) and ('tools' in this.capabilities))
+Model.size_ok getter: (this.size or 0) <= 12884901888
+Model.chat_ok getter: this.is_cloud or ((not this.name_marked) and this.caps_ok and this.size_ok)
+Model.owner getter: 'membrane->' + (this.backend or 'ollama')
+
+-- THE MINDS (the models of the background mechanisms: the watch loops, the idle cortex, the goal workers; and the think dial):
+-- the entity `Minds:seat` {loops, cortex, workers, seat_default, loops_auth, cortex_auth, workers_auth, think}. The launcher's
+-- saved picks arrive as `Boot:seat.minds` (a dict of those names); /membrane/models reads and writes them (packs/door_models.c1f).
+Minds.kind getter: 'minds'
+Minds.read getter: {'loops': this.loops, 'cortex': this.cortex, 'seat_default': this.seat_default, 'workers': this.workers, 'loops_auth': this.loops_auth, 'cortex_auth': this.cortex_auth, 'workers_auth': this.workers_auth, 'think': this.think}
+Boot.started on-setter router-minds:
+  WHEN this.minds != None:
+    ('Minds:seat').loops = prop(this.minds, 'loops') or ''
+    ('Minds:seat').cortex = prop(this.minds, 'cortex') or ''
+    ('Minds:seat').workers = prop(this.minds, 'workers') or ''
+    ('Minds:seat').seat_default = prop(this.minds, 'seat_default') or ''
+    ('Minds:seat').loops_auth = prop(this.minds, 'loops_auth') or 'chat'
+    ('Minds:seat').cortex_auth = prop(this.minds, 'cortex_auth') or 'chat'
+    ('Minds:seat').workers_auth = prop(this.minds, 'workers_auth') or 'chat'
+    ('Minds:seat').think = prop(this.minds, 'think') or 'auto'
