@@ -43,8 +43,8 @@ def test_a_map_mode_seat_shows_a_tiny_placeholder_that_instructs(seat, monkeypat
     text = r["text"] or ""
     assert text.startswith("BANNER")
     assert FL.banner_eid("owner", "ses_op") in text            # where its settings are
-    assert "mode" in text and "entity edit" in text            # and how to change them
-    assert len(text) < 320                                     # tiny
+    assert "mine" in text and "entity edit" in text and "class=MyBanner" in text   # and how to do it
+    assert len(text) < 900                                     # short
     assert "#3 the bilge pump ran twice" not in text           # no recalled facts
     assert "recall" not in calls and "rerank" not in calls     # and nothing was recalled for it
 
@@ -122,7 +122,7 @@ def test_without_the_pack_a_map_seat_falls_back_to_the_introductory_placeholder_
     monkeypatch.setattr(FL, "CURRENT", None)                           # the pack cannot answer
     monkeypatch.setattr(L, "_efield_on", lambda srv: object())
     text = CB.bare(seat, {}, "ses_op")
-    assert text == CB.BARE_FALLBACK and text.startswith("BANNER") and len(text) < 320
+    assert text == CB.BARE_FALLBACK and text.startswith("BANNER") and len(text) < 700
 
 
 def test_the_standard_banner_builder_refuses_to_run_in_map_mode(seat, monkeypatch):
@@ -197,7 +197,7 @@ def _own_banner(seat, getter):
     from membrane.entities import MEMBRANE_NS, QuantumEntity
     seat._loop_runner.sessions["ses_own"] = {"owner": "owner"}
     seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:ownbanner", cls="Pack", properties={
-        "name": "ownbanner", "c1f": "PACK ownbanner 1\n" + getter + "\n"}))
+        "name": "ownbanner", "c1f": "PACK ownbanner 1\nIMPORT banner 1\n" + getter + "\n"}))
     seat.live.settle()
     eid = FL.banner_eid("owner", "ses_own")
     seat.entity_store.upsert(QuantumEntity(eid=eid, cls="OwnBanner", properties={"name": "my banner"}))
@@ -211,7 +211,7 @@ def test_a_banner_of_the_models_own_class_is_what_a_map_seat_shows(seat, monkeyp
     from membrane import lanes as L
     monkeypatch.setattr(RB, "c1f_call", _fake)
     monkeypatch.setattr(L, "_efield_on", lambda srv: object())
-    _own_banner(seat, "OwnBanner.text getter: 'MY BANNER · ' + str(this.chat)")
+    _own_banner(seat, "OwnBanner.mine getter: 'MY BANNER · ' + str(this.chat)")
     out = CB.bare(seat, {"_turn_sid": "ses_own"}, "ses_own")
     assert out.startswith("MY BANNER") and "BANNER: nothing is pushed" not in out
     assert CB.bare(seat, {"_turn_sid": "ses_own"}, "ses_own") == out          # (same text; asked again each turn)
@@ -227,7 +227,66 @@ def test_an_error_in_the_models_own_banner_is_shown_not_replaced(seat, monkeypat
         return _fake(ctx, name, args)
     monkeypatch.setattr(RB, "c1f_call", broken)
     monkeypatch.setattr(L, "_efield_on", lambda srv: object())
-    _own_banner(seat, "OwnBanner.text getter: join(recall(this.ask, 10, this.session), '\\n')")
+    _own_banner(seat, "OwnBanner.mine getter: join(recall(this.ask, 10, this.session), '\\n')")
     body = {"_turn_sid": "ses_own", "messages": [{"role": "user", "content": ASK}]}
     out = CB.bare(seat, body, "ses_own")
     assert "the banner failed" in out and "the store is away" in out and out != CB.BARE_FALLBACK
+
+
+# ---- extending Banner (operator 2026-11-11: "our classes are already interfaces, why can't Memo extend Banner?") ----
+def _own_pack(seat, text_getter=""):
+    from membrane.entities import MEMBRANE_NS, QuantumEntity
+    seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:extbanner", cls="Pack", properties={
+        "name": "extbanner", "c1f": "PACK extbanner 1\nIMPORT banner 1\nExtBanner.m_head getter: 'MINE · ' + str(this.chat)\n"
+                                    + text_getter}))
+    seat.live.settle()
+
+
+def _standard_then(seat, monkeypatch, **switch):
+    """The seat makes the chat's banner (a Banner); then the model switches it (class / parents / properties)."""
+    seat._loop_runner.sessions["ses_ext"] = {"owner": "owner"}
+    monkeypatch.setattr(RB, "c1f_call", _fake)
+    eid = FL.banner_eid("owner", "ses_ext")
+    seat.live.banner(object(), "owner", "ses_ext", "ses_ext", ASK, now=99.0, facts={})
+    d = seat.entity_store.docs[eid]
+    for k, v in switch.items():
+        if k == "cls":
+            d.cls = v
+        else:
+            d.properties = {**d.properties, k: v}
+    seat.entity_store.upsert(d, embedder=None)
+    seat.live.settle()
+    return eid
+
+
+def test_switching_a_banner_instance_to_a_class_of_its_own_reaches_the_engine(seat, monkeypatch):
+    _own_pack(seat, "ExtBanner.mine getter: this.m_head + ' | mine'\n")
+    _standard_then(seat, monkeypatch, cls="ExtBanner")
+    r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", ASK + " now", now=100.0, facts={})
+    assert r["error"] is None, r
+    assert (r["text"] or "").startswith("MINE · ses_ext | mine")          # not the old Banner layout
+
+
+def test_a_class_that_extends_banner_inherits_what_it_does_not_override(seat, monkeypatch):
+    _own_pack(seat, "ExtBanner.mine getter: this.m_head + ' | ' + str(len(this.lines))\n")
+    _standard_then(seat, monkeypatch, cls="ExtBanner")                    # no parents named: the seat adds Banner
+    r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", ASK + " again", now=100.0, facts={})
+    assert r["error"] is None, r
+    assert len(r["lines"]) > 0                                            # Banner's own `lines` getter ran for it
+    assert (r["text"] or "").endswith(f"| {len(r['lines'])}")
+    d = seat.entity_store.docs[FL.banner_eid("owner", "ses_ext")]
+    assert "Banner" in (d.properties.get("parents") or [])
+
+
+def test_a_hand_made_banner_instance_gets_the_dials_and_its_parent(seat, monkeypatch):
+    from membrane.entities import QuantumEntity
+    _own_pack(seat, "")
+    seat._loop_runner.sessions["ses_ext"] = {"owner": "owner"}
+    monkeypatch.setattr(RB, "c1f_call", _fake)
+    eid = FL.banner_eid("owner", "ses_ext")
+    seat.entity_store.upsert(QuantumEntity(eid=eid, cls="ExtBanner", properties={"name": "mine"}))
+    seat.live.settle()
+    r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", ASK, now=100.0, facts={})
+    assert r["error"] is None, r                                          # was: Banner.lines: int(None)
+    d = seat.entity_store.docs[eid]
+    assert d.properties.get("n") and d.properties.get("pool") and "Banner" in (d.properties.get("parents") or [])

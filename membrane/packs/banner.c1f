@@ -136,9 +136,12 @@ Banner.shown getter WHEN this.map and this.mode == 'off': 'off'
 Banner.shown getter WHEN this.map: 'help'
 Banner.shown getter WHEN this.mode == 'help' or this.mode == 'off': this.mode
 Banner.shown getter: 'full'
-Banner.bare getter: 'BANNER: nothing is pushed here; look things up with your tools. Settings: entity edit ' + this.eid + ' (mode help|off).'
+Banner.bare getter: join(['BANNER (placeholder): no history reaches you, so keep your own context: write a banner that shows what matters each turn.', 'How: load a pack: PACK mine 1 / IMPORT banner 1 / MyBanner.mine getter: <what to show: open goals, decisions, what you were doing>. Then: entity edit ' + this.eid + ' class=MyBanner (it extends Banner). Check it: entity read ' + this.eid + ' prop=text run=true. mode help|off on it silences this. help("map") has more.'], '\n')
+-- A class that EXTENDS Banner declares one getter, `mine`: what its banner shows. Banner.text is the template, the
+-- class inherits the rest (lines, the dials, recall). The person's 'off' still wins; `mine` beats the placeholder.
 Banner.text getter:
   WHEN this.shown == 'off': None
+  ELSE WHEN this.mine != None: this.mine
   ELSE WHEN this.shown == 'help': this.bare
   ELSE WHEN this.rows or this.lines: join(concat([this.now_line, this.conv_header], fit(this.rows, this.budget or 900, this.used), this.recall_block), '\n')
   ELSE: None

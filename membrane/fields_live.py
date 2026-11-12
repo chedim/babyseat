@@ -154,6 +154,7 @@ class Live:
         self.srv, self.est = srv, srv.entity_store
         self.f = MV.Fields(_Host(self))
         self.ctxs: dict = {}                       # banner eid -> its build's context while its getters run
+        self._banner_loaded: dict = {}              # banner eid -> (class, parents) the engine has it under
         self.cls_of: dict = {}                     # mirrored eid -> its class (a removal's event names it, #1054)
         self.store_path = _store_file(srv)
         if self.store_path:                        # the store driver: `sql(...)` in packs reads it, read-only
@@ -427,9 +428,40 @@ class Live:
     def has_banner(self) -> bool:
         return BANNER_CLASS in self.classes
 
+    def _extends_banner(self, cls: str) -> bool:
+        """The class's pack says `IMPORT banner`: it extends Banner (operator 2026-11-11)."""
+        import re as _re
+        for text in list(self.pack_texts.values()):
+            if _re.search(r"^" + _re.escape(cls) + r"\.", text, _re.M) and _re.search(r"^IMPORT banner\b", text, _re.M):
+                return True
+        return False
+
+    def _banner_complete(self, d) -> None:
+        """A banner instance of the model's own class (operator 2026-11-11: "our classes are already interfaces"):
+        every banner instance is a Banner, so the seat adds Banner to its `parents` (the class overrides only what it
+        wants; the rest, `text`, `lines`, the dials' getters, is inherited), and it gets the recall dials the seat copies
+        into the instances it makes itself. The standard class is left as it is."""
+        if d.cls == BANNER_CLASS or not self._extends_banner(d.cls):
+            return                                      # a class that replaces the banner outright keeps doing so
+        from . import recall_banner as RB
+        props = dict(d.properties or {})
+        dials = (self.est.docs or {}).get(DIALS_EID)
+        base = {k: v for k, v in ((dials.properties if dials is not None else None) or {}).items()
+                if k not in ("name", "summary", "parents", "born", "silent_birth", "refused", "error")}
+        base.update({"pool": base.get("pool", RB.POOL), "n": base.get("n", RB.BANNER_N)})
+        new = {k: v for k, v in base.items() if k not in props}
+        parents = list(props.get("parents") or [])
+        if BANNER_CLASS not in parents:
+            new["parents"] = parents + [BANNER_CLASS]
+        if new:
+            with W.as_writer(WRITER + "banner"):
+                d.properties = {**props, **new}
+                self.est.upsert(d, embedder=None)
+
     def _banner_instance(self, eid: str, owner: str, chat: str):
         d = (self.est.docs or {}).get(eid)
         if d is not None:
+            self._banner_complete(d)
             return d
         from . import recall_banner as RB
         from .entities import QuantumEntity
@@ -478,10 +510,15 @@ class Live:
                 if self.f.has(eid):
                     for k, v in dials.items():
                         self.f.write(eid, k, _json(v), now)
+            key = (d.cls, tuple((d.properties or {}).get("parents") or []))
+            if self.f.has(eid) and self._banner_loaded.get(eid) != key:     # switched, or loaded before this process knew
+                self.f.remove(eid, now)                # the model switched the class: reload it under the new one
+                self.f.settle(now)
             if not self.f.has(eid):
                 self.f.load(eid, d.cls, _json(dict(d.properties or {})))
                 self.f.settle(now)
                 self._apply()
+            self._banner_loaded[eid] = key
             self.ctxs[eid] = ctx
             self.f.sql_forget(eid)                     # this build's recall starts fresh (the same words recall again)
         try:

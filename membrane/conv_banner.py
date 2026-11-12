@@ -722,8 +722,9 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     return lines
 
 
-BARE_FALLBACK = ("BANNER: nothing is pushed here; look things up with your tools. "
-                 "Settings: entity edit this chat's Banner (mode help|off).")
+BARE_FALLBACK = ("BANNER (placeholder): no history reaches you, so keep your own context: write a banner that shows "
+                 "what matters each turn. How: load a pack: PACK mine 1 / IMPORT banner 1 / MyBanner.mine getter: <what "
+                 "to show>. Then: entity edit this chat's Banner class=MyBanner (it extends Banner). help(\"map\") has more.")
 
 
 def bare(srv, body: dict, conv: str) -> str:
