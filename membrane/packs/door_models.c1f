@@ -1,0 +1,95 @@
+PACK door_models 1
+IMPORT door 1
+IMPORT router 1
+-- THE MODELS' ROUTES (a door route family): GET /v1/models (the picker's list), GET and POST /membrane/models (the minds' models).
+-- A route that needs the backend's live list asks for it once (`models_asked`); the reply waits for `models_ready` (the fetch landed
+-- and the tag rows are Model entities, packs/router.c1f).
+
+Request.o_models getter: this.path in ['/v1/models', '/v1/models/', '/membrane/models']
+Request.m_list getter: this.path in ['/v1/models', '/v1/models/']
+Request.m_post getter: this.method == 'POST'
+Request.m_need getter: this.m_list or this.m_post
+Request.m_ask getter: {'id': this.eid} if (this.o_models == True and this.m_need and this.models_asked != True) else None
+Request.m_ask on-setter models-ask:
+  WHEN this.m_ask != None:
+    this.models_asked = True
+    ('Router:seat').refresh = this.m_ask
+
+-- ---- GET /v1/models: the screened tags, the sentinel lane, the autoselect lanes (only with a router), the cloud rungs
+Request.m_router getter: ([b.router_on for b in instances('Boot')] or [False])[0] == True
+Request.m_tags getter: [m for m in instances('Model') if m.listed == True and m.rung != True and m.chat_ok == True]
+Request.m_rungs getter: [m for m in instances('Model') if m.rung == True and m.listed == True] if this.m_router else []
+Request.m_lanes getter: ['autoselect', 'autoselect-local'] if this.m_router else []
+Request.d_tags getter: FOR m IN this.m_tags: {'id': m.name, 'object': 'model', 'owned_by': 'membrane->ollama'}
+Request.d_lanes getter: FOR l IN this.m_lanes: {'id': l, 'object': 'model', 'owned_by': 'membrane-router'}
+Request.d_rungs getter: FOR m IN this.m_rungs: {'id': m.name, 'object': 'model', 'owned_by': m.owner}
+Request.m_data getter: concat(concat(concat(this.d_tags, [{'id': '@explore', 'object': 'model', 'owned_by': 'membrane->ollama'}]), this.d_lanes), this.d_rungs)
+Request.list_reply getter:
+  WHEN not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN this.models_ready != True: None
+  ELSE: {'status': 200, 'body': {'object': 'list', 'data': this.m_data}}
+
+-- ---- /membrane/models: the minds' models (loops, cortex, workers), their credentials and the think dial
+Request.mind getter: [x for x in instances('Minds')]
+Request.mind_seat getter: this.mind[0] if len(this.mind) > 0 else None
+Request.mind_read getter: this.mind_seat.read if this.mind_seat != None else {}
+Request.pickable getter: concat([m.name for m in this.m_tags], [m.name for m in instances('Model') if m.rung == True and m.backend == 'claude-agent' and m.listed == True])
+Request.in_body getter: json(this.body or '')
+-- every field of the body, with its value, its python-style repr (for the messages) and whether it is a model name
+-- (a string of 1..120 characters from letters, digits and _.:/@~+-)
+Request.k_list getter: ['loops_auth', 'cortex_auth', 'workers_auth', 'loops', 'cortex', 'workers', 'think']
+Request.v_list getter: [prop(this.in_body, k) for k in this.k_list]
+Request.s_list getter: [str(v) for v in this.v_list]
+Request.str_list getter: [this.s_list[i] == this.v_list[i] for i in [0, 1, 2, 3, 4, 5, 6]]
+Request.r_list getter: [("'" + this.s_list[i] + "'") if this.str_list[i] else this.s_list[i] for i in [0, 1, 2, 3, 4, 5, 6]]
+-- a model name is letters, digits and _.:/@~+- (1..120): `plain` keeps letters, digits and _#./:- and turns the rest to spaces
+Request.n_list getter: [replace(replace(replace(this.s_list[i], '@', 'x'), '~', 'x'), '+', 'x') for i in [0, 1, 2, 3, 4, 5, 6]]
+Request.bad_list getter: [plain(this.n_list[i]) != lower(this.n_list[i]) or '#' in this.n_list[i] or ' ' in this.n_list[i] for i in [0, 1, 2, 3, 4, 5, 6]]
+Request.ok_list getter: [this.str_list[i] and len(this.s_list[i]) >= 1 and len(this.s_list[i]) <= 120 and not this.bad_list[i] for i in [0, 1, 2, 3, 4, 5, 6]]
+Request.skip_list getter: [this.v_list[i] == None or (this.k_list[i] == 'workers' and this.v_list[i] == '') for i in [0, 1, 2, 3, 4, 5, 6]]
+Request.e_auth getter: [(this.k_list[i] + ': one of chat|api-key|login, not: ' + this.r_list[i]) if (this.v_list[i] != None and not (this.v_list[i] in ['chat', 'api-key', 'login'])) else None for i in [0, 1, 2]]
+Request.unseen getter: len(this.pickable) > 0
+Request.e_name getter: [(this.k_list[i] + ': not a model name: ' + this.r_list[i]) if not this.ok_list[i] else None for i in [3, 4, 5]]
+Request.e_known getter: [(this.k_list[i] + ": membrane doesn't see " + this.r_list[i] + ' on its backends') if (this.unseen and not (this.v_list[i] in this.pickable)) else None for i in [3, 4, 5]]
+Request.e_mind getter: [None if this.skip_list[i + 3] else (this.e_name[i] or this.e_known[i]) for i in [0, 1, 2]]
+Request.e_think getter: [('think: one of on|off|auto, not: ' + this.r_list[6]) if (this.v_list[6] != None and not (this.v_list[6] in ['on', 'off', 'auto'])) else None]
+Request.errs getter: [e for e in concat(concat(this.e_auth, this.e_mind), this.e_think) if e != None]
+Request.err getter: this.errs[0] if len(this.errs) > 0 else None
+Request.post_go getter: True if (this.o_models == True and this.m_minds and this.m_post and this.models_ready == True and this.mind_seat != None and this.err == None) else None
+Request.m_minds getter: this.path == '/membrane/models'
+
+Request.post_go on-setter minds-loops:
+  WHEN this.post_go == True and prop(this.in_body, 'loops') != None:
+    ('Minds:seat').loops = prop(this.in_body, 'loops')
+Request.post_go on-setter minds-cortex:
+  WHEN this.post_go == True and prop(this.in_body, 'cortex') != None:
+    ('Minds:seat').cortex = prop(this.in_body, 'cortex')
+Request.post_go on-setter minds-workers:
+  WHEN this.post_go == True and prop(this.in_body, 'workers') != None:
+    ('Minds:seat').workers = prop(this.in_body, 'workers')
+Request.post_go on-setter minds-loops-auth:
+  WHEN this.post_go == True and prop(this.in_body, 'loops_auth') != None:
+    ('Minds:seat').loops_auth = prop(this.in_body, 'loops_auth')
+Request.post_go on-setter minds-cortex-auth:
+  WHEN this.post_go == True and prop(this.in_body, 'cortex_auth') != None:
+    ('Minds:seat').cortex_auth = prop(this.in_body, 'cortex_auth')
+Request.post_go on-setter minds-workers-auth:
+  WHEN this.post_go == True and prop(this.in_body, 'workers_auth') != None:
+    ('Minds:seat').workers_auth = prop(this.in_body, 'workers_auth')
+Request.post_go on-setter minds-think:
+  WHEN this.post_go == True and prop(this.in_body, 'think') != None:
+    ('Minds:seat').think = prop(this.in_body, 'think')
+Request.post_go on-setter minds-applied:
+  WHEN this.post_go == True:
+    this.minds_applied = True
+
+Request.minds_reply getter:
+  WHEN this.mind_seat == None: {'status': 503, 'body': ''}
+  ELSE WHEN not this.m_post and not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN not this.m_post: {'status': 200, 'body': this.mind_read}
+  ELSE WHEN this.models_ready != True: None
+  ELSE WHEN this.err != None: {'status': 400, 'body': {'error': this.err}}
+  ELSE WHEN this.minds_applied != True: None
+  ELSE: {'status': 200, 'body': this.mind_read}
+
+Request.r_models getter: this.list_reply if this.m_list else this.minds_reply
