@@ -92,3 +92,25 @@ class TheSeatUsesThem(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSampler(unittest.TestCase):
+    def test_it_names_the_step_the_process_cpu_and_every_threads_frames_until_stopped(self):
+        import io
+        import threading
+        import time as _time
+        from membrane.bootprof import Laps, sample_while_booting
+        laps = Laps("boot")
+        laps.step("entities")
+        out = io.StringIO()
+        waiter = threading.Thread(target=lambda: _time.sleep(1.0), name="loader")
+        waiter.start()
+        stop = sample_while_booting(laps, every_s=0.05, echo=out)
+        _time.sleep(0.3)
+        stop.set()
+        waiter.join()
+        text = out.getvalue()
+        self.assertIn("[boot-sample] t=", text)
+        self.assertIn("step=entities", text)
+        self.assertIn("proc_cpu=", text)
+        self.assertIn("loader:", text)

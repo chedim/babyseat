@@ -765,6 +765,8 @@ def main() -> None:
     from .bootprof import Laps
     _boot_laps = Laps("boot", cpu=time.thread_time)   # #1115: each step's wall (+ cpu) time, one [boot] line
     _boot_laps.step("setup")
+    from .bootprof import sample_while_booting
+    _boot_sample_stop = sample_while_booting(_boot_laps)   # where the boot waits, every 20 s, until the UI is up
     args = _build_ap().parse_args()
     # JWT MODE (jwtauth.py, docs/auth.md): off unless a secret is set; a bad
     # secret (short, empty, unreadable) refuses the boot -- never half-open
@@ -2382,6 +2384,7 @@ def main() -> None:
     # serve read ctrl+c or a group kill -INT as "keep serving" (the exhibit:
     # both pids survived a direct SIGINT to their process group). Only a
     # TUI-launch seat has a child whose ctrl+c the seat must not steal.
+    _boot_sample_stop.set()
     print(_boot_laps.done(), file=sys.stderr, flush=True)   # #1115: the boot's profile
     # THE RERANKER (#680): its model loads in the background, not on the first topical turn
     # after a restart -- and (#1115) once the boot is done, not beside it (a recall before

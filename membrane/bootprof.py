@@ -246,3 +246,39 @@ class BootDoor:
             return
         self.httpd.shutdown()
         self._th = None
+
+
+def sample_while_booting(laps: "Laps", every_s: float = 20.0, echo=None):
+    """A boot that waits (wall far above the main thread's cpu) is waiting on something: every `every_s` seconds, one
+    `[boot-sample]` line with the step running and the whole process's cpu so far, then one line per thread with its
+    innermost Python frames, until the returned event is set (the boot is done). The reading that says whether the
+    wait is the GIL (process cpu climbing), the disk or a lock (it is not) -- and where."""
+    import sys
+    import threading
+
+    stop = threading.Event()
+    out = echo if echo is not None else sys.stderr
+
+    def run():
+        t0 = time.monotonic()
+        while not stop.wait(every_s):
+            try:
+                names = {t.ident: t.name for t in threading.enumerate()}
+                frames = sys._current_frames()
+                me = threading.get_ident()
+                print(f"[boot-sample] t={time.monotonic() - t0:.0f}s step={laps.now} proc_cpu={time.process_time():.1f}s "
+                      f"threads={len(frames) - 1}", file=out, flush=True)
+                for tid, fr in frames.items():
+                    if tid == me:
+                        continue
+                    stack = []
+                    while fr is not None and len(stack) < 4:
+                        stack.append(f"{Path(fr.f_code.co_filename).name}:{fr.f_lineno} {fr.f_code.co_name}")
+                        fr = fr.f_back
+                    print(f"[boot-sample]   {names.get(tid, tid)}: " + " <- ".join(stack), file=out, flush=True)
+            except Exception as e:                       # noqa: BLE001 -- a diagnostic never breaks the boot
+                print(f"[boot-sample] failed: {e!r}", file=out, flush=True)
+                return
+
+    threading.Thread(target=run, name="boot-sampler", daemon=True).start()
+    return stop
