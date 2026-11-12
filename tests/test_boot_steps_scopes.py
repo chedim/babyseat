@@ -42,3 +42,10 @@ def test_no_name_is_a_local_of_one_step_and_an_unbound_global_of_another():
     mod = {s.get_name() for s in symtable.symtable(SRC, "opencode.py", "exec").get_symbols() if s.is_assigned() or s.is_imported() or s.is_namespace()}
     clash = {n: v for n, v in clash.items() if n not in mod and not hasattr(builtins, n)}
     assert not clash, clash
+
+
+def test_the_warm_up_jobs_start_after_the_serve_is_up_not_during_the_boot():
+    main = SRC[SRC.index("\ndef main() -> None:"):]
+    assert 'lambda: recall_vote.warm(srv.efield)' in main and "\n                    recall_vote.warm(srv.efield)" not in main
+    assert '_defer("forewarning", srv._forewarn.start)' in main and "\n                    srv._forewarn.start()" not in main
+    assert main.rindex("_run_deferred()") > main.index("_boot_door.handover()")        # after the serve took the socket

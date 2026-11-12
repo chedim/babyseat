@@ -764,6 +764,20 @@ def _close_listeners(servers) -> None:
 def main() -> None:
     from .bootprof import Laps
     _boot_laps = Laps("boot", cpu=time.thread_time)   # #1115: each step's wall (+ cpu) time, one [boot] line
+    _deferred = []          # BACKGROUND STEPS: work that only warms things up starts once the UI is up, never during the boot
+                            # (it shares the interpreter with the boot and with a person's first turn)
+
+    def _defer(_name, _fn):
+        _deferred.append((_name, _fn))
+
+    def _run_deferred():
+        for _n, _f0 in list(_deferred):
+            try:
+                _f0()
+                print(f"[seat] background: {_n} started", file=sys.stderr)
+            except Exception as _de:
+                print(f"[seat] {_n} skipped ({_de})", file=sys.stderr)
+        _deferred.clear()
     # the boot's steps (docs/python-to-c1f.md): shared names are declared here, each step is a named closure
     JUNK_CUT_DEFAULT = None
     _ = None
@@ -1222,7 +1236,7 @@ def main() -> None:
                 # (each event read once as it lands), older events backfill -- background
                 try:
                     from . import recall_vote
-                    recall_vote.warm(srv.efield)
+                    _defer("vote warm", lambda: recall_vote.warm(srv.efield))
                 except Exception as e:
                     print(f"[seat] vote warm skipped ({e})", file=sys.stderr)
                 # the tool-output chunks (#429) are read only on question-like
@@ -1262,7 +1276,7 @@ def main() -> None:
                     srv._forewarn = Forewarn(srv.efield)
                     srv.efield.step_listeners.append(srv._forewarn.listener)
                     srv.efield.step_prepare.append(srv._forewarn.prepare)
-                    srv._forewarn.start()
+                    _defer("forewarning", srv._forewarn.start)
                 except Exception as e:
                     print(f"[seat] forewarning off ({e})", file=sys.stderr)
                 if srv.capturer.mode == "on":
@@ -2355,6 +2369,7 @@ def main() -> None:
                     if (not _reexec and not args.no_browser
                             and sys.stdin.isatty()):   # a restart's tab reconnects (#243)
                         _UIS.open_when_up(serve_port or 4096, _ui_url)
+                _run_deferred()                # the serve is up: the background steps start now
                 try:                           # the seat as a panel: state, events, controls
                     from . import seat_panel as _SP
                     _SP.start(srv)
