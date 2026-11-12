@@ -161,6 +161,15 @@ def test_a_decided_card_is_not_answered_again(seat):
     assert _props(seat, card)["value"] == 12
 
 
+def test_the_person_can_re_answer_a_decided_card_and_the_old_value_is_kept(seat):
+    card = _card(seat)
+    assert FL.answer_card(seat, card, {"value": 12})["ok"]
+    res = FL.answer_card(seat, card, {"value": 13, "redo": True})
+    assert res["ok"] is True and res["value"] == 13
+    assert _props(seat, card)["value"] == 13 and _props(seat, card)["previous_value"] == 12
+    assert FL.answer_card(seat, card, {"value": 14})["conflict"] is True          # (a plain answer still cannot change it)
+
+
 def test_work_false_closes_the_card_and_speculative_drafts_follow_the_pick(seat):
     card = _card(seat, speculative={"draft": "x"}, work_needed=True)
     res = FL.answer_card(seat, card, {"value": 13, "work": False})

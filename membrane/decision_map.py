@@ -49,7 +49,7 @@ AGENT_STATUSES = (STATUS_OPEN, STATUS_IN_FLIGHT, STATUS_CLOSED, STATUS_DROPPED) 
 LOCKED = (STATUS_CLOSED, STATUS_DROPPED)
 # only the decisions pack (packs/decisions.c1f) writes these: the answer, its stamps and receipts, and what it derives
 ANSWER_OWNED = ("value", "set_by", "set_at", "answer", "answer_id", "answer_result", "answer_log", "relay_id", "relay_result", "value_ts",
-                "relayed_by", "answer_quote", "answer_chat")
+                "relayed_by", "answer_quote", "answer_chat", "previous_value")
 _ANSWER_LOCK = threading.Lock()     # one drop at a time: a card is dropped once
 SPECULATIVE = "speculative"     # reversible drafts an agent attaches to an undecided card
 EDGE_KEYS = ("blocks", "led_to", "carried_by")

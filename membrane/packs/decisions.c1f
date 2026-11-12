@@ -7,7 +7,8 @@ IMPORT boot 1
 --   Decision.relay  = {value, quote}   the model passes on what the person said in the chat. The proof: a message of the
 --                                      person's since the card was made holds the quote word for word (plain() on both).
 --   Decision.answer = {value, work?, conv?, message?, relayed?}   the person's own answer (the board, the chat's "N. value");
---                                      the seat's doors write it, a model's write of it is refused at the door.
+--                                      the seat's doors write it, a model's write of it is refused at the door. `redo: true`
+--                                      (the person only) changes a decided card; the old value stays in `previous_value`.
 -- The receipt is `answer_result` ({id, ok, value | error}), kept in `answer_log` (a door looks for its own request's `id`); a
 -- refused relay leaves `relay_result`.
 -- (an on-setter sees the getters as they were before the write in the same round, so each step is a property the next
@@ -67,7 +68,7 @@ Decision.ans_error getter:
   ELSE: 'the value is empty'
 
 Decision.cur_status getter: this.status if this.status in ['open', 'in_flight', 'decided', 'closed', 'dropped'] else 'decided'
-Decision.answerable getter: this.cur_status == 'open' or (this.cur_status == 'in_flight' and this.value == None)
+Decision.answerable getter: this.cur_status == 'open' or (this.cur_status == 'in_flight' and this.value == None) or (prop(this.answer, 'redo') == True and this.cur_status in ['decided', 'closed'])
 
 Decision.verdict getter:
   WHEN this.answer == None or this.answer_id == None: None
@@ -82,6 +83,9 @@ Decision.verdict on-setter answer-refused:
     this.answer_log = concat(this.answer_log or [], [this.verdict])
 
 -- the answer is decided: the card, the ledger line, the message to whoever waits on it
+Decision.verdict on-setter answer-previous:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id') and prop(this.answer, 'redo') == True and this.value != None:
+    this.previous_value = this.value
 Decision.verdict on-setter answer-decided:
   WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id'):
     this.value = prop(this.verdict, 'value')
