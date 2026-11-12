@@ -239,6 +239,36 @@
       "router_on"
     ]
   },
+  "door_self": {
+    "imports": [
+      "door"
+    ],
+    "classes": [
+      "Feedback",
+      "Request"
+    ],
+    "members": 15,
+    "writes": [
+      "Feedback:*.at",
+      "Feedback:*.by",
+      "Feedback:*.kind",
+      "Feedback:*.message",
+      "Feedback:*.name",
+      "Feedback:*.session",
+      "Feedback:*.summary",
+      "Feedback:*.why"
+    ],
+    "claims": [
+      "/membrane/feedback",
+      "/membrane/jsexec/register",
+      "/membrane/jsexec/result",
+      "/membrane/self/recent",
+      "/membrane/self/sheet",
+      "/membrane/toybox/poke",
+      "/membrane/toybox/state"
+    ],
+    "boot_facts": []
+  },
   "door_state": {
     "imports": [
       "door"
@@ -258,8 +288,6 @@
       "/membrane/seat/control",
       "/membrane/seat/pause",
       "/membrane/self/card",
-      "/membrane/self/recent",
-      "/membrane/self/sheet",
       "/membrane/state",
       "/membrane/stats",
       "/state"
@@ -267,6 +295,28 @@
     "boot_facts": [
       "nerve_pause_off"
     ]
+  },
+  "door_voice": {
+    "imports": [
+      "door",
+      "fs"
+    ],
+    "classes": [
+      "Request"
+    ],
+    "members": 26,
+    "writes": [
+      "File:*.move",
+      "File:*.path",
+      "File:*.write"
+    ],
+    "claims": [
+      "/membrane/voice",
+      "/membrane/voice/state",
+      "/ui/log",
+      "/ui/stt"
+    ],
+    "boot_facts": []
   },
   "fetch": {
     "imports": [],
