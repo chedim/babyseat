@@ -1907,6 +1907,7 @@ def main() -> None:
                         print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
                     _boot_laps.step('loops: field engine')
                     _FL.start(srv)
+                    _FL.boot_started(srv.entity_store)      # Boot:seat.started: the packs that start something answer (the dev commands)
                     _boot_laps.step('loops: owed tasks')             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
                     _r = _GG.reowe(srv)
                     _p = _GG.replan_lost(srv)

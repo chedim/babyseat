@@ -638,6 +638,19 @@ class Live:
                 next_tick = time.time() + GG.WAIT_TICK_S
 
 
+def boot_started(est) -> None:
+    """The seat tells the field it has started: Boot:seat.started = now (data only, as About:seat is). Packs answer with
+    setters on Boot.started (the dev pack makes the dev Commands)."""
+    from .entities import QuantumEntity
+    d = (est.docs or {}).get("Boot:seat")
+    if d is None:
+        est.upsert(QuantumEntity(eid="Boot:seat", cls="Boot", properties={"name": "this seat's start", "silent_birth": True}),
+                   embedder=None)
+        d = est.docs["Boot:seat"]
+    d.properties = {**(d.properties or {}), "started": time.time()}
+    est.upsert(d, embedder=None)
+
+
 def start(srv, thread: bool = True) -> Live | None:
     """Turn the goal graph's field engine on (the default; MEMBRANE_FIELDS=0 is off). Returns None when off."""
     if not enabled():

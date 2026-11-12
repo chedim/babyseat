@@ -27,3 +27,6 @@ Each effect writes `<verb>_result = {id, status, rc, head, ...}` and `<verb>_rc`
 the whole stdout and stderr are kept, `head` is the first lines. No time limit, no output cap.
 
 Define a Command once (its cmd, cwd) and run it again by writing `.run` -- the field remembers every run.
+
+## Ready-made commands (the dev pack)
+`Command:git` and `Command:gh` exist on every seat: run one by writing `.run = {id, args: [...]}`, e.g. `Command:git.run = {id: 'wt', args: ['-C', '<dir>', 'worktree', 'add', '<path>', '-b', '<branch>']}`. Their cwd is the seat's folder; name the repository with `-C <dir>` (git) or `-R <owner/repo>` (gh). Define your own Commands the same way.
