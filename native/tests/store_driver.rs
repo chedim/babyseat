@@ -27,62 +27,9 @@ fn db() -> (std::path::PathBuf, rusqlite::Connection) {
     }
     (p, c)
 }
-/// The tests' executor (0.7.53: the extension no longer carries SQLite; the seat's is membrane/sqlread.py). A test
-/// binary is its own process, so this SQLite copy never shares a WAL file with a seat. Same rules as the seat's.
-struct TestExec { path: String, running: std::sync::Mutex<std::collections::HashMap<u64, rusqlite::InterruptHandle>> }
-impl membrane_vm::store::SqlExec for TestExec {
-    fn run(&self, token: u64, sql: &str, args: &[J]) -> Result<Vec<J>, String> {
-        use rusqlite::{types::ValueRef, OpenFlags};
-        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_URI;
-        let conn = rusqlite::Connection::open_with_flags(&self.path, flags).map_err(|e| format!("store {}: {}", self.path, e))?;
-        conn.busy_timeout(std::time::Duration::from_millis(5000)).map_err(|e| e.to_string())?;
-        conn.pragma_update(None, "query_only", true).map_err(|e| e.to_string())?;
-        self.running.lock().unwrap().insert(token, conn.get_interrupt_handle());
-        let r = (|| {
-            let mut st = conn.prepare(sql).map_err(|e| format!("sql: {}", e))?;
-            if !st.readonly() { return Err("sql: only reads (SELECT / WITH); the field writes through the engine".to_string()); }
-            if st.parameter_count() != args.len() {
-                return Err(format!("sql: the query takes {} argument(s), got {}", st.parameter_count(), args.len()));
-            }
-            let cols: Vec<String> = st.column_names().iter().map(|c| c.to_string()).collect();
-            let params: Vec<rusqlite::types::Value> = args.iter().map(|v| match v {
-                J::Null => rusqlite::types::Value::Null,
-                J::Bool(b) => rusqlite::types::Value::Integer(*b as i64),
-                J::Number(n) => n.as_i64().map(rusqlite::types::Value::Integer).unwrap_or_else(|| rusqlite::types::Value::Real(n.as_f64().unwrap_or(0.0))),
-                J::String(s) => rusqlite::types::Value::Text(s.clone()),
-                o => rusqlite::types::Value::Text(o.to_string()),
-            }).collect();
-            let mut rows = st.query(rusqlite::params_from_iter(params.iter())).map_err(|e| format!("sql: {}", e))?;
-            let mut out = vec![];
-            while let Some(r) = rows.next().map_err(|e| match e {
-                rusqlite::Error::SqliteFailure(ref f, _) if f.code == rusqlite::ErrorCode::OperationInterrupted =>
-                    "sql: interrupted (the getter asked another question, or the seat is stopping)".to_string(),
-                e => format!("sql: {}", e),
-            })? {
-                let mut m = serde_json::Map::new();
-                for (i, c) in cols.iter().enumerate() {
-                    let v = match r.get_ref(i).map_err(|e| e.to_string())? {
-                        ValueRef::Null | ValueRef::Blob(_) => J::Null,
-                        ValueRef::Integer(n) => J::from(n),
-                        ValueRef::Real(x) => serde_json::Number::from_f64(x).map(J::Number).unwrap_or(J::Null),
-                        ValueRef::Text(t) => J::String(String::from_utf8_lossy(t).into_owned()),
-                    };
-                    m.insert(c.clone(), v);
-                }
-                out.push(J::Object(m));
-            }
-            Ok(out)
-        })();
-        self.running.lock().unwrap().remove(&token);
-        r
-    }
-    fn interrupt(&self, token: u64) {
-        if let Some(h) = self.running.lock().unwrap().get(&token) { h.interrupt(); }
-    }
-}
 fn open_store(p: &std::path::Path) -> Store {
     let path = p.to_str().unwrap().to_string();
-    Store::with_exec(&path, std::sync::Arc::new(TestExec { path: path.clone(), running: Default::default() }))
+    Store::with_exec(&path, std::sync::Arc::new(membrane_vm::sqlexec::NativeSqlExec::new(&path).unwrap()))
 }
 fn rand_tag() -> usize {
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

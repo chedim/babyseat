@@ -23,6 +23,10 @@ mod py;
 #[cfg(feature = "python")]
 pub mod store;
 #[cfg(feature = "python")]
+pub mod db;
+#[cfg(feature = "python")]
+pub mod sqlexec;
+#[cfg(feature = "python")]
 pub mod drivers;
 #[cfg(feature = "wasm")]
 pub mod web;
