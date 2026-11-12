@@ -17,11 +17,11 @@ class TestAnEmptyJsonNameIsNoName(unittest.TestCase):
         self.assertEqual(got, T.resolve("entity", {"action": "read", "name": "m:synth:x"}))
 
     def test_the_call_itself_is_routed_by_its_action(self):
-        args = {"action": "call", "object": "presence", "method": "status"}
+        args = {"action": "run", "code": "uptime"}
         self.assertEqual(T.resolve("{}", dict(args)), T.resolve("exec", dict(args)))
 
     def test_every_empty_spelling(self):
-        args = {"action": "call", "object": "presence", "method": "status"}
+        args = {"action": "run", "code": "uptime"}
         for name in ("[]", "null", "{ }", "  {}  "):
             self.assertEqual(T.resolve(name, dict(args)), T.resolve("exec", dict(args)), name)
 

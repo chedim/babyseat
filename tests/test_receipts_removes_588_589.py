@@ -29,17 +29,6 @@ def _class_with_methods(est):
     return c
 
 
-def test_the_composite_receipt_lists_its_steps_and_names_the_halt(monkeypatch):
-    out = {"object": "membrane::Component:scratch", "method": "go", "via": "own", "mro": ["scratch"],
-           "status": "partial", "rc": 3, "outcome": None, "fed": "", "head": "oops",
-           "error": "step failed: membrane::shell:scratch.go:fail -- rc=3 error",
-           "steps": {"first": {"rc": 0, "status": "ok", "head": "ok"}, "fail": {"rc": 3, "status": "error", "head": "oops"}}}
-    monkeypatch.setattr(M, "_http", lambda *a, **k: out)
-    text = M.tool_method_call({"object": "scratch", "method": "go"}, 0)
-    assert "ran: first (rc 0) > fail (rc 3)" in text
-    assert "halted at fail: rc 3" in text and "oops" in text and "None" not in text.split("\n")[0]
-
-
 def test_entity_remove_offers_force():
     tool = next(t for t in M.TOOLS if t["name"] == "entity_remove")
     assert "force" in tool["inputSchema"]["properties"]

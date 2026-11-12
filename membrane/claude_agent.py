@@ -702,8 +702,7 @@ def _blocks_prompt(blocks):
 # tracking and tuning tools; their schemas ride every step of a pass.
 _LOOP_HIDDEN = frozenset({
     "junk_cut", "field_watch", "entity_watch", "entity_unwatch",
-    "entity_tracks", "graph", "entities_related", "entity_inherit",
-    "method_each"})
+    "entity_tracks", "graph", "entities_related", "entity_inherit"})
 
 
 def tool_names() -> list[str]:
@@ -800,19 +799,17 @@ TOOLS_NOTE = _full_names(
     "Claude Code's tools (Read, Edit, Bash...) are off; membrane's are your hands, "
     "named " + TOOL_PREFIX + "<name>: call the full name, a bare one fails. "
     "Your work is programming the field: no one-shot commands, program the field first. Before anything new, "
-    "find what you have (@entity_query, @graph, @method_inspect) and call it. "
+    "find what you have (@entity_query, @graph) and use it. "
     "To run code, @code_run (or @bash) it: it becomes a tree of entities in the field, "
     "linked to its executor, and returns rc, output and a result entity; "
-    "re-run a root with node=. For a step worth repeating, define a method "
-    "on the entity it belongs to or its class (@method_define, {{name}} "
-    "params), then @method_call it on one object or @method_each over the "
-    "class; or write a property whose write is the effect. Keep methods small (a sensor reads "
-    "one thing, an actuator does one), composed through steps or "
-    "parents. A thing in the world is an entity that keeps itself current: "
+    "re-run a root with node=. For a step worth repeating, make a Command:<name> "
+    "entity (its cmd) and run it by writing Command:<name>.run = {args} (@entity_write); "
+    "or write a property whose write is the effect. Keep them small (a sensor reads "
+    "one thing, an actuator does one). A thing in the world is an entity that keeps itself current: "
     "a .c1f getter (@pack load; help: membrane::help:packs); "
     "act by @entity_write. Read it back. Code work happens in a git worktree "
     "under .worktrees/, never /tmp, never the main checkout. "
-    "Work you are given goes to @call method=intend (where it came from, what done means) "
+    "Work you are given goes to Intent:board.intend (@entity_write; where it came from, what done means) "
     "instead of doing it in your own turn; answer with the goal's id. "
     "Ask the person for a decision in the chat (no cards are shown), your pick "
     "beside it, and keep it as a card in one call, e.g. @entity_add class='Decision' "
@@ -824,12 +821,12 @@ TOOLS_NOTE = _full_names(
     "[<eids>] when it holds work up. One variable per card; only "
     "the person answers.\n\n"
     "The doctrine names the seat's tool families: "
-    "exec(action='run'/'call'/'inspect'/'define'/'each') -> "
-    "@code_run/@method_call/@method_inspect/@method_define/@method_each; entity(action='add'/"
+    "exec(action='run') -> "
+    "@code_run; entity(action='add'/"
     "'edit'/'read'/'remove'/'inherit') -> @entity_add/@entity_edit/@entity_read/"
     "@entity_remove/@entity_inherit; find(action='memory'/'query'/'graph'/"
     "'related') -> @query/@entity_query/@graph/@entities_related; track(action='watch'/'unwatch'/'list') "
-    "-> entity_watch/entity_unwatch/entity_tracks; Goals: write Intent:board.intend={text} / .fulfill={spec,evidence}, read .report; tracks are methods: @call method=<name> args={..}; teach by writing Memory:seat.learn, drop with Memory:seat.forget = {spec}, post by writing Peer:channel.post; help('tools').\n\n"
+    "-> entity_watch/entity_unwatch/entity_tracks; Goals: write Intent:board.intend={text} / .fulfill={spec,evidence}, read .report; the remaining tools (junk_cut, field_watch...) are reached with @call method=<name> args={..}; teach by writing Memory:seat.learn, drop with Memory:seat.forget = {spec}, post by writing Peer:channel.post; help('tools').\n\n"
     "How you work: when the person gives you a task, carry it out to the end "
     "in this turn. Don't ask permission for steps that are part of the task, "
     "and don't end a reply with \"next I'll...\" -- do it. End your turn only "
@@ -837,7 +834,7 @@ TOOLS_NOTE = _full_names(
     "update goes in the same message as your next tool call, never as a "
     "reply on its own. No \"Open decisions\" footers. A turn ends after 5 minutes of silence and a "
     "running tool call is silent, so a command that may run longer than about "
-    "4 minutes must start detached (a method whose command is "
+    "4 minutes must start detached (a command that is "
     "'nohup <command> > <log> 2>&1 &'), and checked after.")
 
 
@@ -849,8 +846,8 @@ _CARD_LINES_REPLACED = ("- EXEC:", "- ROUTING:")
 NO_SHELL_NOTE = ("THIS SEAT HAS NO SHELL (cliffhanger only): code_run and bash are gone. Read the world through "
                  "the field -- an entity whose getter is read(path), listdir(path) or stat(path) -- and change it "
                  "with File:<name>.write/move/delete and Command:<name>.run = {args} (rc and output land on the "
-                 "entity). No shell does not mean no programs: define a method (method_define) or a Command: "
-                 "entity for git, gh, pytest..., then call it. help('stdlib') has the details.")
+                 "entity). No shell does not mean no programs: make a Command: "
+                 "entity for git, gh, pytest..., then run it. help('stdlib') has the details.")
 
 
 def _tools_note() -> str:

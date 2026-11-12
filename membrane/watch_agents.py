@@ -456,8 +456,8 @@ def loop_task_text(ev: dict) -> str:
                 f"a seat restart is pending (due {due}): {ev.get('why') or 'new code staged'}")
         detail = ("The engineer staged new code" + (f" ({', '.join(ev.get('files') or [])})" if ev.get("files") else "")
                   + "; it loads when the seat restarts, and the restart is yours. When nothing of yours is "
-                  "mid-flight (a command, a write, a goal step), restart it: exec(action='call', "
-                  "object='presence', method='restart', args={why: '<one line>'}). Need longer? Say STEP "
+                  "mid-flight (a command, a write, a goal step), restart it: "
+                  "entity(action='write', spec='presence', prop='restart', value={why: '<one line>'}). Need longer? Say STEP "
                   "with what you are finishing -- you will be reminded before it is due. Past due, the "
                   "engineer asks the operator.")
     elif kind == "operator-message":
@@ -547,8 +547,8 @@ def loop_task_text(ev: dict) -> str:
     return (f"{head}\n{detail}\n"
             "Decide: REACT (one concrete step through the membrane tools "
             "-- find / entity(action='read') to look; entity add/edit, "
-            "exec(action='call') to act -- call a method you already have "
-            "before defining a new one (exec(action='define'): program the "
+            "entity(action='write') to act (a Command:<name>.run = {args} you already have, "
+            "before a new one: program the "
             "field first, no one-shot commands); memory(action='learn'); "
             "goal(action='close')) or IGNORE. Budget: at most "
             f"{LOOP_TOOL_BUDGET} tool calls this pass; the pulse brings "

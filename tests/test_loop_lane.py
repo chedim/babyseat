@@ -78,7 +78,7 @@ class TestLoopTurnLane(unittest.TestCase):
         self.assertEqual(agent, AGENT)
         lane = MS._lane_of(agent)
         self.assertEqual(lane, "listener")
-        self.assertIsNone(MS._lane_refusal("method_call", lane))
+        self.assertIsNone(MS._lane_refusal("code_run", lane))
         self.assertIsNone(MS._lane_refusal("entity_add", lane))
 
     def test_bare_loop_key_never_lanes_as_operator(self):

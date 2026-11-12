@@ -183,6 +183,6 @@ def test_no_keep_alive_is_emitted_while_a_tool_runs():
 
 def test_the_tools_note_says_to_detach_long_commands():
     note = CA.TOOLS_NOTE
-    for word in ("4 minutes", "detached", "nohup", "a method whose command",
+    for word in ("4 minutes", "detached", "nohup", "a command that is",
                  "5 minutes"):                     # #1043: no 'entity script' path (scripts are retired)
         assert word in note, word

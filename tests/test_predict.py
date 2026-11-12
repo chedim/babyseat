@@ -29,10 +29,10 @@ class TestWhatArgusDid(unittest.TestCase):
         tools, ents = P.actions_of_parts([
             {"type": "text", "text": "hi"},
             tool("entity/action-read", key="membrane::Component:ha:light.cabin"),
-            tool("exec", action="call", object="ha:light.cabin", method="status"),
+            tool("exec", action="run", code="uptime"),
             tool("find", action="memory", q="what about the cabin light"),
             tool("entity_read", spec="m:mqtt:bridge")])
-        self.assertEqual(tools, ["entity.read", "exec.call", "find.memory"])
+        self.assertEqual(tools, ["entity.read", "exec.run", "find.memory"])
         self.assertEqual(ents, ["ha:light.cabin", "mqtt:bridge"])
 
 

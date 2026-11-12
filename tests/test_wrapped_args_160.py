@@ -113,11 +113,6 @@ def test_the_outer_arguments_win_over_the_wrapped_ones():
 
 
 def test_exec_keeps_its_own_args_object():
-    # exec's `args` IS a parameter (the {{param}} values) -- never unwrapped
-    name, a = T.resolve("exec", {"action": "call", "object": "ha:light.x",
-                                 "method": "turn_on", "args": '{"level": 3}'})
-    assert name == "method_call"
-    assert a["args"] == {"level": 3} and "level" not in a
-    name, a = T.resolve("method_call", {"object": "ha:light.x", "method": "turn_on",
-                                        "args": '{"level": 3}'})
-    assert a["args"] == {"level": 3} and "level" not in a
+    # exec's own arguments are never unwrapped from a stray `args` string
+    name, a = T.resolve("exec", {"action": "run", "code": "uptime", "lang": "sh"})
+    assert name == "code_run" and a == {"code": "uptime", "lang": "sh"}

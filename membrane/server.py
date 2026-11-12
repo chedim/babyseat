@@ -1192,14 +1192,8 @@ OPERATOR_TOOLS = frozenset((
     "peer_seats", "peer_read", "junk_cut",
     # the banner tracks (the operator's header)
     "entity_watch", "entity_unwatch",
-    # THE EXECUTOR'S DOOR (2026-10-08, the operator's call): the operator
-    # runs commands itself, the receipt comes back in the same turn -- since
-    # #576 part F only as methods it defines and calls (no one-shot link)
-    "method_define", "method_call", "method_each",
     # #614: code runs as a tree linked to its executor
     "code_run",
-    # a method's read (issue #80): runs nothing, so plans may look too
-    "method_inspect",
     # THE FLOOD GATES (2026-10-08, the operator's call: "open the flood gates
     # between the lanes"): the chat lane holds the entity hands and the
     # watches too -- refused -> intend -> a loop cost more than it protected
@@ -1217,14 +1211,13 @@ CTX_WRITES = frozenset(("__call", "call", "fs_write", "fs_edit"))
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
-    "method_define", "method_call", "method_each", "code_run",
+    "code_run",
     # the board's spatial watches (2026-10-08): attention is the
     # listeners' to allocate; the chat lane announces through intend
     "field_watch",
 }) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
-PLAN_TOOLS = OPERATOR_TOOLS - {"method_define", "method_call", "method_each", "code_run",
-                               "method_inspect",
+PLAN_TOOLS = OPERATOR_TOOLS - {"code_run",
                                "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
                                "entity_inherit", "pack", "entity_write"}
@@ -1343,30 +1336,9 @@ PARALLEL_READS_MAX = 4
 FIELD_FAMILIES = ("find", "entity", "exec", "goal", "track", "field_watch", "state")
 
 
-def _bookkeeping(est, m, obj, w) -> bool:
-    """#1120 (operator 2026-11-11, B): a write the method-call machinery makes about the call itself -- on the method
-    and the methods it runs through (run counts, last call, residues), on the object's call ring, the run's code
-    tree and result entities, and their edges."""
-    from .entities import MEMBRANE_NS
-    eid, prop, path = (list(w) + [None, "", ""])[:3]
-    if str(path or "").startswith("rel:"):
-        return all(not x or x.startswith((MEMBRANE_NS + "node:", MEMBRANE_NS + "result:")) or x == m.eid
-                   for x in str(path)[4:].split("|")[::2])
-    if not eid:
-        return False
-    if eid.startswith((MEMBRANE_NS + "node:", MEMBRANE_NS + "result:")):
-        return True
-    if obj is not None and eid == obj.eid and prop == "calls":
-        return True
-    from . import night as _N
-    return eid == m.eid or eid in {a.eid for a in _N.ancestors(est, m)}
-
-
 def call_reads(srv, name: str, args, wrote) -> bool:
     """#1120: did this call only read, judged by what it did? `wrote`: the writes it made in the field, as
-    (eid, prop, path), or a bool. The read-only set (PARALLEL_READS) reads; a shell run (code_run) acts; a method
-    call reads when the field marks its method read_only, or when its only writes are its own bookkeeping (operator
-    2026-11-11, B); a call of the field's own families reads when it wrote nothing in the field."""
+    (eid, prop, path), or a bool. The read-only set (PARALLEL_READS) reads; a shell run (code_run) acts; a call of the field's own families reads when it wrote nothing in the field."""
     from . import toolset as _ts
     n = str(name or "")
     n = n[len("mcp__membrane__"):] if n.startswith("mcp__membrane__") else n
@@ -1379,21 +1351,6 @@ def call_reads(srv, name: str, args, wrote) -> bool:
         return True
     if n == "code_run":
         return False
-    if n == "method_call":
-        try:
-            from . import night as _N
-            est = getattr(srv, "entity_store", None)
-            obj = est.resolve(str(args.get("object") or "")) if est is not None else None
-            m, _ = _N.resolve_method(est, obj, str(args.get("method") or "")) if obj is not None else (None, None)
-            if m is None:
-                return False
-            if (m.properties or {}).get("read_only"):
-                return True                                  # the field's own marking: an explicit override
-            if isinstance(wrote, bool):
-                return not wrote
-            return not [w for w in wrote if not _bookkeeping(est, m, obj, w)]
-        except Exception:
-            return False
     fams = {f for f, v in _ts.FAMILIES.items() if isinstance(v, dict) and n in set((v.get("actions") or {}).values())}
     return bool(fams & set(FIELD_FAMILIES)) and not wrote
 
@@ -4170,7 +4127,7 @@ def mcp_executor(port: int):
     """The default executor: the MCP tool impls themselves -- the same
     relay surface the TUI uses (all guards stay in the proxy). Unknown
     tools are a clean error, never a crash. The local models'
-    method_call keeps their short head (mcp_server.LOCAL_TOOL_IMPLS)."""
+    the shell tools keep their short head (mcp_server.LOCAL_TOOL_IMPLS)."""
     def exec_tool(name: str, args: dict, call_id: str = "") -> str:
         impl = _mcp.LOCAL_TOOL_IMPLS.get(name)
         if impl is None:

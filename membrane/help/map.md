@@ -39,8 +39,8 @@ own properties on the instance (notes) stay. Set `class` back to `Banner` to get
 Read the cards and goals the map shows before asking the person. The person's "it" is usually the in: line's.
 
 ## Programs
-There is no shell, but there are programs: define a method (method_define) or a `Command:` entity for git,
-gh, pytest…, then call it. Files: read_file / write_file / edit_file / list_dir, or read(path) in cliffhanger
+There is no shell, but there are programs: make a `Command:` entity for git,
+gh, pytest…, then run it (`Command:<name>.run = {args}`). Files: read_file / write_file / edit_file / list_dir, or read(path) in cliffhanger
 (help('stdlib')).
 
 ## A message's words in a getter

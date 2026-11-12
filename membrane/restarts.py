@@ -373,7 +373,7 @@ def check_ask_file(srv) -> None:
 # leaves the serve running. The seat turns it into the entity
 # membrane::restart and a restart-pending event -- a loop turn with real
 # hands -- and he restarts when nothing of his is mid-flight:
-# exec(action='call', object='presence', method='restart', args={why}).
+# entity(action='write', spec='presence', prop='restart', value={why}).
 # Due DUE_S after staging; a minute past due the seat notes restart-overdue
 # (the engineer then asks the operator -- nothing restarts on its own).
 PENDING_FILE = "restart-pending.json"
@@ -405,8 +405,8 @@ def _entity(srv):
         ent = QuantumEntity(eid=MEMBRANE_NS + ENT, cls=CLASS_CONFIG, properties={
             "name": "restart",
             "summary": ("A PENDING SEAT RESTART (new code staged by the engineer): restart the seat "
-                        "yourself when nothing of yours is mid-flight -- exec(action='call', "
-                        "object='presence', method='restart', args={why: '<one line>'}) -- before `due`.")})
+                        "yourself when nothing of yours is mid-flight -- entity(action='write', "
+                        "spec='presence', prop='restart', value={why: '<one line>'}) -- before `due`.")})
         est.docs[ent.eid] = ent
     return ent
 

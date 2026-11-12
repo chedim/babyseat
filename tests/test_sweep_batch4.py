@@ -24,9 +24,9 @@ class TestObjectsSentAsText(unittest.TestCase):
         name, args = TS.resolve("entity_edit", {"name": "voice:out:dmitrii",
                                                 "properties": '{"say": "Can you hear me?"}'})
         self.assertEqual(args["properties"], {"say": "Can you hear me?"})
-        name, args = TS.resolve("exec", {"action": "call", "object": "presence", "method": "exec",
-                                         "args": '{"code": "1+1"}'})
-        self.assertEqual(args["args"], {"code": "1+1"})
+        name, args = TS.resolve("entity", {"action": "edit", "spec": "m:x",
+                                           "properties": '{"summary": "s"}'})
+        self.assertEqual(args["properties"], {"summary": "s"})
 
 
 def _store():

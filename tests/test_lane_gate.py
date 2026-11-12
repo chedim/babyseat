@@ -107,20 +107,22 @@ class TestLaneGate(unittest.TestCase):
             self.assertIn(t, SRV._lane_tools("operator"))
             self.assertIn(t, SRV._lane_tools("listener"))
             self.assertNotIn(t, SRV._lane_tools("plan"))
-        for t in ("method_define", "method_call", "method_each"):
+        for t in ("code_run",):
             self.assertIn(t, SRV._lane_tools("operator"))
             self.assertIn(t, SRV._lane_tools("listener"))
             self.assertNotIn(t, SRV._lane_tools("plan"))
-        self.assertIsNone(SRV._lane_refusal("method_call", "operator"))
-        self.assertIsNotNone(SRV._lane_refusal("method_call", "plan"))
+        for t in ("method_define", "method_call", "method_each", "method_inspect"):    # #1101: gone
+            self.assertNotIn(t, SRV._lane_tools("operator"))
+        self.assertIsNone(SRV._lane_refusal("code_run", "operator"))
+        self.assertIsNotNone(SRV._lane_refusal("code_run", "plan"))
         names = _reach("build")
-        self.assertIn("method_call", names)
+        self.assertIn("code_run", names)
 
     def test_plan_is_the_operator_minus_intend(self):
         """Plan mode communicates: reads + memory + the board; nothing
         planted (the direction needs the user's build word)."""
         self.assertIn("query", SRV._lane_tools("plan"))
-        for t in ("entity_add", "entity_edit", "method_call"):
+        for t in ("entity_add", "entity_edit", "code_run"):
             self.assertNotIn(t, SRV._lane_tools("plan"))
 
     def test_cross_lane_call_refuses_honestly(self):

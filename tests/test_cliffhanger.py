@@ -89,13 +89,12 @@ class TestCliffhanger(unittest.TestCase):
         self.assertIn("x; rm -rf /tmp/never", str(r["head"]))
 
     def test_the_family_and_the_lanes(self):
-        self.assertEqual(T.resolve("exec", {"action": "call", "object": "o", "method": "m", "args": {"a": 1}}),
-                         ("method_call", {"object": "o", "method": "m", "args": {"a": 1}}))
-        self.assertEqual(T.resolve("exec", {"action": "define", "on": "c", "method": "m", "command": "echo"}),
-                         ("method_define", {"on": "c", "method": "m", "command": "echo"}))
-        self.assertIn("method_call", S.OPERATOR_TOOLS)
-        self.assertNotIn("method_call", S.PLAN_TOOLS)
-        self.assertNotIn("method_call", S.PHONE_TOOLS)
+        for act in ("call", "define", "each", "inspect"):          # #1101: methods are Command entities now
+            with self.assertRaises(ValueError):
+                T.resolve("exec", {"action": act, "object": "o", "method": "m"})
+        for tool in ("method_call", "method_define", "method_each", "method_inspect"):
+            self.assertNotIn(tool, S.OPERATOR_TOOLS)
+            self.assertNotIn(tool, S.LISTENER_TOOLS)
         self.assertIn("Cliffhanger", T.help_text("cliffhanger"))
 
 
@@ -317,10 +316,8 @@ class TestFanOut(unittest.TestCase):
         self.assertEqual(r["steps"]["all"]["n_ok"], 2)
 
     def test_the_family(self):
-        self.assertEqual(T.resolve("exec", {"action": "each", "over": "ha light", "method": "m", "dry_run": True}),
-                         ("method_each", {"over": "ha light", "method": "m", "dry_run": True}))
-        self.assertIn("method_each", S.OPERATOR_TOOLS)
-        self.assertNotIn("method_each", S.PHONE_TOOLS)
+        with self.assertRaises(ValueError):                         # #1101: no each action any more
+            T.resolve("exec", {"action": "each", "over": "ha light", "method": "m", "dry_run": True})
 
 
 class TestFanOutMembersAndRemoval(unittest.TestCase):
@@ -430,10 +427,6 @@ class TestInterfaces(unittest.TestCase):
         srv._iface_line_cache = None
         self.assertIn("implemented by: env:c", N.interfaces_line(srv))
 
-    def test_the_tool_parses_an_inline_signature(self):
-        from membrane.mcp_server import method_signature
-        self.assertEqual(method_signature("exec(code, timeout)"), ("exec", ["code", "timeout"]))
-        self.assertEqual(method_signature("status"), ("status", []))
 
 
 class TestNightTwins(unittest.TestCase):
@@ -495,19 +488,6 @@ class TestArgsAlwaysBind(unittest.TestCase):
         r = N.method_call(srv, est, f, None, port.eid, "view", {"n": 60})
         self.assertIn("issue 60", str(r["head"]))
 
-    def test_the_mcp_door_passes_a_list_through(self):
-        from unittest import mock
-        from membrane import mcp_server as M
-        seen = {}
-
-        def fake(port, method, path, body):
-            seen.update(body)
-            return {"object": "o", "status": "ok", "method": "m", "via": "v", "rc": 0}
-        with mock.patch.object(M, "_http", fake):
-            M.tool_method_call({"object": "o", "method": "m", "args": [60, "hello"]}, 1)
-            self.assertEqual(seen["args"], [60, "hello"])
-            M.tool_method_call({"object": "o", "method": "m", "args": "[60, \"hello\"]"}, 1)
-            self.assertEqual(seen["args"], [60, "hello"])
 
 
 class TestTheTimeoutIsHonoured(unittest.TestCase):
