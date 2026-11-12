@@ -137,13 +137,18 @@ MACHINE = ("adapter:", "trigger:")
 
 def watch_chain(cid: str, on: bool = True) -> None:
     if on:
-        _COUNTS.setdefault(cid, 0)
+        _COUNTS.setdefault(cid, [])
     else:
         _COUNTS.pop(cid, None)
 
 
 def chain_writes(cid: str | None) -> int:
-    return int(_COUNTS.get(cid or "", 0))
+    return len(_COUNTS.get(cid or "", ()))
+
+
+def chain_written(cid: str | None, since: int = 0) -> list:
+    """The writes counted on a watched chain, as (eid, prop, path), from the `since`-th on."""
+    return list(_COUNTS.get(cid or "", ())[since:])
 
 
 def emit(path: str, old, new, eid: str | None = None) -> None:
@@ -152,7 +157,8 @@ def emit(path: str, old, new, eid: str | None = None) -> None:
     if _COUNTS:
         c = _CHAIN.get()
         if c is not None and c.get("id") in _COUNTS and not _WRITER.get().startswith(MACHINE):
-            _COUNTS[c["id"]] += 1
+            e = eid if eid is not None else (None if path.startswith("rel:") else path)
+            _COUNTS[c["id"]].append((e, path[len(e) + 1:] if e and path.startswith(e + ".") else "", path))
     if not listeners:
         return
     ch = _CHAIN.get()
