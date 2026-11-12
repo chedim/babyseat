@@ -193,7 +193,7 @@ class TheSeatOpensIt(unittest.TestCase):
         main = SRC[SRC.index("\ndef main() -> None:"):]
         opened = main.index("BootDoor(_serve_socket")
         self.assertGreater(opened, main.index("_serve_socket.listen(128)"))
-        self.assertLess(opened, main.index("_boot_laps.step(\"field rows\")"))
+        self.assertLess(opened, main.index("_run_step('field rows'"))
         handed = main.index("_boot_door.handover()")
         self.assertLess(handed, main.index("runner._httpd, _ = start("))
 
