@@ -22,6 +22,9 @@ Thing.label getter: this.name
 Box.open getter: [t for t in instances('Thing') if t.on]
 Box.names getter: [t.name for t in this.open]
 Box.first getter: head([t for t in instances('Thing') if t.on], 1)
+Box.first_name getter: this.first[0].name
+Box.last_name getter: this.open[-1].name
+Box.none_name getter: this.open[9]
 """
 
 
@@ -53,4 +56,6 @@ def test_a_getter_keeps_a_list_of_entities_and_another_reads_it(seat):
     assert p["open"] == [{"$ref": "Thing:a"}, {"$ref": "Thing:c"}]
     assert p["names"] == ["a", "c"]
     assert p["first"] == [{"$ref": "Thing:a"}]
+    assert p["first_name"] == "a" and p["last_name"] == "c"      # x[i]: a position, from the end
+    assert p.get("none_name") is None                                  # a miss is none
     assert "refused" not in p

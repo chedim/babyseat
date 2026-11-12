@@ -272,6 +272,12 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
   - in any expression, a list: `FOR b IN this.listed: prop(b, 'title')` is `[prop(b, 'title') for b in this.listed]`.
 - **`prop(x, name)`** reads a dict's key and follows an entity's id (`prop(this.server, 'state')`), tracked like
   `x.name`; `this.eid` is an entity's id (a reference is written as an id, never as an entity).
+- **`x[i]`** (2026-11-12): a list by position (`xs[0]`, `xs[-1]` from the end), a dict by key (`d['a']`), an entity by property
+  name (`e['name']`, the same as `e.name`). A miss is none, never an error, and a none base stays none. No slices (use
+  `head`, `pluck`). It counts as one node toward the 64-node cap.
+- **Entity values** (2026-11-12): a getter or setter may store an entity, or a list or dict holding entities. It is kept as
+  a reference, `{"$ref": "<eid>"}`, and reads back as the entity (`this.open[0].name`); the stored list follows the
+  entities as they change.
 - **Host built-ins**: a getter may call a function the seat provides, on live rounds only (a silent rebuild or birth
   never calls out); an error in one is the getter's error (a `refused` receipt, the field keeps its value). Effects
   are never getters: they stay writes to adapter branches. The seat's slow ones (`recall`, `rerank`) run off the

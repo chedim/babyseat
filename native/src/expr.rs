@@ -39,6 +39,8 @@ pub enum Node {
     List(Vec<Node>),
     Dict(Vec<(String, Node)>),
     Attr(Box<Node>, String),
+    /// `base[index]`: a list by position, a dict by key, an entity by property name (a miss is None)
+    Index(Box<Node>, Box<Node>),
     Bin(Op, Box<Node>, Box<Node>),
     Neg(Box<Node>),
     Not(Box<Node>),
@@ -259,7 +261,12 @@ impl P {
                 self.n(1);
                 a = Node::Call(f, args);
             } else if self.is_p("[") {
-                return Err("not allowed in an expression: Subscript".into());
+                self.next();
+                let idx = self.expr()?;
+                if self.is_p(":") { return Err("slices are not allowed in an expression: use head / pluck".into()); }
+                self.expect("]")?;
+                self.n(1);
+                a = Node::Index(Box::new(a), Box::new(idx));
             } else {
                 break;
             }
@@ -745,6 +752,11 @@ fn pronoun(name: &str, w: &dyn World) -> Result<V, Err> {
     }
 }
 
+fn kind_of(v: &V) -> &'static str {
+    match v { V::None => "none", V::Bool(_) => "bool", V::Int(_) => "int", V::Float(_) => "float", V::Str(_) => "text",
+              V::List(_) => "list", V::Dict(_) => "dict", V::Ent(_) => "entity" }
+}
+
 pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err> {
     match n {
         Node::Const(v) => Ok(v.clone()),
@@ -755,6 +767,21 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
             V::Ent(e) => { if a.starts_with('_') { return Err(format!("no attribute {:?}", a)); } Ok(w.attr(&e, a)) }
             _ => Err("attributes are read on entities only".into()),
         },
+        Node::Index(b, i) => {
+            let base = eval(b, env, w)?;
+            let idx = eval(i, env, w)?;
+            match (base, idx) {
+                (V::None, _) => Ok(V::None),
+                (V::List(l), V::Int(k)) => {
+                    let n = l.len() as i64;
+                    let at = if k < 0 { k + n } else { k };
+                    Ok(if at >= 0 && at < n { l[at as usize].clone() } else { V::None })
+                }
+                (V::Dict(d), V::Str(k)) => Ok(d.iter().find(|(x, _)| *x == k).map(|(_, v)| v.clone()).unwrap_or(V::None)),
+                (V::Ent(e), V::Str(k)) => { if k.starts_with('_') { return Err(format!("no attribute {:?}", k)); } Ok(w.attr(&e, &k)) }
+                (b, i) => Err(format!("cannot index a {} by a {}", kind_of(&b), kind_of(&i))),
+            }
+        }
         Node::Bin(op, a, b) => { let x = eval(a, env, w)?; let y = eval(b, env, w)?; arith(*op, &x, &y) }
         Node::Neg(a) => match eval(a, env, w)? {
             V::List(l) => Ok(floats(vec_of(&V::List(l))?.into_iter().map(|x| -x).collect())),
