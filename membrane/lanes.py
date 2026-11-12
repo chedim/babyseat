@@ -7539,6 +7539,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             return
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
+        if op == "define":                                 # no new methods (methods_note.py)
+            from .methods_note import DEFINE_DISABLED
+            self._json_out({"ok": False, "error": DEFINE_DISABLED}); return
         from . import seatauth as _SA
         if op != "inspect" and not _SA.owner(self):        # #253: a method's command is code
             from . import jwtauth as _JWT

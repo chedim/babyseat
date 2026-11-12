@@ -27,6 +27,8 @@ paths chat uses (reads are pre-gate; writes run the ordinary learn guards).
 """
 from __future__ import annotations
 
+from .methods_note import DEFINE_DISABLED, METHODS_DEPRECATED  # noqa: F401
+
 import json
 import os
 import re
@@ -345,7 +347,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "method_define",
-        "description": ("give class|object a METHOD, then method_call / method_each it. command = shell template ({{arg}} = call args, {{self.<prop>}} = object props), e.g. on='light', method='dim', command='curl ... {{self.entity_id}} {{level}}'; or steps = composite in order. guard = python check first -> {'ok':bool,'why':str}. missing owner becomes a class; re-define updates. owner only."),
+        "description": ("DISABLED (methods are retired: use cliffhanger getters/setters, help('cliffhanger')). was: give class|object a METHOD, then method_call / method_each it. command = shell template ({{arg}} = call args, {{self.<prop>}} = object props), e.g. on='light', method='dim', command='curl ... {{self.entity_id}} {{level}}'; or steps = composite in order. guard = python check first -> {'ok':bool,'why':str}. missing owner becomes a class; re-define updates. owner only."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1061,7 +1063,16 @@ def method_signature(method: str) -> tuple[str, list[str]]:
     return m.group(1), [x.strip() for x in m.group(2).split(",") if x.strip()]
 
 
+def _noted(text: str) -> str:
+    """Every method answer carries the deprecation note."""
+    return f"{text}\n{METHODS_DEPRECATED}"
+
+
 def tool_method_define(args: dict, port: int) -> str:
+    return DEFINE_DISABLED                       # creating or editing a method is no longer allowed (methods_note.py)
+
+
+def _tool_method_define_old(args: dict, port: int) -> str:
     name, sig = method_signature(str(args.get("method") or ""))
     out = _http(port, "POST", "/membrane/method/define", {
         "on": str(args.get("on") or args.get("object") or ""), "method": name,
@@ -1099,6 +1110,10 @@ def _ran(out: dict) -> str:
 
 
 def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
+    return _noted(_tool_method_call_run(args, port, head_cap=head_cap))
+
+
+def _tool_method_call_run(args: dict, port: int, head_cap: int | None = None) -> str:
     """A method call; the run's full output rides the reply up to
     LINK_OUTPUT_CAP; `head_cap` (the local models'
     path) keeps the short head instead."""
@@ -1171,6 +1186,10 @@ def tool_bash_local(args: dict, port: int) -> str:
 
 
 def tool_method_inspect(args: dict, port: int) -> str:
+    return _noted(_tool_method_inspect_run(args, port))
+
+
+def _tool_method_inspect_run(args: dict, port: int) -> str:
     """A method's read (issue #80): where a call resolves, the definition, and the
     dry run -- nothing runs."""
     a = args.get("args")
@@ -1186,6 +1205,10 @@ def tool_method_inspect(args: dict, port: int) -> str:
 
 
 def tool_method_each(args: dict, port: int) -> str:
+    return _noted(_tool_method_each_run(args, port))
+
+
+def _tool_method_each_run(args: dict, port: int) -> str:
     a = args.get("args")
     if isinstance(a, str):
         try:
@@ -1508,8 +1531,8 @@ def tool_dunder_call(args: dict, port: int) -> str:
     if not out.get("ok") and not out.get("object"):
         return f"call refused: {out.get('error', 'unknown error')}"
     r = out.get("resolved") or {}
-    return (f"[{out.get('status')}] {meth} on {r.get('object') or out.get('object')} (found in {r.get('level')}): "
-            f"rc={out.get('rc')} {out.get('outcome') or ''}\n{_brief_output(out)}")
+    return _noted(f"[{out.get('status')}] {meth} on {r.get('object') or out.get('object')} (found in {r.get('level')}): "
+                  f"rc={out.get('rc')} {out.get('outcome') or ''}\n{_brief_output(out)}")
 
 
 def _fs_path(p) -> str:

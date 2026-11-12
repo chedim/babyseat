@@ -45,19 +45,11 @@ def test_define_and_each_are_mcp_tools():
     assert e["inputSchema"]["required"] == ["over", "method"]
 
 
-def test_a_define_reaches_the_method_route():
+def test_a_define_is_refused_and_never_reaches_the_route():
     seen = {}
-
-    def fake(port, method, path, body=None):
-        seen.update(path=path, body=body)
-        return {"ok": True, "method": "light.dim", "created": True, "params": ["level"]}
-    with mock.patch.object(M, "_http", fake):
-        out = M.TOOL_IMPLS["method_define"]({"on": "light", "method": "dim",
-                                              "command": "echo dim {{level}}",
-                                              "read_only": False}, 11500)
-    assert seen["path"] == "/membrane/method/define"
-    assert seen["body"]["on"] == "light" and seen["body"]["command"] == "echo dim {{level}}"
-    assert "defined" in out
+    with mock.patch.object(M, "_http", lambda *a, **k: seen.update(hit=True) or {"ok": True}):
+        out = M.TOOL_IMPLS["method_define"]({"on": "light", "method": "dim", "command": "echo dim {{level}}"}, 11500)
+    assert "hit" not in seen and out.startswith("method_define is disabled")
 
 
 def test_an_each_reaches_the_method_route():
