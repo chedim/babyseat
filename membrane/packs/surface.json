@@ -302,13 +302,18 @@
       "fs"
     ],
     "classes": [
-      "Request"
+      "Request",
+      "Voice"
     ],
-    "members": 26,
+    "members": 44,
     "writes": [
       "File:*.move",
       "File:*.path",
-      "File:*.write"
+      "File:*.write",
+      "membrane:*.device",
+      "membrane:*.mode",
+      "membrane:*.on",
+      "membrane:*.state_ts"
     ],
     "claims": [
       "/membrane/voice",
