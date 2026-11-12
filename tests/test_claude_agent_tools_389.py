@@ -167,7 +167,8 @@ class TestOptions(_SDKCase):
 
     def test_allowed_tools_are_exactly_membranes(self):
         kw = self._opts()
-        want = sorted(f"mcp__membrane__{t['name']}" for t in MCP.TOOLS)
+        from membrane import cliffhanger_only as CO       # #1101: the no-bash seat's file tools only on a no-bash seat
+        want = sorted(f"mcp__membrane__{t['name']}" for t in CO.strip_tools(MCP.TOOLS))
         self.assertEqual(sorted(kw["allowed_tools"]), want)
         self.assertTrue(want)
         self.assertTrue(all(n.startswith("mcp__membrane__") for n in kw["allowed_tools"]))
@@ -185,7 +186,8 @@ class TestOptions(_SDKCase):
     def test_the_server_serves_every_membrane_tool_with_its_schema(self):
         srv = self._opts()["mcp_servers"]["membrane"]
         by = {t.name: t for t in srv["tools"]}
-        self.assertEqual(set(by), {t["name"] for t in MCP.TOOLS})
+        from membrane import cliffhanger_only as CO
+        self.assertEqual(set(by), {t["name"] for t in CO.strip_tools(MCP.TOOLS)})
         learn = next(t for t in MCP.TOOLS if t["name"] == "learn")
         self.assertEqual(by["learn"].input_schema, learn["inputSchema"])
         self.assertEqual(by["learn"].description, learn["description"])

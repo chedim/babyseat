@@ -377,10 +377,8 @@ class Autonode:
     def _watchers(self) -> list:
         out = []
         try:
-            for e in (self.est.docs or {}).values():
-                p = e.properties or {}
-                if p.get("watch_script"):
-                    out.append(e)
+            for _k, e in self.est.docs.with_property("watch_script"):       # only the watchers are built
+                out.append(e)
         except Exception:
             return []
         return out

@@ -269,3 +269,17 @@ def test_a_fuzzy_spec_lookup_builds_only_what_it_finds(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_the_watcher_census_and_the_open_goals_build_only_what_they_return(tmp):
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        from types import SimpleNamespace
+        from membrane import autonode, intent
+        assert autonode.Autonode._watchers(SimpleNamespace(est=st)) == []
+        assert intent.GoalSelection._open_goals(SimpleNamespace(est=st)) == []
+        assert built == []
+    finally:
+        _restore(real)
+        db.close()
