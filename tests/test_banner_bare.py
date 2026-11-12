@@ -237,66 +237,46 @@ def test_switching_a_banner_instance_to_a_class_of_its_own_replaces_the_whole_ba
 
 
 
-def test_the_seats_map_lines_and_in_line_reach_the_banner_block(seat, monkeypatch):
-    r = _run(seat, monkeypatch, facts={"map": True, "moving": ["m:goal:x  ↗ 1.0  a · b · c", "c:git  ↗ 0.5  d · e · f"],
-                                       "in_line": "in: chat (it=x)"})
+def test_the_default_banner_on_a_map_seat_is_only_instructions(seat, monkeypatch):
+    # operator 2026-11-11: "in the map mode it's only instructions" -- no map, no recall, nothing read from the store
+    r = _run(seat, monkeypatch, facts={"map": True, "moving": ["m:goal:x  ↗ 1.0  a · b · c"], "in_line": "in: chat"})
     t = r["text"] or ""
-    assert "m:goal:x" in t and "c:git" in t and "in: chat (it=x)" in t and "(nothing moved)" not in t
+    assert t.startswith("BANNER (placeholder)") and "m:goal:x" not in t and "What is moving" not in t
+    d = seat.entity_store.docs[FL.banner_eid("owner", "ses_op")]
+    assert d.cls == "Banner" and not (d.properties.get("refused") or "")
+    assert "user_turns" not in d.properties and "since_rows" not in d.properties and "recalled" not in d.properties
 
 
-def test_a_banner_script_that_waits_longer_than_its_limit_is_an_error(seat, monkeypatch):
-    # operator 2026-11-11: a banner script gets 3 s; past that its banner is an error (the default shows instead)
-    import time as _t
-    monkeypatch.setattr(FL, "BANNER_TIMEOUT_S", 0.2)
-    live = seat.live
-    real = live.f
-
-    class Slow:                                           # a read that never lands
-        def __getattr__(self, n):
-            return getattr(real, n)
-
-        def sql_pending(self):
-            return True
-
-        def sql_wait(self, t=None):
-            _t.sleep(min(t or 5, 0.3))
-            return False
-    monkeypatch.setattr(live, "f", Slow())
-    monkeypatch.setattr(RB, "c1f_call", _fake)
-    t0 = _t.monotonic()
+def test_a_class_of_the_models_own_reads_the_map_the_seat_writes(seat, monkeypatch):
     from membrane.entities import MEMBRANE_NS, QuantumEntity
-    seat.entity_store.upsert(QuantumEntity(eid=FL.banner_eid("owner", "ses_slow"), cls="Banner", properties={"name": "b"}))
-    live.settle()
-    d = seat.entity_store.docs[FL.banner_eid("owner", "ses_slow")]
-    d.cls = "SlowBanner"                                  # a class of the model's own: limited
-    seat.entity_store.upsert(d, embedder=None)
-    r = live.banner(object(), "owner", "ses_slow", "ses_slow", ASK, now=100.0, facts={})
-    assert _t.monotonic() - t0 < 3 and "took longer than 0.2 s" in (r["error"] or "")
-
-
-def test_memos_own_pack_takes_over_after_the_class_switch_and_keeps_its_notes(seat, monkeypatch):
-    # live 2026-11-11: Memo's MyBanner.text was right but the default's stored `text` stood in for it; Memo's own
-    # property (notes) must survive the switch
-    from membrane.entities import MEMBRANE_NS, QuantumEntity
-    pack = ("PACK memobanner 1\nMyBanner.notes_line getter: 'NOTES: ' + str(this.notes or '(none)')\n"
-            "MyBanner.text getter: join(['MINE', this.notes_line, this.in_line or ''], '\\n')\n")
+    pack = "PACK memobanner 1\nMyBanner.text getter: join(concat(['MINE'], this.moving or [], [this.in_line or '']), '\\n')\n"
     seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:memobanner", cls="Pack",
                                            properties={"name": "memobanner", "c1f": pack}))
     seat.live.settle()
-    eid = _standard_then(seat, monkeypatch, cls="MyBanner", notes="remember the boat")
+    eid = _standard_then(seat, monkeypatch, cls="MyBanner")
     r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", "", now=100.0,
-                         facts={"map": True, "moving": ["a"], "in_line": "in: chat"})
-    assert r["text"] == "MINE\nNOTES: remember the boat\nin: chat", r["text"]
+                         facts={"map": True, "moving": ["m:goal:x  ↗ 1.0  a · b · c"], "in_line": "in: chat"})
+    assert r["text"] == "MINE\nm:goal:x  ↗ 1.0  a · b · c\nin: chat", r["text"]
 
 
-def test_a_map_seats_banner_never_runs_the_stores_heavy_reads(seat, monkeypatch):
-    # live 2026-11-11: five sql getters (messages, entity deltas, a join) ran every turn on a map seat whose block never
-    # shows them: seconds of the first response. With `map` there from the first compute they answer [] unrun.
-    from membrane.entities import QuantumEntity
-    seat._loop_runner.sessions["ses_map"] = {"owner": "owner"}
+def test_the_map_is_computed_only_for_a_class_that_reads_it(seat, monkeypatch):
+    from membrane import conv_banner as CB
+    from membrane import lanes as L
+    from membrane.entities import MEMBRANE_NS, QuantumEntity
+    for name, getter in (("readsmap", "ReadsMap.text getter: join(this.moving or [], '\\n')"),
+                         ("nomap", "NoMap.text getter: 'plain'")):
+        seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:" + name, cls="Pack",
+                                               properties={"name": name, "c1f": f"PACK {name} 1\n{getter}\n"}))
+    seat.live.settle()
+    assert seat.live.class_reads("ReadsMap", "moving") and not seat.live.class_reads("NoMap", "moving")
     monkeypatch.setattr(RB, "c1f_call", _fake)
-    r = seat.live.banner(object(), "owner", "ses_map", "ses_map", "", now=100.0, facts={"map": True, "moving": []})
-    d = seat.entity_store.docs[FL.banner_eid("owner", "ses_map")]
-    assert not (d.properties.get("refused") or ""), d.properties.get("refused")      # no "sql: no store attached"
-    assert d.properties.get("user_turns") == [] and d.properties.get("since_rows") == []
-    assert r["error"] is None
+    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
+    asked = []
+    for cls in ("ReadsMap", "NoMap"):
+        sid = "ses_" + cls                                       # one chat each: an upsert keeps an entity's first class
+        seat._loop_runner.sessions[sid] = {"owner": "owner"}
+        seat.entity_store.upsert(QuantumEntity(eid=FL.banner_eid("owner", sid), cls=cls, properties={"name": "b"}))
+        seat.live.settle()
+        asked.clear()
+        CB.bare(seat, {"_turn_sid": sid}, sid, moving=lambda: asked.append(1) or ["x"], in_line="in: chat")
+        assert (asked == [1]) == (cls == "ReadsMap"), cls

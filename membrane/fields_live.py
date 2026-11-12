@@ -80,7 +80,9 @@ def _json(v) -> str:
     return json.dumps(v, default=str)
 
 
-BANNER_CLASS = "Banner"
+BANNER_CLASS = "Banner"                         # the default of a map seat: only instructions
+RECALL_CLASS = "RecallBanner"                   # the default of the other seats: recall, open goals, decisions, the ledger
+DEFAULT_CLASSES = (BANNER_CLASS, RECALL_CLASS)  # a class of the model's own is anything else
 BANNER_NS = MEMBRANE_NS + "Banner:"
 BANNER_TIMEOUT_S = 3.0                          # a banner script gets this long for its reads (operator 2026-11-11)
 DIALS_EID = MEMBRANE_NS + "recall:dials"
@@ -438,9 +440,22 @@ class Live:
     def has_banner(self) -> bool:
         return BANNER_CLASS in self.classes
 
+    def class_reads(self, cls: str, prop: str) -> bool:
+        """Does a pack that declares `cls` read `this.<prop>` anywhere? The seat computes a costly fact (the map of what is
+        moving, seconds) only for a banner class that reads it."""
+        import re as _re
+        head = _re.compile(r"^" + _re.escape(cls) + r"\.", _re.M)
+        use = _re.compile(r"\bthis\." + _re.escape(prop) + r"\b")
+        return any(head.search(t) and use.search(t) for t in list(self.pack_texts.values()))
+
     def _banner_instance(self, eid: str, owner: str, chat: str, facts: dict | None = None):
         d = (self.est.docs or {}).get(eid)
+        want = BANNER_CLASS if (facts or {}).get("map") else RECALL_CLASS
         if d is not None:
+            if d.cls in DEFAULT_CLASSES and d.cls != want:     # a default made for the other kind of seat (before the split)
+                with W.as_writer(WRITER + "banner"):
+                    d.cls = want
+                    self.est.upsert(d, embedder=None)
             return d
         from . import recall_banner as RB
         from .entities import QuantumEntity
@@ -451,7 +466,7 @@ class Live:
                       "pool": props.get("pool", RB.POOL), "n": props.get("n", RB.BANNER_N), "silent_birth": True})
         props.update(facts or {})                      # the seat's facts are there from the first compute (a map seat's heavy reads never run)
         with W.as_writer(WRITER + "banner"):
-            self.est.upsert(QuantumEntity(eid=eid, cls=BANNER_CLASS, properties=props), embedder=None)
+            self.est.upsert(QuantumEntity(eid=eid, cls=want, properties=props), embedder=None)
         return (self.est.docs or {}).get(eid)
 
     def _banner_dials(self, d) -> dict:
@@ -527,7 +542,7 @@ class Live:
             # the pack's reads (sql, jsonl, recall, rerank): wait for each WITHOUT the field's lock (a slow one never
             # stalls the thinker or another chat), and settle after the last one too (its answer lands on the round
             # after it finishes); a round may ask for more (a read that needs another's answer)
-            custom = d.cls != BANNER_CLASS                # the limit is the model's own script's; the default has none
+            custom = d.cls not in DEFAULT_CLASSES         # the limit is the model's own script's; the default has none
             deadline, late = time.monotonic() + BANNER_TIMEOUT_S, False
             while self.f.sql_pending():               # running, or finished and not landed yet
                 left = deadline - time.monotonic()

@@ -4326,6 +4326,28 @@ def _is_operator(owner: str) -> bool:
 
 
 
+def _map_seat() -> bool:
+    """A map-mode seat (momentum_map): the model gets the doctrine, the banner and the person's message; whatever the
+    request assembly would add to the rest (the answer-event gate, a sibling seat's hit) is dropped by the rewrite."""
+    try:
+        from . import momentum_map as _MMp
+        return _MMp.on()
+    except ImportError:
+        return False
+
+
+def _runs_answer_gate() -> bool:
+    """The answer-event gate (an earlier ask of the same thing: the A/B log, the planner's sig) is paid for on every
+    seat but a map seat, where its result changes nothing the model sees (7.5 s of the first response, 2026-11-11)."""
+    return not _map_seat()
+
+
+def _asks_peers() -> bool:
+    """A sibling seat's hit is asked for, one peer after another with a 5 s timeout, on every seat but a map seat,
+    where the rewrite drops what it injects (10 s of the first response, 2026-11-11: two silent peers)."""
+    return not _map_seat()
+
+
 def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
     """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what
     this conversation is about now, walked off its graph) and what a pronoun in the person's
@@ -5852,7 +5874,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # turn's 'sim' (the null-recall lane and the planner's sig read it)
         gv = None
         _fld = _efield_on(srv)
-        if _fld is not None and not _is_tool_round:
+        if _fld is not None and not _is_tool_round and _runs_answer_gate():
             try:
                 from . import efgate as EG
                 gv = EG.candidate(_fld, query, binding_failed=turn.binding_failed)
@@ -6065,7 +6087,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # fan-out, tight timeout (a hung peer must not stall a turn). A hit
         # rides along as MARKED CONTEXT; all failures degrade to "no help"
         # and the model path proceeds exactly as before (the safe direction).
-        if (getattr(srv, "gpeers", None) is not None
+        if (getattr(srv, "gpeers", None) is not None and _asks_peers()
                 and str(verdict.get("verdict", "")).startswith("escalate")):
             try:
                 for peer in srv.gpeers.livelist()[:4]:
@@ -6114,13 +6136,17 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 _map_banner = ""
                 try:                              # the banner: the pack's placeholder, or the model's own class's text
                     from . import conv_banner as _CB
-                    _t_mv = time.time()
-                    _mv = [] if _is_loop_turn(srv, body) else _MM.lines(srv.efield, getattr(srv, "entity_store", None),
-                                                                        chat=_CC.current(srv), held=_CC.held(srv))
-                    print(f"[exp-map] {len(_mv)} lines in {time.time() - _t_mv:.2f}s "
-                          f"({len(getattr(srv.efield, '_states', {}) or {})} states)", file=sys.stderr)
-                    _bare = "" if _is_loop_turn(srv, body) else _CB.bare(srv, body, _CAPMOD.current_conversation(),
-                                                                         moving=_mv, in_line=_cl)
+                    _loop = _is_loop_turn(srv, body)
+
+                    def _moving(srv=srv, _CC=_CC):         # the map: only a banner class of the model's own reads it
+                        _t_mv = time.time()
+                        _mv = _MM.lines(srv.efield, getattr(srv, "entity_store", None),
+                                        chat=_CC.current(srv), held=_CC.held(srv))
+                        print(f"[exp-map] {len(_mv)} lines in {time.time() - _t_mv:.2f}s "
+                              f"({len(getattr(srv.efield, '_states', {}) or {})} states)", file=sys.stderr)
+                        return _mv
+                    _bare = "" if _loop else _CB.bare(srv, body, _CAPMOD.current_conversation(),
+                                                      moving=_moving, in_line=_cl)
                 except Exception as _be:
                     print(f"[exp-map] banner placeholder failed ({_be})", file=sys.stderr)
                     from .conv_banner import BARE_FALLBACK as _bare

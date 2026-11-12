@@ -66,7 +66,7 @@ def test_each_person_in_each_chat_has_an_instance_with_the_dials_copied(seat, mo
     lines = _lines(seat, "ses_op", "what is the battery voltage on the boat?", monkeypatch)
     assert lines == ["#3 the bilge pump ran twice", "#2 the anchor light is LED"]      # n = 2, from recall:dials
     d = seat.entity_store.docs[FL.banner_eid("owner", "ses_op")]
-    assert d.cls == "Banner" and d.properties["rrf_k"] == 60 and d.properties["pool"] == RB.POOL
+    assert d.cls == "RecallBanner" and d.properties["rrf_k"] == 60 and d.properties["pool"] == RB.POOL
     assert d.properties["lines"] == lines                                             # kept on the field
     _lines(seat, "ses_memo", "what is the battery voltage on the boat?", monkeypatch)
     assert FL.banner_eid("memo", "ses_memo") in seat.entity_store.docs
