@@ -1517,10 +1517,8 @@ def main() -> None:
                 # re-firing every open goal on every boot was 37% of the
                 # loops' tool calls): stale goals only, with the backoff,
                 # parked goals wait for the operator
-                _n_goals = sum(
-                    1 for _d in list((srv.entity_store.docs or {}).values())
-                    if _d is not None and _d.cls == CLASS_GOAL
-                    and ((_d.properties or {}).get("status") or "open") == "open")
+                _n_goals = len(srv.entity_store.docs.matching(          # only the goals are built
+                    lambda _c, _p: _c == CLASS_GOAL and (_p.get("status") or "open") == "open"))
                 _n_wakes = boot_wake_goals(srv)
                 print(f"[seat] the board re-derives the wakes: "
                       f"{_n_wakes}/{_n_goals} open goal(s) re-queued to "
