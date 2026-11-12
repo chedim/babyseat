@@ -133,3 +133,20 @@ fn the_door_verifies_the_token_and_a_pack_reads_who() {
     assert_eq!(who("/b"), json!("nobody: no token"));
     assert_eq!(who("/c"), json!("nobody: no token"), "a query-string token is never read");
 }
+
+#[test]
+fn the_secret_may_be_a_file_the_launcher_names() {
+    let dir = std::env::temp_dir().join(format!("door-secret-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("jwt.secret");
+    std::fs::write(&f, "0123456789abcdef0123456789abcdef\n").unwrap();             // a trailing newline is not part of the secret
+    let (mut c, mut f2) = world();
+    put(&mut c, &mut f2, "listen", json!({"id": "l1", "port": 0, "secret_file": f.to_str().unwrap()}));
+    pump(&mut c, &mut f2, |c| c.docs["Http:door"].props.get("listen_result").is_some());
+    let port = c.docs["Http:door"].props["listen_result"]["port"].as_u64().unwrap();
+    let a = ask(port, format!("GET /a HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer {GOOD}\r\n\r\n"));
+    let mut ra = None;
+    pump(&mut c, &mut f2, |_| { if ra.is_none() { ra = a.try_recv().ok(); } ra.is_some() });
+    let who = c.docs.values().find(|e| e.props.get("path") == Some(&json!("/a"))).map(|e| e.props["who"].clone()).unwrap();
+    assert_eq!(who, json!("owner owner"));
+}

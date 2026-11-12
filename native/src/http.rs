@@ -105,7 +105,8 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
     let bound = l.local_addr().map(|a| a.port()).unwrap_or(0);
     if l.set_nonblocking(true).is_err() { return json!({"id": id, "status": "error", "rc": 2, "head": "cannot listen: nonblocking"}); }
     // the door verifies the token itself: the secret comes from the environment variable `secret_env` names (never a prop)
-    let secret: Option<Vec<u8>> = req.get("secret_env").and_then(|e| e.as_str()).and_then(|e| std::env::var(e).ok()).map(|s| s.into_bytes());
+    let secret: Option<Vec<u8>> = req.get("secret_env").and_then(|e| e.as_str()).and_then(|e| std::env::var(e).ok()).map(|s| s.into_bytes())
+        .or_else(|| req.get("secret_file").and_then(|f| f.as_str()).and_then(|f| std::fs::read_to_string(f).ok()).map(|s| s.trim().as_bytes().to_vec()));
     let stop = Arc::new(AtomicBool::new(false));
     if let Some(old) = st.set_listener(eid, stop.clone()) { old.store(true, Ordering::SeqCst); }
     let (st2, eid2, secret) = (st.clone_handle(), eid.to_string(), secret);
