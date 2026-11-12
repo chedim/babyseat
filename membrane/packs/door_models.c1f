@@ -8,6 +8,9 @@ IMPORT router 1
 Request.o_models getter: this.path in ['/v1/models', '/v1/models/', '/membrane/models']
 Request.m_list getter: this.path in ['/v1/models', '/v1/models/']
 Request.m_post getter: this.method == 'POST'
+-- the allowed methods (the door answers 405 + allow): the list is read-only, the minds' route reads and posts; a minds route with no
+-- Minds seat answers 503 whatever the method (None: the family answers itself)
+Request.m_models getter: None if (this.m_minds and this.mind_seat == None) else (['GET', 'POST'] if this.m_minds else ['GET'])
 Request.m_need getter: this.m_list or this.m_post
 Request.m_ask getter: {'id': this.eid} if (this.o_models == True and this.m_need and this.models_asked != True) else None
 Request.m_ask on-setter models-ask:
@@ -25,8 +28,7 @@ Request.d_lanes getter: FOR l IN this.m_lanes: {'id': l, 'object': 'model', 'own
 Request.d_rungs getter: FOR m IN this.m_rungs: {'id': m.name, 'object': 'model', 'owned_by': m.owner}
 Request.m_data getter: concat(concat(concat(this.d_tags, [{'id': '@explore', 'object': 'model', 'owned_by': 'membrane->ollama'}]), this.d_lanes), this.d_rungs)
 Request.list_reply getter:
-  WHEN not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
-  ELSE WHEN this.models_ready != True: None
+  WHEN this.models_ready != True: None
   ELSE: {'status': 200, 'body': {'object': 'list', 'data': this.m_data}}
 
 -- ---- /membrane/models: the minds' models (loops, cortex, workers), their credentials and the think dial
@@ -34,11 +36,10 @@ Request.mind getter: [x for x in instances('Minds')]
 Request.mind_seat getter: this.mind[0] if len(this.mind) > 0 else None
 Request.mind_read getter: this.mind_seat.read if this.mind_seat != None else {}
 Request.pickable getter: concat([m.name for m in this.m_tags], [m.name for m in instances('Model') if m.rung == True and m.backend == 'claude-agent' and m.listed == True])
-Request.in_body getter: json(this.body or '')
 -- every field of the body, with its value, its python-style repr (for the messages) and whether it is a model name
 -- (a string of 1..120 characters from letters, digits and _.:/@~+-)
 Request.k_list getter: ['loops_auth', 'cortex_auth', 'workers_auth', 'loops', 'cortex', 'workers', 'think']
-Request.v_list getter: [prop(this.in_body, k) for k in this.k_list]
+Request.v_list getter: [prop(this.jbody, k) for k in this.k_list]
 Request.s_list getter: [str(v) for v in this.v_list]
 Request.str_list getter: [this.s_list[i] == this.v_list[i] for i in [0, 1, 2, 3, 4, 5, 6]]
 Request.r_list getter: [("'" + this.s_list[i] + "'") if this.str_list[i] else this.s_list[i] for i in [0, 1, 2, 3, 4, 5, 6]]
@@ -59,33 +60,32 @@ Request.post_go getter: True if (this.o_models == True and this.m_minds and this
 Request.m_minds getter: this.path == '/membrane/models'
 
 Request.post_go on-setter minds-loops:
-  WHEN this.post_go == True and prop(this.in_body, 'loops') != None:
-    ('Minds:seat').loops = prop(this.in_body, 'loops')
+  WHEN this.post_go == True and prop(this.jbody, 'loops') != None:
+    ('Minds:seat').loops = prop(this.jbody, 'loops')
 Request.post_go on-setter minds-cortex:
-  WHEN this.post_go == True and prop(this.in_body, 'cortex') != None:
-    ('Minds:seat').cortex = prop(this.in_body, 'cortex')
+  WHEN this.post_go == True and prop(this.jbody, 'cortex') != None:
+    ('Minds:seat').cortex = prop(this.jbody, 'cortex')
 Request.post_go on-setter minds-workers:
-  WHEN this.post_go == True and prop(this.in_body, 'workers') != None:
-    ('Minds:seat').workers = prop(this.in_body, 'workers')
+  WHEN this.post_go == True and prop(this.jbody, 'workers') != None:
+    ('Minds:seat').workers = prop(this.jbody, 'workers')
 Request.post_go on-setter minds-loops-auth:
-  WHEN this.post_go == True and prop(this.in_body, 'loops_auth') != None:
-    ('Minds:seat').loops_auth = prop(this.in_body, 'loops_auth')
+  WHEN this.post_go == True and prop(this.jbody, 'loops_auth') != None:
+    ('Minds:seat').loops_auth = prop(this.jbody, 'loops_auth')
 Request.post_go on-setter minds-cortex-auth:
-  WHEN this.post_go == True and prop(this.in_body, 'cortex_auth') != None:
-    ('Minds:seat').cortex_auth = prop(this.in_body, 'cortex_auth')
+  WHEN this.post_go == True and prop(this.jbody, 'cortex_auth') != None:
+    ('Minds:seat').cortex_auth = prop(this.jbody, 'cortex_auth')
 Request.post_go on-setter minds-workers-auth:
-  WHEN this.post_go == True and prop(this.in_body, 'workers_auth') != None:
-    ('Minds:seat').workers_auth = prop(this.in_body, 'workers_auth')
+  WHEN this.post_go == True and prop(this.jbody, 'workers_auth') != None:
+    ('Minds:seat').workers_auth = prop(this.jbody, 'workers_auth')
 Request.post_go on-setter minds-think:
-  WHEN this.post_go == True and prop(this.in_body, 'think') != None:
-    ('Minds:seat').think = prop(this.in_body, 'think')
+  WHEN this.post_go == True and prop(this.jbody, 'think') != None:
+    ('Minds:seat').think = prop(this.jbody, 'think')
 Request.post_go on-setter minds-applied:
   WHEN this.post_go == True:
     this.minds_applied = True
 
 Request.minds_reply getter:
   WHEN this.mind_seat == None: {'status': 503, 'body': ''}
-  ELSE WHEN not this.m_post and not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE WHEN not this.m_post: {'status': 200, 'body': this.mind_read}
   ELSE WHEN this.models_ready != True: None
   ELSE WHEN this.err != None: {'status': 400, 'body': {'error': this.err}}

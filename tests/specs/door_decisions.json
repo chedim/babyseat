@@ -2322,5 +2322,131 @@
     "equals": 404
    }
   ]
+ },
+ {
+  "name": "a write route allows POST only (allow header)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/drop",
+     "body": ""
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "a read route allows GET only (allow header)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/goals",
+     "body": ""
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET"
+   }
+  ]
  }
 ]

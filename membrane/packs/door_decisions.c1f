@@ -37,7 +37,8 @@ Request.dm_route getter:
   ELSE: None
 Request.o_decisions getter: this.dm_route != None
 Request.dm_write getter: this.dm_route in ['answer', 'drop', 'chat']
-Request.dm_wrong_method getter: (this.dm_write and this.method != 'POST') or (not this.dm_write and not this.is_read)
+-- the allowed methods (the door answers 405 + allow)
+Request.m_decisions getter: ['POST'] if this.dm_write else ['GET']
 
 -- ---- the cards -------------------------------------------------------------------------------------------------------------
 Decision.dm_sk getter: {'open': '0', 'in_flight': '1', 'decided': '2', 'closed': '3', 'dropped': '4'}[this.cur_status] + '|' + str(this.name or this.eid)
@@ -113,8 +114,7 @@ Request.wg_edges getter: [e for e in this.wg_raw if e['from'] in this.wg_ids and
 Request.dm_graph getter: {'nodes': this.wg_nodes, 'edges': this.wg_edges, 'runs': [], 'rocket': False}
 
 -- ---- the query: ?spec=<eid> (percent-decoded for the characters an eid has) ---------------------------------------------------------
-Request.dm_qparts getter: words(replace(this.query or '', '&', ' '))
-Request.dm_spec_raw getter: ([replace(p, 'spec=', '') for p in this.dm_qparts if startswith(p, 'spec=')] or [''])[0]
+Request.dm_spec_raw getter: ([q[1] for q in this.qpairs if q[0] == 'spec'] or [''])[0]
 Request.dm_spec1 getter: replace(replace(replace(replace(replace(replace(this.dm_spec_raw, '+', ' '), '%3A', ':'), '%2F', '/'), '%20', ' '), '%23', '#'), '%40', '@')
 Request.dm_spec getter: strip(replace(replace(replace(replace(replace(replace(this.dm_spec1, '%2C', ','), '%3D', '='), '%26', '&'), '%2B', '+'), '%3F', '?'), '%25', '%'))
 Request.dm_found getter: [e for e in concat(instances('Decision'), instances('Goal'), instances('Task'), instances('Wait')) if e.eid == this.dm_spec]
@@ -151,8 +151,7 @@ Request.dm_msg getter: str(prop(this.dm_body, 'message') or '') or None
 Request.dm_work getter: prop(this.dm_body, 'work') if str(prop(this.dm_body, 'work')) in ['True', 'False', 'true', 'false'] else None
 -- what is refused before anything is written
 Request.dm_refused getter:
-  WHEN this.dm_wrong_method: {'status': 405, 'body': {'error': 'method not allowed'}}
-  ELSE WHEN this.dm_write and this.authed != True: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  WHEN this.dm_write and this.authed != True: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
   ELSE WHEN this.dm_write and not this.dm_obj: {'status': 400, 'body': {'error': 'a JSON object body is required'}}
   ELSE WHEN this.dm_write and this.dm_c == None: {'status': 400, 'body': {'error': 'no Decision card ' + "'" + this.dm_card_id + "'"}}
   ELSE WHEN this.dm_route == 'chat' and strip(str(prop(this.dm_body, 'chat') or '')) == '': {'status': 400, 'body': {'error': 'chat required'}}
