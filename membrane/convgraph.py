@@ -857,20 +857,17 @@ def before_turn(srv, runner, sid: str, user_info: dict, text: str) -> dict | Non
         return {"hint": "proposal", "word": word}
     if not verb:
         return None
-    from . import speech as SP
     labels = [_label(est, c) for c in cands]
-    line = SP.say("reask", word=word, options=labels)
-    # NOT AN INTERCEPT (operator 2026-11-11): the line is shown, the turn still runs and the
-    # model is told the readings. TODO: the model asks instead of membrane (no line at all).
-    srv.__dict__.setdefault("_cg_notes", {})[sid] = (
-        f"In the person's last message, \"{word}\" may mean " + " or ".join(labels) +
-        f"; membrane asked them which ({line}). Use the chat to tell which they mean; "
-        "if you cannot, ask them before acting.")
+    # THE MODEL ASKS, NOT MEMBRANE (#1093, operator 2026-11-11): membrane posts no line. The turn runs and the model
+    # is told the readings; it picks one from the chat and asks only when it can't tell. The person's answer to
+    # the model's question still loads the register (`reask` below is what `_answer_reask` reads, whoever asked).
+    note = (f"In the person's last message, \"{word}\" may mean " + " or ".join(labels) +
+            ". Use the chat to tell which they mean; if you cannot, ask them before acting.")
+    srv.__dict__.setdefault("_cg_notes", {})[sid] = note
     _mint(est, sid, mid, "user", text, speaker=who)
     d = est.docs[u]
     d.properties = {**(d.properties or {}), "reask": {"word": word, "readings": cands}}
     est.upsert(d, embedder=None)
     if prev_a is not None:
         _edge(be, origin, u, "follows", msg_eid(prev_a.get("id")))
-    runner.post_line(sid, line)
-    return {"reask": line, "readings": cands}
+    return {"reask": note, "readings": cands}
