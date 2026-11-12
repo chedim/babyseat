@@ -26,12 +26,9 @@ on its entity; work → a method or goal on the thing it is about. What isn't sa
 
 ## The banner (a placeholder)
 The banner slot holds one line: where this chat's banner lives and how to change it. It is `Banner:<owner>:<chat>`;
-read it with `entity read`; its dials are fields on it, changed with `entity edit` (read it back after):
-- `mode`: `help` (the placeholder, the default here), `full` (the whole block other seats get: recalled facts, open
-  goals, decisions waiting) or `off` (nothing);
-- when `full`: recall `pool` (candidates), `n` (rows shown), `weights`; layout `budget` (characters), `open_max`,
-  `decided_max`, `news_chars`; focus `window`, `focus_k`, `news_max`.
-Switch this chat to `full` only when the person's work needs it, and say what you changed.
+read it with `entity read`. Its one dial here is `mode`, changed with `entity edit` (read it back after): `help`
+(the placeholder, the default) or `off` (nothing). The whole banner block other seats get (recalled facts, open
+goals, decisions waiting) never loads on a map-mode seat: use your tools.
 
 ## Picking a thread back up
 Read the cards and goals the map shows before asking the person. The person's "it" is usually the in: line's.

@@ -722,18 +722,30 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     return lines
 
 
-def bare(srv, body: dict, conv: str) -> str | None:
+BARE_FALLBACK = ("BANNER: nothing is pushed here; look things up with your tools. "
+                 "Settings: entity edit this chat's Banner (mode help|off).")
+
+
+def bare(srv, body: dict, conv: str) -> str:
     """Map mode's banner (operator 2026-11-11): the banner pack's own tiny placeholder that instructs. The seat only
     tells the pack `map`; the pack decides what the slot shows (its `mode` dial can bring the full block or nothing
-    back). No ask is written (so nothing is recalled) and no track alert is taken. None without the field engine."""
-    from . import lanes as _L
-    from . import fields_live as _FL
-    live = _FL.CURRENT
-    fld = _L._efield_on(srv)
-    if live is None or fld is None or not live.has_banner():
-        return None
-    return pack_block(srv, live, fld, conv, [], "", time.time(), str((body or {}).get("_turn_sid") or ""),
-                      {"map": True})
+    back). No ask is written (so nothing is recalled) and no track alert is taken. When the pack cannot answer
+    (no field engine, an error, an empty answer) the fallback is the built-in introductory placeholder
+    (BARE_FALLBACK) -- never the standard banner (operator 2026-11-11: it must NEVER load in map mode)."""
+    try:
+        from . import lanes as _L
+        from . import fields_live as _FL
+        live = _FL.CURRENT
+        fld = _L._efield_on(srv)
+        if live is None or fld is None or not live.has_banner():
+            return BARE_FALLBACK
+        out = pack_block(srv, live, fld, conv, [], "", time.time(), str((body or {}).get("_turn_sid") or ""),
+                         {"map": True})
+    except Exception:                       # noqa: BLE001 -- the placeholder never breaks a turn
+        return BARE_FALLBACK
+    if out is None:
+        return ""                           # the pack's mode dial is 'off': nothing, by the person's choice
+    return out if out.startswith("BANNER") else BARE_FALLBACK
 
 
 def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: str, facts: dict) -> str | None:
@@ -796,7 +808,11 @@ def _shadow(srv, fld, conv, events, latest, now, tz, block) -> None:
 
 def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
           on_alert=None) -> str | None:
-    """The block for this turn (None when it holds nothing of this chat)."""
+    """The block for this turn (None when it holds nothing of this chat). NEVER in map mode: there the banner is
+    only the placeholder (bare), whatever called this."""
+    from . import momentum_map as _MM
+    if _MM.on():
+        return bare(srv, body, conv) or None
     from . import lanes as _L
     now = time.time() if now is None else now
     fld = _L._efield_on(srv)

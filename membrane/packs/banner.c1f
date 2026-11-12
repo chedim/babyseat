@@ -129,13 +129,14 @@ Banner.now_line getter: strip('NOW (for reference, not an event): ' + prop(this.
 Banner.used getter: len(this.now_line) + 1 + len(this.conv_header or '')
 Banner.recall_block getter: concat([this.recall_header], this.lines) if this.lines else []
 -- THE BARE BANNER (operator 2026-11-11): the banner slot can hold a tiny placeholder that instructs instead of the
--- block. Dial `mode` on the chat's instance: 'full' (the block), 'help' (the placeholder: nothing is recalled),
--- 'off' (nothing). With no mode, a seat that writes the fact `map` (map mode) shows the placeholder and every other
--- seat the block.
-Banner.shown getter WHEN this.mode == 'full' or this.mode == 'help' or this.mode == 'off': this.mode
+-- block. A seat in map mode writes the fact `map`: its banner is the placeholder or nothing (dial `mode`: 'off'),
+-- NEVER the block -- `full` is not honoured there. Every other seat: dial `mode` 'full' (the block, the default),
+-- 'help' (the placeholder: nothing is recalled) or 'off' (nothing).
+Banner.shown getter WHEN this.map and this.mode == 'off': 'off'
 Banner.shown getter WHEN this.map: 'help'
+Banner.shown getter WHEN this.mode == 'help' or this.mode == 'off': this.mode
 Banner.shown getter: 'full'
-Banner.bare getter: 'BANNER: nothing is pushed here; look things up with your tools. Settings: entity edit ' + this.eid + ' (mode full|help|off, pool, n, budget).'
+Banner.bare getter: 'BANNER: nothing is pushed here; look things up with your tools. Settings: entity edit ' + this.eid + ' (mode help|off).'
 Banner.text getter:
   WHEN this.shown == 'off': None
   ELSE WHEN this.shown == 'help': this.bare

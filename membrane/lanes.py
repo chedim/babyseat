@@ -4298,6 +4298,9 @@ def _recon_block(srv, fld, body: dict, query: str, vec):
     carries what it needs, and its recall's cold reads held the field store's one lock
     while a person's turn waited for it (2026-10-31, profiled: the banner's 4 minutes)."""
     recon = None
+    from . import momentum_map as _MM
+    if _MM.on():                            # map mode: no history, no past answers (the map and the tools are the memory)
+        return None
     try:
         from .entity_block import reconstruct, render_for
         # this chat's own history (#668): the boot prefix mixed every chat
@@ -6106,10 +6109,10 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 _st.mark("ctx")                   # the context stack's in: line
                 try:                              # the banner pack's tiny placeholder that instructs
                     from . import conv_banner as _CB
-                    _bare = _CB.bare(srv, body, _CAPMOD.current_conversation()) or ""
+                    _bare = _CB.bare(srv, body, _CAPMOD.current_conversation())
                 except Exception as _be:
-                    print(f"[exp-map] banner placeholder skipped ({_be})", file=sys.stderr)
-                    _bare = ""
+                    print(f"[exp-map] banner placeholder failed ({_be})", file=sys.stderr)
+                    from .conv_banner import BARE_FALLBACK as _bare
                 up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield,
                                              getattr(srv, "entity_store", None), _cl,
                                              chat=_CC.current(srv), held=_CC.held(srv), banner=_bare)

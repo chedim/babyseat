@@ -55,17 +55,29 @@ def test_without_the_map_fact_the_full_block_is_unchanged(seat, monkeypatch):
     assert not (r["text"] or "").startswith("BANNER")
 
 
-def test_the_mode_dial_overrides_the_seat(seat, monkeypatch):
+def test_a_map_seat_never_shows_the_full_block_whatever_the_mode(seat, monkeypatch):
+    # operator 2026-11-11: it should NEVER load the standard banner in map mode
     _run(seat, monkeypatch, facts={"map": True})
     _dial(seat, mode="full")
     r = _run(seat, monkeypatch, facts={"map": True}, ask=ASK + " again", now=101.0)
-    assert "#3 the bilge pump ran twice" in (r["text"] or "")          # full, though the seat says map
+    assert (r["text"] or "").startswith("BANNER")                      # full is not honoured on a map seat
+    assert "#3 the bilge pump ran twice" not in (r["text"] or "")
     _dial(seat, mode="off")
     r = _run(seat, monkeypatch, facts={"map": True}, ask=ASK + " once more", now=102.0)
     assert not r["text"]                                               # off: nothing
+
+
+def test_a_seat_that_is_not_map_mode_picks_its_banner_with_the_mode_dial(seat, monkeypatch):
+    _run(seat, monkeypatch, facts={"map": False})
     _dial(seat, mode="help")
-    r = _run(seat, monkeypatch, facts={"map": False}, ask=ASK + " last", now=103.0)
-    assert (r["text"] or "").startswith("BANNER")                      # help, though the seat is not map mode
+    r = _run(seat, monkeypatch, facts={"map": False}, ask=ASK + " help", now=101.0)
+    assert (r["text"] or "").startswith("BANNER")
+    _dial(seat, mode="off")
+    r = _run(seat, monkeypatch, facts={"map": False}, ask=ASK + " off", now=102.0)
+    assert not r["text"]
+    _dial(seat, mode="full")
+    r = _run(seat, monkeypatch, facts={"map": False}, ask=ASK + " full", now=103.0)
+    assert "#3 the bilge pump ran twice" in (r["text"] or "")
 
 
 def test_the_placeholder_comes_from_the_pack_not_from_python():
@@ -101,4 +113,51 @@ def test_conv_banner_bare_asks_the_pack_with_the_map_fact_and_recalls_nothing(se
     assert (text or "").startswith("BANNER")
     assert "recall" not in calls
     monkeypatch.setattr(FL, "CURRENT", None)
-    assert CB.bare(seat, {}, "ses_op") is None                         # no field engine: no placeholder
+    assert CB.bare(seat, {}, "ses_op") == CB.BARE_FALLBACK            # no field engine: the introductory placeholder
+
+
+def test_without_the_pack_a_map_seat_falls_back_to_the_introductory_placeholder_never_the_standard_banner(seat, monkeypatch):
+    from membrane import conv_banner as CB
+    from membrane import lanes as L
+    monkeypatch.setattr(FL, "CURRENT", None)                           # the pack cannot answer
+    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
+    text = CB.bare(seat, {}, "ses_op")
+    assert text == CB.BARE_FALLBACK and text.startswith("BANNER") and len(text) < 320
+
+
+def test_the_standard_banner_builder_refuses_to_run_in_map_mode(seat, monkeypatch):
+    from membrane import conv_banner as CB
+    from membrane import lanes as L
+    calls = []
+
+    def fake(ctx, name, args):
+        calls.append(name)
+        return _fake(ctx, name, args)
+    monkeypatch.setattr(RB, "c1f_call", fake)
+    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
+    monkeypatch.setenv("MEMBRANE_EXP_MOMENTUM_MAP", "1")
+    body = {"_turn_sid": "ses_op", "messages": [{"role": "user", "content": ASK}]}
+    out = CB.build(seat, body, "ses_op")
+    assert (out or "").startswith("BANNER")
+    assert "recall" not in calls and "rerank" not in calls
+    monkeypatch.setattr(FL, "CURRENT", None)                           # even with no field engine at all
+    assert (CB.build(seat, body, "ses_op") or "").startswith("BANNER")
+
+
+def test_map_mode_never_rebuilds_the_history_or_past_answers(seat, monkeypatch):
+    # operator 2026-11-11 (the paste): "THE CONVERSATION SO FAR" + "PAST ANSWERS" rode a map-mode turn through the
+    # no-context rebuild (_recon_block); map mode has no history and no recall block
+    from membrane import entity_block as EB
+    from membrane import lanes as L
+    called = []
+    monkeypatch.setattr(EB, "reconstruct", lambda *a, **k: called.append("reconstruct") or "THE CONVERSATION SO FAR ...")
+    monkeypatch.setattr(EB, "render_for", lambda *a, **k: called.append("render_for") or "PAST ANSWERS ...")
+    monkeypatch.setattr(L, "_own_session_prefix", lambda srv: "")
+    monkeypatch.setattr(L, "_is_loop_turn", lambda srv, body: False)
+    monkeypatch.setattr(L, "_banner_top", lambda srv, q: [])
+    monkeypatch.delenv("MEMBRANE_EXP_MOMENTUM_MAP", raising=False)
+    assert "THE CONVERSATION SO FAR" in (L._recon_block(seat, object(), {}, "q", None) or "")     # other seats: unchanged
+    called.clear()
+    monkeypatch.setenv("MEMBRANE_EXP_MOMENTUM_MAP", "1")
+    assert L._recon_block(seat, object(), {}, "q", None) is None
+    assert called == []
