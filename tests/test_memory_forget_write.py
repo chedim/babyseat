@@ -67,16 +67,17 @@ def _forget(est, spec):
 def test_an_index_spec_cuts_exactly_those_events(seat, spec, nums):
     srv, est = seat
     _forget(est, spec)
-    assert _until(lambda: est.docs[EID].properties.get("cut_result"))
+    assert _until(lambda: est.docs[EID].properties.get("cut_report"))
     assert sorted(srv.cut[0]) == nums and srv.near == []
+    assert est.docs[EID].properties["cut_report"].startswith(f"Forgot {len(nums)} event(s)") and f"- #{nums[0]}: forgotten" in est.docs[EID].properties["cut_report"]
 
 
 @pytest.mark.parametrize("spec", ["the bilge pump", "everything", "#3 and #4", "3.5", "-5", "5-", "3--7", "a-b"])
 def test_a_wordy_spec_only_lists_the_nearest_events_and_deletes_nothing(seat, spec):
     srv, est = seat
     _forget(est, spec)
-    r = _until(lambda: est.docs[EID].properties.get("near_result"))
-    assert "#7" in r and "Nothing removed" in r
+    r = _until(lambda: est.docs[EID].properties.get("near_report"))
+    assert "#7 (sim 0.91)" in r and "Nothing removed" in r
     assert srv.cut == [] and srv.near == [spec]
 
 
@@ -93,7 +94,7 @@ def test_more_than_the_agent_cap_is_refused_and_nothing_is_cut(seat, spec):
 def test_exactly_the_cap_is_fine(seat):
     srv, est = seat
     _forget(est, "1-12")
-    assert _until(lambda: est.docs[EID].properties.get("cut_result"))
+    assert _until(lambda: est.docs[EID].properties.get("cut_report"))
     assert srv.cut[0] == list(range(1, 13))
 
 

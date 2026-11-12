@@ -68,6 +68,17 @@ Memory.forget_plan on-setter forget-act:
     this.forget_result = {'id': prop(this.forget_plan, 'id'), 'removed': None, 'reason': 'nearest events asked'}
     this.near = {'spec': prop(this.forget_plan, 'near')}
 
+-- the reports, worded here from the driver's raw rows
+Memory.cut_what getter: [[r, 'no such event' if prop(r, 'missing') else ('failed (' + str(prop(r, 'error')) + ')' if prop(r, 'error') else ('already forgotten' if prop(r, 'already') else 'forgotten'))] for r in (this.cut_rows or [])]
+Memory.cut_said getter: [[x[0], x[1] + ('; ' + str(len(prop(x[0], 'entities') or [])) + ' entities recomputed' if 'forgotten' in x[1] else '')] for x in this.cut_what]
+Memory.cut_line getter: ['- #' + str(prop(x[0], 'n')) + ': ' + x[1] for x in this.cut_said]
+Memory.cut_gone getter: len([r for r in (this.cut_rows or []) if prop(r, 'key') and not prop(r, 'already')])
+Memory.cut_report getter: None if this.cut_rows == None else join(concat(['Forgot ' + str(this.cut_gone) + ' event(s) (the entity field):'], this.cut_line), '\n')
+Memory.near_report getter:
+  WHEN this.near_rows == None: None
+  ELSE WHEN len(this.near_rows) == 0: 'Wordy forgets propose, never delete: nothing matched (the nearest past events only). Nothing removed.'
+  ELSE: 'Wordy asks never delete from tool calls. Nearest events: ' + join(['#' + str(prop(r, 'n')) + ' (sim ' + str(prop(r, 'sim')) + ')' for r in head(this.near_rows, 8)], ', ') + '. To remove, write forget again with explicit indexes. Nothing removed.'
+
 Boot.started on-setter memory-node:
   ALWAYS:
     ('Memory:seat').name = 'the seat memory'

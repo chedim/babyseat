@@ -122,6 +122,38 @@ impl SqlExec for NativeSqlExec {
         r
     }
 
+    fn write(&self, statements: &[(String, Vec<J>)]) -> Result<(i64, Vec<J>), String> {
+        if statements.is_empty() { return Err("sql: nothing to run (a statement, or statements)".into()); }
+        for (sql, _) in statements { allowed(sql)?; }
+        let mut cx = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX).map_err(|e| format!("store {}: {e}", self.path))?;
+        cx.busy_timeout(Duration::from_millis(BUSY_TIMEOUT_MS)).map_err(|e| word(&e))?;
+        let tx = cx.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| word(&e))?;
+        let (mut changed, mut returned) = (0i64, Vec::new());
+        for (sql, args) in statements {
+            let mut stmt = tx.prepare(sql).map_err(|e| word(&e))?;
+            if stmt.readonly() { return Err("sql: a read is a getter: sql(...) (Store.run writes)".into()); }
+            if stmt.parameter_count() != args.len() {
+                return Err(format!("sql: the statement takes {} argument(s), got {}", stmt.parameter_count(), args.len()));
+            }
+            let cols: Vec<String> = stmt.column_names().into_iter().map(|c| c.to_string()).collect();
+            let vals: Vec<SqlValue> = args.iter().map(bind).collect();
+            if cols.is_empty() {
+                changed += stmt.execute(rusqlite::params_from_iter(vals.iter())).map_err(|e| word(&e))? as i64;
+            } else {
+                let mut rows = stmt.query(rusqlite::params_from_iter(vals.iter())).map_err(|e| word(&e))?;
+                while let Some(r) = rows.next().map_err(|e| word(&e))? {
+                    let mut m = Map::new();
+                    for (i, c) in cols.iter().enumerate() { m.insert(c.clone(), cell(r.get_ref(i).map_err(|e| word(&e))?)); }
+                    returned.push(J::Object(m));
+                    changed += 1;
+                }
+            }
+        }
+        tx.commit().map_err(|e| word(&e))?;
+        Ok((changed, returned))
+    }
+
     fn interrupt(&self, token: u64) {
         let handle = {
             let mut g = self.st.lock().unwrap_or_else(|e| e.into_inner());
@@ -136,6 +168,18 @@ impl SqlExec for NativeSqlExec {
             std::thread::sleep(Duration::from_millis(20));
         }).ok();
     }
+}
+
+/// What `Store.run` may be: one INSERT / UPDATE / DELETE / REPLACE (or a WITH leading one), never DDL, ATTACH, PRAGMA or
+/// VACUUM, never two statements in one string.
+fn allowed(sql: &str) -> Result<(), String> {
+    let t = sql.trim();
+    let first = t.split(|c: char| !c.is_ascii_alphabetic()).next().unwrap_or("").to_ascii_lowercase();
+    if !["insert", "update", "delete", "replace", "with"].contains(&first.as_str()) {
+        return Err(format!("sql: Store.run takes INSERT, UPDATE or DELETE (got {:?}); reads are sql(...) getters, the schema is the store's own", first));
+    }
+    if t.trim_end_matches(';').contains(';') { return Err("sql: one statement per entry (use statements: [...] for several)".into()); }
+    Ok(())
 }
 
 fn query(cx: &Connection, sql: &str, args: &[J]) -> Result<Vec<J>, String> {

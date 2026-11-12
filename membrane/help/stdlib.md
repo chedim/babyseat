@@ -18,6 +18,9 @@ entity.
 - `File:<name>.move = {id, to}`
 - `File:<name>.delete = {id}`
 
+## Changing the store (effects)
+`Store:<name>.run = {id, sql, args}` runs ONE INSERT / UPDATE / DELETE on the seat's store, with bound `args` (`?`). `{id, statements: [{sql, args}, ...]}` runs several as ONE transaction: any failure rolls them all back. `... RETURNING col` puts the rows in the receipt. The receipt lands on the entity: `run_result` ({id, rc, head, changes, rows?}) and `run_rc` (0 ok, 2 refused). Reads are `sql(...)` getters, not this; DDL, ATTACH, PRAGMA and two statements in one string are refused; a script's write of it is refused (only a person, a model or a setter).
+
 ## Running programs (effects)
 - `Command:<name>.run = {id, args}` -- the entity's `cmd` is an argument list (or a string run by `sh -c`),
   with optional `cwd` and `env_from {VAR: ENV_VAR}` (secrets are named, read at run time, never stored)

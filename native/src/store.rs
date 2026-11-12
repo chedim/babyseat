@@ -32,6 +32,9 @@ pub trait SqlExec: Send + Sync {
     /// wrong argument count is refused before the run. Never on the engine's call (it would wait for the GIL).
     fn check(&self, _sql: &str, _nargs: usize) -> Result<(), String> { Ok(()) }
     fn interrupt(&self, token: u64);
+    /// Run write statements as ONE transaction (`Store:<x>.run`): -> (rows changed, RETURNING rows). A read, DDL, ATTACH or
+    /// PRAGMA is refused; a failure rolls the whole batch back. A store with no writer says so.
+    fn write(&self, _statements: &[(String, Vec<J>)]) -> Result<(i64, Vec<J>), String> { Err("sql: this store is read-only".into()) }
 }
 
 /// A query's answer as the engine sees it.
@@ -73,6 +76,9 @@ impl Store {
         st.sh.0.lock().unwrap_or_else(|e| e.into_inner()).exec = Some(exec);
         st
     }
+
+    /// The store's SQLite (None for an io-only store): the write verb runs on it, off the engine's lock.
+    pub fn exec_handle(&self) -> Option<Arc<dyn SqlExec>> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).exec.clone() }
 
     /// The drivers without a database (fs, proc, jsonl): `sql(...)` then says no store is attached.
     pub fn io_only(dir: &str) -> Store {

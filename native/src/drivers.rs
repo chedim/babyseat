@@ -88,7 +88,7 @@ fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
 }
 
 /// The driver verbs the engine runs: (class, verb).
-pub const VERBS: [(&str, &str); 5] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop")];
+pub const VERBS: [(&str, &str); 6] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run")];
 
 /// Run one effect (the engine calls this for a write of a driver verb). `props` are the entity's.
 pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map<String, J>) {
@@ -96,6 +96,27 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
     let dir = st.dir.clone();
     let path = props.get("path").and_then(|v| v.as_str()).map(|p| resolve(&dir, p));
     match (cls, verb) {
+        ("Store", "run") => {                   // the store's writes: bound statements in one transaction, a receipt
+            let stmts: Vec<(String, Vec<J>)> = match req.get("statements").and_then(|s| s.as_array()) {
+                Some(a) => a.iter().map(|x| (x.get("sql").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+                    x.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default())).collect(),
+                None => vec![(req.get("sql").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+                    req.get("args").and_then(|a| a.as_array()).cloned().unwrap_or_default())],
+            };
+            let exec = st.exec_handle();
+            st.effect(eid, verb, Box::new(move |_, _| {
+                let Some(exec) = exec else { return receipt(&id, 2, "this seat has no store attached".into(), Map::new()) };
+                match exec.write(&stmts) {
+                    Ok((changes, rows)) => {
+                        let mut extra = Map::new();
+                        extra.insert("changes".into(), json!(changes));
+                        if !rows.is_empty() { extra.insert("rows".into(), J::Array(rows)); }
+                        receipt(&id, 0, format!("{changes} row(s)"), extra)
+                    }
+                    Err(e) => receipt(&id, 2, e, Map::new()),
+                }
+            }));
+        }
         ("Command", "stop") => {
             let killed = st.kill(eid);
             st.effect(eid, verb, Box::new(move |_, _| receipt(&id, if killed { 0 } else { 1 },

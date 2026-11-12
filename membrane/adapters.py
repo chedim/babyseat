@@ -188,7 +188,7 @@ def _memory(srv, est, ent, prop, new, by) -> None:
     """The memory store's driver: a lesson the pack accepted becomes a NOTE event (src model); a cut deletes the events the
     pack's index parse named; a near lists the nearest events to a wordy spec (it never deletes)."""
     from . import lanes as L
-    if prop == "cut":
+    if prop == "cut":                       # the effect only: delete the events the pack named; the pack words the report
         nums = [int(n) for n in ((new or {}).get("nums") or [])] if isinstance(new, dict) else []
         res = L._efield_forget(srv, nums)
         try:
@@ -196,29 +196,13 @@ def _memory(srv, est, ent, prop, new, by) -> None:
                                           "spec": L._clip(str((new or {}).get("spec") or ""), 200)})
         except Exception:                   # noqa: BLE001 -- an audit never undoes a cut
             pass
-        gone = sum(1 for r in res if r.get("key") and not r.get("already"))
-        lines = [f"Forgot {gone} event(s) (the entity field):"]
-        for r in res:
-            n = r.get("n")
-            if r.get("missing"):
-                lines.append(f"- #{n}: no such event")
-            elif r.get("error"):
-                lines.append(f"- #{n}: failed ({r['error']})")
-            else:
-                lines.append(f"- #{n}: {'already forgotten' if r.get('already') else 'forgotten'}; "
-                             f"{len(r.get('entities') or [])} entities recomputed")
-        _consume(est, ent, prop, new, "\n".join(lines), rc=0)
+        ent.properties = {**(ent.properties or {}), "cut_rows": res}
+        _consume(est, ent, prop, new, "cut", rc=0)
         return
-    if prop == "near":
+    if prop == "near":                      # the effect only: the nearest events; the pack words the report
         spec = str((new or {}).get("spec") or "") if isinstance(new, dict) else str(new or "")
-        cands = _near_events(srv, spec, 40)
-        if not cands:
-            _consume(est, ent, prop, new, "Wordy forgets propose, never delete: nothing matched (the nearest past events "
-                     "only). Nothing removed.", rc=0)
-        else:
-            _consume(est, ent, prop, new, "Wordy asks never delete from tool calls. Nearest events: "
-                     + ", ".join(f"#{c['n']} (sim {c['sim']:.2f})" for c in cands[:8])
-                     + ". To remove, write forget again with explicit indexes. Nothing removed.", rc=0)
+        ent.properties = {**(ent.properties or {}), "near_rows": _near_events(srv, spec, 40)}
+        _consume(est, ent, prop, new, "near", rc=0)
         return
     lesson = str((new or {}).get("lesson") or "") if isinstance(new, dict) else str(new or "")
     note = L._efield_learn(srv, lesson, "model")
