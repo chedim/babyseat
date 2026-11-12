@@ -53,7 +53,7 @@ fn at_path(props: &serde_json::Map<String, J>, path: &str) -> J {
 /// The entity's properties, compact, for a failure message.
 fn dump(p: &serde_json::Map<String, J>) -> String {
     let t = J::Object(p.clone()).to_string();
-    if t.len() > 900 { format!("{}...", &t[..900]) } else { t }
+    if t.len() > 6000 { format!("{}...", &t[..6000]) } else { t }
 }
 
 pub fn run(spec: &J) -> Vec<String> {

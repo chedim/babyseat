@@ -116,7 +116,23 @@ Request.probe_reply getter:
   ELSE WHEN this.path == '/project' or this.path == '/project/current': {'status': 200, 'body': this.project_body}
   ELSE: {'status': 200, 'body': []}
 
-Request.routed getter: this.conf_reply if this.path == '/ui/conf' else (this.login_reply if this.path == '/ui/login' else (this.logout_reply if this.path == '/ui/logout' else (this.probe_reply if this.probe else this.static_reply)))
+-- ---- route families (the porting areas): a family pack IMPORTs door 1 and defines two getters on Request --------------------------
+--   Request.o_<family> : True when the path is the family's          Request.r_<family> : the reply ({status, headers?, body?}),
+--                        or None while it is still being worked out (an effect has not landed). The reserved families:
+--   models  decisions  state  voice  session  self  tools
+-- A family that owns the path answers it, before the shipped routes; the gate still comes first.
+Request.owned getter: this.o_models == True or this.o_decisions == True or this.o_state == True or this.o_voice == True or this.o_session == True or this.o_self == True or this.o_tools == True
+Request.family getter:
+  WHEN this.o_models == True: this.r_models
+  ELSE WHEN this.o_decisions == True: this.r_decisions
+  ELSE WHEN this.o_state == True: this.r_state
+  ELSE WHEN this.o_voice == True: this.r_voice
+  ELSE WHEN this.o_session == True: this.r_session
+  ELSE WHEN this.o_self == True: this.r_self
+  ELSE: this.r_tools
+
+Request.own_routes getter: this.conf_reply if this.path == '/ui/conf' else (this.login_reply if this.path == '/ui/login' else (this.logout_reply if this.path == '/ui/logout' else (this.probe_reply if this.probe else this.static_reply)))
+Request.routed getter: this.family if this.owned else this.own_routes
 Request.shipped getter: this.gate if this.gate != None else this.routed
 
 Request.reply getter: this.override if this.override != None else this.shipped

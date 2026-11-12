@@ -1,0 +1,167 @@
+[
+ {
+  "name": "a family pack's route answers its own paths",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_models_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": false,
+     "auth_error": "no token",
+     "path": "/v1/models"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.family",
+    "equals": "models"
+   }
+  ]
+ },
+ {
+  "name": "the families do not steal the shipped routes",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_models_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": false,
+     "auth_error": "no token",
+     "path": "/global/health"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.healthy",
+    "equals": true
+   }
+  ]
+ },
+ {
+  "name": "a path no family owns is a 404",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_models_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": false,
+     "auth_error": "no token",
+     "path": "/nowhere"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 404
+   }
+  ]
+ },
+ {
+  "name": "the gate still comes first for a family's route (no token, not loopback)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_models_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": false,
+     "auth_error": "no token",
+     "path": "/v1/models"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 401
+   }
+  ]
+ }
+]

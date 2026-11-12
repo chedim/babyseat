@@ -93,12 +93,13 @@ const CLOCK: &str = "\u{0}clock";
 /// Getter levels: a getter that reads another getter's field (by name) sits above it, so a round computes
 /// lower levels first. A cycle keeps the level it reached (its closing edge reads the previous value, rule 8).
 fn levels(gs: &[Getter]) -> Vec<usize> {
+    let exprs: Vec<String> = gs.iter().map(|g| code_only(&g.expr)).collect();
     let mut lv = vec![0usize; gs.len()];
     for _ in 0..gs.len() {
         let mut moved = false;
         for i in 0..gs.len() {
             for j in 0..gs.len() {
-                if gs[j].prop != gs[i].prop && reads_name(&gs[i].expr, &gs[j].prop) && lv[i] <= lv[j] && lv[j] + 1 <= gs.len() {
+                if gs[j].prop != gs[i].prop && reads_name(&exprs[i], &gs[j].prop) && lv[i] <= lv[j] && lv[j] + 1 <= gs.len() {
                     lv[i] = lv[j] + 1; moved = true;
                 }
             }
@@ -106,6 +107,28 @@ fn levels(gs: &[Getter]) -> Vec<usize> {
         if !moved { break; }
     }
     lv
+}
+
+/// The expression with its data strings blanked: a dict key or a list element that happens to be a getter's name is not a read of
+/// it. A string that is the LAST argument of a call (`prop(row, 'name')`) names a field: it stays.
+fn code_only(expr: &str) -> String {
+    let c: Vec<char> = expr.chars().collect();
+    let mut out = String::with_capacity(expr.len());
+    let mut i = 0;
+    while i < c.len() {
+        if c[i] == '\'' || c[i] == '"' {
+            let q = c[i];
+            let mut j = i + 1;
+            while j < c.len() && c[j] != q { if c[j] == '\\' { j += 1; } j += 1; }
+            let end = j.min(c.len() - 1);
+            let prev = out.chars().rev().find(|x| !x.is_whitespace());
+            let next = c[end + 1..].iter().find(|x| !x.is_whitespace());
+            if prev == Some(',') && next == Some(&')') { out.extend(&c[i..=end]); }     // prop(x, 'name'): a read by name
+            else { out.push(' '); for _ in i..=end { out.push(' '); } }
+            i = end + 1;
+        } else { out.push(c[i]); i += 1; }
+    }
+    out
 }
 
 fn reads_name(expr: &str, name: &str) -> bool {

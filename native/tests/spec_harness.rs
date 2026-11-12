@@ -98,3 +98,23 @@ fn an_expectation_can_name_a_path_into_a_property() {
     assert_eq!(f.len(), 1);
     assert!(f[0].contains("reply.body.name") && f[0].contains("seat") && f[0].contains("other"), "{}", f[0]);
 }
+
+#[test]
+fn a_dict_key_that_is_a_getters_name_is_not_a_read_of_it() {
+    // `a` builds a dict whose KEY is the getter c's name; c reads b reads a. The key is data, not a read: no cycle.
+    let d = tmp("keycycle");
+    let p = pack_file(&d, "keycycle", "PACK keycycle 1\nT.a getter: {'c': this.x, 'list': ['c', 'b']}\nT.b getter: this.a\nT.c getter: this.b\n");
+    let s = json!({"name": "key", "packs": [p], "given": [{"eid": "T:1", "class": "T", "props": {"x": 5}}], "writes": [],
+        "expect": [{"eid": "T:1", "prop": "c.c", "equals": 5}, {"eid": "T:1", "prop": "b.c", "equals": 5}]});
+    assert_eq!(spec::run(&s), Vec::<String>::new());
+}
+
+#[test]
+fn prop_of_a_name_is_still_a_read_of_it() {
+    // `prop(e, 'name')` names a field by a string: that IS a dependency, and must order a above name.
+    let d = tmp("propread");
+    let p = pack_file(&d, "propread", "PACK propread 1\nT.c getter: prop(this.row, 'b')\nT.b getter: this.x + 1\nT.row getter: {'b': this.b}\n");
+    let s = json!({"name": "propread", "packs": [p], "given": [{"eid": "T:1", "class": "T", "props": {"x": 5}}], "writes": [],
+        "expect": [{"eid": "T:1", "prop": "b", "equals": 6}, {"eid": "T:1", "prop": "c", "equals": 6}]});
+    assert_eq!(spec::run(&s), Vec::<String>::new());
+}
