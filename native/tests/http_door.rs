@@ -150,3 +150,29 @@ fn the_secret_may_be_a_file_the_launcher_names() {
     let who = c.docs.values().find(|e| e.props.get("path") == Some(&json!("/a"))).map(|e| e.props["who"].clone()).unwrap();
     assert_eq!(who, json!("owner owner"));
 }
+
+#[test]
+fn a_request_can_ask_the_door_to_verify_a_token_it_carries_in_its_body() {
+    std::env::set_var("DOOR_TEST_SECRET", "0123456789abcdef0123456789abcdef");
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, "listen", json!({"id": "l1", "port": 0, "secret_env": "DOOR_TEST_SECRET"}));
+    pump(&mut c, &mut f, |c| c.docs["Http:door"].props.get("listen_result").is_some());
+    c.load("Request:900".into(), "Request".into(), json!({"http": "Http:door", "path": "/ui/login", "method": "POST", "query": "", "body": ""}).as_object().unwrap().clone(), None, 0.0);
+    let ask = |c: &mut Core, f: &mut Fields, id: &str, tok: &str| {
+        let w = Write { eid: "Request:900".into(), prop: "verify".into(), new: json!({"id": id, "token": tok}), old: J::Null, writer: "person".into(), chain: json!({}), seq: 9 };
+        c.hear(w.clone(), None, 2.0);
+        let mut seq = 10;
+        f.react(c, &H, w, 2.0, &mut seq);
+        let want = id.to_string();
+        pump(c, f, move |c| c.docs["Request:900"].props.get("verify_result").and_then(|r| r.get("id")) == Some(&json!(want)));
+    };
+    ask(&mut c, &mut f, "v1", GOOD);
+    let r = c.docs["Request:900"].props["verify_result"].clone();
+    assert_eq!(r["rc"], json!(0), "{r}");
+    assert_eq!(r["claims"]["sub"], json!("owner"));
+    ask(&mut c, &mut f, "v2", "not.a.token");
+    let r = c.docs["Request:900"].props["verify_result"].clone();
+    assert_eq!(r["rc"], json!(1), "{r}");
+    assert_eq!(r["head"], json!("invalid token"), "a refusal is only ever 'invalid token'");
+    assert!(r.get("claims").is_none());
+}

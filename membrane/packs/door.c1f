@@ -62,7 +62,39 @@ Request.conf_reply getter:
   ELSE WHEN not this.entrant: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'invalid token' if this.auth_error != 'no token' else 'missing or invalid token'}}
   ELSE: {'status': 200, 'body': this.conf_body}
 
-Request.shipped getter: this.conf_reply if this.path == '/ui/conf' else this.static_reply
+-- ---- /ui/login and /ui/logout: the cookie ------------------------------------------------------------------------------------
+-- A person's token (JSON only: a cross-site form cannot post it; the seat's internal token never logs in) becomes this seat's
+-- HttpOnly, SameSite=Strict cookie, Secure behind an https proxy. The door checks the token (`Request.verify`, a write whose
+-- receipt is data); everything else is decided here.
+Request.ct getter: (words(replace(lower(str(prop(this.headers, 'content-type') or '')), ';', ' ')) or [''])[0]
+Request.proto getter: (words(replace(lower(str(prop(this.headers, 'x-forwarded-proto') or '')), ',', ' ')) or [''])[0]
+Request.fwdh getter: lower(str(prop(this.headers, 'forwarded') or ''))
+Request.https getter: this.proto == 'https' or 'proto=https' in this.fwdh or 'proto="https"' in this.fwdh
+Request.cookie_name getter: ([prop(h.listen_result, 'cookie') for h in instances('Http') if prop(h.listen_result, 'cookie') != None] or ['membrane_jwt'])[0]
+Request.secure getter: '; Secure' if this.https else ''
+Request.login_token getter: prop(json(this.body or ''), 'token') if this.method == 'POST' and this.path == '/ui/login' else None
+Request.login_shape getter: this.path == '/ui/login' and this.method == 'POST' and this.ct == 'application/json' and len(this.body or '') <= 16384
+Request.login_has getter: this.login_token != None and len(str(this.login_token)) > 0
+Request.login_ask getter: {'id': 'login', 'token': this.login_token} if this.login_shape and this.login_has else None
+Request.login_ask on-setter login-verify:
+  WHEN this.login_ask != None:
+    this.verify = this.login_ask
+Request.login_ok getter: prop(this.verify_result, 'rc') == 0 and prop(prop(this.verify_result, 'claims'), 'sub') != 'seat:internal'
+Request.login_age getter: words(replace(str(max(0, prop(prop(this.verify_result, 'claims'), 'exp') - clock)), '.', ' '))[0]
+Request.login_cookie getter: this.cookie_name + '=' + str(this.login_token) + '; Path=/; Max-Age=' + this.login_age + '; HttpOnly; SameSite=Strict' + this.secure
+Request.login_reply getter:
+  WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN this.ct != 'application/json': {'status': 415, 'body': {'error': 'send JSON: {"token": "..."}'}}
+  ELSE WHEN len(this.body or '') > 16384: {'status': 413, 'body': {'error': 'too large'}}
+  ELSE WHEN this.login_ask == None: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  ELSE WHEN this.verify_result == None: None
+  ELSE WHEN not this.login_ok: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.login_cookie}, 'body': {'ok': True, 'who': {'sub': prop(prop(this.verify_result, 'claims'), 'sub'), 'name': prop(prop(this.verify_result, 'claims'), 'name') or prop(prop(this.verify_result, 'claims'), 'sub')}}}
+Request.logout_reply getter:
+  WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.cookie_name + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict' + this.secure}, 'body': {'ok': True}}
+
+Request.shipped getter: this.conf_reply if this.path == '/ui/conf' else (this.login_reply if this.path == '/ui/login' else (this.logout_reply if this.path == '/ui/logout' else this.static_reply))
 
 Request.reply getter: this.override if this.override != None else this.shipped
 

@@ -37,7 +37,7 @@ fn bad(mut s: TcpStream, status: i64, why: &str) {
 
 /// The token a request presents (never the query string): `Authorization: Bearer <jwt>`, HTTP Basic with the jwt as the
 /// password, or the `membrane_jwt` cookie.
-pub fn token_of(headers: &Map<String, J>, _query: &str) -> Option<String> {
+pub fn token_of(headers: &Map<String, J>, _query: &str, cookie: &str) -> Option<String> {
     if let Some(a) = headers.get("authorization").and_then(|a| a.as_str()) {
         let a = a.trim();
         if let Some(t) = a.strip_prefix("Bearer ").or_else(|| a.strip_prefix("bearer ")) { let t = t.trim(); if !t.is_empty() { return Some(t.to_string()); } }
@@ -49,9 +49,16 @@ pub fn token_of(headers: &Map<String, J>, _query: &str) -> Option<String> {
         }
     }
     if let Some(c) = headers.get("cookie").and_then(|c| c.as_str()) {
+        let (mut ours, mut old) = (None, None);
         for kv in c.split(';') {
-            if let Some((k, v)) = kv.trim().split_once('=') { if k == "membrane_jwt" && !v.is_empty() { return Some(v.to_string()); } }
+            if let Some((k, v)) = kv.trim().split_once('=') {
+                if v.is_empty() { continue; }
+                if !cookie.is_empty() && k == cookie { ours = Some(v.to_string()); }
+                if k == "membrane_jwt" { old = Some(v.to_string()); }
+            }
         }
+        if ours.is_some() { return ours; }
+        return old;
     }
     None
 }
@@ -107,21 +114,23 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
     // the door verifies the token itself: the secret comes from the environment variable `secret_env` names (never a prop)
     let secret: Option<Vec<u8>> = req.get("secret_env").and_then(|e| e.as_str()).and_then(|e| std::env::var(e).ok()).map(|s| s.into_bytes())
         .or_else(|| req.get("secret_file").and_then(|f| f.as_str()).and_then(|f| std::fs::read_to_string(f).ok()).map(|s| s.trim().as_bytes().to_vec()));
+    if let Some(k) = &secret { st.set_secret(eid, k.clone()); }
+    let cookie = secret.as_ref().map(|k| crate::jwt::cookie_name(k)).unwrap_or_default();
     let stop = Arc::new(AtomicBool::new(false));
     if let Some(old) = st.set_listener(eid, stop.clone()) { old.store(true, Ordering::SeqCst); }
-    let (st2, eid2, secret) = (st.clone_handle(), eid.to_string(), secret);
+    let (st2, eid2, secret, cookie2) = (st.clone_handle(), eid.to_string(), secret, cookie.clone());
     std::thread::Builder::new().name("membrane-http".into()).spawn(move || {
         while !stop.load(Ordering::SeqCst) {
             match l.accept() {
                 Ok((mut s, peer)) => {
-                    let (st3, eid3, secret) = (st2.clone_handle(), eid2.clone(), secret.clone());
+                    let (st3, eid3, secret, cookie) = (st2.clone_handle(), eid2.clone(), secret.clone(), cookie2.clone());
                     let _ = std::thread::Builder::new().name("membrane-http-conn".into()).spawn(move || {
                         let _ = s.set_nonblocking(false);
                         let Some((mut props, _)) = read_request(&mut s) else { return bad(s, 400, "bad request"); };
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
                         // WHO: verified here, by the door, before any pack sees the request (a pack reads `authed` and `sub`; it cannot set them)
                         let headers = props.get("headers").and_then(|h| h.as_object()).cloned().unwrap_or_default();
-                        let verdict = match (&secret, token_of(&headers, "")) {
+                        let verdict = match (&secret, token_of(&headers, "", &cookie)) {
                             (None, _) => Err("this door has no secret".to_string()),
                             (Some(_), None) => Err("no token".to_string()),
                             (Some(k), Some(t)) => crate::jwt::verify(&t, k, now),
@@ -143,7 +152,20 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
             }
         }
     }).ok();
-    json!({"id": id, "status": "ok", "rc": 0, "head": format!("listening on {}:{}", host, bound), "port": bound, "host": host})
+    json!({"id": id, "status": "ok", "rc": 0, "head": format!("listening on {}:{}", host, bound), "port": bound, "host": host, "cookie": cookie})
+}
+
+/// `Request.verify = {id, token}`: check a token (one the request carries in its body, say) with the door's own secret.
+/// The receipt is data: rc 0 and the claims, or rc 1 and only "invalid token" (the reason stays in the log, never the answer).
+pub fn verify(st: &Store, http_eid: &str, req: &J) -> J {
+    let id = req.get("id").cloned().unwrap_or(J::Null);
+    let tok = req.get("token").and_then(|t| t.as_str()).unwrap_or("");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    match st.secret_of(http_eid).map(|k| crate::jwt::verify(tok, &k, now)) {
+        Some(Ok(claims)) => json!({"id": id, "status": "ok", "rc": 0, "head": "ok", "claims": claims}),
+        Some(Err(why)) => { eprintln!("[door] token refused: {why}"); json!({"id": id, "status": "error", "rc": 1, "head": crate::jwt::INVALID}) }
+        None => json!({"id": id, "status": "error", "rc": 2, "head": "this door has no secret"}),
+    }
 }
 
 /// `Http.respond`: write the answer to the held connection and close it. body: text, or any JSON (sent as json).

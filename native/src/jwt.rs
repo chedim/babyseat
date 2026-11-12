@@ -59,6 +59,14 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     sha256(&outer)
 }
 
+/// This seat's cookie: `membrane_jwt_<8 hex of a hash of its secret>` (cookies are per host, not per port: two seats on one host
+/// under one name overwrite each other's token). The old shared name is read when this seat's is absent.
+pub fn cookie_name(secret: &[u8]) -> String {
+    let mut m = b"membrane cookie\0".to_vec();
+    m.extend_from_slice(secret);
+    format!("membrane_jwt_{}", &hex(&sha256(&m))[..8])
+}
+
 pub fn hex(b: &[u8]) -> String { b.iter().map(|x| format!("{:02x}", x)).collect() }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

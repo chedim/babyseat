@@ -43,10 +43,19 @@ fn every_refusal_is_a_refusal() {
 #[test]
 fn the_token_rides_the_bearer_header_basic_or_the_cookie_never_the_query() {
     let h = |k: &str, v: &str| { let mut m = serde_json::Map::new(); m.insert(k.into(), serde_json::json!(v)); m };
-    assert_eq!(token_of(&h("authorization", &format!("Bearer {GOOD}")), ""), Some(GOOD.to_string()));
+    assert_eq!(token_of(&h("authorization", &format!("Bearer {GOOD}")), "", ""), Some(GOOD.to_string()));
     let basic = format!("Basic {}", jwt::base64_encode(format!("anyuser:{GOOD}").as_bytes()));
-    assert_eq!(token_of(&h("authorization", &basic), ""), Some(GOOD.to_string()));
-    assert_eq!(token_of(&h("cookie", &format!("a=b; membrane_jwt={GOOD}; c=d")), ""), Some(GOOD.to_string()));
-    assert_eq!(token_of(&serde_json::Map::new(), &format!("token={GOOD}")), None);
-    assert_eq!(token_of(&h("authorization", "Bearer"), ""), None);
+    assert_eq!(token_of(&h("authorization", &basic), "", ""), Some(GOOD.to_string()));
+    assert_eq!(token_of(&h("cookie", &format!("a=b; membrane_jwt={GOOD}; c=d")), "", ""), Some(GOOD.to_string()), "the old shared name");
+    assert_eq!(token_of(&h("cookie", &format!("a=b; membrane_jwt_23a8086e={GOOD}; c=d")), "", "membrane_jwt_23a8086e"), Some(GOOD.to_string()), "this seat's name");
+    assert_eq!(token_of(&h("cookie", &format!("membrane_jwt_deadbeef={GOOD}")), "", "membrane_jwt_23a8086e"), None, "another seat's cookie is not ours");
+    assert_eq!(token_of(&h("cookie", &format!("membrane_jwt_deadbeef=OTHER; membrane_jwt={GOOD}")), "", "membrane_jwt_23a8086e"), Some(GOOD.to_string()), "the old name only when ours is absent");
+    assert_eq!(token_of(&serde_json::Map::new(), &format!("token={GOOD}"), ""), None);
+    assert_eq!(token_of(&h("authorization", "Bearer"), "", ""), None);
+}
+
+#[test]
+fn the_cookie_name_is_per_seat_from_a_hash_of_the_secret() {
+    assert_eq!(jwt::cookie_name(SECRET), "membrane_jwt_23a8086e");
+    assert_ne!(jwt::cookie_name(SECRET), jwt::cookie_name(b"another secret of at least 32 bytes!!"));
 }

@@ -60,6 +60,8 @@ pub struct Shared {
     conns: HashMap<u64, std::net::TcpStream>,
     next_conn: u64,
     listeners: HashMap<String, Arc<std::sync::atomic::AtomicBool>>,
+    /// each door's token secret by its entity (the verify verb reads it; a prop never carries it)
+    secrets: HashMap<String, Vec<u8>>,
     /// a running command's child process, by its entity (Command.stop kills it)
     children: HashMap<String, Arc<Mutex<Option<std::process::Child>>>>,
     done: u64,
@@ -254,6 +256,10 @@ impl Store {
     pub fn set_listener(&self, eid: &str, stop: Arc<std::sync::atomic::AtomicBool>) -> Option<Arc<std::sync::atomic::AtomicBool>> {
         self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).listeners.insert(eid.to_string(), stop)
     }
+
+    /// A door's secret (set at listen) and its read (the verify verb).
+    pub fn set_secret(&self, eid: &str, secret: Vec<u8>) { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).secrets.insert(eid.to_string(), secret); }
+    pub fn secret_of(&self, eid: &str) -> Option<Vec<u8>> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).secrets.get(eid).cloned() }
 
     /// Keep an accepted connection open until a pack answers it: -> its number.
     pub fn hold_conn(&self, s: std::net::TcpStream) -> u64 {
