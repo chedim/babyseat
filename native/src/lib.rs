@@ -11,6 +11,7 @@ pub mod mapped;
 pub mod topk;
 pub mod packs;
 pub mod expr;
+pub mod infer;
 pub mod clock;
 pub mod walk;
 pub mod fields;
