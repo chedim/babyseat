@@ -298,34 +298,6 @@ impl Host for DetachedHost {
     }
 }
 
-/// The store driver's reads on the seat's own SQLite (membrane.sqlread.Reader): the GIL is taken only for the call;
-/// CPython's sqlite3 releases it while the query runs.
-struct PySqlExec { obj: Py<PyAny> }
-
-impl crate::store::SqlExec for PySqlExec {
-    fn run(&self, token: u64, sql: &str, args: &[serde_json::Value]) -> Result<Vec<serde_json::Value>, String> {
-        let args_json = serde_json::Value::Array(args.to_vec()).to_string();
-        Python::attach(|py| {
-            let out = self.obj.bind(py).call_method1("run", (token, sql, args_json))
-                .map_err(|e| e.value(py).str().map(|s| s.to_string()).unwrap_or_else(|_| "sql: failed".into()))?;
-            let text: String = out.extract().map_err(|_| "sql: the reader answered no text".to_string())?;
-            match serde_json::from_str::<serde_json::Value>(&text) {
-                Ok(serde_json::Value::Array(rows)) => Ok(rows),
-                _ => Err("sql: the reader answered no rows".into()),
-            }
-        })
-    }
-    fn check(&self, sql: &str, nargs: usize) -> Result<(), String> {
-        Python::attach(|py| {
-            self.obj.bind(py).call_method1("check", (sql, nargs)).map(|_| ())
-                .map_err(|e| e.value(py).str().map(|s| s.to_string()).unwrap_or_else(|_| "sql: failed".into()))
-        })
-    }
-    fn interrupt(&self, token: u64) {
-        Python::attach(|py| { let _ = self.obj.bind(py).call_method1("interrupt", (token,)); });
-    }
-}
-
 type Engine = (vm::Core, fields::Fields, i64);
 
 /// Fields (#994): the field engine over its own Core, reachable from Python. Thread-safe and non-blocking: every
@@ -347,11 +319,11 @@ impl Fields {
     fn new(host: Py<PyAny>) -> Self {
         Fields { c: std::sync::Mutex::new((vm::Core::new(), fields::Fields::goalgraph(), 0)), host, waiter: std::sync::Mutex::new(None) }
     }
-    /// The store driver: `sql(...)` in getters and setters reads this SQLite file, read-only, through the seat's OWN
-    /// sqlite3 (membrane/sqlread.py) -- never a SQLite of this extension's: one SQLite per process (0.7.53).
+    /// The store driver: `sql(...)` in getters and setters reads this SQLite file, read-only, on the process's one
+    /// SQLite -- the native store's own (sqlexec.rs); Python's `sqlite3` is not used for the field (#1111).
     fn set_store(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        let reader = py.import("membrane.sqlread")?.getattr("Reader")?.call1((path,))?.unbind();
-        let st = crate::store::Store::with_exec(path, std::sync::Arc::new(PySqlExec { obj: reader }));
+        let exec = crate::sqlexec::NativeSqlExec::new(path).map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+        let st = crate::store::Store::with_exec(path, std::sync::Arc::new(exec));
         *self.waiter.lock().unwrap_or_else(|e| e.into_inner()) = Some(st.waiter());
         self.with(py, move |g| { g.0.store = Some(st); });
         Ok(())
