@@ -245,3 +245,13 @@ def test_the_relay_is_the_chats_hand_not_a_loops(seat, monkeypatch):
     assert "plan mode" in DM.refusal("Decision", "relay", {}, {})
     monkeypatch.setattr(DR, "current", lambda: {"agent": "build"})
     assert DM.refusal("Decision", "relay", {}, {}) is None
+
+
+def test_the_ledger_path_is_known_before_the_start_is_announced(monkeypatch, tmp_path):
+    """Live 2026-11-12: the setter on Boot.started ran before the engine heard Boot.ledger and removed the path."""
+    from membrane import writes as W
+    order = []
+    est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
+    W.on_write(lambda w: order.append(w.get("prop")) if str(w.get("eid")) == "Boot:seat" else None)
+    FL.boot_started(est, ledger=str(tmp_path / "l.jsonl"))
+    assert "ledger" in order and "started" in order and order.index("ledger") < order.index("started"), order

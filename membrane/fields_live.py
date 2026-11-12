@@ -661,10 +661,10 @@ def boot_started(est, ledger: str | None = None) -> None:
         est.upsert(QuantumEntity(eid="Boot:seat", cls="Boot", properties={"name": "this seat's start", "silent_birth": True}),
                    embedder=None)
         d = est.docs["Boot:seat"]
-    props = {**(d.properties or {}), "started": time.time()}
-    if ledger:
-        props["ledger"] = str(ledger)
-    d.properties = props
+    if ledger:                              # the facts first, the announcement last: a setter on `started` must find them
+        d.properties = {**(d.properties or {}), "ledger": str(ledger)}
+        est.upsert(d, embedder=None)
+    d.properties = {**(d.properties or {}), "started": time.time()}
     est.upsert(d, embedder=None)
 
 
