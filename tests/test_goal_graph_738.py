@@ -121,6 +121,22 @@ def test_a_plan_writes_tasks_cards_and_edges_and_escalates_the_card(seat):
         assert seat.ch_vm.fired.get(MEMBRANE_NS + "Trigger:goal-graph-ready") == 1
 
 
+def test_a_card_that_needs_work_after_its_answer_still_unblocks_its_task_1139(seat):
+    """#1139: a card answered but still needing work stays `decided`, and the task it blocked kept counting it as an open
+    blocker: workers never picked the task up and the goal never re-planned."""
+    write(seat, GOAL, "plan", PLAN)
+    tasks_in_pool(seat)
+    card = [d for d in seat.entity_store.docs.values() if d.cls == "Decision"][0]
+    seat.entity_store.edit(card.eid, properties={"work_needed": True})
+    seat.calls.clear()
+    with W.source("person", "op"):
+        res = DM.answer(seat.entity_store, None, card.eid, "right")
+    assert res["ok"] and seat.entity_store.docs[card.eid].properties["status"] == "decided"
+    settle(seat)
+    assert st(seat, C) == "owed" and tasks_in_pool(seat) == [C]
+    assert any(c["prompt"].startswith("plan the goal: card " + card.eid) for c in seat.calls), seat.calls
+
+
 def test_a_card_answered_unblocks_its_task_and_replans(seat):
     write(seat, GOAL, "plan", PLAN)
     tasks_in_pool(seat)
