@@ -1,0 +1,492 @@
+{
+  "about": {
+    "imports": [
+      "dom"
+    ],
+    "classes": [
+      "About",
+      "DomNode"
+    ],
+    "members": 8,
+    "writes": [
+      "DomNode:*.parent",
+      "DomNode:*.tag",
+      "DomNode:*.text",
+      "DomNode:about:anchor.class",
+      "DomNode:about:anchor.parent",
+      "DomNode:about:anchor.tag",
+      "DomNode:about:btn.class",
+      "DomNode:about:btn.parent",
+      "DomNode:about:btn.tag",
+      "DomNode:about:btn.text",
+      "DomNode:about:btn.title",
+      "DomNode:about:full.href",
+      "DomNode:about:full.parent",
+      "DomNode:about:full.tag",
+      "DomNode:about:full.text",
+      "DomNode:about:head.parent",
+      "DomNode:about:head.tag",
+      "DomNode:about:list.parent",
+      "DomNode:about:list.tag",
+      "DomNode:about:name.parent",
+      "DomNode:about:name.tag",
+      "DomNode:about:name.text",
+      "DomNode:about:release.parent",
+      "DomNode:about:release.tag",
+      "DomNode:about:release.text",
+      "DomNode:about:win.class",
+      "DomNode:about:win.hidden",
+      "DomNode:about:win.parent",
+      "DomNode:about:win.role",
+      "DomNode:about:win.tag",
+      "DomNode:about:x.parent",
+      "DomNode:about:x.tag",
+      "DomNode:about:x.text",
+      "DomNode:about:x.title"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "attention": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Attention",
+      "Boot"
+    ],
+    "members": 2,
+    "writes": [
+      "Attention:seat.budget",
+      "Attention:seat.mode",
+      "Attention:seat.window_min"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "banner": {
+    "imports": [
+      "goalgraph"
+    ],
+    "classes": [
+      "Banner",
+      "Goal",
+      "RecallBanner"
+    ],
+    "members": 83,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
+  "boot": {
+    "imports": [],
+    "classes": [
+      "Boot",
+      "Step"
+    ],
+    "members": 3,
+    "writes": [],
+    "claims": [],
+    "boot_facts": [
+      "started"
+    ]
+  },
+  "decisions": {
+    "imports": [
+      "goalgraph",
+      "fs",
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Decision",
+      "Notify"
+    ],
+    "members": 27,
+    "writes": [
+      "File:operator-ledger.path",
+      "File:operator-ledger.write",
+      "Notify:seat.summary",
+      "Notify:seat.tell"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "ledger"
+    ]
+  },
+  "dev": {
+    "imports": [
+      "boot",
+      "proc"
+    ],
+    "classes": [
+      "Boot"
+    ],
+    "members": 1,
+    "writes": [
+      "Command:gh.cmd",
+      "Command:git.cmd"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "door": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Http",
+      "Request"
+    ],
+    "members": 69,
+    "writes": [
+      "Http:door.listen"
+    ],
+    "claims": [
+      "/",
+      "/command",
+      "/favicon.ico",
+      "/global/health",
+      "/index.html",
+      "/membrane",
+      "/path",
+      "/project",
+      "/project/",
+      "/project/current",
+      "/ui/conf",
+      "/ui/login",
+      "/ui/logout",
+      "/ui/www/",
+      "/vcs"
+    ],
+    "boot_facts": [
+      "build_id",
+      "door_port",
+      "door_secret_file",
+      "seat_aliases",
+      "seat_blurp",
+      "seat_cwd",
+      "seat_home",
+      "seat_language",
+      "seat_name",
+      "seat_named",
+      "seat_project",
+      "seat_stt",
+      "seat_version",
+      "seat_voice_out",
+      "ui_dir"
+    ]
+  },
+  "door_decisions": {
+    "imports": [
+      "door",
+      "decisions",
+      "goalgraph",
+      "banner",
+      "intents"
+    ],
+    "classes": [
+      "Decision",
+      "Goal",
+      "Request",
+      "Task",
+      "Wait"
+    ],
+    "members": 94,
+    "writes": [
+      "*.answer",
+      "*.chat",
+      "*.drop"
+    ],
+    "claims": [
+      "/membrane/decision/answer",
+      "/membrane/decision/chat",
+      "/membrane/decision/drop",
+      "/membrane/decisions",
+      "/membrane/entity-history",
+      "/membrane/goals",
+      "/membrane/item-chat",
+      "/membrane/work-graph"
+    ],
+    "boot_facts": []
+  },
+  "door_models": {
+    "imports": [
+      "door",
+      "router"
+    ],
+    "classes": [
+      "Request"
+    ],
+    "members": 40,
+    "writes": [
+      "Minds:seat.cortex",
+      "Minds:seat.cortex_auth",
+      "Minds:seat.loops",
+      "Minds:seat.loops_auth",
+      "Minds:seat.think",
+      "Minds:seat.workers",
+      "Minds:seat.workers_auth",
+      "Router:seat.refresh"
+    ],
+    "claims": [
+      "/membrane/models",
+      "/v1/models",
+      "/v1/models/"
+    ],
+    "boot_facts": [
+      "router_on"
+    ]
+  },
+  "door_state": {
+    "imports": [
+      "door"
+    ],
+    "classes": [
+      "Request",
+      "Seat"
+    ],
+    "members": 29,
+    "writes": [
+      "membrane::presence.control"
+    ],
+    "claims": [
+      "/membrane/minds",
+      "/membrane/quota",
+      "/membrane/seat",
+      "/membrane/seat/control",
+      "/membrane/seat/pause",
+      "/membrane/self/card",
+      "/membrane/self/recent",
+      "/membrane/self/sheet",
+      "/membrane/state",
+      "/membrane/stats",
+      "/state"
+    ],
+    "boot_facts": [
+      "nerve_pause_off"
+    ]
+  },
+  "fetch": {
+    "imports": [],
+    "classes": [
+      "Fetch"
+    ],
+    "members": 1,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
+  "fs": {
+    "imports": [],
+    "classes": [
+      "Dir",
+      "File"
+    ],
+    "members": 4,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
+  "intents": {
+    "imports": [
+      "goalgraph",
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Intent"
+    ],
+    "members": 23,
+    "writes": [
+      "*.fulfilled_by",
+      "*.fulfilled_evidence",
+      "*.fulfilled_ts",
+      "*.status",
+      "Goal:*.born",
+      "Goal:*.name",
+      "Goal:*.planted_by",
+      "Goal:*.status",
+      "Goal:*.summary",
+      "Goal:*.text",
+      "Intent:board.name",
+      "Intent:board.summary"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "mcp": {
+    "imports": [],
+    "classes": [
+      "McpPrompt",
+      "McpResource",
+      "McpServer",
+      "McpTool"
+    ],
+    "members": 10,
+    "writes": [
+      "McpPrompt:*.arguments",
+      "McpPrompt:*.description",
+      "McpPrompt:*.name",
+      "McpPrompt:*.prompt_of",
+      "McpResource:*.description",
+      "McpResource:*.mime",
+      "McpResource:*.name",
+      "McpResource:*.resource_of",
+      "McpResource:*.uri",
+      "McpTool:*.description",
+      "McpTool:*.input_schema",
+      "McpTool:*.name",
+      "McpTool:*.server"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "memory": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Memory"
+    ],
+    "members": 27,
+    "writes": [
+      "Memory:seat.agent_writes",
+      "Memory:seat.name",
+      "Memory:seat.summary"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "agent_writes"
+    ]
+  },
+  "messages": {
+    "imports": [],
+    "classes": [],
+    "members": 0,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
+  "methods": {
+    "imports": [
+      "boot",
+      "proc"
+    ],
+    "classes": [
+      "Boot",
+      "Methods",
+      "Tool"
+    ],
+    "members": 52,
+    "writes": [
+      "Command:*.cmd",
+      "Command:*.from_method",
+      "Command:*.params",
+      "Command:*.read_only",
+      "Methods:review.untranslated"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "peer": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Peer"
+    ],
+    "members": 2,
+    "writes": [
+      "Peer:channel.name",
+      "Peer:channel.summary"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "ported": {
+    "imports": [],
+    "classes": [
+      "ChatThing"
+    ],
+    "members": 1,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
+  "proc": {
+    "imports": [],
+    "classes": [
+      "Command"
+    ],
+    "members": 2,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
+  "router": {
+    "imports": [
+      "boot",
+      "door",
+      "fetch"
+    ],
+    "classes": [
+      "Boot",
+      "Fetch",
+      "Minds",
+      "Model",
+      "Router"
+    ],
+    "members": 16,
+    "writes": [
+      "*.models_ready",
+      "Fetch:tags.request",
+      "Minds:seat.cortex",
+      "Minds:seat.cortex_auth",
+      "Minds:seat.loops",
+      "Minds:seat.loops_auth",
+      "Minds:seat.seat_default",
+      "Minds:seat.think",
+      "Minds:seat.workers",
+      "Minds:seat.workers_auth",
+      "Model:*.backend",
+      "Model:*.capabilities",
+      "Model:*.kind",
+      "Model:*.listed",
+      "Model:*.name",
+      "Model:*.rung",
+      "Model:*.size"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "cloud_models",
+      "minds",
+      "router_on",
+      "seat_backend"
+    ]
+  },
+  "store": {
+    "imports": [],
+    "classes": [
+      "Store"
+    ],
+    "members": 2,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
+  "turn": {
+    "imports": [],
+    "classes": [
+      "Ctx",
+      "Turn"
+    ],
+    "members": 34,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  }
+}

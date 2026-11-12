@@ -30,7 +30,8 @@ and read its `request_result`.
 ## The contracts (docs/c1f-stdlib.md, enforced by `native/tests/contracts.rs`)
 A family pack defines `o_<f>`/`r_<f>` (and `m_<f>` for the declarative 405: prefer it to your own checks); use the shared getters
 `facts jbody qpairs person` and register every Boot fact you read in `membrane/packs/facts.json` (`wired: false` if the launcher
-does not write it yet). `cargo test --test contracts` must pass.
+does not write it yet). `cargo test --test contracts` must pass. If your pack's *surface* changed (new write, path, import, fact), that is expected:
+review the diff it prints, then regenerate `membrane/packs/surface.json` with `SURFACE_UPDATE=1 cargo test --test contracts surface` and commit it.
 
 ## Engine rules that bit (c1f)
 - An expression has at most **64 nodes**: split it into named getters.

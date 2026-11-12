@@ -130,3 +130,82 @@ fn the_boot_facts_packs_read_are_registered_and_the_wired_ones_are_written_by_th
     }
     assert!(bad.is_empty(), "\n{}\n", bad.join("\n"));
 }
+
+// ---- the surface snapshot: a pack as a black box ------------------------------------------------------------------------------
+// What a pack touches from outside, computed from its text: the classes it declares, the members it declares on them, the other
+// packs it imports, the properties it WRITES on other entities (`('Class:key').prop = ...`, `this.<ref>.prop = ...` is local), the
+// paths it claims, the Boot facts it reads. Compared to the committed `membrane/packs/surface.json`: any change is a failing test
+// until someone reviews it and regenerates the file (`SURFACE_UPDATE=1 cargo test --test contracts surface`).
+fn surface_of(text: &str) -> serde_json::Value {
+    use serde_json::json;
+    let decl = declared(text);
+    let mut classes: BTreeSet<String> = BTreeSet::new();
+    let mut members: BTreeSet<String> = BTreeSet::new();
+    for (c, p) in &decl { classes.insert(c.clone()); members.insert(format!("{c}.{p}")); }
+    let mut writes: BTreeSet<String> = BTreeSet::new();
+    let mut claims: BTreeSet<String> = BTreeSet::new();
+    for l in text.lines() {
+        let t = l.trim_start();
+        if t.starts_with("--") { continue; }
+        // a write to ANOTHER entity: ('Class:key').prop = ..., ('Class:' + expr).prop = ..., (expr).prop = ... (a dynamic target,
+        // shown as `*`), or this.<ref>.prop = ... (through a reference property). `this.prop = ...` is the entity's own: not listed.
+        let mut note = |target: String, rest: &str| {
+            let prop: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            if !prop.is_empty() && rest[prop.len()..].trim_start().starts_with('=') && !rest[prop.len()..].trim_start().starts_with("==") { writes.insert(format!("{target}.{prop}")); }
+        };
+        if t.starts_with('(') {
+            // find the matching close paren of the target expression
+            let mut depth = 0; let mut end = None;
+            for (i, c) in t.char_indices() { if c == '(' { depth += 1; } if c == ')' { depth -= 1; if depth == 0 { end = Some(i); break; } } }
+            if let Some(e) = end {
+                if t[e + 1..].starts_with('.') {
+                    let inner = &t[1..e];
+                    let target = if inner.starts_with('\'') {
+                        let lit: String = inner[1..].chars().take_while(|c| *c != '\'').collect();
+                        if inner[1 + lit.len()..].trim_start_matches('\'').trim_start().starts_with('+') { lit.split(':').next().unwrap_or("").to_string() + ":*" } else { lit }
+                    } else { "*".to_string() };
+                    note(target, &t[e + 2..]);
+                }
+            }
+        } else if let Some(rest) = t.strip_prefix("this.") {
+            if let Some((r, after)) = rest.split_once('.') {
+                if r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { note(format!("ref({r})"), after); }
+            }
+        }
+        // paths a family claims: startswith(this.path, '/x'), this.path == '/x', this.path in ['/x', ...]
+        for pat in ["this.path == '", "startswith(this.path, '", "this.path in ["] {
+            for (i, _) in l.match_indices(pat) {
+                let rest = &l[i + pat.len()..];
+                let seg = rest.split(|c| c == ']' || c == ')').next().unwrap_or("");
+                for s in seg.split('\'').filter(|s| s.starts_with('/')) { claims.insert(s.to_string()); }
+            }
+        }
+    }
+    let mut facts: BTreeSet<String> = BTreeSet::new();
+    let mut cur = String::new();
+    for l in text.lines() {
+        if !l.starts_with(' ') && !l.starts_with("--") && !l.is_empty() { cur = l.split(['.', ' ']).next().unwrap_or("").to_string(); }
+        if l.contains("for b in instances('Boot')") || l.contains("for b in this.boots") { for id in ident_after(l, "b.") { facts.insert(id); } }
+        if cur == "Boot" { for id in ident_after(l, "this.") { facts.insert(id); } }
+    }
+    let boot_decl: BTreeSet<String> = decl.iter().filter(|(c, _)| c == "Boot").map(|(_, p)| p.clone()).collect();
+    facts.retain(|f| !boot_decl.contains(f) && !["eid", "name", "summary", "cls", "state", "facts"].contains(&f.as_str()));
+    json!({"imports": imports(text), "classes": classes, "members": members.len(), "writes": writes, "claims": claims, "boot_facts": facts})
+}
+
+#[test]
+fn the_surface_of_every_pack_matches_the_reviewed_snapshot() {
+    let mut now = serde_json::Map::new();
+    for (stem, text) in packs() { now.insert(stem, surface_of(&text)); }
+    let path = root().join("membrane/packs/surface.json");
+    if std::env::var("SURFACE_UPDATE").is_ok() {
+        std::fs::write(&path, serde_json::to_string_pretty(&serde_json::Value::Object(now)).unwrap() + "\n").unwrap();
+        return;
+    }
+    let want: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("membrane/packs/surface.json (SURFACE_UPDATE=1 writes it)")).unwrap();
+    let mut diffs = vec![];
+    let want = want.as_object().unwrap();
+    for (k, v) in &now { match want.get(k) { None => diffs.push(format!("+ pack {k} is new: {v}")), Some(w) if w != v => diffs.push(format!("~ pack {k} changed:\n    was {w}\n    now {v}")), _ => {} } }
+    for k in want.keys() { if !now.contains_key(k) { diffs.push(format!("- pack {k} is gone")); } }
+    assert!(diffs.is_empty(), "\nthe surface of a pack changed; review it and run SURFACE_UPDATE=1 cargo test --test contracts surface\n{}\n", diffs.join("\n"));
+}
