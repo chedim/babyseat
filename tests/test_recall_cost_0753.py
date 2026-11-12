@@ -164,6 +164,51 @@ class EpisodeMatrix(unittest.TestCase):
         self.assertEqual(got, want)
 
 
+    def _stale_world(self):
+        f = _field()
+        bg = np.random.default_rng(0).normal(size=64)
+        f._ostats["bg"]["discourse"] = EF.pack_f16(bg)
+        rows = {f"f:x{i}.py": {"eps": [], "covered": True,
+                               "pts": [np.random.default_rng(100 + i * 3 + j).normal(size=64) for j in range(3)]}
+                for i in range(50)}
+        f._ep_index = {"rows": rows, "M": None}
+        return f, rows
+
+    def test_a_closed_episode_serves_the_last_matrix_while_one_rebuild_runs(self):
+        import threading
+        import time
+        f, rows = self._stale_world()
+        q = EF.unit(np.random.default_rng(7).normal(size=64))
+        first = f._ep_hits(f._centered(q), 8)           # nothing built yet: this one builds
+        gate = threading.Event()
+        started = {"n": 0}
+        real = f._ep_build
+
+        def slow(idx):
+            started["n"] += 1
+            gate.wait(5.0)
+            return real(idx)
+        rows["f:new.py"] = {"eps": [], "covered": True, "pts": [np.asarray(q, float)]}
+        with mock.patch.object(f, "_ep_build", side_effect=slow):
+            f._ep_dirty()                                # what an episode close does
+            t0 = time.time()
+            got1 = f._ep_hits(f._centered(q), 8)
+            got2 = f._ep_hits(f._centered(q), 8)
+            self.assertLess(time.time() - t0, 2.0)       # neither waited for the gated rebuild
+            self.assertEqual(got1, first)                # the last matrix answered
+            self.assertEqual(got2, first)
+            self.assertEqual(started["n"], 1)            # one rebuild, not one per recall
+            gate.set()
+            self.assertTrue(f.wait_ep_rebuild(5.0))
+        self.assertEqual(f._ep_hits(f._centered(q), 8)[0], "f:new.py")   # the new episode is in once it lands
+
+    def test_a_dirty_matrix_that_never_existed_is_built_in_place(self):
+        f, rows = self._stale_world()
+        f._ep_dirty()
+        q = EF.unit(np.random.default_rng(7).normal(size=64))
+        self.assertEqual(len(f._ep_hits(f._centered(q), 8)), 8)         # first build still answers at once
+
+
 class BackfillYields(unittest.TestCase):
     def test_the_move_log_backfill_sleeps_between_batches(self):
         from membrane import movelog as ML
