@@ -131,6 +131,37 @@ fn code_only(expr: &str) -> String {
     out
 }
 
+/// `this.<name>` read in an expression (a whole name: `this.level` is not `this.levels`).
+fn reads_this(expr: &str, name: &str) -> bool { reads_name(&expr.replace("this.", " "), name) && expr.contains(&format!("this.{name}")) }
+
+/// A setter sees the getters as they were BEFORE the write that fired it, so one that reads a getter depending (through
+/// this class's other getters) on its own trigger property reads a stale value. The loader refuses it and names the fix.
+fn stale_setter_read(setters: &[OnSet], getters: &[Getter]) -> Option<String> {
+    for st in setters {
+        let mut exprs: Vec<&str> = vec![&st.when];
+        exprs.extend(st.writes.iter().map(|w| w.2.as_str()));
+        for (c, ws) in &st.els { exprs.push(c); exprs.extend(ws.iter().map(|w| w.2.as_str())); }
+        let same: Vec<&Getter> = getters.iter().filter(|g| g.cls == st.cls && g.prop != st.prop).collect();
+        let depends = |g: &Getter| -> bool {
+            let mut seen = vec![g.prop.as_str()];
+            let mut todo = vec![g];
+            while let Some(x) = todo.pop() {
+                if reads_this(&x.expr, &st.prop) { return true; }
+                for y in &same { if !seen.contains(&y.prop.as_str()) && reads_this(&x.expr, &y.prop) { seen.push(&y.prop); todo.push(y); } }
+            }
+            false
+        };
+        for g in &same {
+            if exprs.iter().any(|e| reads_this(e, &g.prop)) && depends(g) {
+                return Some(format!(
+                    "{c}.{p} on-setter {n} reads the getter {c}.{g}, which depends on {c}.{p}: a setter sees the getters as they were before its write, so {g} is stale there. Act from an on-setter on {c}.{g} instead",
+                    c = st.cls, p = st.prop, n = st.name, g = g.prop));
+            }
+        }
+    }
+    None
+}
+
 fn reads_name(expr: &str, name: &str) -> bool {
     expr.match_indices(name).any(|(i, _)| {
         let b = expr.as_bytes();
@@ -205,6 +236,7 @@ impl Fields {
     pub fn set_pack(&mut self, name: &str, src: &str) -> Result<(), String> {
         let p = crate::syntax::parse_full(src).map_err(|e| format!("pack {}: {}", name, e))?;
         if let Some(n) = &p.name { if n != name { return Err(format!("pack {}: its PACK line says {}", name, n)); } }
+        if let Some(e) = stale_setter_read(&p.setters, &p.getters) { return Err(format!("pack {}: {}", name, e)); }
         let old = self.packs.insert(name.to_string(), p);
         if !self.load_order.iter().any(|n| n == name) { self.load_order.push(name.to_string()); }
         self.compose();
