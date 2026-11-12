@@ -1,7 +1,7 @@
 """#766: work given in the chat goes through the goal graph.
 
 The doctrine, the goals help and the Claude rung's tools note tell the agent
-to plant work as a Goal (issue link + what done means) and answer with its
+to plant work as a Goal (where it came from + what done means) and answer with its
 id, while quick questions, reviews and lookups stay in its own turn.
 """
 import sys

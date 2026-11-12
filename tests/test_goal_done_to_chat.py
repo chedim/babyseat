@@ -48,7 +48,7 @@ def test_a_planner_that_is_not_done_tells_no_chat(seat):
 
 
 def test_the_planner_is_told_it_never_closes():
-    text = GG.PLANNER_TEXT
+    text = GG.PLANNER_SYSTEM + GG.PLANNER_TEXT          # #1120: the rules are the planner's system prompt
     assert "close it with fulfill" not in text
     assert "FULFILLED" in text and "chat" in text
 

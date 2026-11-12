@@ -49,7 +49,7 @@ READ_ONLY = {
     "energy": "energy is read-only: it is Blurp's to report (#345), not a setting",
 }
 TAU_NOTE = "changing it needs the operator's approval"
-MIND_KEYS = ("loops", "cortex", "loops_auth", "cortex_auth")   # -> minds_models
+MIND_KEYS = ("loops", "cortex", "loops_auth", "cortex_auth", "workers", "workers_auth")   # -> minds_models
 
 
 def _share_ok(v) -> bool:
@@ -115,15 +115,15 @@ def _background(srv):
     from . import minds_models as MM
     mm = MM.read(srv)
     models = list(MM.pickable(srv) or [])
-    for cur in (mm["loops"], mm["cortex"]):
+    for cur in (mm["loops"], mm["cortex"], mm["workers"]):
         if cur and cur not in models:
             models.insert(0, cur)
     try:
         chat_auth = CA.auth_mode()
     except Exception:
         chat_auth = CA.MODE_KEY
-    return {"loops": mm["loops"], "cortex": mm["cortex"],
-            "loops_auth": mm["loops_auth"], "cortex_auth": mm["cortex_auth"],
+    return {"loops": mm["loops"], "cortex": mm["cortex"], "workers": mm["workers"],
+            "loops_auth": mm["loops_auth"], "cortex_auth": mm["cortex_auth"], "workers_auth": mm["workers_auth"],
             "models": models, "claude": [m for m in models if CA.is_claude_rung(srv, m)],
             "chat_auth": chat_auth, "picked": MM.picked(srv)}
 

@@ -1005,13 +1005,24 @@ class _LoopDrainer:
                         return "skip"
                     taken = True
                     out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
+                    _first = GG.sample_verdict(out)
+                    if _first is not None and GG.escalates(srv) and not _restarting():
+                        # #1120 (operator 2026-11-11): a leaf on the workers model that ended failed / stuck /
+                        # empty / capped runs ONCE more on the loops model; that run's result is the task's
+                        GG.record_sample(srv, ent, _first[0], _first[1], session=sid,
+                                         usage=GG.run_usage(srv, agent, out))
+                        agent = GG.escalated_agent(ent)
+                        sid = srv.create_loop_session(agent, agent)
+                        if _fp is not None:
+                            _fp.loop_session(agent, ent, sid)
+                        out = srv.run_loop_turn(sid, GG.worker_text(est, ent), agent) or {}
                     if isinstance(out.get("capped"), dict) and not isinstance(out.get("quota"), dict):
                         # #1116 (the operator's option A): cut at its one step -- the worker does not go on;
                         # the task ends split, with what the step did, and its goal plans it into sub-tasks
                         _note = str((out.get("capped") or {}).get("progress") or "").strip()
                         taken = False
                         GG.finish(srv, ent, GG.SPLIT, ("more than one step; what its one step did:\n" + _note)
-                                  if _note else "more than one step", session=sid)
+                                  if _note else "more than one step", session=sid, usage=GG.run_usage(srv, agent, out))
                         return GG.SPLIT
                     if isinstance(out.get("quota"), dict):
                         d = est.docs.get(ent)
@@ -1026,20 +1037,32 @@ class _LoopDrainer:
                         return "restart"         # #777: cut off by a restart -- left running, boot re-owes it
                     verdict, detail = GG.parse_worker(text)
                     taken = False
-                    GG.finish(srv, ent, verdict, detail, session=sid)
+                    GG.finish(srv, ent, verdict, detail, session=sid, usage=GG.run_usage(srv, agent, out))
                     return verdict
                 from . import llm as _LLM
                 _replan = ((est.docs.get(ent) or QuantumEntity(eid="")).properties or {}).get("replan")
                 _prev = getattr(_LLM._ctx, "depth", 0)
                 _LLM._ctx.depth = int(ev.get("depth") or 1)
+                _snap = GG.planner_snapshot(est, ent)    # #1120: what this pass sees, the next pass's baseline
                 try:
                     out = srv.run_loop_turn(sid, GG.planner_text(est, ent, str(ev.get("prompt") or "")), agent) or {}
                 finally:
                     _LLM._ctx.depth = _prev
+                if not isinstance(out.get("quota"), dict):
+                    try:
+                        with _W.as_writer("adapter:tasks"):
+                            GG.planner_seen(est, ent, _snap)
+                    except Exception:
+                        pass
                 if isinstance(out.get("quota"), dict):
                     self._quota_park(ev, str(out["quota"].get("model") or ""))
                     return "held"
                 text = str(out.get("text") or out.get("verdict_text") or "")
+                try:
+                    with _W.as_writer("adapter:tasks"):
+                        GG.note_planner_usage(srv, ent, out.get("usage"))   # #1120: the goal's ledger
+                except Exception:
+                    pass
                 try:
                     _LLM.answered(srv, ev, text, model=out.get("model"))
                     est.stamp_watch_decision(ent, {"verdict": "planned", "decision": text.strip()[-240:],

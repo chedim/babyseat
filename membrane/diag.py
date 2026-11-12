@@ -52,7 +52,7 @@ PROFILER_THREAD = "membrane-profiler"
 
 DIAG_PATHS = ("/membrane/diag/timing", "/membrane/diag/profile",
               "/membrane/diag/claude-agent", "/membrane/diag/deliver",
-              "/membrane/diag/requests")
+              "/membrane/diag/requests", "/membrane/diag/goals-ledger")
 
 # THE BUSY TIMEOUT (#431, option C of #429): a turn whose delivery outlives
 # the rung's budget fails visibly with this error -- never a bare resend
@@ -396,6 +396,12 @@ def route(handler, path: str) -> bool:
                              "max_tool_calls": _CA.MAX_TOOL_CALLS_PER_ANSWER,
                              "max_turns": _CA.MAX_TURNS,
                              "usage": _CA.usage_stats()})
+        return True
+    if path == "/membrane/diag/goals-ledger":
+        # #1120: what each goal cost and how its leaves ended (read-only)
+        from . import goalgraph as _GG
+        est = getattr(handler.server, "entity_store", None)
+        _send(handler, 200, _GG.ledger(est) if est is not None else {"goals": [], "note": "no field"})
         return True
     if path == "/membrane/diag/requests":
         # what the seat last sent to each model: the RAM ring (diag_requests)

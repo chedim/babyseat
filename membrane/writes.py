@@ -129,9 +129,36 @@ def stamp(ev: dict) -> dict:
     return ev
 
 
+# #1120: the writes a turn's own calls made in its chain, counted only while a goal worker's turn watches its chain
+# (a round that wrote nothing in the field only read). The machinery's writes (adapters, the field engine) don't count.
+_COUNTS: dict = {}
+MACHINE = ("adapter:", "trigger:")
+
+
+def watch_chain(cid: str, on: bool = True) -> None:
+    if on:
+        _COUNTS.setdefault(cid, [])
+    else:
+        _COUNTS.pop(cid, None)
+
+
+def chain_writes(cid: str | None) -> int:
+    return len(_COUNTS.get(cid or "", ()))
+
+
+def chain_written(cid: str | None, since: int = 0) -> list:
+    """The writes counted on a watched chain, as (eid, prop, path), from the `since`-th on."""
+    return list(_COUNTS.get(cid or "", ())[since:])
+
+
 def emit(path: str, old, new, eid: str | None = None) -> None:
     """One write. `eid` (when the writer knows it) splits the path exactly --
     an eid may itself hold dots (`f:router.py`): the event carries eid and prop."""
+    if _COUNTS:
+        c = _CHAIN.get()
+        if c is not None and c.get("id") in _COUNTS and not _WRITER.get().startswith(MACHINE):
+            e = eid if eid is not None else (None if path.startswith("rel:") else path)
+            _COUNTS[c["id"]].append((e, path[len(e) + 1:] if e and path.startswith(e + ".") else "", path))
     if not listeners:
         return
     ch = _CHAIN.get()

@@ -318,6 +318,39 @@ def _head_tail(text: str, cap: int) -> str:
     return text[:h] + f"\n… {len(text) - cap} chars …\n" + text[-(cap - h):]
 
 
+def loop_turn_out(out) -> dict:
+    """A loop turn's serve result -> what the loop lanes read: the text (the verdict is its last line), the cap
+    (`capped`, the old `claudeCapped` too) with what the cut step did, the trail, the model, and the turn's usage
+    (#1120: the per-goal ledger)."""
+    from . import claude_agent as _CA
+    parts = (out or {}).get("parts") or []
+    info = (out or {}).get("info") or {}
+    txt = "\n".join(str(p.get("text") or "") for p in parts if p.get("type") == "text")
+    trail = []
+    for p in parts:
+        if p.get("type") != "tool":
+            continue
+        st = p.get("state") or {}
+        res = str(st.get("output") or st.get("error") or "")
+        trail.append(f"{p.get('tool')} {st.get('status', '')}: {' '.join(res.split())[:60]}")
+    if isinstance((out or {}).get("quota"), dict):
+        return {"text": "", "quota": out["quota"]}   # out of tokens (quota.py): no verdict, the event waits
+    _cap = _CA.cap_of(info)
+    if isinstance(_cap, dict):                       # what the cut step did, for the planner's split
+        _cap = {**_cap, "progress": chunk_progress(parts, txt)}
+    tk = info.get("tokens") or {}
+    cache = tk.get("cache") or {}
+    read, write = int(cache.get("read") or 0), int(cache.get("write") or 0)
+    usage = {"model": info.get("modelID"), "input": max(0, int(tk.get("input") or 0) - read - write),
+             "cache_read": read, "cache_write": write, "output": int(tk.get("output") or 0),
+             "steps": int(info.get("steps") or 0), "estimated": bool(info.get("tokensEstimated"))}
+    return {"text": txt[-4000:], "verdict_text": txt[:200],
+            **({"capped": _cap} if isinstance(_cap, dict) else {}),
+            "trail": trail[-6:],
+            # the turn's model (#254: self trusts an advisor per model)
+            "model": info.get("modelID"), "usage": usage}
+
+
 def chunk_progress(parts: list, text: str = "") -> str:
     """#857: what a worker's capped chunk did -- each tool call, its input and result in short --
     for the next chunk's task text (the field carries it, not the old transcript)."""
@@ -1723,29 +1756,7 @@ def main() -> None:
                 if runner is not None:
                     out = runner.run(session_id, text)
                     # #561: no bgusage tally here: the serve turn is a stored row, the stats count it from there
-                    parts = (out or {}).get("parts") or []
-                    txt = "\n".join(str(p.get("text") or "")
-                                    for p in parts if p.get("type") == "text")
-                    trail = []
-                    for p in parts:
-                        if p.get("type") != "tool":
-                            continue
-                        st = p.get("state") or {}
-                        res = str(st.get("output") or st.get("error") or "")
-                        trail.append(f"{p.get('tool')} {st.get('status', '')}: "
-                                     f"{' '.join(res.split())[:60]}")
-                    # the WHOLE text: the verdict is its last line
-                    if isinstance((out or {}).get("quota"), dict):
-                        # out of tokens (quota.py): no verdict, the event waits
-                        return {"text": "", "quota": out["quota"]}
-                    _cap = ((out or {}).get("info") or {}).get("claudeCapped")
-                    if isinstance(_cap, dict):          # #857: what the cut chunk did, for the next one
-                        _cap = {**_cap, "progress": chunk_progress(parts, txt)}
-                    return {"text": txt[-4000:], "verdict_text": txt[:200],
-                            **({"capped": _cap} if isinstance(_cap, dict) else {}),
-                            "trail": trail[-6:],
-                            # the turn's model (#254: self trusts an advisor per model)
-                            "model": ((out or {}).get("info") or {}).get("modelID")}
+                    return loop_turn_out(out)
                 # the proxy-only degrade: ONE model call, no tools
                 from .rag import _model_chat
                 model = (getattr(srv, "idle_cortex_model", "") or "")

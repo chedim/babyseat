@@ -53,7 +53,7 @@ def test_goal_text_identical_at_every_hop(name):
 
     why = "because"
     assert GG.planner_text(est, eid, why) == GG.PLANNER_TEXT.format(
-        goal=eid, text=text, why=why, graph=GG._graph_lines(est, eid), tick_s=GG.WAIT_TICK_S), \
+        goal=eid, text=text, why=why, graph="The goal's graph now:\n" + GG._graph_lines(est, eid)), \
         "planner prompt differs from the goal text"
 
     GG.apply_plan(srv, eid, {"tasks": [{"key": "k1", "title": "t", "detail": text}]})

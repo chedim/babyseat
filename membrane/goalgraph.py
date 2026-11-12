@@ -454,6 +454,7 @@ def apply_plan(srv, goal: str, plan) -> dict:
             d.properties = {**(d.properties or {}), "status": DROPPED}
             est.upsert(d, embedder=None)
             dropped.append(eid)
+    dups = _flag_duplicates(est, goal, made)   # #1120: applied, but the planner hears of it
     recount(srv, goal)                  # the counts, last (each write may fire `ready`)
     g = est.docs[goal]
     g.properties = {**(g.properties or {}), "planned_ts": time.time()}
@@ -462,12 +463,38 @@ def apply_plan(srv, goal: str, plan) -> dict:
         _escalate_card(srv, goal, c)
     out = {"ok": True, "tasks": made, "cards": new_cards, "waits": made_waits, "dropped": dropped,
            "updated": updated, "reopened": reopened}
+    if dups:
+        out["duplicates"] = {new: f"duplicate of {old}: drop one in your next plan" for new, old in dups.items()}
     nodes = [d for d in list((est.docs or {}).values())
              if (d.properties or {}).get("goal") == goal and d.cls in (TASK, WAIT, "Decision")]
     if nodes and not any(_moving(d) for d in nodes):
         # #867: a plan that leaves nothing to run says so (never a bare `tasks: []`)
         out["nothing runnable"] = ("every task has ended; to run one again list its key with redo: true, "
                                    "or write a new task under a new key")
+    return out
+
+
+def _flag_duplicates(est, goal: str, made: list) -> dict:
+    """#1120: each task this plan made whose title is like an open, owed or running task of the goal (made before
+    this plan) gets `dup_of: <that task>`. Likeness: the seat's own line likeness (recall_banner: the same word
+    stems, DEDUPE_JACCARD). -> {new: old}."""
+    from . import recall_banner as _RB
+    live = [d for d in list((est.docs or {}).values())
+            if d.cls == TASK and (d.properties or {}).get("goal") == goal and d.eid not in made
+            and (d.properties or {}).get("status") in (OPEN, OWED, RUNNING)]
+    out = {}
+    for eid in made:
+        d = (est.docs or {}).get(eid)
+        if d is None:
+            continue
+        sig = _RB._sig(str((d.properties or {}).get("title") or ""))
+        for o in live:
+            if o.eid != (d.properties or {}).get("parent") and \
+                    _RB._alike(sig, _RB._sig(str((o.properties or {}).get("title") or ""))):
+                d.properties = {**(d.properties or {}), "dup_of": o.eid}
+                est.upsert(d, embedder=None)
+                out[eid] = o.eid
+                break
     return out
 
 
@@ -569,7 +596,7 @@ def parse_worker(text: str) -> tuple[str, str]:
     return v.lower(), detail.strip()[:600]
 
 
-def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str | None:
+def finish(srv, task: str, verdict: str, detail: str, session: str = "", usage: dict | None = None) -> str | None:
     """The worker's result onto the task: a result entity (-result->), and the status
     the triggers react to. -> the result's eid."""
     est = srv.entity_store
@@ -583,6 +610,7 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str 
     est.upsert(QuantumEntity(eid=res, cls=CLASS_COMPONENT, properties={
         "name": f"{verdict} {p.get('title') or task}"[:80], "task": task, "goal": p.get("goal"),
         "outcome": verdict, "receipt": str(detail or "")[:2000], "session": session, "ts": time.time(),
+        **_run_props(usage),                                                # #1120: its model and what it cost
         "silent_birth": True}), embedder=None)
     _edge(srv, task, EXECUTING, WORKERS_EID, receipt={"op": verdict, "why": str(detail)[:160]}, drop=True)
     _edge(srv, task, RESULT, res)
@@ -590,6 +618,156 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "") -> str 
                     "runs": n, "result": res, "receipt": str(detail or "")[:600], "status": verdict,
                     "ended_ts": time.time()}
     est.upsert(d, embedder=None)
+    return res
+
+
+# ---- the ledger (#1120): what a goal cost, and how its leaves ended --------------------------------------------
+_COST = ("input", "cache_read", "cache_write", "output", "steps")
+
+
+def _add_cost(into: dict, usage: dict) -> None:
+    for k in _COST:
+        try:
+            into[k] = int(into.get(k) or 0) + int(usage.get(k) or 0)
+        except (TypeError, ValueError):
+            pass
+    into["runs"] = int(into.get("runs") or 0) + 1
+    into["estimated"] = int(into.get("estimated") or 0) + (1 if usage.get("estimated") else 0)
+
+
+def note_planner_usage(srv, goal: str, usage) -> None:
+    """A planner run's usage, summed on the goal by model (`planner_usage`)."""
+    est = srv.entity_store
+    g = (est.docs or {}).get(goal)
+    if g is None or not isinstance(usage, dict):
+        return
+    led = {m: dict(v) for m, v in ((g.properties or {}).get("planner_usage") or {}).items()}
+    _add_cost(led.setdefault(str(usage.get("model") or "?"), {}), usage)
+    g.properties = {**(g.properties or {}), "planner_usage": led}
+    est.upsert(g, embedder=None)
+
+
+def ledger(est) -> dict:
+    """The per-goal report (GET /membrane/diag/goals-ledger, read-only): tokens by model (worker runs from their
+    result entities, planner runs from the goal), each worker run's outcome, the tasks by status, leaves (tasks with
+    no sub-tasks), runs per leaf, re-planned (leaves that ran more than once), open or not."""
+    docs = list((est.docs or {}).values())
+    out = []
+    for g in docs:
+        if g.cls != "Goal":
+            continue
+        gp = g.properties or {}
+        tasks = [d for d in docs if d.cls == TASK and (d.properties or {}).get("goal") == g.eid]
+        results = [d for d in docs if (d.properties or {}).get("goal") == g.eid
+                   and (d.properties or {}).get("task") and (d.properties or {}).get("outcome")]
+        if not tasks and not results and not gp.get("planner_usage"):
+            continue
+        tokens: dict = {}
+        for r in results:
+            u = (r.properties or {}).get("usage")
+            if isinstance(u, dict):
+                _add_cost(tokens.setdefault(str(u.get("model") or "?"), {}), u)
+        for m, v in (gp.get("planner_usage") or {}).items():
+            t = tokens.setdefault(m, {})
+            for k in _COST + ("runs", "estimated"):
+                t[k] = int(t.get(k) or 0) + int(v.get(k) or 0)
+        total: dict = {}
+        for v in tokens.values():
+            for k, n in v.items():
+                total[k] = total.get(k, 0) + n
+        outcomes: dict = {}
+        for r in results:
+            if (r.properties or {}).get("escalated"):
+                continue                       # a first run that went up: its cost counts, its outcome doesn't
+            o = str((r.properties or {}).get("outcome"))
+            outcomes[o] = outcomes.get(o, 0) + 1
+        statuses: dict = {}
+        for t in tasks:
+            s = str((t.properties or {}).get("status") or OPEN)
+            statuses[s] = statuses.get(s, 0) + 1
+        parents = {(t.properties or {}).get("parent") for t in tasks}
+        leaves = [t for t in tasks if t.eid not in parents]
+        runs = sum(int((t.properties or {}).get("runs") or 0) for t in leaves)
+        out.append({"goal": g.eid, "name": gp.get("name"), "status": gp.get("status") or OPEN,
+                    "open": (gp.get("status") or OPEN) == OPEN, "tokens": tokens, "total": total,
+                    "runs_by_outcome": outcomes, "tasks_by_status": statuses, "leaves": len(leaves), "runs": runs,
+                    "runs_per_leaf": round(runs / len(leaves), 2) if leaves else 0,
+                    "replanned": sum(1 for t in leaves if int((t.properties or {}).get("runs") or 0) > 1),
+                    "escalated": sum(1 for r in results if (r.properties or {}).get("escalated")),
+                    "held": "not recorded: a goal does not count its reopens yet (#867 reopens a closed goal on a "
+                            "send-back without a counter)"})
+    return {"goals": out}
+
+
+# ---- escalation (#1120, operator 2026-11-11): a leaf the workers model couldn't do runs once on the loops ----------
+ESCALATED = "worker-loops"
+
+
+def escalated_agent(task: str) -> str:
+    """The agent of a leaf's one re-run: still a worker (one step, the worker lane) but on the loops' model."""
+    return f"{ESCALATED}: {task}"
+
+
+def escalates(srv) -> bool:
+    """A `workers` model is set and it isn't the loops' own: a failed leaf has somewhere else to go."""
+    wm = str(getattr(srv, "_workers_model", "") or "")
+    lm = str(getattr(getattr(srv, "_loop_runner", None), "model", "") or "")
+    return bool(wm) and wm != lm
+
+
+def sample_verdict(out) -> tuple | None:
+    """(verdict, detail) of a worker run that should go up once (capped, failed, stuck, or no verdict at all), or
+    None (done, or out of tokens: that one waits)."""
+    out = out if isinstance(out, dict) else {}
+    if isinstance(out.get("quota"), dict):
+        return None
+    if isinstance(out.get("capped"), dict):
+        return SPLIT, "capped: more than one step"
+    v, detail = parse_worker(str(out.get("text") or out.get("verdict_text") or ""))
+    return None if v == DONE else (v, detail)
+
+
+def routed_model(srv, agent: str) -> str:
+    """The model a worker agent's turn is routed to (server._turn_model): a `worker:` leaf the workers' pick when one
+    is set, else the loops'; an escalated leaf (`worker-loops:`) the loops'."""
+    loops = str(getattr(getattr(srv, "_loop_runner", None), "model", "") or "")
+    workers = str(getattr(srv, "_workers_model", "") or "")
+    return workers if workers and str(agent or "").lower().startswith("worker:") else loops
+
+
+def run_usage(srv, agent: str, out) -> dict:
+    """A worker run's usage, always: the run's own count when it came back with one, else zeros marked estimated;
+    and always its model -- the run's own, else the one its turn was routed to (#1120: a run that came back with
+    nothing still says which model it was)."""
+    out = out if isinstance(out, dict) else {}
+    u = dict(out.get("usage") or {})
+    model = str(u.get("model") or out.get("model") or routed_model(srv, agent) or "")
+    if not u:
+        u = {"input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "steps": 0, "estimated": True}
+    u["model"] = model
+    return {"model": model, **{k: v for k, v in u.items() if k != "model"}}
+
+
+def _run_props(usage) -> dict:
+    """A worker result's `usage` and, as its own property, its `model`."""
+    if not isinstance(usage, dict):
+        return {}
+    return {"usage": dict(usage), **({"model": usage["model"]} if usage.get("model") else {})}
+
+
+def record_sample(srv, task: str, verdict: str, detail: str, session: str = "", usage: dict | None = None) -> str:
+    """The first run of an escalated leaf, in the ledger only: a result entity marked `escalated`; the task keeps
+    running (its status and run count are the second run's). -> its eid."""
+    est = srv.entity_store
+    d = (est.docs or {}).get(task)
+    p = (d.properties or {}) if d is not None else {}
+    n = int(p.get("runs") or 0) + 1
+    res = f"{MEMBRANE_NS}result:{task[len(MEMBRANE_NS):].replace(':', '-')}:{n}-escalated"
+    est.upsert(QuantumEntity(eid=res, cls=CLASS_COMPONENT, properties={
+        "name": f"{verdict} {p.get('title') or task} (escalated)"[:80], "task": task, "goal": p.get("goal"),
+        "outcome": verdict, "escalated": True, "receipt": str(detail or "")[:2000], "session": session,
+        "ts": time.time(), **_run_props(usage),
+        "silent_birth": True}), embedder=None)
     return res
 
 
@@ -867,7 +1045,7 @@ def view(est, goal: str) -> dict:
         if p.get("goal") != goal:
             continue
         if d.cls == TASK:
-            tasks.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"), "parent": p.get("parent"),
+            tasks.append({"eid": d.eid, "title": p.get("title"), "status": p.get("status"), "parent": p.get("parent"), "dup_of": p.get("dup_of"),
                           "waits_on": [b.eid for b in _blockers_of(est, d.eid, idx) if _unfinished(b)],
                           "open_blockers": p.get("open_blockers"), "result": p.get("result"),
                           "receipt": p.get("receipt")})
@@ -885,17 +1063,26 @@ def view(est, goal: str) -> dict:
 
 
 # ---- the lanes' texts ------------------------------------------------------------------------------
+# #1120 (the lean planner): the rules are the planner's own system prompt, byte-stable (formatted once, here), so the
+# prompt cache reads them; the per-call message carries the goal, why, and what changed since its last plan
+PLANNER_SYSTEM = ("""You are the PLANNER of a goal: you turn it into a graph of tasks, decision cards and waits that
+workers, the person and the clock carry out. Your message names the goal, why you were called, and its graph:
+what changed since your last plan in full, the rest as one line each (key [status] title).
+
+Work the goal as a graph. Write ONE plan with entity_edit on the goal:
+  entity_edit spec='<the goal's id>' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"], "parent": "<a split task's key, for its sub-task>"}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
+A task is ONE worker step: one reading round (calls that only read) if it needs one, then one batch of acting calls, then its verdict; "read X, then write from it" is one task. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth; after, cards and waits work on them as on any task); it is done when its sub-tasks are, and what waits on it waits until then. You can split a task before it runs the same way. Listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (a reply, a delivery, a long job finishing) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: a long job takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, duplicates = new tasks like an open or running one (drop one of each pair; the graph marks them "duplicate of"), and `nothing runnable` when the plan leaves nothing to run.
+When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
+End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>.""").format(tick_s=WAIT_TICK_S)
+
 PLANNER_TEXT = """You are the PLANNER for goal {goal}: {text}
 Why you were called: {why}
 
-The goal's graph now:
 {graph}
 
-Work the goal as a graph. Write ONE plan with entity_edit on the goal:
-  entity_edit spec='{goal}' properties={{"plan": {{"tasks": [{{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"], "parent": "<a split task's key, for its sub-task>"}}], "cards": [{{"key": "c1", "name": "The question (no quotes)", "summary": "...", "var": {{"type": "option", "options": ["a", "b"]}}, "pick": "a", "blocks": ["k1"]}}], "waits": [{{"key": "w1", "title": "...", "condition": {{"field": "<entity spec>", "prop": "<name>", "equals": "<value>"}} or {{"method": "<object>.<method>", "args": {{}}}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}}], "drop": ["<key no longer needed>"]}}}}
-A task is ONE worker step: one batch of tool calls, then its verdict. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth; after, cards and waits work on them as on any task); it is done when its sub-tasks are, and what waits on it waits until then. You can split a task before it runs the same way. Listing a stuck or failed task's key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it (it is escalated to the operator's chat for you). Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least {tick_s}; a field property equal to a value, or a method that passes), releases the tasks it blocks when it holds, and fails after deadline_min minutes (the failure goes to the chat). Choose both for what it waits on: CI takes minutes, a person's reply hours. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true (it opens again and a worker takes it), or write a new task under a new key. A send-back (the goal's replan written by the chat) on a goal whose tasks have all ended needs one of those two: otherwise nothing runs and the chat is told so. Read the entity back for plan_result: tasks = created, updated = existing keys rewritten, reopened = tasks that run again, and `nothing runnable` when the plan leaves nothing to run.
-When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.
-End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>."""
+Write at most one plan with entity_edit on the goal (the rules, the plan's shape and how a split task gets
+sub-tasks by `parent`: your system prompt). End with one line: PLANNED / FULFILLED / UNCHANGED."""
+
 
 WORKER_TEXT = """You are a WORKER on task {task} of goal {goal}.
 Task: {title}
@@ -903,7 +1090,7 @@ Task: {title}
 
 What it waited on is done: {done}
 
-Do this task now in ONE step: one batch of tool calls, then your verdict. Do not plan other work. A second batch of calls is refused and the task goes back to the planner to be split; if one step can't finish it, don't start it: end with SPLIT.
+Do this task now in ONE step: if you need to look first, one round of calls that only read; then one batch of acting calls; then your verdict. Do not plan other work. A round past those is refused and the task goes back to the planner to be split; if that can't finish it, don't start it: end with SPLIT.
 End with one line: DONE <the receipt that proves it> / FAILED <what went wrong> / STUCK <what you need: a decision or other work> / SPLIT <the parts it needs>."""
 
 
@@ -911,6 +1098,7 @@ def _graph_lines(est, goal: str) -> str:
     v = view(est, goal)
     out = [f"- task {t['eid']} [{t['status']}] {t['title']}"
            + (f" (sub-task of {t['parent']})" if t.get("parent") else "")
+           + (f" (duplicate of {t['dup_of']})" if t.get("dup_of") else "")
            + (f" (waits on {', '.join(t['waits_on'])})" if t["waits_on"] else "")
            + (f" -- receipt: {str(t['receipt'])[:160]}" if t.get("receipt") else "") for t in v["tasks"]]
     out += [f"- wait {w['eid']} [{w['status']}] {w['title']}"
@@ -922,12 +1110,55 @@ def _graph_lines(est, goal: str) -> str:
     return "\n".join(out) or "(empty: nothing planned yet)"
 
 
+def planner_snapshot(est, goal: str) -> dict:
+    """{node: its status and receipt} for the goal's tasks, waits and cards: what the planner has seen."""
+    out = {}
+    for d in list((est.docs or {}).values()):
+        p = d.properties or {}
+        if p.get("goal") == goal and d.cls in (TASK, WAIT, "Decision"):
+            out[d.eid] = hashlib.sha1(json.dumps([p.get("status"), p.get("receipt"), p.get("value")],
+                                                 default=str).encode()).hexdigest()[:12]
+    return out
+
+
+def planner_seen(est, goal: str, snap: dict | None = None) -> None:
+    """A planner pass ran: what it saw (taken before it ran) is the next pass's baseline."""
+    g = (est.docs or {}).get(goal)
+    if g is None:
+        return
+    g.properties = {**(g.properties or {}), "planner_seen": snap if snap is not None else planner_snapshot(est, goal)}
+    est.upsert(g, embedder=None)
+
+
+def _index_line(est, eid: str) -> str:
+    d = (est.docs or {}).get(eid)
+    p = (d.properties or {}) if d is not None else {}
+    kind = {TASK: "task", WAIT: "wait"}.get(getattr(d, "cls", ""), "card")
+    title = " ".join(str(p.get("title") or p.get("name") or "").split())
+    return (f"- {kind} {p.get('plan_key') or eid} [{p.get('status') or OPEN}] {title[:60]}"
+            + (" (sub-task)" if p.get("parent") else ""))
+
+
 def planner_text(est, goal: str, why: str) -> str:
+    """#1120: the first pass sees the whole graph; a later pass what changed since the last (new nodes, a changed
+    status or receipt), in full, and the rest as one index line each."""
     g = (est.docs or {}).get(goal)
     p = (g.properties or {}) if g is not None else {}
     text = p.get("text") or p.get("summary") or p.get("name") or goal
-    return PLANNER_TEXT.format(goal=goal, text=str(text), why=str(why)[:400], graph=_graph_lines(est, goal),
-                               tick_s=WAIT_TICK_S)
+    seen = p.get("planner_seen")
+    full = _graph_lines(est, goal)
+    if isinstance(seen, dict) and seen:
+        now = planner_snapshot(est, goal)
+        changed = {e for e, sig in now.items() if seen.get(e) != sig}
+        lines = full.split("\n")
+        hit = [ln for ln in lines if any(f" {e} [" in ln for e in changed)]
+        rest = sorted((e for e in now if e not in changed), key=lambda e: (len(e), e))
+        graph = ("What changed since your last plan:\n" + ("\n".join(hit) or "(nothing)")
+                 + "\n\nThe rest of the graph (unchanged):\n" + ("\n".join(_index_line(est, e) for e in rest)
+                                                               or "(nothing)"))
+    else:
+        graph = "The goal's graph now:\n" + full
+    return PLANNER_TEXT.format(goal=goal, text=str(text), why=str(why)[:400], graph=graph)
 
 
 def worker_text(est, task: str) -> str:

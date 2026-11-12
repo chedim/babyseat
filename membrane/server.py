@@ -1309,6 +1309,14 @@ def _lane_of(agent: str | None) -> str:
     return "listener"
 
 
+def _json_args(raw) -> dict:
+    try:
+        a = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return a if isinstance(a, dict) else {}
+
+
 def _lane_tools(lane: str) -> frozenset:
     if _lane_gate_off():
         return _mcp_names()
@@ -1324,6 +1332,86 @@ def _mcp_names() -> frozenset:
 PARALLEL_READS = frozenset(("find", "query", "state", "graph", "entities_related", "entity_query",
                             "entity_read", "entity_tracks", "intents"))
 PARALLEL_READS_MAX = 4
+
+
+# #1120 (operator 2026-11-11, "using getters?"): the tool families whose effects are the field's own writes -- a call
+# of theirs that wrote nothing in the field only read (a getter evaluated, an entity looked at). Calls of the others
+# (memory, peers, the shell) are judged by the read-only set alone.
+FIELD_FAMILIES = ("find", "entity", "exec", "goal", "track", "field_watch", "state")
+
+
+def _bookkeeping(est, m, obj, w) -> bool:
+    """#1120 (operator 2026-11-11, B): a write the method-call machinery makes about the call itself -- on the method
+    and the methods it runs through (run counts, last call, residues), on the object's call ring, the run's code
+    tree and result entities, and their edges."""
+    from .entities import MEMBRANE_NS
+    eid, prop, path = (list(w) + [None, "", ""])[:3]
+    if str(path or "").startswith("rel:"):
+        return all(not x or x.startswith((MEMBRANE_NS + "node:", MEMBRANE_NS + "result:")) or x == m.eid
+                   for x in str(path)[4:].split("|")[::2])
+    if not eid:
+        return False
+    if eid.startswith((MEMBRANE_NS + "node:", MEMBRANE_NS + "result:")):
+        return True
+    if obj is not None and eid == obj.eid and prop == "calls":
+        return True
+    from . import night as _N
+    return eid == m.eid or eid in {a.eid for a in _N.ancestors(est, m)}
+
+
+def call_reads(srv, name: str, args, wrote) -> bool:
+    """#1120: did this call only read, judged by what it did? `wrote`: the writes it made in the field, as
+    (eid, prop, path), or a bool. The read-only set (PARALLEL_READS) reads; a shell run (code_run) acts; a method
+    call reads when the field marks its method read_only, or when its only writes are its own bookkeeping (operator
+    2026-11-11, B); a call of the field's own families reads when it wrote nothing in the field."""
+    from . import toolset as _ts
+    n = str(name or "")
+    n = n[len("mcp__membrane__"):] if n.startswith("mcp__membrane__") else n
+    args = args if isinstance(args, dict) else {}
+    try:
+        n, args = _ts.resolve(n, args)
+    except Exception:
+        return False
+    if n in PARALLEL_READS:
+        return True
+    if n == "code_run":
+        return False
+    if n == "method_call":
+        try:
+            from . import night as _N
+            est = getattr(srv, "entity_store", None)
+            obj = est.resolve(str(args.get("object") or "")) if est is not None else None
+            m, _ = _N.resolve_method(est, obj, str(args.get("method") or "")) if obj is not None else (None, None)
+            if m is None:
+                return False
+            if (m.properties or {}).get("read_only"):
+                return True                                  # the field's own marking: an explicit override
+            if isinstance(wrote, bool):
+                return not wrote
+            return not [w for w in wrote if not _bookkeeping(est, m, obj, w)]
+        except Exception:
+            return False
+    fams = {f for f, v in _ts.FAMILIES.items() if isinstance(v, dict) and n in set((v.get("actions") or {}).values())}
+    return bool(fams & set(FIELD_FAMILIES)) and not wrote
+
+
+def reads_only(calls) -> bool:
+    """#1120: a round of tool calls that only reads -- every call, resolved like the round runs it, is one the seat
+    marks read-only (PARALLEL_READS: the calls safe to run together). [(name, args)]; an empty round reads nothing."""
+    calls = list(calls or [])
+    if not calls:
+        return False
+    from . import toolset as _ts
+    for name, args in calls:
+        n = str(name or "")
+        n = n[len("mcp__membrane__"):] if n.startswith("mcp__membrane__") else n
+        try:
+            n, _ = _ts.resolve(n, args if isinstance(args, dict) else {})
+        except Exception:
+            return False
+        if n not in PARALLEL_READS:
+            return False
+    return True
 
 
 def _thinking(runner, sid: str, phase: str) -> None:
@@ -1462,8 +1550,13 @@ def _tokens_fill(a_info: dict, resp: dict) -> None:
                                      "reasoning": 0,
                                      "cache": {"read": 0, "write": 0}})
     u = (resp or {}).get("usage")
+    # #1120: the model's API steps -- a round is one, a claude-agent round reports its own count
+    _st = u.get("steps") if isinstance(u, dict) else None
+    a_info["steps"] = int(a_info.get("steps") or 0) + (int(_st) if isinstance(_st, int) and _st > 0 else 1)
     if not isinstance(u, dict) or not u:
         return
+    if u.get("estimated"):
+        a_info["tokensEstimated"] = True      # #1120: the seat's estimate, not the model's count
 
     def _i(v):
         try:
@@ -1876,11 +1969,12 @@ class TurnRunner:
         with lock:
             row = self.messages.get_msg(sid, str(mid or ""))
             info = (row or {}).get("info") or {}
-            cap = info.get(_CA.CAP_MARK)
+            cap = _CA.cap_of(info)
             if not isinstance(cap, dict) or not cap.get("session"):
                 raise _CA.ContinueRefused("that message did not stop at the tool-call ceiling")
             if cap.get("continued"):
                 raise _CA.ContinueRefused("that answer was already continued")
+            info.pop(_CA.OLD_CAP_MARK, None)
             info[_CA.CAP_MARK] = dict(cap, continued=True)
             self.messages.append(sid, info, list(row.get("parts") or []))
         self.hub.publish({"type": "message.updated", "info": dict(info),
@@ -1975,9 +2069,16 @@ class TurnRunner:
             field_call = str(agent or "").strip().lower().startswith("field-call")
             # #729: a watch triage pass runs on the local idle model, never on Claude
             triage = str(agent or "").strip().lower().startswith("triage")
+            # #1120: a goal leaf (the worker lane) runs on the workers' pick when one is set
+            # (an escalated leaf, `worker-loops:`, runs on the loops' pick)
+            _wm = str(getattr(srv, "_workers_model", "") or "") \
+                if str(agent or "").strip().lower().startswith("worker:") else ""
+            if _wm:
+                turn_model = _wm
+            mind = "workers" if _wm else "loops"
             if (lane == "listener" or field_call) and not triage and _CA.is_claude_rung(srv, turn_model) \
-                    and _MM.claude_allowed(srv, "loops", turn_model):
-                auth = _MM.credential_mode(srv, "loops")
+                    and _MM.claude_allowed(srv, mind, turn_model):
+                auth = _MM.credential_mode(srv, mind)
             else:
                 # THE CLAUDE-AGENT RUNG IS A PERSON'S (issue #384): a loop
                 # or a mind not picked onto it falls back to the seat's model
@@ -2908,7 +3009,9 @@ class TurnRunner:
         # told so, and the next round goes out without tools: it can only answer.
         _refused: set = set()
         _text_only = False
-        _acted = False                     # #1116: a worker's round of tool calls ran
+        _acted = []                        # #1116/#1120: a worker's rounds of tool calls (True = it only read)
+        from . import writes as _WC
+        _wcid, _w0 = None, 0               # #1120: the worker turn's chain, its writes before the current call
         while not err_done and rounds < MAX_ROUNDS:
             rounds += 1
             self._turn_activity[sid] = time.time()   # THE ROUND'S TOUCH
@@ -2991,6 +3094,21 @@ class TurnRunner:
             body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}
+            # #1120: a goal leaf on a local model runs with thinking off -- the think dial's own key (rag.
+            # apply_think_dial keeps a body's think:false whatever the seat's dial says); qwen3 thought 117 s
+            # and answered nothing on a one-step leaf
+            if str((self._agents or {}).get(sid) or "").lower().startswith("worker"):
+                try:
+                    from . import claude_agent as _CA
+                    if not _CA.is_claude_rung(getattr(self, "srv", None), turn_model):
+                        body["think"] = False
+                except Exception:
+                    pass
+            # #1120 (the lean planner): a goal's planner runs on its own short system prompt, not the chat doctrine
+            if str((self._agents or {}).get(sid) or "").lower().startswith("planner") and body["messages"] \
+                    and body["messages"][0].get("role") == "system":
+                from . import goalgraph as _GG
+                body["messages"][0] = {"role": "system", "content": _GG.PLANNER_SYSTEM}
             if _turn_auth:                 # a mind's own Claude credentials
                 from . import claude_agent as _CA
                 body[_CA.AUTH_KEY] = _turn_auth
@@ -3348,6 +3466,7 @@ class TurnRunner:
                     a_info[_CA.CAP_MARK] = {"session": str(_cap["session"]),
                                             "calls": int(_cap.get("calls")
                                                          or _CA.MAX_TOOL_CALLS_PER_ANSWER),
+                                            **({"steps": int(_cap["steps"])} if _cap.get("steps") else {}),
                                             "continued": False}
             _tokens_fill(a_info, resp)
             # A CUT IS NOT AN ANSWER (#449): a round the person's message (or
@@ -3444,15 +3563,18 @@ class TurnRunner:
                                   "time": int(time.time() * 1000),
                                   "sessionID": sid})
             if tcs and not _ca_round and str((self._agents or {}).get(sid) or "").lower().startswith("worker"):
-                # #1116 (the operator's option A): a goal worker gets ONE step -- one round of tool calls, then
-                # its verdict. A second round of calls never runs: the answer ends capped (as the Claude rung's
-                # does) and the task goes back to the planner to be split
-                if _acted:
+                # #1116 (the operator's option A) and #1120 (read, then act): a goal worker gets one READING
+                # round (every call read-only) and then one acting round, then its verdict. A round past that
+                # never runs: the answer ends capped (as the Claude rung's does) and the task is split
+                if len(_acted) >= 2 or (_acted and not _acted[0]):
                     a_info[_CA.CAP_MARK] = {"session": "", "calls": 0, "continued": False, "split": True}
                     mkpart({"type": "step-finish", "reason": "stop", "cost": 0,
                             "tokens": _step_tokens(a_info, history, parts)})
                     break
-                _acted = True
+                _acted.append(True)            # #1120: judged by what its calls did (below)
+                _wcid = (_WC.current() or {}).get("id")
+                if _wcid:
+                    _WC.watch_chain(_wcid)
             if tcs:
                 a_info["time"].setdefault("start", int(time.time() * 1000))
                 asst_msg = {"role": "assistant", "content": content or "",
@@ -3604,6 +3726,7 @@ class TurnRunner:
                                                    session=sid, kind=name_l)
                             except Exception:
                                 pass
+                            _w0 = _WC.chain_writes(_wcid)
                             _p = _pre.get(call_id)
                             if _p is not None and _p[0] == name_l:
                                 output = _p[1].result()
@@ -3617,6 +3740,10 @@ class TurnRunner:
                                 output = self.executor(name_l, args, call_id)
                             output = _claim_note(getattr(self, "srv", None), (self._agents or {}).get(sid),
                                                  name_l, args, output)
+                            if _acted:               # #1120: a worker's call that wrote in the field acted
+                                _acted[-1] = _acted[-1] and call_reads(
+                                    getattr(self, "srv", None), name_l, args,
+                                    _WC.chain_written(_wcid, _w0) if _wcid else True)
                         # THE TOOL'S TOUCH (the activity clock): a
                         # completed tool = the turn moved
                         self._turn_activity[sid] = time.time()
@@ -3683,10 +3810,13 @@ class TurnRunner:
             mkpart({"type": "step-finish", "reason": "stop", "cost": 0,
                     "tokens": _step_tokens(a_info, history, parts)})
             break
+        if _wcid:
+            _WC.watch_chain(_wcid, False)
         if "error" in a_info:
             a_info.pop("finish", None)
         if not (a_info.get("tokens") or {}).get("total"):
             a_info["tokens"] = _tokens_estimate(history, parts)
+            a_info["tokensEstimated"] = True       # #1120: the ledger says when it is a guess
         # A TOOL CALL THAT NEVER RAN IS CLOSED (2026-10-11: a cut turn left an
         # `exec` 'pending' forever -- the operator saw it hang for minutes)
         _cut_now = int(time.time() * 1000)
@@ -4933,7 +5063,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     out = _MM.apply(psrv, loops=b.get("loops"), cortex=b.get("cortex"),
                                     think=b.get("think"), known=known or None,
                                     loops_auth=b.get("loops_auth"),
-                                    cortex_auth=b.get("cortex_auth"))
+                                    cortex_auth=b.get("cortex_auth"),
+                                    workers=b.get("workers"), workers_auth=b.get("workers_auth"))
                 except ValueError as e:
                     body = json.dumps({"error": str(e)}).encode()
                     self.send_response(400); self.send_header("Content-Type", "application/json")

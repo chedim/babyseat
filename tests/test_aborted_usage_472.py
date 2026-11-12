@@ -78,9 +78,10 @@ class TestProgress(_Case):
                   if ln.startswith(b"data:") and ln[5:].strip() != b"[DONE]"
                   and json.loads(ln[5:]).get("usage")]
         self.assertEqual(usages[0], CA._usage(FIRST))
-        self.assertEqual(usages[-1], CA._usage({"input_tokens": 3, "cache_read_input_tokens": 38000,
-                                                "cache_creation_input_tokens": 9000,
-                                                "output_tokens": 90}))
+        self.assertEqual(usages[-1], {**CA._usage({"input_tokens": 3, "cache_read_input_tokens": 38000,
+                                                   "cache_creation_input_tokens": 9000,
+                                                   "output_tokens": 90}),
+                                      "steps": 2})          # #1120: the answer's API steps ride its usage
 
 
 def _broken_stream(chunks):

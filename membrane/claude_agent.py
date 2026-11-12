@@ -32,7 +32,7 @@ the ceiling.
 
 THE CEILING AND CONTINUE (#389's machinery): an answer that stops at the
 ceiling (or the backstop) is neither an error nor a silent cut. The reply
-carries CAPPED_KEY {session, calls}; the transcript row keeps it as CAP_MARK
+carries CAPPED_KEY {session, calls}; the transcript row keeps it as CAP_MARK (`capped`)
 and the chat offers Continue. Continue is a person's action only (never
 automatic, never on a background lane): it resumes the SAME SDK session
 (the SDK's `resume`, RESUME_KEY on the turn) with the same tools and options
@@ -115,21 +115,29 @@ MAX_TOOL_CALLS_PER_ANSWER = 2048    # the hard ceiling per answer; Continue
                                     # 2026-10-23, #467)
 MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: sized
                                     # never to bind before the ceiling (#425)
+CHAT_STEP_CEILING = 12              # a person's chat answer: acting API steps (operator 2026-11-11, #1120)
+CHAT_STEP_MESSAGE = (f"This answer reached its ceiling of {CHAT_STEP_CEILING} acting steps. "
+                     "Stop here: checkpoint what's left to the field (the goal, its decision cards, what's left) "
+                     "and say what you'll do next; the person can press Continue.")
+CHAT_STEP_LAST = (" · the next step is your last acting step in this answer: make it the checkpoint -- save the "
+                  "goal, its decision cards and what's left to the field -- then end with what you'll do next")
 WORKER_CEILING = 20                 # a goal worker's one step: at most this many calls (#857; #1116: then it splits)
 CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
                    f"person can press Continue.")
 CHUNK_MESSAGE = (f"This step reached its limit of {WORKER_CEILING} tool "
                  f"calls. Stop here; the task goes back to the planner to be split.")
-STEP_MESSAGE = ("A goal task gets ONE step: this second batch of tool calls is "
-                "refused. Stop here; the task goes back to the planner to be split.")
+STEP_MESSAGE = ("A goal task gets one reading round and one acting round: this "
+                "batch of tool calls is past them and is refused. Stop here; the "
+                "task goes back to the planner to be split.")
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
 TOOL_START_KEY = "membrane_tool_start"  # a streamed chunk: a call started (or was dropped)
 TOOLS_KEY = "membrane_tools"        # a buffered response: every tool Claude ran
 CAPPED_KEY = "membrane_capped"      # reply: the answer stopped at the ceiling (#425)
-CAP_MARK = "claudeCapped"           # transcript row: {session, turns, continued}
+CAP_MARK = "capped"                 # transcript row: {session, turns, continued} (#1120: local leaves too)
+OLD_CAP_MARK = "claudeCapped"       # its name before #1120: stored rows still carry it
 RESUME_KEY = "claude_resume"        # turn/body: resume this SDK session
 CONTINUE_FIELD = "claudeContinue"   # a person's POST: the capped message's id
 CONTINUE_TEXT = "Continue"          # the person's row a Continue adds
@@ -139,6 +147,22 @@ MAX_TURNS_SUBTYPE = "error_max_turns"   # the SDK's result subtype at the cap
 NO_AUTO_MEMORY_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"   # the CLI's own switch (build_options)
 QUOTA_ERRORS = ("rate_limit", "billing_error")   # an AssistantMessage error that
                                     # means out of tokens: the rung pauses (quota.py)
+
+
+def step_reads(blocks) -> bool:
+    """#1120: a step's tool calls only read (server.reads_only over its ToolUseBlocks)."""
+    from .server import reads_only
+    return reads_only((getattr(b, "name", ""), getattr(b, "input", None) or {})
+                      for b in blocks or [] if type(b).__name__ == "ToolUseBlock")
+
+
+def cap_of(info) -> dict | None:
+    """A transcript row's cap mark: `capped`, or the `claudeCapped` a row stored before #1120 carries."""
+    info = info if isinstance(info, dict) else {}
+    cap = info.get(CAP_MARK)
+    if not isinstance(cap, dict):
+        cap = info.get(OLD_CAP_MARK)
+    return cap if isinstance(cap, dict) else None
 
 
 class ContinueRefused(ValueError):
@@ -284,22 +308,65 @@ class _Answer:
         self.one_step = self.limit == WORKER_CEILING
         self.acting = None              # the message id of that acting step
         self.split = False
+        self.steps: list = []           # #1120: [message id, it only read] of each step that called tools
+        # #1120 (operator 2026-11-11): a person's chat answer gets CHAT_STEP_CEILING acting steps
+        self.step_limit = CHAT_STEP_CEILING if _DR.current().get("lane") == "chat" else None
+        # #1120 ("using getters?"): a worker's step is judged by what its calls did -- the writes they made in the
+        # field, counted on the turn's chain while this answer runs (stop() ends the count)
+        from . import writes as _W
+        self.chain = (_W.current() or {}).get("id") if self.one_step else None
+        if self.chain:
+            _W.watch_chain(self.chain)
+        self.acting_steps = 0
+        self._step_mid = None
+        self.over = False
 
-    def saw_step(self, mid) -> None:
+    def saw_step(self, mid, reads: bool = False) -> None:
         """An assistant message carrying tool calls, by its API step's message id (the CLI sends one message per
-        content block, all with their step's id): a second acting step means more than one step."""
+        content block, all with their step's id). #1120: one reading step (every call read-only) and then one
+        acting step make one leaf; a step past them means more than one step. A chat answer counts its acting
+        steps against CHAT_STEP_CEILING."""
+        if mid != self._step_mid:
+            self._step_mid = mid
+            self.acting_steps += 1
+            if self.step_limit is not None and self.acting_steps > self.step_limit:
+                self.over = True
         if not self.one_step:
             return
         if self.acting is None:
             self.acting = mid
-        elif mid != self.acting:
+        # [mid, read by its calls' names, read by what its calls did (None until one ran)]
+        if self.steps and self.steps[-1][0] == mid:
+            self.steps[-1][1] = self.steps[-1][1] and bool(reads)
+        else:
+            self.steps.append([mid, bool(reads), None])
+        first = self.steps[0]
+        first_read = first[2] if first[2] is not None else first[1]
+        if len(self.steps) > 2 or (len(self.steps) == 2 and not first_read):
             self.split = True
+
+    def call_done(self, name: str, args, wrote) -> None:
+        """#1120: one call of the current step ran; a call that acted makes its step an acting one."""
+        if not self.one_step or not self.steps:
+            return
+        from .adapters import _SEAT
+        from .server import call_reads
+        did = call_reads(_SEAT.get("srv"), name, args, wrote)
+        cur = self.steps[-1]
+        cur[2] = did if cur[2] is None else (cur[2] and did)
+
+    def stop(self) -> None:
+        if self.chain:
+            from . import writes as _W
+            _W.watch_chain(self.chain, False)
 
     async def hook(self, hook_input, tool_use_id=None, context=None):
         tid = str((hook_input or {}).get("tool_use_id") or tool_use_id or "")
         if self.split:
             self.message = STEP_MESSAGE
-        if self.calls >= self.limit or self.split:
+        if self.over:
+            self.message = CHAT_STEP_MESSAGE
+        if self.calls >= self.limit or self.split or self.over:
             self.ceiling = True
             self.denied.add(tid)
             return {"continue_": False, "stopReason": self.message,
@@ -682,7 +749,9 @@ def _footer(answer) -> str:
     if answer is None:
         return ""
     left = max(MAX_TOOL_CALLS_PER_ANSWER - answer.calls, 0)
-    return f"\n\n\u00b7 {left} calls left"
+    lim = getattr(answer, "step_limit", None)
+    last = CHAT_STEP_LAST if lim is not None and getattr(answer, "acting_steps", 0) == lim - 1 else ""
+    return f"\n\n\u00b7 {left} calls left{last}"
 
 
 # #1061: the agent of the turn this rung answers (set by the proxy when it hands the turn over; the SDK thread and
@@ -707,7 +776,12 @@ def _tool_handler(name: str, port, answer=None):
             if agent:
                 from .server import stamp_watch_owner
                 call = stamp_watch_owner(name, call, agent)
+            from . import writes as _W
+            _cid = getattr(answer, "chain", None)
+            _w0 = _W.chain_writes(_cid)
             text = await asyncio.to_thread(impl, call, int(port))
+            if answer is not None and hasattr(answer, "call_done"):     # #1120: what the call did
+                answer.call_done(name, call, _W.chain_written(_cid, _w0) if _cid else True)
             return {"content": [{"type": "text",
                                  "text": str(text) + _footer(answer)}]}
         except _mcp.ProxyError as e:
@@ -757,7 +831,7 @@ TOOLS_NOTE = _full_names(
     "a .c1f getter (@pack load; help: membrane::help:packs); "
     "act by @entity_write. Read it back. Code work happens in a temp git "
     "worktree, never the main checkout. "
-    "Work you are given goes to @intend (issue link, what done means) "
+    "Work you are given goes to @intend (where it came from, what done means) "
     "instead of doing it in your own turn; answer with the goal's id. "
     "Ask the person for a decision with a card on their decision "
     "board, not a list in chat, in one call, e.g. @entity_add class='Decision' "
@@ -860,7 +934,8 @@ def _usage(u) -> dict:
                 "cache_write_tokens": int(u.get("cache_creation_input_tokens") or 0)}}
 
 
-_FOOTER_RE = re.compile(r"\n\n\u00b7 \d+ calls left( \u00b7 check-in in \d+)?$")   # the old form too
+_FOOTER_RE = re.compile(r"\n\n\u00b7 \d+ calls left( \u00b7 check-in in \d+)?"
+                        r"( \u00b7 the next step is your last acting step[^\n]*)?$")   # the old form too; #1120
 
 
 def _result_text(content) -> str:
@@ -971,7 +1046,9 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                     raise _quota_paused(model, why, rejected_until)
                 raise RuntimeError(why)
             if any(type(b).__name__ == "ToolUseBlock" for b in getattr(m, "content", None) or []):
-                answer.saw_step(getattr(m, "message_id", None) or f"after-{results}")   # #1116
+                answer.saw_step(getattr(m, "message_id", None) or f"after-{results}",   # #1116
+                                reads=step_reads(getattr(m, "content", None) or []))   # #1120: what its calls
+                # did (call_done) decides once they ran; their names until then
             for b in getattr(m, "content", None) or []:
                 bk = type(b).__name__
                 if bk == "ToolUseBlock":
@@ -1014,9 +1091,11 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
                 raise RuntimeError(f"claude-agent: {why}")
             _Q.ok(model)                     # it answered: a probing pause is over
             put(("usage", _usage(getattr(m, "usage", None))))
+    answer.stop()
     if capped or answer.ceiling:
         _count("ceiling_hits")
-        put(("capped", {"session": session, "calls": answer.limit}))
+        put(("capped", {"session": session, "calls": answer.limit,
+                        **({"steps": answer.step_limit} if answer.over else {})}))   # #1120: the step ceiling
 
 
 def _quota_paused(model: str, why: str, until=None):
@@ -1062,6 +1141,7 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
     # #576: the SDK thread runs in the turn's context, so its tool calls carry the turn's chain
     threading.Thread(target=_W.carry(run), daemon=True, name="claude-agent").start()
     so_far: dict = {}                       # the answer's usage, step by step (#472)
+    steps = 0                               # #1120: the answer's API steps, on its usage
     while True:
         item = q.get()
         if item is _END:
@@ -1070,7 +1150,9 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
             raise item[1]
         if item[0] == "usage":
             _record_usage(item[1])
+            item = ("usage", {**item[1], "steps": steps})
         if item[0] == "step":                # the ledger (#450) and the usage so far (#472)
+            steps += 1
             u = item[1]["usage"]
             _record_step(u, item[1]["first"])
             for k in ("input_tokens", "cache_read_input_tokens",
