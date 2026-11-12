@@ -17,13 +17,13 @@ def _stop(lane):
 
 
 class TestChunkMessage(unittest.TestCase):
-    def test_worker_chunk_stop_names_real_limit_and_fresh_chunk(self):
+    def test_worker_stop_names_real_limit_and_the_split(self):   # #1116: no fresh chunk; the task splits
         a, msg = _stop("worker")
         self.assertEqual(a.limit, CA.WORKER_CEILING)
         self.assertIn(str(CA.WORKER_CEILING), msg)
         self.assertNotIn("2048", msg)
         self.assertNotIn("Continue", msg)
-        self.assertIn("fresh chunk", msg)
+        self.assertIn("split", msg)
 
     def test_true_ceiling_message_unchanged(self):
         a, msg = _stop("chat")
