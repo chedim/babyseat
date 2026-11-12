@@ -141,6 +141,9 @@ fn reads_name(expr: &str, name: &str) -> bool {
     })
 }
 
+/// How many times the start-up pass may repeat while values still change (see `rebuild`).
+const REBUILD_PASSES: usize = 16;
+
 pub struct Fields {
     pub setters: Vec<OnSet>,
     /// the llm calls the plan fields asked for (the effect that is not a prop write)
@@ -443,19 +446,30 @@ impl Fields {
         self.known = core.docs.keys().cloned().collect();
         let mut order: Vec<usize> = (0..self.getters.len()).collect();
         order.sort_by_key(|&i| self.glevel[i]);
-        for gi in order {
-            let cls = self.getters[gi].cls.clone();
-            let mut es: Vec<String> = of_kind(core, &cls);
-            es.sort();
-            for e in es {
-                let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
-                let prop = self.getters[gi].prop.clone();
-                if core.docs.get(&e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
-                *seq += 1;
-                let w = Write { eid: e.clone(), prop: prop.clone(), new: v, old: J::Null, writer: "field:rebuild".into(), chain: json!({}), seq: *seq };
-                self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
-                core.hear(w, None, now);
+        // A getter that reads the same getter on ANOTHER entity (a tree's depth through its children) cannot be ordered by class level:
+        // the parent may be computed before its children. So the pass repeats until nothing changes (bounded: a chain of references
+        // longer than REBUILD_PASSES settles in the live rounds that follow, since each change marks its readers dirty).
+        for pass in 0..REBUILD_PASSES {
+            let mut changed = false;
+            for &gi in &order {
+                let cls = self.getters[gi].cls.clone();
+                let mut es: Vec<String> = of_kind(core, &cls);
+                es.sort();
+                for e in es {
+                    let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
+                    let prop = self.getters[gi].prop.clone();
+                    let was = core.docs.get(&e).and_then(|d| d.props.get(&prop)).cloned();
+                    if was.as_ref() == Some(&v) || (v.is_null() && was.is_none()) { continue; }
+                    changed = true;
+                    *seq += 1;
+                    let w = Write { eid: e.clone(), prop: prop.clone(), new: v, old: J::Null, writer: "field:rebuild".into(), chain: json!({}), seq: *seq };
+                    if pass == 0 || !self.out.iter().rev().take(64).any(|o| o["eid"] == json!(w.eid) && o["prop"] == json!(w.prop) && o["new"] == w.new) {
+                        self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+                    }
+                    core.hear(w, None, now);
+                }
             }
+            if !changed { break; }
         }
         self.dirty.clear();
     }

@@ -1,0 +1,6 @@
+PACK tree 1
+-- a binary tree as entities: depth and in-order walk by recursion through the references (the data stays in its nodes)
+Node.l getter: this.left.depth or 0
+Node.r getter: this.right.depth or 0
+Node.depth getter: 1 + max(this.l, this.r)
+Node.walk getter: concat(this.left.walk or [], [this.v], this.right.walk or [])
