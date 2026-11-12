@@ -4772,8 +4772,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._item_say(); return
         if path == "/membrane/feedback":
             self._reply_feedback(); return
-        if path == "/membrane/peer/post":
-            self._peer_post(); return
         if path == "/membrane/peer/read":
             self._peer_read(); return
         if path == "/membrane/junk-cut":
@@ -7200,24 +7198,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                         "answer": content[:4000]})
 
     # ---- /membrane/entity-track: the model's banner lane (MCP relay) ----
-    def _peer_post(self) -> None:
-        """POST /membrane/peer/post: the cross-seat chat lane (the
-        operator's multi-seat design)."""
-        srv = self.server
-        peers = getattr(srv, "peers", None)
-        if peers is None:
-            self._json_err_raw(503, "peer substrate unavailable"); return
-        body = self._json_body()
-        text = str(body.get("text") or "").strip()
-        if not text:
-            self._json_err_raw(400, "text required"); return
-        ok = peers.post(text, reply_to=str(body.get("reply_to") or ""))
-        if not ok:
-            from .peers import post_failure_reason
-            self._json_out({"ok": False, "error": post_failure_reason(peers)})
-            return
-        self._json_out({"ok": ok})
-
     def _peer_read(self) -> None:
         """POST /membrane/peer/read (#429): the unread peer-channel messages,
         oldest first -- read-once per seat, like the banner's peer lines

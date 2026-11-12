@@ -703,7 +703,7 @@ def _blocks_prompt(blocks):
 _LOOP_HIDDEN = frozenset({
     "junk_cut", "field_watch", "entity_watch", "entity_unwatch",
     "entity_tracks", "graph", "entities_related", "entity_inherit",
-    "method_each", "peer_post", "answer_card"})
+    "method_each", "answer_card"})
 
 
 def tool_names() -> list[str]:
@@ -831,8 +831,7 @@ TOOLS_NOTE = _full_names(
     "@entity_remove/@entity_inherit; find(action='memory'/'query'/'graph'/"
     "'related') -> @query/@entity_query/@graph/@entities_related; memory(action="
     "'learn'/'forget') -> learn/forget; track(action='watch'/'unwatch'/'list') "
-    "-> entity_watch/entity_unwatch/entity_tracks; peer(action='post') -> "
-    "peer_post. Goals, memory, tracks and peers are methods: @call method=<name> args={..}; help('tools').\n\n"
+    "-> entity_watch/entity_unwatch/entity_tracks; Goals, memory and tracks are methods: @call method=<name> args={..}; post to peers by writing Peer:channel.post; help('tools').\n\n"
     "How you work: when the person gives you a task, carry it out to the end "
     "in this turn. Don't ask permission for steps that are part of the task, "
     "and don't end a reply with \"next I'll...\" -- do it. End your turn only "

@@ -1194,7 +1194,7 @@ OPERATOR_TOOLS = frozenset((
     # with a receipt, the listeners' too: their landed work moves the board)
     "intend", "intents", "fulfill",
     # room
-    "peer_post", "peer_seats", "peer_read", "junk_cut",
+    "peer_seats", "peer_read", "junk_cut",
     # the banner tracks (the operator's header)
     "entity_watch", "entity_unwatch",
     # THE EXECUTOR'S DOOR (2026-10-08, the operator's call): the operator

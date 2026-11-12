@@ -51,12 +51,6 @@ class _Http:
 
 
 class TestPeerPost(unittest.TestCase):
-    def test_no_channel_says_so(self):
-        with _Http({"ok": False, "error": "no peer channel on this seat"}):
-            with self.assertRaises(M.ProxyError) as cm:
-                M.tool_peer_post({"text": "hi"}, 0)
-        self.assertIn("no peer channel", str(cm.exception))
-
     def test_route_names_the_reason(self):
         from membrane import peers as P
         p = P.PeerSubstrate.__new__(P.PeerSubstrate)

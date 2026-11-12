@@ -989,18 +989,6 @@ def tool_set_junk_cut(args: dict, port: int) -> str:
             f"applies on the next banner render / watch arrival.")
 
 
-def tool_peer_post(args: dict, port: int) -> str:
-    text = _arg(args, "text", "message", "msg", "content")
-    if not text:
-        raise ProxyError(400, "text required")
-    out = _http(port, "POST", "/membrane/peer/post", {
-        "text": text, "reply_to": str(args.get("reply_to") or "")})
-    if not out.get("ok"):
-        raise ProxyError(503, f"post failed: {out.get('error') or 'unknown error'}")
-    return (f"Posted to the peer channel (visible to the operator on "
-            f"every connected seat; unread messages ride their banners).")
-
-
 def tool_intend(args: dict, port: int) -> str:
     """The model's pen on the steering wheel: create-or-pin a shared Goal
     + give it a priority pin on THIS seat's active set. Speech announces
@@ -1592,21 +1580,6 @@ METHOD_TOOL_DEFS = [
             },
         },
     {
-            "name": "peer_post",
-            "description": (
-                'post to the PEER CHANNEL (cross-seat LLM chat; the operator sees it on every seat): handoffs, questions, announcements. text<=2000, reply_to=seat id. unread ride your banner.'),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string",
-                             "description": "The message (capped 2000)."},
-                    "reply_to": {"type": "string",
-                                 "description": "Optional seat id replying to."},
-                },
-                "required": ["text"],
-            },
-        },
-    {
             "name": "junk_cut",
             "description": (
                 "tune the junk cut: how strictly machinery (tool output, ps/lsof tables, test bars, logs, config dumps) stays out of banner stories + watch triggers. per track | 'all' | global default. CUT 0..1, higher = stricter. anchor-vector screen (junk embeds near anchor entities in the field). audited to the operator."),
@@ -1695,7 +1668,7 @@ METHOD_TOOL_DEFS = [
 # The tools that are not field manipulation or querying are METHODS, reached by name through `call` (operator,
 # 2026-11-12). Their implementations below are a labelled bridge: phase B moves each into c1f as the system behind it
 # (the intent board, watches, dials, memory, the peer channel) moves.
-METHOD_TOOLS = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "peer_post", "junk_cut",
+METHOD_TOOLS = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "junk_cut",
                 "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
 
 
@@ -1843,7 +1816,6 @@ TOOL_IMPLS = {
     "entity_write": tool_write,
     "entity_remove": tool_entity_remove,
     "junk_cut": tool_set_junk_cut,
-    "peer_post": tool_peer_post,
     "peer_seats": tool_peer_seats,
     "peer_read": tool_peer_read,
     "graph": tool_graph,

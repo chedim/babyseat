@@ -3,7 +3,7 @@
 ~200 of the HA seat's tool calls were refused 'X required' for a value the
 model DID send -- under the name it reaches for, not the schema's:
 entity_read got eid/entity/name/key (or a wrapped {"args": "<json>"}),
-intend got goal, peer_post got message, learn got text, query got
+intend got goal, learn got text, query got
 query/text, entities_related got q. The aliases resolve; the schema name
 still wins. And the tool watchdog disarms on an ERRORING call too: each
 refusal left its timer armed -> a false 'STILL PENDING ... ALL THREADS'
@@ -80,11 +80,6 @@ class TestToolsResolveAliases(unittest.TestCase):
             M.tool_intend({"goal": "wire the seat into HA"}, 0)
         self.assertEqual(h.calls[0][2]["text"], "wire the seat into HA")
 
-    def test_peer_post_message(self):
-        with _Http({"ok": True}) as h:
-            M.tool_peer_post({"message": "hello"}, 0)
-        self.assertEqual(h.calls[0][2]["text"], "hello")
-
     def test_learn_text(self):
         with _Http({"written": False}) as h:
             M.tool_learn({"text": "adb cannot link"}, 0)
@@ -96,8 +91,6 @@ class TestToolsResolveAliases(unittest.TestCase):
         self.assertIn("q=mqtt", h.calls[0][1])
 
     def test_missing_still_refused(self):
-        with self.assertRaises(M.ProxyError):
-            M.tool_peer_post({}, 0)
         with self.assertRaises(M.ProxyError):
             M.tool_learn({"lesson": "  "}, 0)
 

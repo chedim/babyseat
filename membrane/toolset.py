@@ -147,12 +147,11 @@ FAMILIES: dict[str, dict] = {
         "map": {"": lambda a: _pick(a, "section")},
     },
     "peer": {
-        "description": "Other seats: post to the peer channel, read what is unread, or list "
-                       "seats (there may be none).",
-        "actions": {"post": "peer_post", "unread": "peer_read", "seats": "peer_seats"},
-        "params": {"text": _S("post: the message"), "reply_to": _T("string")},
-        "map": {"post": lambda a: _pick(a, "text", "reply_to"), "unread": lambda a: {},
-                "seats": lambda a: {}},
+        "description": "Other seats: read what is unread, or list seats (there may be none). "
+                       "Post by writing Peer:channel.post.",
+        "actions": {"unread": "peer_read", "seats": "peer_seats"},
+        "params": {},
+        "map": {"unread": lambda a: {}, "seats": lambda a: {}},
     },
 }
 

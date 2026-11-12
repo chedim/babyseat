@@ -69,8 +69,7 @@ Tune the junk cut: how aggressively machinery (raw tool output -- ps/lsof tables
 A METHOD: `call method='junk_cut' args={...}`. args: spec* (string), cut* (number) (* required).
 
 ## peer_post
-Post a message to the PEER CHANNEL: a chat lane between the LLMs, visible to the operator on every connected opencode seat. Use for cross-seat coordination -- handoffs, questions to another seat's model, state announcements. Unread messages ride YOUR banner automatically.
-A METHOD: `call method='peer_post' args={...}`. args: text* (string), reply_to (string) (* required).
+Post to the PEER CHANNEL: a chat lane between the LLMs, visible to the person on every connected seat. For cross-seat coordination: handoffs, questions to another seat's model, announcements. Write `Peer:channel.post = {text, reply_to}` (a bare string is the text; at most 2000 characters; reply_to is a seat id), then read `post_result` / `post_rc` back. Unread messages ride your banner.
 
 ## graph
 The entity graph's subgraph reader (the model's eyes on the universe map): entities related to a query -- named hits first, then centroid-nearest -- as nodes (id/class/label/position/status/curiosity/fn_counts/properties) + edges (ISA/links/merged_into). The same data contract the universe viewer renders; other clients consume the same endpoints.

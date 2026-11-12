@@ -11,6 +11,7 @@ to the effects that already exist:
   membrane::llm.wake         llm.set_wake: {about, at, prompt}
   membrane::llm.unwake       llm.unwake: the wake's id
   membrane::presence.restart restarts.do_restart: the reason
+  Peer:channel.post          peers.post: {text, reply_to} (packs/peer.c1f makes the node)
   <method>.invoke            night.method_call: {object, args} (#576 C: a learned call acts)
   <wait>.check               goalgraph.check_wait: an armed wait's condition (#773)
   rel:<root>|execute|<ex>    lang.process: the code tree runs on its executor (#614);
@@ -64,6 +65,8 @@ def _branch(path: str) -> tuple[str, str, str] | None:
         return "llm", eid, prop
     if prop == "restart" and eid == MEMBRANE_NS + "presence":
         return "seat", eid, prop
+    if prop == "post" and eid == "Peer:channel":
+        return "peer", eid, prop                # the peer channel (packs/peer.c1f): the substrate driver posts
     if prop == "invoke":
         return "methods", eid, prop             # a method entity or not: the worker reads method_name
     if prop == "replan":
@@ -158,6 +161,23 @@ def _llm(srv, est, ent, prop, new, by) -> None:
     else:
         r = LLM.unwake(srv, str(d.get("id") or "") if d else str(new))
     _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r, rc=_rc(r))
+
+
+def _peer(srv, est, ent, prop, new, by) -> None:
+    peers = getattr(srv, "peers", None)
+    d = new if isinstance(new, dict) else {"text": new}
+    text = str(d.get("text") or "").strip()
+    if peers is None:
+        _consume(est, ent, prop, new, "peer substrate unavailable on this seat", rc=2)
+        return
+    if not text:
+        _consume(est, ent, prop, new, "post: text required", rc=2)
+        return
+    if peers.post(text, reply_to=str(d.get("reply_to") or "")):
+        _consume(est, ent, prop, new, "posted", rc=0)
+        return
+    from .peers import post_failure_reason
+    _consume(est, ent, prop, new, post_failure_reason(peers), rc=2)
 
 
 def _seat(srv, est, ent, prop, new, by) -> None:
@@ -344,7 +364,7 @@ def _mcp(srv, est, ent, prop, new, by) -> None:
     {"link": MF.link, "call:run": MF.call, "import": MF.import_effect}[prop](srv, est, ent, prop, new, by)
 
 
-EFFECTS = {"mcp": _mcp, "exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "methods": _methods,
+EFFECTS = {"mcp": _mcp, "exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "peer": _peer, "methods": _methods,
            "toybox": _toybox, "plan": _plan, "replan": _replan, "tasks": _tasks, "wait": _wait}
 
 

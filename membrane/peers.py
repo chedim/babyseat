@@ -70,7 +70,7 @@ def post_failure_reason(peers) -> str:
     an imagined sister seat, 2026-10-08)."""
     if getattr(peers, "_chan", None) is None:
         return ("no peer channel on this seat (no other seats are "
-                "connected; peer_post has nowhere to go)")
+                "connected; posting has nowhere to go)")
     return "the peer channel refused the write"
 
 
