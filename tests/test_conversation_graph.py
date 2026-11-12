@@ -336,7 +336,8 @@ class TheRunnerWiring(unittest.TestCase):
         self.assertEqual(len(calls), n + 1)                   # no intercept: the model ran (2026-11-11)
         texts = [p.get("text") or "" for m in r.messages.list(sid) for p in m["parts"]]
         self.assertNotIn('"it": membrane/a.py or membrane/b.py?', texts)   # membrane posts no line (#1093): the model asks
-        self.assertIn("membrane/a.py or membrane/b.py", str(calls[-1]))  # and the model is told
+        note = (getattr(srv, "_cg_notes", None) or {}).get(sid) or ""      # the model is told (lanes._with_referent)
+        self.assertIn("membrane/a.py or membrane/b.py", note)
 
 
 if __name__ == "__main__":
