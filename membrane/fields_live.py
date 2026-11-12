@@ -187,6 +187,7 @@ class Live:
         self.pack_texts: dict = {}
         self.classes: set = set(CLASSES)
         self.file_mtimes: dict = {}
+        self._reported: set = set()
         self._scan_files()
         for eid, d in list((self.est.docs or {}).items()):
             if is_pack(eid, d):
@@ -229,12 +230,13 @@ class Live:
                     hub.publish({"type": "field.pack", "name": name, "c1f": text})
                 except Exception:                  # noqa: BLE001
                     pass
+        err = ""
         try:
             self.f.set_pack(name, text)
-            err = ""
         except Exception as e:                    # noqa: BLE001
             err = str(e)
-            print(f"[fields] {err}"[:300], file=sys.stderr)
+            if "isn't loaded" not in err and "isn't active" not in err:         # not a pack waiting for one that loads next
+                print(f"[fields] {err}"[:300], file=sys.stderr)
         if eid:
             self.pack_eids[name] = eid
         # every Pack entity shows its pack's state: an import that arrived later clears a waiting pack's error
@@ -598,6 +600,12 @@ class Live:
             self.file_mtimes[fp.name] = m
             if self._pack(fp.stem, fp.read_text(), None):
                 changed = True
+        for n, why in json.loads(self.f.pack_errors() or "{}").items():      # what is still waiting after the files loaded
+            if re.search(r"(?m)^IMPORT dom\b", self.pack_texts.get(n) or ""):
+                continue                          # a view pack waits for `dom`, which only pages have: not an error here
+            if why and (n, why) not in self._reported:
+                self._reported.add((n, why))
+                print(f"[fields] {why}"[:300], file=sys.stderr)
         return changed
 
     def on_sweep(self, now: float) -> None:
