@@ -156,7 +156,12 @@ pub fn respond(st: &Store, req: &J, conn: Option<u64>) -> J {
     };
     let status = req.get("status").and_then(|v| v.as_i64()).unwrap_or(200);
     let mut ctype = "text/plain; charset=utf-8".to_string();
+    let no_body = req.get("no_body").and_then(|b| b.as_bool()).unwrap_or(false);       // a HEAD: the headers, the length, no bytes
     let body: Vec<u8> = match req.get("body") {
+        _ if req.get("file").is_some() => {
+            // the bytes of a file a pack named (the pack decided which: its routes refuse a climbing path)
+            std::fs::read(req.get("file").and_then(|f| f.as_str()).unwrap_or("")).unwrap_or_default()
+        }
         None | Some(J::Null) => Vec::new(),
         Some(J::String(t)) => t.clone().into_bytes(),
         Some(other) => { ctype = "application/json".into(); other.to_string().into_bytes() }
@@ -174,7 +179,7 @@ pub fn respond(st: &Store, req: &J, conn: Option<u64>) -> J {
     }
     if !have_ctype && !body.is_empty() { head.push_str(&format!("Content-Type: {}\r\n", ctype)); }
     head.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
-    let ok = s.write_all(head.as_bytes()).and_then(|_| s.write_all(&body)).and_then(|_| s.flush()).is_ok();
+    let ok = s.write_all(head.as_bytes()).and_then(|_| if no_body { Ok(()) } else { s.write_all(&body) }).and_then(|_| s.flush()).is_ok();
     let _ = s.shutdown(std::net::Shutdown::Both);
     if ok { json!({"id": id, "status": "ok", "rc": 0, "head": format!("{} {}", status, body.len())}) }
     else { json!({"id": id, "status": "error", "rc": 1, "head": "the client went away"}) }

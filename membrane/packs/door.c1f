@@ -1,0 +1,45 @@
+PACK door 1
+IMPORT boot 1
+-- THE DOOR'S ROUTES (operator, 2026-11-12: all logic is c1f, the operating system; rust only listens, verifies the token and
+-- sends the bytes a pack names). A request is the entity `Request:<n>` (method, path, query, headers, body, authed, sub); the
+-- answer is `Request.reply` = {status, headers?, body? | file?}; the setter below writes it to the request's `respond`, which
+-- the driver sends. A pack that IMPORTs door 1 can answer first: define `Request.override` (a getter that is None when the
+-- request is not its own) and it wins over the shipped routes.
+
+Request.is_read getter: this.method == 'GET' or this.method == 'HEAD'
+
+-- ---- the page and its files ------------------------------------------------------------------------------------------------
+-- Boot:seat.ui_dir is the UI's folder (the launcher tells it at boot). The files are /, /index.html, /membrane (the page),
+-- /favicon.ico and /ui/www/<file>; a path with '..', a percent, a backslash, a leading '/' or a second /ui/www/ is refused.
+Request.ui_root getter: ([b.ui_dir for b in instances('Boot') if b.ui_dir != None] or [''])[0]
+Request.rel getter:
+  WHEN this.path == '/' or this.path == '/index.html' or this.path == '/membrane': 'index.html'
+  ELSE WHEN this.path == '/favicon.ico': 'favicon.svg'
+  ELSE WHEN startswith(this.path, '/ui/www/'): replace(this.path, '/ui/www/', '')
+  ELSE: None
+Request.rel_climb getter: this.rel != None and ('..' in this.rel or '%' in this.rel or '\\' in this.rel or startswith(this.rel, '/') or '/ui/www/' in this.rel)
+Request.rel_ok getter: this.rel != None and this.rel != '' and not this.rel_climb and this.ui_root != ''
+Request.file getter: (this.ui_root + '/' + this.rel) if this.rel_ok else None
+Request.found getter: stat(this.file) if this.file != None else None
+Request.parts getter: concat([''], words(replace(this.rel or '', '.', ' ')))
+Request.ext getter: this.parts[len(this.parts) - 1]
+Request.ctype getter: {'html': 'text/html; charset=utf-8', 'js': 'application/javascript; charset=utf-8', 'mjs': 'application/javascript; charset=utf-8', 'wasm': 'application/wasm', 'gz': 'application/gzip', 'json': 'application/json', 'css': 'text/css; charset=utf-8', 'png': 'image/png', 'svg': 'image/svg+xml', 'ico': 'image/x-icon', 'woff2': 'font/woff2'}[this.ext] or 'application/octet-stream'
+-- none until the file's stat has come back (an asynchronous read): the reply waits for it
+Request.static getter:
+  WHEN this.rel == None: 'no'
+  ELSE WHEN not this.rel_ok: 'bad'
+  ELSE WHEN this.found == None: None
+  ELSE WHEN prop(this.found, 'exists') == True and prop(this.found, 'kind') == 'file': 'file'
+  ELSE: 'missing'
+
+Request.shipped getter:
+  WHEN this.static == None: None
+  ELSE WHEN this.static == 'file' and not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN this.static == 'file': {'status': 200, 'headers': {'content-type': this.ctype, 'cache-control': 'no-store, max-age=0'}, 'file': this.file, 'no_body': this.method == 'HEAD'}
+  ELSE: {'status': 404, 'body': {'error': 'not found'}}
+
+Request.reply getter: this.override if this.override != None else this.shipped
+
+Request.reply on-setter answer:
+  WHEN this.reply != None:
+    this.respond = this.reply
