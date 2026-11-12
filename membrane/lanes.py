@@ -313,7 +313,8 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
             "- CONTEXT: MAP MODE. No chat history is sent. Your memory is the field: the 'What is moving' "
             "block shows what is live; the in: line shows where you are and what 'it' means. Read any id "
             "with entity read. Missing earlier context is expected: look it up in the field, never guess. "
-            "There is no banner, recall block or transcript on this seat, whatever else here mentions one. "
+            "There is no recall block or transcript on this seat, whatever else here mentions one; the banner is one "
+            "placeholder line with its settings. "
             "help('map') has the details.")
         L.append(
             "- KEEP WHAT MATTERS: anything that must outlive this turn goes into the field: a decision → a "
@@ -6103,9 +6104,15 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                     _CC.new_turn(srv, _sid)
                 _cl = _CC.line(srv)
                 _st.mark("ctx")                   # the context stack's in: line
+                try:                              # the banner pack's tiny placeholder that instructs
+                    from . import conv_banner as _CB
+                    _bare = _CB.bare(srv, body, _CAPMOD.current_conversation()) or ""
+                except Exception as _be:
+                    print(f"[exp-map] banner placeholder skipped ({_be})", file=sys.stderr)
+                    _bare = ""
                 up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield,
                                              getattr(srv, "entity_store", None), _cl,
-                                             chat=_CC.current(srv), held=_CC.held(srv))
+                                             chat=_CC.current(srv), held=_CC.held(srv), banner=_bare)
                 _st.mark("map")                   # the 'What is moving' block (was timed as 'router')
         except Exception as _e:
             print(f"[exp-map] skipped ({_e})", file=sys.stderr)

@@ -208,14 +208,16 @@ def lines(fld, est=None, max_lines: int = MAX_LINES, chat: str = "", held=()) ->
     return out
 
 
-def block(fld, est=None, ctx_line: str = "", chat: str = "", held=()) -> str:
+def block(fld, est=None, ctx_line: str = "", chat: str = "", held=(), banner: str = "") -> str:
+    """`banner`: the banner pack's own tiny placeholder that instructs (conv_banner.bare), first in the block."""
     ls = lines(fld, est, chat=chat, held=held)
-    text = HEADER + ("\n" + ctx_line if ctx_line else "") + "\n" + ("\n".join(ls) if ls else "(nothing moved)")
+    text = (banner + "\n" if banner else "") + HEADER + ("\n" + ctx_line if ctx_line else "") + "\n" + \
+        ("\n".join(ls) if ls else "(nothing moved)")
     print(f"[exp-map] {len(ls)} lines, ~{len(text) // 4} tokens", file=sys.stderr)
     return text
 
 
-def rewrite(messages: list, fld, est=None, ctx_line: str = "", chat: str = "", held=()) -> list:
+def rewrite(messages: list, fld, est=None, ctx_line: str = "", chat: str = "", held=(), banner: str = "") -> list:
     """The first system message (doctrine, card) + the map + the current turn (the last user message and the
     tool rounds after it). Everything else -- history, banners -- goes."""
     msgs = [m for m in (messages or []) if isinstance(m, dict)]
@@ -223,7 +225,7 @@ def rewrite(messages: list, fld, est=None, ctx_line: str = "", chat: str = "", h
     if last_user is None:
         return messages
     head = [m for m in msgs[:last_user] if m.get("role") == "system"][:1]
-    out = head + [{"role": "system", "content": block(fld, est, ctx_line, chat, held)}] + msgs[last_user:]
+    out = head + [{"role": "system", "content": block(fld, est, ctx_line, chat, held, banner)}] + msgs[last_user:]
     try:                                   # what the model got, for the operator to look at
         import json
         with open(os.path.join(".membrane", "exp-map-last.json"), "w") as f:

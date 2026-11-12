@@ -722,6 +722,20 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     return lines
 
 
+def bare(srv, body: dict, conv: str) -> str | None:
+    """Map mode's banner (operator 2026-11-11): the banner pack's own tiny placeholder that instructs. The seat only
+    tells the pack `map`; the pack decides what the slot shows (its `mode` dial can bring the full block or nothing
+    back). No ask is written (so nothing is recalled) and no track alert is taken. None without the field engine."""
+    from . import lanes as _L
+    from . import fields_live as _FL
+    live = _FL.CURRENT
+    fld = _L._efield_on(srv)
+    if live is None or fld is None or not live.has_banner():
+        return None
+    return pack_block(srv, live, fld, conv, [], "", time.time(), str((body or {}).get("_turn_sid") or ""),
+                      {"map": True})
+
+
 def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: str, facts: dict) -> str | None:
     """#994: the whole block from this chat's banner instance (the banner pack: recall, OPEN, DECIDED, the layout);
     `facts` are the seat's facts for this turn, written as fields. A script's error is shown in the block's place,

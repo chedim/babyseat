@@ -8,7 +8,7 @@ IMPORT goalgraph 1
 -- Built-ins: recall(text, pool, session), rerank(rows, text, weights), pick(rows, n, session), line(row),
 -- topic(text); a row is {h, n, ts, role, via, score, fact}, read with prop(row, 'score').
 -- recall and rerank run off the engine (None until they land), one step per getter so `lines` changes once
-Banner.recalled getter WHEN topic(this.ask): recall(this.ask, this.pool, this.session)
+Banner.recalled getter WHEN topic(this.ask) and this.shown == 'full': recall(this.ask, this.pool, this.session)
 Banner.recalled getter: None
 Banner.ranked getter WHEN this.recalled != None: rerank(this.recalled, this.ask, this.weights)
 Banner.ranked getter: None
@@ -128,6 +128,16 @@ Banner.now_parts getter: localtime(clock)
 Banner.now_line getter: strip('NOW (for reference, not an event): ' + prop(this.now_parts, 'date') + ' ' + prop(this.now_parts, 'clock') + ' ' + prop(this.now_parts, 'zone'))
 Banner.used getter: len(this.now_line) + 1 + len(this.conv_header or '')
 Banner.recall_block getter: concat([this.recall_header], this.lines) if this.lines else []
+-- THE BARE BANNER (operator 2026-11-11): the banner slot can hold a tiny placeholder that instructs instead of the
+-- block. Dial `mode` on the chat's instance: 'full' (the block), 'help' (the placeholder: nothing is recalled),
+-- 'off' (nothing). With no mode, a seat that writes the fact `map` (map mode) shows the placeholder and every other
+-- seat the block.
+Banner.shown getter WHEN this.mode == 'full' or this.mode == 'help' or this.mode == 'off': this.mode
+Banner.shown getter WHEN this.map: 'help'
+Banner.shown getter: 'full'
+Banner.bare getter: 'BANNER: nothing is pushed here; look things up with your tools. Settings: entity edit ' + this.eid + ' (mode full|help|off, pool, n, budget).'
 Banner.text getter:
-  WHEN this.rows or this.lines: join(concat([this.now_line, this.conv_header], fit(this.rows, this.budget or 900, this.used), this.recall_block), '\n')
+  WHEN this.shown == 'off': None
+  ELSE WHEN this.shown == 'help': this.bare
+  ELSE WHEN this.rows or this.lines: join(concat([this.now_line, this.conv_header], fit(this.rows, this.budget or 900, this.used), this.recall_block), '\n')
   ELSE: None

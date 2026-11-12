@@ -24,14 +24,14 @@ On a map-mode seat no chat history reaches you. Each turn carries the doctrine, 
 Anything that must outlive this turn goes into the field: a decision → a decision card; a fact → a property
 on its entity; work → a method or goal on the thing it is about. What isn't saved is gone next turn.
 
-## The banner (off here)
-Other seats show a banner: recalled facts, open goals, decisions waiting. Here it is off; the map and your tools
-replace it. Each chat still has one: `Banner:<owner>:<chat>`. Read it with `entity read`; its dials are fields on it,
-changed with `entity edit` (read it back after):
-- recall: `pool` (candidates), `n` (rows shown), `weights` (the scorer's; none = the learned set);
-- layout: `budget` (characters), `open_max`, `decided_max`, `news_chars` (a line's clip);
-- focus: `window` (person messages looked at), `focus_k`, `news_max`.
-Change a dial for this chat only when the person's work needs it, and say what you changed.
+## The banner (a placeholder)
+The banner slot holds one line: where this chat's banner lives and how to change it. It is `Banner:<owner>:<chat>`;
+read it with `entity read`; its dials are fields on it, changed with `entity edit` (read it back after):
+- `mode`: `help` (the placeholder, the default here), `full` (the whole block other seats get: recalled facts, open
+  goals, decisions waiting) or `off` (nothing);
+- when `full`: recall `pool` (candidates), `n` (rows shown), `weights`; layout `budget` (characters), `open_max`,
+  `decided_max`, `news_chars`; focus `window`, `focus_k`, `news_max`.
+Switch this chat to `full` only when the person's work needs it, and say what you changed.
 
 ## Picking a thread back up
 Read the cards and goals the map shows before asking the person. The person's "it" is usually the in: line's.
