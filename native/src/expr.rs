@@ -813,11 +813,14 @@ pub fn from_json(j: &serde_json::Value) -> V {
         J::Number(n) => if let Some(i) = n.as_i64() { V::Int(i) } else { V::Float(n.as_f64().unwrap_or(f64::NAN)) },
         J::String(s) => V::Str(s.clone()),
         J::Array(a) => V::List(a.iter().map(from_json).collect()),
+        // an entity stored by a getter is a reference: {"$ref": "<eid>"} reads back as the entity
+        J::Object(o) if o.len() == 1 && o.get("$ref").map(|r| r.is_string()).unwrap_or(false) =>
+            V::Ent(o["$ref"].as_str().unwrap_or_default().to_string()),
         J::Object(o) => V::Dict(o.iter().map(|(k, v)| (k.clone(), from_json(v))).collect()),
     }
 }
 
-/// None where Python's _writable would refuse an entity (it can't be written).
+/// A value as JSON. An entity is kept as a reference, `{"$ref": "<eid>"}` (`from_json` reads it back as the entity).
 pub fn to_json(v: &V) -> Result<serde_json::Value, Err> {
     use serde_json::Value as J;
     Ok(match v {
@@ -828,6 +831,6 @@ pub fn to_json(v: &V) -> Result<serde_json::Value, Err> {
         V::Str(s) => J::String(s.clone()),
         V::List(l) => J::Array(l.iter().map(to_json).collect::<Result<_, _>>()?),
         V::Dict(d) => J::Object(d.iter().map(|(k, x)| Ok((k.clone(), to_json(x)?))).collect::<Result<_, Err>>()?),
-        V::Ent(_) => return Err("cannot write a EntityView".into()),
+        V::Ent(e) => J::Object(std::iter::once(("$ref".to_string(), J::String(e.clone()))).collect()),
     })
 }
