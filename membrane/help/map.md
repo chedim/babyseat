@@ -24,8 +24,9 @@ On a map-mode seat no chat history reaches you. Each turn carries the doctrine, 
 Anything that must outlive this turn goes into the field: a decision → a decision card; a fact → a property
 on its entity; work → a method or goal on the thing it is about. What isn't saved is gone next turn.
 
-## The banner (a placeholder)
-The banner slot holds one line: where this chat's banner lives and how to change it. It is `Banner:<owner>:<chat>`;
+## The banner
+The banner is the middle message of every turn (the doctrine first, the person's message last): the one block with
+the state. By default it is a short placeholder, then the map below. It is `Banner:<owner>:<chat>`;
 read it with `entity read`. Its one dial here is `mode`, changed with `entity edit` (read it back after): `help`
 (the placeholder, the default) or `off` (nothing). The whole banner block other seats get (recalled facts, open
 goals, decisions waiting) never loads on a map-mode seat: use your tools.
@@ -35,9 +36,12 @@ No history reaches you, so keep your own context: write a banner that shows what
 replaces the default one completely: the chat's banner instance is an entity, and its class says who builds it.
 1. Load a pack (`help('packs')`): `PACK mine 1`, `MyBanner.text getter: <what to show>`.
 2. `entity edit` this chat's banner instance, set `class` to `MyBanner`.
-3. Check it: `entity read` the instance with `prop=text run=true`.
-What `text` returns is what the turn shows, and what the injection card shows. An error in it is shown as it is, so
-you can fix it. Set `class` back to `Banner` to get the default again.
+3. It takes effect on your next turn. `entity read` does not run a pack's getters, so you see the result as that
+   turn's first block (the injection card in the chat shows the same text).
+What `text` returns is the whole block: the placeholder and the map of what is moving are gone unless your `text` reads
+them (the seat writes `moving` and `in_line` on the instance each turn). It has 3 seconds for its reads. When it
+fails, is slow or returns nothing, the default banner is shown instead, headed by the error: fix it from there. Your
+own properties on the instance (notes) stay. Set `class` back to `Banner` to get the default again.
 
 ## Picking a thread back up
 Read the cards and goals the map shows before asking the person. The person's "it" is usually the in: line's.

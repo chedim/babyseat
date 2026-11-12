@@ -578,6 +578,9 @@ impl Fields {
                           chain: json!({}), seq: *seq }, None, now);
         self.known.remove(eid);
         self.dirty.retain(|(_, e, _)| e != eid);
+        // what its getters read is forgotten with it: a reload under another class must not run the old class's getters
+        self.reads.retain(|(e, _), _| e != eid);
+        for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
         for (p, v) in &old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); }
         self.dirty.retain(|(_, e, _)| e != eid);
         self.visited.clear();
