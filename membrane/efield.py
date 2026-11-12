@@ -37,6 +37,7 @@ from __future__ import annotations
 import os
 import functools
 import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -1135,7 +1136,7 @@ class EntityField:
         if self._ep_index is not None and st.n + 1 >= MATURE:
             self._ep_index["rows"][st.eid] = self._ep_row(
                 [v for v, _ in st.episodes], ep_covered(st.n + 1, st.episodes, st.ep_k), st.mean)
-            self._ep_index["M"] = None
+            self._ep_dirty()
 
     _ep_index: dict | None = None
 
@@ -1229,38 +1230,94 @@ class EntityField:
         pts = self._wl_points(d)
         return max(float(self._centered(p) @ qc) for p in pts) if pts else None
 
+    def _ep_dirty(self) -> None:
+        """An episode closed: the matrix no longer covers every row. The last built one stays (`old`) and keeps
+        answering while ONE background rebuild runs (0.7.53 follow-up, the deltas index's way: a busy seat closes
+        episodes all the time and the idle claim judge recalls nonstop -- a rebuild per recall held the GIL for
+        seconds and starved every other thread)."""
+        idx = self._ep_index
+        if idx is not None:
+            idx["ver"] = idx.get("ver", 0) + 1
+            idx["M"] = None
+
+    def _ep_build(self, idx: dict):
+        """(M, owner) over the rows as they are now: every point centered on the discourse background and unit,
+        in blocks (the same arithmetic per point as ever, a smaller peak)."""
+        owner, pts = [], []
+        for eid, row in list(idx["rows"].items()):
+            for v in row["pts"]:
+                owner.append(eid); pts.append(v)
+        if not pts:
+            return np.zeros((0, 1), np.float32), np.asarray(owner, dtype=object)
+        bg = self._bg("discourse")
+        bg = None if bg is None else np.asarray(bg, dtype=np.float64)
+        M = None
+        for i in range(0, len(pts), 2048):
+            P = np.asarray(pts[i:i + 2048], dtype=np.float64)
+            if bg is not None:
+                P = P - bg
+            nrm = np.linalg.norm(P, axis=1, keepdims=True)
+            nrm[nrm == 0] = 1.0
+            if M is None:
+                M = np.empty((len(pts), P.shape[1]), np.float32)
+            M[i:i + len(P)] = (P / nrm).astype(np.float32)
+        return M, np.asarray(owner, dtype=object)
+
+    def _ep_rebuild_async(self, idx: dict) -> None:
+        """Start the one background rebuild (none if one runs). It lands as `old` and, when no episode closed
+        meanwhile, as the current matrix."""
+        lock = idx.setdefault("lock", threading.Lock())
+        if not lock.acquire(blocking=False):
+            return
+        ver = idx.get("ver", 0)
+
+        def run():
+            try:
+                M, owner = self._ep_build(idx)
+                idx["old"] = (M, owner)
+                if idx.get("ver", 0) == ver and self._ep_index is idx:
+                    idx["owner"], idx["M"] = owner, M
+            except Exception as e:              # a failed rebuild keeps serving the last matrix
+                print(f"[efield] episode index rebuild failed: {e}", file=sys.stderr)
+            finally:
+                idx["done"] = idx.get("done", 0) + 1
+                lock.release()
+        t = threading.Thread(target=run, name="ep-index", daemon=True)
+        idx["thread"] = t
+        t.start()
+
+    def wait_ep_rebuild(self, timeout: float = 5.0) -> bool:
+        """Tests: wait for a running episode-matrix rebuild."""
+        idx = self._ep_index
+        t = idx.get("thread") if idx else None
+        if t is not None:
+            t.join(timeout)
+            return not t.is_alive()
+        return True
+
     def _ep_hits(self, qc, k: int) -> list[str]:
         """Mature entities whose best EPISODE is nearest the query -- found even
         when their current state sits elsewhere. Kept in place (an episode that
-        closes updates its row), so it never goes stale; dropped on a rebuild."""
+        closes updates its row); the matrix over those rows is rebuilt in the background after a close while the
+        last one answers (_ep_dirty); dropped on a full rebuild."""
         self._ep_rows()
         idx = self._ep_index
         if idx["M"] is None:
-            # 0.7.53: one numpy pass (the background read once), not _centered() per point -- an episode closes
-            # often on a busy seat, and every close drops the matrix
-            owner, pts = [], []
-            for eid, row in idx["rows"].items():
-                for v in row["pts"]:
-                    owner.append(eid); pts.append(v)
-            idx["owner"] = np.asarray(owner, dtype=object)
-            if pts:
-                P = np.asarray(pts, dtype=np.float64)
-                bg = self._bg("discourse")
-                if bg is not None:
-                    P = P - np.asarray(bg, dtype=np.float64)
-                nrm = np.linalg.norm(P, axis=1, keepdims=True)
-                nrm[nrm == 0] = 1.0
-                idx["M"] = (P / nrm).astype(np.float32)
-            else:
-                idx["M"] = np.zeros((0, 1), np.float32)
-        if not len(idx["M"]):
+            old = idx.get("old")
+            if old is None:                       # nothing was ever built: this call builds it
+                idx["M"], idx["owner"] = old = self._ep_build(idx)
+                idx["old"] = old
+            else:                                 # the last matrix answers; one rebuild runs behind it
+                self._ep_rebuild_async(idx)
+        M, owner = (idx["M"], idx["owner"]) if idx["M"] is not None else idx["old"]
+        if not len(M):
             return []
-        sims = idx["M"] @ np.asarray(qc, dtype=np.float32)
+        sims = M @ np.asarray(qc, dtype=np.float32)
         best: dict = {}
         top = min(k * 8, len(sims))
         cand = np.argpartition(-sims, top - 1)[:top] if top < len(sims) else np.arange(len(sims))
         for i in cand[np.argsort(-sims[cand])]:
-            e = idx["owner"][i]
+            e = owner[i]
             if e not in best:
                 best[e] = float(sims[i])
                 if len(best) >= k:

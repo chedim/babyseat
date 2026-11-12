@@ -155,7 +155,7 @@ def _ancestor(est, eid: str, target: str, hops: int = 16) -> bool:
     return False
 
 
-def _matches(est, ent, verb: str, val: str, near_fn=None) -> bool:
+def _matches(est, ent, verb: str, val: str, near_fn=None, memo: dict | None = None) -> bool:
     props = ent.properties or {}
     eid = ent.eid
     if verb == "match-all":
@@ -178,7 +178,13 @@ def _matches(est, ent, verb: str, val: str, near_fn=None) -> bool:
     if verb == "parent":
         return _ancestor(est, eid, val.strip())
     if verb == "children":
-        kids = {c.eid for c in est.children_of(val.strip())}
+        # children_of walks every entity: ask it once per distinct value per query (the caller's memo), never
+        # once per entity -- that made one query O(N^2) and a big field timed it out
+        if memo is None:
+            memo = {}
+        kids = memo.get(val)
+        if kids is None:
+            kids = memo[val] = {c.eid for c in est.children_of(val.strip())}
         return eid in kids
     if verb == "status":
         return (props.get("status") or "open").lower() == val.strip().lower()
@@ -218,6 +224,7 @@ def run(est, q: str, k: int = 20, count: bool = False,
     near_text = " ".join(val for terms in blocks for v, val in terms if v == "near")
     rows: list[dict] = []
     total = 0
+    memo: dict = {}                              # per-query answers shared across entities
     # newest first (the store keeps insertion order): a fresh card is never
     # past k behind older ones; a near: query re-sorts best first below
     for ent in reversed(list(est.docs.values())):
@@ -226,7 +233,7 @@ def run(est, q: str, k: int = 20, count: bool = False,
             continue
         hit = False
         for terms in blocks:
-            if all(_matches(est, ent, v, val, near_fn) for v, val in terms):
+            if all(_matches(est, ent, v, val, near_fn, memo) for v, val in terms):
                 hit = True
                 break
         if not hit:

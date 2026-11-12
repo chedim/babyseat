@@ -115,6 +115,28 @@ class TestGrammar(unittest.TestCase):
                          {"membrane::f:membrane/router.py",
                           "membrane::f:membrane/watch.py"})
 
+    def test_children_is_asked_once_per_query_not_once_per_entity(self):
+        """children_of walks every entity; asking it for each entity made one query O(N^2) (a big field: the
+        query timed out and starved the seat). One ask per distinct children: value per query."""
+        est = _est()
+        for i in range(40):
+            est.upsert(QuantumEntity(eid=f"membrane::f:other{i}", cls="Component",
+                                     properties={"name": f"o{i}"}), embedder=None)
+        calls = {"n": 0}
+        real = est.children_of
+
+        def counted(spec):
+            calls["n"] += 1
+            return real(spec)
+        est.children_of = counted
+        rows = EQ.run(est, "children:membrane::f:membrane")
+        self.assertEqual({r["eid"] for r in rows}, {"membrane::f:membrane/router.py",
+                                                    "membrane::f:membrane/watch.py"})
+        self.assertEqual(calls["n"], 1)
+        calls["n"] = 0
+        EQ.run(est, "children:membrane::f:membrane | children:membrane::tool:radios")
+        self.assertEqual(calls["n"], 2)                 # two distinct values, two asks
+
     def test_status_filter(self):
         """The status term: a MISSING status reads as 'open' (implicit);
         a set status filters."""
