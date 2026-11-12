@@ -136,7 +136,7 @@ Banner.shown getter WHEN this.map and this.mode == 'off': 'off'
 Banner.shown getter WHEN this.map: 'map'
 Banner.shown getter WHEN this.mode == 'help' or this.mode == 'off': this.mode
 Banner.shown getter: 'full'
-Banner.bare getter: join(['BANNER (placeholder): no history reaches you, so keep your own context: write a banner that shows what matters each turn.', 'How: load a pack: PACK mine 1 / MyBanner.text getter: <what to show: open goals, decisions, what you were doing>. Then: entity edit ' + (this.instance or this.eid) + ' class=MyBanner (this replaces the default banner completely). It is the first block of your next turn; if it fails you see the error there, under the default banner. mode help|off on it silences this. help("map") has more.'], '\n')
+Banner.bare getter: join(['BANNER (placeholder): no history reaches you, so use this banner for continuity between your turns: it is the one block that carries your state, so make it show what matters each turn (what you are doing, what is open, what you decided).', 'How: load a pack: PACK mine 1 / MyBanner.text getter: <what to show: open goals, decisions, what you were doing>. Then: entity edit ' + (this.instance or this.eid) + ' class=MyBanner (this replaces the default banner completely). It is the first block of your next turn; if it fails you see the error there, under the default banner. mode help|off on it silences this. help("map") has more.'], '\n')
 Banner.failed_lines getter: ['▸ your banner failed, the default banner is shown: ' + this.failed] if this.failed else []
 Banner.in_lines getter: [this.in_line] if this.in_line else []
 Banner.moving_lines getter: this.moving if this.moving else ['(nothing moved)']

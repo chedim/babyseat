@@ -722,8 +722,8 @@ def recall_lines(srv, fld, conv: str, events, latest: str, now: float | None = N
     return lines
 
 
-BARE_FALLBACK = ("BANNER (placeholder): no history reaches you, so keep your own context: write a banner that shows "
-                 "what matters each turn. How: load a pack: PACK mine 1 / MyBanner.text getter: <what "
+BARE_FALLBACK = ("BANNER (placeholder): no history reaches you, so use this banner for continuity between your turns: "
+                 "it is the one block that carries your state, so make it show what matters each turn. How: load a pack: PACK mine 1 / MyBanner.text getter: <what "
                  "to show>. Then: entity edit this chat's Banner class=MyBanner (it replaces the default banner). help(\"map\") has more.")
 
 
