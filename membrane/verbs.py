@@ -51,6 +51,15 @@ def _implements(d) -> bool:
     return bool(p.get("method_name")) and not p.get("retired") and not p.get("abstract")
 
 
+RULES = 1          # bump when note() / _alias() change what they derive: every method is noted again, once
+
+
+def _marker(d) -> str:
+    """What a method was last noted as: the rules, its verb's name, and whether it implements. A boot notes only the
+    methods whose marker moved (a stopgap for the verb index becoming getters on the methods, which store the same)."""
+    return f"{RULES}|{lemma((d.properties or {}).get('method_name'))}|{int(_implements(d))}"
+
+
 def note(est, method) -> str | None:
     """A method into its verb (made on first use). -> the verb's eid."""
     p = method.properties or {}
@@ -70,8 +79,9 @@ def note(est, method) -> str | None:
     vp["implemented_by"] = impl
     v.properties = vp
     est.upsert(v, embedder=None)
-    if p.get("verb") != eid:
-        method.properties = {**p, "verb": eid}
+    mark = _marker(method)
+    if p.get("verb") != eid or p.get("verb_noted") != mark:
+        method.properties = {**p, "verb": eid, "verb_noted": mark}
         est.upsert(method, embedder=None)
     _alias(est, method, lem)
     be, origin = _rel(est)
@@ -141,25 +151,33 @@ def aliased(est, verb: str) -> list:
 
 
 def boot(srv) -> dict:
-    """Boot: every method noted on its verb (idempotent; a retired one stops implementing).
-    Aliases are rebuilt from scratch, and a verb left meaning nothing is removed (a stale alias
-    of an older rule, a method that went)."""
+    """Boot: every method that is new or changed noted on its verb (idempotent; a retired one stops implementing).
+    An unchanged method is not read again (its marker says what it was noted as); an alias whose method went or stopped
+    implementing is dropped, and a verb left meaning nothing is removed."""
     est = srv.entity_store
-    for _k, d in est.docs.matching(lambda c, p: c == CLASS_VERB and p.get("aliased")):
-        d.properties = {**(d.properties or {}), "aliased": []}
+    docs = est.docs
+    for _k, d in docs.matching(lambda c, p: c == CLASS_VERB and p.get("aliased")):
+        al = d.properties.get("aliased") or []
+        keep = [a for a in al if a.get("method") in docs and _implements(docs[a["method"]])]
+        if keep != al:
+            d.properties = {**(d.properties or {}), "aliased": keep}
     seen = set()
-    for _k, d in est.docs.with_property("method_name"):
+    for _k, d in docs.with_property("method_name"):
+        p = d.properties or {}
+        if p.get("verb_noted") == _marker(d) and p.get("verb") and docs.get(p["verb"]) is not None:
+            seen.add(p["verb"])                                   # as it was: nothing to read
+            continue
         e = note(est, d)
         if e:
             seen.add(e)
-    gone = [d.eid for _k, d in est.docs.matching(lambda c, p: c == CLASS_VERB)           # (only the verbs and the methods are built)
+    gone = [d.eid for _k, d in docs.matching(lambda c, p: c == CLASS_VERB)                 # (only the verbs and the methods are built)
             if not (d.properties or {}).get("implemented_by") and not (d.properties or {}).get("aliased")
             and not (d.properties or {}).get("same_as")]          # a taught synonym means something
     for eid in gone:
         try:
             est.remove(eid)
         except Exception:
-            est.docs.pop(eid, None)
+            docs.pop(eid, None)
     return {"verbs": len(seen), "removed": len(gone)}
 
 
