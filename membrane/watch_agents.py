@@ -1009,7 +1009,8 @@ class _LoopDrainer:
                     if _first is not None and GG.escalates(srv) and not _restarting():
                         # #1120 (operator 2026-11-11): a leaf on the workers model that ended failed / stuck /
                         # empty / capped runs ONCE more on the loops model; that run's result is the task's
-                        GG.record_sample(srv, ent, _first[0], _first[1], session=sid, usage=out.get("usage"))
+                        GG.record_sample(srv, ent, _first[0], _first[1], session=sid,
+                                         usage=GG.run_usage(srv, agent, out))
                         agent = GG.escalated_agent(ent)
                         sid = srv.create_loop_session(agent, agent)
                         if _fp is not None:
@@ -1021,7 +1022,7 @@ class _LoopDrainer:
                         _note = str((out.get("capped") or {}).get("progress") or "").strip()
                         taken = False
                         GG.finish(srv, ent, GG.SPLIT, ("more than one step; what its one step did:\n" + _note)
-                                  if _note else "more than one step", session=sid, usage=out.get("usage"))
+                                  if _note else "more than one step", session=sid, usage=GG.run_usage(srv, agent, out))
                         return GG.SPLIT
                     if isinstance(out.get("quota"), dict):
                         d = est.docs.get(ent)
@@ -1036,7 +1037,7 @@ class _LoopDrainer:
                         return "restart"         # #777: cut off by a restart -- left running, boot re-owes it
                     verdict, detail = GG.parse_worker(text)
                     taken = False
-                    GG.finish(srv, ent, verdict, detail, session=sid, usage=out.get("usage"))
+                    GG.finish(srv, ent, verdict, detail, session=sid, usage=GG.run_usage(srv, agent, out))
                     return verdict
                 from . import llm as _LLM
                 _replan = ((est.docs.get(ent) or QuantumEntity(eid="")).properties or {}).get("replan")

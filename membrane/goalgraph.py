@@ -610,7 +610,7 @@ def finish(srv, task: str, verdict: str, detail: str, session: str = "", usage: 
     est.upsert(QuantumEntity(eid=res, cls=CLASS_COMPONENT, properties={
         "name": f"{verdict} {p.get('title') or task}"[:80], "task": task, "goal": p.get("goal"),
         "outcome": verdict, "receipt": str(detail or "")[:2000], "session": session, "ts": time.time(),
-        **({"usage": dict(usage)} if isinstance(usage, dict) else {}),      # #1120: what the run cost
+        **_run_props(usage),                                                # #1120: its model and what it cost
         "silent_birth": True}), embedder=None)
     _edge(srv, task, EXECUTING, WORKERS_EID, receipt={"op": verdict, "why": str(detail)[:160]}, drop=True)
     _edge(srv, task, RESULT, res)
@@ -727,6 +727,34 @@ def sample_verdict(out) -> tuple | None:
     return None if v == DONE else (v, detail)
 
 
+def routed_model(srv, agent: str) -> str:
+    """The model a worker agent's turn is routed to (server._turn_model): a `worker:` leaf the workers' pick when one
+    is set, else the loops'; an escalated leaf (`worker-loops:`) the loops'."""
+    loops = str(getattr(getattr(srv, "_loop_runner", None), "model", "") or "")
+    workers = str(getattr(srv, "_workers_model", "") or "")
+    return workers if workers and str(agent or "").lower().startswith("worker:") else loops
+
+
+def run_usage(srv, agent: str, out) -> dict:
+    """A worker run's usage, always: the run's own count when it came back with one, else zeros marked estimated;
+    and always its model -- the run's own, else the one its turn was routed to (#1120: a run that came back with
+    nothing still says which model it was)."""
+    out = out if isinstance(out, dict) else {}
+    u = dict(out.get("usage") or {})
+    model = str(u.get("model") or out.get("model") or routed_model(srv, agent) or "")
+    if not u:
+        u = {"input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "steps": 0, "estimated": True}
+    u["model"] = model
+    return {"model": model, **{k: v for k, v in u.items() if k != "model"}}
+
+
+def _run_props(usage) -> dict:
+    """A worker result's `usage` and, as its own property, its `model`."""
+    if not isinstance(usage, dict):
+        return {}
+    return {"usage": dict(usage), **({"model": usage["model"]} if usage.get("model") else {})}
+
+
 def record_sample(srv, task: str, verdict: str, detail: str, session: str = "", usage: dict | None = None) -> str:
     """The first run of an escalated leaf, in the ledger only: a result entity marked `escalated`; the task keeps
     running (its status and run count are the second run's). -> its eid."""
@@ -738,7 +766,7 @@ def record_sample(srv, task: str, verdict: str, detail: str, session: str = "", 
     est.upsert(QuantumEntity(eid=res, cls=CLASS_COMPONENT, properties={
         "name": f"{verdict} {p.get('title') or task} (escalated)"[:80], "task": task, "goal": p.get("goal"),
         "outcome": verdict, "escalated": True, "receipt": str(detail or "")[:2000], "session": session,
-        "ts": time.time(), **({"usage": dict(usage)} if isinstance(usage, dict) else {}),
+        "ts": time.time(), **_run_props(usage),
         "silent_birth": True}), embedder=None)
     return res
 

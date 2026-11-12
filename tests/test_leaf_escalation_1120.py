@@ -160,3 +160,36 @@ def test_the_report_counts_escalations_and_both_runs_costs(seat):
     assert g["runs_by_outcome"] == {"done": 1}                      # the task's result, not the first sample
     assert g["tokens"]["qwen3:8b"]["runs"] == 1 and g["tokens"][CLAUDE]["runs"] == 1
     assert g["replanned"] == 0
+
+
+# ---- every worker result names its model (live: an escalated run's usage was None, so nobody could tell) ----------
+def test_a_run_with_no_usage_still_names_its_model(seat):
+    agents = _workers(seat, {LEAF: [{"text": ""}], ESC: [{"text": "DONE it landed"}]})
+    _work(seat)
+    assert agents == [LEAF, ESC]
+    res = _results(seat)
+    assert [r["model"] for r in res] == ["qwen3:8b", CLAUDE]               # the routed model, as its own property
+    assert res[0]["usage"] == {"model": "qwen3:8b", "input": 0, "cache_read": 0, "cache_write": 0, "output": 0,
+                               "steps": 0, "estimated": True}
+    assert res[1]["usage"]["model"] == CLAUDE and res[1]["usage"]["estimated"] is True
+
+
+def test_the_runs_own_model_beats_the_routed_one(seat):
+    _workers(seat, {LEAF: [{"text": "DONE ok", "model": "qwen3:14b", "usage": dict(U8, model="qwen3:14b")}]})
+    _work(seat)
+    assert _results(seat)[0]["model"] == "qwen3:14b"
+
+
+def test_the_ledger_shows_a_usage_less_run_under_its_model(seat):
+    _workers(seat, {LEAF: [{"text": ""}], ESC: [{"text": "DONE it landed", "usage": US}]})
+    _work(seat)
+    g = next(x for x in GG.ledger(seat.entity_store)["goals"] if x["goal"] == GOAL)
+    assert g["tokens"]["qwen3:8b"]["runs"] == 1 and g["tokens"]["qwen3:8b"]["estimated"] == 1
+    assert g["tokens"][CLAUDE]["runs"] == 1
+
+
+def test_a_split_run_names_its_model_too(seat):
+    _workers(seat, {LEAF: [{"text": "", "capped": {"session": "", "split": True}}]}, workers="qwen3:8b",
+             loops="qwen3:8b")
+    _work(seat)
+    assert _results(seat)[0]["model"] == "qwen3:8b"
