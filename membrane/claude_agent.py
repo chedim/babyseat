@@ -345,7 +345,7 @@ class _Answer:
         if len(self.steps) > 2 or (len(self.steps) == 2 and not first_read):
             self.split = True
 
-    def call_done(self, name: str, args, wrote: bool) -> None:
+    def call_done(self, name: str, args, wrote) -> None:
         """#1120: one call of the current step ran; a call that acted makes its step an acting one."""
         if not self.one_step or not self.steps:
             return
@@ -781,7 +781,7 @@ def _tool_handler(name: str, port, answer=None):
             _w0 = _W.chain_writes(_cid)
             text = await asyncio.to_thread(impl, call, int(port))
             if answer is not None and hasattr(answer, "call_done"):     # #1120: what the call did
-                answer.call_done(name, call, _W.chain_writes(_cid) > _w0 if _cid else True)
+                answer.call_done(name, call, _W.chain_written(_cid, _w0) if _cid else True)
             return {"content": [{"type": "text",
                                  "text": str(text) + _footer(answer)}]}
         except _mcp.ProxyError as e:

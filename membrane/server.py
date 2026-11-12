@@ -1340,10 +1340,30 @@ PARALLEL_READS_MAX = 4
 FIELD_FAMILIES = ("find", "entity", "exec", "goal", "track", "field_watch", "state")
 
 
-def call_reads(srv, name: str, args, wrote: bool) -> bool:
-    """#1120: did this call only read, judged by what it did? The read-only set (PARALLEL_READS) reads; a shell run
-    (code_run) acts; a method call reads when the field marks its method read_only (method bookkeeping is always
-    written); a call of the field's own families reads when it wrote nothing in the field."""
+def _bookkeeping(est, m, obj, w) -> bool:
+    """#1120 (operator 2026-11-11, B): a write the method-call machinery makes about the call itself -- on the method
+    and the methods it runs through (run counts, last call, residues), on the object's call ring, the run's code
+    tree and result entities, and their edges."""
+    from .entities import MEMBRANE_NS
+    eid, prop, path = (list(w) + [None, "", ""])[:3]
+    if str(path or "").startswith("rel:"):
+        return all(not x or x.startswith((MEMBRANE_NS + "node:", MEMBRANE_NS + "result:")) or x == m.eid
+                   for x in str(path)[4:].split("|")[::2])
+    if not eid:
+        return False
+    if eid.startswith((MEMBRANE_NS + "node:", MEMBRANE_NS + "result:")):
+        return True
+    if obj is not None and eid == obj.eid and prop == "calls":
+        return True
+    from . import night as _N
+    return eid == m.eid or eid in {a.eid for a in _N.ancestors(est, m)}
+
+
+def call_reads(srv, name: str, args, wrote) -> bool:
+    """#1120: did this call only read, judged by what it did? `wrote`: the writes it made in the field, as
+    (eid, prop, path), or a bool. The read-only set (PARALLEL_READS) reads; a shell run (code_run) acts; a method
+    call reads when the field marks its method read_only, or when its only writes are its own bookkeeping (operator
+    2026-11-11, B); a call of the field's own families reads when it wrote nothing in the field."""
     from . import toolset as _ts
     n = str(name or "")
     n = n[len("mcp__membrane__"):] if n.startswith("mcp__membrane__") else n
@@ -1362,7 +1382,13 @@ def call_reads(srv, name: str, args, wrote: bool) -> bool:
             est = getattr(srv, "entity_store", None)
             obj = est.resolve(str(args.get("object") or "")) if est is not None else None
             m, _ = _N.resolve_method(est, obj, str(args.get("method") or "")) if obj is not None else (None, None)
-            return bool(m is not None and (m.properties or {}).get("read_only"))
+            if m is None:
+                return False
+            if (m.properties or {}).get("read_only"):
+                return True                                  # the field's own marking: an explicit override
+            if isinstance(wrote, bool):
+                return not wrote
+            return not [w for w in wrote if not _bookkeeping(est, m, obj, w)]
         except Exception:
             return False
     fams = {f for f, v in _ts.FAMILIES.items() if isinstance(v, dict) and n in set((v.get("actions") or {}).values())}
@@ -3717,7 +3743,7 @@ class TurnRunner:
                             if _acted:               # #1120: a worker's call that wrote in the field acted
                                 _acted[-1] = _acted[-1] and call_reads(
                                     getattr(self, "srv", None), name_l, args,
-                                    _WC.chain_writes(_wcid) > _w0 if _wcid else True)
+                                    _WC.chain_written(_wcid, _w0) if _wcid else True)
                         # THE TOOL'S TOUCH (the activity clock): a
                         # completed tool = the turn moved
                         self._turn_activity[sid] = time.time()

@@ -40,7 +40,8 @@ def test_a_call_is_judged_by_what_it_did():
     assert MS.call_reads(srv, "entity_edit", {"spec": "a"}, wrote=False)                 # wrote nothing: a read
     assert not MS.call_reads(srv, "entity_edit", {"spec": "a"}, wrote=True)
     assert MS.call_reads(srv, "method_call", {"object": "ha:light.port", "method": "level"}, wrote=True)
-    assert not MS.call_reads(srv, "method_call", {"object": "ha:light.port", "method": "turn_on"}, wrote=False)
+    # operator 2026-11-11 (B): a method call's own bookkeeping is not a write; read_only stays an override
+    assert MS.call_reads(srv, "method_call", {"object": "ha:light.port", "method": "turn_on"}, wrote=[])
     assert not MS.call_reads(srv, "code_run", {"code": "cat x"}, wrote=False)            # a shell: outside the field
     assert not MS.call_reads(srv, "learn", {"lesson": "x"}, wrote=False)                 # not a field family
 
@@ -68,8 +69,27 @@ def _call(cid, name, args="{}"):
     return {"id": cid, "type": "function", "function": {"name": name, "arguments": args}}
 
 
-def _turn(*msgs, writes=()):
-    """A worker turn; the executor writes in the field for the call ids in `writes`."""
+def _turn(*msgs, writes=(), execute=None):
+    """A worker turn; the executor writes in the field for the call ids in `writes` (or runs `execute`)."""
+    if execute is not None:
+        ran = []
+
+        def _ex(name, args, cid=None, _f=execute):
+            ran.append(cid)
+            return _f(name, args, cid)
+        return _turn_with(msgs, _ex, ran)
+    ran = []
+
+    def execute(name, args, cid=None):
+        ran.append(cid)
+        if cid in writes:
+            with W.as_writer("llm"):
+                W.emit("ha:light.port.level", 1, 2)
+        return "ok"
+    return _turn_with(msgs, execute, ran)
+
+
+def _turn_with(msgs, execute, ran):
     state = {"n": 0}
 
     def ladder(body):
@@ -80,14 +100,6 @@ def _turn(*msgs, writes=()):
         state["n"] += 1
         return {"choices": [{"message": msg, "finish_reason": "stop"}]}
     ladder.stream = stream
-    ran = []
-
-    def execute(name, args, cid=None):
-        ran.append(cid)
-        if cid in writes:
-            with W.as_writer("llm"):
-                W.emit("ha:light.port.level", 1, 2)
-        return "ok"
     tools = [{"name": n, "description": "", "inputSchema": {"type": "object"}}
              for n in ("method_call", "entity_edit", "learn")]
     r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(), ladder, execute, system="", model="m",
@@ -144,3 +156,52 @@ def test_claude_a_step_that_wrote_nothing_only_read():
     a.call_done("entity_edit", {"spec": "x"}, wrote=False)
     a.saw_step("m2", reads=True)
     assert asyncio.run(a.hook({"tool_use_id": "t2"})) == {}
+
+
+# ---- operator 2026-11-11 (B): a method call's own bookkeeping is no write -----------------------------------------
+TURN_ON = {"object": "ha:light.port", "method": "turn_on"}
+BOOKKEEPING = [("membrane::method:turn_on", "runs", "membrane::method:turn_on.runs"),
+               ("membrane::method:turn_on", "last_call", "membrane::method:turn_on.last_call"),
+               ("ha:light.port", "calls", "ha:light.port.calls"),
+               ("membrane::result:abc:1", "", "membrane::result:abc:1"),
+               ("membrane::node:abc", "code", "membrane::node:abc.code"),
+               (None, "", "rel:membrane::node:abc|result|membrane::result:abc:1")]
+
+
+def test_a_method_whose_only_writes_are_its_bookkeeping_reads():
+    assert MS.call_reads(_srv(), "method_call", TURN_ON, wrote=BOOKKEEPING)
+
+
+def test_a_method_that_wrote_anything_else_acted():
+    assert not MS.call_reads(_srv(), "method_call", TURN_ON,
+                             wrote=BOOKKEEPING + [("ha:light.port", "state", "ha:light.port.state")])
+
+
+def test_read_only_stays_an_override():
+    assert MS.call_reads(_srv(), "method_call", {"object": "ha:light.port", "method": "level"},
+                         wrote=[("ha:light.port", "state", "ha:light.port.state")])
+
+
+def test_the_chain_keeps_what_was_written():
+    with W.source("worker", "a") as ch:
+        W.watch_chain(ch["id"])
+        try:
+            with W.as_writer("llm"):
+                W.emit("ha:light.port.state", 1, 2, eid="ha:light.port")
+            assert W.chain_written(ch["id"]) == [("ha:light.port", "state", "ha:light.port.state")]
+        finally:
+            W.watch_chain(ch["id"], False)
+
+
+def test_a_round_of_a_bookkeeping_only_method_call_is_a_reading_round():
+    def run(name, args, cid=None):
+        with W.as_writer("llm"):
+            W.emit("membrane::method:turn_on.runs", 1, 2, eid="membrane::method:turn_on")
+        return "ok"
+    out, ran = _turn({"tool_calls": [_call("m1", "method_call", '{"object": "ha:light.port", "method": "turn_on"}')]},
+                     {"tool_calls": [_call("w1", "learn")]}, {"content": "DONE"}, execute=run)
+    assert ran == ["m1", "w1"] and not _capped(out)
+
+
+def test_local_chat_models_keep_their_rounds():
+    assert MS.MAX_ROUNDS == 24                    # operator 2026-11-11: no 12-step ceiling for local chat models
