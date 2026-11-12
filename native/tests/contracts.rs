@@ -209,3 +209,34 @@ fn the_surface_of_every_pack_matches_the_reviewed_snapshot() {
     for k in want.keys() { if !now.contains_key(k) { diffs.push(format!("- pack {k} is gone")); } }
     assert!(diffs.is_empty(), "\nthe surface of a pack changed; review it and run SURFACE_UPDATE=1 cargo test --test contracts surface\n{}\n", diffs.join("\n"));
 }
+
+// ---- the types snapshot: what the static inference says about every getter -------------------------------------------------
+// `infer_pack` over every shipped pack, together (a class a pack imports is typed from the pack that defines it), compared to the
+// committed `membrane/packs/types.json`: `pack -> {getters: Class.prop -> type, writes: ..., findings: [...]}`. A REPORT, not a gate on
+// quality: a change is a diff to read, then `TYPES_UPDATE=1 cargo test --test contracts types` regenerates it.
+#[test]
+fn the_inferred_types_of_every_pack_match_the_reviewed_snapshot() {
+    use serde_json::json;
+    let all = packs();
+    let texts: Vec<&str> = all.iter().map(|p| p.1.as_str()).collect();
+    let reports = membrane_vm::infer::infer_packs(&texts).expect("every shipped pack parses");
+    let mut now = serde_json::Map::new();
+    let (mut total, mut concrete) = (0, 0);
+    for ((stem, _), (_, r)) in all.iter().zip(&reports) {
+        total += r.getters.len();
+        concrete += r.getters.values().filter(|t| *t != "Any").count();
+        now.insert(stem.clone(), json!({"getters": r.getters, "writes": r.writes, "findings": r.findings}));
+    }
+    eprintln!("inferred types: {concrete} of {total} getters resolve to a type other than Any");
+    let path = root().join("membrane/packs/types.json");
+    if std::env::var("TYPES_UPDATE").is_ok() {
+        std::fs::write(&path, serde_json::to_string_pretty(&serde_json::Value::Object(now)).unwrap() + "\n").unwrap();
+        return;
+    }
+    let want: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("membrane/packs/types.json (TYPES_UPDATE=1 writes it)")).unwrap();
+    let want = want.as_object().unwrap();
+    let mut diffs = vec![];
+    for (k, v) in &now { match want.get(k) { None => diffs.push(format!("+ pack {k} is new")), Some(w) if w != v => diffs.push(format!("~ pack {k} changed:\n    was {w}\n    now {v}")), _ => {} } }
+    for k in want.keys() { if !now.contains_key(k) { diffs.push(format!("- pack {k} is gone")); } }
+    assert!(diffs.is_empty(), "\nthe inferred types changed; review them and run TYPES_UPDATE=1 cargo test --test contracts types\n{}\n", diffs.join("\n"));
+}

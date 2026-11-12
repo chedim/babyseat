@@ -60,6 +60,29 @@ difference. Reviewing a pack, an agent's branch or Memo's edit means reading the
 writing a new property, claiming a new path or importing a new pack fails the test until the change is reviewed and recorded
 (`SURFACE_UPDATE=1 cargo test --test contracts surface`). There is no `private` keyword: the contract is the surface.
 
+## Inferred types (a report, enforces nothing)
+c1f is dynamic at run time, but a getter's type follows from its definition. `native/src/infer.rs` (`infer_expr`, `infer_pack`,
+`infer_packs`) deduces it from literals, the builtins' signatures, the types of other getters it reads (any order; a cycle is `Any`
+and a finding), and the right-hand sides of setters (collected as the union of types WRITTEN to each `Class.prop`, shown next to
+the getter's type when the property has both). Plain properties written from outside (Boot facts, Request fields, driver receipts,
+JSON) are untyped edges: `Any`. A getter that reads its own name (`X.f getter: this.f`, the fallback arm) reads that written value:
+also an edge, not a cycle.
+
+Types: `Bool Int Float Num(=Int|Float) Text List(T) Dict Entity(Class) Any`, `?` for nullable, `|` for a union, `None` for the
+null alone, `Never` for the element of `[]`. Rules (they MODEL the null semantics, they never run them):
+- an operation on a nullable value is nullable (`Any + 1` is `Num?`); `x or d` strips the null of `x`; a getter whose last arm is
+  missing is nullable (`Text?`); a list or dict miss is a null (`l[0]` is `T?`);
+- `Int(x)`, `Text(x)` ... are checked casts: the target type, nullable unless `x` is already that type; `Int(x) or Text(x)` is not
+  null when the two casts together cover `x`'s kinds; `x == None` is a null test (`Bool`);
+- builtins have signatures (`len` is `Int` whatever it gets; `words` is `List(Text)`; `instances('Boot')` is `List(Entity(Boot))`;
+  host functions `stat sql read ...` are `Any`); `Entity(C).p` is `C.p`'s getter type, or `Any`;
+- not modelled: dict value types (`Dict` is a bare `Dict`), flow-sensitivity, the host functions' results.
+
+Findings are what is certainly wrong: text added to a number, an index or attribute on something that cannot take it, a builtin
+given an argument of the wrong kind (`len(3)`), a wrong argument count, `<` between text and a number, a loop over a non-list, a
+getter cycle. Nothing fails on them yet. `membrane/packs/types.json` is the snapshot of every shipped pack (`pack -> getters,
+writes, findings`); `native/tests/contracts.rs` compares it and `TYPES_UPDATE=1 cargo test --test contracts types` regenerates it.
+
 ## Order of work
 1. This document and the Request contract's shared getters with specs (`tests/specs/door_std.json`): `facts`, `jbody`, `qpairs`,
    `person`, and the declarative method gate `m_<f>`.
