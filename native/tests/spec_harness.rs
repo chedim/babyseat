@@ -81,3 +81,20 @@ fn a_getter_reading_instances_of_another_class_settles_from_the_loaded_state() {
         "writes": [], "expect": [{"eid": "T:1", "prop": "rows", "equals": [7]}, {"eid": "T:1", "prop": "first", "equals": 7}, {"eid": "T:1", "prop": "it", "equals": 7}]});
     assert_eq!(spec::run(&s), Vec::<String>::new());
 }
+
+#[test]
+fn an_expectation_can_name_a_path_into_a_property() {
+    let d = tmp("path");
+    let p = pack_file(&d, "path", "PACK path 1\nR.reply getter: {'status': 200, 'body': {'name': this.n, 'who': None, 'tags': ['a', 'b']}}\n");
+    let ok = json!({"name": "path", "packs": [p.clone()],
+        "given": [{"eid": "R:1", "class": "R", "props": {"n": "seat"}}], "writes": [],
+        "expect": [{"eid": "R:1", "prop": "reply.status", "equals": 200}, {"eid": "R:1", "prop": "reply.body.name", "equals": "seat"},
+                   {"eid": "R:1", "prop": "reply.body.who", "none": true}, {"eid": "R:1", "prop": "reply.body.tags.1", "equals": "b"},
+                   {"eid": "R:1", "prop": "reply.body.missing.deeper", "none": true}]});
+    assert_eq!(spec::run(&ok), Vec::<String>::new());
+    let bad = json!({"name": "path", "packs": [p], "given": [{"eid": "R:1", "class": "R", "props": {"n": "seat"}}], "writes": [],
+        "expect": [{"eid": "R:1", "prop": "reply.body.name", "equals": "other"}]});
+    let f = spec::run(&bad);
+    assert_eq!(f.len(), 1);
+    assert!(f[0].contains("reply.body.name") && f[0].contains("seat") && f[0].contains("other"), "{}", f[0]);
+}

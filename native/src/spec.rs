@@ -34,6 +34,22 @@ fn quiet(c: &mut Core, f: &mut Fields) {
     f.settle(c, &H, 3.0, &mut seq);
 }
 
+/// A property, or a path into it: `reply.body.tags.1` (an object key, or an index into a list); anything missing is null.
+fn at_path(props: &serde_json::Map<String, J>, path: &str) -> J {
+    if let Some(v) = props.get(path) { return v.clone(); }            // a property whose own name has dots wins
+    let mut parts = path.split('.');
+    let Some(first) = parts.next() else { return J::Null };
+    let mut cur = props.get(first).cloned().unwrap_or(J::Null);
+    for p in parts {
+        cur = match &cur {
+            J::Object(m) => m.get(p).cloned().unwrap_or(J::Null),
+            J::Array(a) => p.parse::<usize>().ok().and_then(|i| a.get(i).cloned()).unwrap_or(J::Null),
+            _ => J::Null,
+        };
+    }
+    cur
+}
+
 /// The entity's properties, compact, for a failure message.
 fn dump(p: &serde_json::Map<String, J>) -> String {
     let t = J::Object(p.clone()).to_string();
@@ -74,7 +90,7 @@ pub fn run(spec: &J) -> Vec<String> {
     for e in expect {
         let (eid, prop) = (e["eid"].as_str().unwrap_or(""), e["prop"].as_str().unwrap_or(""));
         let Some(ent) = c.docs.get(eid) else { fails.push(format!("{name}: {eid}.{prop}: no such entity")); continue };
-        let got = ent.props.get(prop).cloned().unwrap_or(J::Null);
+        let got = at_path(&ent.props, prop);
         if let Some(want) = e.get("equals") {
             if &got != want { fails.push(format!("{name}: {eid}.{prop}: expected {want}, got {got}   [{}]", dump(&ent.props))); }
         } else if e.get("none").and_then(|n| n.as_bool()).unwrap_or(false) {
