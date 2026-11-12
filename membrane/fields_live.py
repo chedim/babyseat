@@ -662,7 +662,7 @@ def boot_started(est, ledger: str | None = None) -> None:
                    embedder=None)
         d = est.docs["Boot:seat"]
     if ledger:                              # the facts first, the announcement last: a setter on `started` must find them
-        d.properties = {**(d.properties or {}), "ledger": str(ledger)}
+        d.properties = {**(d.properties or {}), "ledger": str(Path(ledger).resolve())}      # absolute: the file driver resolves a relative path against the data folder
         est.upsert(d, embedder=None)
     d.properties = {**(d.properties or {}), "started": time.time()}
     est.upsert(d, embedder=None)

@@ -255,3 +255,13 @@ def test_the_ledger_path_is_known_before_the_start_is_announced(monkeypatch, tmp
     W.on_write(lambda w: order.append(w.get("prop")) if str(w.get("eid")) == "Boot:seat" else None)
     FL.boot_started(est, ledger=str(tmp_path / "l.jsonl"))
     assert "ledger" in order and "started" in order and order.index("ledger") < order.index("started"), order
+
+
+def test_the_ledger_path_the_pack_gets_is_absolute(tmp_path, monkeypatch):
+    """Live 2026-11-12: the seat's path was relative to its start folder and the file driver resolved it against the data
+    folder (.membrane/.membrane/...): the decisions went to a file nobody reads."""
+    monkeypatch.chdir(tmp_path)
+    est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
+    FL.boot_started(est, ledger=".membrane/field.json.ledger.jsonl")
+    got = est.docs["Boot:seat"].properties["ledger"]
+    assert os.path.isabs(got) and got == str((tmp_path / ".membrane" / "field.json.ledger.jsonl").resolve())
