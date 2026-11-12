@@ -73,6 +73,7 @@ forwarding to Python; writes into entities through setters, not function calls; 
 | 4 sweeps and loops | not started |
 | 5 goals and decisions | decisions and the board's pen are c1f; the selection (pin, cap, ranking) stays with the dream loop |
 | 6 turn path and serve | the Rust door (`http.rs`, `jwt.rs`), the UI shell and files (`door.c1f`); every request is an entity a pack answers; 0 of ~140 routes ported; the message turn is untouched |
+| outbound http | `Fetch:<x>.request` (`fetch.rs`) speaks http and https: TLS is rustls (ring) with the webpki roots, behind the `tls` feature (on with `python`, absent from wasm); `ca_pem` in the request adds trusted roots (private CA, tests); a certificate failure is a receipt (rc 1, head names it) |
 | 7 the rest | not started |
 | 8 entity store and field engine | not started; the SQLite store is native (`db.rs`), `Store:<x>.run` writes from c1f |
 

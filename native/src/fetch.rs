@@ -1,6 +1,8 @@
 //! The outbound HTTP driver (the model list, the model call and its streamed reply): `Fetch:<x>.request = {id, url, method?,
 //! headers?, body?, stream?, timeout_s?}`. The receipt is data. With `stream` the body is pushed into the engine as entities
-//! `Chunk:<fetch>:<n>` ({fetch, id, n, data, done}) while it is read. Plain http for now; https says so (TLS is a later piece).
+//! `Chunk:<fetch>:<n>` ({fetch, id, n, data, done}) while it is read. http and https: https is rustls with the webpki roots (feature `tls`, on with `python`; wasm
+//! has none and refuses https). `ca_pem` (PEM text) adds trusted roots for a private CA or a test; a failed verification is a
+//! receipt (rc 1) whose head names the certificate problem.
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -11,19 +13,72 @@ use crate::store::Store;
 
 const MAX_BODY: usize = 64 * 1024 * 1024;
 
+/// The connection, plain or TLS; a TLS peer that drops the socket without close_notify reads as a plain end of stream.
+trait Conn: Read + Write {}
+impl<T: Read + Write> Conn for T {}
+#[cfg(feature = "tls")]
+struct Tls(rustls::StreamOwned<rustls::ClientConnection, TcpStream>);
+#[cfg(feature = "tls")]
+impl Read for Tls {
+    fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+        match self.0.read(b) { Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(0), r => r }
+    }
+}
+#[cfg(feature = "tls")]
+impl Write for Tls {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> { self.0.write(b) }
+    fn flush(&mut self) -> std::io::Result<()> { self.0.flush() }
+}
+
+/// The client config: the webpki roots plus `ca_pem`.
+#[cfg(feature = "tls")]
+fn tls_config(ca_pem: Option<&str>) -> Result<std::sync::Arc<rustls::ClientConfig>, String> {
+    use rustls::pki_types::{pem::PemObject, CertificateDer};
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(pem) = ca_pem {
+        let mut n = 0;
+        for der in CertificateDer::pem_slice_iter(pem.as_bytes()) {
+            roots.add(der.map_err(|e| format!("ca_pem: {e}"))?).map_err(|e| format!("ca_pem: {e}"))?;
+            n += 1;
+        }
+        if n == 0 { return Err("ca_pem holds no certificate".into()); }
+    }
+    let cfg = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions().map_err(|e| format!("tls: {e}"))?
+        .with_root_certificates(roots).with_no_client_auth();
+    Ok(std::sync::Arc::new(cfg))
+}
+
+/// TLS over `tcp`; the handshake is finished here so its failure is named.
+#[cfg(feature = "tls")]
+fn handshake(tcp: TcpStream, host: &str, cfg: std::sync::Arc<rustls::ClientConfig>) -> Result<Box<dyn Conn>, String> {
+    use rustls::pki_types::ServerName;
+    let name = ServerName::try_from(host.to_string()).map_err(|e| format!("tls server name {host:?}: {e}"))?;
+    let conn = rustls::ClientConnection::new(cfg, name).map_err(|e| format!("tls: {e}"))?;
+    let mut st = rustls::StreamOwned::new(conn, tcp);
+    while st.conn.is_handshaking() {
+        st.conn.complete_io(&mut st.sock).map_err(|e| format!("tls handshake {host}: {e}"))?;
+    }
+    Ok(Box::new(Tls(st)))
+}
+
 fn refuse(id: &J, rc: i64, why: String) -> J { json!({"id": id, "status": "error", "rc": rc, "head": why}) }
 
-/// `http://host[:port]/path?query` -> (host, port, path+query)
-fn parse(url: &str) -> Result<(String, u16, String), String> {
-    if url.starts_with("https://") { return Err("https is not supported yet (TLS is a later piece)".into()); }
-    let rest = url.strip_prefix("http://").ok_or_else(|| format!("not an http url: {url:?}"))?;
+/// `http(s)://host[:port]/path?query` -> (tls, host, port, path+query)
+fn parse(url: &str) -> Result<(bool, String, u16, String), String> {
+    let (tls, rest) = match (url.strip_prefix("https://"), url.strip_prefix("http://")) {
+        (Some(r), _) => (true, r), (_, Some(r)) => (false, r), _ => return Err(format!("not an http url: {url:?}")),
+    };
+    #[cfg(not(feature = "tls"))]
+    if tls { return Err("https is not available in this build (no tls feature)".into()); }
     let (hostport, path) = match rest.find('/') { Some(i) => (&rest[..i], &rest[i..]), None => (rest, "/") };
     if hostport.is_empty() || hostport.contains(' ') { return Err(format!("not a url: {url:?}")); }
     let (host, port) = match hostport.rsplit_once(':') {
         Some((h, p)) if !h.ends_with(']') || h.starts_with('[') => (h.trim_matches(|c| c == '[' || c == ']').to_string(), p.parse::<u16>().map_err(|_| format!("bad port in {url:?}"))?),
-        _ => (hostport.to_string(), 80),
+        _ => (hostport.to_string(), if tls { 443 } else { 80 }),
     };
-    Ok((host, port, path.to_string()))
+    Ok((tls, host, port, path.to_string()))
 }
 
 /// Complete UTF-8 text from a byte buffer, keeping an incomplete trailing sequence for the next piece.
@@ -48,17 +103,32 @@ fn take_text(pending: &mut Vec<u8>) -> String {
 pub fn request(st: &Store, eid: &str, req: &J) -> J {
     let id = req.get("id").cloned().unwrap_or(J::Null);
     let url = req.get("url").and_then(|u| u.as_str()).unwrap_or("");
-    let (host, port, path) = match parse(url) { Ok(p) => p, Err(e) => return refuse(&id, 2, e) };
+    let (tls, host, port, path) = match parse(url) { Ok(p) => p, Err(e) => return refuse(&id, 2, e) };
     let timeout = Duration::from_secs(req.get("timeout_s").and_then(|t| t.as_u64()).unwrap_or(60));
     let stream = req.get("stream").and_then(|s| s.as_bool()).unwrap_or(false);
+    #[cfg(feature = "tls")]
+    let tls_cfg = if tls {
+        let ca = match req.get("ca_pem") { None | Some(J::Null) => None, Some(J::String(p)) => Some(p.as_str()), Some(_) => return refuse(&id, 2, "ca_pem must be PEM text".into()) };
+        match tls_config(ca) { Ok(c) => Some(c), Err(e) => return refuse(&id, 2, e) }
+    } else { None };
     let addr = match (host.as_str(), port).to_socket_addrs().ok().and_then(|mut a| a.next()) {
         Some(a) => a, None => return refuse(&id, 1, format!("connect {host}:{port}: cannot resolve")),
     };
-    let mut s = match TcpStream::connect_timeout(&addr, timeout) { Ok(s) => s, Err(e) => return refuse(&id, 1, format!("connect {host}:{port}: {e}")) };
-    let _ = s.set_read_timeout(Some(timeout));
+    let tcp = match TcpStream::connect_timeout(&addr, timeout) { Ok(s) => s, Err(e) => return refuse(&id, 1, format!("connect {host}:{port}: {e}")) };
+    let _ = tcp.set_read_timeout(Some(timeout));
+    let _ = tcp.set_write_timeout(Some(timeout));
+    let mut s: Box<dyn Conn> = if tls {
+        #[cfg(feature = "tls")]
+        {
+            match handshake(tcp, &host, tls_cfg.unwrap()) { Ok(c) => c, Err(e) => return refuse(&id, 1, e) }
+        }
+        #[cfg(not(feature = "tls"))]
+        unreachable!()
+    } else { Box::new(tcp) };
     let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("GET").to_ascii_uppercase();
     let body = req.get("body").map(|b| match b { J::String(t) => t.clone(), other => other.to_string() }).unwrap_or_default();
-    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUser-Agent: membrane\r\nConnection: close\r\nAccept: */*\r\n");
+    let hostport = if port == if tls { 443 } else { 80 } { host.clone() } else { format!("{host}:{port}") };
+    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: {hostport}\r\nUser-Agent: membrane\r\nConnection: close\r\nAccept: */*\r\n");
     if let Some(h) = req.get("headers").and_then(|h| h.as_object()) {
         for (k, v) in h {
             if k.eq_ignore_ascii_case("host") || k.eq_ignore_ascii_case("content-length") || k.eq_ignore_ascii_case("connection") { continue; }
