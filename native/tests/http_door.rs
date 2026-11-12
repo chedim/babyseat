@@ -25,6 +25,7 @@ Request.reply getter:
 Request.reply on-setter answer:
   ALWAYS:
     this.respond = this.reply
+Request.who getter: ('owner ' + this.sub) if this.authed else ('nobody: ' + str(this.auth_error))
 Http.kind getter: 'http'
 ";
 
@@ -111,4 +112,24 @@ fn a_request_without_a_connection_cannot_be_answered() {
     f.react(&mut c, &H, w, 2.0, &mut seq);
     pump(&mut c, &mut f, |c| c.docs["Request:900"].props.get("respond_result").is_some());
     assert_eq!(c.docs["Request:900"].props["respond_rc"], json!(2));
+}
+
+const GOOD: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJvd25lciIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwLCJuYW1lIjoiT3duZXIifQ.AaVTM8jSb9mpYU5XQGs0zoUVw2_kMPZ-lSDhe6s9YTw";
+
+#[test]
+fn the_door_verifies_the_token_and_a_pack_reads_who() {
+    std::env::set_var("DOOR_TEST_SECRET", "0123456789abcdef0123456789abcdef");
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, "listen", json!({"id": "l1", "port": 0, "secret_env": "DOOR_TEST_SECRET"}));
+    pump(&mut c, &mut f, |c| c.docs["Http:door"].props.get("listen_result").is_some());
+    let port = c.docs["Http:door"].props["listen_result"]["port"].as_u64().unwrap();
+    let a = ask(port, format!("GET /a HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer {GOOD}\r\n\r\n"));
+    let b = ask(port, "GET /b HTTP/1.1\r\nHost: t\r\n\r\n".into());
+    let c2 = ask(port, format!("GET /c?token={GOOD} HTTP/1.1\r\nHost: t\r\n\r\n"));
+    let (mut ra, mut rb, mut rc) = (None, None, None);
+    pump(&mut c, &mut f, |_| { if ra.is_none() { ra = a.try_recv().ok(); } if rb.is_none() { rb = b.try_recv().ok(); } if rc.is_none() { rc = c2.try_recv().ok(); } ra.is_some() && rb.is_some() && rc.is_some() });
+    let who = |path: &str| c.docs.values().find(|e| e.props.get("path") == Some(&json!(path))).map(|e| e.props["who"].clone()).unwrap();
+    assert_eq!(who("/a"), json!("owner owner"));
+    assert_eq!(who("/b"), json!("nobody: no token"));
+    assert_eq!(who("/c"), json!("nobody: no token"), "a query-string token is never read");
 }

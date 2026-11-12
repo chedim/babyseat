@@ -32,6 +32,7 @@ pub mod drivers;
 #[cfg(feature = "wasm")]
 pub mod web;
 pub mod http;
+pub mod jwt;
 
 
 /// Parse and evaluate one expression against plain values (`env_json`: a JSON object), no entities. The result as

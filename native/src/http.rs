@@ -35,6 +35,27 @@ fn bad(mut s: TcpStream, status: i64, why: &str) {
     let _ = s.write_all(body);
 }
 
+/// The token a request presents (never the query string): `Authorization: Bearer <jwt>`, HTTP Basic with the jwt as the
+/// password, or the `membrane_jwt` cookie.
+pub fn token_of(headers: &Map<String, J>, _query: &str) -> Option<String> {
+    if let Some(a) = headers.get("authorization").and_then(|a| a.as_str()) {
+        let a = a.trim();
+        if let Some(t) = a.strip_prefix("Bearer ").or_else(|| a.strip_prefix("bearer ")) { let t = t.trim(); if !t.is_empty() { return Some(t.to_string()); } }
+        if let Some(b) = a.strip_prefix("Basic ").or_else(|| a.strip_prefix("basic ")) {
+            if let Some(raw) = crate::jwt::base64_decode(b.trim(), false) {
+                let s = String::from_utf8_lossy(&raw).to_string();
+                if let Some((_, pw)) = s.split_once(':') { if !pw.is_empty() { return Some(pw.to_string()); } }
+            }
+        }
+    }
+    if let Some(c) = headers.get("cookie").and_then(|c| c.as_str()) {
+        for kv in c.split(';') {
+            if let Some((k, v)) = kv.trim().split_once('=') { if k == "membrane_jwt" && !v.is_empty() { return Some(v.to_string()); } }
+        }
+    }
+    None
+}
+
 /// Read one request off a connection: -> the entity's properties, or None (the connection was answered or dropped).
 fn read_request(s: &mut TcpStream) -> Option<(Map<String, J>, Vec<u8>)> {
     s.set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT_S))).ok()?;
@@ -83,17 +104,31 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
     };
     let bound = l.local_addr().map(|a| a.port()).unwrap_or(0);
     if l.set_nonblocking(true).is_err() { return json!({"id": id, "status": "error", "rc": 2, "head": "cannot listen: nonblocking"}); }
+    // the door verifies the token itself: the secret comes from the environment variable `secret_env` names (never a prop)
+    let secret: Option<Vec<u8>> = req.get("secret_env").and_then(|e| e.as_str()).and_then(|e| std::env::var(e).ok()).map(|s| s.into_bytes());
     let stop = Arc::new(AtomicBool::new(false));
     if let Some(old) = st.set_listener(eid, stop.clone()) { old.store(true, Ordering::SeqCst); }
-    let (st2, eid2) = (st.clone_handle(), eid.to_string());
+    let (st2, eid2, secret) = (st.clone_handle(), eid.to_string(), secret);
     std::thread::Builder::new().name("membrane-http".into()).spawn(move || {
         while !stop.load(Ordering::SeqCst) {
             match l.accept() {
                 Ok((mut s, peer)) => {
-                    let (st3, eid3) = (st2.clone_handle(), eid2.clone());
+                    let (st3, eid3, secret) = (st2.clone_handle(), eid2.clone(), secret.clone());
                     let _ = std::thread::Builder::new().name("membrane-http-conn".into()).spawn(move || {
                         let _ = s.set_nonblocking(false);
                         let Some((mut props, _)) = read_request(&mut s) else { return bad(s, 400, "bad request"); };
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+                        // WHO: verified here, by the door, before any pack sees the request (a pack reads `authed` and `sub`; it cannot set them)
+                        let headers = props.get("headers").and_then(|h| h.as_object()).cloned().unwrap_or_default();
+                        let verdict = match (&secret, token_of(&headers, "")) {
+                            (None, _) => Err("this door has no secret".to_string()),
+                            (Some(_), None) => Err("no token".to_string()),
+                            (Some(k), Some(t)) => crate::jwt::verify(&t, k, now),
+                        };
+                        match verdict {
+                            Ok(claims) => { props.insert("authed".into(), json!(true)); props.insert("sub".into(), claims["sub"].clone()); props.insert("claims".into(), claims); }
+                            Err(why) => { props.insert("authed".into(), json!(false)); props.insert("auth_error".into(), json!(why)); }
+                        }
                         let conn = st3.hold_conn(s);
                         props.insert("conn".into(), json!(conn));
                         props.insert("http".into(), json!(eid3));
