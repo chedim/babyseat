@@ -43,7 +43,7 @@ entity_edit  spec=<eid>  properties={"status": "open", "var": {"type": "int", "u
 
 On a `Decision`, `entity_edit` refuses `value`, `set_by`, `set_at` and any `status` other than `open` or `in_flight`. Only the operator answers:
 
-- Both ports serve the board: the proxy (`:11500`) and the serve port (`:4096`, which the page reaches as `/ui/serve/...`).
+- The board's routes are the door's, decided in c1f (`membrane/packs/door_decisions.c1f`; `Decision.drop` is in `packs/decisions.c1f`): each write is a person's (a verified token, never a bare loopback caller) and the reply waits for the card's own receipt (`answer_log` / `drop_log`). `POST /membrane/decision/drop {card}` drops an open card (409 otherwise). Not in the door: the work graph's watch nodes and rocket runs, and an entity's own properties (`docs/python-to-c1f.md`).
 - `GET /membrane/decisions` returns `{cards: [...], edges: [{from, to, rel}]}`.
 - `GET /membrane/goals` (serve port) returns the cockpit's goals, `{goals: [{eid, title, summary, active, born}]}`: the open `Goal` entities, with the seat's active set (the intent board's selection) first and flagged `active`.
 - `POST /membrane/decision/chat {card, chat}` (serve port, owner only) records the chat a card opened. Only `chat` changes, and a card keeps one it already has.

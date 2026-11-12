@@ -6,10 +6,8 @@ the answer-owned keys, so an agent can ask but never decide."""
 import os
 import sys
 import tempfile
-import types
 import unittest
 from pathlib import Path
-from unittest import mock
 
 os.environ.setdefault("MEMBRANE_STORE", "json")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -39,30 +37,6 @@ def _card(est, name, status="open", var=None, pick=None, **props):
     return eid
 
 
-
-
-class TestCards(unittest.TestCase):
-    def test_cards_and_edges(self):
-        est, _ = _store()
-        a = _card(est, "turn time limit", var={"type": "int", "unit": "s"}, pick=1800)
-        b = _card(est, "release when", var={"type": "string"})
-        c = _card(est, "banner window", status="in_flight", var={"type": "int"}, pick=3)
-        est.edit(b, properties={"blocks": [a]})
-        est.edit(c, properties={"carried_by": ["PR #468"]})
-        legacy = est.add(cls="Decision", name="old choice", summary="kept 300 s")["eid"]
-        est.add(cls="Component", name="conv_banner.py")
-        m = DM.board(est)
-        by = {x["eid"]: x for x in m["cards"]}
-        self.assertEqual(set(by), {a, b, c, legacy})
-        self.assertEqual(by[a]["status"], "open")
-        self.assertEqual(by[a]["title"], "turn time limit")
-        self.assertEqual(by[a]["description"], "about turn time limit")
-        self.assertEqual(by[a]["pick"], 1800)
-        self.assertEqual(by[a]["var"]["type"], "int")
-        self.assertEqual(by[c]["status"], "in_flight")
-        self.assertEqual(by[legacy]["status"], "decided")      # a Decision with no status
-        self.assertIn({"from": b, "to": a, "rel": "blocks"}, m["edges"])
-        self.assertIn({"from": c, "to": "PR #468", "rel": "carried_by"}, m["edges"])
 
 
 class TestAnswer(unittest.TestCase):
@@ -119,45 +93,6 @@ class TestAgentsAskButNeverDecide(unittest.TestCase):
         self.assertEqual(sorted(res["properties_set"]), ["status", "value"])
 
 
-class TestRoutes(unittest.TestCase):
-    def _h(self, path, method, body=None, owner=True):
-        from membrane import lanes as L
-        if not hasattr(self, "srv"):
-            est, led = _store()
-            self.srv = types.SimpleNamespace(entity_store=est, user_ledger=led,
-                                             _last_request_ts=0, paused=False)
-            self.card = _card(est, "turn time limit", var={"type": "int"}, pick=1800)
-        h = L.MembraneOpenAIHandler.__new__(L.MembraneOpenAIHandler)
-        h.server, h.path, h.command, h.headers = self.srv, path, method, {}
-        out = []
-        h._json_out = lambda obj, *a, **k: out.append(obj)
-        h._json_err_raw = lambda code, msg: out.append({"error": msg, "code": code})
-        h._json_body = lambda: dict(body or {})
-        with mock.patch("membrane.seatauth.owner", return_value=owner), \
-                mock.patch("membrane.jwtauth.send_unauthorized",
-                           side_effect=lambda hh: out.append({"code": 401})):
-            (h.do_GET if method == "GET" else h.do_POST)()
-        return out[-1]
-
-    def test_board_route(self):
-        out = self._h("/membrane/decisions", "GET")
-        self.assertEqual(out["cards"][0]["title"], "turn time limit")
-
-    def test_answer_route(self):
-        self._h("/membrane/decisions", "GET")
-        out = self._h("/membrane/decision/answer", "POST",
-                      {"card": self.card, "value": 1800, "conv": "ses_y"})
-        self.assertTrue(out["ok"], out)
-        self.assertEqual(self.srv.entity_store.docs[self.card].properties["value"], 1800)
-
-    def test_only_the_owner_answers(self):
-        self._h("/membrane/decisions", "GET")
-        out = self._h("/membrane/decision/answer", "POST",
-                      {"card": self.card, "value": 1800}, owner=False)
-        self.assertEqual(out["code"], 401)
-        self.assertEqual(self.srv.entity_store.docs[self.card].properties["status"], "open")
-
-
 if __name__ == "__main__":
     unittest.main()
 
@@ -200,12 +135,3 @@ class TestReviewFixes(unittest.TestCase):
     def test_entity_add_takes_no_properties(self):
         import inspect
         self.assertNotIn("properties", inspect.signature(EntityStore.add).parameters)
-
-
-class TestReviewRoutes(TestRoutes):
-    def test_already_decided_is_a_conflict(self):
-        self._h("/membrane/decisions", "GET")
-        self.assertTrue(self._h("/membrane/decision/answer", "POST",
-                                {"card": self.card, "value": 1})["ok"])
-        out = self._h("/membrane/decision/answer", "POST", {"card": self.card, "value": 2})
-        self.assertEqual(out["code"], 409)
