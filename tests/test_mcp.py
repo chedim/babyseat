@@ -175,7 +175,9 @@ class TestMcpProtocol(unittest.TestCase):
                                  "method_define", "method_call",
                                  "code_run", "bash", "method_each",
                                  "method_inspect",
-                                 "entity_read"])
+                                 "entity_read",
+                                 # #1101: the context stack and bare method calls (the file tools only on a no-bash seat)
+                                 "call", "entity_enter", "entity_exit"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)
             self.assertTrue(t["description"].strip())

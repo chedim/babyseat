@@ -25,12 +25,10 @@ def _name(t: dict) -> str:
     return str(t.get("name") or (t.get("function") or {}).get("name") or "")
 
 
-FILE_TOOLS = {"read_file", "write_file", "edit_file", "list_dir"}    # #1101: the usual file tools, no-bash only
-
-
 def strip_tools(tools):
-    """No-bash on: the tool list without the shell tools. Off: without the no-bash seat's file tools."""
+    """No-bash on: the tool list without the shell tools."""
     if not isinstance(tools, list):
         return tools
-    drop = SHELL_TOOLS if on() else FILE_TOOLS
-    return [t for t in tools if not (isinstance(t, dict) and _name(t).lower() in drop)]
+    if not on():
+        return tools
+    return [t for t in tools if not (isinstance(t, dict) and _name(t).lower() in SHELL_TOOLS)]

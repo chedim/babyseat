@@ -23,7 +23,7 @@ class TestEveryCardNameResolves(unittest.TestCase):
             n = t["name"]
             if n in T.RETIRED:
                 continue
-            known = n in T.FAMILIES or n in set(T._LEGACY_FAMILY)
+            known = n in T.FAMILIES or n in set(T._LEGACY_FAMILY) or n in M.TOOL_IMPLS   # #1101's declared tools run behind the same gate
             self.assertTrue(known, f"registry name {n!r} is not on the wire")
             try:
                 rl, _ = T.resolve(n, {})
