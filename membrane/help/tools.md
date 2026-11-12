@@ -43,8 +43,7 @@ WATCH THE FIELD (a topic region): plant a probe on a topic; every NEW memory lan
 A METHOD: `call method='field_watch' args={...}`. args: action* (string), topic (string), spec (string), owner (string) (* required).
 
 ## attention
-YOUR ALERT DIAL: how many watch events per window may wake you as their own interrupt turn; the rest fold into the 'watch digest' lines of your next WHERE WE ARE block (grouped per entity). mode 'interrupt' (the budget applies) | 'digest' (no interrupt turns; everything folds -- goal events always come through). Turn it down when alerts eat your turns, up when you're missing things. action get | set.
-A METHOD: `call method='attention' args={...}`. args: action (string), budget (integer), window_min (number), mode (string) (* required).
+THE ALERT DIAL: how many watch events per window may wake you as their own interrupt turn; the rest fold into the 'watch digest' lines of your next WHERE WE ARE block (grouped per entity). It is the entity `Attention:seat`: write `Attention:seat.dial = {budget: 0..50, window_min: 1..1440, mode: 'interrupt'|'digest'}` (only the fields you give change; mode 'digest' folds everything but goal events), then read `dial_result` back: {ok: true} or the error. Read budget, window_min and mode on the entity. Turn it down when alerts eat your turns, up when you're missing things.
 
 ## entity_tracks
 List entity tracks: key, label, owner, boundary, current inside/outside state, and pending alert count. LANE-AWARE: a listener passes its own agent name to see ITS tracks; the operator sees all (with owners). Use before planting a duplicate track or to review your watches.

@@ -106,52 +106,49 @@ def is_exempt(ev: dict) -> bool:
 
 
 class AlertGate:
-    """At most `budget` watch events per rolling `window_s` become interrupt
+    """At most `budget` watch events per rolling window become interrupt
     turns; the rest fold into a DIGEST grouped per entity (the next turn's
     WHERE WE ARE lines). mode 'digest' folds everything but the exempt goal
-    events. The seat sets the dial (the attention tool); membrane keeps it."""
+    events. The dial is the entity Attention:seat; membrane keeps the gate."""
 
     MODES = ("interrupt", "digest")
     DIGEST_MAX = 12
+    EID = "Attention:seat"
+    # what a seat holds until its first start has made the entity (packs/attention.c1f carries the same numbers)
+    DEFAULTS = {"budget": 6, "window_min": 10, "mode": "interrupt"}
 
-    def __init__(self, budget: int = 6, window_s: float = 600.0,
-                 mode: str = "interrupt") -> None:
-        self.budget, self.window_s, self.mode = int(budget), float(window_s), mode
+    def __init__(self, est=None, budget=None, window_s=None, mode=None) -> None:
+        self.est = est
+        # an explicit value (a test's, a standalone gate's) stands in for the entity's
+        self._own = {k: v for k, v in (("budget", budget),
+                                       ("window_min", None if window_s is None else float(window_s) / 60.0),
+                                       ("mode", mode)) if v is not None}
         self._spent: list[float] = []
         self._digest: dict[str, dict] = {}
         self._last_charged = False
 
-    # the dial
-    def set(self, budget=None, window_min=None, mode=None) -> dict:
-        if mode is not None:
-            if str(mode) not in self.MODES:
-                raise ValueError(f"mode is one of {self.MODES}")
-            self.mode = str(mode)
-        if budget is not None:
-            b = int(budget)
-            if not 0 <= b <= 50:
-                raise ValueError("budget is 0..50 interrupt turns per window")
-            self.budget = b
-        if window_min is not None:
-            w = float(window_min)
-            if not 1 <= w <= 1440:
-                raise ValueError("window_min is 1..1440")
-            self.window_s = w * 60.0
-        return self.settings()
+    # the dial: the entity Attention:seat, written by the model (Attention:seat.dial = {...}; packs/attention.c1f)
+    def _dial(self, key: str):
+        if key in self._own:
+            return self._own[key]
+        d = (getattr(self.est, "docs", None) or {}).get(self.EID) if self.est is not None else None
+        v = (d.properties or {}).get(key) if d is not None else None
+        return self.DEFAULTS[key] if v is None else v
+
+    @property
+    def budget(self) -> int:
+        return int(self._dial("budget"))
+
+    @property
+    def window_s(self) -> float:
+        return float(self._dial("window_min")) * 60.0
+
+    @property
+    def mode(self) -> str:
+        return str(self._dial("mode"))
 
     def settings(self) -> dict:
-        return {"budget": self.budget, "window_min": round(self.window_s / 60.0, 2),
-                "mode": self.mode}
-
-    @classmethod
-    def from_settings(cls, d) -> "AlertGate":
-        g = cls()
-        if isinstance(d, dict):
-            try:
-                g.set(budget=d.get("budget"), window_min=d.get("window_min"), mode=d.get("mode"))
-            except (ValueError, TypeError):
-                pass
-        return g
+        return {"budget": self.budget, "window_min": round(self.window_s / 60.0, 2), "mode": self.mode}
 
     # the gate
     def allow(self, ev: dict, now: float | None = None) -> bool:
@@ -196,3 +193,23 @@ class AlertGate:
         out = self.digest(now)
         self._digest = {}
         return out
+
+
+def migrate_dial(est, path: str) -> bool:
+    """A seat that still has the old attention.json brings its dial over once, as the Attention:seat entity (the file is
+    kept beside it as attention.json.migrated). -> migrated?"""
+    import json
+    import os
+    if est is None or not os.path.exists(path):
+        return False
+    try:
+        saved = json.loads(open(path).read() or "{}")
+    except (OSError, ValueError):
+        return False
+    from .entities import QuantumEntity
+    props = {k: saved[k] for k in ("budget", "window_min", "mode") if saved.get(k) is not None}
+    if props and AlertGate.EID not in (est.docs or {}):
+        est.upsert(QuantumEntity(eid=AlertGate.EID, cls="Attention",
+                                 properties={"name": "alert dial", "silent_birth": True, **props}), embedder=None)
+    os.replace(path, path + ".migrated")
+    return True

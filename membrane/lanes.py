@@ -1134,7 +1134,7 @@ def _digest_lines(srv, drain: bool = True) -> list[str]:
     s = gate.settings()
     head = (f"watch digest ({len(rows)} entities past your alert budget "
             f"{s['budget']}/{s['window_min']:g}min, mode {s['mode']} -- "
-            f"dial it with the attention tool):")
+            f"write Attention:seat.dial to change it):")
     return [head] + [f"  {r}" for r in rows]
 
 
@@ -4780,8 +4780,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._junk_cut_set(); return
         if path == "/membrane/watch":
             self._membrane_watch(); return
-        if path == "/membrane/attention":
-            self._membrane_attention(); return
         if path == "/membrane/entity/edit":
             self._entity_edit(); return
         if path == "/membrane/pack":
@@ -7311,37 +7309,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             except Exception as e:
                 self._json_err_raw(500, f"related lookup failed: {e}"); return
         self._json_err_raw(503, "the entity field is off"); return
-
-    def _membrane_attention(self) -> None:
-        """POST /membrane/attention {action: get|set, budget, window_min,
-        mode}: the seat's own alert dial (attention.AlertGate), persisted
-        next to the field (attention.json)."""
-        from .attention import AlertGate
-        srv = self.server
-        gate = getattr(srv, "_alert_gate", None)
-        if gate is None:
-            gate = srv._alert_gate = AlertGate()
-        body = self._json_body()
-        if str(body.get("action") or "get").lower() == "set":
-            try:
-                gate.set(budget=body.get("budget"), window_min=body.get("window_min"),
-                         mode=body.get("mode"))
-            except (ValueError, TypeError) as e:
-                self._json_err_raw(400, str(e)); return
-            try:
-                import json as _json
-                _p = getattr(srv, "_attention_path", None)
-                if _p:
-                    open(_p, "w").write(_json.dumps(gate.settings()))
-            except Exception:
-                pass
-            _write_audit(srv.membrane, {"event": "attention", "op": "set",
-                                        **gate.settings()})
-        s_ = gate.settings()
-        self._json_out({"ok": True, **s_, "digest_pending": len(gate.digest()),
-                        "text": (f"alert dial: {s_['budget']} interrupt turns per "
-                                 f"{s_['window_min']:g} min, mode {s_['mode']}; "
-                                 f"{len(gate.digest())} entities waiting in the digest")})
 
     def _membrane_watch(self) -> None:
         """POST /membrane/watch {action: plant|drop|list, topic, spec,

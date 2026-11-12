@@ -72,7 +72,6 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(R("exec", {"action": "call", "object": "o", "method": "m"}),
                          ("method_call", {"object": "o", "method": "m"}))
         self.assertEqual(R("track", {"action": "list"}), ("entity_tracks", {}))
-        self.assertEqual(R("field_watch", {"action": "dial", "budget": 4}), ("attention", {"action": "set", "budget": 4}))
         self.assertEqual(R("state", {}), ("state", {}))
 
     def test_scripts_object_expands(self):

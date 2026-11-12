@@ -701,7 +701,7 @@ def _blocks_prompt(blocks):
 # #569: a watch/goal loop pass needs the look/act core, not the watch-planting,
 # tracking and tuning tools; their schemas ride every step of a pass.
 _LOOP_HIDDEN = frozenset({
-    "attention", "junk_cut", "field_watch", "entity_watch", "entity_unwatch",
+    "junk_cut", "field_watch", "entity_watch", "entity_unwatch",
     "entity_tracks", "graph", "entities_related", "entity_inherit",
     "method_each", "peer_post", "answer_card"})
 

@@ -1138,26 +1138,18 @@ def main() -> None:
         except Exception as e:
             print(f"[opencode] watch layer disabled ({_one_line(e)})",
                   file=sys.stderr)
-        # THE ALERT DIAL (2026-10-08, the seat's review): watch events past the
-        # budget fold into the WHERE WE ARE digest instead of interrupt turns;
-        # the seat sets it with the attention tool (persisted next to the field)
+        # THE ALERT DIAL (2026-10-08, the seat's review): watch events past the budget fold into the WHERE WE ARE digest
+        # instead of interrupt turns. The dial is the entity Attention:seat (packs/attention.c1f): the model writes
+        # Attention:seat.dial = {...}. A seat that still has the old attention.json brings it over once.
         try:
-            import json as _json
-            from .attention import AlertGate
-            srv._attention_path = str(_wdir / "attention.json")
             srv._models_path = str(_wdir / "models.json")      # the minds' models
             try:                                                # the saved picks, before any mind runs
                 from .minds_models import prime as _mm_prime
                 _mm_prime(srv)
             except Exception as e:
                 print(f"[seat] minds' models not primed ({e})", file=sys.stderr)
-            _saved = None
-            if os.path.exists(srv._attention_path):
-                _saved = _json.loads(open(srv._attention_path).read() or "{}")
-            srv._alert_gate = AlertGate.from_settings(_saved)
-            _g = srv._alert_gate.settings()
-            print(f"[opencode] alert dial: {_g['budget']} interrupt turns per "
-                  f"{_g['window_min']:g} min, mode {_g['mode']}", file=sys.stderr)
+            from .attention import AlertGate
+            srv._alert_gate = AlertGate()       # its dial is the entity Attention:seat: wired once the store exists
         except Exception as e:
             srv._alert_gate = None
             print(f"[opencode] alert dial off ({_one_line(e)})", file=sys.stderr)
@@ -1347,6 +1339,10 @@ def main() -> None:
             # field's flush reads the store as its sink (--est-sink) and
             # the store carries the seat back (the pool lives on the seat)
             srv.entity_store._srv = srv
+            if getattr(srv, "_alert_gate", None) is not None:
+                from .attention import migrate_dial
+                migrate_dial(srv.entity_store, str(_wdir / "attention.json"))
+                srv._alert_gate.est = srv.entity_store
             if getattr(srv, "events_pool", None) is not None:
                 srv.entity_store._events_pool = srv.events_pool
             if getattr(srv, "efield", None) is not None:

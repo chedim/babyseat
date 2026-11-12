@@ -1,4 +1,5 @@
 PACK dev 1
+IMPORT boot 1
 IMPORT proc 1
 -- THE DEV COMMANDS (docs/python-to-c1f.md): programs a worker needs at once, as Command entities, made by writing to
 -- nodes. On a no-bash seat there is no shell: a worker that wanted git first had to define a Command for it, and the

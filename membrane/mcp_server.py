@@ -793,18 +793,6 @@ def tool_field_watch(args: dict, port: int) -> str:
     return str(out.get("text") or out)
 
 
-def tool_attention(args: dict, port: int) -> str:
-    """The seat's alert dial (POST /membrane/attention)."""
-    action = str(args.get("action") or ("set" if any(
-        args.get(k) is not None for k in ("budget", "window_min", "mode")) else "get")).lower()
-    body = {"action": action}
-    for k in ("budget", "window_min", "mode"):
-        if args.get(k) is not None:
-            body[k] = args[k]
-    out = _http(port, "POST", "/membrane/attention", body)
-    return str(out.get("text") or out)
-
-
 def tool_unwatch_entity(args: dict, port: int) -> str:
     key = str(args.get("key") or "").strip()
     if not key:
@@ -1636,20 +1624,6 @@ METHOD_TOOL_DEFS = [
             },
         },
     {
-            "name": "attention",
-            "description": (
-                "alert dial: watch events per window that may wake you as own turn; rest fold into 'watch digest' lines. action get|set; mode interrupt (budget applies)|digest (all fold; goal events still come). down when alerts eat turns, up when missing things."),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["get", "set"]},
-                    "budget": {"type": "integer", "description": "interrupt turns per window (0..50)"},
-                    "window_min": {"type": "number", "description": "the rolling window in minutes (1..1440)"},
-                    "mode": {"type": "string", "enum": ["interrupt", "digest"]},
-                },
-            },
-        },
-    {
             "name": "entity_watch",
             "description": ("track: entity live state in WHERE WE ARE each turn; boundary 'enter N'|'exit N' fires once per crossing (banner, or owner 'watch:<eid>' next turn). keys files:<path> models:<name> symbols:<qualname>. field topic -> field_watch; relational/motion -> entity_edit watch_ops/watch_fields. one shared attention budget."),
             "inputSchema": {
@@ -1721,7 +1695,7 @@ METHOD_TOOL_DEFS = [
 # The tools that are not field manipulation or querying are METHODS, reached by name through `call` (operator,
 # 2026-11-12). Their implementations below are a labelled bridge: phase B moves each into c1f as the system behind it
 # (the intent board, watches, dials, memory, the peer channel) moves.
-METHOD_TOOLS = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "peer_post", "junk_cut", "attention",
+METHOD_TOOLS = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "peer_post", "junk_cut",
                 "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
 
 
@@ -1860,7 +1834,6 @@ TOOL_IMPLS = {
     "forget": tool_forget,
     "entity_watch": tool_watch_entity,
     "field_watch": tool_field_watch,
-    "attention": tool_attention,
     "entity_unwatch": tool_unwatch_entity,
     "entity_tracks": tool_list_tracks,
     "entities_related": tool_related_entities,

@@ -67,15 +67,10 @@ class TestGate(unittest.TestCase):
         self.assertFalse(g.allow(ev("c:a"), now=0))
         self.assertEqual(len(g.digest(now=0)), 1)
 
-    def test_the_dial(self):
-        g = AlertGate()
-        out = g.set(budget=4, window_min=20, mode="digest")
-        self.assertEqual((out["budget"], out["window_min"], out["mode"]), (4, 20, "digest"))
-        with self.assertRaises(ValueError):
-            g.set(mode="loud")
-        with self.assertRaises(ValueError):
-            g.set(budget=-1)
-        self.assertEqual(AlertGate.from_settings(g.settings()).settings(), g.settings())
+    def test_the_dial_is_the_entity_not_the_gate(self):
+        # the dial is Attention:seat (tests/test_attention_dial.py); a gate holds none of its own
+        self.assertFalse(hasattr(AlertGate, "set") or hasattr(AlertGate, "from_settings"))
+        self.assertEqual(AlertGate().settings(), {"budget": 6, "window_min": 10, "mode": "interrupt"})
 
     def test_digest_is_bounded(self):
         g = AlertGate(budget=0, window_s=600)
@@ -146,9 +141,5 @@ class TestRefundAndWiring(unittest.TestCase):
     def test_the_dial_is_the_seats_hand(self):
         from membrane import mcp_server as M
         from membrane import server as S
-        self.assertIn("attention", S.OPERATOR_TOOLS)
-        self.assertIn("attention", S.LISTENER_TOOLS)
-        tool = next(t for t in M.TOOLS if t["name"] == "attention")
-        self.assertEqual(set(tool["inputSchema"]["properties"]["mode"]["enum"]),
-                         {"interrupt", "digest"})
-        self.assertIn("attention", M.TOOL_IMPLS)
+        self.assertNotIn("attention", S.OPERATOR_TOOLS)          # no tool: the model writes Attention:seat.dial
+        self.assertNotIn("attention", M.TOOL_IMPLS)

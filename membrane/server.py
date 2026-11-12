@@ -1197,9 +1197,6 @@ OPERATOR_TOOLS = frozenset((
     "peer_post", "peer_seats", "peer_read", "junk_cut",
     # the banner tracks (the operator's header)
     "entity_watch", "entity_unwatch",
-    # the seat's own alert dial (2026-10-08): how many watch events may
-    # interrupt vs fold into the WHERE WE ARE digest
-    "attention",
     # THE EXECUTOR'S DOOR (2026-10-08, the operator's call): the operator
     # runs commands itself, the receipt comes back in the same turn -- since
     # #576 part F only as methods it defines and calls (no one-shot link)

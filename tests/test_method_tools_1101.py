@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import mcp_server as M  # noqa: E402
 
-NAMES = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "peer_post", "junk_cut", "attention",
+NAMES = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "peer_post", "junk_cut",
          "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
 
 

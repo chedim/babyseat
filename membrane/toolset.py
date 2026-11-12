@@ -133,17 +133,13 @@ FAMILIES: dict[str, dict] = {
     },
     "field_watch": {
         "description": "Spatial watches on the field (within your attention budget of 12): "
-                       "plant / drop / list; dial sets how many watch events may interrupt you.",
-        "actions": {"plant": "field_watch", "drop": "field_watch", "list": "field_watch",
-                    "dial": "attention"},
+                       "plant / drop / list (the alert dial is the entity Attention:seat).",
+        "actions": {"plant": "field_watch", "drop": "field_watch", "list": "field_watch"},
         "params": {"topic": _S("plant: what to watch"), "spec": _S("drop: which watch"),
-                   "owner": _T("string"), "budget": _I("dial: interrupts per window"),
-                   "window_min": _I("dial: window minutes"), "mode": _S("dial: interrupt | digest")},
+                   "owner": _T("string")},
         "map": {"plant": lambda a: {"action": "plant", **_pick(a, "topic", "owner")},
                 "drop": lambda a: {"action": "drop", **_pick(a, "spec")},
-                "list": lambda a: {"action": "list"},
-                "dial": lambda a: {"action": "set" if any(k in a for k in ("budget", "window_min", "mode")) else "get",
-                                   **_pick(a, "budget", "window_min", "mode")}},
+                "list": lambda a: {"action": "list"}},
     },
     "state": {
         "description": "Membrane's own vitals (the field, the gate, the night pass).",
