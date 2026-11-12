@@ -1390,7 +1390,14 @@ def main() -> None:
         # VERBS (verbs.py): every method noted on its verb entity; a retired one stops implementing
         try:
             from .verbs import boot as _boot_verbs
-            print(f"[seat] verbs: {_boot_verbs(srv)['verbs']}", file=sys.stderr)
+
+            def _verbs_in_background():           # the verb index is read by routing after the UI is up: the boot does not wait for it
+                try:
+                    _t_v = time.time()
+                    print(f"[seat] verbs: {_boot_verbs(srv)['verbs']} ({time.time() - _t_v:.0f}s, background)", file=sys.stderr)
+                except Exception as _ve:
+                    print(f"[seat] verbs skipped ({_ve})", file=sys.stderr)
+            threading.Thread(target=_verbs_in_background, name="boot-verbs", daemon=True).start()
         except Exception as e:
             print(f"[seat] verbs skipped ({e})", file=sys.stderr)
         # LIVING LANGUAGE (language.py): the seeded adjectives and the en executor, made once

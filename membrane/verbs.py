@@ -87,6 +87,10 @@ def note(est, method) -> str | None:
     return eid
 
 
+import functools as _ft
+
+
+@_ft.lru_cache(maxsize=8192)          # a word is read by the parser once per process (the boot re-read every method name)
 def _command_verb(word: str) -> str | None:
     """`word` read as a command ("check it"): its verb lemma, or None (living language's parser)."""
     try:
