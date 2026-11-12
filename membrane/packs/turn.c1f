@@ -1,8 +1,11 @@
 PACK turn 1
 -- A TURN IS AN ENTITY (operator, 2026-11-12) and the pronouns are getters on it, with the rules callctx.py had. `Turn:<id>`
 -- holds `sid`, `ctx` (its chat's `Ctx:<sid>`), `touched` (what it touched, NEWEST FIRST) and `state`; the `Ctx` holds the entered
--- `frames` (innermost first, each {eid, bind: {it, he, there}}) and the chat's `promoted` subjects ({it, that, age}).
--- A bare it / this / that / they / he / there in a c1f expression reads the property of the same name on the running turn.
+-- `frames` (innermost first, each {eid, bind: {sing, pers, place}}) and the chat's `promoted` subjects ({main, prev, age}).
+-- (the dicts' keys are NOT pronoun names: the engine orders getters by finding other getters' names in an expression, strings
+-- included, so a key 'it' beside a getter `it` is a cycle)
+-- (there is no `this` pronoun: a bare `this` is the entity itself, and a getter NAMED this is read by every getter)
+-- A bare it / that / they / he / there in a c1f expression reads the property of the same name on the running turn.
 -- Innermost first: the turn's touched things, then the entered frames, then the chat's promoted subjects. Only concrete
 -- entities bind (never a concept, a word, a session, a register or the seat); he/she bind a person, there/here a place.
 
@@ -18,12 +21,12 @@ Turn.frames_rows getter: [c.frames or [] for c in instances('Ctx') if c.eid == t
 Turn.promoted_rows getter: [c.promoted or {} for c in instances('Ctx') if c.eid == this.ctx]
 Turn.frames_of getter: this.frames_rows[0] if len(this.frames_rows) > 0 else []
 Turn.f_binds getter: [prop(f, 'bind') or {} for f in this.frames_of]
-Turn.f_it getter: [prop(b, 'it') for b in this.f_binds if prop(b, 'it') != None]
-Turn.f_he getter: [prop(b, 'he') for b in this.f_binds if prop(b, 'he') != None]
-Turn.f_there getter: [prop(b, 'there') for b in this.f_binds if prop(b, 'there') != None]
+Turn.f_it getter: [prop(b, 'sing') for b in this.f_binds if prop(b, 'sing') != None]
+Turn.f_he getter: [prop(b, 'pers') for b in this.f_binds if prop(b, 'pers') != None]
+Turn.f_there getter: [prop(b, 'place') for b in this.f_binds if prop(b, 'place') != None]
 Turn.pr getter: this.promoted_rows[0] if len(this.promoted_rows) > 0 else {}
-Turn.pr_it getter: [x for x in [prop(this.pr, 'it')] if x != None]
-Turn.pr_that getter: [x for x in [prop(this.pr, 'that') or prop(this.pr, 'it')] if x != None]
+Turn.pr_it getter: [x for x in [prop(this.pr, 'main')] if x != None]
+Turn.pr_that getter: [x for x in [prop(this.pr, 'prev') or prop(this.pr, 'main')] if x != None]
 
 Turn.p_it getter: (concat(this.t_thing, this.f_it, this.pr_it) or [None])[0]
 Turn.p_that getter: (concat(this.t_thing, this.f_it, this.pr_that) or [None])[0]
@@ -32,7 +35,6 @@ Turn.p_there getter: (concat(this.t_place, this.f_there) or [None])[0]
 Turn.p_they getter: this.t_all if len(this.t_all) > 1 else None
 
 Turn.it getter: this.p_it
-Turn.this getter: this.p_it
 Turn.that getter: this.p_that
 Turn.they getter: this.p_they
 Turn.them getter: this.p_they

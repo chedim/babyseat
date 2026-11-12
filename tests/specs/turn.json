@@ -1,0 +1,395 @@
+[
+ {
+  "name": "it is the last concrete thing touched this turn",
+  "packs": [
+   "membrane/packs/turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Ctx:c1",
+    "class": "Ctx",
+    "props": {
+     "frames": []
+    }
+   },
+   {
+    "eid": "Turn:t1",
+    "class": "Turn",
+    "props": {
+     "sid": "c1",
+     "ctx": "Ctx:c1",
+     "touched": [
+      "membrane::f:router.py",
+      "membrane::goal:old"
+     ],
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Turn:t1",
+    "prop": "it",
+    "equals": "membrane::f:router.py"
+   }
+  ]
+ },
+ {
+  "name": "a concept, a word, a session, a register and the seat never bind",
+  "packs": [
+   "membrane/packs/turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Ctx:c1",
+    "class": "Ctx",
+    "props": {
+     "frames": []
+    }
+   },
+   {
+    "eid": "Turn:t1",
+    "class": "Turn",
+    "props": {
+     "sid": "c1",
+     "ctx": "Ctx:c1",
+     "touched": [
+      "membrane::concept:battery",
+      "w:battery",
+      "session:now",
+      "s:?x",
+      "seat:self",
+      "membrane::register:r",
+      "membrane::f:a.py"
+     ],
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Turn:t1",
+    "prop": "it",
+    "equals": "membrane::f:a.py"
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "they",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "they is the concrete things newest first; he and there bind their kinds",
+  "packs": [
+   "membrane/packs/turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Ctx:c1",
+    "class": "Ctx",
+    "props": {
+     "frames": []
+    }
+   },
+   {
+    "eid": "Turn:t1",
+    "class": "Turn",
+    "props": {
+     "sid": "c1",
+     "ctx": "Ctx:c1",
+     "touched": [
+      "membrane::place:galley",
+      "membrane::person:dima",
+      "membrane::f:b.py",
+      "membrane::f:a.py"
+     ],
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Turn:t1",
+    "prop": "they",
+    "equals": [
+     "membrane::place:galley",
+     "membrane::person:dima",
+     "membrane::f:b.py",
+     "membrane::f:a.py"
+    ]
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "he",
+    "equals": "membrane::person:dima"
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "she",
+    "equals": "membrane::person:dima"
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "there",
+    "equals": "membrane::place:galley"
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "here",
+    "equals": "membrane::place:galley"
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "it",
+    "equals": "membrane::f:b.py"
+   }
+  ]
+ },
+ {
+  "name": "an entered frame binds it, innermost first",
+  "packs": [
+   "membrane/packs/turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Ctx:c1",
+    "class": "Ctx",
+    "props": {
+     "frames": [
+      {
+       "eid": "membrane::goal:inner",
+       "bind": {
+        "sing": "membrane::goal:inner"
+       }
+      },
+      {
+       "eid": "membrane::goal:outer",
+       "bind": {
+        "sing": "membrane::goal:outer"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Turn:t1",
+    "class": "Turn",
+    "props": {
+     "sid": "c1",
+     "ctx": "Ctx:c1",
+     "touched": [],
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Turn:t1",
+    "prop": "it",
+    "equals": "membrane::goal:inner"
+   }
+  ]
+ },
+ {
+  "name": "the outer frame is back when the inner exits",
+  "packs": [
+   "membrane/packs/turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Ctx:c1",
+    "class": "Ctx",
+    "props": {
+     "frames": [
+      {
+       "eid": "membrane::goal:inner",
+       "bind": {
+        "sing": "membrane::goal:inner"
+       }
+      },
+      {
+       "eid": "membrane::goal:outer",
+       "bind": {
+        "sing": "membrane::goal:outer"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Turn:t1",
+    "class": "Turn",
+    "props": {
+     "sid": "c1",
+     "ctx": "Ctx:c1",
+     "touched": [],
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Ctx:c1",
+    "prop": "frames",
+    "value": [
+     {
+      "eid": "membrane::goal:outer",
+      "bind": {
+       "sing": "membrane::goal:outer"
+      }
+     }
+    ]
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Turn:t1",
+    "prop": "it",
+    "equals": "membrane::goal:outer"
+   }
+  ]
+ },
+ {
+  "name": "the turn's touch beats the frame, the chat's promoted subject comes last",
+  "packs": [
+   "membrane/packs/turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Ctx:c1",
+    "class": "Ctx",
+    "props": {
+     "frames": [
+      {
+       "eid": "membrane::goal:g",
+       "bind": {
+        "sing": "membrane::goal:g"
+       }
+      }
+     ],
+     "promoted": {
+      "main": "membrane::f:before.py",
+      "prev": "membrane::f:earlier.py",
+      "age": 0
+     }
+    }
+   },
+   {
+    "eid": "Turn:t1",
+    "class": "Turn",
+    "props": {
+     "sid": "c1",
+     "ctx": "Ctx:c1",
+     "touched": [
+      "membrane::f:now.py"
+     ],
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Turn:t1",
+    "prop": "it",
+    "equals": "membrane::f:now.py"
+   }
+  ]
+ },
+ {
+  "name": "with nothing touched or entered, the promoted subject is it and that is the one before",
+  "packs": [
+   "membrane/packs/turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Ctx:c1",
+    "class": "Ctx",
+    "props": {
+     "frames": [],
+     "promoted": {
+      "main": "membrane::f:before.py",
+      "prev": "membrane::f:earlier.py",
+      "age": 0
+     }
+    }
+   },
+   {
+    "eid": "Turn:t1",
+    "class": "Turn",
+    "props": {
+     "sid": "c1",
+     "ctx": "Ctx:c1",
+     "touched": [],
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Turn:t1",
+    "prop": "it",
+    "equals": "membrane::f:before.py"
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "that",
+    "equals": "membrane::f:earlier.py"
+   }
+  ]
+ },
+ {
+  "name": "an unbound pronoun is none",
+  "packs": [
+   "membrane/packs/turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Ctx:c1",
+    "class": "Ctx",
+    "props": {
+     "frames": []
+    }
+   },
+   {
+    "eid": "Turn:t1",
+    "class": "Turn",
+    "props": {
+     "sid": "c1",
+     "ctx": "Ctx:c1",
+     "touched": [],
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Turn:t1",
+    "prop": "it",
+    "none": true
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "they",
+    "none": true
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "he",
+    "none": true
+   },
+   {
+    "eid": "Turn:t1",
+    "prop": "there",
+    "none": true
+   }
+  ]
+ }
+]
