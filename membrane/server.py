@@ -1188,8 +1188,6 @@ OPERATOR_TOOLS = frozenset((
     # reads
     "query", "state", "graph", "entities_related", "entity_query",
     "entity_read", "entity_tracks",
-    # memory
-    "forget",
     # steering (intentions -- THE OPERATOR'S PEN; fulfill = the close
     # with a receipt, the listeners' too: their landed work moves the board)
     "intend", "intents", "fulfill",

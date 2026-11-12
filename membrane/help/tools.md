@@ -25,8 +25,7 @@ A METHOD: `call method='intents' args={...}`. args: none (* required).
 Write ONE durable earned lesson into the seat's memory: `Memory:seat.learn = {lesson: '<the lesson, in prose>'}` (`entity_write` on the node). A lesson is a note, not a transcript: no secrets, no personal data, no fenced code, at most 2000 characters; the field's own guards (dedup, the variety gate) may decline it. Read the answer back: `learn_result` ({written: false, reason} when refused) and `note_result` (which note it became). Use it when you EARNED something durable (a fixed quirk, the command that worked, why a gate exists).
 
 ## forget
-Delete memories. Index form (e.g. '#3-7, 9' or '12') DELETES those cells (capped). Wordier asks return candidate indexes as a PROPOSAL -- they never delete. After deleting, prefer a learn that overwrites the lesson with the correction.
-A METHOD: `call method='forget' args={...}`. args: spec* (string) (* required).
+Delete memories: write `Memory:seat.forget = {spec: '#3-7, 9'}` (`entity_write` on the node). Index form ('#3-7, 9' or '12', at most 12) DELETES those events; the report lands in `cut_result`. A wordier spec only lists the nearest events in `near_result` and never deletes. A refusal is in `forget_result`. After deleting, prefer learning the correction.
 
 ## entity_watch
 Plant a TRACK: an entity's live state in the WHERE WE ARE header every turn. An optional boundary ('enter N' / 'exit N') fires once per crossing: into the banner (owner '') or into a listener's next turn (owner 'watch:<eid>'). Keys: 'files:router.py', 'models:<name>', 'symbols:<qualname>'. To watch the field instead: field_watch (a topic region), or entity_edit watch_ops / watch_fields (relational / motion) -- one shared attention budget.

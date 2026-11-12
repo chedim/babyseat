@@ -17,7 +17,6 @@ Tools (each maps 1:1 to a canonical frame / endpoint):
   query    read recall (GET  /membrane/ask?q=...&k=N)     [read-only]
   state    field health/stats (GET /membrane/state?mcp=1) [read-only]
   learn    write one earned lesson (POST /membrane/learn) [guarded]
-  forget   delete cells (POST /membrane/forget)           [guarded]
 
 Protocol: MCP stdio transport -- newline-delimited JSON-RPC 2.0 on stdin/
 stdout (initialize / tools/list / tools/call + notifications). Only stdlib.
@@ -687,40 +686,6 @@ def tool_state(args: dict, port: int) -> str:
             b.append(f"  learned: #{r['learned']}")
         lines.append("")
         lines.append("\n".join(b))
-    return "\n".join(lines)
-
-
-def tool_forget(args: dict, port: int) -> str:
-    spec = str(args.get("spec") or "").strip()
-    if not spec:
-        raise ProxyError(400, "spec required")
-    out = _http(port, "POST", "/membrane/forget", {"spec": spec})
-    if out.get("events") is not None:
-        lines = [f"Forgot {out['removed']} event(s) (the entity field):"]
-        for r in out["events"]:
-            if r.get("missing"):
-                lines.append(f"- #{r['n']}: no such event")
-            elif r.get("error"):
-                lines.append(f"- #{r['n']}: failed ({r['error']})")
-            else:
-                lines.append(f"- #{r['n']}: {'already forgotten' if r.get('already') else 'forgotten'}; "
-                             f"{len(r.get('entities') or [])} entities recomputed")
-        return "\n".join(lines)
-    if out.get("removed") is not None:
-        lines = [f"Removed {out['removed']} of {out.get('field_size_before')} "
-                 f"(index form). Field now {out.get('field_size')}."]
-        for r in out.get("removed_cells") or []:
-            lines.append(f"- #{r['idx']}: {r['situation']}")
-        return "\n".join(lines)
-    cands = out.get("candidates") or []
-    if not cands:
-        return ("Wordy forgets propose, never delete: nothing matched "
-                "(the nearest past events only). Nothing removed.")
-    lines = ["Wordy asks never delete from tool calls. Nearest events:",
-             ", ".join(f"#{c['idx']} (sim {c['sim']:.2f})"
-                       for c in cands[:8]),
-             "To remove, re-ask forget with explicit indexes. "
-             "Nothing removed."]
     return "\n".join(lines)
 
 
@@ -1507,20 +1472,6 @@ METHOD_TOOL_DEFS = [
             "inputSchema": {"type": "object", "properties": {}},
         },
     {
-            "name": "forget",
-            "description": (
-                "spec='#3-7, 9' deletes those cells (capped); wordy spec = proposal only, deletes nothing. after deleting prefer learn with the correction."),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "spec": {"type": "string",
-                             "description": "'#N' / '#N-M, K' indexes, or a "
-                                            "wordy topic (proposal only)."},
-                },
-                "required": ["spec"],
-            },
-        },
-    {
             "name": "junk_cut",
             "description": (
                 "tune the junk cut: how strictly machinery (tool output, ps/lsof tables, test bars, logs, config dumps) stays out of banner stories + watch triggers. per track | 'all' | global default. CUT 0..1, higher = stricter. anchor-vector screen (junk embeds near anchor entities in the field). audited to the operator."),
@@ -1609,7 +1560,7 @@ METHOD_TOOL_DEFS = [
 # The tools that are not field manipulation or querying are METHODS, reached by name through `call` (operator,
 # 2026-11-12). Their implementations below are a labelled bridge: phase B moves each into c1f as the system behind it
 # (the intent board, watches, dials, memory, the peer channel) moves.
-METHOD_TOOLS = ("intend", "fulfill", "intents", "forget", "junk_cut",
+METHOD_TOOLS = ("intend", "fulfill", "intents", "junk_cut",
                 "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
 
 
@@ -1743,7 +1694,6 @@ TOOL_IMPLS = {
     "intend": tool_intend,
     "intents": tool_intents,
     "fulfill": tool_fulfill,
-    "forget": tool_forget,
     "entity_watch": tool_watch_entity,
     "field_watch": tool_field_watch,
     "entity_unwatch": tool_unwatch_entity,

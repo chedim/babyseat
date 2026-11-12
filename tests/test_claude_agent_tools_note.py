@@ -183,7 +183,7 @@ def test_the_note_maps_the_doctrine_families_to_the_tools():
     tools = {t["name"] for t in M.TOOLS} | set(M.METHOD_TOOLS)        # a method is reached through `call`
     pairs = _name_map()
     fams = {f for f, _, _ in pairs}
-    assert {"exec", "entity", "goal", "memory", "find", "track"} <= fams, fams
+    assert {"exec", "entity", "goal", "find", "track"} <= fams, fams
     for fam, act, name in pairs:
         assert name in tools, name
         assert fam in T.FAMILIES, fam

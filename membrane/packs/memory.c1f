@@ -22,6 +22,52 @@ Memory.learn on-setter learn:
     this.learn_result = {'written': True}
     this.note = {'lesson': strip(str(prop(this.learn, 'lesson')))}
 
+-- ---- forget: `Memory:seat.forget = {spec}` --------------------------------------------------------------------------
+-- '#12', '12', '3-7', '3-7, 9' are INDEXES (at most 12 events): the pack hands the driver `cut = {nums}` and it deletes them.
+-- Anything wordier only asks for the nearest events (`near = {spec}`) -- nothing wordy ever deletes. A refusal is answered in
+-- `forget_result` ({removed: None, reason}); the cut's report lands in `cut_result`, the nearest events in `near_result`.
+-- (an on-setter sees the getters as they were before the write in the same round: forget -> forget_id -> forget_plan -> act)
+Memory.forget on-setter forget-stamp:
+  ALWAYS:
+    this.forget_id = clock
+
+Memory.fg_spec getter: strip(str(prop(this.forget, 'spec') or ''))
+Memory.fg_toks getter: words(replace(replace(this.fg_spec, ',', ' '), '#', ''))
+-- every token with its numbers: '12' -> [12], '3-7' -> [3, 7], 'pump' -> [None]
+Memory.fg_ends getter: [{'t': t, 'p': [num(p) for p in words(replace(t, '-', ' '))]} for t in this.fg_toks]
+-- a token is an index when every part is a whole number and a dash only ever joins two of them
+Memory.fg_nan getter: len([e for e in this.fg_ends if None in prop(e, 'p') or len(prop(e, 'p')) > 2])
+Memory.fg_dec getter: len([e for e in this.fg_ends if '.' in prop(e, 't')])
+Memory.fg_dash getter: len([e for e in this.fg_ends if len(prop(e, 't')) - len(replace(prop(e, 't'), '-', '')) != len(prop(e, 'p')) - 1])
+Memory.fg_bad getter: this.fg_nan + this.fg_dec + this.fg_dash
+Memory.fg_spans getter: [[min(prop(e, 'p')), max(prop(e, 'p'))] for e in this.fg_ends]
+Memory.fg_wide getter: len([s for s in this.fg_spans if s[1] - s[0] >= 12])
+-- a span's numbers: lo, lo+1, ... lo+11 while they stay within hi (no range primitive: the offsets are written out)
+Memory.fg_o0 getter: concat([s[0] + 0 for s in this.fg_spans if s[0] + 0 <= s[1]], [s[0] + 1 for s in this.fg_spans if s[0] + 1 <= s[1]])
+Memory.fg_o1 getter: concat([s[0] + 2 for s in this.fg_spans if s[0] + 2 <= s[1]], [s[0] + 3 for s in this.fg_spans if s[0] + 3 <= s[1]])
+Memory.fg_o2 getter: concat([s[0] + 4 for s in this.fg_spans if s[0] + 4 <= s[1]], [s[0] + 5 for s in this.fg_spans if s[0] + 5 <= s[1]])
+Memory.fg_o3 getter: concat([s[0] + 6 for s in this.fg_spans if s[0] + 6 <= s[1]], [s[0] + 7 for s in this.fg_spans if s[0] + 7 <= s[1]])
+Memory.fg_o4 getter: concat([s[0] + 8 for s in this.fg_spans if s[0] + 8 <= s[1]], [s[0] + 9 for s in this.fg_spans if s[0] + 9 <= s[1]])
+Memory.fg_o5 getter: concat([s[0] + 10 for s in this.fg_spans if s[0] + 10 <= s[1]], [s[0] + 11 for s in this.fg_spans if s[0] + 11 <= s[1]])
+Memory.fg_nums getter: distinct(concat(this.fg_o0, this.fg_o1, this.fg_o2, this.fg_o3, this.fg_o4, this.fg_o5))
+
+Memory.forget_plan getter:
+  WHEN this.forget == None or this.forget_id == None: None
+  ELSE WHEN this.fg_spec == '': {'id': this.forget_id, 'error': 'spec required'}
+  ELSE WHEN this.fg_bad > 0: {'id': this.forget_id, 'near': this.fg_spec}
+  ELSE WHEN this.fg_wide > 0 or len(this.fg_nums) > 12: {'id': this.forget_id, 'error': 'that is more events than the agent cap (12) allows: ask the operator for a larger delete'}
+  ELSE: {'id': this.forget_id, 'cut': this.fg_nums, 'spec': this.fg_spec}
+
+Memory.forget_plan on-setter forget-act:
+  WHEN prop(this.forget_plan, 'error') != None and prop(this.forget_result, 'id') != prop(this.forget_plan, 'id'):
+    this.forget_result = {'id': prop(this.forget_plan, 'id'), 'removed': None, 'reason': prop(this.forget_plan, 'error')}
+  ELSE WHEN prop(this.forget_plan, 'cut') != None and prop(this.forget_result, 'id') != prop(this.forget_plan, 'id'):
+    this.forget_result = {'id': prop(this.forget_plan, 'id'), 'removed': None, 'reason': 'cut sent'}
+    this.cut = {'nums': prop(this.forget_plan, 'cut'), 'spec': prop(this.forget_plan, 'spec')}
+  ELSE WHEN prop(this.forget_plan, 'near') != None and prop(this.forget_result, 'id') != prop(this.forget_plan, 'id'):
+    this.forget_result = {'id': prop(this.forget_plan, 'id'), 'removed': None, 'reason': 'nearest events asked'}
+    this.near = {'spec': prop(this.forget_plan, 'near')}
+
 Boot.started on-setter memory-node:
   ALWAYS:
     ('Memory:seat').name = 'the seat memory'

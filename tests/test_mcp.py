@@ -275,23 +275,11 @@ class TestMcpTools(unittest.TestCase):
 
 
 
-    def test_forget_index_form_deletes(self):
-        text = _call("forget", {"spec": "#3"})
-        self.assertIn("Removed 2 of 12", text)
-        self.assertIn("#3: junk", text)
-
-    def test_forget_wordy_proposes_never_deletes(self):
-        _StubProxy.forget = {"removed": None, "candidates": [
-            {"idx": 7, "sim": 0.72}, {"idx": 9, "sim": 0.61}]}
-        text = _call("forget", {"spec": "that thing about the cake"})
-        self.assertIn("never delete", text)
-        self.assertIn("#7 (sim 0.72)", text)
-        self.assertIn("Nothing removed", text)
     def test_proxy_error_is_tool_error_not_protocol_error(self):
         _StubProxy.fail_next = (503, "router off")
         resp = _rpc([{"jsonrpc": "2.0", "id": 5, "method": "tools/call",
-                      "params": {"name": "forget",
-                                 "arguments": {"spec": "x"}}}])[0]
+                      "params": {"name": "state",
+                                 "arguments": {}}}])[0]
         self.assertIn("result", resp)                     # RESULT, not error
         self.assertTrue(resp["result"]["isError"])
         self.assertIn("membrane tool error",

@@ -4746,8 +4746,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._v1_embeddings(); return
         if path == "/membrane/delegate":
             self._membrane_delegate(); return
-        if path == "/membrane/forget":
-            self._membrane_forget(); return
         if path == "/membrane/codegraph":
             self._membrane_codegraph(); return
         if path == "/membrane/entity-query":
@@ -7027,38 +7025,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
     # audit trail (origin: mcp), same agent_writes kill switch. Returns are
     # JSON mirrors of the executors' text (the MCP layer formats for the
     # model); failures degrade to {"written": false} / {"removed": null}.
-    def _membrane_forget(self) -> None:
-        """POST /membrane/forget {spec}: '#N' / '3-7' forget those events
-        (agent cap); anything wordier returns the nearest events as
-        candidates and deletes nothing."""
-        srv = self.server
-        spec = str(self._json_body().get("spec") or "").strip()
-        if not spec:
-            self._json_err_raw(400, "spec required"); return
-        fld = _efield_of(srv)
-        if fld is None or srv.membrane.embedder is None:
-            self._json_out({"removed": None, "candidates": [],
-                            "reason": "the entity field or the embedder is unavailable"}); return
-        nums = _parse_agent_forget(spec)
-        if nums is None:
-            try:
-                near = fld.events_near(srv.membrane.embedder.embed([spec])[0], k=_FORGET_LIMIT)
-            except Exception:
-                near = []
-            self._json_out({"removed": None, "candidates": [
-                {"n": d.get("n"), "sim": round(float(s_), 4),
-                 "text": _clip(d.get("text") or d.get("tool") or "", 120)}
-                for d, s_ in near if d.get("n") is not None]}); return
-        if len(nums) > _AGENT_FORGET_LIMIT:
-            self._json_out({"removed": None, "candidates": [],
-                            "reason": f"{len(nums)} events exceed the agent cap "
-                                      f"({_AGENT_FORGET_LIMIT})"}); return
-        res = _efield_forget(srv, nums)
-        _write_audit(srv.membrane, {"event": "forget-events", "origin": "mcp",
-                                    "results": res, "spec": _clip(spec, 200)})
-        self._json_out({"removed": sum(1 for r in res if r.get("key") and not r.get("already")),
-                        "events": res})
-
     # ---- /membrane/delegate: model-pointed work, router-disposed ------------
     def _membrane_delegate(self) -> None:
         """A model (or subagent) hands a subtask to membrane; the ROUTER

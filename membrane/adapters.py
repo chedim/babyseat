@@ -67,7 +67,7 @@ def _branch(path: str) -> tuple[str, str, str] | None:
         return "llm", eid, prop
     if prop == "restart" and eid == MEMBRANE_NS + "presence":
         return "seat", eid, prop
-    if prop == "note" and eid == "Memory:seat":
+    if prop in ("note", "cut", "near") and eid == "Memory:seat":
         return "memory", eid, prop              # a lesson the memory pack accepted (packs/memory.c1f): the note event
     if prop == "tell" and eid == "Notify:seat":
         return "notify", eid, prop              # a decision event's delivery (packs/decisions.c1f): the pool or the card's chat
@@ -169,9 +169,57 @@ def _llm(srv, est, ent, prop, new, by) -> None:
     _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r, rc=_rc(r))
 
 
-def _memory(srv, est, ent, prop, new, by) -> None:
-    """The memory store's driver: a lesson the pack accepted becomes a NOTE event (src model)."""
+def _near_events(srv, spec: str, k: int) -> list:
+    """The nearest past events to a wordy spec: [{n, sim, text}] -- [] with no entity field or no embedder."""
     from . import lanes as L
+    fld = L._efield_of(srv)
+    emb = getattr(getattr(srv, "membrane", None), "embedder", None)
+    if fld is None or emb is None:
+        return []
+    try:
+        near = fld.events_near(emb.embed([spec])[0], k=k)
+    except Exception:                          # noqa: BLE001
+        return []
+    return [{"n": d.get("n"), "sim": float(s_), "text": L._clip(d.get("text") or d.get("tool") or "", 120)}
+            for d, s_ in near if d.get("n") is not None]
+
+
+def _memory(srv, est, ent, prop, new, by) -> None:
+    """The memory store's driver: a lesson the pack accepted becomes a NOTE event (src model); a cut deletes the events the
+    pack's index parse named; a near lists the nearest events to a wordy spec (it never deletes)."""
+    from . import lanes as L
+    if prop == "cut":
+        nums = [int(n) for n in ((new or {}).get("nums") or [])] if isinstance(new, dict) else []
+        res = L._efield_forget(srv, nums)
+        try:
+            L._write_audit(srv.membrane, {"event": "forget-events", "origin": "mcp", "results": res,
+                                          "spec": L._clip(str((new or {}).get("spec") or ""), 200)})
+        except Exception:                   # noqa: BLE001 -- an audit never undoes a cut
+            pass
+        gone = sum(1 for r in res if r.get("key") and not r.get("already"))
+        lines = [f"Forgot {gone} event(s) (the entity field):"]
+        for r in res:
+            n = r.get("n")
+            if r.get("missing"):
+                lines.append(f"- #{n}: no such event")
+            elif r.get("error"):
+                lines.append(f"- #{n}: failed ({r['error']})")
+            else:
+                lines.append(f"- #{n}: {'already forgotten' if r.get('already') else 'forgotten'}; "
+                             f"{len(r.get('entities') or [])} entities recomputed")
+        _consume(est, ent, prop, new, "\n".join(lines), rc=0)
+        return
+    if prop == "near":
+        spec = str((new or {}).get("spec") or "") if isinstance(new, dict) else str(new or "")
+        cands = _near_events(srv, spec, 40)
+        if not cands:
+            _consume(est, ent, prop, new, "Wordy forgets propose, never delete: nothing matched (the nearest past events "
+                     "only). Nothing removed.", rc=0)
+        else:
+            _consume(est, ent, prop, new, "Wordy asks never delete from tool calls. Nearest events: "
+                     + ", ".join(f"#{c['n']} (sim {c['sim']:.2f})" for c in cands[:8])
+                     + ". To remove, write forget again with explicit indexes. Nothing removed.", rc=0)
+        return
     lesson = str((new or {}).get("lesson") or "") if isinstance(new, dict) else str(new or "")
     note = L._efield_learn(srv, lesson, "model")
     if not note:

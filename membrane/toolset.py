@@ -112,12 +112,6 @@ FAMILIES: dict[str, dict] = {
                 "close": lambda a: _pick(a, "spec", "evidence"),
                 },
     },
-    "memory": {
-        "description": "forget: drop a memory (by #N or text). Keep a lesson by writing Memory:seat.learn.",
-        "actions": {"forget": "forget"},
-        "params": {"spec": _S("forget: what to drop")},
-        "map": {"forget": lambda a: _pick(a, "spec")},
-    },
     "track": {
         "description": "Entity tracks ride your header every turn: watch one (boundary "
                        "like 'enter 3'), unwatch, list.",

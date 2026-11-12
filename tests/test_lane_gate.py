@@ -123,7 +123,6 @@ class TestLaneGate(unittest.TestCase):
         planted (the direction needs the user's build word)."""
         self.assertIn("intents", SRV._lane_tools("plan"))
         self.assertIn("query", SRV._lane_tools("plan"))
-        self.assertIn("forget", SRV._lane_tools("plan"))
         self.assertNotIn("intend", SRV._lane_tools("plan"))
         for t in ("entity_add", "entity_edit", "method_call"):
             self.assertNotIn(t, SRV._lane_tools("plan"))
