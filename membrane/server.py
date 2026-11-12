@@ -1222,8 +1222,8 @@ OPERATOR_TOOLS = frozenset((
 ))
 # #1101: the context stack (enter/exit), unknown names as method calls, the usual file tools on a no-bash seat
 CTX_TOOLS = frozenset(("ctx_enter", "ctx_exit", "__call", "fs_read", "fs_write", "fs_edit", "fs_list",
-                       "call", "entity_enter", "entity_exit", "read_file", "write_file", "edit_file", "list_dir"))
-CTX_WRITES = frozenset(("__call", "call", "fs_write", "fs_edit", "write_file", "edit_file"))
+                       "call", "entity_enter", "entity_exit"))
+CTX_WRITES = frozenset(("__call", "call", "fs_write", "fs_edit"))
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
