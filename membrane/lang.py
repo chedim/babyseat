@@ -768,6 +768,9 @@ def run(srv, code: str | None = None, lang: str = "sh", node: str | None = None,
     gate (#725) refuses a shape that already ran SHAPE_K times, and counts it."""
     tree = None
     if oneshot:
+        from . import cliffhanger_only as _CO
+        if _CO.on():                          # operator 2026-11-11: no bash, cliffhanger only
+            return {"ok": False, "error": _CO.REFUSAL}
         try:
             if node:
                 d = srv.entity_store._resolve_spec(node)

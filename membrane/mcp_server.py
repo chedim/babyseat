@@ -811,6 +811,20 @@ TOOLS: list[dict] = [
     },
 ]
 
+# #1101: the context stack and bare method calls -- declared, so a rung that only calls declared tools (the
+# Claude SDK) reaches them; the usual file tools only on a no-bash seat (cliffhanger_only.strip_tools)
+_OBJ = {"type": "object"}
+TOOLS += [
+    {"name": "call", "description": "Call a method by its bare name; it resolves in your context (in: …), "
+                                    "innermost first. args are its params.",
+     "inputSchema": {"type": "object", "properties": {"method": {"type": "string"}, "args": _OBJ},
+                     "required": ["method"]}},
+    {"name": "entity_enter", "description": "Enter an entity: it joins this chat's context (in: …) until exit.",
+     "inputSchema": {"type": "object", "properties": {"spec": {"type": "string"}}, "required": ["spec"]}},
+    {"name": "entity_exit", "description": "Leave the innermost entered entity.",
+     "inputSchema": {"type": "object", "properties": {}}},
+]
+
 
 # ---- transport helpers -------------------------------------------------------
 
@@ -1816,7 +1830,118 @@ def tool_write(args: dict, port: int) -> str:
             f"{prop}_result on the entity -- read it back before you claim it happened.")
 
 
+def tool_ctx_enter(args: dict, port: int) -> str:
+    out = _http(port, "POST", "/membrane/ctx", {"op": "enter", "spec": str(args.get("spec") or args.get("name") or "")})
+    return out.get("line") if out.get("ok") else f"enter failed: {out.get('error')}"
+
+
+def tool_ctx_exit(args: dict, port: int) -> str:
+    out = _http(port, "POST", "/membrane/ctx", {"op": "exit"})
+    return out.get("line") if out.get("ok") else f"exit failed: {out.get('error')}"
+
+
+def tool_dunder_call(args: dict, port: int) -> str:
+    """#1101 __call: a bare method name, resolved through the context stack, called like method_call."""
+    a = args.get("args")
+    if not isinstance(a, (dict, list)):
+        a = {k: v for k, v in args.items() if k not in ("method", "name", "args")}
+    meth = str(args.get("method") or args.get("name") or "")
+    out = _http(port, "POST", "/membrane/ctx", {"op": "call", "method": meth, "args": a})
+    if not out.get("ok") and not out.get("object"):
+        return f"call refused: {out.get('error', 'unknown error')}"
+    r = out.get("resolved") or {}
+    return (f"[{out.get('status')}] {meth} on {r.get('object') or out.get('object')} (found in {r.get('level')}): "
+            f"rc={out.get('rc')} {out.get('outcome') or ''}\n{_brief_output(out)}")
+
+
+def _fs_path(p) -> str:
+    import os as _os
+    return _os.path.expanduser(str(p or "").strip())
+
+
+def tool_fs_read(args: dict, port: int) -> str:
+    """#1101 (no-bash): Read path -> the file's text, as the field's read(path) getter sees it."""
+    p = _fs_path(args.get("path"))
+    if not p:
+        return "read: a path is required"
+    try:
+        with open(p, errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError as e:
+        return f"read {p}: {e}"
+    off = max(0, int(args.get("offset") or 1) - 1)
+    lim = int(args.get("limit") or 2000)
+    body = "\n".join(f"{i + 1:6}\t{ln}" for i, ln in enumerate(lines[off:off + lim], start=off))
+    return f"read({p!r}) -- {len(lines)} lines\n{body}"
+
+
+def tool_fs_write(args: dict, port: int) -> str:
+    p = _fs_path(args.get("path"))
+    if not p:
+        return "write: a path is required"
+    try:
+        import os as _os
+        if _os.path.dirname(p):
+            _os.makedirs(_os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            f.write(str(args.get("content") or ""))
+    except OSError as e:
+        return f"File:{p}.write failed: {e}"
+    return f"File:{p}.write done ({len(str(args.get('content') or ''))} chars)"
+
+
+def tool_fs_edit(args: dict, port: int) -> str:
+    p = _fs_path(args.get("path"))
+    old, new = args.get("old"), args.get("new")
+    if not p or old is None or new is None:
+        return "edit: path, old_string and new_string are required"
+    try:
+        with open(p) as f:
+            text = f.read()
+    except OSError as e:
+        return f"edit {p}: {e}"
+    n = text.count(str(old))
+    if n == 0:
+        return f"edit {p}: old_string not found"
+    if n > 1 and not args.get("all"):
+        return f"edit {p}: old_string occurs {n} times -- give more context or replace_all=true"
+    text = text.replace(str(old), str(new)) if args.get("all") else text.replace(str(old), str(new), 1)
+    return tool_fs_write({"path": p, "content": text}, port).replace("write done", "write done (edit)")
+
+
+def tool_fs_list(args: dict, port: int) -> str:
+    import fnmatch
+    import os as _os
+    p = _fs_path(args.get("path") or ".")
+    pat = args.get("pattern")
+    try:
+        if pat and any(c in str(pat) for c in "*?[") and ("/" in str(pat) or "**" in str(pat)):
+            import glob as _glob
+            hits = sorted(_glob.glob(_os.path.join(p, str(pat)), recursive=True))[:300]
+            return f"listdir({p!r}, {pat!r}) -- {len(hits)}\n" + "\n".join(hits)
+        rows = sorted(_os.listdir(p))
+    except OSError as e:
+        return f"listdir {p}: {e}"
+    if pat:
+        rows = [r for r in rows if fnmatch.fnmatch(r, str(pat))]
+    out = []
+    for r in rows[:300]:
+        full = _os.path.join(p, r)
+        out.append(f"{r}/" if _os.path.isdir(full) else r)
+    return f"listdir({p!r}) -- {len(rows)}\n" + "\n".join(out)
+
+
 TOOL_IMPLS = {
+    "ctx_enter": tool_ctx_enter,
+    "ctx_exit": tool_ctx_exit,
+    "entity_enter": tool_ctx_enter,
+    "entity_exit": tool_ctx_exit,
+    "__call": tool_dunder_call,
+    "call": tool_dunder_call,
+    "fs_read": tool_fs_read,
+    "fs_write": tool_fs_write,
+    "fs_edit": tool_fs_edit,
+    "fs_list": tool_fs_list,
     "query": tool_query,
     "state": tool_state,
     "intend": tool_intend,
@@ -1895,7 +2020,8 @@ def _handle(req: dict, port: int) -> dict | None:
     if method == "ping":
         return _rpc_result(req_id, {})
     if method == "tools/list":
-        return _rpc_result(req_id, {"tools": TOOLS})
+        from . import cliffhanger_only as _CO
+        return _rpc_result(req_id, {"tools": _CO.strip_tools(TOOLS)})
     if method == "tools/call":
         # ISSUE #60 (Memo): a route string as a tool name ('/exec') -- the slash
         # is no part of the name the registry advertises

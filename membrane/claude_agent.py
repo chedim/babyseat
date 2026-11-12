@@ -665,7 +665,8 @@ def tool_names() -> list[str]:
     from . import diag_requests as _dr
     if _dr.current().get("lane") in ("loop", "worker"):     # a worker is a field loop too (#857)
         hide = hide | _LOOP_HIDDEN
-    return [TOOL_PREFIX + t["name"] for t in _mcp.TOOLS if t["name"] not in hide]
+    from . import cliffhanger_only as _CO
+    return [TOOL_PREFIX + t["name"] for t in _CO.strip_tools(_mcp.TOOLS) if t["name"] not in hide]
 
 
 def _coproc_hidden() -> frozenset:
@@ -726,7 +727,8 @@ def build_mcp_server(sdk, port, answer=None):
     from . import mcp_server as _mcp
     tools = [sdk.tool(t["name"], t["description"], t["inputSchema"])(
                  _tool_handler(t["name"], port, answer))
-             for t in _mcp.TOOLS if t["name"] in _mcp.TOOL_IMPLS
+             for t in __import__("membrane.cliffhanger_only", fromlist=["x"]).strip_tools(_mcp.TOOLS)
+             if t["name"] in _mcp.TOOL_IMPLS
              and t["name"] not in _coproc_hidden()]
     return sdk.create_sdk_mcp_server(name=MCP_NAME, version=_mcp.SERVER_VERSION,
                                      tools=tools)
@@ -795,11 +797,23 @@ TOOLS_NOTE = _full_names(
 _CARD_LINES_REPLACED = ("- EXEC:", "- ROUTING:")
 
 
+NO_SHELL_NOTE = ("THIS SEAT HAS NO SHELL (cliffhanger only): code_run and bash are gone. Read the world through "
+                 "the field -- an entity whose getter is read(path), listdir(path) or stat(path) -- and change it "
+                 "with File:<name>.write/move/delete and Command:<name>.run = {args} (rc and output land on the "
+                 "entity). No shell does not mean no programs: define a method (method_define) or a Command: "
+                 "entity for git, gh, pytest..., then call it. help('stdlib') has the details.")
+
+
+def _tools_note() -> str:
+    from . import cliffhanger_only as _CO
+    return TOOLS_NOTE + ("\n\n" + NO_SHELL_NOTE if _CO.on() else "")
+
+
 def _with_tools_note(system: str) -> str:
     if not system:
-        return TOOLS_NOTE
+        return _tools_note()
     kept = "\n".join(ln for ln in system.splitlines() if not ln.startswith(_CARD_LINES_REPLACED))
-    return kept.rstrip() + "\n\n" + TOOLS_NOTE
+    return kept.rstrip() + "\n\n" + _tools_note()
 
 
 def _field_mcp_servers() -> dict:

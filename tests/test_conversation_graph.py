@@ -250,12 +250,13 @@ class TheReferent(unittest.TestCase):
         _turn(srv, runner, 1, "look", "I changed membrane/a.py and membrane/b.py.")
         return srv, runner
 
-    def test_two_readings_re_ask_and_skip_the_turn(self):
+    def test_two_readings_are_told_to_the_model_and_membrane_posts_no_line(self):
         srv, runner = self._two_files()
         runner.messages.add(SID, "msg_u2", "user", "delete it")
         out = CG.before_turn(srv, runner, SID, {"id": "msg_u2"}, "delete it")
         self.assertTrue(out and out.get("reask"))
-        self.assertEqual(runner.posted, [(SID, '"it": membrane/a.py or membrane/b.py?')])
+        self.assertEqual(runner.posted, [])                       # #1093: the model asks, membrane posts no line
+        self.assertIn("membrane/a.py or membrane/b.py", out["reask"])
 
     def test_a_closed_reading_drops_and_the_one_left_is_recorded(self):
         srv, runner = _seat()
@@ -334,8 +335,9 @@ class TheRunnerWiring(unittest.TestCase):
         r.run(sid, "delete it")
         self.assertEqual(len(calls), n + 1)                   # no intercept: the model ran (2026-11-11)
         texts = [p.get("text") or "" for m in r.messages.list(sid) for p in m["parts"]]
-        self.assertIn('"it": membrane/a.py or membrane/b.py?', texts)   # the line is still shown
-        self.assertIn("membrane/a.py or membrane/b.py", str(calls[-1]))  # and the model is told
+        self.assertNotIn('"it": membrane/a.py or membrane/b.py?', texts)   # membrane posts no line (#1093): the model asks
+        note = (getattr(srv, "_cg_notes", None) or {}).get(sid) or ""      # the model is told (lanes._with_referent)
+        self.assertIn("membrane/a.py or membrane/b.py", note)
 
 
 if __name__ == "__main__":

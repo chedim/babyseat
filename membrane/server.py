@@ -1110,7 +1110,8 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
     wrapper only shapes the MCP registry's own rows (2026-10-13: an
     explicit set used to die here on a bare KeyError('name'))."""
     from . import toolset as _ts
-    tools = _mcp.TOOLS if mcp_tools is None else mcp_tools
+    from . import cliffhanger_only as _CO
+    tools = _CO.strip_tools(_mcp.TOOLS if mcp_tools is None else mcp_tools)
     return [t if isinstance(t, dict) and "function" in t else
             {"type": "function",
              "function": {"name": t["name"],
@@ -1219,6 +1220,10 @@ OPERATOR_TOOLS = frozenset((
     # #1043: the field engine's hands -- a .c1f pack loaded, a property written (acting by writing)
     "pack", "entity_write",
 ))
+# #1101: the context stack (enter/exit), unknown names as method calls, the usual file tools on a no-bash seat
+CTX_TOOLS = frozenset(("ctx_enter", "ctx_exit", "__call", "fs_read", "fs_write", "fs_edit", "fs_list",
+                       "call", "entity_enter", "entity_exit"))
+CTX_WRITES = frozenset(("__call", "call", "fs_write", "fs_edit"))
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
@@ -1366,6 +1371,8 @@ def _lane_refusal(name: str, lane: str) -> str | None:
         return None
     if name in _lane_tools(lane):
         return None
+    if name in CTX_TOOLS and lane not in ("phone",) and not (lane == "plan" and name in CTX_WRITES):
+        return None                    # #1101: the context stack, __call and the no-bash file tools
     # the plan-mode texts are for the PLAN lane only: a listener told
     # "plan mode: ..." concluded its seat was in plan mode (2026-10-08)
     if lane == "phone":
@@ -1417,7 +1424,8 @@ def _openai_tools_for(agent: str | None) -> list:
     if os.environ.get("MEMBRANE_TOOL_FAMILIES", "1") != "0":
         from . import toolset as _ts
         return _ts.advertised(names)
-    return [t for t in _mcp.TOOLS if t["name"] in names]
+    from . import cliffhanger_only as _CO
+    return [t for t in _CO.strip_tools(_mcp.TOOLS) if t["name"] in names]
 
 
 def _tool_title(name: str, args: dict) -> str:
