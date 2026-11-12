@@ -3024,6 +3024,7 @@ class TurnRunner:
 
         err_done = False
         rounds = 0
+        (getattr(self, "_last_inj", None) or {}).pop(sid, None)    # a new turn: its first round shows its card even when the banner is the same text
         _quota_hit = None                  # the model ran out mid-turn (quota.py)
         # THE REPEATED REFUSAL (issue #274): qwen3:14b sent the same nameless
         # call seven rounds running, each refused the same way, and the person

@@ -256,3 +256,16 @@ def test_verbs_boot_builds_only_the_verbs_and_the_methods(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_a_fuzzy_spec_lookup_builds_only_what_it_finds(tmp):
+    # live 2026-11-11: a boot-time lookup that missed fell through to a scan over docs.values() (59,899 built)
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        assert st._resolve_spec("no-such-thing-here") is None and built == []
+        hit = st._resolve_spec("t7")                         # a name: found by its property, only that one built
+        assert hit is not None and hit.eid == "membrane::thing:7" and built == ["membrane::thing:7"]
+    finally:
+        _restore(real)
+        db.close()

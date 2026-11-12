@@ -1374,24 +1374,28 @@ class _Docs(dict):
     def unbuilt(self) -> int:
         return self._n_raw
 
-    def matching(self, pred) -> list:
-        """(eid, entity) for every entity whose (class, properties) satisfy `pred`, in store order. An unbuilt entity is
-        judged from its raw record and built only when it matches: a boot scan for "the verbs" builds the verbs."""
+    def scan(self, pred) -> list:
+        """(eid, entity) for every entity whose (eid, class, properties) satisfy `pred`, in store order. An unbuilt entity
+        is judged from its raw record and built only when it matches: a boot scan for "the verbs" builds the verbs."""
         out = []
         for k in list(dict.keys(self)):
             v = dict.get(self, k)
             if type(v) is _Raw:
                 data = v.rec.get("data") or {}
                 props = data.get("properties")
-                if not isinstance(props, dict) or not pred(str(data.get("class") or CLASS_COMPONENT), props):
+                if not isinstance(props, dict) or not pred(k, str(data.get("class") or CLASS_COMPONENT), props):
                     continue
-            elif not pred(v.cls, v.properties or {}):
+            elif not pred(k, v.cls, v.properties or {}):
                 continue
             try:
                 out.append((k, self[k]))
             except KeyError:
                 continue
         return out
+
+    def matching(self, pred) -> list:
+        """scan, judged on (class, properties) only."""
+        return self.scan(lambda _eid, cls, props: pred(cls, props))
 
     def with_property(self, name: str) -> list:
         """The entities whose properties hold a truthy `name` (see matching)."""
@@ -2577,9 +2581,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         if not fuzzy:
             return None
         low = spec.lower()
-        hits = [q for q in list(self.docs.values())
-                if q.eid.lower().endswith(":" + low)
-                or str((q.properties or {}).get("name", "")).lower() == low]
+        hits = [q for _k, q in self.docs.scan(lambda eid, _c, props: eid.lower().endswith(":" + low)
+                                              or str(props.get("name", "")).lower() == low)]
         if len(hits) > 1:
             # THE DELIBERATE ONE WINS (2026-10-10: a night-minted twin
             # 'models:mqtt:bridge' shadowed the seat's 'Component:mqtt:bridge'):
