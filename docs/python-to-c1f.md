@@ -34,7 +34,20 @@ In order, each piece deployed on its own and replacing its Python:
 7. **Router, voice, peers, restarts, toybox, absorb, codegraph, predict** and the rest, one by one.
 8. **Last: the entity store and the field engine** (`entities.py`, `efield.py`, `efstore.py`, `cblstore.py`): native.
 
-The UI follows its own track: each window a `dom` view pack in the browser VM (the About window is the first).
+## The UI is a cliffhanger app too (operator, 2026-11-11)
+Today `membrane/ui/` is about 16,100 lines of JavaScript (`home.js` 4,900, `panel.js` 4,100, `field3d.js` 2,600,
+`field.js` 1,000, `decisions.js` 1,000, `vosk.js` 800, the rest small). The target is a thin shell and view packs:
+
+- **The shell stays JavaScript:** `index.html`, the WASM loader, and one adapter (`host.js`): DOM nodes as `DomNode`
+  entities, events (click, input, key, scroll) as writes, `fetch` and the seat's event stream as entities, WebGL/canvas
+  drawing as `dom` built-ins. No UI logic lives in it.
+- **Everything the person sees is a view pack** running in the browser VM, loaded from the seat like any pack, so a
+  model can read and change its own interface (the About window is the first).
+- **Order, smallest first:** the loading and offline field animation (it becomes the graph viewer: rotation, zoom, no
+  reload between steps), favicon, the decisions board, the 2D field view, the 3D field view (needs the drawing
+  built-ins), the chat panel (messages, tool and injection cards, composer), the home page and its windows, voice.
+- **Needs first:** the event and draw built-ins in the `dom` library, and list virtualization for long chats.
+
 
 ## Rules for every piece
 - failing test first; the Python it replaces is deleted in the same change;
