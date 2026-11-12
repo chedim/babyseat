@@ -44,12 +44,18 @@ Request.st_awake getter: this.st_card_mode != 'off' and not this.st_asleep
 Request.st_name getter: prop(this.st_state, 'self_name') or 'Blurp'
 Request.st_card_body getter: {'name': this.st_name, 'level': 0, 'rung_name': '', 'next': [], 'mode': this.st_card_mode, 'awake': this.st_awake, 'last_activity': None, 'generated': clock, 'energy': this.st_energy, 'asleep': this.st_asleep, 'pull': this.st_pull, 'limiting': this.st_limiting, 'record_cap': this.st_cap}
 
+-- the allowed methods (the door answers 405 + allow); the not-ported routes answer 501 whatever the method (None: the family answers)
+Request.m_state getter:
+  WHEN this.st_gap: None
+  ELSE WHEN this.path == '/membrane/seat/control': ['POST']
+  ELSE WHEN this.path == '/membrane/seat/pause': ['GET', 'POST']
+  ELSE: ['GET']
+
 -- ---- the control writes: validate, then record the ask on the presence entity ----------------------------------------------------------
-Request.st_json getter: json(this.body or '') if this.method == 'POST' else None
-Request.st_pause_ok getter: this.path == '/membrane/seat/pause' and (prop(this.st_json, 'paused') == True or prop(this.st_json, 'paused') == False)
-Request.st_ctl_ok getter: this.path == '/membrane/seat/control' and len([k for k in ['paused', 'loops_max', 'self', 'accept', 'self_name'] if prop(this.st_json, k) != None]) > 0
+Request.st_pause_ok getter: this.path == '/membrane/seat/pause' and (prop(this.jbody, 'paused') == True or prop(this.jbody, 'paused') == False)
+Request.st_ctl_ok getter: this.path == '/membrane/seat/control' and len([k for k in ['paused', 'loops_max', 'self', 'accept', 'self_name'] if prop(this.jbody, k) != None]) > 0
 Request.st_by getter: 'user:' + str(this.sub)
-Request.st_ask getter: {'id': this.eid, 'by': this.st_by, 'body': this.st_json} if this.method == 'POST' and this.authed == True and this.st_seat != None and (this.st_pause_ok or this.st_ctl_ok) else None
+Request.st_ask getter: {'id': this.eid, 'by': this.st_by, 'body': this.jbody} if this.method == 'POST' and this.authed == True and this.st_seat != None and (this.st_pause_ok or this.st_ctl_ok) else None
 Request.st_ask on-setter st-control:
   WHEN this.st_ask != None:
     ('membrane::presence').control = this.st_ask
@@ -64,8 +70,6 @@ Request.st_read getter:
   ELSE: this.st_state_body
 Request.r_state getter:
   WHEN this.st_gap: {'status': 501, 'body': {'error': 'not ported yet: reads the live seat'}}
-  ELSE WHEN this.path == '/membrane/seat/control' and this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
-  ELSE WHEN not this.st_post and not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE WHEN this.st_post and not (this.st_pause_ok or this.st_ctl_ok): {'status': 400, 'body': {'error': 'the body is {"paused": true|false}' if this.path == '/membrane/seat/pause' else 'the body names a control: paused, loops_max, self, accept or self_name'}}
   ELSE WHEN this.st_post and this.st_seat == None: {'status': 503, 'body': {'error': 'no seat'}}
   ELSE WHEN this.st_post: {'status': 202, 'body': {'ok': True, 'queued': this.st_ask, 'state': this.st_state}}

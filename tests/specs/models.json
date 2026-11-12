@@ -453,5 +453,107 @@
     "none": true
    }
   ]
+ },
+ {
+  "name": "a non-read on /v1/models is a 405 with allow GET",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/router.c1f",
+   "membrane/packs/door_models.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "router_on": true
+    }
+   },
+   {
+    "eid": "Model:glm-4:9b",
+    "class": "Model",
+    "props": {
+     "name": "glm-4:9b",
+     "kind": "local",
+     "listed": true,
+     "size": 5000000000,
+     "capabilities": [
+      "completion",
+      "tools"
+     ],
+     "backend": "ollama"
+    }
+   },
+   {
+    "eid": "Model:nomic-embed-text:latest",
+    "class": "Model",
+    "props": {
+     "name": "nomic-embed-text:latest",
+     "kind": "local",
+     "listed": true,
+     "size": 270000000,
+     "backend": "ollama"
+    }
+   },
+   {
+    "eid": "Model:gone:1b",
+    "class": "Model",
+    "props": {
+     "name": "gone:1b",
+     "kind": "local",
+     "listed": false,
+     "size": 1000000000,
+     "backend": "ollama"
+    }
+   },
+   {
+    "eid": "Model:claude-sonnet",
+    "class": "Model",
+    "props": {
+     "name": "claude-sonnet",
+     "kind": "cloud",
+     "rung": true,
+     "listed": true,
+     "backend": "claude-agent"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": false,
+     "auth_error": "no token",
+     "path": "/v1/models",
+     "models_asked": true,
+     "models_ready": true
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "method not allowed"
+   }
+  ]
  }
 ]
