@@ -295,7 +295,8 @@ impl Db {
         })
     }
 
-    /// Nothing to do: the vectors are not the database's.
+    /// Always returns 0, as the Python version did: the vectors are not the database's, so there is nothing to update
+    /// (a caller must not read the 0 as "nothing was due").
     #[pyo3(signature = (coll, name, to_vec, limit=500))]
     fn update_lazy(&self, coll: String, name: String, to_vec: Py<PyAny>, limit: i64) -> i64 {
         let _ = (coll, name, to_vec, limit);
