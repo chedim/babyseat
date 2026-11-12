@@ -19,7 +19,7 @@ Task.status on-setter replan-task:
   WHEN (this.status == 'done' or this.status == 'failed' or this.status == 'stuck'):
     this.goal.replan = 'task ' + this.eid + ' ' + this.status
 Decision.status on-setter replan-card:
-  WHEN (this.status == 'closed' or this.status == 'dropped'):
+  WHEN (this.status == 'decided' or this.status == 'closed' or this.status == 'dropped'):
     this.goal.replan = 'card ' + this.eid + ' ' + this.status
 
 -- a wait with nothing open in its way is armed; when it is due, its adapter checks
@@ -47,7 +47,8 @@ Goal.status on-setter plan-after-reopen:
 -- a dropped blocker blocks nothing (Memo's live check, 2026-11-09: it used to block forever)
 Task.finished getter: this.status in ('done', 'dropped')
 Wait.finished getter: this.status in ('done', 'dropped')
-Decision.finished getter: this.status in ('closed', 'dropped')
+-- a card stops blocking once it is ANSWERED (decided), not only when its follow-up work is closed (#1139)
+Decision.finished getter: this.status in ('decided', 'in_flight', 'closed', 'dropped')
 Task.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.finished])
 Wait.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.finished])
 -- from the first beat after it armed, an armed wait's `due` is the beat's time: it changes every beat, so its check

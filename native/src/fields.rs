@@ -12,8 +12,8 @@ use crate::vm::{Core, Host, Write};
 
 const BLOCKER_CLASSES: [&str; 3] = ["Task", "Decision", "Wait"];
 
-/// finished(b): Task/Wait -> status 'done'; Decision -> status 'closed' (doc section 5).
-const OPEN_BLOCKERS_FILTER: &str = "t.eid in (b.blocks or []) and not ((b.cls == 'Decision' and b.status == 'closed') or (b.cls != 'Decision' and b.status == 'done'))";
+/// finished(b): Task/Wait -> status 'done'; Decision -> answered: decided, in_flight, closed or dropped (#1139; doc section 5).
+const OPEN_BLOCKERS_FILTER: &str = "t.eid in (b.blocks or []) and not ((b.cls == 'Decision' and b.status in ['decided', 'in_flight', 'closed', 'dropped']) or (b.cls != 'Decision' and b.status == 'done'))";
 
 /// `this` is the entity written (`x` is the old name, still bound for migrated scripts); `clock` the time.
 /// Each write: (target entity expr, prop, value expr). The first branch is `WHEN when: writes`; `els` are the
