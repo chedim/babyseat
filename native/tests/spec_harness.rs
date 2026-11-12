@@ -118,3 +118,24 @@ fn prop_of_a_name_is_still_a_read_of_it() {
         "expect": [{"eid": "T:1", "prop": "b", "equals": 6}, {"eid": "T:1", "prop": "c", "equals": 6}]});
     assert_eq!(spec::run(&s), Vec::<String>::new());
 }
+
+#[test]
+fn a_null_expectation_can_ask_why_and_a_failure_shows_the_chain() {
+    let d = tmp("nullwhy");
+    let p = pack_file(&d, "nullwhy", "PACK nullwhy 1\nT.a getter: this.b + 1\nT.b getter: this.c * 2\nT.c getter: None('no such file')\n");
+    let given = json!([{"eid": "T:1", "class": "T", "props": {}}]);
+    // the origin's reason is what `null_why` matches (a substring)
+    let ok = json!({"name": "why", "packs": [p.clone()], "given": given.clone(), "writes": [],
+        "expect": [{"eid": "T:1", "prop": "a", "none": true}, {"eid": "T:1", "prop": "a", "null_why": "no such file"}]});
+    assert_eq!(spec::run(&ok), Vec::<String>::new());
+    let wrong = json!({"name": "why", "packs": [p.clone()], "given": given.clone(), "writes": [],
+        "expect": [{"eid": "T:1", "prop": "a", "null_why": "something else"}]});
+    let f = spec::run(&wrong);
+    assert_eq!(f.len(), 1);
+    assert!(f[0].contains("no such file") && f[0].contains("something else"), "{}", f[0]);
+    // an expectation that fails on a null property shows how the null came to be
+    let eq = json!({"name": "why", "packs": [p], "given": given, "writes": [],
+        "expect": [{"eid": "T:1", "prop": "a", "equals": 1}]});
+    let f = spec::run(&eq);
+    assert!(f[0].contains("why: a <- b <- c") && f[0].contains("no such file"), "{}", f[0]);
+}

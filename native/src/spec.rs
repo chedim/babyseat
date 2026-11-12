@@ -87,12 +87,30 @@ pub fn run(spec: &J) -> Vec<String> {
         quiet(&mut c, &mut f);
     }
     let mut fails = Vec::new();
+    // how a null came to be: "why: a <- b <- c: <the origin's reason>"
+    let chain_text = |eid: &str, prop: &str| -> Option<String> {
+        let chain = f.why_chain(&c, eid, prop);
+        if chain.is_empty() { return None; }
+        let names: Vec<String> = chain.iter().map(|n| n["prop"].as_str().unwrap_or("").to_string()).collect();
+        let reason = chain.last().and_then(|n| n["reason"].as_str()).unwrap_or("");
+        Some(format!("why: {}: {}", names.join(" <- "), reason))
+    };
     for e in expect {
         let (eid, prop) = (e["eid"].as_str().unwrap_or(""), e["prop"].as_str().unwrap_or(""));
         let Some(ent) = c.docs.get(eid) else { fails.push(format!("{name}: {eid}.{prop}: no such entity")); continue };
         let got = at_path(&ent.props, prop);
-        if let Some(want) = e.get("equals") {
-            if &got != want { fails.push(format!("{name}: {eid}.{prop}: expected {want}, got {got}   [{}]", dump(&ent.props))); }
+        if let Some(sub) = e.get("null_why").and_then(|w| w.as_str()) {
+            let chain = chain_text(eid, prop);
+            match &chain {
+                Some(t) if t.contains(sub) => {}
+                Some(t) => fails.push(format!("{name}: {eid}.{prop}: expected the null to say {sub:?}; {t}")),
+                None => fails.push(format!("{name}: {eid}.{prop}: expected a null that says {sub:?}, but it is {got}")),
+            }
+        } else if let Some(want) = e.get("equals") {
+            if &got != want {
+                let why = if got.is_null() { chain_text(eid, prop).map(|t| format!("   {t}")).unwrap_or_default() } else { String::new() };
+                fails.push(format!("{name}: {eid}.{prop}: expected {want}, got {got}{why}   [{}]", dump(&ent.props)));
+            }
         } else if e.get("none").and_then(|n| n.as_bool()).unwrap_or(false) {
             if !got.is_null() { fails.push(format!("{name}: {eid}.{prop}: expected none, got {got}")); }
         } else if let Some(sub) = e.get("contains") {

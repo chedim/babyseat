@@ -331,7 +331,7 @@ impl Fields {
     fn compute(&mut self, core: &mut Core, host: Option<&dyn Host>, eid: &str, gi: usize, now: f64, seq: &mut i64) -> Option<J> {
         let g = self.getters[gi].clone();
         let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
-        let (r, reads) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker, g.arms.max(1));
+        let (r, reads, nil) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker, g.arms.max(1));
         let key = (eid.to_string(), gi);
         if let Some(old) = self.reads.remove(&key) { for k in old { if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); } } }
         let mut ins: Vec<(String, String)> = reads.into_iter().filter(|(e, p)| !(e == eid && *p == g.prop)).collect();
@@ -339,14 +339,43 @@ impl Fields {
         ins.sort(); ins.dedup();
         for k in &ins { self.deps.entry(k.clone()).or_default().insert(key.clone()); }
         self.reads.insert(key, ins);
+        let key2 = (eid.to_string(), g.prop.clone());
         match r {
-            Ok(v) => Some(v),
+            Ok(v) => {
+                match &nil { Some(why) if v.is_null() => { core.why.insert(key2, why.clone()); } _ => { core.why.remove(&key2); } }   // a null remembers why
+                Some(v)
+            }
             Err(e) => {
-                let reason = format!("error in getter {}.{}: {}; the field kept its value", g.cls, g.prop, e);
+                // an error is a null with the error as its reason (it no longer keeps a stale value); the receipt still says where
+                let reason = format!("error in getter {}.{}: {}; the value is null", g.cls, g.prop, e);
                 self.receipt(core, eid, &format!("getter:{}", g.prop), reason, J::Null, seq, now);
-                None
+                core.why.insert(key2, format!("error: {}", e));
+                Some(J::Null)
             }
         }
+    }
+
+    /// The chain behind a null: [{eid, prop, reason}] from the property asked about back to the first null that has a reason of
+    /// its own (each getter on the way read the next one, and its reason is the same). Empty when the value is not null, or the
+    /// property is not a getter of the entity.
+    pub fn why_chain(&self, core: &Core, eid: &str, prop: &str) -> Vec<J> {
+        let mut out: Vec<J> = vec![];
+        let mut cur = (eid.to_string(), prop.to_string());
+        let mut seen: std::collections::BTreeSet<(String, String)> = Default::default();
+        loop {
+            let null = core.docs.get(&cur.0).map(|e| e.props.get(&cur.1).map(|v| v.is_null()).unwrap_or(true)).unwrap_or(false);
+            let gi = self.getters_of(core, &cur.0).into_iter().find(|&i| self.getters[i].prop == cur.1);
+            if !null || gi.is_none() || !seen.insert(cur.clone()) { break; }
+            let reason = core.why.get(&cur).cloned();
+            out.push(json!({"eid": cur.0, "prop": cur.1, "reason": reason}));
+            let Some(r) = reason else { break };
+            // the input that is itself a null getter with the same reason is where this one came from
+            let next = self.reads.get(&(cur.0.clone(), gi.unwrap())).and_then(|ins| ins.iter().find(|k| {
+                core.why.get(*k) == Some(&r) && core.docs.get(&k.0).map(|e| e.props.get(&k.1).map(|v| v.is_null()).unwrap_or(true)).unwrap_or(false)
+            }).cloned());
+            match next { Some(n) => cur = n, None => break }
+        }
+        out
     }
 
     /// A write changed (eid, prop): every getter instance that read it, or that asked `referencing(_, prop)`, is dirty.

@@ -109,6 +109,9 @@ struct Cur {
 
 pub struct Core {
     pub docs: HashMap<String, Ent>,
+    /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
+    /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
+    pub why: std::collections::BTreeMap<(String, String), String>,
     order: Vec<Option<String>>,
     at: HashMap<String, usize>,
     pub triggers: Vec<Trig>,
@@ -174,7 +177,10 @@ impl<'a> expr::World for View<'a> {
             "eid" => V::Str(eid.to_string()),
             "cls" => V::Str(e.cls.clone()),
             "position" => e.pos.as_ref().map(|p| V::List(p.iter().map(|x| V::Float(*x)).collect())).unwrap_or(V::None),
-            _ => e.props.get(attr).map(expr::from_json).unwrap_or(V::None),
+            _ => match e.props.get(attr) {
+                Some(j) if !j.is_null() => expr::from_json(j),
+                _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or(V::None),
+            },
         }
     }
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> { self.core.refs(eid, prop) }
@@ -245,6 +251,7 @@ pub enum Step {
 impl Core {
     pub fn new() -> Self {
         Core {
+            why: Default::default(),
             docs: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
@@ -527,7 +534,7 @@ impl Core {
             let k = crate::store::scoped(asker, &crate::store::key(q, &args));
             match st.request(asker, q, &args) {
                 crate::store::Poll::Ready(r) => (r.map(|rows| V::List(rows.iter().map(expr::from_json).collect())), Some(k)),
-                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: sql({})", q.chars().take(48).collect::<String>()))), Some(k)),
             }
         }
         #[cfg(not(feature = "python"))]
@@ -552,7 +559,7 @@ impl Core {
                 });
                 return match st.request_job(&slot, key, true, run) {
                     crate::store::Poll::Ready(r) => (r.map(|mut rows| rows.pop().map(|j| expr::from_json(&j)).unwrap_or(V::None)), Some(k)),
-                    crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                    crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: {}(...)", f))), Some(k)),
                 };
             }
         }
@@ -569,7 +576,7 @@ impl Core {
             let k = crate::store::scoped(asker, &crate::store::jsonl_key(name));
             match st.request_jsonl(asker, name) {
                 crate::store::Poll::Ready(r) => (r.map(|rows| V::List(rows.iter().map(expr::from_json).collect())), Some(k)),
-                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: jsonl({name})"))), Some(k)),
             }
         }
         #[cfg(not(feature = "python"))]
@@ -586,7 +593,7 @@ impl Core {
             let k = crate::store::scoped(asker, &crate::drivers::key(st, f, path));
             match crate::drivers::request(st, asker, f, path) {
                 crate::store::Poll::Ready(r) => (r.map(|mut rows| rows.pop().map(|j| expr::from_json(&j)).unwrap_or(V::None)), Some(k)),
-                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: {}({})", f, path))), Some(k)),
             }
         }
         #[cfg(not(feature = "python"))]
@@ -655,17 +662,18 @@ impl Core {
 
     /// Evaluate and return what it read (#994 getters). `vars` bind names to entities, `extra` to values.
     pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)], host: Option<&dyn Host>, asker: &str, scale: usize)
-        -> (Result<serde_json::Value, String>, Vec<(String, String)>) {
+        -> (Result<serde_json::Value, String>, Vec<(String, String)>, Option<String>) {
         let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
         for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
         let parsed = self.cache.get_scaled(src, scale);
         let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
+        let mut nil: Option<String> = None;
         let r = match &*parsed {
-            Ok(node) => { let n: &Node = node; expr::eval(n, &env, &tv).and_then(|v| expr::to_json(&v)) }
+            Ok(node) => { let n: &Node = node; expr::eval(n, &env, &tv).and_then(|v| { if let V::Nil(why) = &v { nil = Some(why.clone()); } expr::to_json(&v) }) }
             Err(e) => Err(e.clone()),
         };
         let reads = tv.reads.into_inner();
-        (r, reads)
+        (r, reads, nil)
     }
 
     fn bindings(&mut self, host: &dyn Host, sp: &Spec, memo: &mut Memo, fixed: Binding) -> Vec<Binding> {
