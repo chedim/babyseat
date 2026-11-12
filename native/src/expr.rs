@@ -730,10 +730,25 @@ pub fn py_str(v: &V) -> String {
     }
 }
 
+/// The pronouns a bare name can mean (#1101): with no variable of that name, one resolves through the host's context
+/// stack (turn frame -> entered frames -> chat -> person) to the entity (or entities, for `they`) it stands for.
+pub const PRONOUNS: [&str; 9] = ["it", "that", "they", "them", "these", "those", "he", "him", "she"];
+
+fn pronoun(name: &str, w: &dyn World) -> Result<V, Err> {
+    if !PRONOUNS.contains(&name) && name != "her" { return Err(format!("unbound name {:?}", name)); }
+    let ent = |v: V| match v { V::Str(e) => V::Ent(e), o => o };
+    match w.host("pronoun", &[V::Str(name.to_string())]) {
+        Some(Ok(V::List(l))) if !l.is_empty() => Ok(V::List(l.into_iter().map(ent).collect())),
+        Some(Ok(V::Str(e))) if !e.is_empty() => Ok(V::Ent(e)),
+        Some(Err(e)) => Err(e),
+        _ => Err(format!("the pronoun {:?} is not bound here (nothing in the turn, the entered frames, the chat or the person is it)", name)),
+    }
+}
+
 pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err> {
     match n {
         Node::Const(v) => Ok(v.clone()),
-        Node::Name(s) => env.get(s).cloned().ok_or_else(|| format!("unbound name {:?}", s)),
+        Node::Name(s) => match env.get(s) { Some(v) => Ok(v.clone()), None => pronoun(s, w) },
         Node::List(v) => Ok(V::List(v.iter().map(|x| eval(x, env, w)).collect::<Result<_, _>>()?)),
         Node::Dict(v) => Ok(V::Dict(v.iter().map(|(k, x)| Ok((k.clone(), eval(x, env, w)?))).collect::<Result<_, Err>>()?)),
         Node::Attr(b, a) => match eval(b, env, w)? {

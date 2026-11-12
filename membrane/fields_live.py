@@ -131,6 +131,12 @@ class _Host:
     later = frozenset({"recall", "rerank"})
 
     def call(self, name, args_json, asker=None):
+        if name == "pronoun":                         # a bare it / that / they in a c1f method (#1101): the context stack's
+            from . import callctx                     # innermost binding, live at the moment the method runs
+            try:
+                return json.dumps(callctx.pronoun(self.live.srv, str(json.loads(args_json)[0])))
+            except Exception as e:                    # noqa: BLE001
+                return json.dumps(None)
         ctxs = getattr(self.live, "ctxs", None) or {}
         ctx = ctxs.get(str(asker).split("\0", 1)[0]) if asker else None
         if ctx is None and len(ctxs) == 1 and not asker:

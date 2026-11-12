@@ -244,3 +244,16 @@ class FileTools(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_the_vm_asks_the_context_stack_for_a_bare_pronoun(monkeypatch):
+    # #1101: `it` / `they` in a c1f method, with no variable of that name, reach callctx.pronoun through the host
+    import json as _j
+    from types import SimpleNamespace
+    from membrane import callctx as CC
+    from membrane import fields_live as FL
+    host = FL._Host(SimpleNamespace(srv=object(), ctxs={}))
+    monkeypatch.setattr(CC, "pronoun", lambda srv, w, sid=None: {"it": "membrane::goal:x", "they": ["a", "b"]}.get(w))
+    assert _j.loads(host.call("pronoun", _j.dumps(["it"]))) == "membrane::goal:x"
+    assert _j.loads(host.call("pronoun", _j.dumps(["they"]))) == ["a", "b"]
+    assert _j.loads(host.call("pronoun", _j.dumps(["that"]))) is None             # unbound: the VM names the pronoun
