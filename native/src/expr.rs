@@ -17,6 +17,8 @@ pub const VEC_MAX: usize = 8192;
 #[derive(Clone, Debug)]
 pub enum V {
     None,
+    /// A null that says why: `pending: read(/a)`, `error: ...`, `absent ...` (nulls propagate like SQL's; operator 2026-11-12)
+    Nil(String),
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -246,7 +248,7 @@ impl P {
                     _ => return Err("not an expression: attribute".into()),
                 }
             } else if self.is_p("(") {
-                let f = match a { Node::Name(ref n) => n.clone(), _ => return Err("only the built-ins may be called".into()) };
+                let f = match a { Node::Name(ref n) => n.clone(), Node::Const(V::None) => "None".to_string(), _ => return Err("only the built-ins may be called".into()) };
                 self.next();
                 let mut args = Vec::new();
                 while !self.is_p(")") {
@@ -391,9 +393,18 @@ pub trait World {
     fn host(&self, _f: &str, _a: &[V]) -> Option<Result<V, Err>> { None }
 }
 
+pub fn nullish(v: &V) -> bool { matches!(v, V::None | V::Nil(_)) }
+
+/// The null an operation on null operands gives: the first reason carried, else `absent`.
+fn null_of(vals: &[&V], what: &str) -> Option<V> {
+    for v in vals { if let V::Nil(r) = v { return Some(V::Nil(r.clone())); } }
+    if vals.iter().any(|v| matches!(v, V::None)) { return Some(V::Nil(format!("absent operand of {what}"))); }
+    None
+}
+
 pub fn truthy(v: &V) -> bool {
     match v {
-        V::None => false,
+        V::None | V::Nil(_) => false,
         V::Bool(b) => *b,
         V::Int(i) => *i != 0,
         V::Float(f) => *f != 0.0,
@@ -412,7 +423,7 @@ pub fn py_eq(a: &V, b: &V) -> bool {
     match (a, b) {
         (V::Int(x), V::Int(y)) => x == y,
         (V::Bool(x), V::Bool(y)) => x == y,
-        (V::None, V::None) => true,
+        (V::None | V::Nil(_), V::None | V::Nil(_)) => true,
         (V::Str(x), V::Str(y)) => x == y,
         (V::List(x), V::List(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| py_eq(p, q)),
         (V::Dict(x), V::Dict(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.iter().any(|(k2, v2)| k == k2 && py_eq(v, v2))),
@@ -440,7 +451,7 @@ fn contains(a: &V, b: &V) -> Option<bool> {
     match b {
         V::List(l) => Some(l.iter().any(|x| py_eq(a, x))),
         V::Str(s) => match a { V::Str(x) => Some(s.contains(x.as_str())), _ => None },
-        V::Dict(d) => match a { V::Str(x) => Some(d.iter().any(|(k, _)| k == x)), V::Int(_) | V::Float(_) | V::Bool(_) | V::None => Some(false), _ => None },
+        V::Dict(d) => match a { V::Str(x) => Some(d.iter().any(|(k, _)| k == x)), V::Int(_) | V::Float(_) | V::Bool(_) | V::None | V::Nil(_) => Some(false), _ => None },
         _ => None,
     }
 }
@@ -494,6 +505,7 @@ fn vec_arith(op: Op, a: &V, b: &V) -> Result<V, Err> {
 }
 
 pub fn arith(op: Op, a: &V, b: &V) -> Result<V, Err> {
+    if let Some(n) = null_of(&[a, b], "arithmetic") { return Ok(n); }
     if matches!(a, V::List(_)) || matches!(b, V::List(_)) { return vec_arith(op, a, b); }
     if let (V::Str(x), V::Str(y), Op::Add) = (a, b, op) { return Ok(V::Str(format!("{}{}", x, y))); }
     let (a, b) = (num(a)?, num(b)?);
@@ -534,6 +546,8 @@ fn extreme(args: &[V], want: std::cmp::Ordering) -> Result<V, Err> {
 fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
     let argn = |n: usize| -> Result<(), Err> { if a.len() == n { Ok(()) } else { Err(format!("{}: takes {} arguments", f, n)) } };
     match f {
+        // None is a class like any other: None('why') constructs a null that carries its reason (None() says "null")
+        "None" => Ok(V::Nil(match a.len() { 0 => "null".into(), 1 => py_str(&a[0]), _ => return Err("None: takes one reason".into()) })),
         "dot" => { argn(2)?; let (x, y) = (vec_of(&a[0])?, vec_of(&a[1])?); if x.len() != y.len() { return Err("dot: shapes not aligned".into()); } Ok(V::Float(x.iter().zip(&y).map(|(p, q)| p * q).sum())) }
         "norm" => { argn(1)?; Ok(V::Float(norm(&vec_of(&a[0])?))) }
         "distance" => { argn(2)?; Ok(V::Float(dist(&vec_of(&a[0])?, &vec_of(&a[1])?))) }
@@ -541,7 +555,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "abs" => { argn(1)?; match &a[0] { V::Int(i) => Ok(V::Int(i.abs())), V::Float(x) => Ok(V::Float(x.abs())), V::Bool(b) => Ok(V::Int(*b as i64)), _ => Err("bad operand type for abs()".into()) } }
         "min" => { if a.is_empty() { return Err("min expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Less) }
         "max" => { if a.is_empty() { return Err("max expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Greater) }
-        "len" => { argn(1)?; match &a[0] { V::List(l) => Ok(V::Int(l.len() as i64)), V::Str(t) => Ok(V::Int(t.chars().count() as i64)), V::Dict(d) => Ok(V::Int(d.len() as i64)), V::None => Ok(V::Int(0)), v => Err(format!("object of type {:?} has no len()", v)) } }
+        "len" => { argn(1)?; match &a[0] { V::List(l) => Ok(V::Int(l.len() as i64)), V::Str(t) => Ok(V::Int(t.chars().count() as i64)), V::Dict(d) => Ok(V::Int(d.len() as i64)), V::None | V::Nil(_) => Ok(V::Int(0)), v => Err(format!("object of type {:?} has no len()", v)) } }
         // ---- text (the banner port; plain functions, no new syntax) ----
         "lower" => { argn(1)?; Ok(V::Str(text_of(&a[0])?.to_lowercase())) }
         "strip" => { argn(1)?; Ok(V::Str(text_of(&a[0])?.trim().to_string())) }
@@ -555,7 +569,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "words" => { argn(1)?; Ok(V::List(text_of(&a[0])?.split_whitespace().map(|w| V::Str(w.to_string())).collect())) }
         "join" => {
             argn(2)?;
-            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("join(list, sep): a list".into()) };  // #1065: a pending read (None) is empty
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("join(list, sep): a list".into()) };  // #1065: a pending read (None) is empty
             Ok(V::Str(l.iter().map(py_str).collect::<Vec<_>>().join(&text_of(&a[1])?)))
         }
         "head" => {
@@ -567,7 +581,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         // ---- lists ----
         "sort_by" => {
             if a.len() < 2 || a.len() > 3 { return Err("sort_by(rows, key[, desc]): 2 or 3 arguments".into()); }
-            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("sort_by(rows, key, desc): rows is a list".into()) };  // #1065: a pending read (None) is empty
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("sort_by(rows, key, desc): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let key = text_of(&a[1])?;
             let desc = a.get(2).map(truthy).unwrap_or(false);
             let field = |v: &V| -> V { match v { V::Dict(d) => d.iter().find(|(k, _)| *k == key).map(|(_, x)| x.clone()).unwrap_or(V::None), _ => V::None } };
@@ -616,13 +630,13 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "pluck" => {
             // a column of rows: [row[key] for row in rows]
             argn(2)?;
-            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("pluck(rows, key): rows is a list".into()) };  // #1065: a pending read (None) is empty
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("pluck(rows, key): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let key = text_of(&a[1])?;
             Ok(V::List(l.iter().map(|r| match r { V::Dict(d) => d.iter().find(|(x, _)| *x == key).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None }).collect()))
         }
         "distinct" => {
             argn(1)?;
-            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("distinct(list): a list".into()) };  // #1065: a pending read (None) is empty
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("distinct(list): a list".into()) };  // #1065: a pending read (None) is empty
             let mut out: Vec<V> = vec![];
             for x in l { if !out.iter().any(|y| py_eq(y, x)) { out.push(x.clone()); } }
             Ok(V::List(out))
@@ -630,7 +644,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "group_by" => {
             // rows grouped by a key, in first-seen order: [{key, rows}]
             argn(2)?;
-            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("group_by(rows, key): rows is a list".into()) };  // #1065: a pending read (None) is empty
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("group_by(rows, key): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let key = text_of(&a[1])?;
             let mut groups: Vec<(V, Vec<V>)> = vec![];
             for r in l {
@@ -642,14 +656,14 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "concat" => {
             // lists joined end to end (`+` on lists is vector addition: lists are vectors)
             let mut out = vec![];
-            for x in a.iter() { match x { V::List(l) => out.extend(l.iter().cloned()), V::None => {}, _ => return Err("concat(list, ...): lists".into()) } }
+            for x in a.iter() { match x { V::List(l) => out.extend(l.iter().cloned()), V::None | V::Nil(_) => {}, _ => return Err("concat(list, ...): lists".into()) } }
             Ok(V::List(out))
         }
         "fit" => {
             // the banner's budget (conv_banner.render): rows {text, prio, slot}; lower prio kept first, each line
             // costs len(text) + 1, a line that does not fit is skipped (a later shorter one may); page order = slot
             if a.len() < 2 || a.len() > 3 { return Err("fit(rows, budget[, used]): 2 or 3 arguments".into()); }
-            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None => &none, _ => return Err("fit(rows, budget): rows is a list".into()) };  // #1065: a pending read (None) is empty
+            let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("fit(rows, budget): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let budget = match &a[1] { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err("fit(rows, budget): budget is a number".into()) };
             let get = |v: &V, k: &str| -> V { match v { V::Dict(d) => d.iter().find(|(x, _)| x == k).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None } };
             let num = |v: V| -> f64 { match v { V::Int(n) => n as f64, V::Float(f) => f, _ => 0.0 } };
@@ -692,7 +706,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         // everything else is a space; runs of spaces collapse
         "plain" => {
             argn(1)?;
-            let t = match &a[0] { V::None => String::new(), v => text_of(v)? };
+            let t = match &a[0] { V::None | V::Nil(_) => String::new(), v => text_of(v)? };
             let mapped: String = t.to_lowercase().chars().map(|c| if c.is_alphanumeric() || "_#./:-".contains(c) { c } else { ' ' }).collect();
             Ok(V::Str(mapped.split_whitespace().collect::<Vec<_>>().join(" ")))
         }
@@ -713,7 +727,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "epoch" => { argn(1)?; Ok(match &a[0] { V::Int(n) => V::Float(*n as f64), V::Float(f) => V::Float(*f), v => epoch_of(v).map(V::Float).unwrap_or(V::None) }) }
         // ---- time ----
         "localtime" => { argn(1)?; let ts = match &a[0] { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err("localtime(ts): a number".into()) }; Ok(crate::clock::local(ts)) }
-        "json" => { argn(1)?; match &a[0] { V::Str(t) => serde_json::from_str::<serde_json::Value>(t).map(|j| from_json(&j)).or_else(|_| Ok::<V, String>(V::None)), V::None => Ok(V::None), _ => Err("json(text): a string".into()) } }
+        "json" => { argn(1)?; match &a[0] { V::Str(t) => serde_json::from_str::<serde_json::Value>(t).map(|j| from_json(&j)).or_else(|_| Ok::<V, String>(V::None)), V::None | V::Nil(_) => Ok(V::None), _ => Err("json(text): a string".into()) } }
         "str" => { argn(1)?; Ok(V::Str(match &a[0] { V::Str(t) => t.clone(), V::List(_) | V::Dict(_) => to_json(&a[0])?.to_string(), v => py_str(v) })) }
         "referencing" => {
             argn(2)?;
@@ -748,12 +762,12 @@ fn epoch_of(v: &V) -> Option<f64> {
 }
 
 fn text_of(v: &V) -> Result<String, Err> {
-    match v { V::Str(s) => Ok(s.clone()), V::None => Ok(String::new()), V::Ent(e) => Ok(e.clone()), V::List(_) | V::Dict(_) => Err("expected text".into()), v => Ok(py_str(v)) }
+    match v { V::Str(s) => Ok(s.clone()), V::None | V::Nil(_) => Ok(String::new()), V::Ent(e) => Ok(e.clone()), V::List(_) | V::Dict(_) => Err("expected text".into()), v => Ok(py_str(v)) }
 }
 
 pub fn py_str(v: &V) -> String {
     match v {
-        V::None => "None".into(), V::Bool(b) => if *b { "True".into() } else { "False".into() },
+        V::None | V::Nil(_) => "None".into(), V::Bool(b) => if *b { "True".into() } else { "False".into() },
         V::Int(i) => i.to_string(), V::Float(f) => format!("{:?}", f), V::Str(s) => s.clone(),
         V::Ent(e) => e.clone(), _ => format!("{:?}", v),
     }
@@ -775,7 +789,7 @@ fn pronoun(name: &str, w: &dyn World) -> Result<V, Err> {
 }
 
 fn kind_of(v: &V) -> &'static str {
-    match v { V::None => "none", V::Bool(_) => "bool", V::Int(_) => "int", V::Float(_) => "float", V::Str(_) => "text",
+    match v { V::None | V::Nil(_) => "none", V::Bool(_) => "bool", V::Int(_) => "int", V::Float(_) => "float", V::Str(_) => "text",
               V::List(_) => "list", V::Dict(_) => "dict", V::Ent(_) => "entity" }
 }
 
@@ -787,12 +801,16 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
         Node::Dict(v) => Ok(V::Dict(v.iter().map(|(k, x)| Ok((k.clone(), eval(x, env, w)?))).collect::<Result<_, Err>>()?)),
         Node::Attr(b, a) => match eval(b, env, w)? {
             V::Ent(e) => { if a.starts_with('_') { return Err(format!("no attribute {:?}", a)); } Ok(w.attr(&e, a)) }
+            V::Nil(r) => Ok(V::Nil(r)),
+            V::None => Ok(V::Nil(format!("absent: .{} of an absent value", a))),
             _ => Err("attributes are read on entities only".into()),
         },
         Node::Index(b, i) => {
             let base = eval(b, env, w)?;
             let idx = eval(i, env, w)?;
             match (base, idx) {
+                (V::Nil(r), _) => Ok(V::Nil(r)),
+                (_, V::Nil(r)) => Ok(V::Nil(r)),
                 (V::None, _) => Ok(V::None),
                 (V::List(l), V::Int(k)) => {
                     let n = l.len() as i64;
@@ -809,7 +827,7 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
             V::List(l) => Ok(floats(vec_of(&V::List(l))?.into_iter().map(|x| -x).collect())),
             V::Int(i) => Ok(V::Int(-i)),
             V::Float(f) => Ok(V::Float(-f)),
-            v => Err(format!("not a number: {:?}", v)),
+            v => if let Some(n) = null_of(&[&v], "negation") { Ok(n) } else { Err(format!("not a number: {:?}", v)) },
         },
         Node::Not(a) => Ok(V::Bool(!truthy(&eval(a, env, w)?))),
         Node::And(v) => { let mut last = V::Bool(true); for x in v { last = eval(x, env, w)?; if !truthy(&last) { return Ok(last); } } Ok(last) }
@@ -835,7 +853,7 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
         }
         Node::If(a, c, b) => if truthy(&eval(c, env, w)?) { eval(a, env, w) } else { eval(b, env, w) },
         Node::Comp(elt, var, iter, cond) => {
-            let xs = match eval(iter, env, w)? { V::List(l) => l, V::None => vec![], v => return Err(format!("can't iterate over {:?}", v)) };
+            let xs = match eval(iter, env, w)? { V::List(l) => l, V::None | V::Nil(_) => vec![], v => return Err(format!("can't iterate over {:?}", v)) };
             let mut out = Vec::new();
             let mut env2 = env.clone();
             for x in xs {
@@ -847,7 +865,12 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
         }
         Node::Call(f, args) => {
             let a = args.iter().map(|x| eval(x, env, w)).collect::<Result<Vec<_>, _>>()?;
-            call(f, a, w).map_err(|e| if e.starts_with(f.as_str()) || e.contains("built-ins") { e } else { format!("{}: {}", f, e) })
+            let any_null = a.iter().any(nullish);
+            let r = call(f, a.clone(), w);
+            match r {
+                Err(_) if any_null => Ok(null_of(&a.iter().collect::<Vec<_>>(), f).unwrap_or(V::Nil(format!("error: {f} of a null")))),   // an error caused by a null is a null
+                other => other.map_err(|e| if e.starts_with(f.as_str()) || e.contains("built-ins") { e } else { format!("{}: {}", f, e) }),
+            }
         }
     }
 }
@@ -873,7 +896,7 @@ pub fn from_json(j: &serde_json::Value) -> V {
 pub fn to_json(v: &V) -> Result<serde_json::Value, Err> {
     use serde_json::Value as J;
     Ok(match v {
-        V::None => J::Null,
+        V::None | V::Nil(_) => J::Null,
         V::Bool(b) => J::Bool(*b),
         V::Int(i) => J::from(*i),
         V::Float(f) => serde_json::Number::from_f64(*f).map(J::Number).ok_or("not a finite number")?,
