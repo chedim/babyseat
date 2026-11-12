@@ -63,11 +63,11 @@ class Map(unittest.TestCase):
                 {"role": "assistant", "content": "old reply"}, {"role": "system", "content": "BANNER"},
                 {"role": "user", "content": "now"}, {"role": "assistant", "tool_calls": [1]},
                 {"role": "tool", "content": "r"}]
-        out = MM.rewrite(msgs, fld)
+        out = MM.rewrite(msgs, fld, banner="THE BANNER MESSAGE")
         self.assertEqual(out[0]["content"], "doctrine")
-        self.assertIn("No chat history is sent", out[1]["content"])
+        self.assertEqual(out[1]["content"], "THE BANNER MESSAGE")      # the banner IS the middle message
         self.assertEqual([m["role"] for m in out[2:]], ["user", "assistant", "tool"])
-        self.assertNotIn("BANNER", str(out))
+        self.assertNotIn("BANNER\"", str(out))                        # the old banner message is gone
         self.assertNotIn("old", str(out[2:]))
 
     def test_word_kind_identifiers_are_their_own_kind(self):
@@ -175,9 +175,7 @@ class Relevance(unittest.TestCase):
 
     def test_rewrite_passes_the_chat_through(self):
         fld = busy_code_field(self.SAIL)
-        out = MM.rewrite([{"role": "system", "content": "d"}, {"role": "user", "content": "now"}], fld,
-                         chat="ses_sail")
-        rows = out[1]["content"].splitlines()[1:]
+        rows = MM.lines(fld, None, chat="ses_sail")
         self.assertTrue(rows[0].split()[0] in {"m:goal:trip-north", "person:dmitrii", "m:decision:inside-route"},
                         rows)
 
