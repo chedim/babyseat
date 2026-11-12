@@ -6,7 +6,8 @@ import unittest
 from membrane import claude_agent as CA
 from membrane import mcp_server as MCP
 
-NAMES = sorted((t["name"] for t in MCP.TOOLS), key=len, reverse=True)
+ENGLISH = {"call"}      # a tool named like an ordinary word (#1101): the note says "call the full name", never the tool bare
+NAMES = sorted((t["name"] for t in MCP.TOOLS if t["name"] not in ENGLISH), key=len, reverse=True)
 
 
 def _bare(note: str) -> list[str]:

@@ -167,11 +167,7 @@ TOOLS: list[dict] = [
     {
         "name": "query",
         "description": (
-            "Read membrane's long-term memory: the nearest past exchanges for "
-            "a topic (situation-response pairs with similarity, answered-model "
-            "and seat provenance). Read-only, no model call, never learned. Use "
-            "before redoing known work, when past-session context would "
-            "help, or to check what the field already learned."),
+            'recall(topic,k=3): nearest past exchanges (pair, similarity, model, seat). read-only, no model call. use before redoing work.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -186,15 +182,7 @@ TOOLS: list[dict] = [
     {
         "name": "state",
         "description": (
-            "Membrane's own live state: the entity field's vitals "
-            "(live entities, events by stream, entities by tier, "
-            "conflicts), the replay A/B ledger, and the last night pass. "
-            "Read-only, computed from the running proxy. Use for "
-            "memory-health checks. With `section`, just that part of the "
-            "seat's WHERE WE ARE: tracks, commands (your methods, most "
-            "called first), interfaces, classes (class proposals), loops, "
-            "timelines, frame, digest, or changes (what moved since your "
-            "last message)."),
+            'field vitals + replay ledger + last night pass; read-only. section=tracks|commands|interfaces|classes|loops|timelines|frame|digest|changes -> that part of WHERE WE ARE (changes = since your last message).'),
         "inputSchema": {"type": "object", "properties": {
             "section": {"type": "string", "enum": list(_PULL_SECTIONS),
                         "description": "Optional: one part instead of all."}}},
@@ -202,16 +190,7 @@ TOOLS: list[dict] = [
     {
         "name": "intend",
         "description": (
-            "Plant YOUR commitment (the steering wheel of membrane's idle "
-            "mind): create-or-pin a shared Goal + pin it on this seat's "
-            "active set. Open intentions STEER the dream loop "
-            "(quarantined timeline branches grow toward them, think-ahead "
-            "extends them) and ride recall. An intention is never "
-            "auto-closed: fulfillment is explicit (the `fulfill` tool "
-            "with its evidence, or the operator's `membrane: fulfill #N` "
-            "-- reality's signature; a similarity flag is only a "
-            "'maybe-done?' hint). Use when working toward a multi-session "
-            "goal or when the field's work has a direction worth keeping."),
+            'plant own goal (shared Goal, pinned on this seat). open goals steer the dream loop + ride recall. never auto-closed: close with fulfill+evidence.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -228,12 +207,7 @@ TOOLS: list[dict] = [
     {
         "name": "fulfill",
         "description": (
-            "Close an OPEN goal you have PROVEN done: its status flips to "
-            "fulfilled on the shared board (every seat's active set drops "
-            "it). Requires evidence -- the receipt (a method call's "
-            "rc=0 output, the entity state you read back). Never close on "
-            "intent or a plan; an unfinished goal stays open and you take "
-            "its next concrete step instead."),
+            'close an open goal PROVEN done: spec=goal, evidence=receipt (rc=0 output / entity read back). never on intent or plan; else take its next step.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -250,10 +224,7 @@ TOOLS: list[dict] = [
     {
         "name": "answer_card",
         "description": (
-            "Pass on a Decision card's answer the person gave you in this chat, so they need "
-            "not answer again on the board. Only for words they really said about this card; "
-            "if they said nothing clear, ask. The quote must match a message of theirs word "
-            "for word, and it stays on the card and in the ledger. Chat lane only."),
+            "relay the person's chat answer to a Decision card: card=eid, value, quote=their words verbatim (must match one of their messages; kept in ledger). unclear -> ask. chat lane only."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -268,21 +239,13 @@ TOOLS: list[dict] = [
     {
         "name": "intents",
         "description": (
-            "Read YOUR intent board: the seat's active set steered goals "
-            "(the dream loop's steering coordinates), open + closed. Use "
-            "before planting a duplicate or to review what commitments "
-            "are alive."),
+            'read own intent board (goals steering this seat), open+closed. check before planting a duplicate.'),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "learn",
         "description": (
-            "Write ONE durable earned lesson into membrane's field. A lesson "
-            "is a note, not a transcript: no secrets, no user personal data, "
-            "no code dumps, no fenced blocks. The proxy applies the same "
-            "guards as any learned turn (dedup, variety gate) and may skip "
-            "it. Use when you EARNED something durable (a fixed quirk, the "
-            "command that worked, why a gate exists)."),
+            'store ONE durable earned lesson (a note, not a transcript; no secrets, personal data, code, fences). guards: dedup, variety; may skip.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -295,10 +258,7 @@ TOOLS: list[dict] = [
     {
         "name": "forget",
         "description": (
-            "Delete memories. Index form (e.g. '#3-7, 9' or '12') DELETES "
-            "those cells (capped). Wordier asks return candidate indexes as "
-            "a PROPOSAL -- they never delete. After deleting, prefer a "
-            "learn that overwrites the lesson with the correction."),
+            "spec='#3-7, 9' deletes those cells (capped); wordy spec = proposal only, deletes nothing. after deleting prefer learn with the correction."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -311,7 +271,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_watch",
-        "description": ("Plant a TRACK: an entity's live state in the WHERE WE ARE header every turn. An optional boundary ('enter N' / 'exit N') fires once per crossing: into the banner (owner '') or into a listener's next turn (owner 'watch:<eid>'). Keys: 'files:router.py', 'models:<name>', 'symbols:<qualname>'. To watch the field instead: field_watch (a topic region), or entity_edit watch_ops / watch_fields (relational / motion) -- one shared attention budget."),
+        "description": ("track: entity live state in WHERE WE ARE each turn; boundary 'enter N'|'exit N' fires once per crossing (banner, or owner 'watch:<eid>' next turn). keys files:<path> models:<name> symbols:<qualname>. field topic -> field_watch; relational/motion -> entity_edit watch_ops/watch_fields. one shared attention budget."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -335,8 +295,7 @@ TOOLS: list[dict] = [
     {
         "name": "entity_unwatch",
         "description": (
-            "Remove entity tracks: exact key ('files:router.py') or a kind "
-            "prefix ('files:' removes all file tracks)."),
+            "remove tracks: key exact ('files:router.py') or kind prefix ('files:' = all)."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -348,17 +307,7 @@ TOOLS: list[dict] = [
     {
         "name": "field_watch",
         "description": (
-            "WATCH THE FIELD (a topic region): plant a probe on a topic; "
-            "every NEW memory landing inside its radius is reported to "
-            "you on your next turn. The radius EARNS its size (a watch "
-            "that swallows too much collapses; one that swallows "
-            "everything or starves goes dormant). The board holds 7, "
-            "inside ONE attention budget shared with watch_ops and "
-            "watch_fields: at the limit the plant is REFUSED with the "
-            "list of live watches (sense, what, owner, age, hits) -- "
-            "drop the ones you no longer need, then plant. Your agent is "
-            "stamped as each watch's owner. action: plant (topic) | drop "
-            "('#N', a label fragment, or 'all') | list."),
+            "probe a topic region: each NEW memory inside its radius reported next turn. radius earns its size (swallow all/none -> dormant). board holds 7 in one attention budget (with watch_ops/watch_fields); full -> plant refused with the live list, drop one first. action plant(topic)|drop('#N'|label fragment|'all')|list. owner = your agent."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -376,13 +325,7 @@ TOOLS: list[dict] = [
     {
         "name": "attention",
         "description": (
-            "YOUR ALERT DIAL: how many watch events per window may wake "
-            "you as their own interrupt turn; the rest fold into the "
-            "'watch digest' lines of your next WHERE WE ARE block "
-            "(grouped per entity). mode 'interrupt' (the budget applies) "
-            "| 'digest' (no interrupt turns; everything folds -- goal "
-            "events always come through). Turn it down when alerts eat "
-            "your turns, up when you're missing things. action get | set."),
+            "alert dial: watch events per window that may wake you as own turn; rest fold into 'watch digest' lines. action get|set; mode interrupt (budget applies)|digest (all fold; goal events still come). down when alerts eat turns, up when missing things."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -396,11 +339,7 @@ TOOLS: list[dict] = [
     {
         "name": "entity_tracks",
         "description": (
-            "List entity tracks: key, label, owner, boundary, current "
-            "inside/outside state, and pending alert count. LANE-AWARE: "
-            "a listener passes its own agent name to see ITS tracks; "
-            "the operator sees all (with owners). Use before planting "
-            "a duplicate track or to review your watches."),
+            "list tracks: key, label, owner, boundary, inside/outside, pending alerts. owner='watch:<eid>' filters, ''=all. check before planting a duplicate."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -413,10 +352,7 @@ TOOLS: list[dict] = [
     {
         "name": "entities_related",
         "description": (
-            "Read the entity graph: entities related to a free-text query "
-            "(named hits first, then semantic nearness), each with its "
-            "mention count and co-occurrence neighbors. Use to explore what "
-            "the field knows about a component before acting on it."),
+            'entities related to query (names first, then semantic) with mention counts + co-occurring neighbours. k 1-20 (8).'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -431,14 +367,7 @@ TOOLS: list[dict] = [
     {
         "name": "entity_query",
         "description": (
-            "The entity graph's QUERY LANGUAGE: enumerate/list/count "
-            "with a one-line grammar. Terms: 'kind:<k|*>' (the eid's "
-            "kind: f/s/m/c/tool/...), 'name~:<prefix>', "
-            "'parent:<spec>' (the ISA ancestor chain includes spec), "
-            "'children:<spec>' (the reverse walk), 'status:<s>', "
-            "'near:<text>' (shares its words, best first; lists run newest first). '&' conjoins, '|' disjoins. "
-            "count=true renders 'N entity(ies)'. Examples: "
-            "'kind:tool:* & status:open', 'children:membrane::c:deploy'"),
+            "enumerate/count entities. q terms: kind:<k|*> (eid kind f/s/m/c/tool/...) | name~:<prefix> | parent:<spec> (ISA ancestor) | children:<spec> | status:<s> | near:<text> (shared words, best first; lists newest first). & and, | or. count=true -> 'N entity(ies)'. e.g. 'kind:tool:* & status:open'."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -453,7 +382,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_add",
-        "description": ('Add an entity -- a decision, failure mode, component or goal -- with a one-line summary; the same name updates it. A COMMAND entity (class Tool + a `command` prop) composes with its ISA parents (entity_inherit) into a pipeline: the parents run first and feed the child through {{parent.head}} / {{parent.tail}} ({{parent:<eid>.head}} names one). Audited.'),
+        "description": ('add entity (decision, failure mode, component, goal) with a one-line summary; same name updates. class Tool + `command` prop = command entity, composes with ISA parents (entity_inherit): parents run first and feed the child via {{parent.head}} / {{parent.tail}} ({{parent:<eid>.head}} names one). audited.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -484,7 +413,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_edit",
-        "description": ("Edit an entity (eid or exact name); only the given fields change. merged_into marks a subsumption (the source stays, pointing at its survivor). Behaviour is a .c1f pack (the pack tool, help('packs')), never a script property; `class` may be any class a loaded pack declares. To act, entity_write the property whose write is the effect (chat:<person>.say, membrane::llm.call, a File or Command verb). publish=True exports it (state only)."),
+        "description": ("edit by eid|exact name; only given fields change. merged_into = subsumption. behaviour = .c1f pack (pack tool, help('packs')), never a script prop; class = any class a loaded pack declares. to act: entity_write the prop whose write is the effect (chat:<person>.say, membrane::llm.call, File/Command verb). publish=True exports state only."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -505,10 +434,7 @@ TOOLS: list[dict] = [
     {
         "name": "entity_remove",
         "description": (
-            "Remove an entity (noise cleanup): resolve by eid or exact "
-            "name. Ambiguous fragments remove nothing. A live method, or a class "
-            "that owns methods, is refused unless force=true (a forced class "
-            "removal takes its methods with it)."),
+            'remove entity (noise cleanup) by eid|exact name; ambiguous -> nothing removed. a live method, or a class owning methods, is refused unless force=true (class removal takes its methods).'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -522,14 +448,7 @@ TOOLS: list[dict] = [
     {
         "name": "junk_cut",
         "description": (
-            "Tune the junk cut: how aggressively machinery (raw tool "
-            "output -- ps/lsof tables, test bars, log lines, config "
-            "dumps) is kept out of YOUR banner stories and watch "
-            "triggers. Per-track (raise for a paranoid trace, lower for "
-            "a permissive one), 'all' tracks at once, or the global "
-            "default. The screen is anchor-vector based: junk embeds "
-            "near anchor entities stored IN the field; prose stays far. "
-            "CUT 0..1 -- higher = stricter. Audited to the operator."),
+            "tune the junk cut: how strictly machinery (tool output, ps/lsof tables, test bars, logs, config dumps) stays out of banner stories + watch triggers. per track | 'all' | global default. CUT 0..1, higher = stricter. anchor-vector screen (junk embeds near anchor entities in the field). audited to the operator."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -546,11 +465,7 @@ TOOLS: list[dict] = [
     {
         "name": "peer_post",
         "description": (
-            "Post a message to the PEER CHANNEL: a chat lane between the "
-            "LLMs, visible to the operator on every connected opencode "
-            "seat. Use for cross-seat coordination -- handoffs, "
-            "questions to another seat's model, state announcements. "
-            "Unread messages ride YOUR banner automatically."),
+            'post to the PEER CHANNEL (cross-seat LLM chat; the operator sees it on every seat): handoffs, questions, announcements. text<=2000, reply_to=seat id. unread ride your banner.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -564,14 +479,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "graph",
-        "description": "The entity graph's subgraph reader (the model's "
-                       "eyes on the universe map): entities related to a "
-                       "query -- named hits first, then centroid-nearest "
-                       "-- as nodes (id/class/label/position/status/"
-                       "curiosity/fn_counts/properties) + edges (ISA/"
-                       "links/merged_into). The same data contract the "
-                       "universe viewer renders; other clients consume "
-                       "the same endpoints.",
+        "description": 'subgraph reader: entities related to query (names first, then centroid-nearest) as nodes(id,class,label,position,status,curiosity,fn_counts,properties) + edges(ISA,links,merged_into). k cap 8; empty query = top-linked.',
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -588,11 +496,7 @@ TOOLS: list[dict] = [
     {
         "name": "entity_inherit",
         "description": (
-            "ENTITY INHERITANCE: give an entity a parent concept ('a "
-            "letter points to letters'). The child inherits the parent's "
-            "constraints (latch level, the `living` flag) down the ISA "
-            "chain; the child's geometry sits at the parent's position "
-            "plus its own offset. Cycles are rejected."),
+            'give entity parent concept(s): child inherits constraints (latch level, living flag) down the ISA chain; geometry = parent position + own offset. cycles rejected. spec=child, parents=[...].'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -610,11 +514,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "pack",
-        "description": ("THE FIELD'S PROGRAMS: a .c1f pack gives a class its behaviour -- getters that keep a value true, "
-                        "setters that react to a write (help('packs')). action list | show (name) | load (name, c1f: the "
-                        "whole text, `PACK <name> <n>` first): a load runs at once and the reply carries its load "
-                        "error (a broken pack is refused; the last good one keeps running). Shipped packs (banner, mcp, "
-                        "...) are the release's: extend one from your own pack (`IMPORT banner 1`, your own class)."),
+        "description": ("field programs: a .c1f pack gives a class getters (keep a value true) + setters (react to a write) (help('packs')). action list | show(name) | load(name, c1f=whole text starting `PACK <name> <n>`): load runs at once, reply carries its load error (broken pack refused, last good keeps running). shipped packs (banner, mcp, ...) are the release's: extend from your own pack (`IMPORT banner 1`, own class)."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -627,10 +527,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_write",
-        "description": ("ACT BY WRITING: set one property of an entity; the write runs whatever reacts to it -- a pack's "
-                        "setters, or an adapter's effect (chat:<person>.say speaks to them, membrane::llm.call wakes a "
-                        "model turn, McpTool:<server>:<tool>.call:run calls a tool, a File's write / Command's run). An "
-                        "effect's receipt lands on the entity as <prop>_result: read it back."),
+        "description": ('act by writing: set one prop; the write runs what reacts to it: pack setters or adapter effects (chat:<person>.say speaks to them; membrane::llm.call wakes a model turn; McpTool:<server>:<tool>.call:run; File write; Command run). receipt lands as <prop>_result: read it back.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -643,7 +540,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "method_define",
-        "description": ("Give a class or object a METHOD once, then call it on any object of that kind (method_call, or method_each over every member). command: a shell template, {{arg}} for a call's args and {{self.<prop>}} for the object's (on='light', method='dim', command='curl ... {{self.entity_id}} {{level}}'); or steps, a composite run in order. guard: a python check first (result = {'ok': bool, 'why': str}). A missing owner becomes a class; re-defining updates. Owner only."),
+        "description": ("give class|object a METHOD, then method_call / method_each it. command = shell template ({{arg}} = call args, {{self.<prop>}} = object props), e.g. on='light', method='dim', command='curl ... {{self.entity_id}} {{level}}'; or steps = composite in order. guard = python check first -> {'ok':bool,'why':str}. missing owner becomes a class; re-define updates. owner only."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -679,14 +576,7 @@ TOOLS: list[dict] = [
     {
         "name": "method_call",
         "description": (
-            "CLIFFHANGER CALL: run a method on an object -- an entity or a "
-            "class. Dispatch walks the object, then its ISA classes, then the "
-            "globals (help('cliffhanger')). PROGRAM THE FIELD FIRST: define "
-            "the method (method_define), then call it here (code itself runs "
-            "with code_run); a call straight at the executor "
-            "(tool:executor, remote_executor or an implementation's exec) is "
-            "refused. E.g. object='presence', method='restart' restarts the "
-            "seat. The receipt (rc, outcome, head) lands on the object."),
+            "run method on entity|class: dispatch object -> ISA classes -> globals (help('cliffhanger')). program the field first: method_define, then call here (code itself: code_run). a call straight at an executor (tool:executor, remote_executor, an implementation's exec) is refused. e.g. object='presence', method='restart'. receipt (rc, outcome, head) lands on the object."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -700,15 +590,7 @@ TOOLS: list[dict] = [
     {
         "name": "code_run",
         "description": (
-            "RUN CODE (#614): the code is parsed into a tree of nodes in the field "
-            "(one entity per node, shared wherever the same code appears) and its "
-            "root is linked to an executor of its language: -execute-> while owed, "
-            "-executing-> while it runs, then -result-> a result entity for this run. "
-            "lang='sh' (default) runs on tool:executor, lang='js' in an opted-in browser "
-            "tab (presence). Re-run a root with "
-            "node=<its id> (each run keeps its own result); entity_read on a root "
-            "shows its code, state and runs. Returns the root, the result, rc and "
-            "the output."),
+            "run code: parsed into a node tree in the field (one entity per node, shared), root linked to an executor of its language (-execute-> owed, -executing-> running, -result-> result entity). lang 'sh' (default, tool:executor) | 'js' (opted-in browser tab). re-run: node=<root id> (each run keeps its result). entity_read on a root = code, state, runs. returns root, result, rc, output."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -722,11 +604,7 @@ TOOLS: list[dict] = [
     {
         "name": "bash",
         "description": (
-            "Run a shell command once: code_run under the name you know (the "
-            "command becomes a tree in the field, the run a result entity; re-run "
-            "with code_run node=<root>). What you will run again is a METHOD: "
-            "method_define it on the entity it belongs to (its args as {{params}}), "
-            "then method_call it -- program the field first."),
+            'run a shell command once = code_run lang sh (tree in the field, result entity; re-run via code_run node=<root>). what you will run again: method_define on its entity ({{params}}), then method_call.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -740,10 +618,7 @@ TOOLS: list[dict] = [
     {
         "name": "method_each",
         "description": (
-            "CLIFFHANGER EACH: call one method on every member of a class "
-            "(over='light') or a name pattern (over='ha:light.*'). dry_run "
-            "lists who it would reach without running. Stops at the first "
-            "failure unless on_fail='continue'. Owner only."),
+            "call one method on every member of a class (over='light') or name pattern ('ha:light.*'). dry_run lists targets only. stops at first failure unless on_fail='continue'. owner only."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -769,9 +644,7 @@ TOOLS: list[dict] = [
     {
         "name": "method_inspect",
         "description": (
-            "CLIFFHANGER INSPECT: which method a call on an object would run "
-            "(its owner, the resolution order, its params and template) without "
-            "running it. Read-only."),
+            'which method a call would run (owner, resolution order, params, template), without running it. read-only.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -784,7 +657,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "entity_read",
-        "description": ("READ an entity's value after processing: its pack getters' current values with its properties (run=true reads through any cache). The properties blob is clipped at ~800 chars: read one in full with prop= (tail=N pages a list from its newest end; lines=A-B pages text, such as a run's kept output)."),
+        "description": ("read entity: pack getter values + properties (run=true bypasses cache). properties blob clipped ~800 chars: prop=<name> reads one in full; tail=N last N items of a list prop; lines=A-B pages text (e.g. a run's output)."),
         "inputSchema": {
             "type": "object",
             "properties": {
