@@ -72,7 +72,7 @@ forwarding to Python; writes into entities through setters, not function calls; 
 | 3 language layer | pronouns: `Turn`/`Ctx` getters (`turn.c1f`); registers and `convgraph` not yet |
 | 4 sweeps and loops | not started |
 | 5 goals and decisions | decisions and the board's pen are c1f; the selection (pin, cap, ranking) stays with the dream loop |
-| 6 turn path and serve | the Rust door (`http.rs`, `jwt.rs`), the UI shell and files (`door.c1f`); every request is an entity a pack answers; 0 of ~140 routes ported; the message turn is untouched |
+| 6 turn path and serve | the Rust door (`http.rs`, `jwt.rs`), the UI shell and files (`door.c1f`); every request is an entity a pack answers; 0 of ~140 routes ported; the message turn is untouched; **state family** (`door_state.c1f`, `tests/specs/door_state.json`): GET `/membrane/seat`, `/membrane/seat/pause`, `/membrane/state`, `/membrane/self/card` are getters over the presence entity (`membrane::presence`, class Seat; `state`/`events`) and `Boot:seat.nerve_pause_off`; POST `/membrane/seat/pause` and `/membrane/seat/control` write `membrane::presence.control = {id, by, body}` for the verified person and answer 202. **Gaps (Python still serves them; the door answers 501):** nothing consumes `control` yet (the effect is still `seat_panel.control` / `set_pause`), the state read is the panel's cached `state` not the full instrument, `/membrane/stats` (needs a dict with data-driven keys: `models` is keyed by model name; fork), `/membrane/quota`, `/membrane/minds`, `/membrane/self/sheet`, `/membrane/self/recent` (live Python state), the state `?section=` pull |
 | 7 the rest | not started |
 | 8 entity store and field engine | not started; the SQLite store is native (`db.rs`), `Store:<x>.run` writes from c1f |
 
