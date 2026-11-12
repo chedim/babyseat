@@ -22,6 +22,8 @@ wgpu = { version = "30.0.1", optional = true }
 objc2 = { version = "0.6.5", optional = true }
 objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSString", "NSError"] }
 objc2-metal = { version = "0.3.2", optional = true, default-features = false, features = ["std", "block2", "MTLAllocation", "MTLBuffer", "MTLCommandBuffer", "MTLCommandEncoder", "MTLCommandQueue", "MTLComputeCommandEncoder", "MTLComputePipeline", "MTLDevice", "MTLLibrary", "MTLResource", "MTLTypes"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+webpki-roots = { version = "1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -31,10 +33,12 @@ opt-level = 3
 
 [features]
 default = ["python"]
-python = ["dep:pyo3", "dep:rusqlite"]   # the seat: Python binding + the native field store (one SQLite per process, #1111)
+python = ["dep:pyo3", "dep:rusqlite", "tls"]   # the seat: Python binding + the native field store (one SQLite per process, #1111)
 wasm = ["dep:wasm-bindgen"]
 metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:objc2", "dep:objc2-foundation", "dep:objc2-metal"]
+tls = ["dep:rustls", "dep:webpki-roots"]   # https for the Fetch driver (rustls + webpki roots); off for wasm
 
 [dev-dependencies]
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 # the Rust tests' own executor (a test binary is its own process: it never shares a WAL file with the seat)
 rusqlite = { version = "0.32", features = ["bundled"] }
