@@ -1,0 +1,212 @@
+PACK door_decisions 1
+IMPORT door 1
+IMPORT decisions 1
+IMPORT goalgraph 1
+IMPORT banner 1
+IMPORT intents 1
+-- THE DECISION BOARD'S ROUTES (operator, 2026-11-12: all logic is c1f; the door only listens). The route family `decisions` of the
+-- door (docs/porting-brief.md): the board and its writes, the goals, the work graph, an entity's history, an item's chat.
+--   GET  /membrane/decisions        {cards, edges}: every Decision card (merged ones left out), by status then title
+--   GET  /membrane/goals            {goals}: the open Goals; the seat's active set first (Intent:board.active, in its rank order)
+--   GET  /membrane/work-graph       {nodes, edges, runs, rocket}: goals, tasks, unfinished waits, cards; blocks / of edges
+--   GET  /membrane/entity-history?spec=<eid>   {ok, eid, cls, properties, changes, relations}  (the store's rows; see the boundary)
+--   GET  /membrane/item-chat?spec=<eid>        {ok, eid, messages}: the Messages that refer to the item, oldest first
+--   POST /membrane/decision/answer  {card, value, conv?, message?, work?}   a write of `Decision.answer` (the decisions pack decides)
+--   POST /membrane/decision/drop    {card}                                  a write of `Decision.drop`   (the decisions pack decides)
+--   POST /membrane/decision/chat    {card, chat}                            a write of `Decision.chat` (a card keeps the chat it has)
+-- A write is a person's: the door's verified token (`authed`), never a bare loopback caller. The writer is `Request.sub`. The reply
+-- waits for the card's receipt (`answer_log` / `drop_log`, carrying this request's id).
+-- THE BOUNDARY (what this pack does not hold): a card's `receipt` (the UI never reads it; a getter's dict holds 12 keys at most, the engine's
+-- 64-node cap, and the card has 13); the rocket view of finished runs (off unless MEMBRANE_ROCKET_RUNS) answers `runs: []`;
+-- watch nodes (a watch is a property of any entity, the engine mirrors only the classes packs declare) are not drawn; the active
+-- goals are what the dream loop writes to Intent:board.active (nothing does yet: unranked); an entity's `properties` and its field
+-- `changes` are not the store's (the Python engine holds them): properties answer {}, changes the store's delta rows; a spec is an
+-- exact eid; the paused-seat refusal of writes stays with the Python seat; /membrane/item-chat/say (a Message and a relation
+-- edge written) has no c1f verb yet and stays Python.
+
+-- ---- which route ------------------------------------------------------------------------------------------------------------
+Request.dm_route getter:
+  WHEN this.path == '/membrane/decisions': 'board'
+  ELSE WHEN this.path == '/membrane/goals': 'goals'
+  ELSE WHEN this.path == '/membrane/work-graph': 'graph'
+  ELSE WHEN this.path == '/membrane/entity-history': 'history'
+  ELSE WHEN this.path == '/membrane/item-chat': 'chat_of'
+  ELSE WHEN this.path == '/membrane/decision/answer': 'answer'
+  ELSE WHEN this.path == '/membrane/decision/drop': 'drop'
+  ELSE WHEN this.path == '/membrane/decision/chat': 'chat'
+  ELSE: None
+Request.o_decisions getter: this.dm_route != None
+Request.dm_write getter: this.dm_route in ['answer', 'drop', 'chat']
+Request.dm_wrong_method getter: (this.dm_write and this.method != 'POST') or (not this.dm_write and not this.is_read)
+
+-- ---- the cards -------------------------------------------------------------------------------------------------------------
+Decision.dm_sk getter: {'open': '0', 'in_flight': '1', 'decided': '2', 'closed': '3', 'dropped': '4'}[this.cur_status] + '|' + str(this.name or this.eid)
+Decision.dm_title getter: this.name or this.eid
+Decision.dm_summary getter: this.summary or ''
+Decision.dm_card getter: {'eid': this.eid, 'title': this.dm_title, 'description': this.dm_summary, 'status': this.cur_status, 'var': this.var, 'pick': this.pick, 'value': this.value, 'set_by': this.set_by, 'set_at': this.set_at, 'chat': this.chat, 'message': this.message, 'work_needed': this.work_needed}
+Request.dm_cards getter: [d for d in instances('Decision') if not d.merged_into]
+-- the edges: one card's targets as JSON text (the engine has no flatten: a list of lists cannot be one list), one list in the end
+Decision.dm_e_blocks getter: [('{"from":"' + replace(this.eid, '"', "'") + '","to":"' + replace(str(t), '"', "'") + '","rel":"blocks"}') for t in (this.blocks or [])]
+Decision.dm_e_led getter: [('{"from":"' + replace(this.eid, '"', "'") + '","to":"' + replace(str(t), '"', "'") + '","rel":"led_to"}') for t in (this.led_to or [])]
+Decision.dm_e_carried getter: [('{"from":"' + replace(this.eid, '"', "'") + '","to":"' + replace(str(t), '"', "'") + '","rel":"carried_by"}') for t in (this.carried_by or [])]
+Decision.dm_e_text getter: join(concat(this.dm_e_blocks, this.dm_e_led, this.dm_e_carried), ',')
+Request.dm_e_all getter: json('[' + join([d.dm_e_text for d in this.dm_cards if d.dm_e_text != ''], ',') + ']')
+Request.dm_rows getter: sort_by([{'sk': d.dm_sk, 'card': d.dm_card} for d in this.dm_cards], 'sk')
+Request.dm_board getter: {'cards': pluck(this.dm_rows, 'card'), 'edges': this.dm_e_all}
+
+-- ---- the goals -------------------------------------------------------------------------------------------------------------
+Request.dm_active getter: ([i.active for i in instances('Intent') if i.active != None] or [[]])[0]
+Request.dm_open_goals getter: [g for g in instances('Goal') if (g.status or 'open') == 'open' and not g.merged_into]
+Goal.dm_act getter: this.eid in (([i.active for i in instances('Intent') if i.active != None] or [[]])[0])
+Goal.dm_row getter: {'eid': this.eid, 'title': this.name or this.eid, 'summary': this.summary or '', 'active': this.dm_act, 'born': this.born}
+Request.dm_grow getter: [{'k': g.eid, 'bn': g.born or 0, 'title': g.name or g.eid, 'row': g.dm_row} for g in this.dm_open_goals]
+Request.dm_in_act getter: [r for r in [([x for x in this.dm_grow if x['k'] == e] or [None])[0] for e in this.dm_active] if r != None]
+Request.dm_rest getter: sort_by(sort_by([x for x in this.dm_grow if not (x['k'] in this.dm_active)], 'title'), 'bn', True)
+Request.dm_goals getter: {'goals': pluck(concat(this.dm_in_act, this.dm_rest), 'row')}
+
+-- ---- the work graph ---------------------------------------------------------------------------------------------------------
+-- a node: {id, kind: goal|task|wait|decision, title, status, goal, [waiting_on]}; an edge: {from, to, rel: blocks|of}
+-- unfinished: a task or wait until done or dropped; a card until answered (#1139). Goals, tasks, waits and cards that were merged are
+-- not drawn; a wait is drawn only while unfinished.
+Goal.wg_kind getter: 'goal'
+Task.wg_kind getter: 'task'
+Wait.wg_kind getter: 'wait'
+Decision.wg_kind getter: 'decision'
+Goal.wg_title getter: this.title or this.name or this.eid
+Task.wg_title getter: this.title or this.name or this.eid
+Wait.wg_title getter: this.title or this.name or this.eid
+Decision.wg_title getter: this.title or this.name or this.eid
+Task.wg_pending getter: not this.merged_into and (this.status or 'open') not in ['done', 'dropped']
+Wait.wg_pending getter: not this.merged_into and (this.status or 'open') not in ['done', 'dropped']
+Decision.wg_pending getter: not this.merged_into and (this.status or 'open') not in ['decided', 'in_flight', 'closed', 'dropped']
+Task.wg_drawn getter: not this.merged_into
+Wait.wg_drawn getter: this.wg_pending
+Decision.wg_drawn getter: not this.merged_into
+Task.wg_what getter: 'blocker task'
+Wait.wg_what getter: 'wait'
+Decision.wg_what getter: 'decision'
+-- what a task waits on: the unfinished waits, cards and tasks whose `blocks` name it
+Task.wg_blockers getter: [{'id': b.eid, 'kind': b.wg_kind, 'title': b.wg_title, 'reason': 'unfinished ' + b.wg_what} for b in concat(instances('Task'), instances('Wait'), instances('Decision')) if b.wg_pending and this.eid in (b.blocks or [])]
+-- what a goal waits on: its stuck or failed tasks, unfinished blocker tasks, unfinished waits, open cards
+Task.wg_goal_why getter: None if this.merged_into else ((this.status + ' task') if this.status in ['stuck', 'failed'] else ('unfinished blocker task' if this.wg_pending and this.blocks else None))
+Wait.wg_goal_why getter: 'unfinished wait' if this.wg_pending else None
+Decision.wg_goal_why getter: 'open decision' if this.wg_pending else None
+Task.wg_wrow getter: {'id': this.eid, 'kind': 'task', 'title': this.wg_title, 'reason': this.wg_goal_why}
+Wait.wg_wrow getter: {'id': this.eid, 'kind': 'wait', 'title': this.wg_title, 'reason': this.wg_goal_why}
+Decision.wg_wrow getter: {'id': this.eid, 'kind': 'decision', 'title': this.wg_title, 'reason': this.wg_goal_why}
+Goal.wg_waiting getter: [x.wg_wrow for x in concat(instances('Task'), instances('Wait'), instances('Decision')) if x.goal == this.eid and x.eid != this.eid and x.wg_goal_why != None]
+Goal.wg_node getter: {'id': this.eid, 'kind': 'goal', 'title': this.wg_title, 'status': this.status or 'open', 'goal': None, 'waiting_on': this.wg_waiting}
+Task.wg_node getter: {'id': this.eid, 'kind': 'task', 'title': this.wg_title, 'status': this.status or 'open', 'goal': this.goal, 'waiting_on': this.wg_blockers}
+Wait.wg_node getter: {'id': this.eid, 'kind': 'wait', 'title': this.wg_title, 'status': this.status or 'open', 'goal': this.goal}
+Decision.wg_node getter: {'id': this.eid, 'kind': 'decision', 'title': this.wg_title, 'status': this.cur_status, 'goal': this.goal}
+Request.wg_goals getter: sort_by([g.wg_node for g in instances('Goal') if not g.merged_into], 'title')
+Request.wg_tasks getter: sort_by([t.wg_node for t in instances('Task') if t.wg_drawn], 'title')
+Request.wg_waits getter: sort_by([w.wg_node for w in instances('Wait') if w.wg_drawn], 'title')
+Request.wg_cards getter: sort_by([d.wg_node for d in instances('Decision') if d.wg_drawn], 'title')
+Request.wg_nodes getter: concat(this.wg_goals, this.wg_tasks, this.wg_waits, this.wg_cards)
+Request.wg_ids getter: pluck(this.wg_nodes, 'id')
+Request.wg_all getter: [x for x in concat(instances('Task'), instances('Wait'), instances('Decision')) if x.wg_drawn]
+Request.wg_blk_text getter: [join([('{"from":"' + replace(t.eid, '"', "'") + '","to":"' + replace(str(x), '"', "'") + '","rel":"blocks"}') for x in t.blocks], ',') for t in this.wg_all if len(t.blocks or []) > 0]
+Request.wg_of_text getter: [('{"from":"' + replace(t.eid, '"', "'") + '","to":"' + replace(str(t.goal), '"', "'") + '","rel":"of"}') for t in this.wg_all if t.goal]
+Request.wg_raw getter: json('[' + join(concat(this.wg_blk_text, this.wg_of_text), ',') + ']')
+Request.wg_edges getter: [e for e in this.wg_raw if e['from'] in this.wg_ids and e['to'] in this.wg_ids]
+Request.dm_graph getter: {'nodes': this.wg_nodes, 'edges': this.wg_edges, 'runs': [], 'rocket': False}
+
+-- ---- the query: ?spec=<eid> (percent-decoded for the characters an eid has) ---------------------------------------------------------
+Request.dm_qparts getter: words(replace(this.query or '', '&', ' '))
+Request.dm_spec_raw getter: ([replace(p, 'spec=', '') for p in this.dm_qparts if startswith(p, 'spec=')] or [''])[0]
+Request.dm_spec1 getter: replace(replace(replace(replace(replace(replace(this.dm_spec_raw, '+', ' '), '%3A', ':'), '%2F', '/'), '%20', ' '), '%23', '#'), '%40', '@')
+Request.dm_spec getter: strip(replace(replace(replace(replace(replace(replace(this.dm_spec1, '%2C', ','), '%3D', '='), '%26', '&'), '%2B', '+'), '%3F', '?'), '%25', '%'))
+Request.dm_found getter: [e for e in concat(instances('Decision'), instances('Goal'), instances('Task'), instances('Wait')) if e.eid == this.dm_spec]
+
+-- an entity's history: the store's delta rows and relation rows (no field-engine changes; see the boundary above)
+Request.dm_hist_q getter:
+  WHEN this.dm_route != 'history' or this.dm_spec == '': None
+  ELSE: sql("SELECT json_extract(body, '$.d') AS d FROM c_entity_deltas WHERE json_extract(body, '$.d.eid') = ? ORDER BY json_extract(body, '$.d.seq'), json_extract(body, '$.d.sidx')", this.dm_spec)
+Request.dm_rel_q getter:
+  WHEN this.dm_route not in ['history', 'chat_of'] or this.dm_spec == '': None
+  ELSE: sql("SELECT json_extract(body, '$.d') AS d FROM c_relations WHERE json_extract(body, '$.d.subj') = ? OR json_extract(body, '$.d.obj') = ? ORDER BY json_extract(body, '$.o')", this.dm_spec, this.dm_spec)
+Request.dm_hist getter:
+  WHEN this.dm_spec == '': {'ok': False, 'error': 'no entity matches ' + "''"}
+  ELSE WHEN this.dm_hist_q == None or this.dm_rel_q == None: None
+  ELSE WHEN len(this.dm_found) == 0 and len(this.dm_hist_q) == 0 and len(this.dm_rel_q) == 0: {'ok': False, 'error': 'no entity matches ' + "'" + this.dm_spec + "'"}
+  ELSE: {'ok': True, 'eid': this.dm_spec, 'cls': ([e.cls for e in this.dm_found] or [None])[0], 'properties': {}, 'changes': [json(prop(r, 'd')) for r in this.dm_hist_q], 'relations': this.dm_rels}
+
+-- an item's chat: the Messages whose refers-to relation names the item
+Request.dm_rels getter: [json(prop(r, 'd')) for r in (this.dm_rel_q or [])]
+Request.dm_msg_ids getter: [x['subj'] for x in this.dm_rels if x['obj'] == this.dm_spec and x['rel'] == 'refers-to' and x['superseded'] != True]
+Request.dm_chat getter:
+  WHEN this.dm_spec == '': {'ok': False, 'error': 'no entity matches ' + "''"}
+  ELSE WHEN this.dm_rel_q == None: None
+  ELSE: {'ok': True, 'eid': this.dm_spec, 'messages': sort_by([{'id': m.eid, 'who': m.speaker or '', 'text': m.text or '', 'ts': m.ts or 0} for m in instances('Message') if m.eid in this.dm_msg_ids], 'ts')}
+
+-- ---- the writes -------------------------------------------------------------------------------------------------------------
+Request.dm_body getter: json(this.body or '') if this.method == 'POST' else None
+Request.dm_obj getter: this.dm_body != None and startswith(str(this.dm_body), '{')
+Request.dm_card_id getter: str(prop(this.dm_body, 'card') or '') if this.dm_obj else ''
+Request.dm_c getter: ([d for d in instances('Decision') if d.eid == this.dm_card_id] or [None])[0]
+Request.dm_v getter: prop(this.dm_body, 'value')
+Request.dm_conv getter: str(prop(this.dm_body, 'conv') or '') or None
+Request.dm_msg getter: str(prop(this.dm_body, 'message') or '') or None
+Request.dm_work getter: prop(this.dm_body, 'work') if str(prop(this.dm_body, 'work')) in ['True', 'False', 'true', 'false'] else None
+-- what is refused before anything is written
+Request.dm_refused getter:
+  WHEN this.dm_wrong_method: {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN this.dm_write and this.authed != True: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  ELSE WHEN this.dm_write and not this.dm_obj: {'status': 400, 'body': {'error': 'a JSON object body is required'}}
+  ELSE WHEN this.dm_write and this.dm_c == None: {'status': 400, 'body': {'error': 'no Decision card ' + "'" + this.dm_card_id + "'"}}
+  ELSE WHEN this.dm_route == 'chat' and strip(str(prop(this.dm_body, 'chat') or '')) == '': {'status': 400, 'body': {'error': 'chat required'}}
+  ELSE: None
+-- one id per request (a restart restarts the Request numbers; the card's log outlives it)
+Request.dm_ask getter: True if this.dm_write and this.dm_refused == None else None
+Request.dm_ask on-setter dm-stamp:
+  WHEN this.dm_ask == True and this.dm_rid == None:
+    this.dm_rid = this.eid + '@' + str(clock)
+Request.dm_plan getter:
+  WHEN this.dm_ask != True or this.dm_rid == None: None
+  ELSE WHEN this.dm_route == 'answer': {'card': this.dm_card_id, 'prop': 'answer', 'value': {'id': this.dm_rid, 'by': this.sub, 'value': this.dm_v, 'conv': this.dm_conv, 'message': this.dm_msg, 'work': this.dm_work}}
+  ELSE WHEN this.dm_route == 'drop': {'card': this.dm_card_id, 'prop': 'drop', 'value': {'id': this.dm_rid, 'by': this.sub}}
+  ELSE WHEN not this.dm_cchat: {'card': this.dm_card_id, 'prop': 'chat', 'value': strip(str(prop(this.dm_body, 'chat')))}
+  ELSE: {'card': this.dm_card_id, 'prop': None}
+Request.dm_plan on-setter dm-answer:
+  WHEN prop(this.dm_plan, 'prop') == 'answer' and this.dm_sent == None:
+    this.dm_sent = True
+    (prop(this.dm_plan, 'card')).answer = prop(this.dm_plan, 'value')
+Request.dm_plan on-setter dm-drop:
+  WHEN prop(this.dm_plan, 'prop') == 'drop' and this.dm_sent == None:
+    this.dm_sent = True
+    (prop(this.dm_plan, 'card')).drop = prop(this.dm_plan, 'value')
+Request.dm_plan on-setter dm-chat:
+  WHEN prop(this.dm_plan, 'prop') == 'chat' and this.dm_sent == None:
+    this.dm_sent = True
+    (prop(this.dm_plan, 'card')).chat = prop(this.dm_plan, 'value')
+
+-- the receipt: the card's own log, this request's id
+Request.dm_got getter:
+  WHEN this.dm_rid == None or this.dm_c == None: None
+  ELSE WHEN this.dm_route == 'drop': ([r for r in (this.dm_c.drop_log or []) if prop(r, 'id') == this.dm_rid] or [None])[0]
+  ELSE: ([r for r in (this.dm_c.answer_log or []) if prop(r, 'id') == this.dm_rid] or [None])[0]
+Request.dm_receipt getter:
+  WHEN this.dm_got == None: None
+  ELSE WHEN prop(this.dm_got, 'ok') != True: {'status': 409 if prop(this.dm_got, 'conflict') == True else 400, 'body': {'error': prop(this.dm_got, 'error')}}
+  ELSE WHEN this.dm_route == 'drop': {'status': 200, 'body': {'ok': True, 'card': this.dm_c.dm_card}}
+  ELSE: {'status': 200, 'body': {'id': prop(this.dm_got, 'id'), 'ok': True, 'value': prop(this.dm_got, 'value'), 'card': this.dm_c.dm_card}}
+Request.dm_cchat getter: this.dm_c.chat if this.dm_c != None else None
+Request.dm_chat_reply getter:
+  WHEN not this.dm_cchat: None
+  ELSE: {'status': 200, 'body': {'ok': True, 'card': this.dm_c.dm_card}}
+Request.dm_write_reply getter:
+  WHEN this.dm_route == 'chat': this.dm_chat_reply
+  ELSE: this.dm_receipt
+
+-- ---- the reply ----------------------------------------------------------------------------------------------------------------
+Request.dm_read_reply getter:
+  WHEN this.dm_route == 'board': {'status': 200, 'body': this.dm_board}
+  ELSE WHEN this.dm_route == 'goals': {'status': 200, 'body': this.dm_goals}
+  ELSE WHEN this.dm_route == 'graph': {'status': 200, 'body': this.dm_graph}
+  ELSE WHEN this.dm_route == 'history': ({'status': 200, 'body': this.dm_hist} if this.dm_hist != None else None)
+  ELSE: ({'status': 200, 'body': this.dm_chat} if this.dm_chat != None else None)
+Request.r_decisions getter:
+  WHEN this.dm_refused != None: this.dm_refused
+  ELSE WHEN this.dm_write: this.dm_write_reply
+  ELSE: this.dm_read_reply

@@ -4654,9 +4654,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             import urllib.parse as _up
             _q = _up.parse_qs(self.path.split("?", 1)[-1])
             self._json_out(_DM.item_chat(self.server, (_q.get("spec") or [""])[0].strip())); return
-        if path == "/membrane/decisions":             # #470: the project decision map
-            from . import decision_map as _DM
-            self._json_out(_DM.board(getattr(self.server, "entity_store", None))); return
         if path in STRANGER_PATHS:
             self._stranger(path); return
         if path == "/membrane/gate-stages":           # the gate's stage clock, the last rounds
@@ -4754,10 +4751,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._entity_track_list(); return
         if path == "/membrane/entity/add":
             self._entity_add(); return
-        if path == "/membrane/decision/answer":
-            self._decision_answer(); return
-        if path == "/membrane/decision/drop":
-            self._decision_drop(); return
         if path == "/membrane/item-chat/say":
             self._item_say(); return
         if path == "/membrane/feedback":
@@ -7292,26 +7285,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         _entity_post_process(srv, res)
         self._json_out(res)
 
-    def _decision_answer(self) -> None:
-        """POST /membrane/decision/answer {card, value, conv}: the operator
-        answers a decision card (#470). Owner only: agents ask, never decide."""
-        if self._paused_write_refused():
-            return
-        from . import seatauth as _SA
-        if not _SA.owner(self):
-            from . import jwtauth as _JWT
-            _JWT.send_unauthorized(self); return
-        srv = self.server
-        body = self._json_body()
-        from . import fields_live as _FL
-        req = {"value": body.get("value"), "conv": str(body.get("conv") or ""), "message": str(body.get("message") or "")}
-        if isinstance(body.get("work"), bool):
-            req["work"] = body["work"]
-        res = _FL.answer_card(srv, str(body.get("card") or ""), {k: v for k, v in req.items() if v not in ("", None)})
-        if not res.get("ok"):
-            self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
-        self._json_out(res)
-
     def _item_say(self) -> None:
         """POST /membrane/item-chat/say {spec, text}: say in an item's mini-chat (k7). Owner only."""
         if self._paused_write_refused():
@@ -7344,22 +7317,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                          session=str(body.get("session") or ""))
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
-        self._json_out(res)
-
-    def _decision_drop(self) -> None:
-        """POST /membrane/decision/drop {card}: the operator drops an open card.
-        Owner only: agents never drop."""
-        if self._paused_write_refused():
-            return
-        from . import seatauth as _SA
-        if not _SA.owner(self):
-            from . import jwtauth as _JWT
-            _JWT.send_unauthorized(self); return
-        from . import decision_map as _DM
-        body = self._json_body()
-        res = _DM.drop(getattr(self.server, "entity_store", None), str(body.get("card") or ""))
-        if not res.get("ok"):
-            self._json_err_raw(409 if res.get("conflict") else 400, str(res.get("error"))); return
         self._json_out(res)
 
     def _filetool(self) -> None:

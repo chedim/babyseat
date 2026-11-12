@@ -71,8 +71,8 @@ forwarding to Python; writes into entities through setters, not function calls; 
 | 2 model's tools | `learn`, `forget`, `intend`, `fulfill`, `intents`, `answer_card`, `peer_post`, `attention` are c1f writes (`memory`, `intents`, `decisions`, `peer`, `attention` packs); the watch family and `junk_cut` wait for piece 8; entity methods are disabled (creation refused, every call carries the deprecation note), to be translated to `Command:` entities and removed |
 | 3 language layer | pronouns: `Turn`/`Ctx` getters (`turn.c1f`); registers and `convgraph` not yet |
 | 4 sweeps and loops | not started |
-| 5 goals and decisions | decisions and the board's pen are c1f; the selection (pin, cap, ranking) stays with the dream loop |
-| 6 turn path and serve | the Rust door (`http.rs`, `jwt.rs`), the UI shell and files (`door.c1f`); every request is an entity a pack answers; 0 of ~140 routes ported; the message turn is untouched |
+| 5 goals and decisions | decisions and the board's pen are c1f; the selection (pin, cap, ranking) stays with the dream loop. The decision routes are the door's (`door_decisions.c1f`, family `decisions`): the board, goals, work graph, answer, drop, chat (specs `tests/specs/door_decisions.json`) and entity-history / item-chat (store rows; `native/tests/door_decisions_sql.rs`); `Decision.drop` is a decisions-pack write. Still Python: `/membrane/item-chat/say` (no relation-write verb), the work graph's watch nodes and rocket runs, an entity's `properties` and field changes |
+| 6 turn path and serve | the Rust door (`http.rs`, `jwt.rs`), the UI shell and files (`door.c1f`); every request is an entity a pack answers; the decision family ported (~10 of ~140 routes); the message turn is untouched |
 | 7 the rest | not started |
 | 8 entity store and field engine | not started; the SQLite store is native (`db.rs`), `Store:<x>.run` writes from c1f |
 

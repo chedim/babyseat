@@ -163,12 +163,6 @@ class TestLifecycle(unittest.TestCase):
         D.answer(est, led, eid, "yes")
         self.assertFalse(DM.drop(est, eid)["ok"])
 
-    def test_board_lists_every_status(self):
-        est, _ = _store()
-        eid = _card(est, "d")
-        DM.drop(est, eid)
-        self.assertEqual(DM.board(est)["cards"][0]["status"], "dropped")
-
 
 if __name__ == "__main__":
     unittest.main()

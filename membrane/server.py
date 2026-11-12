@@ -4671,11 +4671,6 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if psrv is None:
                     return self._json_err(503, "no seat")
                 self._json_out(_SP.pause_state(psrv))
-            elif path == "/membrane/decisions":
-                # #470: the decision board's read (the page calls the serve port)
-                from . import decision_map as _DM
-                psrv = getattr(runner, "srv", None) if runner is not None else None
-                self._json_out(_DM.board(getattr(psrv, "entity_store", None)))
             elif path in ("/membrane/work-graph", "/membrane/entity-history", "/membrane/item-chat"):
                 # #772: the field view's reads (the page calls the serve port)
                 from . import decision_map as _DM
@@ -4688,20 +4683,6 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     self._json_out(_DM.entity_history(psrv, _spec))
                 else:
                     self._json_out(_DM.item_chat(psrv, _spec))
-            elif path == "/membrane/goals":
-                # #470: the cockpit's goals -- the open Goal entities, the
-                # seat's active set (the intent board's selection) first
-                from . import decision_map as _DM
-                psrv = getattr(runner, "srv", None) if runner is not None else None
-                _act = []
-                try:
-                    from .lanes import _intents_board
-                    _ib = _intents_board(psrv) if psrv is not None else None
-                    if _ib is not None and _ib.selection is not None:
-                        _act = [i.eid for i in _ib.open_intents()]
-                except Exception:
-                    _act = []                              # no board: the goals, unranked
-                self._json_out(_DM.goals(getattr(psrv, "entity_store", None), _act))
             elif path == "/membrane/options":
                 # #344: the seat-wide options (options.py) -- the ⚙ window's read
                 from . import options as _OPT
@@ -5003,28 +4984,6 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                                  relay_speaker=getattr(self, "_ui_speaker", "") if getattr(self, "_ui_relay", False) else None,
                                  body=b)
                 return self._json_out(_SP.set_pause(psrv, b["paused"], by=_by))
-            if path in ("/membrane/decision/answer", "/membrane/decision/chat", "/membrane/decision/drop"):
-                # #470: the board's writes, behind the owner's door above like
-                # every write: an answer (the decisions pack) or a card's chat
-                from . import decision_map as _DM
-                b = self._read_body()
-                if not isinstance(b, dict):
-                    return self._json_out({"error": "a JSON object body is required"}, code=400)
-                psrv = getattr(runner, "srv", None) if runner is not None else None
-                est = getattr(psrv, "entity_store", None)
-                if path.endswith("/answer"):
-                    from . import fields_live as _FL
-                    req = {"value": b.get("value"), "conv": str(b.get("conv") or ""), "message": str(b.get("message") or "")}
-                    if isinstance(b.get("work"), bool):
-                        req["work"] = b["work"]
-                    res = _FL.answer_card(psrv, str(b.get("card") or ""), {k: v for k, v in req.items() if v not in ("", None)})
-                elif path.endswith("/drop"):
-                    res = _DM.drop(est, str(b.get("card") or ""))
-                else:
-                    res = _DM.set_chat(est, str(b.get("card") or ""), str(b.get("chat") or ""))
-                if not res.get("ok"):
-                    return self._json_out({"error": res.get("error")}, code=409 if res.get("conflict") else 400)
-                return self._json_out(res)
             if path == "/membrane/feedback":
                 # G15/G9 (docs/ui-pack-design.md): a reply's footer press -- 👍/👎(+why), owner's door above
                 from . import reply_feedback as _RF

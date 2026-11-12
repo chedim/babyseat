@@ -134,6 +134,37 @@ Decision.verdict on-setter answer-done:
     this.answer_result = {'id': prop(this.verdict, 'id'), 'ok': True, 'value': prop(this.verdict, 'value')}
     this.answer_log = concat(this.answer_log or [], [{'id': prop(this.verdict, 'id'), 'ok': True, 'value': prop(this.verdict, 'value')}])
 
+-- ---- the drop: the person drops an OPEN card without answering it ----------------------------------------------------------------
+--   Decision.drop = {id?, by?}   the person's own drop (the board's Drop; the seat's door writes it). Only an open card drops (an agent's
+--                                drop is a status edit with a dropped_why, refused or allowed by the entity tools, not this).
+-- The receipt is `drop_result` ({id, ok, error?, conflict?}), kept in `drop_log` (a door looks for its own request's `id`).
+Decision.drop on-setter drop-stamp:
+  ALWAYS:
+    this.drop_id = prop(this.drop, 'id') or clock
+Decision.drop_verdict getter:
+  WHEN this.drop == None or this.drop_id == None: None
+  ELSE WHEN this.cur_status != 'open': {'id': this.drop_id, 'ok': False, 'conflict': True, 'error': 'only an open card can be dropped'}
+  ELSE: {'id': this.drop_id, 'ok': True, 'body': {'card': this.eid, 'kind': 'decision', 'title': this.title_short, 'value': 'dropped', 'blocks': this.blocks or [], 'work_needed': False}}
+Decision.drop_verdict on-setter drop-refused:
+  WHEN prop(this.drop_verdict, 'ok') == False and prop(this.drop_result, 'id') != prop(this.drop_verdict, 'id'):
+    this.drop_result = this.drop_verdict
+    this.drop_log = concat(this.drop_log or [], [this.drop_verdict])
+Decision.drop_verdict on-setter drop-decided:
+  WHEN prop(this.drop_verdict, 'ok') == True and prop(this.drop_result, 'id') != prop(this.drop_verdict, 'id'):
+    this.status = 'dropped'
+    this.set_by = 'operator'
+    this.dropped_by = 'operator'
+    this.value_ts = clock
+    this.set_at = prop(localtime(clock), 'date') + ' ' + prop(localtime(clock), 'clock') + ' ' + prop(localtime(clock), 'zone')
+Decision.drop_verdict on-setter drop-notify:
+  WHEN prop(this.drop_verdict, 'ok') == True and prop(this.drop_result, 'id') != prop(this.drop_verdict, 'id'):
+    ('Notify:seat').tell = {'body': prop(this.drop_verdict, 'body'), 'ts': clock}
+-- the receipt LAST (see answer-done)
+Decision.drop_verdict on-setter drop-done:
+  WHEN prop(this.drop_verdict, 'ok') == True and prop(this.drop_result, 'id') != prop(this.drop_verdict, 'id'):
+    this.drop_result = {'id': prop(this.drop_verdict, 'id'), 'ok': True}
+    this.drop_log = concat(this.drop_log or [], [{'id': prop(this.drop_verdict, 'id'), 'ok': True}])
+
 -- ---- the nodes the decisions use ---------------------------------------------------------------------------------------
 -- Notify:seat is the seat's delivery of a decision event (the watcher pool, or one message into the card's chat); a
 -- driver. File:operator-ledger is the operator's ledger file (the seat tells its path at start).

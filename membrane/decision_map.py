@@ -52,7 +52,6 @@ ANSWER_OWNED = ("value", "set_by", "set_at", "answer", "answer_id", "answer_resu
                 "relayed_by", "answer_quote", "answer_chat", "previous_value")
 _ANSWER_LOCK = threading.Lock()     # one drop at a time: a card is dropped once
 SPECULATIVE = "speculative"     # reversible drafts an agent attaches to an undecided card
-EDGE_KEYS = ("blocks", "led_to", "carried_by")
 VAR_TYPES = ("int", "float", "bool", "string", "option")
 
 
@@ -130,39 +129,6 @@ def _card_of(ent) -> dict:
             "work_needed": p.get("work_needed"), "receipt": p.get("receipt")}
 
 
-def board(est) -> dict:
-    """Every Decision card and the edges between them (and to the work)."""
-    from .entities import CLASS_DECISION
-    cards, edges = [], []
-    for ent in list((getattr(est, "docs", None) or {}).values()):
-        if ent.cls != CLASS_DECISION or (ent.properties or {}).get("merged_into"):
-            continue
-        cards.append(_card_of(ent))
-        for rel in EDGE_KEYS:
-            to = (ent.properties or {}).get(rel)
-            for t in (to if isinstance(to, list) else [to] if to else []):
-                edges.append({"from": ent.eid, "to": str(t), "rel": rel})
-    cards.sort(key=lambda c: (STATUSES.index(c["status"]), c["title"]))
-    return {"cards": cards, "edges": edges}
-
-
-def set_chat(est, spec: str, chat: str) -> dict:
-    """Record the chat a card opened (the board's click): only the `chat`
-    property changes, and a card keeps the chat it already has."""
-    from .entities import CLASS_DECISION
-    chat = str(chat or "").strip()
-    if not chat:
-        return {"ok": False, "error": "chat required"}
-    ent = est.resolve(str(spec or ""), exact=True) if est is not None else None
-    if ent is None or ent.cls != CLASS_DECISION:
-        return {"ok": False, "error": f"no Decision card {spec!r}"}
-    p = ent.properties or {}
-    p["chat"] = p.get("chat") or chat
-    ent.properties = p
-    est.upsert(ent)
-    return {"ok": True, "card": _card_of(ent)}
-
-
 def _one_line(s, cap: int) -> str:
     s = " ".join(str(s or "").split())
     return s if len(s) <= cap else s[: cap - 1] + "…"
@@ -229,28 +195,6 @@ def tell_drop(est, ent) -> None:
 def stamp_agent_drop(props: dict) -> None:
     """An agent's drop (status -> dropped via entity_edit): same stamps as drop()."""
     props.update({"dropped_by": "agent", "value_ts": time.time()})
-
-
-def goals(est, active=()) -> dict:
-    """The cockpit's goals (#470): the open Goal entities, the seat's active
-    set first (in its rank order, ``active`` eids, flagged), then the rest,
-    the newest first."""
-    from .entities import CLASS_GOAL
-    act = [str(a) for a in (active or ())]
-    out = []
-    for ent in list((getattr(est, "docs", None) or {}).values()):
-        p = ent.properties or {}
-        if ent.cls != CLASS_GOAL or p.get("merged_into") or p.get("status", "open") != "open":
-            continue
-        out.append({"eid": ent.eid, "title": p.get("name") or ent.eid,
-                    "summary": p.get("summary") or "", "active": ent.eid in act,
-                    "born": p.get("born")})
-
-    def rank(g):
-        born = g["born"] if isinstance(g["born"], (int, float)) else 0.0
-        return (act.index(g["eid"]) if g["active"] else len(act), -born, g["title"])
-    out.sort(key=rank)
-    return {"goals": out}
 
 
 def _wait_on(d, reason: str) -> dict:
