@@ -65,6 +65,16 @@ difference. Reviewing a pack, an agent's branch or Memo's edit means reading the
 writing a new property, claiming a new path or importing a new pack fails the test until the change is reviewed and recorded
 (`SURFACE_UPDATE=1 cargo test --test contracts surface`). There is no `private` keyword: the contract is the surface.
 
+## Natives: Rust inside core packs only (operator, 2026-11-12)
+A shipped pack may carry `native <Class>.<getter> (<args>) -> <Type> rust:` blocks. A build step extracts them into a generated
+Rust module compiled into the library and registered in the native-class table; the pack then uses the class like any other
+(`Std.Url(raw: x).decoded`). The declared signature is the contract: arguments are checked like casts before the block runs (a value
+of the wrong type or a null never reaches it: the call returns the reasoned null), and the return converts by type (`T?` is an Option,
+`Result<T, String>`'s `Err` becomes `None('error: ...')`, a panic is caught and becomes a reasoned null, an unlisted Rust type is a
+build error). A native is pure: it receives values and returns a value; I/O stays in the drivers. **Only core packs can contain Rust:**
+a `native` block in a pack loaded at runtime (a `Pack` entity, which is what the model writes) is refused by the loader, and no toolchain
+is needed on a seat. A sandboxed `native wasm:` variant for runtime packs is a later option.
+
 ## Order of work
 1. This document and the Request contract's shared getters with specs (`tests/specs/door_std.json`): `facts`, `jbody`, `qpairs`,
    `person`, and the declarative method gate `m_<f>`.
