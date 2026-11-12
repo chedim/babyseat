@@ -105,9 +105,10 @@ fn the_boot_facts_packs_read_are_registered_and_the_wired_ones_are_written_by_th
     let boot_declared: BTreeSet<String> = all.iter().flat_map(|p| declared(&p.1)).filter(|(c, _)| c == "Boot").map(|(_, p)| p).collect();
     let mut read: BTreeSet<String> = BTreeSet::new();
     for (_, text) in &all {
-        for id in ident_after(text, "b.") { read.insert(id); }                         // [b.x for b in instances('Boot')]
         let mut cur = String::new();
         for l in text.lines() {
+            // [b.x for b in instances('Boot')] or [b.x for b in this.boots]: only where b ranges over the Boot entities
+            if l.contains("for b in instances('Boot')") || l.contains("for b in this.boots") { for id in ident_after(l, "b.") { read.insert(id); } }
             if !l.starts_with(' ') && !l.starts_with("--") && !l.is_empty() { cur = l.split(['.', ' ']).next().unwrap_or("").to_string(); }
             if cur == "Boot" { for id in ident_after(l, "this.") { read.insert(id); } }
         }
