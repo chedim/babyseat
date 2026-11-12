@@ -39,7 +39,7 @@ def _dial(seat, **props):
 
 def test_a_map_mode_seat_shows_a_tiny_placeholder_that_instructs(seat, monkeypatch):
     calls = []
-    r = _run(seat, monkeypatch, facts={"map": True}, calls=calls)
+    r = _run(seat, monkeypatch, facts={"map": True}, ask="", calls=calls)      # the seat writes no ask on a map seat
     text = r["text"] or ""
     assert text.startswith("BANNER")
     assert FL.banner_eid("owner", "ses_op") in text            # where its settings are
@@ -161,3 +161,73 @@ def test_map_mode_never_rebuilds_the_history_or_past_answers(seat, monkeypatch):
     monkeypatch.setenv("MEMBRANE_EXP_MOMENTUM_MAP", "1")
     assert L._recon_block(seat, object(), {}, "q", None) is None
     assert called == []
+
+
+def test_the_placeholder_is_asked_of_the_pack_once_per_chat_and_mode(seat, monkeypatch):
+    from membrane import conv_banner as CB
+    from membrane import lanes as L
+    monkeypatch.setattr(RB, "c1f_call", _fake)
+    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
+    builds = []
+    real = CB.pack_block
+
+    def counted(*a, **k):
+        builds.append(1)
+        return real(*a, **k)
+    monkeypatch.setattr(CB, "pack_block", counted)
+    body = {"_turn_sid": "ses_op"}
+    first = CB.bare(seat, body, "ses_op")
+    assert first.startswith("BANNER")
+    assert CB.bare(seat, body, "ses_op") == first and CB.bare(seat, body, "ses_op") == first
+    assert len(builds) == 1                                             # not once per turn
+    _dial(seat, mode="off")
+    assert CB.bare(seat, body, "ses_op") == "" and len(builds) == 2     # the dial changed: asked again
+
+
+def test_a_failed_build_is_never_shown_in_the_placeholders_place(seat, monkeypatch):
+    from membrane import conv_banner as CB
+    from membrane import lanes as L
+    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
+    monkeypatch.setattr(CB, "pack_block", lambda *a, **k: "▸ the banner failed: boom")
+    assert CB.bare(seat, {"_turn_sid": "ses_fail"}, "ses_fail") == CB.BARE_FALLBACK
+
+
+def _own_banner(seat, getter):
+    """The chat's banner instance made of a class of the model's own (it declares its own `text`)."""
+    from membrane.entities import MEMBRANE_NS, QuantumEntity
+    seat._loop_runner.sessions["ses_own"] = {"owner": "owner"}
+    seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:ownbanner", cls="Pack", properties={
+        "name": "ownbanner", "c1f": "PACK ownbanner 1\n" + getter + "\n"}))
+    seat.live.settle()
+    eid = FL.banner_eid("owner", "ses_own")
+    seat.entity_store.upsert(QuantumEntity(eid=eid, cls="OwnBanner", properties={"name": "my banner"}))
+    seat.live.settle()
+
+
+def test_a_banner_of_the_models_own_class_is_what_a_map_seat_shows(seat, monkeypatch):
+    # operator 2026-11-11: "free reign over your banner": the standard class shows the placeholder, the model's own
+    # class shows what ITS text says (not cached, not replaced by the fallback)
+    from membrane import conv_banner as CB
+    from membrane import lanes as L
+    monkeypatch.setattr(RB, "c1f_call", _fake)
+    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
+    _own_banner(seat, "OwnBanner.text getter: 'MY BANNER · ' + str(this.chat)")
+    out = CB.bare(seat, {"_turn_sid": "ses_own"}, "ses_own")
+    assert out.startswith("MY BANNER") and "BANNER: nothing is pushed" not in out
+    assert CB.bare(seat, {"_turn_sid": "ses_own"}, "ses_own") == out          # (same text; asked again each turn)
+
+
+def test_an_error_in_the_models_own_banner_is_shown_not_replaced(seat, monkeypatch):
+    from membrane import conv_banner as CB
+    from membrane import lanes as L
+
+    def broken(ctx, name, args):
+        if name == "recall":
+            raise RuntimeError("the store is away")
+        return _fake(ctx, name, args)
+    monkeypatch.setattr(RB, "c1f_call", broken)
+    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
+    _own_banner(seat, "OwnBanner.text getter: join(recall(this.ask, 10, this.session), '\\n')")
+    body = {"_turn_sid": "ses_own", "messages": [{"role": "user", "content": ASK}]}
+    out = CB.bare(seat, body, "ses_own")
+    assert "the banner failed" in out and "the store is away" in out and out != CB.BARE_FALLBACK

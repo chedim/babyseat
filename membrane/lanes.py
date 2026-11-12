@@ -5989,6 +5989,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # unchanged.
         _st.mark("act")
         speak_block = _speak_block(srv)
+        from . import momentum_map as _MMs
+        if _MMs.on():                       # map mode: nothing is injected into the chat but the banner (operator
+            speak_block = None              # 2026-11-11); the speech relay's held lines are drained and dropped
         up = dict(body)
         # the serve's streamed rounds ask for membrane's injection as data
         # (the card), not as a reasoning monologue -- the flag never leaves
@@ -6097,6 +6100,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             up["messages"] = _inject_after(_msgs, speak_block)
         _st.mark("assemble")
         # THROWAWAY EXPERIMENT (operator 2026-11-11): the map of what moves, no history, no banners
+        _map_banner = ""
         try:
             from . import momentum_map as _MM
             if _MM.on() and getattr(srv, "efield", None) is not None:
@@ -6107,12 +6111,14 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                     _CC.new_turn(srv, _sid)
                 _cl = _CC.line(srv)
                 _st.mark("ctx")                   # the context stack's in: line
-                try:                              # the banner pack's tiny placeholder that instructs
+                _map_banner = ""
+                try:                              # the banner: the pack's placeholder, or the model's own class's text
                     from . import conv_banner as _CB
-                    _bare = _CB.bare(srv, body, _CAPMOD.current_conversation())
+                    _bare = "" if _is_loop_turn(srv, body) else _CB.bare(srv, body, _CAPMOD.current_conversation())
                 except Exception as _be:
                     print(f"[exp-map] banner placeholder failed ({_be})", file=sys.stderr)
                     from .conv_banner import BARE_FALLBACK as _bare
+                _map_banner = _bare
                 up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield,
                                              getattr(srv, "entity_store", None), _cl,
                                              chat=_CC.current(srv), held=_CC.held(srv), banner=_bare)
@@ -6170,6 +6176,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 _CB.restamp(up.get("messages"), up.get("model"))   # #466: the model is known only now
             except Exception as e:
                 print(f"[conv-banner] model line error: {e}", file=sys.stderr)
+        if _map_banner and not ctx:
+            ctx = _map_banner               # the injection card shows the banner, as ever (it is the injection)
         _gate_s = round(time.time() - _t_v1, 2)
         _sid_s = str(body.get("_turn_sid") or "")
         _row_s = ((getattr(getattr(getattr(srv, "_loop_runner", None), "sessions", None), "sessions", None) or {})

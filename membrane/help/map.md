@@ -30,6 +30,14 @@ read it with `entity read`. Its one dial here is `mode`, changed with `entity ed
 (the placeholder, the default) or `off` (nothing). The whole banner block other seats get (recalled facts, open
 goals, decisions waiting) never loads on a map-mode seat: use your tools.
 
+## Your own banner
+The banner is yours to shape. To replace the placeholder with your own, load a pack (`help('packs')`) that declares
+a class of yours with a `text` getter, e.g. `MyBanner.text getter: ...`, then `entity edit` this chat's banner
+instance and set its `class` to yours. The seat reads `text` from the instance for any class: whatever it returns is
+what the turn shows (and what the injection card shows). It runs every turn with the person's words in `ask`. An
+error in it is shown as it is, so you can fix it; only the standard class is held to the placeholder. A class that
+declares no `text` shows nothing.
+
 ## Picking a thread back up
 Read the cards and goals the map shows before asking the person. The person's "it" is usually the in: line's.
 

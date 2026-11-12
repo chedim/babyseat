@@ -739,13 +739,35 @@ def bare(srv, body: dict, conv: str) -> str:
         fld = _L._efield_on(srv)
         if live is None or fld is None or not live.has_banner():
             return BARE_FALLBACK
-        out = pack_block(srv, live, fld, conv, [], "", time.time(), str((body or {}).get("_turn_sid") or ""),
-                         {"map": True})
+        sid = str((body or {}).get("_turn_sid") or "")
+        est = getattr(srv, "entity_store", None)
+        sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
+        owner = str(((sess.get(sid or conv) if sess is not None else None) or {}).get("owner") or "seat")
+        d = (est.docs or {}).get(_FL.banner_eid(owner, sid or conv)) if est is not None else None
+        if d is not None and d.cls != "Banner":
+            # THE MODEL'S OWN BANNER (operator 2026-11-11, "free reign over your banner"): this chat's instance is of a
+            # class the model made; its own `text` is the banner, asked every turn with the person's words, an error
+            # shown as it is (never replaced). Only the standard class is held to the placeholder.
+            out = pack_block(srv, live, fld, conv, [], _L._last_user_text(body or {}), time.time(), sid, {"map": True})
+            return out or ""
+        # the standard class: the placeholder only changes with this chat's `mode` dial: ask the pack once, then per
+        # change of the dial (a build costs seconds on a busy field; a turn must not pay it every time)
+        cache = srv.__dict__.setdefault("_bare_cache", {})
+        mode = str(((d.properties or {}).get("mode") if d is not None else "") or "")
+        hit = cache.get(sid or conv)
+        if hit is not None and hit[0] == mode:
+            return hit[1]
+        out = pack_block(srv, live, fld, conv, [], "", time.time(), sid, {"map": True})
     except Exception:                       # noqa: BLE001 -- the placeholder never breaks a turn
         return BARE_FALLBACK
     if out is None:
-        return ""                           # the pack's mode dial is 'off': nothing, by the person's choice
-    return out if out.startswith("BANNER") else BARE_FALLBACK
+        out = ""                            # the pack's mode dial is 'off': nothing, by the person's choice
+    elif not out.startswith("BANNER"):
+        return BARE_FALLBACK                # a failed build is never shown in the placeholder's place
+    cache[sid or conv] = (mode, out)
+    while len(cache) > 64:
+        cache.pop(next(iter(cache)))
+    return out
 
 
 def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: str, facts: dict) -> str | None:

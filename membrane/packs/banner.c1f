@@ -8,7 +8,7 @@ IMPORT goalgraph 1
 -- Built-ins: recall(text, pool, session), rerank(rows, text, weights), pick(rows, n, session), line(row),
 -- topic(text); a row is {h, n, ts, role, via, score, fact}, read with prop(row, 'score').
 -- recall and rerank run off the engine (None until they land), one step per getter so `lines` changes once
-Banner.recalled getter WHEN topic(this.ask) and this.shown == 'full': recall(this.ask, this.pool, this.session)
+Banner.recalled getter WHEN topic(this.ask): recall(this.ask, this.pool, this.session)
 Banner.recalled getter: None
 Banner.ranked getter WHEN this.recalled != None: rerank(this.recalled, this.ask, this.weights)
 Banner.ranked getter: None
