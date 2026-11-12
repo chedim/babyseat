@@ -181,3 +181,18 @@ def test_a_replaced_unbuilt_entity_is_the_new_one(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_the_boot_entity_finds_the_previous_boot_without_building_the_store(tmp):
+    # live 2026-11-11: boot_entity scanned docs.values() for the previous boot and built all 61,794 entities at boot
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        from membrane import lanes as L
+        prev = L.boot_entity(st, root=tmp, field="f", pid=1, argv=["a"], boot_ts=1000.0)
+        cur = L.boot_entity(st, root=tmp, field="f", pid=2, argv=["b"], boot_ts=2000.0)
+        assert cur.properties.get("prev_boot") == prev.eid
+        assert built == []                                   # no `thing:` entity was built to find the previous boot
+    finally:
+        _restore(real)
+        db.close()

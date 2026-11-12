@@ -8317,10 +8317,11 @@ def boot_entity(est, root: str, field: str, pid: int, argv: list,
     }
     # THE LINEAGE: the PREVIOUS boot's eid rides (the chain the graph
     # reader can walk: boot -> prev_boot -> ...)
+    _boot_keys = [k for k in list((est.docs or {}).keys())            # by key: nothing is built to find the boot records
+                  if str(k).startswith(MEMBRANE_NS + "boot:")]
     _boots = [((e.properties or {}).get("boot_ts") or 0, e.eid)
-              for e in (est.docs or {}).values()
-              if str(e.eid).startswith(MEMBRANE_NS + "boot:")
-              and (e.properties or {})
+              for e in (est.docs.get(k) for k in _boot_keys) if e is not None
+              if (e.properties or {})
               and (e.properties or {}).get("boot_ts", 0) < boot_ts]
     prev = max(_boots) if _boots else None
     if prev and prev[0]:
