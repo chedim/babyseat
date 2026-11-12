@@ -337,3 +337,17 @@ def test_the_thinkers_tick_pass_builds_only_what_can_tick(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_timeline_name_suffix_and_junk_lookups_build_only_what_they_return(tmp):
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        assert st.open_timelines() == [] and built == []
+        assert st.find("t7").eid == "membrane::thing:7" and built == ["membrane::thing:7"]
+        built.clear()
+        assert st.docs.get("x") is None
+        assert built == []
+    finally:
+        _restore(real)
+        db.close()

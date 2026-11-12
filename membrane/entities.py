@@ -1140,9 +1140,7 @@ class TimelineOps:
         turn_state_arr = (_np.asarray(turn_state, dtype=_np.uint8)
                           if turn_state is not None and lane is not None
                           else None)
-        for ent in list(store.docs.values()):
-            if ent.cls != CLASS_TIMELINE:
-                continue
+        for _k, ent in store.docs.matching(lambda c, _p: c == CLASS_TIMELINE):       # only the timelines are built
             props = ent.properties or {}
             if props.get("status") != TimelineOps.TL_STATUS_QUARANTINED:
                 continue
@@ -1246,9 +1244,7 @@ class TimelineOps:
         """The render surface: quarantined + confirmed branches under the
         true timeline, newest first, bounded."""
         out = []
-        for ent in list(store.docs.values()):
-            if ent.cls != CLASS_TIMELINE:
-                continue
+        for _k, ent in store.docs.matching(lambda c, _p: c == CLASS_TIMELINE):       # only the timelines are built
             props = ent.properties or {}
             if props.get("status") in (TimelineOps.TL_STATUS_QUARANTINED,
                                        TimelineOps.TL_STATUS_CONFIRMED):
@@ -1270,9 +1266,7 @@ class TimelineOps:
         if ent is None:
             return []
         out = []
-        for e in list(store.docs.values()):
-            if e.cls != CLASS_TIMELINE:
-                continue
+        for _k, e in store.docs.matching(lambda c, _p: c == CLASS_TIMELINE):
             props = e.properties or {}
             if open_only and props.get("status") not in (
                     TimelineOps.TL_STATUS_QUARANTINED,
@@ -2424,7 +2418,8 @@ class EntityStore(MultiParentOps, TimelineOps):
     def find(self, name_l: str) -> QuantumEntity | None:
         """Case-insensitive name lookup (the viewer/join path)."""
         name_l = (name_l or "").strip().lower()
-        for q in list(self.docs.values()):
+        for _k, q in self.docs.scan(lambda eid, _c, p: str(p.get("name", "")).strip().lower() == name_l
+                                    or eid.lower().endswith(":" + name_l)):
             props = q.properties or {}
             if str(props.get("name", "")).strip().lower() == name_l \
                     or q.eid.lower().endswith(":" + name_l):
@@ -2524,9 +2519,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         holds a hub named 'junk', plus the field-only ids (a field word or an
         unresolved symbol can't take a parent) listed on a hub's `junk`."""
         from .eids import field_id as _fid
-        hubs = [d for d in list(self.docs.values())
-                if str((d.properties or {}).get("name") or "").lower() == "junk"
-                or d.eid.lower().endswith(":junk") or d.eid.lower() == (MEMBRANE_NS + "junk")]
+        hubs = [d for _k, d in self.docs.scan(lambda eid, _c, p: str(p.get("name") or "").lower() == "junk"
+                                              or eid.lower().endswith(":junk") or eid.lower() == (MEMBRANE_NS + "junk"))]
         if not hubs:
             return set()
         sig = (len(self.docs), tuple(sorted((h.eid, len((h.properties or {}).get("junk") or [])) for h in hubs)))
@@ -2538,12 +2532,13 @@ class EntityStore(MultiParentOps, TimelineOps):
             for x in (h.properties or {}).get("junk") or []:
                 out.add(str(x))
                 out.add(_fid(str(x)))
-        for d in list(self.docs.values()):
-            ps = (d.properties or {}).get("parents") or []
+        def _under_junk(props) -> bool:
+            ps = props.get("parents") or []
             ps = ps if isinstance(ps, list) else [ps]
-            if any(p in hub_ids or str(p).lower().endswith(":junk") or str(p).lower() == "junk" for p in ps):
-                out.add(_fid(d.eid))
-                out.add(d.eid)
+            return any(p in hub_ids or str(p).lower().endswith(":junk") or str(p).lower() == "junk" for p in ps)
+        for _k, d in self.docs.scan(lambda _e, _c, p: _under_junk(p)):        # only what hangs under a junk hub is built
+            out.add(_fid(d.eid))
+            out.add(d.eid)
         self._junk_sig, self._junk_ids = sig, out
         return out
 
@@ -3591,9 +3586,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         if hit is not None:
             return hit
         suffix = ":" + key.lower()
-        for q in list(self.docs.values()):
-            if q.eid.lower().endswith(suffix):
-                return q
+        for _k, q in self.docs.scan(lambda eid, _c, _p: eid.lower().endswith(suffix)):
+            return q
         return None
 
 POSITION_HALF_LIFE_S = 24 * 3600.0   # default drift half-life (24h)
