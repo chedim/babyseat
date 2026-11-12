@@ -323,3 +323,17 @@ def test_the_drift_pass_filter_judges_by_eid_and_builds_nothing(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_the_thinkers_tick_pass_builds_only_what_can_tick(tmp):
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        from types import SimpleNamespace
+        from membrane import thinker
+        me = SimpleNamespace(srv=SimpleNamespace(entity_store=st), _beat=1)
+        thinker.Thinker._tick_scripts(me)
+        assert built == []                                   # no `thing:` entity has a tick_script or parents
+    finally:
+        _restore(real)
+        db.close()

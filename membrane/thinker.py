@@ -458,7 +458,7 @@ class Thinker:
         beat = self._beat
         fired, movers = [], []
         from .night import effective_script, script_held
-        for ent in list(est.docs.values()):
+        for _k, ent in est.docs.scan(lambda _e, _c, p: p.get("tick_script") or p.get("parents")):   # only what can tick is built
             props = ent.properties or {}
             if script_held(props, time.time()):
                 continue          # struck out: off until its retry is due (#149)
