@@ -1815,6 +1815,7 @@ def main() -> None:
         if getattr(srv, "events_pool", None) is not None:
             srv.loops = LoopRunner(max_loops=max(1, int(os.environ.get("MEMBRANE_LOOPS_MAX") or 3)))   # an HA box: fewer
             srv.loops._srv = srv
+            _boot_laps.step('loops: runner')
             srv.loops.titles = []          # the running agents' names (the banner)
 
             # THE SESSION-MAKER (the storm's last exhibit, 2026-10-07: the
@@ -1849,6 +1850,7 @@ def main() -> None:
                     return {"verdict_text": (out or "")[:200], "model": model or None}
                 return go
             srv.run_loop_turn = _run_loop_turn()
+            _boot_laps.step('loops: old commands')
             try:                               # #576 G: the retired link commands go (once; a backup is kept)
                 from . import scripts as _SCR
                 if getattr(srv, "entity_store", None) is not None:
@@ -1858,6 +1860,7 @@ def main() -> None:
                               f"{_rep['deleted']} variants deleted (backup {_rep['backup']})", file=sys.stderr)
             except Exception as e:
                 print(f"[opencode] command migration failed ({e})", file=sys.stderr)
+            _boot_laps.step('loops: cliffhanger VM')
             try:                               # #576 B: the cliffhanger VM hears every write
                 from . import ch as _CH
                 if getattr(srv, "entity_store", None) is not None and getattr(srv, "ch_vm", None) is None:
@@ -1875,7 +1878,9 @@ def main() -> None:
                 start_goal_pulse(srv)
                 try:                           # #738: goals as a graph -- the triggers, the worker pool
                     from . import goalgraph as _GG
+                    _boot_laps.step('loops: goal graph seed')
                     _n = _GG.seed(srv)
+                    _boot_laps.step('loops: script upgrade')
                     from . import fields_live as _FL
                     try:                       # #1044: the upgrade -- entity scripts move into .c1f once (rules, replay-gated)
                         from . import scriptport as _SPORT
@@ -1884,7 +1889,9 @@ def main() -> None:
                             print("[upgrade] scripts: " + ", ".join(f"{k} {len(v)}" for k, v in _rep.items()), file=sys.stderr)
                     except Exception as e:     # noqa: BLE001 -- the seat starts; scripts stay Python
                         print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
-                    _FL.start(srv)             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
+                    _boot_laps.step('loops: field engine')
+                    _FL.start(srv)
+                    _boot_laps.step('loops: owed tasks')             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
                     _r = _GG.reowe(srv)
                     _p = _GG.replan_lost(srv)
                     print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool, "
