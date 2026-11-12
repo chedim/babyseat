@@ -82,6 +82,7 @@ def _json(v) -> str:
 
 BANNER_CLASS = "Banner"
 BANNER_NS = MEMBRANE_NS + "Banner:"
+BANNER_TIMEOUT_S = 3.0                          # a banner script gets this long for its reads (operator 2026-11-11)
 DIALS_EID = MEMBRANE_NS + "recall:dials"
 
 
@@ -510,14 +511,21 @@ class Live:
             # the pack's reads (sql, jsonl, recall, rerank): wait for each WITHOUT the field's lock (a slow one never
             # stalls the thinker or another chat), and settle after the last one too (its answer lands on the round
             # after it finishes); a round may ask for more (a read that needs another's answer)
+            deadline, late = time.monotonic() + BANNER_TIMEOUT_S, False
             while self.f.sql_pending():               # running, or finished and not landed yet
-                self.f.sql_wait(None)
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    late = True                       # the script is over its time: what it asked for lands later, unread
+                    break
+                self.f.sql_wait(left)
                 with self.busy:
                     self.f.settle(now)
                     writes += self._apply().get("writes") or []
             with self.busy:
                 refused = next((w.get("new") for w in reversed(writes)
                                 if w.get("eid") == eid and w.get("prop") == "refused"), None)
+                if late and not refused:
+                    refused = f"the banner script took longer than {BANNER_TIMEOUT_S:g} s"
                 cur = json.loads(self.f.get(eid)) or {}
         finally:
             self.ctxs.pop(eid, None)

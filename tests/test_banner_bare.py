@@ -242,3 +242,27 @@ def test_the_seats_map_lines_and_in_line_reach_the_banner_block(seat, monkeypatc
                                        "in_line": "in: chat (it=x)"})
     t = r["text"] or ""
     assert "m:goal:x" in t and "c:git" in t and "in: chat (it=x)" in t and "(nothing moved)" not in t
+
+
+def test_a_banner_script_that_waits_longer_than_its_limit_is_an_error(seat, monkeypatch):
+    # operator 2026-11-11: a banner script gets 3 s; past that its banner is an error (the default shows instead)
+    import time as _t
+    monkeypatch.setattr(FL, "BANNER_TIMEOUT_S", 0.2)
+    live = seat.live
+    real = live.f
+
+    class Slow:                                           # a read that never lands
+        def __getattr__(self, n):
+            return getattr(real, n)
+
+        def sql_pending(self):
+            return True
+
+        def sql_wait(self, t=None):
+            _t.sleep(min(t or 5, 0.3))
+            return False
+    monkeypatch.setattr(live, "f", Slow())
+    monkeypatch.setattr(RB, "c1f_call", _fake)
+    t0 = _t.monotonic()
+    r = live.banner(object(), "owner", "ses_slow", "ses_slow", ASK, now=100.0, facts={})
+    assert _t.monotonic() - t0 < 3 and "took longer than 0.2 s" in (r["error"] or "")
