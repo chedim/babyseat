@@ -39,7 +39,8 @@ and read its `request_result`.
   `words(replace(str(n), '.', ' '))[0]` truncates; `clock` is epoch seconds.
 - Python-hosted tests need a fresh library: `rm -f membrane/membrane_vm.so && sh native/build.sh`; a test calling the door over
   HTTP needs `@pytest.mark.tokenless`; helpers like `_until` that return on any non-None treat `False` as done.
-- `cmd | tail` hides the exit code of `cmd`: read the output.
+- `cmd | tail` hides the exit code of `cmd`: read the output. Count a Rust run from every `test result:` line (`cargo test` stops at the first failing binary, so a partial count is not a pass).
+- A mutation script that restores the original file must `touch` it afterwards: cargo trusts modification times, and a restored copy with an old time keeps running the last mutated build (a false red).
 
 ## Done means
 Specs and Rust tests green, mutation-checked; the Python it replaces deleted with its tests; `docs/python-to-c1f.md`'s status row
