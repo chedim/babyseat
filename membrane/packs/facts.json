@@ -14,79 +14,79 @@
    "why": "the operator's ledger file path (the decisions pack writes it)"
   },
   "door_port": {
-   "wired": false,
+   "wired": true,
    "why": "the port the Rust door listens on; absent = no door (set from MEMBRANE_DOOR_PORT at the cutover)"
   },
   "door_secret_file": {
-   "wired": false,
+   "wired": true,
    "why": "the JWT secret file the door verifies tokens with"
   },
   "ui_dir": {
-   "wired": false,
+   "wired": true,
    "why": "the folder of the UI's files (membrane/ui)"
   },
   "build_id": {
-   "wired": false,
+   "wired": true,
    "why": "the build the page shows"
   },
   "seat_version": {
-   "wired": false,
+   "wired": true,
    "why": "the seat's version, for /global/health"
   },
   "seat_cwd": {
-   "wired": false,
+   "wired": true,
    "why": "the seat's working folder (opencode /path and /project)"
   },
   "seat_home": {
-   "wired": false,
+   "wired": true,
    "why": "the person's home folder (opencode /path)"
   },
   "seat_project": {
-   "wired": false,
+   "wired": true,
    "why": "the project id (opencode /project)"
   },
   "seat_name": {
-   "wired": false,
+   "wired": true,
    "why": "the seat's name for /ui/conf"
   },
   "seat_named": {
-   "wired": false,
+   "wired": true,
    "why": "whether the person named the seat"
   },
   "seat_aliases": {
-   "wired": false,
+   "wired": true,
    "why": "the seat's other names, for /ui/conf"
   },
   "seat_stt": {
-   "wired": false,
+   "wired": true,
    "why": "the speech-to-text server url, else the browser listens"
   },
   "seat_voice_out": {
-   "wired": false,
+   "wired": true,
    "why": "whether voice output is on"
   },
   "seat_language": {
-   "wired": false,
+   "wired": true,
    "why": "the page's language"
   },
   "seat_blurp": {
-   "wired": false,
+   "wired": true,
    "why": "whether Blurp is on (MEMBRANE_BLURP=1)"
   },
   "seat_backend": {
-   "wired": false,
+   "wired": true,
    "why": "the model backend's url (ollama), for the model list"
   },
   "router_on": {
-   "wired": false,
+   "wired": true,
    "why": "whether the router exists (the autoselect lanes are offered)"
   },
   "cloud_models": {
-   "wired": false,
+   "wired": true,
    "why": "the router's cloud candidates, as rows"
   },
   "minds": {
-   "wired": false,
+   "wired": true,
    "why": "the minds' model picks"
   }
  }

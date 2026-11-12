@@ -663,10 +663,45 @@ class Live:
                 next_tick = time.time() + GG.WAIT_TICK_S
 
 
-def boot_started(est, ledger: str | None = None, facts: dict | None = None) -> None:
+def seat_facts(env, settings, srv, known=None) -> dict:
+    """The facts packs read from Boot:seat, assembled in the launcher (the one place that may): `env` (the environment), `settings`
+    (the person's settings file), `srv` (the seat: backend, router, the minds) and `known` (what the launcher resolved: ui_dir,
+    build_id, seat_version, seat_cwd, seat_home, seat_project). A source that is missing leaves its fact out (never None); the
+    JWT secret is only ever a PATH."""
+    out = {k: str(v) for k, v in (known or {}).items() if v}
+    port = str(env.get("MEMBRANE_DOOR_PORT") or "").strip()
+    if port.isdigit() and int(port) > 0:
+        out["door_port"] = int(port)                   # absent unless asked: no door starts by default
+    if env.get("MEMBRANE_JWT", "").strip() != "0" and "MEMBRANE_JWT_SECRET" not in env:
+        sf = env.get("MEMBRANE_JWT_SECRET_FILE") or (os.path.join(out["seat_cwd"], ".membrane", "jwt.secret") if out.get("seat_cwd") else "")
+        if sf:
+            out["door_secret_file"] = sf
+    out["seat_name"] = str(settings.get("name") or "") or "Bob"
+    out["seat_named"] = bool(settings.get("name"))
+    out["seat_aliases"] = list(settings.get("aliases") or [])
+    if str(settings.get("stt") or "").startswith("http"):
+        out["seat_stt"] = str(settings["stt"])
+    out["seat_voice_out"] = bool(settings.get("voice_out"))
+    out["seat_language"] = settings.get("language") or "en"
+    out["seat_blurp"] = str(env.get("MEMBRANE_BLURP", "0")).strip() not in ("0", "", "off", "false", "no")
+    if getattr(srv, "backend", None):
+        out["seat_backend"] = str(srv.backend).rstrip("/")
+    router = getattr(srv, "router", None)
+    out["router_on"] = router is not None
+    rows = [{"name": r.name, "backend": r.backend} for r in (getattr(router, "records", None) or {}).values()
+            if getattr(r, "backend", "") and r.kind == "cloud"]
+    if rows:
+        out["cloud_models"] = rows
+    from . import minds_models as MM
+    out["minds"] = MM.read(srv)
+    return out
+
+
+def boot_started(est, ledger: str | None = None, facts: dict | None = None, announce: bool = True) -> None:
     """The seat tells the field it has started: Boot:seat.started = now (data only, as About:seat is), with the facts packs
-    need (`ledger`: the operator ledger's file). Packs answer with setters on Boot.started (the dev pack makes the dev
-    Commands, the decisions pack its nodes)."""
+    need (`ledger`: the operator ledger's file; `facts`: seat_facts). Each fact is a property of Boot:seat and the whole set is the
+    dict `facts`. `announce=False` only adds facts (the router's arrive after the loops start) and does not say `started` again.
+    Packs answer with setters on Boot.started (the dev pack makes the dev Commands, the decisions pack its nodes)."""
     from .entities import QuantumEntity
     d = (est.docs or {}).get("Boot:seat")
     if d is None:
@@ -679,8 +714,12 @@ def boot_started(est, ledger: str | None = None, facts: dict | None = None) -> N
     for k, v in known.items():              # the facts first, the announcement last: a setter on `started` must find them
         d.properties = {**(d.properties or {}), k: v}
         est.upsert(d, embedder=None)
-    d.properties = {**(d.properties or {}), "started": time.time()}
+    whole = {**((d.properties or {}).get("facts") or {}), **known}
+    d.properties = {**(d.properties or {}), "facts": whole}
     est.upsert(d, embedder=None)
+    if announce:
+        d.properties = {**(d.properties or {}), "started": time.time()}
+        est.upsert(d, embedder=None)
 
 
 def answer_card(srv, card: str, request: dict, timeout: float = 15.0) -> dict:
