@@ -79,8 +79,8 @@ Request.login_ask on-setter login-verify:
   WHEN this.login_ask != None:
     this.verify = this.login_ask
 Request.login_ok getter: prop(this.verify_result, 'rc') == 0 and prop(prop(this.verify_result, 'claims'), 'sub') != 'seat:internal'
-Request.login_age getter: words(replace(str(max(0, prop(prop(this.verify_result, 'claims'), 'exp') - clock)), '.', ' '))[0]
-Request.login_cookie getter: this.cookie_name + '=' + str(this.login_token) + '; Path=/; Max-Age=' + this.login_age + '; HttpOnly; SameSite=Strict' + this.secure
+Request.login_age getter: words(replace(str(max(0, prop(prop(this.verify_result, 'claims'), 'exp') - clock)), '.', ' '))[0] if this.verify_result != None else None
+Request.login_cookie getter: None if this.login_age == None else this.cookie_name + '=' + str(this.login_token) + '; Path=/; Max-Age=' + this.login_age + '; HttpOnly; SameSite=Strict' + this.secure
 Request.login_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE WHEN this.ct != 'application/json': {'status': 415, 'body': {'error': 'send JSON: {"token": "..."}'}}

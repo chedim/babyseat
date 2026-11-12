@@ -53,6 +53,7 @@ def _get(port, path):
         return e.code, e.read(), {k.lower(): v for k, v in e.headers.items()}
 
 
+@pytest.mark.tokenless          # the suite's hook would add the seat token to this call; the door (rightly) refuses a non-JWT token
 def test_the_boot_facts_start_the_door_and_the_pack_answers_a_real_request(monkeypatch, tmp_path):
     secret = tmp_path / "jwt.secret"
     secret.write_text("0123456789abcdef0123456789abcdef")
