@@ -7,19 +7,13 @@ Read membrane's long-term memory: the nearest past exchanges for a topic (situat
 Membrane's own live state: the entity field's vitals (live entities, events by stream, entities by tier, conflicts), the replay A/B ledger, and the last night pass. Read-only, computed from the running proxy. Use for memory-health checks. With `section`, just that part of the seat's WHERE WE ARE: tracks, commands (your methods, most called first), interfaces, classes (class proposals), loops, timelines, frame, digest, or changes (what moved since your last message).
 
 ## intend
-Plant YOUR commitment (the steering wheel of membrane's idle mind): create-or-pin a shared Goal + pin it on this seat's active set. Open intentions STEER the dream loop (quarantined timeline branches grow toward them, think-ahead extends them) and ride recall. An intention is never auto-closed: fulfillment is explicit (the `fulfill` tool with its evidence, or the operator's `membrane: fulfill #N` -- reality's signature; a similarity flag is only a 'maybe-done?' hint). Use when working toward a multi-session goal or when the field's work has a direction worth keeping.
-A METHOD: `call method='intend' args={...}`. args: text* (string), ttl (string) (* required).
+Plant YOUR commitment: write `Intent:board.intend = {text: '<the goal>', by?}` (an `entity_write` on the node). It creates a shared Goal (`Goal:<words of the text>`) -- or finds the open one with the same words (case and spacing do not matter). Open goals steer the idle mind. The receipt is `intend_result` ({ok, eid, created | error}).
 
 ## fulfill
-Close an OPEN goal you have PROVEN done: its status flips to fulfilled on the shared board (every seat's active set drops it). Requires evidence -- the receipt (a method call's rc=0 output, the entity state you read back). Never close on intent or a plan; an unfinished goal stays open and you take its next concrete step instead.
-A METHOD: `call method='fulfill' args={...}`. args: spec* (string), evidence* (string) (* required).
-
-## answer_card
-PASS ON A DECISION CARD'S ANSWER the person gave you in this chat, so they need not answer again on the board. Write `relay = {value, quote}` on the card (`entity_write` on the Decision): `quote` is their own words, word for word; the seat checks that a message of theirs since the card was made holds it (case and punctuation aside). Then read `answer_result` back: `{ok: true, value}` when the card is decided, or `{ok: false, error}` (your words were not theirs, the value does not fit the card's variable, or the card is already decided); a refused quote leaves `relay_result`. Only for words they really said about this card; if they said nothing clear, ask. The quote stays on the card and in the operator ledger. Chat lane only; you cannot write the answer itself.
+Close an OPEN goal you have PROVEN done: write `Intent:board.fulfill = {spec: '<goal eid or a name fragment>', evidence: '<the receipt>', by?}`. Evidence is required (at least 8 characters: a method call's rc=0 output, the entity state) -- no receipt, no close. An eid-shaped spec (it has a ':') is an id and never name-matches. The receipt is `fulfill_result`.
 
 ## intents
-Read YOUR intent board: the seat's active set steered goals (the dream loop's steering coordinates), open + closed. Use before planting a duplicate or to review what commitments are alive.
-A METHOD: `call method='intents' args={...}`. args: none (* required).
+Read YOUR board: `Intent:board.report` lists the open goals (newest first) and the recently fulfilled. Read it before planting a duplicate.
 
 ## learn
 Write ONE durable earned lesson into the seat's memory: `Memory:seat.learn = {lesson: '<the lesson, in prose>'}` (`entity_write` on the node). A lesson is a note, not a transcript: no secrets, no personal data, no fenced code, at most 2000 characters; the field's own guards (dedup, the variety gate) may decline it. Read the answer back: `learn_result` ({written: false, reason} when refused) and `note_result` (which note it became). Use it when you EARNED something durable (a fixed quirk, the command that worked, why a gate exists).

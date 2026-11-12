@@ -263,11 +263,7 @@ class TestToolSurface(unittest.TestCase):
         self.assertIn("peer_read", MS.OPERATOR_TOOLS)
         self.assertIn("peer_read", MS.PLAN_TOOLS)
 
-    def test_the_goal_tool_carries_the_empty_board_nudge(self):
-        d = TS.FAMILIES["goal"]["description"].lower()
-        self.assertIn("empty board", d)
-        self.assertIn("unsteered", d)
-        self.assertIn("help('goals')", d)
+    def test_the_goals_help_carries_the_empty_board_nudge(self):
         self.assertIn("worth keeping across sessions", TS.help_text("goals"))
 
     def test_the_sections_are_documented_behind_help(self):

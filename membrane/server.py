@@ -1188,9 +1188,6 @@ OPERATOR_TOOLS = frozenset((
     # reads
     "query", "state", "graph", "entities_related", "entity_query",
     "entity_read", "entity_tracks",
-    # steering (intentions -- THE OPERATOR'S PEN; fulfill = the close
-    # with a receipt, the listeners' too: their landed work moves the board)
-    "intend", "intents", "fulfill",
     # room
     "peer_seats", "peer_read", "junk_cut",
     # the banner tracks (the operator's header)
@@ -1226,7 +1223,7 @@ LISTENER_TOOLS = (OPERATOR_TOOLS | {
     "field_watch",
 }) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
-PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_call", "method_each", "code_run",
+PLAN_TOOLS = OPERATOR_TOOLS - {"method_define", "method_call", "method_each", "code_run",
                                "method_inspect",
                                "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
@@ -1236,8 +1233,7 @@ PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_cal
 # sentence must never reach the shell or rewrite entities; a request
 # becomes a visible goal (intend) the loops carry out.
 PHONE_TOOLS = frozenset(("query", "state", "graph", "entities_related",
-                         "entity_query", "entity_read", "entity_tracks",
-                         "intend", "intents"))
+                         "entity_query", "entity_read", "entity_tracks"))
 
 _LANE_REFUSALS = {
     "pack": "plan mode: packs aren't loaded from a planning session -- the build-mode turn loads them",
@@ -1255,7 +1251,7 @@ _LANE_REFUSALS = {
                 "receipt) closes them"),
     "intend": ("plan mode: commitments aren't planted from a planning "
                "session -- the direction needs the user's build-mode "
-               "word; the board reads via goal(action='list')"),
+               "word; the board reads via Intent:board.report"),
 }
 _LISTENER_REFUSALS = {
     "intend": ("listener lane: a watch loop does not plant new goals -- "
@@ -1273,6 +1269,19 @@ _GRAPH_REFUSALS = {
                 "FULFILLED <receipt> (a worker with DONE); the claim goes to the chat, and the "
                 "chat turn decides"),
 }
+
+
+def intent_write_refusal(key: str, agent: str | None) -> str | None:
+    """Intent:board's writes keep the lane rules the tools had: plan mode plants and closes nothing, a listener plants
+    no goal, a goal-graph loop closes none (None = allowed)."""
+    if _lane_gate_off() or key not in ("intend", "fulfill"):
+        return None
+    lane = _lane_of(agent)
+    if lane == "plan":
+        return _LANE_REFUSALS.get(key)
+    if lane == "listener":
+        return _graph_refusal(key, agent) or _LISTENER_REFUSALS.get(key)
+    return None
 
 
 def _graph_refusal(name: str, agent: str | None) -> str | None:
@@ -1324,7 +1333,7 @@ def _mcp_names() -> frozenset:
 
 
 PARALLEL_READS = frozenset(("find", "query", "state", "graph", "entities_related", "entity_query",
-                            "entity_read", "entity_tracks", "intents"))
+                            "entity_read", "entity_tracks"))
 PARALLEL_READS_MAX = 4
 
 
@@ -1455,7 +1464,7 @@ def _lane_refusal(name: str, lane: str) -> str | None:
     if lane == "phone":
         return (f"phone lane: {name} doesn't run from a call (a misheard "
                 "sentence must not change the boat) -- answer from what you "
-                "can read, or plant the request with goal(action='plant') so a loop "
+                "can read, or plant the request by writing Intent:board.intend so a loop "
                 "carries it out")
     r = _LANE_REFUSALS.get(name) if lane == "plan" else _LISTENER_REFUSALS.get(name)
     if r is not None:

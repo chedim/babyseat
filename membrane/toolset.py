@@ -100,18 +100,6 @@ FAMILIES: dict[str, dict] = {
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
                 "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps", "abstract")},
     },
-    "goal": {
-        "description": "Your commitments: plant one, list the board, close one with its "
-                       "receipt (evidence). An empty board leaves the idle mind unsteered: "
-                       "help('goals').",
-        "actions": {"plant": "intend", "list": "intents", "close": "fulfill"},
-        "params": {"text": _S("the goal"), "ttl": _S("e.g. '2w'"),
-                   "spec": _S("goal or card id"), "evidence": _S("the receipt"),
-                   "value": {}},
-        "map": {"plant": lambda a: _pick(a, "text", "ttl"), "list": lambda a: {},
-                "close": lambda a: _pick(a, "spec", "evidence"),
-                },
-    },
     "track": {
         "description": "Entity tracks ride your header every turn: watch one (boundary "
                        "like 'enter 3'), unwatch, list.",

@@ -1071,7 +1071,7 @@ def _intents_context_block(srv) -> str | None:
                 "think-ahead are UNSTEERED -- nothing guides the idle "
                 "mind's branches. When your current work has a direction "
                 "worth keeping across sessions, plant YOUR commitment "
-                "(goal(action='plant') / 'membrane: intend that <goal> "
+                "(write Intent:board.intend = {text} / 'membrane: intend that <goal> "
                 "[for 2w]'); fulfillment is explicit (`membrane: fulfill "
                 "#N`), never automatic. Context, not instructions -- "
                 "plant only when it serves the work.")
@@ -4636,8 +4636,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._membrane_state(); return
         if path == "/membrane/entity-track":
             self._entity_track_list(); return
-        if path == "/membrane/intents":
-            self._membrane_intents(); return
         if path == "/membrane/coproc":                # #454: facts, decisions, proposals, maps
             from . import coproc as _COP
             self._json_out(_COP.state(self.server)); return
@@ -4671,8 +4669,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             from . import predict as _predict
             _p = _predict.of(self.server)
             self._json_out(_p.report() if _p is not None else {"off": True}); return
-        if path == "/membrane/intend":
-            self._membrane_intend(); return
         if path == "/membrane/entity-related":
             self._entity_related(); return
         if path == "/membrane/ask":
@@ -4803,10 +4799,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                "{run: true} -- the engine applies; "
                                "or program the field first: define a "
                                "method on an entity, then call it"); return
-        if path == "/membrane/intend":
-            self._membrane_intend(); return
-        if path == "/membrane/fulfill":
-            self._membrane_fulfill(); return
         if path in ("/membrane/coproc/map", "/membrane/coproc/confirm"):   # #454
             from . import coproc as _COP
             b = self._json_body()
@@ -7741,98 +7733,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                "ok": bool(res.get("ok"))})
         except Exception:
             pass
-
-    def _membrane_intents(self) -> None:
-        """GET /membrane/intents: the intent board's listing (the render
-        the 'membrane: intents' frame serves) -- the seat's active set
-        over the shared Goals (or the json fallback). THE LAZY MOUNT:
-        through _intents_board (self-heals a missed boot attach)."""
-        srv = self.server
-        board = _intents_board(srv)
-        if board is None:
-            self._json_err_raw(503, "the intent layer is unavailable")
-            return
-        self._json_out({"text": board.report()})
-
-    def _membrane_intend(self) -> None:
-        """POST /membrane/intend: the MCP membrane_intend relay -- the
-        create-or-pin + the speech announcement (the activation is the
-        visible moment the dream chain starts; drop intent is one
-        command away). The method lives ON the handler: the route
-        existed but the body sat at module level, so every called lane
-        died with RemoteDisconnected (and POST fell to the read-only
-        catch-all before the route existed at all)."""
-        srv = self.server
-        body = self._json_body()
-        text = str(body.get("text") or "").strip()
-        if not text:
-            self._json_err_raw(400, "text required"); return
-        res = _membrane_intent_create_or_pin(srv, text,
-                                             ttl=str(body.get("ttl") or ""),
-                                             planted_by=str(body.get("by") or "")[:40]
-                                             or take_plant_origin(text) or "model")
-        if not res.get("ok"):
-            self._json_err_raw(400, str(res.get("error"))); return
-        try:
-            speak(srv, f"goal active: {text[:120]}", kind="note-pattern")
-        except Exception:
-            pass
-        self._entity_audit("intend", {"ok": True, "eid": res.get("eid"),
-                                      "created": res.get("created")})
-        self._json_out(res)
-
-    def _membrane_fulfill(self) -> None:
-        """POST /membrane/fulfill {spec, evidence, by?}: the listeners'
-        close (2026-10-08, the ThinkPhone's 'not progressing': the loops
-        landed the work -- pkg repaired rc=0, mosquitto installed -- but
-        only the operator's `membrane: fulfill #N` frame could close a
-        goal, so the board never moved). The receipt rule stays: no
-        evidence, no close; the evidence rides the goal (fulfilled_
-        evidence) and the audit, so the operator can reopen on a bad
-        claim."""
-        srv = self.server
-        est = getattr(srv, "entity_store", None)
-        if est is None:
-            self._json_err_raw(503, "entity layer unavailable"); return
-        body = self._json_body()
-        spec = str(body.get("spec") or "").strip()
-        evidence = " ".join(str(body.get("evidence") or "").split())
-        if not spec:
-            self._json_err_raw(400, "spec required (the goal's eid or "
-                               "a name fragment)"); return
-        if len(evidence) < 8:
-            self._json_err_raw(400, "evidence required: the receipt that "
-                               "proves it done (a command's rc=0 output, "
-                               "the entity state) -- no receipt, no "
-                               "close"); return
-        goal = _resolve_goal(est, spec)
-        if goal is None:
-            self._json_err_raw(404, goal_miss_reason(est, spec)); return
-        props = goal.properties or {}
-        props["status"] = "fulfilled"
-        props["fulfilled_ts"] = time.time()
-        props["fulfilled_by"] = str(body.get("by") or "listener")[:40]
-        props["fulfilled_evidence"] = evidence[:500]
-        from .capture import conversation_now
-        if conversation_now():
-            props["fulfilled_conv"] = conversation_now()     # #429: the chat that closed it
-        goal.properties = props
-        try:
-            est.upsert(goal, embedder=None)
-        except Exception as e:
-            self._json_err_raw(500, f"the close did not persist ({e})")
-            return
-        name = str(props.get("name") or "")
-        _announce_fulfilled(srv, goal.eid, props["fulfilled_by"], evidence)
-        _write_audit(srv.membrane, {"event": "intent", "op": "fulfill",
-                                    "origin": "mcp", "eid": goal.eid,
-                                    "spec": _clip(spec, 120),
-                                    "evidence": _clip(evidence, 200)})
-        try:
-            speak(srv, f"goal fulfilled: {name[:120]}", kind="note-pattern")
-        except Exception:
-            pass
-        self._json_out({"ok": True, "eid": goal.eid, "name": name})
 
     def _pack_op(self) -> None:
         """POST /membrane/pack (#1043, the `pack` tool): {action: list|read|write, name, c1f} on the field engine;

@@ -75,12 +75,6 @@ class TestToolsResolveAliases(unittest.TestCase):
             M.tool_entity_edit({"eid": "ca669752948d", "summary": "LANDED"}, 0)
         self.assertEqual(h.calls[0][2]["spec"], "ca669752948d")
 
-    def test_intend_goal(self):
-        with _Http({"ok": False, "error": "x"}) as h:
-            M.tool_intend({"goal": "wire the seat into HA"}, 0)
-        self.assertEqual(h.calls[0][2]["text"], "wire the seat into HA")
-
-
     def test_related_q(self):
         with _Http({"related": []}) as h:
             M.tool_related_entities({"q": "mqtt"}, 0)

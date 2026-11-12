@@ -49,7 +49,6 @@ class TestDiet(unittest.TestCase):
         self.assertEqual(phone["entity"]["inputSchema"]["properties"]["action"]["enum"], ["read"])
         self.assertNotIn("exec", phone)
         plan = {d["name"]: d for d in T.advertised(S.PLAN_TOOLS)}
-        self.assertNotIn("plant", plan["goal"]["inputSchema"]["properties"]["action"]["enum"])
         self.assertNotIn("exec", plan)
 
     def test_retired_from_the_model(self):
@@ -65,9 +64,6 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(R("find", {"action": "related", "q": "bms", "k": 4}), ("entities_related", {"query": "bms", "k": 4}))
         self.assertEqual(R("find", {"action": "query", "q": "kind:c"}), ("entity_query", {"q": "kind:c"}))
         self.assertEqual(R("entity", {"action": "read", "spec": "c:x", "run": True}), ("entity_read", {"spec": "c:x", "run": True}))
-        self.assertEqual(R("goal", {"action": "plant", "text": "wire it"}), ("intend", {"text": "wire it"}))
-        self.assertEqual(R("goal", {"action": "close", "spec": "g", "evidence": "rc=0"}),
-                         ("fulfill", {"spec": "g", "evidence": "rc=0"}))
         self.assertEqual(R("exec", {"action": "call", "object": "o", "method": "m"}),
                          ("method_call", {"object": "o", "method": "m"}))
         self.assertEqual(R("track", {"action": "list"}), ("entity_tracks", {}))
@@ -149,10 +145,10 @@ class TestTheTurn(unittest.TestCase):
 
     def test_help_and_bad_actions_answer_without_the_executor(self):
         seen, tools, _ = _turn("build", [("help", {"topic": "scripts"}),
-                                         ("goal", {"action": "explode"})])
+                                         ("track", {"action": "explode"})])
         self.assertEqual(seen, [])
         self.assertIn("getter", tools[0]["state"]["output"])
-        self.assertIn("plant", tools[1]["state"]["output"])
+        self.assertIn("watch", tools[1]["state"]["output"])
 
     def test_old_names_still_run(self):
         seen, _, _ = _turn("build", [("entity_read", {"spec": "c:x"})])

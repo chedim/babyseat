@@ -58,56 +58,6 @@ class _Pool:
         return out
 
 
-class TestMount(unittest.TestCase):
-    def test_intend_and_intents_on_the_surface(self):
-        """THE MOUNT: the steering wheel's tools are on the MCP surface
-        (schemas + impls) -- the orphaned-pen exhibit."""
-        import membrane.mcp_server as M
-        self.assertIn("intend", M.METHOD_TOOLS)          # the steering wheel is a method, reached through `call`
-        self.assertIn("intents", M.METHOD_TOOLS)
-        self.assertEqual(M.TOOL_IMPLS.get("intend"), M.tool_intend)
-        self.assertEqual(M.TOOL_IMPLS.get("intents"), M.tool_intents)
-        for t in M.TOOLS:
-            if t["name"] in ("intend", "intents"):
-                self.assertIn("inputSchema", t)
-                self.assertTrue(t["description"].strip())
-
-    def test_intents_tool_relay(self):
-        """The intents tool reads GET /membrane/intents (the board's
-        render)."""
-        import membrane.mcp_server as M
-        out = M.tool_intents({}, _port_of_a_stub_serving_text(
-            "Membrane intentions (0/8 open): none held."))
-        self.assertIn("none held", out)
-        self.assertTrue(out.startswith("Membrane intentions"))
-
-
-def _port_of_a_stub_serving_text(text: str):
-    """A one-response stub of the seat proxy answering GET
-    /membrane/intents with {"text": ...}."""
-    import json as _json
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    box = {"port": 0}
-
-    class _H(BaseHTTPRequestHandler):
-        def do_GET(self):
-            b = _json.dumps({"text": text}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(b)))
-            self.end_headers()
-            self.wfile.write(b)
-
-        def log_message(self, *a):
-            pass
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), _H)
-    box["port"] = srv.server_address[1]
-    import threading
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    # the caller keeps the process alive thread; leak is fine for tests
-    return box["port"]
-
-
 class TestContextBlock(unittest.TestCase):
     def setUp(self):
         self.est = _store()

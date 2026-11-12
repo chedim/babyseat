@@ -61,17 +61,5 @@ class TestAddSpecIsName(unittest.TestCase):
         self.assertNotIn("Ignored unknown arg(s): spec", msg)
 
 
-class TestFulfillIntentIsSpec(unittest.TestCase):
-    def test_fulfill_intent_is_spec(self):
-        with _Http({"ok": False, "error": "x"}) as h:
-            M.tool_fulfill({"intent": "176237", "evidence": "rc=0 output"}, 0)
-        self.assertEqual(h.calls[0][2]["spec"], "176237")
-
-    def test_fulfill_intent_hash_form(self):
-        with _Http({"ok": False, "error": "x"}) as h:
-            M.tool_fulfill({"intent": "#3", "evidence": "rc=0 output"}, 0)
-        self.assertEqual(h.calls[0][2]["spec"], "#3")
-
-
 if __name__ == "__main__":
     unittest.main()

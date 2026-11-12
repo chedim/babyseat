@@ -934,55 +934,6 @@ def tool_set_junk_cut(args: dict, port: int) -> str:
             f"applies on the next banner render / watch arrival.")
 
 
-def tool_intend(args: dict, port: int) -> str:
-    """The model's pen on the steering wheel: create-or-pin a shared Goal
-    + give it a priority pin on THIS seat's active set. Speech announces
-    every activation; drop intent suppresses seat-locally; fulfill closes
-    the goal shared."""
-    body = {"text": _arg(args, "text", "goal", "intent", "spec")}
-    if args.get("ttl"):
-        body["ttl"] = str(args["ttl"])
-    out = _http(port, "POST", "/membrane/intend", body)
-    if not out.get("ok"):
-        return f"Intend failed: {out.get('error', 'unknown error')}"
-    what = "created" if out.get("created") else "existing goal"
-    if out.get("on_set", True):
-        return (f"Goal active ({what}, pinned): {out.get('eid')}\n"
-                f"The active set steers the dream loop; the banner shows it. "
-                f"Drop intent #N suppresses it on this seat; fulfill #N closes "
-                f"it shared.")
-    cap = out.get("cap", "")
-    return (f"Goal open ({what}) but NOT on the active set: {out.get('eid')}\n"
-            f"The set is full (cap {cap}) and held goals outrank this pin. "
-            f"It stays open and shared; free a slot with drop intent #N or "
-            f"fulfill #N, then it can rank in.")
-
-
-def tool_fulfill(args: dict, port: int) -> str:
-    """The close with a receipt: an open goal flips to fulfilled (shared)
-    when the caller hands the evidence that proves it done."""
-    out = _http(port, "POST", "/membrane/fulfill", {
-        "spec": _arg(args, "spec", "eid", "goal", "id", "name", "key",
-                     "intent"),
-        "evidence": _arg(args, "evidence", "receipt", "proof", "summary",
-                         "text"),
-        "by": str(args.get("by") or "")})
-    if not out.get("ok"):
-        return f"Fulfill failed: {out.get('error', 'unknown error')}"
-    return (f"Goal fulfilled (shared): {out.get('eid')} "
-            f"{str(out.get('name') or '')[:100]}\n"
-            f"It leaves every seat's active set; the evidence rides the "
-            f"goal and the audit.")
-
-
-def tool_intents(args: dict, port: int) -> str:
-    """The board's read: the seat's active set + the closed record. The
-    GET /membrane/intents relay answers the rendered listing."""
-    out = _http(port, "GET", "/membrane/intents")
-    text = str(out.get("text") or "")
-    return text or "the intent board is unavailable"
-
-
 def tool_graph(args: dict, port: int) -> str:
     """The model's graph read: the entity graph's subgraph as nodes +
     edges -- the same contract the universe viewer renders."""
@@ -1432,46 +1383,6 @@ def tool_ctx_exit(args: dict, port: int) -> str:
 # the argument schemas of those methods: not in the tool list; `help('tools')` carries each method's arguments
 METHOD_TOOL_DEFS = [
     {
-            "name": "intend",
-            "description": (
-                'plant own goal (shared Goal, pinned on this seat). open goals steer the dream loop + ride recall. never auto-closed: close with fulfill+evidence.'),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string",
-                             "description": "The commitment, one sentence."},
-                    "ttl": {"type": "string",
-                            "description": "Optional priority-pin decay window "
-                                           "('2w'/'10d'); the goal itself never "
-                                           "expires."},
-                },
-                "required": ["text"],
-            },
-        },
-    {
-            "name": "fulfill",
-            "description": (
-                'close an open goal PROVEN done: spec=goal, evidence=receipt (rc=0 output / entity read back). never on intent or plan; else take its next step.'),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "spec": {"type": "string",
-                             "description": "The goal's eid (or a unique "
-                                            "name fragment)."},
-                    "evidence": {"type": "string",
-                                 "description": "The receipt that proves it "
-                                                "done, one or two sentences."},
-                },
-                "required": ["spec", "evidence"],
-            },
-        },
-    {
-            "name": "intents",
-            "description": (
-                'read own intent board (goals steering this seat), open+closed. check before planting a duplicate.'),
-            "inputSchema": {"type": "object", "properties": {}},
-        },
-    {
             "name": "junk_cut",
             "description": (
                 "tune the junk cut: how strictly machinery (tool output, ps/lsof tables, test bars, logs, config dumps) stays out of banner stories + watch triggers. per track | 'all' | global default. CUT 0..1, higher = stricter. anchor-vector screen (junk embeds near anchor entities in the field). audited to the operator."),
@@ -1560,7 +1471,7 @@ METHOD_TOOL_DEFS = [
 # The tools that are not field manipulation or querying are METHODS, reached by name through `call` (operator,
 # 2026-11-12). Their implementations below are a labelled bridge: phase B moves each into c1f as the system behind it
 # (the intent board, watches, dials, memory, the peer channel) moves.
-METHOD_TOOLS = ("intend", "fulfill", "intents", "junk_cut",
+METHOD_TOOLS = ("junk_cut",
                 "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
 
 
@@ -1691,9 +1602,6 @@ TOOL_IMPLS = {
     "fs_list": tool_fs_list,
     "query": tool_query,
     "state": tool_state,
-    "intend": tool_intend,
-    "intents": tool_intents,
-    "fulfill": tool_fulfill,
     "entity_watch": tool_watch_entity,
     "field_watch": tool_field_watch,
     "entity_unwatch": tool_unwatch_entity,

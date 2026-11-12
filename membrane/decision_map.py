@@ -60,6 +60,10 @@ def refusal(cls: str, key: str, value, props: dict | None = None) -> str | None:
     """Why entity_edit may not set ``key`` on an entity of class ``cls`` whose
     properties are ``props`` (None = it may)."""
     from .entities import CLASS_DECISION
+    if cls == "Intent":                   # the intent board's writes (packs/intents.c1f) keep the lane rules the tools had
+        from . import diag_requests as _DR
+        from . import server as _S
+        return _S.intent_write_refusal(key, (_DR.current() or {}).get("agent"))
     if cls != CLASS_DECISION:
         return None
     if key == "relay":                    # the model's hand: pass on what the person said in the chat (the pack proves it)

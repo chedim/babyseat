@@ -115,15 +115,11 @@ class TestLaneGate(unittest.TestCase):
         self.assertIsNotNone(SRV._lane_refusal("method_call", "plan"))
         names = _reach("build")
         self.assertIn("method_call", names)
-        self.assertIn("intend", SRV._lane_tools("operator"))
-        self.assertNotIn("intend", SRV._lane_tools("listener"))
 
     def test_plan_is_the_operator_minus_intend(self):
         """Plan mode communicates: reads + memory + the board; nothing
         planted (the direction needs the user's build word)."""
-        self.assertIn("intents", SRV._lane_tools("plan"))
         self.assertIn("query", SRV._lane_tools("plan"))
-        self.assertNotIn("intend", SRV._lane_tools("plan"))
         for t in ("entity_add", "entity_edit", "method_call"):
             self.assertNotIn(t, SRV._lane_tools("plan"))
 
@@ -135,14 +131,8 @@ class TestLaneGate(unittest.TestCase):
         r = SRV._lane_refusal("entity_add", "plan")
         assert r is not None
         self.assertIn("plan mode", r)
-        r2 = SRV._lane_refusal("intend", "plan")
-        assert r2 is not None
-        self.assertIn("plan mode", r2)
-        r3 = SRV._lane_refusal("intend", "listener")
-        self.assertIsNotNone(r3)
         # a same-lane call passes
         self.assertIsNone(SRV._lane_refusal("entity_add", "listener"))
-        self.assertIsNone(SRV._lane_refusal("intend", "operator"))
         # reads never refuse
         self.assertIsNone(SRV._lane_refusal("graph", "plan"))
         self.assertIsNone(SRV._lane_refusal("query", "listener"))
@@ -155,10 +145,7 @@ class TestLaneGate(unittest.TestCase):
         self.assertIn("entity_add", op)
         self.assertIn("field_watch", op)
         self.assertNotIn("entity_add", pl)
-        self.assertIn("intend", op)
-        self.assertNotIn("intend", li)
         self.assertIn("entity_add", li)
-        self.assertNotIn("intend", pl)
 
     def test_kill_switch_restores_the_flat_surface(self):
         os.environ["MEMBRANE_LANE_GATE"] = "0"

@@ -25,10 +25,10 @@ class TestLane(unittest.TestCase):
     def test_phone_is_its_own_lane(self):
         self.assertEqual(S._lane_of("phone"), "phone")
         tools = S._lane_tools("phone")
-        for t in ("entity_read", "query", "intend", "state"):
+        for t in ("entity_read", "query", "state"):
             self.assertIn(t, tools)
         for t in ("method_call", "entity_add", "entity_edit", "entity_remove",
-                  "fulfill", "field_watch", "entity_inherit", "peer_post"):
+                  "field_watch", "entity_inherit", "peer_post"):
             self.assertNotIn(t, tools)
         r = S._lane_refusal("method_call", "phone")
         self.assertIn("phone", r)
