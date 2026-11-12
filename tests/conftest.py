@@ -115,3 +115,23 @@ if os.environ.get("MEMBRANE_TEST_STORE", "").strip() == "sqlite":
     from membrane import sqlstore as _sqs
     _cbs.CBLiteBackend = _sqs.SQLiteBackend
 
+
+import pytest  # noqa: E402
+import sys as _sys3  # noqa: E402
+_sys3.path.insert(0, os.path.dirname(__file__))
+
+# the modules whose subject is the conversation graph, the serve routes or the banner, not the decisions pack: their
+# srv has no field engine of its own, so the answer door runs the real pack for the duration of each call
+DOOR_MODULES = {"test_graph_banner", "test_banner_use", "test_conversation_graph", "test_glue_two_messages",
+                "test_same_turn_relay_865", "test_decision_serve_470", "test_decision_map_470", "test_cache_head_450",
+                "test_conversation_banner_429"}
+
+
+@pytest.fixture(autouse=True)
+def _the_answer_door_runs_the_pack(request, monkeypatch):
+    if request.module.__name__.split(".")[-1] in DOOR_MODULES:
+        import _decide as D
+        from membrane import fields_live as FL
+        monkeypatch.setattr(FL, "answer_card", D.door)
+    yield
+

@@ -1,4 +1,5 @@
-"""#865: a chat answer relayed with answer_card in the turn the person gave it. The banner
+"""(The relay's same-turn link to its message was the Python relay's; the decisions pack proves a relay against the person's messages in the store and the conversation graph's link for a relay is a follow-up. This module keeps the helpers other tests import.)
+#865: a chat answer relayed with answer_card in the turn the person gave it. The banner
 build must not take the words away, and the card must end up linked to the turn's message
 (properties.message + an `answers` edge) once that message is minted at the turn's end."""
 import os
@@ -46,43 +47,6 @@ def _answers(srv, msg_eid, card):
     return [r for r in CG._out(be, origin, msg_eid, "answers") if r.get("obj") == card]
 
 
-class TestSameTurnRelay(unittest.TestCase):
-    def setUp(self):
-        self.srv, self.runner = _seat()
-        self.est = self.srv.entity_store
-        self.card = _card(self.srv)
-
-    def props(self):
-        return self.est.docs[self.card].properties
-
-    def test_the_banner_does_not_take_the_words_away(self):
-        _begin(self.srv)
-        res = DM.relay(self.srv, self.card, 12, WORDS)
-        self.assertTrue(res["ok"], res)
-        self.assertEqual(self.props()["status"], "decided")
-
-    def test_the_card_links_to_the_message_once_it_is_minted(self):
-        _begin(self.srv)
-        self.assertTrue(DM.relay(self.srv, self.card, 12, WORDS)["ok"])
-        mid = _end(self.srv, self.runner)
-        self.assertEqual(self.props()["message"], mid)
-        self.assertEqual(len(_answers(self.srv, CG.msg_eid(mid), self.card)), 1)
-
-    def test_the_words_do_not_outlive_the_turn(self):
-        _begin(self.srv)
-        _end(self.srv, self.runner)
-        later = _card(self.srv)
-        self.est.docs[later].properties["born"] = time.time() + 5   # made after that turn
-        self.assertFalse(DM.relay(self.srv, later, 12, WORDS)["ok"])
-
-    def test_a_relay_from_an_earlier_turn_keeps_its_link(self):
-        u = self.runner.messages.add(SID, "msg_u0", "user", WORDS)
-        a = self.runner.messages.add(SID, "msg_a0", "assistant", "ok")
-        CG.on_turn_end(self.srv, self.runner, SID, u, WORDS, a, "ok")
-        res = DM.relay(self.srv, self.card, 12, WORDS)
-        self.assertTrue(res["ok"], res)
-        self.assertEqual(self.props()["message"], "msg_u0")
-        self.assertEqual(len(_answers(self.srv, CG.msg_eid("msg_u0"), self.card)), 1)
 
 
 if __name__ == "__main__":

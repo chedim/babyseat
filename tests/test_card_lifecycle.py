@@ -11,6 +11,8 @@ from pathlib import Path
 
 os.environ.setdefault("MEMBRANE_STORE", "json")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _decide as D  # noqa: E402
 
 from membrane import decision_map as DM  # noqa: E402
 from membrane.entities import EntityStore  # noqa: E402
@@ -47,14 +49,14 @@ class TestLifecycle(unittest.TestCase):
     def test_no_work_answer_closes_the_card(self):
         est, led = _store()
         eid = _card(est, "pure choice", work_needed=False)
-        self.assertTrue(DM.answer(est, led, eid, "yes")["ok"])
+        self.assertTrue(D.answer(est, led, eid, "yes")["ok"])
         self.assertEqual(_status(est, eid), "closed")
 
     def test_work_answer_stays_decided_and_wakes_the_loops(self):
         est, led = _store()
         est._events_pool = pool = _Pool()
         eid = _card(est, "needs work", work_needed=True)
-        self.assertTrue(DM.answer(est, led, eid, "yes")["ok"])
+        self.assertTrue(D.answer(est, led, eid, "yes")["ok"])
         self.assertEqual(_status(est, eid), "decided")
         self.assertTrue(pool.events[0]["work_needed"])
 
@@ -62,7 +64,7 @@ class TestLifecycle(unittest.TestCase):
         est, led = _store()
         est._events_pool = pool = _Pool()
         eid = _card(est, "pure", work_needed=False)
-        DM.answer(est, led, eid, "no")
+        D.answer(est, led, eid, "no")
         self.assertEqual(len(pool.events), 1)
         self.assertFalse(pool.events[0]["work_needed"])
 
@@ -70,26 +72,26 @@ class TestLifecycle(unittest.TestCase):
         est, led = _store()
         a = _card(est, "tagged work", work_needed=True)
         b = _card(est, "tagged none", work_needed=False)
-        DM.answer(est, led, a, "yes", work=False)
-        DM.answer(est, led, b, "yes", work=True)
+        D.answer(est, led, a, "yes", work=False)
+        D.answer(est, led, b, "yes", work=True)
         self.assertEqual((_status(est, a), _status(est, b)), ("closed", "decided"))
 
     def test_agent_moves_decided_work_card_to_in_flight(self):
         est, led = _store()
         eid = _card(est, "w", work_needed=True)
-        DM.answer(est, led, eid, "yes")
+        D.answer(est, led, eid, "yes")
         self.assertTrue(est.edit(eid, properties={"status": "in_flight"})["ok"])
 
     def test_agent_cannot_start_work_on_a_no_work_card(self):
         est, led = _store()
         eid = _card(est, "n", work_needed=False)
-        DM.answer(est, led, eid, "yes")
+        D.answer(est, led, eid, "yes")
         self.assertFalse(est.edit(eid, properties={"status": "in_flight"})["ok"])
 
     def test_closing_needs_a_receipt(self):
         est, led = _store()
         eid = _card(est, "w", work_needed=True)
-        DM.answer(est, led, eid, "yes")
+        D.answer(est, led, eid, "yes")
         est.edit(eid, properties={"status": "in_flight"})
         self.assertFalse(est.edit(eid, properties={"status": "closed"})["ok"])
         self.assertTrue(est.edit(eid, properties={"receipt": "PR merged, CI green"})["ok"])
@@ -103,9 +105,9 @@ class TestLifecycle(unittest.TestCase):
     def test_closed_card_is_locked(self):
         est, led = _store()
         eid = _card(est, "c", work_needed=False)
-        DM.answer(est, led, eid, "yes")
+        D.answer(est, led, eid, "yes")
         self.assertFalse(est.edit(eid, properties={"status": "open"})["ok"])
-        self.assertFalse(DM.answer(est, led, eid, "no")["ok"])
+        self.assertFalse(D.answer(est, led, eid, "no")["ok"])
 
     def test_agent_cannot_drop_without_a_reason(self):
         est, _ = _store()
@@ -128,7 +130,7 @@ class TestLifecycle(unittest.TestCase):
     def test_agent_drops_only_open_cards(self):                 # #758
         est, led = _store()
         eid = _card(est, "x", work_needed=True)
-        DM.answer(est, led, eid, "yes")
+        D.answer(est, led, eid, "yes")
         res = est.edit(eid, properties={"dropped_why": "w", "status": "dropped"})
         self.assertIn("status", res.get("properties_refused") or {})
         self.assertEqual(_status(est, eid), "decided")
@@ -153,12 +155,12 @@ class TestLifecycle(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertEqual(_status(est, eid), "dropped")
         self.assertEqual(pool.events[0]["kind"], "decision")
-        self.assertFalse(DM.answer(est, led, eid, "yes")["ok"])
+        self.assertFalse(D.answer(est, led, eid, "yes")["ok"])
 
     def test_only_open_cards_drop(self):
         est, led = _store()
         eid = _card(est, "x", work_needed=False)
-        DM.answer(est, led, eid, "yes")
+        D.answer(est, led, eid, "yes")
         self.assertFalse(DM.drop(est, eid)["ok"])
 
     def test_board_lists_every_status(self):
@@ -181,14 +183,14 @@ class AnsweredCardsStayAnswered(unittest.TestCase):
     def _in_flight(self):
         est, led = _store()
         eid = _card(est, "deploy", work_needed=True)
-        self.assertTrue(DM.answer(est, led, eid, True)["ok"])
+        self.assertTrue(D.answer(est, led, eid, True)["ok"])
         self.assertTrue(est.edit(eid, properties={"status": "in_flight"})["ok"])
         return est, led, eid
 
     def test_an_in_flight_answered_card_takes_no_second_answer(self):
         est, led, eid = self._in_flight()
         n = len(led.entries()) if hasattr(led, "entries") else None
-        res = DM.answer(est, led, eid, False)
+        res = D.answer(est, led, eid, False)
         self.assertFalse(res["ok"])
         self.assertTrue(res.get("conflict"))
         p = est.resolve(eid, exact=True).properties
@@ -207,7 +209,7 @@ class AnsweredCardsStayAnswered(unittest.TestCase):
         est, led = _store()
         eid = _card(est, "legacy")
         self.assertTrue(est.edit(eid, properties={"status": "in_flight"})["ok"])
-        self.assertTrue(DM.answer(est, led, eid, True)["ok"])
+        self.assertTrue(D.answer(est, led, eid, True)["ok"])
 
 
 class SpeculativeWork(unittest.TestCase):
@@ -233,7 +235,7 @@ class SpeculativeWork(unittest.TestCase):
         est._events_pool = pool = _Pool()
         eid = _card(est, "s", work_needed=True, pick=True)
         est.edit(eid, properties={"speculative": "draft"})
-        self.assertTrue(DM.answer(est, led, eid, True)["ok"])
+        self.assertTrue(D.answer(est, led, eid, True)["ok"])
         p = est.resolve(eid, exact=True).properties
         self.assertEqual(p["speculative"], "draft")
         self.assertTrue(pool.events[0]["speculative_kept"])
@@ -243,7 +245,7 @@ class SpeculativeWork(unittest.TestCase):
         est._events_pool = pool = _Pool()
         eid = _card(est, "s", work_needed=True, pick=True)
         est.edit(eid, properties={"speculative": "draft"})
-        self.assertTrue(DM.answer(est, led, eid, False)["ok"])
+        self.assertTrue(D.answer(est, led, eid, False)["ok"])
         p = est.resolve(eid, exact=True).properties
         self.assertNotIn("speculative", p)
         self.assertEqual(p["speculative_discarded"], "draft")
@@ -252,5 +254,5 @@ class SpeculativeWork(unittest.TestCase):
     def test_drafts_do_not_attach_to_a_decided_card(self):
         est, led = _store()
         eid = _card(est, "s", work_needed=True)
-        DM.answer(est, led, eid, True)
+        D.answer(est, led, eid, True)
         self.assertFalse(est.edit(eid, properties={"speculative": "late"})["ok"])

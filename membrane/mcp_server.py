@@ -1013,17 +1013,6 @@ def tool_intend(args: dict, port: int) -> str:
             f"fulfill #N, then it can rank in.")
 
 
-def tool_answer_card(args: dict, port: int) -> str:
-    """#845: what the person said in the chat reaches the card (decision_map.relay)."""
-    out = _http(port, "POST", "/membrane/decision/relay", {
-        "card": _arg(args, "card", "spec", "eid"), "value": args.get("value"),
-        "quote": str(args.get("quote") or "")})
-    if not out.get("ok"):
-        return f"Answer failed: {out.get('error', 'unknown error')}"
-    card = out.get("card") or {}
-    return f"Card {card.get('status')}: value {card.get('value')} (relayed, with the quote on record)"
-
-
 def tool_fulfill(args: dict, port: int) -> str:
     """The close with a receipt: an open goal flips to fulfilled (shared)
     when the caller hands the evidence that proves it done."""
@@ -1538,21 +1527,6 @@ METHOD_TOOL_DEFS = [
             "inputSchema": {"type": "object", "properties": {}},
         },
     {
-            "name": "answer_card",
-            "description": (
-                "relay the person's chat answer to a Decision card: card=eid, value, quote=their words verbatim (must match one of their messages; kept in ledger). unclear -> ask. chat lane only."),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "card": {"type": "string", "description": "The card's eid."},
-                    "value": {"description": "The answer, of the card's var type."},
-                    "quote": {"type": "string",
-                              "description": "The person's own words that give the answer."},
-                },
-                "required": ["card", "value", "quote"],
-            },
-        },
-    {
             "name": "learn",
             "description": (
                 'store ONE durable earned lesson (a note, not a transcript; no secrets, personal data, code, fences). guards: dedup, variety; may skip.'),
@@ -1668,7 +1642,7 @@ METHOD_TOOL_DEFS = [
 # The tools that are not field manipulation or querying are METHODS, reached by name through `call` (operator,
 # 2026-11-12). Their implementations below are a labelled bridge: phase B moves each into c1f as the system behind it
 # (the intent board, watches, dials, memory, the peer channel) moves.
-METHOD_TOOLS = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "junk_cut",
+METHOD_TOOLS = ("intend", "fulfill", "intents", "learn", "forget", "junk_cut",
                 "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
 
 
@@ -1802,7 +1776,6 @@ TOOL_IMPLS = {
     "intend": tool_intend,
     "intents": tool_intents,
     "fulfill": tool_fulfill,
-    "answer_card": tool_answer_card,
     "learn": tool_learn,
     "forget": tool_forget,
     "entity_watch": tool_watch_entity,

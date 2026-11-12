@@ -11,6 +11,8 @@ from pathlib import Path
 os.environ.setdefault("MEMBRANE_STORE", "json")
 os.environ.setdefault("MEMBRANE_RUN", "0")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _decide as D  # noqa: E402
 
 from membrane import decision_map as DM  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
@@ -36,7 +38,7 @@ def test_an_answer_enqueues_one_decision_event():
     est, led = _seat()
     goal = est.add(cls="Goal", name="ship the new suite", summary="x")["eid"]
     eid = _card(est, "Which test runner", blocks=[goal], planted_by="watch")
-    assert DM.answer(est, led, eid, "pytest")["ok"]
+    assert D.answer(est, led, eid, "pytest")["ok"]
     [ev] = est._events_pool.take()
     assert (ev["kind"], ev["entity"], ev["title"], ev["value"]) == \
         ("decision", eid, "Which test runner", "pytest")
@@ -48,14 +50,14 @@ def test_an_answer_enqueues_one_decision_event():
 def test_a_refused_answer_enqueues_nothing():
     est, led = _seat()
     eid = _card(est, "Which test runner")
-    assert not DM.answer(est, led, eid, "nose")["ok"]
+    assert not D.answer(est, led, eid, "nose")["ok"]
     assert est._events_pool.take() == []
 
 
 def test_the_drainer_wakes_a_loop_pass_on_it():
     est, led = _seat()
     eid = _card(est, "Which test runner", planted_by="watch")
-    assert DM.answer(est, led, eid, "unittest")["ok"]
+    assert D.answer(est, led, eid, "unittest")["ok"]
     [ev] = est._events_pool.take()
 
     class _Srv:

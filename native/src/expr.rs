@@ -688,6 +688,28 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             let (Some(ts), Some(now)) = (num(&a[0]).or_else(|| epoch_of(&a[0])), num(&a[1])) else { return Ok(V::Str(String::new())) };
             Ok(V::Str(crate::clock::ago(ts, now)))
         }
+        // plain(text): the text a quote is compared in (convgraph._norm): lowercase; letters, digits and _ # . / : - stay,
+        // everything else is a space; runs of spaces collapse
+        "plain" => {
+            argn(1)?;
+            let t = match &a[0] { V::None => String::new(), v => text_of(v)? };
+            let mapped: String = t.to_lowercase().chars().map(|c| if c.is_alphanumeric() || "_#./:-".contains(c) { c } else { ' ' }).collect();
+            Ok(V::Str(mapped.split_whitespace().collect::<Vec<_>>().join(" ")))
+        }
+        // num(x): a number from a number or a numeric text (whole -> int, else float); anything else, a bool, nan, inf: none
+        "num" => {
+            argn(1)?;
+            Ok(match &a[0] {
+                V::Int(i) => V::Int(*i),
+                V::Float(f) if f.is_finite() => V::Float(*f),
+                V::Str(t) => {
+                    let t = t.trim();
+                    if let Ok(i) = t.parse::<i64>() { V::Int(i) }
+                    else { match t.parse::<f64>() { Ok(f) if f.is_finite() => V::Float(f), _ => V::None } }
+                }
+                _ => V::None,
+            })
+        }
         "epoch" => { argn(1)?; Ok(match &a[0] { V::Int(n) => V::Float(*n as f64), V::Float(f) => V::Float(*f), v => epoch_of(v).map(V::Float).unwrap_or(V::None) }) }
         // ---- time ----
         "localtime" => { argn(1)?; let ts = match &a[0] { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err("localtime(ts): a number".into()) }; Ok(crate::clock::local(ts)) }

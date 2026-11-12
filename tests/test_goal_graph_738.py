@@ -13,6 +13,8 @@ import pytest
 os.environ.setdefault("MEMBRANE_STORE", "json")
 os.environ.setdefault("MEMBRANE_RUN", "0")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _decide as D  # noqa: E402
 
 from membrane import adapters as AD  # noqa: E402
 from membrane import ch as CH  # noqa: E402
@@ -127,7 +129,7 @@ def test_a_card_answered_unblocks_its_task_and_replans(seat):
     card = [d for d in seat.entity_store.docs.values() if d.cls == "Decision"][0]
     seat.calls.clear()
     with W.source("person", "op"):
-        assert DM.answer(seat.entity_store, None, card.eid, "right")["ok"]
+        assert D.answer(seat.entity_store, None, card.eid, "right")["ok"]
     settle(seat)
     assert st(seat, C) == "owed" and tasks_in_pool(seat) == [C]
     assert any(c["prompt"].startswith("plan the goal: card " + card.eid) for c in seat.calls), seat.calls

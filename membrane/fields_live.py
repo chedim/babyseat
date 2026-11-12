@@ -427,7 +427,10 @@ class Live:
             if str(w.get("writer") or "").startswith("field:") and w["eid"].startswith(BANNER_NS):
                 self._engine_props.setdefault(w["eid"], set()).add(w["prop"])   # what a banner's class computed
             with W.as_writer(WRITER + str(w.get("writer") or "").removeprefix("field:")):
-                d.properties = {**(d.properties or {}), w["prop"]: w["new"]}
+                props = {**(d.properties or {}), w["prop"]: w["new"]}
+                if w["new"] is None:                 # a write of none removes the property (as a getter's none leaves it absent)
+                    props.pop(w["prop"], None)
+                d.properties = props
                 self.est.upsert(d, embedder=None)
         for c in out.get("calls") or []:
             llm = (self.est.docs or {}).get(LLM_EID)
@@ -519,6 +522,8 @@ class Live:
             self._banner_loaded[eid] = key
             self.ctxs[eid] = ctx
             self.f.sql_forget(eid)                     # this build's recall starts fresh (the same words recall again)
+            if d.cls not in DEFAULT_CLASSES:
+                self.f.refresh(eid, now)               # a model's own class: every getter reads the store again (one over constants is never dirty)
         try:
             with self.busy:
                 cur0 = json.loads(self.f.get(eid)) or {}
@@ -646,17 +651,51 @@ class Live:
                 next_tick = time.time() + GG.WAIT_TICK_S
 
 
-def boot_started(est) -> None:
-    """The seat tells the field it has started: Boot:seat.started = now (data only, as About:seat is). Packs answer with
-    setters on Boot.started (the dev pack makes the dev Commands)."""
+def boot_started(est, ledger: str | None = None) -> None:
+    """The seat tells the field it has started: Boot:seat.started = now (data only, as About:seat is), with the facts packs
+    need (`ledger`: the operator ledger's file). Packs answer with setters on Boot.started (the dev pack makes the dev
+    Commands, the decisions pack its nodes)."""
     from .entities import QuantumEntity
     d = (est.docs or {}).get("Boot:seat")
     if d is None:
         est.upsert(QuantumEntity(eid="Boot:seat", cls="Boot", properties={"name": "this seat's start", "silent_birth": True}),
                    embedder=None)
         d = est.docs["Boot:seat"]
-    d.properties = {**(d.properties or {}), "started": time.time()}
+    props = {**(d.properties or {}), "started": time.time()}
+    if ledger:
+        props["ledger"] = str(ledger)
+    d.properties = props
     est.upsert(d, embedder=None)
+
+
+def answer_card(srv, card: str, request: dict, timeout: float = 15.0) -> dict:
+    """The seat's door for a person's own answer to a Decision card (the board, the chat's "N. value"): write
+    `Decision.answer` and wait for the decisions pack's receipt (`answer_result`). A stopgap until the serve routes are
+    entities: the decision itself is the pack's. -> {ok, value | error[, conflict], card}"""
+    est = getattr(srv, "entity_store", None)
+    ent = est.resolve(str(card or ""), exact=True) if est is not None else None
+    if ent is None or ent.cls != "Decision":
+        return {"ok": False, "error": f"no Decision card {card!r}"}
+    if getattr(srv, "fields_live", None) is None:
+        return {"ok": False, "error": "the field engine is off on this seat: cards are answered by the decisions pack"}
+    live = srv.fields_live
+    rid = f"a{time.time_ns()}-{threading.get_ident()}"
+    with live.busy:                       # the engine's own lock: its write-backs are read-modify-write on the same properties
+        ent = est.docs.get(ent.eid) or ent
+        with W.as_writer("field:answer"):
+            ent.properties = {**(ent.properties or {}), "answer": {**dict(request), "id": rid}}
+            est.upsert(ent, embedder=None)
+    t = time.time() + timeout
+    while time.time() < t:
+        for r in (est.docs.get(ent.eid).properties or {}).get("answer_log") or []:
+            if isinstance(r, dict) and r.get("id") == rid:
+                from . import decision_map as DM
+                return {**r, "card": DM._card_of(est.docs[ent.eid])}
+        time.sleep(0.02)
+    return {"ok": False, "error": "the decisions pack did not answer in time (is the field engine running?)"}
+
+
+real_answer_card = answer_card          # (the name a test that swaps the door cannot reach)
 
 
 def start(srv, thread: bool = True) -> Live | None:

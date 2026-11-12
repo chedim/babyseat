@@ -104,8 +104,7 @@ FAMILIES: dict[str, dict] = {
         "description": "Your commitments: plant one, list the board, close one with its "
                        "receipt (evidence). An empty board leaves the idle mind unsteered: "
                        "help('goals').",
-        "actions": {"plant": "intend", "list": "intents", "close": "fulfill",
-                    "answer": "answer_card"},
+        "actions": {"plant": "intend", "list": "intents", "close": "fulfill"},
         "params": {"text": _S("the goal"), "ttl": _S("e.g. '2w'"),
                    "spec": _S("goal or card id"), "evidence": _S("the receipt"),
                    "value": {}},

@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import mcp_server as M  # noqa: E402
 
-NAMES = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "junk_cut",
+NAMES = ("intend", "fulfill", "intents", "learn", "forget", "junk_cut",
          "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
 
 
@@ -45,9 +45,9 @@ def test_call_passes_the_args_through(monkeypatch):
 
 def test_the_lane_rules_apply_through_call(monkeypatch):
     called = []
-    monkeypatch.setitem(M.TOOL_IMPLS, "answer_card", lambda a, p: called.append(a) or "passed")
-    monkeypatch.setattr(M, "_method_tool_refusal", lambda name: "listener lane: a loop doesn't answer a Decision card")
-    out = M.tool_dunder_call({"method": "answer_card", "args": {"card": "c", "value": 1, "quote": "yes"}}, 1)
+    monkeypatch.setitem(M.TOOL_IMPLS, "intend", lambda a, p: called.append(a) or "planted")
+    monkeypatch.setattr(M, "_method_tool_refusal", lambda name: "listener lane: a watch loop does not plant new goals")
+    out = M.tool_dunder_call({"method": "intend", "args": {"text": "x"}}, 1)
     assert "listener lane" in out and called == []
 
 
@@ -55,9 +55,9 @@ def test_the_refusal_comes_from_the_seats_lane_rules(monkeypatch):
     from membrane import diag_requests as DR
     from membrane import server as S
     monkeypatch.setattr(DR, "current", lambda: {"lane": "loop", "agent": "watch:membrane::x"})
-    assert "answer a Decision card" in (M._method_tool_refusal("answer_card") or "")
+    assert "does not plant new goals" in (M._method_tool_refusal("intend") or "")
     monkeypatch.setattr(DR, "current", lambda: {"lane": "chat", "agent": ""})
-    assert M._method_tool_refusal("answer_card") is None
+    assert M._method_tool_refusal("intend") is None
     monkeypatch.setattr(DR, "current", lambda: {"lane": "loop", "agent": "worker:membrane::task:a"})
     assert "isn't closed from here" in (M._method_tool_refusal("fulfill") or "") or S._graph_refusal("fulfill", "worker:membrane::task:a")
 

@@ -421,6 +421,12 @@ impl Fields {
         }
     }
 
+    /// Recompute every getter of this entity in the next round (a banner build asks its store reads again: a getter over
+    /// constants is never dirty on its own).
+    pub fn refresh(&mut self, core: &mut Core, host: &dyn Host, eid: &str, now: f64, seq: &mut i64) {
+        for gi in self.getters_of(core, eid) { self.dirty.insert((self.glevel[gi], eid.to_string(), gi)); }
+        self.settle(core, host, now, seq);
+    }
     /// A round with no outside write (new entities registered, dirty getters settled).
     pub fn settle(&mut self, core: &mut Core, host: &dyn Host, now: f64, seq: &mut i64) {
         self.visited.clear();

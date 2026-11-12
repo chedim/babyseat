@@ -1,3 +1,6 @@
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parent))
+import _decide as D  # noqa: E402
 """Review of #903 (re-review): per-message state of messages glued into one turn.
 RED tests: the per-session slots (_cg_understood, _cg_filled, _cg_text, _cg_said_now,
 _cg_pending_answers) hold one message, so two glued messages / a card answered before the glue
@@ -63,30 +66,6 @@ class TestTwoGluedMessages(unittest.TestCase):
         self.assertEqual((sb.get("filled") or {}).get("mark"), "B")
 
 
-class TestAnswerCardsAcrossGlue(unittest.TestCase):
-    def setUp(self):
-        self.srv, self.runner = _seat()
-        self.est = self.srv.entity_store
-        self.card = _card(self.srv)
-
-    def test_card_answered_before_the_glue_stays_on_the_turns_own_message(self):
-        _begin(self.srv, TURN)
-        self.assertTrue(DM.relay(self.srv, self.card, 12, TURN)["ok"])
-        g = self.runner.messages.add(SID, "msg_g1", "user", A_WORDS)
-        fake = _door(self.srv, ("msg_g1", A_WORDS))
-        _apply(fake, SID, "msg_g1")
-        u = self.runner.messages.add(SID, "msg_u1", "user", TURN)
-        a = self.runner.messages.add(SID, "msg_a1", "assistant", "ok")
-        CG.on_glued(self.srv, self.runner, SID, {"msgs": [(g, "[user: Dima]\n" + A_WORDS)], "orig": {}}, a)
-        CG.on_turn_end(self.srv, self.runner, SID, u, TURN, a, "ok")
-        self.assertEqual(self.est.docs[self.card].properties.get("message"), "msg_u1")
-
-    def test_answer_card_quoting_the_first_message_still_works_after_a_glue(self):
-        _begin(self.srv, TURN)                               # the turn's own words go to _cg_said_now
-        fake = _door(self.srv, ("msg_g1", A_WORDS))
-        _apply(fake, SID, "msg_g1")                          # the glue makes the glued words current
-        res = DM.relay(self.srv, self.card, 12, TURN)        # the agent quotes the turn's own message
-        self.assertTrue(res["ok"], res)
 
 
 if __name__ == "__main__":

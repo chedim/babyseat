@@ -12,6 +12,7 @@ to the effects that already exist:
   membrane::llm.unwake       llm.unwake: the wake's id
   membrane::presence.restart restarts.do_restart: the reason
   Peer:channel.post          peers.post: {text, reply_to} (packs/peer.c1f makes the node)
+  Notify:seat.tell           decision_map._tell: a decision event to the pool or the card's chat (packs/decisions.c1f)
   <method>.invoke            night.method_call: {object, args} (#576 C: a learned call acts)
   <wait>.check               goalgraph.check_wait: an armed wait's condition (#773)
   rel:<root>|execute|<ex>    lang.process: the code tree runs on its executor (#614);
@@ -65,6 +66,8 @@ def _branch(path: str) -> tuple[str, str, str] | None:
         return "llm", eid, prop
     if prop == "restart" and eid == MEMBRANE_NS + "presence":
         return "seat", eid, prop
+    if prop == "tell" and eid == "Notify:seat":
+        return "notify", eid, prop              # a decision event's delivery (packs/decisions.c1f): the pool or the card's chat
     if prop == "post" and eid == "Peer:channel":
         return "peer", eid, prop                # the peer channel (packs/peer.c1f): the substrate driver posts
     if prop == "invoke":
@@ -161,6 +164,18 @@ def _llm(srv, est, ent, prop, new, by) -> None:
     else:
         r = LLM.unwake(srv, str(d.get("id") or "") if d else str(new))
     _consume(est, ent, prop, new, r.get("text") if isinstance(r, dict) else r, rc=_rc(r))
+
+
+def _notify(srv, est, ent, prop, new, by) -> None:
+    from . import decision_map as DM
+    from . import speech as SP
+    d = new if isinstance(new, dict) else {}
+    ev = {**(d.get("body") or {}), "ts": d.get("ts")}
+    ev["entity"] = ev.get("card")
+    card = (est.docs or {}).get(str(ev.get("card") or ""))
+    DM._tell(est, (card.properties if card is not None else {}) or {}, ev,
+             SP.say("decided", title=ev.get("title"), value=ev.get("value")))
+    _consume(est, ent, prop, new, "told", rc=0)
 
 
 def _peer(srv, est, ent, prop, new, by) -> None:
@@ -364,7 +379,7 @@ def _mcp(srv, est, ent, prop, new, by) -> None:
     {"link": MF.link, "call:run": MF.call, "import": MF.import_effect}[prop](srv, est, ent, prop, new, by)
 
 
-EFFECTS = {"mcp": _mcp, "exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "peer": _peer, "methods": _methods,
+EFFECTS = {"mcp": _mcp, "exec": _exec, "chat": _chat, "toys": _toys, "llm": _llm, "seat": _seat, "peer": _peer, "notify": _notify, "methods": _methods,
            "toybox": _toybox, "plan": _plan, "replan": _replan, "tasks": _tasks, "wait": _wait}
 
 

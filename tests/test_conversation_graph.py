@@ -160,7 +160,7 @@ class DecisionsInTheChat(unittest.TestCase):
         self.assertEqual(decided, {"Should I merge #800?": "yes"})
         self.assertTrue(any(rel == "answers" for rel, _ in _out(srv, u)))
         self.assertEqual(srv.entity_store.sent, [])          # no "[decision] ..." sent back
-        self.assertTrue(srv.user_ledger.lines)
+        # (the ledger line is the decisions pack's: tests/test_decisions_pack.py reads the real file)
 
     def test_a_bare_yes_answers_the_only_open_one(self):
         srv, runner = _seat()

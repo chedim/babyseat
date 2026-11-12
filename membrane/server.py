@@ -1212,8 +1212,6 @@ OPERATOR_TOOLS = frozenset((
     # COMPOSITION IS INHERITANCE (the doctrine's own hand; it sat in no
     # lane -- 52 refusals, 2026-10-08)
     "entity_inherit",
-    # #845: passes on what the person said in the chat; the one hand no loop holds
-    "answer_card",
     # #1043: the field engine's hands -- a .c1f pack loaded, a property written (acting by writing)
     "pack", "entity_write",
 ))
@@ -1228,13 +1226,13 @@ LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the board's spatial watches (2026-10-08): attention is the
     # listeners' to allocate; the chat lane announces through intend
     "field_watch",
-}) - {"intend", "answer_card"}
+}) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
 PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_call", "method_each", "code_run",
                                "method_inspect",
                                "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
-                               "entity_inherit", "answer_card", "pack", "entity_write"}
+                               "entity_inherit", "pack", "entity_write"}
 
 # THE PHONE LANE (2026-10-08): a call's turn reads and answers. A misheard
 # sentence must never reach the shell or rewrite entities; a request
@@ -1246,8 +1244,6 @@ PHONE_TOOLS = frozenset(("query", "state", "graph", "entities_related",
 _LANE_REFUSALS = {
     "pack": "plan mode: packs aren't loaded from a planning session -- the build-mode turn loads them",
     "entity_write": "plan mode: nothing is written from a planning session -- the build-mode turn acts",
-    "answer_card": ("plan mode: a card isn't answered from a planning session -- the build-mode "
-                    "turn passes on what the person said"),
     "field_watch": ("plan mode: watches aren't planted from a planning "
                     "session -- the build-mode turn plants them"),
     "entity_add": ("plan mode: entities aren't created from a planning "
@@ -1264,8 +1260,6 @@ _LANE_REFUSALS = {
                "word; the board reads via goal(action='list')"),
 }
 _LISTENER_REFUSALS = {
-    "answer_card": ("listener lane: a loop doesn't answer a Decision card -- only the person's "
-                    "chat passes on what they said; end with BLOCKED on them"),
     "intend": ("listener lane: a watch loop does not plant new goals -- "
                "take this goal's next step yourself, close it (goal action='close') with the "
                "receipt, or end with BLOCKED; the operator's chat plants "
@@ -5004,7 +4998,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 return self._json_out(_SP.set_pause(psrv, b["paused"], by=_by))
             if path in ("/membrane/decision/answer", "/membrane/decision/chat", "/membrane/decision/drop"):
                 # #470: the board's writes, behind the owner's door above like
-                # every write: an answer (decision_map.answer) or a card's chat
+                # every write: an answer (the decisions pack) or a card's chat
                 from . import decision_map as _DM
                 b = self._read_body()
                 if not isinstance(b, dict):
@@ -5012,10 +5006,11 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 est = getattr(psrv, "entity_store", None)
                 if path.endswith("/answer"):
-                    res = _DM.answer(est, getattr(psrv, "user_ledger", None), str(b.get("card") or ""),
-                                     b.get("value"), conv=str(b.get("conv") or ""),
-                                     message=str(b.get("message") or ""),
-                                     work=b.get("work") if isinstance(b.get("work"), bool) else None)
+                    from . import fields_live as _FL
+                    req = {"value": b.get("value"), "conv": str(b.get("conv") or ""), "message": str(b.get("message") or "")}
+                    if isinstance(b.get("work"), bool):
+                        req["work"] = b["work"]
+                    res = _FL.answer_card(psrv, str(b.get("card") or ""), {k: v for k, v in req.items() if v not in ("", None)})
                 elif path.endswith("/drop"):
                     res = _DM.drop(est, str(b.get("card") or ""))
                 else:

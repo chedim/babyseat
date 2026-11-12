@@ -267,8 +267,8 @@ def _answer(srv, sid: str, u_mid: str, u_eid: str, text: str, prev_a: str | None
             asked[int(str(r["rel"]).split(":", 1)[1])] = d.eid
     n = 0
     for k, value in answers_in(text, sorted(asked)):
-        res = DM.answer(est, getattr(srv, "user_ledger", None), asked[k], value, conv=sid,
-                        message=u_mid, tell=False)
+        from . import fields_live as _FL
+        res = _FL.answer_card(srv, asked[k], {"value": value, "conv": sid, "message": u_mid, "tell": False})
         if res.get("ok"):
             _edge(be, origin, u_eid, "answers", asked[k])
             n += 1

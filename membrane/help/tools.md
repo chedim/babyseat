@@ -15,8 +15,7 @@ Close an OPEN goal you have PROVEN done: its status flips to fulfilled on the sh
 A METHOD: `call method='fulfill' args={...}`. args: spec* (string), evidence* (string) (* required).
 
 ## answer_card
-Pass on a Decision card's answer the person gave you in this chat, so they need not answer again on the board. Only for words they really said about this card; if they said nothing clear, ask. The quote must match a message of theirs word for word, and it stays on the card and in the ledger. Chat lane only.
-A METHOD: `call method='answer_card' args={...}`. args: card* (string), value*, quote* (string) (* required).
+PASS ON A DECISION CARD'S ANSWER the person gave you in this chat, so they need not answer again on the board. Write `relay = {value, quote}` on the card (`entity_write` on the Decision): `quote` is their own words, word for word; the seat checks that a message of theirs since the card was made holds it (case and punctuation aside). Then read `answer_result` back: `{ok: true, value}` when the card is decided, or `{ok: false, error}` (your words were not theirs, the value does not fit the card's variable, or the card is already decided); a refused quote leaves `relay_result`. Only for words they really said about this card; if they said nothing clear, ask. The quote stays on the card and in the operator ledger. Chat lane only; you cannot write the answer itself.
 
 ## intents
 Read YOUR intent board: the seat's active set steered goals (the dream loop's steering coordinates), open + closed. Use before planting a duplicate or to review what commitments are alive.

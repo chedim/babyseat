@@ -9,6 +9,8 @@ from pathlib import Path
 os.environ.setdefault("MEMBRANE_STORE", "json")
 os.environ.setdefault("MEMBRANE_RUN", "0")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _decide as D  # noqa: E402
 
 from membrane import decision_map as DM  # noqa: E402
 from membrane import server as S  # noqa: E402
@@ -36,7 +38,7 @@ def _card(est, name, **props):
 def test_a_watch_planted_card_wakes_the_pool_not_the_chat():
     est, led = _seat()
     eid = _card(est, "Which one", planted_by="watch", chat="ses_1")
-    assert DM.answer(est, led, eid, "a", conv="ses_1")["ok"]
+    assert D.answer(est, led, eid, "a", conv="ses_1")["ok"]
     assert [e["kind"] for e in est._events_pool.take()] == ["decision"]
     assert est.sent == []
 
@@ -44,7 +46,7 @@ def test_a_watch_planted_card_wakes_the_pool_not_the_chat():
 def test_any_other_card_tells_its_chat_not_the_pool():
     est, led = _seat()
     eid = _card(est, "Which one", planted_by="chat", chat="ses_1")
-    assert DM.answer(est, led, eid, "b", conv="ses_1")["ok"]
+    assert D.answer(est, led, eid, "b", conv="ses_1")["ok"]
     assert est._events_pool.take() == []
     [(sid, text)] = est.sent
     assert sid == "ses_1" and "Which one" in text and "b" in text
@@ -75,7 +77,7 @@ def test_the_lane_stamps_the_planter_on_a_new_card():
 def test_a_chat_card_with_no_chat_falls_back_to_the_pool():
     est, led = _seat()
     eid = _card(est, "Which one", planted_by="chat")
-    assert DM.answer(est, led, eid, "a")["ok"]
+    assert D.answer(est, led, eid, "a")["ok"]
     assert [e["kind"] for e in est._events_pool.take()] == ["decision"]
     assert est.sent == []
 
@@ -98,6 +100,6 @@ def test_answering_a_chat_planted_card_wakes_its_planting_chat():
             None, "ses_9")["properties"]
     eid = est.add(cls="Decision", name="Q", summary="x")["eid"]
     assert est.edit(eid, properties=props)["ok"]
-    assert DM.answer(est, led, eid, "a")["ok"]      # the board answers with no conv
+    assert D.answer(est, led, eid, "a")["ok"]      # the board answers with no conv
     assert est._events_pool.take() == []
     assert [s for s, _ in est.sent] == ["ses_9"]

@@ -408,6 +408,11 @@ impl Fields {
     fn rebuild(&self, py: Python<'_>, now: f64) {
         self.with(py, move |g| { let (core, f, seq) = g; let mut s = *seq; f.rebuild(core, now, &mut s); *seq = s; });
     }
+    /// Recompute every getter of one entity (its store reads ask again), then settle.
+    fn refresh(&self, py: Python<'_>, eid: String, now: f64) {
+        let host = self.host(py);
+        self.with(py, move |g| { let (core, f, seq) = g; let mut s = *seq; f.refresh(core, &host, &eid, now, &mut s); *seq = s; });
+    }
     /// Run a round with no outside write: a newly loaded entity's getters compute, and what references it recalculates.
     fn settle(&self, py: Python<'_>, now: f64) {
         let host = self.host(py);

@@ -59,7 +59,10 @@ class UserLedger:
                         rec = json.loads(ln)
                         t = str(rec.get("text") or "").strip()
                         if t:
-                            e = {"ts": str(rec.get("ts") or ""), "text": t}
+                            ts = rec.get("ts")
+                            if isinstance(ts, (int, float)) and not isinstance(ts, bool):     # the decisions pack writes the clock
+                                ts = datetime.fromtimestamp(float(ts), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                            e = {"ts": str(ts or ""), "text": t}
                             if rec.get("conv"):          # #429: the chat it was said in
                                 e["conv"] = str(rec["conv"])
                             out.append(e)

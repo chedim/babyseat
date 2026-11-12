@@ -64,3 +64,33 @@ fn it_counts_toward_the_node_cap_and_composes_with_the_rest() {
     assert_eq!(int(run("xs[0] + xs[1] + len(xs)").unwrap()), 33);
     assert_eq!(int(run("[x for x in xs][1]").unwrap()), 20);
 }
+
+// ---- num(x): a number from a number or a numeric text; anything else is none (never an error) ----
+
+#[test]
+fn num_parses_what_is_a_number_and_misses_the_rest() {
+    assert_eq!(int(run("num(12)").unwrap()), 12);
+    assert_eq!(int(run("num(' 12 ')").unwrap()), 12);
+    assert!(matches!(run("num('2.5')").unwrap(), V::Float(f) if f == 2.5));
+    assert!(matches!(run("num('1e3')").unwrap(), V::Float(f) if f == 1000.0));
+    assert!(matches!(run("num('abc')").unwrap(), V::None));
+    assert!(matches!(run("num('')").unwrap(), V::None));
+    assert!(matches!(run("num(True)").unwrap(), V::None));            // a bool is no number
+    assert!(matches!(run("num('nan')").unwrap(), V::None));
+    assert!(matches!(run("num('inf')").unwrap(), V::None));
+    assert!(matches!(run("num(n)").unwrap(), V::None));
+    assert!(matches!(run("num([1])").unwrap(), V::None));
+    assert_eq!(int(run("num('7') + num(3)").unwrap()), 10);
+}
+
+// ---- plain(text): the text compared for a quote (convgraph._norm): lowercase, keep letters digits and _#./:-, the rest a space ----
+
+#[test]
+fn plain_lowercases_and_drops_punctuation_but_keeps_the_marks_of_names_and_paths() {
+    assert_eq!(py_str(&run("plain('  Yes,  GO ahead!! ')").unwrap()), "yes go ahead");
+    assert_eq!(py_str(&run("plain('use #1131 in src/a.py: now-ok')").unwrap()), "use #1131 in src/a.py: now-ok");
+    assert_eq!(py_str(&run("plain('(a) [b] {c} \"d\" e_f')").unwrap()), "a b c d e_f");
+    assert_eq!(py_str(&run("plain('')").unwrap()), "");
+    assert_eq!(py_str(&run("plain(n)").unwrap()), "");
+    assert_eq!(py_str(&run("plain('ÄÖ ünï')").unwrap()), "äö ünï");
+}
