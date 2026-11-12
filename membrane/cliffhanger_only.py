@@ -13,8 +13,8 @@ SHELL_TOOLS = {"bash", "code_run", "shell", "run_shell_command", "execute_comman
 REFUSAL = ("refused: no shell on this seat (cliffhanger only). Read the world through the field: an entity "
            "whose getter is read(path), listdir(path) or stat(path); change it with File:<name>.write / .move / "
            ".delete; run a program with Command:<name>.run = {args} (its receipt lands on the entity: rc, "
-           "output). No shell does not mean no programs: define a method (method_define) or a Command: entity "
-           "for git, gh, pytest..., then call it. See help('stdlib').")
+           "output). No shell does not mean no programs: make a Command: entity "
+           "for git, gh, pytest..., then run it. See help('stdlib').")
 
 
 def on() -> bool:

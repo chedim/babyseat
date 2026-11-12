@@ -71,4 +71,4 @@ if __name__ == "__main__":
 class TestTheChatMayShowThings(unittest.TestCase):
     def test_the_chat_can_call_the_seats_exec(self):
         from membrane import server as S
-        self.assertIsNone(S._lane_refusal("method_call", "operator"))            # Argus can show things from the chat
+        self.assertIsNone(S._lane_refusal("code_run", "operator"))            # Argus can show things from the chat

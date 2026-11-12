@@ -1,0 +1,90 @@
+PACK methods 1
+IMPORT boot 1
+IMPORT proc 1
+-- ENTITY METHODS BECOME COMMANDS (docs/python-to-c1f.md, piece 2; methods are retired, #1101). A method is a Tool entity
+-- {method_name, command, read_only, name, ...}. When the seat starts (Boot:seat.started) this pack writes the matching
+-- `Command:<name>` (name = the method's `name`, "owner.method", with '.' ':' and ' ' as '_'): `cmd` = the command,
+-- `read_only` kept, `from_method` = the method's id. Run it with a write, as any Command:
+--     Command:<name>.run = {id, args: [<the {{params}} in the order they first appear>]}
+-- A {{param}} (bare, 'quoted' or "quoted") becomes the positional word "$1", "$2", ... of the command (the Command driver
+-- runs a string `cmd` with `sh -c`, the args after it), so every value stays ONE shell word, as the old shell-quoting did.
+-- Only what binds mechanically is translated; the rest (steps, a guard, abstract, {{self.x}} / {{parent}} placeholders, more than
+-- four placeholders, a placeholder inside single quotes) is listed on `Methods:review`.untranslated = [{eid, name, why}].
+-- A Command that already exists (the model edited it, or it was made before) is never rewritten.
+
+Tool.is_method getter: this.method_name != None and this.retired != True
+Tool.m_label getter: str(this.name or this.method_name)
+Tool.m_cname getter: replace(replace(replace(this.m_label, '.', '_'), ':', '_'), ' ', '_')
+Tool.m_tpl getter: str(this.command or '')
+
+-- the placeholders, in order of appearance: each one's name, and the text after it (four at most)
+Tool.m_n1 getter: strip(before(after(this.m_tpl, '{{'), '}}'))
+Tool.m_c1 getter: after(after(this.m_tpl, '{{'), '}}')
+Tool.m_n2 getter: strip(before(after(this.m_c1, '{{'), '}}'))
+Tool.m_c2 getter: after(after(this.m_c1, '{{'), '}}')
+Tool.m_n3 getter: strip(before(after(this.m_c2, '{{'), '}}'))
+Tool.m_c3 getter: after(after(this.m_c2, '{{'), '}}')
+Tool.m_n4 getter: strip(before(after(this.m_c3, '{{'), '}}'))
+Tool.m_c4 getter: after(after(this.m_c3, '{{'), '}}')
+Tool.m_names getter: [n for n in [this.m_n1, this.m_n2, this.m_n3, this.m_n4] if n != '']
+Tool.m_badn1 getter: len([n for n in this.m_names if startswith(n, 'parent') or startswith(n, 'self.') or startswith(n, 'steps.') or startswith(n, 'entities.')])
+Tool.m_badn2 getter: len([n for n in this.m_names if ' ' in n or "'" in n or '"' in n or '$' in n or '{' in n or '}' in n])
+Tool.m_badn getter: this.m_badn1 + this.m_badn2
+Tool.m_p getter: distinct(this.m_names)
+Tool.m_p0 getter: this.m_p[0]
+Tool.m_p1 getter: this.m_p[1]
+Tool.m_p2 getter: this.m_p[2]
+Tool.m_p3 getter: this.m_p[3]
+
+-- a quoted placeholder ('{{x}}' or "{{x}}") is the same single word: drop its quotes, then every {{x}} is "$k"
+Tool.m_a1 getter: this.m_tpl if this.m_p0 == None else replace(replace(this.m_tpl, "'{{" + this.m_p0 + "}}'", '{{' + this.m_p0 + '}}'), '"{{' + this.m_p0 + '}}"', '{{' + this.m_p0 + '}}')
+Tool.m_a2 getter: this.m_a1 if this.m_p1 == None else replace(replace(this.m_a1, "'{{" + this.m_p1 + "}}'", '{{' + this.m_p1 + '}}'), '"{{' + this.m_p1 + '}}"', '{{' + this.m_p1 + '}}')
+Tool.m_a3 getter: this.m_a2 if this.m_p2 == None else replace(replace(this.m_a2, "'{{" + this.m_p2 + "}}'", '{{' + this.m_p2 + '}}'), '"{{' + this.m_p2 + '}}"', '{{' + this.m_p2 + '}}')
+Tool.m_a4 getter: this.m_a3 if this.m_p3 == None else replace(replace(this.m_a3, "'{{" + this.m_p3 + "}}'", '{{' + this.m_p3 + '}}'), '"{{' + this.m_p3 + '}}"', '{{' + this.m_p3 + '}}')
+Tool.m_w1 getter: this.m_a4 if this.m_p0 == None else replace(this.m_a4, '{{' + this.m_p0 + '}}', '"$1"')
+Tool.m_w2 getter: this.m_w1 if this.m_p1 == None else replace(this.m_w1, '{{' + this.m_p1 + '}}', '"$2"')
+Tool.m_w3 getter: this.m_w2 if this.m_p2 == None else replace(this.m_w2, '{{' + this.m_p2 + '}}', '"$3"')
+Tool.m_sh getter: this.m_w3 if this.m_p3 == None else replace(this.m_w3, '{{' + this.m_p3 + '}}', '"$4"')
+
+-- a bare placeholder is inside single quotes when an odd number of ' stands before it (the quoted ones are gone from m_a4)
+Tool.m_g0 getter: before(this.m_a4, '{{')
+Tool.m_d1 getter: after(after(this.m_a4, '{{'), '}}')
+Tool.m_g1 getter: before(this.m_d1, '{{')
+Tool.m_d2 getter: after(after(this.m_d1, '{{'), '}}')
+Tool.m_g2 getter: before(this.m_d2, '{{')
+Tool.m_d3 getter: after(after(this.m_d2, '{{'), '}}')
+Tool.m_g3 getter: before(this.m_d3, '{{')
+Tool.m_q1 getter: len(this.m_g0) - len(replace(this.m_g0, "'", ''))
+Tool.m_q2 getter: this.m_q1 + len(this.m_g1) - len(replace(this.m_g1, "'", ''))
+Tool.m_q3 getter: this.m_q2 + len(this.m_g2) - len(replace(this.m_g2, "'", ''))
+Tool.m_q4 getter: this.m_q3 + len(this.m_g3) - len(replace(this.m_g3, "'", ''))
+Tool.m_s1 getter: '{{' in this.m_a4 and '.5' in str(this.m_q1 / 2)
+Tool.m_s2 getter: '{{' in this.m_d1 and '.5' in str(this.m_q2 / 2)
+Tool.m_s3 getter: '{{' in this.m_d2 and '.5' in str(this.m_q3 / 2)
+Tool.m_s4 getter: '{{' in this.m_d3 and '.5' in str(this.m_q4 / 2)
+Tool.m_sq getter: this.m_s1 or this.m_s2 or this.m_s3 or this.m_s4
+
+Tool.m_why getter:
+  WHEN this.abstract == True: 'abstract (an interface signature)'
+  ELSE WHEN len(this.parents or []) > 0: 'steps or a guard (parents)'
+  ELSE WHEN strip(this.m_tpl) == '': 'no command'
+  ELSE WHEN '{{' in this.m_c4: 'more than four placeholders'
+  ELSE WHEN this.m_badn > 0 or '{{' in this.m_sh: 'a placeholder it cannot bind (self., parent, steps. or odd)'
+  ELSE WHEN this.m_sq: 'a placeholder inside single quotes'
+  ELSE: None
+Tool.mech getter: this.is_method and this.m_why == None
+
+-- the seat's start: the translation, once per boot
+Boot.have getter: [c.eid for c in instances('Command')]
+Boot.m_todo getter: [t for t in instances('Tool') if t.mech and ('Command:' + t.m_cname) not in this.have]
+Boot.m_review getter: [{'eid': t.eid, 'name': t.m_label, 'why': t.m_why} for t in instances('Tool') if t.is_method and t.m_why != None]
+Methods.count getter: len(this.untranslated or [])
+
+Boot.started on-setter methods-to-commands:
+  ALWAYS:
+    FOR t IN this.m_todo:
+      ('Command:' + t.m_cname).cmd = t.m_sh
+      ('Command:' + t.m_cname).read_only = t.read_only == True
+      ('Command:' + t.m_cname).params = t.m_p
+      ('Command:' + t.m_cname).from_method = t.eid
+    ('Methods:review').untranslated = this.m_review

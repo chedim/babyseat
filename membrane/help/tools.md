@@ -74,23 +74,11 @@ THE FIELD'S PROGRAMS: a .c1f pack gives a class its behaviour -- getters that ke
 ## entity_write
 ACT BY WRITING: set one property of an entity; the write runs whatever reacts to it -- a pack's setters, or an adapter's effect (chat:<person>.say speaks to them, membrane::llm.call wakes a model turn, McpTool:<server>:<tool>.call:run calls a tool, a File's write / Command's run). An effect's receipt lands on the entity as <prop>_result: read it back.
 
-## method_define
-Give a class or object a METHOD once, then call it on any object of that kind (method_call, or method_each over every member). command: a shell template, {{arg}} for a call's args and {{self.<prop>}} for the object's (on='light', method='dim', command='curl ... {{self.entity_id}} {{level}}'); or steps, a composite run in order. guard: a python check first (result = {'ok': bool, 'why': str}). A missing owner becomes a class; re-defining updates. Owner only.
-
-## method_call
-CLIFFHANGER CALL: run a method on an object -- an entity or a class. Dispatch walks the object, then its ISA classes, then the globals (help('cliffhanger')). PROGRAM THE FIELD FIRST: define the method (method_define), then call it here (code itself runs with code_run); a call straight at the executor (tool:executor, remote_executor or an implementation's exec) is refused. E.g. object='presence', method='restart' restarts the seat. The receipt (rc, outcome, head) lands on the object.
-
 ## code_run
 RUN CODE (#614): the code is parsed into a tree of nodes in the field (one entity per node, shared wherever the same code appears) and its root is linked to an executor of its language: -execute-> while owed, -executing-> while it runs, then -result-> a result entity for this run. lang='sh' (default) runs on tool:executor, lang='js' in an opted-in browser tab (presence). Re-run a root with node=<its id> (each run keeps its own result); entity_read on a root shows its code, state and runs. Returns the root, the result, rc and the output.
 
 ## bash
-Run a shell command once: code_run under the name you know (the command becomes a tree in the field, the run a result entity; re-run with code_run node=<root>). What you will run again is a METHOD: method_define it on the entity it belongs to (its args as {{params}}), then method_call it -- program the field first.
-
-## method_each
-CLIFFHANGER EACH: call one method on every member of a class (over='light') or a name pattern (over='ha:light.*'). dry_run lists who it would reach without running. Stops at the first failure unless on_fail='continue'. Owner only.
-
-## method_inspect
-CLIFFHANGER INSPECT: which method a call on an object would run (its owner, the resolution order, its params and template) without running it. Read-only.
+Run a shell command once: code_run under the name you know (the command becomes a tree in the field, the run a result entity; re-run with code_run node=<root>). What you will run again is a Command: entity (its cmd, its varying values as "$1", "$2"): run it by writing Command:<name>.run = {id, args: [...]} -- program the field first.
 
 ## entity_read
 READ an entity's value after processing: its pack getters' current values with its properties (run=true reads through any cache). The properties blob is clipped at ~800 chars: read one in full with prop= (tail=N pages a list from its newest end; lines=A-B pages text, such as a run's kept output).

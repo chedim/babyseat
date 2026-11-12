@@ -1652,7 +1652,7 @@ membrane toybox remove toy:d6        # the entities go; the history is archived
 change the entity store, so the CLI refuses them while the
 seat is running. Use the seat's model then: the `toybox` object answers
 `add(spec)`, `list()`, `remove(name)` and `reset(name)`, for example
-`exec(action='call', object='toybox', method='add', args={'spec': 'tower n=5'})`.
+`entity(action='write', spec='toybox', prop='add', value='tower n=5')` (it was `exec(action='call', ...)` before methods were retired, #1101).
 The default name is `toy:<kind>`. A removed or reset toy's state and log are
 moved to `toybox/archive/`, never deleted.
 
@@ -1694,7 +1694,7 @@ membrane toybox poke toy:die roll --as alice    # by: alice
   only touches the toy's own files, under the toy's lock, so it works while
   the seat runs; self sees it on its next look.
 - **The seat's model** calls `toybox.poke(toy, action)`, for example
-  `exec(action='call', object='toybox', method='poke', args={'toy': 'toy:tower', 'action': 'knock 3'})`.
+  `entity(action='write', spec='toybox', prop='poke', value={'toy': 'toy:tower', 'action': 'knock 3'})`.
   A method call doesn't say who called it, and the toybox object is the
   model's surface (self's own reaches go through the getter), so every poke
   made there is tagged `model`.

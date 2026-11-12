@@ -4,8 +4,8 @@ enforced synthetic llm calls with a more natural 'call-llm' entity?").
 membrane::llm is an actuator like any other: its method `call(about,
 prompt)` wakes a model turn -- a loop with the listener's hands -- on the
 entity `about`, with that prompt as its task. Whoever decides the model is
-needed calls it: the seat (exec(action='call', object='llm', method='call',
-args={about, prompt})), a script (membrane.call_llm(prompt) -- one per
+needed calls it: the seat (entity(action='write', spec='llm', prop='call',
+value={about, prompt})), a script (membrane.call_llm(prompt) -- one per
 fire, like speak), and, step by step, the seat's own triggers (a watch's
 reaction, auto-chat, the nudges) instead of composing prompts in code.
 

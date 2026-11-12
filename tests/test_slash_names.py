@@ -14,7 +14,7 @@ from membrane import toolset as T
 
 class TestTheSlashIsNoPartOfTheName(unittest.TestCase):
     def test_the_seats_dispatcher_reads_slash_exec_as_exec(self):
-        args = {"action": "call", "object": "o", "method": "m", "args": {"a": 1}}
+        args = {"action": "run", "code": "uptime"}
         self.assertEqual(T.resolve("/exec", dict(args)), T.resolve("exec", dict(args)))
         self.assertEqual(T.resolve("//entity", {"action": "read", "name": "x"}),
                          T.resolve("entity", {"action": "read", "name": "x"}))

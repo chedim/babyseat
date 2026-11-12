@@ -64,8 +64,7 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(R("find", {"action": "related", "q": "bms", "k": 4}), ("entities_related", {"query": "bms", "k": 4}))
         self.assertEqual(R("find", {"action": "query", "q": "kind:c"}), ("entity_query", {"q": "kind:c"}))
         self.assertEqual(R("entity", {"action": "read", "spec": "c:x", "run": True}), ("entity_read", {"spec": "c:x", "run": True}))
-        self.assertEqual(R("exec", {"action": "call", "object": "o", "method": "m"}),
-                         ("method_call", {"object": "o", "method": "m"}))
+        self.assertEqual(R("exec", {"action": "run", "code": "uptime"}), ("code_run", {"code": "uptime"}))
         self.assertEqual(R("track", {"action": "list"}), ("entity_tracks", {}))
         self.assertEqual(R("state", {}), ("state", {}))
 
@@ -95,7 +94,7 @@ class TestHelp(unittest.TestCase):
     def test_help_carries_the_long_form(self):
         self.assertIn("help('packs')", T.help_text("scripts"))        # #1043: behaviour is a pack
         self.assertIn("getter", T.help_text("packs"))
-        self.assertIn("parents", T.help_text("exec"))
+        self.assertIn("Command:<name>.run", T.help_text("exec"))    # #1101: methods are Commands now
         self.assertIn("topics", T.help_text(""))
         self.assertIn("help", {d["name"] for d in T.advertised(S.OPERATOR_TOOLS)})
 
@@ -139,7 +138,7 @@ class TestTheTurn(unittest.TestCase):
         self.assertNotIn("entity_edit", sent)
 
     def test_the_lane_gate_still_holds(self):
-        seen, tools, _ = _turn("phone", [("exec", {"action": "call", "object": "presence", "method": "restart"})])
+        seen, tools, _ = _turn("phone", [("exec", {"action": "run", "code": "uptime"})])
         self.assertEqual(seen, [])
         self.assertIn("Refused", tools[0]["state"]["output"])
 
@@ -204,8 +203,8 @@ class TestOldEditTakesParents(unittest.TestCase):
             leg, a = T.resolve(name, args)
             self.assertEqual((leg, a.get("spec")), ("entity_read", "m:x"), name)
             self.assertIsNone(S._lane_refusal(leg, "operator"), name)
-        leg, a = T.resolve("exec/action-call", {"object": "o", "method": "m", "args": {"needle": "x"}})
-        self.assertEqual((leg, a["object"], a["args"]), ("method_call", "o", {"needle": "x"}))
+        leg, a = T.resolve("exec/action-run", {"code": "uptime"})
+        self.assertEqual((leg, a["code"]), ("code_run", "uptime"))
         self.assertEqual(T.resolve("membrane-query", {"topic": "t"})[0], "query")
         self.assertEqual(T.resolve("nonsense/action-read", {})[0], "nonsense/action-read")   # still refused, honestly
 

@@ -111,7 +111,7 @@ class TestArgusRestarts(unittest.TestCase):
         t = WA.loop_task_text({"kind": "restart-pending", "entity": "membrane::restart", "why": "new score",
                                "files": ["score.py"], "due": 1_800_000_000})
         self.assertIn("a seat restart is pending", t)
-        self.assertIn("method='restart'", t)
+        self.assertIn("prop='restart'", t)
         self.assertIn("STEP", t)
 
     def test_the_doctrine_says_the_restart_is_his(self):
@@ -120,7 +120,7 @@ class TestArgusRestarts(unittest.TestCase):
         self.assertIn("restarts (yours to do when `restart` is pending)", d)   # #1043: the pointer stays
         h = packaged("restarts")                                              # the long form is help('restarts')
         self.assertIn("RESTARTS:", h)
-        self.assertIn("method='restart'", h)
+        self.assertIn("prop='restart'", h)
 
 
 class TestARestartRestarts(unittest.TestCase):

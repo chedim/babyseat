@@ -39,9 +39,7 @@ def test_a_call_is_judged_by_what_it_did():
     assert MS.call_reads(srv, "entity_read", {"spec": "a"}, wrote=True)                  # the read-only set
     assert MS.call_reads(srv, "entity_edit", {"spec": "a"}, wrote=False)                 # wrote nothing: a read
     assert not MS.call_reads(srv, "entity_edit", {"spec": "a"}, wrote=True)
-    assert MS.call_reads(srv, "method_call", {"object": "ha:light.port", "method": "level"}, wrote=True)
-    # operator 2026-11-11 (B): a method call's own bookkeeping is not a write; read_only stays an override
-    assert MS.call_reads(srv, "method_call", {"object": "ha:light.port", "method": "turn_on"}, wrote=[])
+    assert not MS.call_reads(srv, "method_call", {"object": "ha:light.port", "method": "level"}, wrote=False)   # #1101: no such tool
     assert not MS.call_reads(srv, "code_run", {"code": "cat x"}, wrote=False)            # a shell: outside the field
     assert not MS.call_reads(srv, "learn", {"lesson": "x"}, wrote=False)                 # not a field family
 
@@ -101,7 +99,7 @@ def _turn_with(msgs, execute, ran):
         return {"choices": [{"message": msg, "finish_reason": "stop"}]}
     ladder.stream = stream
     tools = [{"name": n, "description": "", "inputSchema": {"type": "object"}}
-             for n in ("method_call", "entity_edit", "learn")]
+             for n in ("entity_read", "entity_edit", "learn")]
     r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(), ladder, execute, system="", model="m",
                       tools=tools)
     r.srv = _srv()
@@ -115,11 +113,11 @@ def _capped(out):
     return isinstance((out.get("info") or {}).get(CA.CAP_MARK), dict)
 
 
-RO = '{"object": "ha:light.port", "method": "level"}'
+RO = '{"spec": "ha:light.port"}'
 
 
-def test_a_read_only_method_call_is_a_reading_round():
-    out, ran = _turn({"tool_calls": [_call("r1", "method_call", RO)]}, {"tool_calls": [_call("w1", "learn")]},
+def test_a_read_is_a_reading_round():
+    out, ran = _turn({"tool_calls": [_call("r1", "entity_read", RO)]}, {"tool_calls": [_call("w1", "learn")]},
                      {"content": "DONE"})
     assert ran == ["r1", "w1"] and not _capped(out)
 
@@ -159,27 +157,12 @@ def test_claude_a_step_that_wrote_nothing_only_read():
 
 
 # ---- operator 2026-11-11 (B): a method call's own bookkeeping is no write -----------------------------------------
-TURN_ON = {"object": "ha:light.port", "method": "turn_on"}
-BOOKKEEPING = [("membrane::method:turn_on", "runs", "membrane::method:turn_on.runs"),
-               ("membrane::method:turn_on", "last_call", "membrane::method:turn_on.last_call"),
-               ("ha:light.port", "calls", "ha:light.port.calls"),
-               ("membrane::result:abc:1", "", "membrane::result:abc:1"),
-               ("membrane::node:abc", "code", "membrane::node:abc.code"),
-               (None, "", "rel:membrane::node:abc|result|membrane::result:abc:1")]
 
 
-def test_a_method_whose_only_writes_are_its_bookkeeping_reads():
-    assert MS.call_reads(_srv(), "method_call", TURN_ON, wrote=BOOKKEEPING)
 
 
-def test_a_method_that_wrote_anything_else_acted():
-    assert not MS.call_reads(_srv(), "method_call", TURN_ON,
-                             wrote=BOOKKEEPING + [("ha:light.port", "state", "ha:light.port.state")])
 
 
-def test_read_only_stays_an_override():
-    assert MS.call_reads(_srv(), "method_call", {"object": "ha:light.port", "method": "level"},
-                         wrote=[("ha:light.port", "state", "ha:light.port.state")])
 
 
 def test_the_chain_keeps_what_was_written():
@@ -193,14 +176,6 @@ def test_the_chain_keeps_what_was_written():
             W.watch_chain(ch["id"], False)
 
 
-def test_a_round_of_a_bookkeeping_only_method_call_is_a_reading_round():
-    def run(name, args, cid=None):
-        with W.as_writer("llm"):
-            W.emit("membrane::method:turn_on.runs", 1, 2, eid="membrane::method:turn_on")
-        return "ok"
-    out, ran = _turn({"tool_calls": [_call("m1", "method_call", '{"object": "ha:light.port", "method": "turn_on"}')]},
-                     {"tool_calls": [_call("w1", "learn")]}, {"content": "DONE"}, execute=run)
-    assert ran == ["m1", "w1"] and not _capped(out)
 
 
 def test_local_chat_models_keep_their_rounds():

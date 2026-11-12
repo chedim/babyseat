@@ -368,9 +368,9 @@ def shape_refusal(srv, lang: str, tree: Node) -> str | None:
         return None
     roots = ", ".join(str(r) for r in (p.get(SHAPE_ROOTS) or [])[-SHAPE_K:])
     return (f"refused: this program's shape already ran {int(p[SHAPE_RUNS])} times as a one-shot "
-            f"(roots: {roots}) -- program the field first: define a method from it on the entity it "
-            "belongs to (method_define, its command this code with the varying literals as "
-            "{{params}}), then method_call it")
+            f"(roots: {roots}) -- program the field first: make a Command:<name> entity from it "
+            "(its cmd this code, the varying literals as \"$1\", \"$2\"), then run it by writing "
+            "Command:<name>.run = {args: [...]}")
 
 
 def note_oneshot(srv, lang: str, tree: Node, root: str) -> None:

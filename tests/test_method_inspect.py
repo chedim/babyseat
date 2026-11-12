@@ -81,25 +81,5 @@ class TestInspect(unittest.TestCase):
         self.assertEqual([s.get("command") for s in r["steps"]], ["echo a", "echo b"])
 
 
-class TestTheWiring(unittest.TestCase):
-    def test_exec_inspect_is_the_inspect_tool(self):
-        self.assertEqual(T.resolve("exec", {"action": "inspect", "object": "o", "method": "m", "args": {"a": 1}}),
-                         ("method_inspect", {"object": "o", "method": "m", "args": {"a": 1}}))
-
-    def test_the_hands_lanes_have_it_and_plans_never_see_exec(self):
-        self.assertIn("method_inspect", S.OPERATOR_TOOLS)
-        self.assertIn("method_inspect", S.LISTENER_TOOLS)
-        self.assertNotIn("method_inspect", S.PLAN_TOOLS)       # the plan lane never sees exec at all
-        from membrane import jobs as J
-        self.assertNotIn("method_inspect", J.RUN_TOOLS)        # nothing runs
-
-    def test_the_mcp_door_knows_it(self):
-        from membrane import mcp_server as M
-        self.assertIn("method_inspect", M.TOOL_IMPLS)
-
-    def test_the_help_says_so(self):
-        self.assertIn("inspect", T.help_text("cliffhanger"))
-
-
 if __name__ == "__main__":
     unittest.main()

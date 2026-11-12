@@ -27,7 +27,6 @@ paths chat uses (reads are pre-gate; writes run the ordinary learn guards).
 """
 from __future__ import annotations
 
-from .methods_note import DEFINE_DISABLED, METHODS_DEPRECATED  # noqa: F401
 
 import json
 import os
@@ -142,21 +141,6 @@ def _brief_output(r: dict) -> str:
             + "\n".join(head) + ("\n…\n" if gap else "\n") + "\n".join(tail))
 
 
-def _link_output(r: dict) -> str:
-    """One run's output block for the tool reply: the (already cut) output,
-    and past the cap its total size and how to read the rest."""
-    out = r.get("output")
-    if out is None:                       # an older seat / a composition exit
-        out = r.get("head") or ""
-    out = str(out)
-    n = int(r.get("output_len") or len(out))
-    if n <= LINK_OUTPUT_CAP:
-        return f"output ({n} chars):\n{out}" if out else "output: (none)"
-    h = LINK_OUTPUT_CAP * 2 // 3
-    return (f"output ({n} chars, cut to the first {h} and the last "
-            f"{LINK_OUTPUT_CAP - h}; the full output is not kept -- read the "
-            f"rest by re-running narrower: sed -n 'A,Bp' / head -c / tail -c / "
-            f"grep):\n{out}")
 
 
 # the parts of WHERE WE ARE state(section=...) pulls (#429); the same names
@@ -346,55 +330,6 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "method_define",
-        "description": ("DISABLED (methods are retired: use cliffhanger getters/setters, help('cliffhanger')). was: give class|object a METHOD, then method_call / method_each it. command = shell template ({{arg}} = call args, {{self.<prop>}} = object props), e.g. on='light', method='dim', command='curl ... {{self.entity_id}} {{level}}'; or steps = composite in order. guard = python check first -> {'ok':bool,'why':str}. missing owner becomes a class; re-define updates. owner only."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "on": {"type": "string",
-                       "description": "The owner: the class or object the method "
-                                      "belongs to (eid or name)."},
-                "method": {"type": "string",
-                           "description": "The method's name; with abstract, its "
-                                          "signature, e.g. 'dim(level)'."},
-                "command": {"type": "string",
-                            "description": "The command template ({{arg}}, "
-                                           "{{self.prop}})."},
-                "read_only": {"type": "boolean",
-                              "description": "The method only reads (a sensor)."},
-                "guard": {"type": "string",
-                          "description": "Optional python check run before the "
-                                         "command; state has self, args, steps."},
-                "steps": {"type": "array",
-                          "items": {"type": "object"},
-                          "description": "A composite instead of a command: "
-                                         "[{name, call, object?, args?} | "
-                                         "{name, each, call, args?, max?} | "
-                                         "{name, command}], run in order, a "
-                                         "failure halts."},
-                "abstract": {"type": "boolean",
-                             "description": "An interface's required method: a "
-                                            "signature, no command; each member "
-                                            "must implement it."},
-            },
-            "required": ["on", "method"],
-        },
-    },
-    {
-        "name": "method_call",
-        "description": (
-            "run method on entity|class: dispatch object -> ISA classes -> globals (help('cliffhanger')). program the field first: method_define, then call here (code itself: code_run). a call straight at an executor (tool:executor, remote_executor, an implementation's exec) is refused. e.g. object='presence', method='restart'. receipt (rc, outcome, head) lands on the object."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "object": {"type": "string", "description": "The target entity (eid or name)."},
-                "method": {"type": "string", "description": "The method's name, e.g. exec."},
-                "args": {"type": "object", "description": "The method's {{param}} values."},
-            },
-            "required": ["object", "method"],
-        },
-    },
-    {
         "name": "code_run",
         "description": (
             "run code: parsed into a node tree in the field (one entity per node, shared), root linked to an executor of its language (-execute-> owed, -executing-> running, -result-> result entity). lang 'sh' (default, tool:executor) | 'js' (opted-in browser tab). re-run: node=<root id> (each run keeps its result). entity_read on a root = code, state, runs. returns root, result, rc, output."),
@@ -411,7 +346,7 @@ TOOLS: list[dict] = [
     {
         "name": "bash",
         "description": (
-            'run a shell command once = code_run lang sh (tree in the field, result entity; re-run via code_run node=<root>). what you will run again: method_define on its entity ({{params}}), then method_call.'),
+            'run a shell command once = code_run lang sh (tree in the field, result entity; re-run via code_run node=<root>). what you will run again: a Command:<name> entity, run by writing Command:<name>.run = {args}.'),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -420,46 +355,6 @@ TOOLS: list[dict] = [
                 "description": {"type": "string", "description": "What the command does, in a few words."},
             },
             "required": ["command"],
-        },
-    },
-    {
-        "name": "method_each",
-        "description": (
-            "call one method on every member of a class (over='light') or name pattern ('ha:light.*'). dry_run lists targets only. stops at first failure unless on_fail='continue'. owner only."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "over": {"type": "string",
-                         "description": "The class (its members) or a '*' "
-                                        "name pattern."},
-                "method": {"type": "string", "description": "The method's name."},
-                "args": {"type": "object",
-                         "description": "The method's {{param}} values, the same "
-                                        "for every member."},
-                "max": {"type": "integer",
-                        "description": "Cap on members reached (default 20, "
-                                       "at most 150)."},
-                "dry_run": {"type": "boolean",
-                            "description": "List the members only; run nothing."},
-                "on_fail": {"type": "string", "enum": ["abort", "continue"],
-                            "description": "abort (default) stops at the first "
-                                           "failure; continue runs the rest."},
-            },
-            "required": ["over", "method"],
-        },
-    },
-    {
-        "name": "method_inspect",
-        "description": (
-            'which method a call would run (owner, resolution order, params, template), without running it. read-only.'),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "object": {"type": "string", "description": "The target entity (eid or name)."},
-                "method": {"type": "string", "description": "The method's name."},
-                "args": {"type": "object", "description": "Optional {{param}} values to bind."},
-            },
-            "required": ["object", "method"],
         },
     },
     {
@@ -495,8 +390,9 @@ TOOLS: list[dict] = [
 # Claude SDK) reaches them; the usual file tools only on a no-bash seat (cliffhanger_only.strip_tools)
 _OBJ = {"type": "object"}
 TOOLS += [
-    {"name": "call", "description": "Call a method by its bare name; it resolves in your context (in: …), "
-                                    "innermost first. args are its params.",
+    {"name": "call", "description": "Call one of the seat's remaining tools by its bare name (help('tools') lists them); "
+                                    "args are its arguments. Entity methods are retired: run a program by writing "
+                                    "Command:<name>.run = {args}.",
      "inputSchema": {"type": "object", "properties": {"method": {"type": "string"}, "args": _OBJ},
                      "required": ["method"]}},
     {"name": "entity_enter", "description": "Enter an entity: it joins this chat's context (in: …) until exit.",
@@ -1041,121 +937,22 @@ def tool_entity_query(args: dict, port: int) -> str:
     return "no entities match"
 
 
-def tool_method_call_local(args: dict, port: int) -> str:
-    """method_call for the local models (server.mcp_executor): the short head."""
-    return tool_method_call(args, port, head_cap=LOCAL_LINK_HEAD)
 
 
-def _steps_arg(v):
-    if isinstance(v, str):
-        try:
-            v = json.loads(v)
-        except ValueError:
-            return None
-    return v if isinstance(v, list) else None
 
 
-def method_signature(method: str) -> tuple[str, list[str]]:
-    """'exec(code, timeout)' -> ('exec', ['code', 'timeout']); a bare name -> (name, [])."""
-    m = re.match(r"^\s*([A-Za-z_][\w]*)\s*\((.*)\)\s*$", str(method or ""))
-    if not m:
-        return str(method or "").strip(), []
-    return m.group(1), [x.strip() for x in m.group(2).split(",") if x.strip()]
 
 
-def _noted(text: str) -> str:
-    """Every method answer carries the deprecation note."""
-    return f"{text}\n{METHODS_DEPRECATED}"
 
 
-def tool_method_define(args: dict, port: int) -> str:
-    return DEFINE_DISABLED                       # creating or editing a method is no longer allowed (methods_note.py)
 
 
-def _tool_method_define_old(args: dict, port: int) -> str:
-    name, sig = method_signature(str(args.get("method") or ""))
-    out = _http(port, "POST", "/membrane/method/define", {
-        "on": str(args.get("on") or args.get("object") or ""), "method": name,
-        "command": str(args.get("command") or args.get("commands") or ""),
-        "read_only": bool(args.get("read_only")), "guard": str(args.get("guard") or ""),
-        "steps": _steps_arg(args.get("steps")),
-        "abstract": str(args.get("abstract") or "").lower() in ("true", "1", "yes"),
-        "params": _listish(args.get("params")) or sig})
-    if not out.get("ok"):
-        return f"define failed: {out.get('error', 'unknown error')}"
-    p = out.get("params") or []
-    if out.get("abstract"):
-        return (f"abstract method {out['method']}({', '.join(p)}) declared -- its owner is an interface; "
-                f"each entity inheriting it must implement {out['method'].split('.')[-1]} itself "
-                f"(exec(action='define', on=<it or a class between>, method=..., command=...))")
-    return (f"method {out['method']}{('{' + ','.join(p) + '}') if p else ''} "
-            f"{'defined' if out.get('created') else 'updated'} -- call it on any object that is (or "
-            f"inherits from) its owner: exec(action='call', object=..., method=...)")
 
 
-def _ran(out: dict) -> str:
-    """#588: what ran -- the command line, or a composite's steps with their rc --
-    and, on a halt, the failing step with its output."""
-    steps = out.get("steps") if isinstance(out.get("steps"), dict) else {}
-    if str(out.get("fed") or "").strip() or not steps:
-        line = f"ran: {str(out.get('fed') or '')[:300]}"
-    else:
-        line = "ran: " + " > ".join(f"{name} (rc {v.get('rc')})" for name, v in steps.items())
-    bad = next(((n, v) for n, v in steps.items() if v.get("rc") not in (0, None)
-                or v.get("status") in ("error", "blocked", "timeout")), None)
-    if bad and (out.get("error") or out.get("rc") not in (0, None)):
-        n, v = bad
-        line += f"\nhalted at {n}: rc {v.get('rc')}" + (f" -- {str(v.get('head') or '')[:300]}" if v.get("head") else "")
-    return line
 
 
-def tool_method_call(args: dict, port: int, head_cap: int | None = None) -> str:
-    return _noted(_tool_method_call_run(args, port, head_cap=head_cap))
 
 
-def _tool_method_call_run(args: dict, port: int, head_cap: int | None = None) -> str:
-    """A method call; the run's full output rides the reply up to
-    LINK_OUTPUT_CAP; `head_cap` (the local models'
-    path) keeps the short head instead."""
-    def shown(out: dict) -> str:
-        if head_cap is not None:
-            return f"head: {str(out.get('head') or '')[:head_cap]}"
-        return _link_output(out)
-    a = args.get("args")
-    if isinstance(a, str):
-        try:
-            a = json.loads(a)
-        except ValueError:
-            a = None
-    if isinstance(a, list):              # positional args (issue #61): the seat binds them in order
-        out = _http(port, "POST", "/membrane/method/call", {
-            "object": str(args.get("object") or args.get("spec") or ""),
-            "method": str(args.get("method") or ""), "args": a})
-        if not out.get("object") or out.get("status") == "blocked":
-            return (f"call {out.get('status', 'blocked')}: {out.get('error', 'unknown error')}"
-                    + (f" [resolution order: {' > '.join(out['mro'])}]" if out.get("mro") else ""))
-        return (f"[{out.get('status')}] {out['method']} on {out['object']} (via {out['via']}): "
-                f"rc={out.get('rc')} {out.get('outcome') or out.get('status')}\n{_ran(out)}\n"
-                f"{shown(out)}")
-    a = dict(a) if isinstance(a, dict) else {}
-    # THE PARAM BAG (issue #5 residual): the models put the wake's
-    # about/at/prompt (and the browser executor's code) at the TOP of the
-    # call -- only object/method/args rode the wire, so a
-    # `llm.wake about=x at=in 1h` reached the template with NO params and
-    # rc=2'd into a usage error instead of planting a wake
-    for k in ("about", "at", "prompt", "code"):
-        if k in args and k not in a and args[k] not in (None, "") \
-                and not isinstance(args[k], (dict, list)):
-            a[k] = args[k]
-    out = _http(port, "POST", "/membrane/method/call", {
-        "object": str(args.get("object") or args.get("spec") or ""),
-        "method": str(args.get("method") or ""), "args": a if isinstance(a, dict) else {}})
-    if not out.get("object") or out.get("status") == "blocked":
-        return (f"call {out.get('status', 'blocked')}: {out.get('error', 'unknown error')}"
-                + (f" [resolution order: {' > '.join(out['mro'])}]" if out.get("mro") else ""))
-    return (f"[{out.get('status')}] {out['method']} on {out['object']} (via {out['via']}; order "
-            f"{' > '.join(out.get('mro') or [])}): rc={out.get('rc')} {out.get('outcome') or out.get('status')}\n"
-            f"{_ran(out)}\n{shown(out)}")
 
 
 def tool_code_run(args: dict, port: int, head_cap: int | None = None) -> str:
@@ -1185,54 +982,12 @@ def tool_bash_local(args: dict, port: int) -> str:
     return tool_code_run_local(bash_args(args), port)
 
 
-def tool_method_inspect(args: dict, port: int) -> str:
-    return _noted(_tool_method_inspect_run(args, port))
 
 
-def _tool_method_inspect_run(args: dict, port: int) -> str:
-    """A method's read (issue #80): where a call resolves, the definition, and the
-    dry run -- nothing runs."""
-    a = args.get("args")
-    if isinstance(a, str):
-        try:
-            a = json.loads(a)
-        except ValueError:
-            a = None
-    out = _http(port, "POST", "/membrane/method/inspect", {
-        "object": str(args.get("object") or args.get("spec") or ""),
-        "method": str(args.get("method") or ""), "args": a if isinstance(a, (dict, list)) else None})
-    return json.dumps(out, indent=1)[:4000]
 
 
-def tool_method_each(args: dict, port: int) -> str:
-    return _noted(_tool_method_each_run(args, port))
 
 
-def _tool_method_each_run(args: dict, port: int) -> str:
-    a = args.get("args")
-    if isinstance(a, str):
-        try:
-            a = json.loads(a)
-        except ValueError:
-            a = None
-    out = _http(port, "POST", "/membrane/method/each", {
-        "over": str(args.get("over") or args.get("each") or ""), "method": str(args.get("method") or ""),
-        "args": a if isinstance(a, dict) else {}, "max": args.get("max"),
-        "dry_run": bool(args.get("dry_run")) and str(args.get("dry_run")).lower() not in ("false", "0"),
-        "on_fail": str(args.get("on_fail") or "abort")})
-    skip = (f" | skipped {out['n_unconfirmed']} unconfirmed (the class getter never read them -- "
-            f"likely text artifacts; check, then entity remove or give them a reading): "
-            + ", ".join(out.get("unconfirmed") or [])) if out.get("n_unconfirmed") else ""
-    if out.get("dry_run"):
-        return (f"dry run: {out['method']} over {out['over']} would reach {out['n']} (max {out['max']}): "
-                + ", ".join(out.get("members") or []) + skip)
-    head = f"[{out.get('status')}] {out.get('method')} over {out.get('over')}: "
-    if out.get("status") == "blocked" and not out.get("results"):
-        return head + str(out.get("error")) + skip
-    rows = "; ".join(f"{r['object']}:{r['status']}" for r in (out.get("results") or [])[:40])
-    return (head + f"{out.get('n_ok', 0)}/{out.get('n')} ok, ran {out.get('ran')}"
-            + (" (stopped at the first failure; on_fail='continue' runs the rest)" if out.get("stopped") else "")
-            + f" -- {rows}" + skip)
 
 
 def tool_entity_read(args: dict, port: int) -> str:
@@ -1509,30 +1264,18 @@ def _method_tool_refusal(name: str) -> str | None:
 
 
 def tool_dunder_call(args: dict, port: int) -> str:
-    """#1101 __call: a bare method name, resolved through the context stack, called like method_call."""
+    """#1101 __call: a bare name no tool has. A few of the old tools stay as a labelled bridge (METHOD_TOOLS above);
+    any other name is no longer a method (they are retired): the answer says how to act instead."""
     a = args.get("args")
     if not isinstance(a, (dict, list)):
         a = {k: v for k, v in args.items() if k not in ("method", "name", "args")}
     meth = str(args.get("method") or args.get("name") or "")
-    legacy = meth in METHOD_TOOLS and meth in TOOL_IMPLS
-    if legacy:
+    if meth in METHOD_TOOLS and meth in TOOL_IMPLS:
         why = _method_tool_refusal(meth)
-        if why:
-            return why
-    try:
-        out = _http(port, "POST", "/membrane/ctx", {"op": "call", "method": meth, "args": a})
-    except Exception as e:                           # noqa: BLE001 -- a miss for the bridge below
-        if not legacy:
-            raise
-        out = {"ok": False, "error": repr(e)}
-    if legacy and not out.get("ok") and not out.get("object"):
-        # no method of the model's own by that name in its context: the bridge (the Python behind the old tool)
-        return TOOL_IMPLS[meth](a if isinstance(a, dict) else {}, port)
-    if not out.get("ok") and not out.get("object"):
-        return f"call refused: {out.get('error', 'unknown error')}"
-    r = out.get("resolved") or {}
-    return _noted(f"[{out.get('status')}] {meth} on {r.get('object') or out.get('object')} (found in {r.get('level')}): "
-                  f"rc={out.get('rc')} {out.get('outcome') or ''}\n{_brief_output(out)}")
+        return why if why else TOOL_IMPLS[meth](a if isinstance(a, dict) else {}, port)
+    return (f"no tool named {meth!r}, and entity methods are retired: run a program with a write, "
+            f"Command:<name>.run = {{args}} (its receipt lands on the entity), or write a pack with the `pack` tool; "
+            f"help('cliffhanger') has the syntax.")
 
 
 def _fs_path(p) -> str:
@@ -1641,18 +1384,13 @@ TOOL_IMPLS = {
     "graph": tool_graph,
     "entity_query": tool_entity_query,
     "entity_inherit": tool_entity_inherit,
-    "method_define": tool_method_define,
-    "method_call": tool_method_call,
     "code_run": tool_code_run,
     "bash": tool_bash,
-    "method_each": tool_method_each,
-    "method_inspect": tool_method_inspect,
     "entity_read": tool_entity_read,
 }
 # the local models' toolset path (server.mcp_executor): the same tools, with
-# method_call's short head (their context is small)
-LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "method_call": tool_method_call_local,
-                    "code_run": tool_code_run_local, "bash": tool_bash_local}
+# the local models' toolset path: the shell tools with the short head (their context is small)
+LOCAL_TOOL_IMPLS = {**TOOL_IMPLS, "code_run": tool_code_run_local, "bash": tool_bash_local}
 
 
 # ---- the JSON-RPC loop ---------------------------------------------------------

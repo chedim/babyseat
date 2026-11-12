@@ -26,7 +26,7 @@ def _system(system="the doctrine"):
 
 
 def test_the_note_names_the_hands():
-    for word in ("method_define", "method_call", "worktree", "query",
+    for word in ("Command:<name>.run", "worktree", "query",
                  "Decision", "'status': 'open'", "pick"):
         assert word in CA.TOOLS_NOTE, word
 
@@ -56,13 +56,13 @@ def test_the_note_says_how_to_work():
 def test_the_note_teaches_programming_the_field():
     note = CA.TOOLS_NOTE
     assert "getter_script" not in note and "tick_script" not in note     # #1043: packs, never Python scripts
-    for phrase in ("programming the field", "method_define", "method_call",
-                   "method_each", "method_inspect", "entity_query",
+    for phrase in ("programming the field", "Command:<name>.run", "entity_query",
                    ".c1f getter", "membrane::help:packs", "doctrine",
                    "worktree", "no one-shot", "program the field first", "code_run"):
         assert phrase in note, phrase
     # reuse comes BEFORE defining something new
-    assert note.index("entity_query") < note.index("method_define")
+    assert note.index("entity_query") < note.index("Command:<name>.run")
+    assert not [w for w in ("method_define", "method_call", "method_each", "method_inspect") if w in note]
     # the raw-shell sales pitch is gone, and so is the one-shot door
     assert "read files (cat, sed -n" not in note
     assert "entity_link" not in note and "one-off" not in note
@@ -82,10 +82,10 @@ def test_the_note_stays_tight():
     assert len(CA.TOOLS_NOTE) <= 3560, len(CA.TOOLS_NOTE)  # +#766 work-to-goal line, +#919 full tool names (operator: ok)
 
 
-def test_the_name_map_carries_define_and_each():
+def test_the_name_map_has_no_method_tools():
     pairs = {(f, a): n for f, a, n in _name_map()}
-    assert pairs[("exec", "define")] == "method_define"
-    assert pairs[("exec", "each")] == "method_each"
+    assert pairs[("exec", "run")] == "code_run"
+    assert ("exec", "define") not in pairs and ("exec", "each") not in pairs and ("exec", "call") not in pairs
 
 
 def test_the_system_prompt_carries_the_note_after_the_doctrine():

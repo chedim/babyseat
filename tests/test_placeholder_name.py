@@ -27,7 +27,7 @@ class TestATemplatePlaceholderNameIsNoName(unittest.TestCase):
         msg = str(e.exception)
         self.assertIn("placeholder", msg.lower())
         self.assertIn("{function_name}", msg)
-        self.assertIn('"action": "call", "object": "presence"', msg)   # a real, filled-in call
+        self.assertIn('"action": "read", "name": "presence"', msg)   # a real, filled-in call
 
     def test_other_placeholder_spellings(self):
         for name in ("{fn_name}", "{ function-name }", "{tool_name}"):

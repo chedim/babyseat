@@ -48,10 +48,10 @@ def test_a_shipped_pack_is_not_overwritten(live):
     assert not r["ok"] and "IMPORT banner" in r["error"]
 
 
-def test_the_tools_are_on_the_surface_before_method_define():
+def test_the_tools_are_on_the_surface_before_code_run():
     names = [t["name"] for t in M.TOOLS]
     assert "pack" in names and "entity_write" in names and "write" not in names      # opencode owns `write` (files)
-    assert names.index("pack") < names.index("method_define") and names.index("entity_write") < names.index("method_define")
+    assert names.index("pack") < names.index("code_run") and names.index("entity_write") < names.index("code_run")
 
 
 def test_write_is_an_entity_edit_of_one_property(monkeypatch):

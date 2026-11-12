@@ -159,13 +159,9 @@ class TestMcpProtocol(unittest.TestCase):
                                  "entity_inherit",
                                  # #1043: the field engine's hands
                                  "pack", "entity_write",
-                                 # Cliffhanger: define a method on a class, call it
-                                 # on an object or each member, inspect a call
-                                 "method_define", "method_call",
-                                 "code_run", "bash", "method_each",
-                                 "method_inspect",
+                                 "code_run", "bash",
                                  "entity_read",
-                                 # #1101: the context stack and bare method calls (the file tools only on a no-bash seat
+                                 # #1101: the context stack and the remaining tools by name (the file tools only on a no-bash seat
                                  "call", "entity_enter", "entity_exit"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)

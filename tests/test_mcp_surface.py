@@ -117,12 +117,12 @@ class TestScriptsHelpKeepsTheContract(unittest.TestCase):
         self.assertNotIn("python", json.dumps(t).lower())
 
 
-class TestBashSteersToMethods(unittest.TestCase):
+class TestBashSteersToCommands(unittest.TestCase):
     """2026-10-29: since the `bash` alias (#619) ~80% of the model's calls
-    were one-shot shell and it defined no methods in two days; the doctrine
-    says program the field first. The tool's own description says so."""
+    were one-shot shell; the doctrine says program the field first. The tool's
+    own description says so (#1101: what you run again is a Command entity)."""
 
-    def test_bash_says_one_shot_and_points_at_methods(self):
+    def test_bash_says_one_shot_and_points_at_commands(self):
         d = next(t for t in M.TOOLS if t["name"] == "bash")["description"]
-        for needle in ("once", "method_define", "method_call"):
+        for needle in ("once", "Command:<name>.run"):
             self.assertIn(needle, d, needle)

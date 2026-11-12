@@ -78,27 +78,15 @@ FAMILIES: dict[str, dict] = {
     },
     "exec": {
         "description": "load/show/packs: .c1f packs (help('packs')). run: code as a field tree. "
-                       "define/call/each/inspect: methods.",
-        "actions": {"load": "pack", "show": "pack", "packs": "pack", "run": "code_run", "call": "method_call",
-                    "each": "method_each", "define": "method_define", "inspect": "method_inspect"},
-        "params": {"args": {"type": "object", "description": "{{param}} values"},
-                   "name": _S("pack"), "c1f": _S("load: text"),
+                       "Run a program by writing Command:<name>.run = {args} (entity write).",
+        "actions": {"load": "pack", "show": "pack", "packs": "pack", "run": "code_run"},
+        "params": {"name": _S("pack"), "c1f": _S("load: text"),
                    "code": _S("run: code"), "lang": _S("run: sh|js"), "node": _S("run: root"),
-                   "object": _S("call: target"), "on": _S("define: owner; run: executor"),
-                   "over": _S("each: class|pattern"), "max": _I("each: cap (20)"),
-                   "dry_run": _B("each: list only"), "on_fail": _S("each: abort|continue"),
-                   "method": _S("method name"), "command": _S("define: template"),
-                   "read_only": _B("define: a read"), "guard": _S("define: guard"),
-                   "abstract": _B("define: f(a,b), no command"),
-                   "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"}},
+                   "on": _S("run: executor")},
         "map": {"run": lambda a: _pick(a, "code", "lang", "node", "on"),
                 "load": lambda a: {"action": "load", "name": a.get("name"), "c1f": a.get("c1f")},
                 "show": lambda a: {"action": "show", "name": a.get("name")},
-                "packs": lambda a: {"action": "list"},
-                "call": lambda a: _pick(a, "object", "method", "args"),
-                "inspect": lambda a: _pick(a, "object", "method", "args"),
-                "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
-                "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps", "abstract")},
+                "packs": lambda a: {"action": "list"}},
     },
     "track": {
         "description": "Entity tracks ride your header every turn: watch one (boundary "
@@ -455,8 +443,7 @@ def _placeholder_call(placeholder: str, args: dict) -> tuple[str, dict]:
     raise ValueError(
         f"the call's name {placeholder!r} is a template placeholder from your call format, not a tool: "
         f"write the real tool's name in its place -- one of {', '.join(sorted(FAMILIES))} -- and its "
-        "arguments as JSON. For example, to call a method: name exec, arguments "
-        '{"action": "call", "object": "presence", "method": "status"}; to read an entity: name entity, arguments '
+        "arguments as JSON. For example, to read an entity: name entity, arguments "
         '{"action": "read", "name": "presence"}')
 
 

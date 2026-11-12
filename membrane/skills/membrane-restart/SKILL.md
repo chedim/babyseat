@@ -12,19 +12,19 @@ never cuts a person's turn off.
 
 ## The planned restart: presence.restart
 
-Call the `restart` method on `presence`, with the reason as `why`:
+Write `restart` on `presence`, with the reason as `why`:
 
-- from the model: `exec(action="call", object="presence", method="restart", args={"why": "..."})`
+- from the model: `entity(action="write", spec="presence", prop="restart", value={"why": "..."})`
 - from a shell, against a running seat (port = its `--listen`, 11500 by default):
 
       ~/.membrane/venv/bin/python - <<'EOF'
       import json, urllib.request
       from membrane import jwtauth as J
       h = dict(J.client_headers(), **{"Content-Type": "application/json"})
-      body = {"object": "presence", "method": "restart", "args": {"why": "load #NNN"}}
-      req = urllib.request.Request("http://127.0.0.1:11500/membrane/method/call",
+      body = {"spec": "presence", "properties": {"restart": {"why": "load #NNN"}}}
+      req = urllib.request.Request("http://127.0.0.1:11500/membrane/entity/edit",
                                    data=json.dumps(body).encode(), headers=h)
-      print(json.load(urllib.request.urlopen(req, timeout=30))["status"])
+      print(json.load(urllib.request.urlopen(req, timeout=30)))
       EOF
 
   `J.client_headers()` carries the seat's credential (a minted JWT in JWT

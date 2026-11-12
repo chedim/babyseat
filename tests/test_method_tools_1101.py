@@ -23,8 +23,17 @@ def test_they_are_not_in_the_tool_list():
 def test_the_field_tools_stay():
     have = {t["name"] for t in M.TOOLS}
     assert {"entity_read", "entity_query", "entity_add", "entity_edit", "entity_remove", "entity_write",
-            "entity_inherit", "entity_enter", "entity_exit", "query", "graph", "state", "pack", "call",
-            "method_define", "method_call", "method_each", "method_inspect"} <= have
+            "entity_inherit", "entity_enter", "entity_exit", "query", "graph", "state", "pack", "call"} <= have
+
+
+def test_the_method_tools_are_gone_everywhere():
+    """#1101: methods became Command entities (packs/methods.c1f); the four tools, the exec actions and the
+    /membrane/method routes are removed."""
+    from membrane import toolset as T
+    gone = {"method_define", "method_call", "method_each", "method_inspect"}
+    assert not gone & {t["name"] for t in M.TOOLS}
+    assert not gone & set(M.TOOL_IMPLS) and not gone & set(M.LOCAL_TOOL_IMPLS)
+    assert not {"call", "each", "define", "inspect"} & set(T.FAMILIES["exec"]["actions"])
 
 
 def test_call_reaches_a_method_tool_by_name(monkeypatch):
@@ -51,19 +60,7 @@ def test_the_lane_rules_apply_through_call(monkeypatch):
     assert "listener lane" in out and called == []
 
 
-def test_an_unknown_name_still_goes_the_old_way(monkeypatch):
-    monkeypatch.setattr(M, "_http", lambda *a, **k: {"ok": False, "error": "no method"})
-    assert "call refused" in M.tool_dunder_call({"method": "frobnicate", "args": {}}, 1)
-
-
-def test_a_method_the_model_defined_wins_over_the_bridge(monkeypatch):
-    """Resolution order: the model's own method (in its context stack) first, the legacy Python only as the fallback --
-    so every one of these can be redefined by the model."""
-    legacy = []
-    monkeypatch.setitem(M.TOOL_IMPLS, "entity_tracks", lambda a, p: legacy.append(a) or "legacy board")
-    monkeypatch.setattr(M, "_method_tool_refusal", lambda name: None)
-    monkeypatch.setattr(M, "_http", lambda *a, **k: {"ok": True, "status": "ok", "rc": 0, "object": "membrane::Component:mine",
-                                                       "resolved": {"object": "membrane::Component:mine", "level": "chat"},
-                                                       "outcome": "ok", "head": "my board"})
-    out = M.tool_dunder_call({"method": "entity_tracks", "args": {}}, 1)
-    assert "my board" in out and legacy == []
+def test_an_unknown_name_is_no_method_any_more(monkeypatch):
+    monkeypatch.setattr(M, "_http", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no route is reached")))
+    out = M.tool_dunder_call({"method": "frobnicate", "args": {}}, 1)
+    assert "retired" in out and "Command:<name>.run" in out

@@ -367,9 +367,8 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
         L.append(
             "- EXEC: you have NO built-in tools this seat (bash/read/edit/"
             "grep/... are switched off in the config) -- every command, "
-            "file work is a method you define and call (exec(action='define') "
-            "then exec(action='call'): it runs inline and the result rides "
-            "the SAME tool call) or an entity script's "
+            "file work is a Command:<name> entity you run by writing "
+            "Command:<name>.run = {args} (its receipt lands on the entity) or an entity script's "
             "verdicts (one shell command -> one `c:<head>` membrane entity "
             "it runs THROUGH: the result lands on the entity, errors reach "
             "your next banner). Entity scripts run UNSANDBOXED: imports "
@@ -1479,14 +1478,15 @@ def person_paused(srv) -> bool:
     return bool(getattr(srv, "paused", False)) and getattr(srv, "pause_by", None) != "battery"
 
 
-def _is_restart_call(est, op: str, body) -> bool:
-    """True for a method call of presence.restart (#388): the one method
-    the pause lets through. The object may be named or given as its eid."""
-    if op != "call" or not isinstance(body, dict):
+def _is_restart_write(est, body) -> bool:
+    """True for a write of presence.restart (#388): the one write the pause lets through (the entity edit route,
+    `presence.restart = {why}`). The entity may be named or given as its eid."""
+    if not isinstance(body, dict):
         return False
-    if str(body.get("method") or "").strip() != "restart":
+    props = body.get("properties")
+    if not isinstance(props, dict) or set(props) != {"restart"}:
         return False
-    obj = str(body.get("object") or "").strip()
+    obj = str(body.get("spec") or "").strip()
     pres = MEMBRANE_NS + "presence"
     if obj in ("presence", pres):
         return True
@@ -4767,9 +4767,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._pack_op(); return
         if path == "/membrane/entity/inherit":
             self._entity_inherit(); return
-        if path in ("/membrane/method/define", "/membrane/method/call", "/membrane/method/each",
-                    "/membrane/method/inspect"):
-            self._method(path.rsplit("/", 1)[-1]); return
         if path == "/membrane/ctx":                    # #1101: the context stack and __call
             self._ctx_op(); return
         if path == "/membrane/code/run":
@@ -7349,13 +7346,13 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         self._json_out(res)
 
     def _entity_edit(self) -> None:
-        if self._paused_write_refused():
-            return
         srv = self.server
         est = getattr(srv, "entity_store", None)
+        body = self._json_body()
+        if not _is_restart_write(est, body) and self._paused_write_refused():
+            return
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
-        body = self._json_body()
         # SCRIPTS ARE CODE (#253): a script field lands only from the owner
         # (localhost or a token) -- a second check behind the route's door
         from . import seatauth as _SA
@@ -7482,67 +7479,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                        .startswith("refused: this program's shape") else {})})
         self._json_out(res)
 
-    def _method(self, op: str) -> None:
-        """POST /membrane/method/define|call: Cliffhanger's two verbs.
-
-        RESTARTS WHILE PAUSED (#388): the pause's write gate lets exactly
-        one call through -- presence.restart (a staged deploy must not
-        wait for a resume). The person's pause is carried to the new
-        boot (#395); every other method still answers 423."""
-        body = self._json_body()
-        srv = self.server
-        est = getattr(srv, "entity_store", None)
-        if not _is_restart_call(est, op, body) and self._paused_write_refused():
-            return
-        if est is None:
-            self._json_err_raw(503, "entity layer unavailable"); return
-        if op == "define":                                 # no new methods (methods_note.py)
-            from .methods_note import DEFINE_DISABLED
-            self._json_out({"ok": False, "error": DEFINE_DISABLED}); return
-        from . import seatauth as _SA
-        if op != "inspect" and not _SA.owner(self):        # #253: a method's command is code
-            from . import jwtauth as _JWT
-            _JWT.send_unauthorized(self); return
-        from .night import method_define, method_call, method_each, method_inspect
-        if op in ("call", "each"):
-            # #576 part F: a call straight at the executor is refused
-            from .night import direct_exec_refusal, direct_each_refusal
-            meth = str(body.get("method") or "")
-            why = (direct_each_refusal(est, str(body.get("over") or ""), meth) if op == "each"
-                   else direct_exec_refusal(est, str(body.get("object") or ""), meth))
-            if why:
-                self._json_out({"ok": False, "status": "blocked", "error": why, "method": meth,
-                                "object": str(body.get("object") or "") or None,
-                                "over": str(body.get("over") or "") or None}); return
-        if op == "inspect":
-            a = body.get("args")
-            self._json_out(method_inspect(est, str(body.get("object") or ""), str(body.get("method") or ""),
-                                          a if isinstance(a, (dict, list)) else None)); return
-        if op == "each":
-            a = body.get("args")
-            res = method_each(srv, est, _efield_on(srv), srv.membrane, str(body.get("over") or ""),
-                              str(body.get("method") or ""), a if isinstance(a, dict) else {},
-                              max_n=body.get("max"), dry_run=bool(body.get("dry_run")),
-                              on_fail=str(body.get("on_fail") or "abort"))
-            self._json_out(res); return
-        if op == "define":
-            res = method_define(srv, est, _efield_on(srv), srv.membrane, str(body.get("on") or ""),
-                                str(body.get("method") or ""), str(body.get("command") or ""),
-                                read_only=bool(body.get("read_only")), guard=str(body.get("guard") or ""),
-                                steps=body.get("steps") if isinstance(body.get("steps"), list) else None,
-                                abstract=bool(body.get("abstract")),
-                                params=body.get("params") if isinstance(body.get("params"), list) else None)
-        else:
-            a = body.get("args")
-            res = method_call(srv, est, _efield_on(srv), srv.membrane, str(body.get("object") or ""),
-                              str(body.get("method") or ""), a if isinstance(a, (dict, list)) else {})
-        if not res.get("ok") and not res.get("object"):
-            self._json_err_raw(400, str(res.get("error"))); return
-        self._json_out(res)
-
     def _ctx_op(self) -> None:
-        """POST /membrane/ctx {op: enter|exit|line|call, spec, method, args} (#1101). `call` resolves a bare method
-        name through the context stack and calls it like method_call (owner only)."""
+        """POST /membrane/ctx {op: enter|exit|line|pronoun, spec} (#1101): the context stack."""
         body = self._json_body()
         srv = self.server
         est = getattr(srv, "entity_store", None)
@@ -7569,22 +7507,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         if op == "pronoun":
             self._json_out({"ok": True, "word": body.get("word"), "means": _CC.pronoun(srv, str(body.get("word") or ""))})
             return
-        if op == "call":
-            meth = str(body.get("method") or "")
-            r = _CC.resolve(srv, meth)
-            if "miss" in r:
-                self._json_out({"ok": False, "error": r["miss"]}); return
-            from .night import method_call, direct_exec_refusal
-            why = direct_exec_refusal(est, r["object"], meth)
-            if why:
-                self._json_out({"ok": False, "error": why}); return
-            a = body.get("args")
-            res = method_call(srv, est, _efield_on(srv), srv.membrane, r["object"], meth,
-                              a if isinstance(a, (dict, list)) else {})
-            res["resolved"] = {"object": r["object"], "level": r["level"]}
-            _CC.touch(srv, r["object"])
-            self._json_out(res); return
-        self._json_out({"ok": False, "error": f"ctx: unknown op {op!r} (enter, exit, line, call)"})
+        self._json_out({"ok": False, "error": f"ctx: unknown op {op!r} (enter, exit, line, pronoun)"})
 
     def _stranger(self, path: str) -> None:
         """GET /membrane/stranger/visit|view|event|leave: the login page's

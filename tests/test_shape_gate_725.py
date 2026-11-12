@@ -64,7 +64,7 @@ def test_the_fourth_one_shot_of_a_shape_is_refused_naming_the_earlier_roots():
     assert not out.get("ok") and "refused" in out["error"]
     for r in roots:
         assert r in out["error"]
-    assert "method" in out["error"] and "{{" in out["error"]
+    assert "Command:<name>" in out["error"] and "$1" in out["error"]
 
 
 def test_the_count_lives_on_the_shapes_node():

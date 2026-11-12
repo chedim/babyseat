@@ -377,9 +377,8 @@ membrane/server.py):
   `fulfill`), room (`peer_post`, `peer_seats`, `peer_read`, `junk_cut`), the watches
   (`entity_watch`, `entity_unwatch`, `field_watch`, `attention`) and the
   entity hands (`entity_add`, `entity_edit`, `entity_remove`,
-  `entity_inherit`, `entity_write`), `pack` and the method tools (`method_define`, `method_call`,
-  `method_each`, `method_inspect`). The chat defines and calls a method
-  itself instead of planting a goal for it.
+  `entity_inherit`, `entity_write`), `pack`. (The method tools are gone, #1101: a repeated program is a
+  `Command:<name>` entity run by a write.)
 - **Event listener** (agent `watch:<eid>` — the thinking loops): the
   operator's set **minus** `intend` (a loop takes the next step, closes
   with `fulfill`, or ends BLOCKED; it never plants new goals).
