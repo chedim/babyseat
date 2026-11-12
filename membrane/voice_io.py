@@ -29,6 +29,7 @@ import time
 RING = 30
 SAY_GAP_S = 1.5
 SAY_MAX = 400
+KIND = "cls:voice"
 IN_MODES = ("off", "ptt", "lock", "hotword", "addressed")
 
 
@@ -62,6 +63,9 @@ def entity(srv, kind: str, person: str, create: bool = True):
         ent = est.docs.get(r.get("eid", "")) if isinstance(r, dict) else None
         if ent is not None:
             ent.properties.update({"person": person, "on": False, "voice_io": kind})
+    have = list((ent.properties or {}).get("parents") or []) if ent is not None else [KIND]
+    if ent is not None and KIND not in have:                 # the ISA kind-mirror (#1143): the engine's Voice class applies
+        ent.properties = {**(ent.properties or {}), "parents": have + [KIND]}
     return ent
 
 

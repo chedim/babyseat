@@ -527,14 +527,36 @@
       "Request.vo_out_view": "Dict",
       "Request.vo_person": "Text",
       "Request.vo_reply": "Dict?",
-      "Request.vo_slug": "Text"
+      "Request.vo_slug": "Text",
+      "Request.vs_dev": "Text",
+      "Request.vs_found": "Bool",
+      "Request.vs_go": "Bool",
+      "Request.vs_in": "Any",
+      "Request.vs_in_dev": "Any",
+      "Request.vs_in_eid": "Text",
+      "Request.vs_in_on": "Any",
+      "Request.vs_in_q": "Any",
+      "Request.vs_mode": "Any",
+      "Request.vs_out": "Any",
+      "Request.vs_out_dev": "Any",
+      "Request.vs_out_eid": "Text",
+      "Request.vs_out_on": "Any",
+      "Request.vs_out_q": "Any",
+      "Request.vs_ready": "Bool",
+      "Request.vs_reply": "Dict?",
+      "Request.vs_write": "Bool?",
+      "Voice.vs_kind": "None"
     },
     "writes": {
       "File.move": "Dict",
       "File.path": "Text",
       "File.write": "Dict",
       "Request.pl_rotated": "Bool",
-      "Request.pl_written": "Bool"
+      "Request.pl_written": "Bool",
+      "membrane.device": "Any",
+      "membrane.mode": "Any",
+      "membrane.on": "Any",
+      "membrane.state_ts": "Num"
     },
     "findings": []
   },

@@ -102,7 +102,7 @@
   ]
  },
  {
-  "name": "POST /membrane/voice/state is a 501: the voice entities are the Python seat's",
+  "name": "POST /membrane/voice/state with no person at all says no person (200, as the page expects)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -127,11 +127,8 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": true,
-     "sub": "alice",
-     "claims": {
-      "sub": "alice"
-     }
+     "authed": false,
+     "auth_error": "no token"
     }
    }
   ],
@@ -146,12 +143,15 @@
    {
     "eid": "Request:1",
     "prop": "reply.status",
-    "equals": 501
+    "equals": 200
    },
    {
     "eid": "Request:1",
-    "prop": "reply.body.error",
-    "equals": "not ported yet: the voice entities are written by the Python seat (voice_io)"
+    "prop": "reply.body",
+    "equals": {
+     "ok": false,
+     "error": "no person"
+    }
    }
   ]
  },

@@ -41,8 +41,17 @@ fn db(d: &std::path::Path) -> std::path::PathBuf {
         "heard": [{"ts": 1.0, "text": "hey memo", "session": "ses_1"}], "last_heard": "hey memo"}));
     put("membrane::Config:voice:out:dmitrii-chechetkin", json!({"person": "Dmitrii Chechetkin", "on": false, "device": "phone", "said": [{"ts": 2.0, "text": "hello"}]}));
     put("membrane::Config:voice:in:owner", json!({"on": true, "mode": "ptt"}));
+    for (k, p) in voice_ents() { put(k, p); }
+    put("membrane::Config:voice:in:old-one", json!({"person": "Old One", "on": false}));                      // made before the kind stamp
+    put("membrane::Config:voice:out:old-one", json!({"person": "Old One", "on": false}));
     put("membrane::Config:other", json!({"on": true}));
     p
+}
+
+/// The voice entities the Python seat stamps with the kind (voice_io.entity): in the store and held by the engine.
+fn voice_ents() -> Vec<(&'static str, J)> {
+    vec![("membrane::Config:voice:in:alice-b", json!({"person": "Alice B", "on": false, "voice_io": "in", "mode": "ptt", "device": "tablet", "parents": ["cls:voice"]})),
+         ("membrane::Config:voice:out:alice-b", json!({"person": "Alice B", "on": true, "voice_io": "out", "device": "tablet", "parents": ["cls:voice"]}))]
 }
 
 fn world(d: &std::path::Path) -> (Core, Fields) {
@@ -55,12 +64,16 @@ fn world(d: &std::path::Path) -> (Core, Fields) {
     let path = db(d).to_str().unwrap().to_string();
     c.store = Some(Store::with_exec(&path, std::sync::Arc::new(membrane_vm::sqlexec::NativeSqlExec::new(&path).unwrap())));
     let o = |v: J| v.as_object().unwrap().clone();
+    for (k, p) in voice_ents() { c.load(k.into(), "Config".into(), p.as_object().unwrap().clone(), None, 0.0); }
     c.load("Boot:seat".into(), "Boot".into(), o(json!({"ui_dir": "/x", "facts": {"seat_data_dir": d.to_str().unwrap()}})), None, 0.0);
     (c, f)
 }
 
 /// One request through the door: `who` None = a caller with no token on this machine. -> the reply.
-fn ask(d: &std::path::Path, path: &str, body: &str, who: Option<&str>) -> J {
+fn ask(d: &std::path::Path, path: &str, body: &str, who: Option<&str>) -> J { ask_in(d, path, body, who).0 }
+
+/// The same, and the field after it: the entities the request wrote.
+fn ask_in(d: &std::path::Path, path: &str, body: &str, who: Option<&str>) -> (J, Core) {
     let (mut c, mut f) = world(d);
     let mut req = json!({"method": "POST", "query": "", "headers": {}, "peer": "127.0.0.1:5", "path": path, "conn": 7});
     match who {
@@ -80,7 +93,7 @@ fn ask(d: &std::path::Path, path: &str, body: &str, who: Option<&str>) -> J {
     loop {
         f.settle(&mut c, &H, 3.0, &mut seq);
         let r = c.docs["Request:1"].props.get("reply").cloned().unwrap_or(J::Null);
-        if !r.is_null() { return r; }
+        if !r.is_null() { f.settle(&mut c, &H, 4.0, &mut seq); return (r, c); }
         if t.elapsed().as_secs() >= 10 { panic!("no reply: {:?}", c.docs["Request:1"].props); }
         wt.wait(Some(std::time::Duration::from_millis(20)));
     }
@@ -145,4 +158,65 @@ fn a_line_that_is_not_json_is_not_logged() {
     let r = ask(&d, "/ui/log", "not json", Some("owner"));
     assert_eq!(r["status"], 204);
     assert!(!d.join("page-voice.log").exists());
+}
+
+fn props<'a>(c: &'a Core, eid: &str) -> &'a serde_json::Map<String, J> { &c.docs[eid].props }
+const I: &str = "membrane::Config:voice:in:alice-b";
+const O: &str = "membrane::Config:voice:out:alice-b";
+
+#[test]
+fn the_state_route_writes_the_persons_two_voice_entities() {
+    let d = dir();
+    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true, \"in_mode\": \"addressed\", \"out_on\": false, \"device\": \"phone\"}", Some("Alice B"));
+    assert_eq!(r["status"], 200, "{r}");
+    assert_eq!(r["body"], json!({"ok": true, "state": {"in": {"on": true, "mode": "addressed", "device": "phone"}, "out": {"on": false, "device": "phone"}}}));
+    assert_eq!((props(&c, I)["on"].clone(), props(&c, I)["mode"].clone(), props(&c, I)["device"].clone()), (json!(true), json!("addressed"), json!("phone")));
+    assert_eq!((props(&c, O)["on"].clone(), props(&c, O)["device"].clone()), (json!(false), json!("phone")));
+    assert!(props(&c, I)["state_ts"].is_number() && props(&c, O)["state_ts"].is_number());
+    assert_eq!(props(&c, O)["person"], "Alice B");                                  // the rest of the entity is untouched
+    assert_eq!(props(&c, I)["parents"], json!(["cls:voice"]));
+}
+
+#[test]
+fn a_mode_outside_the_list_is_off_and_a_device_is_clipped_to_eighty() {
+    let d = dir();
+    let dev = "d".repeat(100);
+    let (r, c) = ask_in(&d, "/membrane/voice/state", &format!("{{\"in_mode\": \"nonsense\", \"device\": \"{dev}\"}}"), Some("Alice B"));
+    assert_eq!(r["status"], 200, "{r}");
+    assert_eq!(props(&c, I)["mode"], "off");
+    assert_eq!(props(&c, I)["device"], "d".repeat(80).as_str());
+    assert_eq!(props(&c, O)["device"], "d".repeat(80).as_str());
+}
+
+#[test]
+fn what_the_body_leaves_out_keeps_its_old_value() {
+    let d = dir();
+    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true}", Some("Alice B"));
+    assert_eq!(r["body"], json!({"ok": true, "state": {"in": {"on": true, "mode": "ptt", "device": "tablet"}, "out": {"on": true, "device": "tablet"}}}), "{r}");
+    assert_eq!((props(&c, I)["mode"].clone(), props(&c, I)["device"].clone(), props(&c, O)["on"].clone()), (json!("ptt"), json!("tablet"), json!(true)));
+}
+
+#[test]
+fn a_person_with_no_voice_entity_yet_is_a_404_and_nothing_is_made() {
+    let d = dir();
+    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true}", Some("Nobody"));
+    assert_eq!((r["status"].clone(), r["body"]["error"].clone()), (json!(404), json!("no voice entity yet")), "{r}");
+    assert!(!c.docs.keys().any(|k| k.contains("nobody")), "{:?}", c.docs.keys().collect::<Vec<_>>());
+}
+
+#[test]
+fn an_entity_without_the_kind_stamp_is_not_written_the_engine_does_not_hold_it() {
+    let d = dir();
+    let (r, _) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true}", Some("Old One"));
+    assert_eq!(r["status"], 404, "{r}");
+}
+
+#[test]
+fn the_state_route_names_the_person_from_the_body_without_a_token() {
+    let d = dir();
+    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"person\": \"Alice B\", \"out_on\": false}", None);
+    assert_eq!(r["status"], 200, "{r}");
+    assert_eq!(props(&c, O)["on"], false);
+    let (r, _) = ask_in(&d, "/membrane/voice/state", "{\"out_on\": false}", None);
+    assert_eq!(r["body"], json!({"ok": false, "error": "no person"}));
 }

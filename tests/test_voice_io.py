@@ -35,6 +35,17 @@ class TestVoiceIO(unittest.TestCase):
         VIO.set_state(srv, "Dmitrii Chechetkin", in_mode="nonsense")
         self.assertEqual(srv.entity_store._resolve_spec("voice:in:dmitrii-chechetkin").properties["mode"], "off")
 
+    def test_the_voice_entities_carry_the_voice_kind(self):
+        """#1143: the ISA kind-mirror: the engine's `Voice` class (door_voice.c1f) applies to entities with parents cls:voice."""
+        srv, r, _ = _seat()
+        VIO.set_state(srv, "Dmitrii Chechetkin", in_on=True)
+        for k in ("in", "out"):
+            self.assertEqual(srv.entity_store._resolve_spec(f"voice:{k}:dmitrii-chechetkin").properties["parents"], ["cls:voice"])
+        old = srv.entity_store._resolve_spec("voice:in:dmitrii-chechetkin")          # one made before the stamp
+        old.properties = {k: v for k, v in old.properties.items() if k != "parents"}
+        VIO.entity(srv, "in", "Dmitrii Chechetkin", create=False)
+        self.assertEqual(old.properties["parents"], ["cls:voice"])
+
     def test_argus_speaks_by_editing_say_and_only_while_it_is_on(self):
         srv, r, seen = _seat()
         VIO.set_state(srv, "Dmitrii Chechetkin", out_on=False)
