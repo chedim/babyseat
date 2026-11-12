@@ -131,8 +131,30 @@ Request.family getter:
   ELSE WHEN this.o_self == True: this.r_self
   ELSE: this.r_tools
 
+-- ---- the standard getters on Request (docs/c1f-stdlib.md): shared, so a family never restates them ------------------------------------
+-- facts: the launcher's facts as ONE dict (Boot:seat.facts). jbody: the body as JSON ({} when there is none or it is not JSON).
+-- qpairs: the query as rows [[k, v], ...] (undecoded). person: the verified name (the token's name, else its subject).
+Request.facts getter: ([b.facts for b in instances('Boot') if b.facts != None] or [{}])[0]
+Request.jbody getter: (json(this.body) or {}) if len(this.body or '') > 0 else {}
+Request.qpairs getter: [head(concat(words(replace(p, '=', ' ')), ['']), 2) for p in words(replace(this.query or '', '&', ' '))]
+Request.person getter: (prop(this.claims, 'name') or this.sub) if this.authed == True else None
+
+-- the declarative method gate: a family that declares `Request.m_<f>` (its allowed methods) gets the 405 and the `allow` header
+-- from here; a family that declares none checks for itself (the early families do). A HEAD is a GET.
+Request.allow getter:
+  WHEN this.o_models == True: this.m_models
+  ELSE WHEN this.o_decisions == True: this.m_decisions
+  ELSE WHEN this.o_state == True: this.m_state
+  ELSE WHEN this.o_voice == True: this.m_voice
+  ELSE WHEN this.o_session == True: this.m_session
+  ELSE WHEN this.o_self == True: this.m_self
+  ELSE WHEN this.o_tools == True: this.m_tools
+  ELSE: None
+Request.method_ok getter: this.allow == None or this.method in this.allow or (this.method == 'HEAD' and 'GET' in this.allow)
+Request.family_checked getter: {'status': 405, 'headers': {'allow': join(this.allow, ', ')}, 'body': {'error': 'method not allowed'}} if not this.method_ok else this.family
+
 Request.own_routes getter: this.conf_reply if this.path == '/ui/conf' else (this.login_reply if this.path == '/ui/login' else (this.logout_reply if this.path == '/ui/logout' else (this.probe_reply if this.probe else this.static_reply)))
-Request.routed getter: this.family if this.owned else this.own_routes
+Request.routed getter: this.family_checked if this.owned else this.own_routes
 Request.shipped getter: this.gate if this.gate != None else this.routed
 
 Request.reply getter: this.override if this.override != None else this.shipped

@@ -1,0 +1,717 @@
+[
+ {
+  "name": "facts is the launcher's dict",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "facts": {
+      "seat_version": "1.0",
+      "seat_name": "Nebo"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "facts.seat_version",
+    "equals": "1.0"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "facts.seat_name",
+    "equals": "Nebo"
+   }
+  ]
+ },
+ {
+  "name": "facts is empty when the launcher told none",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "facts",
+    "equals": {}
+   }
+  ]
+ },
+ {
+  "name": "jbody parses the body",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "{\"a\": 1, \"b\": {\"c\": \"x\"}, \"t\": [1, 2]}",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "jbody.a",
+    "equals": 1
+   },
+   {
+    "eid": "Request:1",
+    "prop": "jbody.b.c",
+    "equals": "x"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "jbody.t.1",
+    "equals": 2
+   }
+  ]
+ },
+ {
+  "name": "jbody is empty for a body that is not json",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "nope",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "jbody",
+    "equals": {}
+   }
+  ]
+ },
+ {
+  "name": "jbody is empty for no body",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "jbody",
+    "equals": {}
+   }
+  ]
+ },
+ {
+  "name": "qpairs reads the query as rows",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "spec=a&k=3&flag",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "qpairs.0.0",
+    "equals": "spec"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "qpairs.0.1",
+    "equals": "a"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "qpairs.1.0",
+    "equals": "k"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "qpairs.1.1",
+    "equals": "3"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "qpairs.2.0",
+    "equals": "flag"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "qpairs.2.1",
+    "equals": ""
+   }
+  ]
+ },
+ {
+  "name": "qpairs is empty for no query",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "qpairs",
+    "equals": []
+   }
+  ]
+ },
+ {
+  "name": "person is the verified name",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "person",
+    "equals": "Owner"
+   }
+  ]
+ },
+ {
+  "name": "person falls back to the subject",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "person",
+    "equals": "owner"
+   }
+  ]
+ },
+ {
+  "name": "person is none for a caller with no token",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/x",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": false,
+     "sub": null,
+     "claims": null,
+     "auth_error": "no token"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "person",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "a family's declared methods: a read passes",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_std_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/demo",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.method",
+    "equals": "GET"
+   }
+  ]
+ },
+ {
+  "name": "a method the family did not declare is a 405 with allow",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_std_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/demo",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "method not allowed"
+   }
+  ]
+ },
+ {
+  "name": "a family may declare a post",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_std_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/demo2",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.method",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "a HEAD is a GET to the gate",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_std_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "HEAD",
+     "path": "/demo",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   }
+  ]
+ },
+ {
+  "name": "the allow header lists every method",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "tests/specs/fixtures/door_std_demo.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "DELETE",
+     "path": "/demo2",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.9:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET, POST"
+   }
+  ]
+ }
+]

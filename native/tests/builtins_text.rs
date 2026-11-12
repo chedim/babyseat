@@ -126,3 +126,13 @@ fn replace_swaps_every_occurrence() {
     assert_eq!(ev("replace('a-b-c', '-', ' ')", json!({})), json!("a b c"));
     assert_eq!(ev("replace('abc', '', 'x')", json!({})), json!("abc"));       // an empty pattern changes nothing
 }
+
+#[test]
+fn json_of_text_that_is_not_json_is_none_so_a_default_can_follow() {
+    // a body that is not JSON must not abort the getter: `json(x) or {}` is the whole idiom
+    assert_eq!(ev("json(body)", json!({"body": "nope"})), json!(null));
+    assert_eq!(ev("json(body) or {}", json!({"body": "nope"})), json!({}));
+    assert_eq!(ev("json(body)", json!({"body": "{\"a\": 1}"})), json!({"a": 1}));
+    assert_eq!(ev("json(body)", json!({"body": ""})), json!(null));
+    assert_eq!(ev("json(body)", json!({"body": null})), json!(null));
+}
