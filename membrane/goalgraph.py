@@ -70,6 +70,7 @@ ENDED = (DONE, FAILED, STUCK)
 DROPPED = "dropped"
 TASK_ENDED = (DONE, DROPPED)   # no longer blocking its dependents
 CARD_ENDED = ("closed", "dropped")
+CARD_ANSWERED = ("decided", "in_flight", "closed", "dropped")     # a card stops BLOCKING once answered (#1139), not only when its follow-up work closes
 EXECUTE, EXECUTING, RESULT, BLOCKS = "execute", "executing", "result", "blocks"
 # #773: the third node class. A wait blocks tasks until its condition holds; it arms
 # when what it follows is done, is checked on the `every` trigger, and fails past its
@@ -234,9 +235,9 @@ def _blockers_of(est, task: str, index: dict | None = None) -> list:
 
 def _unfinished(d) -> bool:
     """Still blocking: a task until done or dropped (a dropped task's dependents are the
-    planner's to re-plan, never stuck behind it), a card until closed or dropped."""
+    planner's to re-plan, never stuck behind it), a card until answered (#1139)."""
     st = str((d.properties or {}).get("status") or "open")
-    return st not in (TASK_ENDED if d.cls in (TASK, WAIT) else CARD_ENDED)
+    return st not in (TASK_ENDED if d.cls in (TASK, WAIT) else CARD_ANSWERED)
 
 
 def _cycle(edges: dict) -> list | None:

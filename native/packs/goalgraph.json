@@ -136,7 +136,7 @@
    ],
    [
     "filter",
-    "g.eid == d.goal and (d.status == 'closed' or d.status == 'dropped')"
+    "g.eid == d.goal and (d.status == 'decided' or d.status == 'closed' or d.status == 'dropped')"
    ]
   ],
   "write": [
