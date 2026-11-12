@@ -65,3 +65,16 @@ def test_the_refusal_comes_from_the_seats_lane_rules(monkeypatch):
 def test_an_unknown_name_still_goes_the_old_way(monkeypatch):
     monkeypatch.setattr(M, "_http", lambda *a, **k: {"ok": False, "error": "no method"})
     assert "call refused" in M.tool_dunder_call({"method": "frobnicate", "args": {}}, 1)
+
+
+def test_a_method_the_model_defined_wins_over_the_bridge(monkeypatch):
+    """Resolution order: the model's own method (in its context stack) first, the legacy Python only as the fallback --
+    so every one of these can be redefined by the model."""
+    legacy = []
+    monkeypatch.setitem(M.TOOL_IMPLS, "intents", lambda a, p: legacy.append(a) or "legacy board")
+    monkeypatch.setattr(M, "_method_tool_refusal", lambda name: None)
+    monkeypatch.setattr(M, "_http", lambda *a, **k: {"ok": True, "status": "ok", "rc": 0, "object": "membrane::Component:mine",
+                                                       "resolved": {"object": "membrane::Component:mine", "level": "chat"},
+                                                       "outcome": "ok", "head": "my board"})
+    out = M.tool_dunder_call({"method": "intents", "args": {}}, 1)
+    assert "my board" in out and legacy == []

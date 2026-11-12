@@ -1741,12 +1741,20 @@ def tool_dunder_call(args: dict, port: int) -> str:
     if not isinstance(a, (dict, list)):
         a = {k: v for k, v in args.items() if k not in ("method", "name", "args")}
     meth = str(args.get("method") or args.get("name") or "")
-    if meth in METHOD_TOOLS and meth in TOOL_IMPLS:
+    legacy = meth in METHOD_TOOLS and meth in TOOL_IMPLS
+    if legacy:
         why = _method_tool_refusal(meth)
         if why:
             return why
+    try:
+        out = _http(port, "POST", "/membrane/ctx", {"op": "call", "method": meth, "args": a})
+    except Exception as e:                           # noqa: BLE001 -- a miss for the bridge below
+        if not legacy:
+            raise
+        out = {"ok": False, "error": repr(e)}
+    if legacy and not out.get("ok") and not out.get("object"):
+        # no method of the model's own by that name in its context: the bridge (the Python behind the old tool)
         return TOOL_IMPLS[meth](a if isinstance(a, dict) else {}, port)
-    out = _http(port, "POST", "/membrane/ctx", {"op": "call", "method": meth, "args": a})
     if not out.get("ok") and not out.get("object"):
         return f"call refused: {out.get('error', 'unknown error')}"
     r = out.get("resolved") or {}
