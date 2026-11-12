@@ -55,6 +55,7 @@ Banner.decided_lines getter: FOR r IN (this.decided_tagged or []): '- ' + clip(p
 -- (this chat's last delivered turn: SINCE counts from it).
 Banner.chat_key getter: this.chat if startswith(str(this.chat), 'sid:') else 'sid:' + str(this.chat)
 Banner.cur getter: lower(join(words(unspeak(this.ask or '')), ' '))
+Banner.user_turns getter WHEN this.map: []
 Banner.user_turns getter: sql("SELECT k, json_extract(body,'$.d.seq') AS seq, json_extract(body,'$.d.ts') AS ts, json_extract(body,'$.d.text') AS text, json_extract(body,'$.d.author') AS author FROM c_events WHERE json_extract(body,'$.d.conv') = ? AND json_extract(body,'$.d.stream') = 'discourse' AND json_extract(body,'$.d.role') = 'user' AND coalesce(json_extract(body,'$.d.status'), '') != 'forgotten' ORDER BY seq DESC LIMIT 50", this.chat_key) or []
 -- the person's own messages (newest first), the speaker line dropped
 Banner.asks getter: [{'k': prop(r, 'k'), 'seq': prop(r, 'seq'), 'ts': prop(r, 'ts'), 'raw': join(words(unspeak(prop(r, 'text') or '')), ' ')} for r in this.user_turns if prop(r, 'author') == 'person']
@@ -66,12 +67,15 @@ Banner.window_start getter: min([prop(a, 'seq') for a in this.window_asks]) if l
 
 -- ABOUT (focus): the entities named in the person's message now (first, in its order), then those in at least
 -- focus_min_events of the window's events (most events first, then the most recent)
+Banner.named_raw getter WHEN this.map: []
 Banner.named_raw getter: [prop(r, 'eid') for r in (sql("SELECT json_extract(body,'$.d.eid') AS eid FROM c_entity_deltas WHERE json_extract(body,'$.d.event') = ? AND instr(json_extract(body,'$.d.eid'), ':') > 0 AND substr(json_extract(body,'$.d.eid'), 1, instr(json_extract(body,'$.d.eid'), ':') - 1) IN ('f','s','c','port','m','u','ha') ORDER BY json_extract(body,'$.d.sidx'), rowid", this.cur_key) or [])] if this.cur_key else []
 Banner.named getter: [e for e in distinct(this.named_raw) if not (startswith(e, 's:?') and (after(e, 's:?') in (this.tool_names or []) or before(after(e, 's:?'), '.') in (this.tool_names or [])))]
+Banner.counted getter WHEN this.map: []
 Banner.counted getter: [prop(r, 'eid') for r in (sql("SELECT json_extract(d.body,'$.d.eid') AS eid, count(DISTINCT json_extract(d.body,'$.d.event')) AS n, max(json_extract(d.body,'$.d.seq')) AS last FROM c_entity_deltas d WHERE json_extract(d.body,'$.d.event') IN (SELECT k FROM c_events WHERE json_extract(body,'$.d.conv') = ? AND json_extract(body,'$.d.seq') >= ? AND json_extract(body,'$.d.stream') != 'code') AND instr(eid, ':') > 0 AND substr(eid, 1, instr(eid, ':') - 1) IN ('f','s','c','port','m','u','ha') AND eid NOT LIKE 's:?%' GROUP BY eid HAVING n >= ? ORDER BY n DESC, last DESC, eid LIMIT 50", this.chat_key, this.window_start, this.focus_min_events or 2) or [])]
 Banner.focus getter: head(concat(this.named, [e for e in this.counted if not e in this.named]), this.focus_k or 5)
 
 -- WORKING ON: the person's latest earlier ask in the window; with focus, the latest that names a focus entity
+Banner.ask_eids getter WHEN this.map: []
 Banner.ask_eids getter: (sql("SELECT json_extract(body,'$.d.event') AS ev, json_extract(body,'$.d.eid') AS eid FROM c_entity_deltas WHERE json_extract(body,'$.d.event') IN (SELECT value FROM json_each(?))", [prop(a, 'k') for a in this.window_asks]) or []) if this.window_asks else []
 Banner.on_focus getter: [prop(r, 'ev') for r in this.ask_eids if prop(r, 'eid') in this.focus]
 Banner.working_ask getter: head(concat([a for a in this.window_asks if prop(a, 'k') in this.on_focus], this.window_asks), 1)
@@ -79,6 +83,7 @@ Banner.working_line getter: FOR a IN this.working_ask: 'WORKING ON: "' + clip(pr
 
 -- SINCE YOUR LAST MESSAGE: what moved a focus entity after this chat's last delivered turn, from outside this
 -- chat (code, scripts, other chats): the newest line each, in focus order
+Banner.since_rows getter WHEN this.map: []
 Banner.since_rows getter: (sql("SELECT x.eid AS eid, x.ts AS ts, CASE WHEN x.stream = 'code' THEN 'code' WHEN coalesce(x.src, '') LIKE 'script%' THEN x.src WHEN coalesce(x.conv, '') != '' THEN 'another chat' ELSE 'outside this chat' END AS label, coalesce(json_extract(s.body,'$.d.text'), x.text) AS text FROM (SELECT json_extract(d.body,'$.d.eid') AS eid, max(json_extract(d.body,'$.d.seq')) AS seq, coalesce(json_extract(e.body,'$.d.ts'), json_extract(d.body,'$.d.ts')) AS ts, json_extract(d.body,'$.d.sid') AS sid, json_extract(e.body,'$.d.stream') AS stream, json_extract(e.body,'$.d.src') AS src, json_extract(e.body,'$.d.conv') AS conv, json_extract(e.body,'$.d.text') AS text FROM c_entity_deltas d JOIN c_events e ON e.k = json_extract(d.body,'$.d.event') WHERE json_extract(d.body,'$.d.eid') IN (SELECT value FROM json_each(?)) AND json_extract(d.body,'$.d.seq') > ? AND (json_extract(e.body,'$.d.stream') = 'code' OR coalesce(json_extract(e.body,'$.d.conv'), '') != ?) GROUP BY eid) x JOIN json_each(?) j ON j.value = x.eid LEFT JOIN c_sentences s ON s.k = x.sid ORDER BY j.key LIMIT ?", this.focus, this.mark_seq, this.chat_key, this.focus, this.news_max or 3) or []) if this.mark_seq and this.focus else []
 Banner.since_tagged getter: [{'eid': prop(r, 'eid'), 'text': prop(r, 'text'), 'tag': join([x for x in [prop(r, 'label'), ago(prop(r, 'ts'), clock)] if x], ' · ')} for r in this.since_rows]
 Banner.since_lines getter: FOR r IN this.since_tagged: '- ' + clip(prop(r, 'eid') + ': ' + join(words(prop(r, 'text') or ''), ' '), this.clip_n) + ' (' + prop(r, 'tag') + ')'

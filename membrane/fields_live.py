@@ -438,7 +438,7 @@ class Live:
     def has_banner(self) -> bool:
         return BANNER_CLASS in self.classes
 
-    def _banner_instance(self, eid: str, owner: str, chat: str):
+    def _banner_instance(self, eid: str, owner: str, chat: str, facts: dict | None = None):
         d = (self.est.docs or {}).get(eid)
         if d is not None:
             return d
@@ -449,6 +449,7 @@ class Live:
                  if k not in ("name", "summary", "parents", "born", "silent_birth", "refused", "error")}
         props.update({"name": f"banner: {owner} in {chat}", "owner": owner, "chat": chat,
                       "pool": props.get("pool", RB.POOL), "n": props.get("n", RB.BANNER_N), "silent_birth": True})
+        props.update(facts or {})                      # the seat's facts are there from the first compute (a map seat's heavy reads never run)
         with W.as_writer(WRITER + "banner"):
             self.est.upsert(QuantumEntity(eid=eid, cls=BANNER_CLASS, properties=props), embedder=None)
         return (self.est.docs or {}).get(eid)
@@ -480,7 +481,7 @@ class Live:
         writes: list = []
         ctx = {"field": field, "session": session, "now": now, "rows": {}, "timing": {}}
         with self.busy:
-            d = self._banner_instance(eid, owner, chat)
+            d = self._banner_instance(eid, owner, chat, facts)
             dials = self._banner_dials(d)
             if dials:
                 with W.as_writer(WRITER + "banner"):

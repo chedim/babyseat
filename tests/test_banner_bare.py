@@ -287,3 +287,16 @@ def test_memos_own_pack_takes_over_after_the_class_switch_and_keeps_its_notes(se
     r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", "", now=100.0,
                          facts={"map": True, "moving": ["a"], "in_line": "in: chat"})
     assert r["text"] == "MINE\nNOTES: remember the boat\nin: chat", r["text"]
+
+
+def test_a_map_seats_banner_never_runs_the_stores_heavy_reads(seat, monkeypatch):
+    # live 2026-11-11: five sql getters (messages, entity deltas, a join) ran every turn on a map seat whose block never
+    # shows them: seconds of the first response. With `map` there from the first compute they answer [] unrun.
+    from membrane.entities import QuantumEntity
+    seat._loop_runner.sessions["ses_map"] = {"owner": "owner"}
+    monkeypatch.setattr(RB, "c1f_call", _fake)
+    r = seat.live.banner(object(), "owner", "ses_map", "ses_map", "", now=100.0, facts={"map": True, "moving": []})
+    d = seat.entity_store.docs[FL.banner_eid("owner", "ses_map")]
+    assert not (d.properties.get("refused") or ""), d.properties.get("refused")      # no "sql: no store attached"
+    assert d.properties.get("user_turns") == [] and d.properties.get("since_rows") == []
+    assert r["error"] is None
