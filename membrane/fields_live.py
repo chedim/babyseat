@@ -428,40 +428,9 @@ class Live:
     def has_banner(self) -> bool:
         return BANNER_CLASS in self.classes
 
-    def _extends_banner(self, cls: str) -> bool:
-        """The class's pack says `IMPORT banner`: it extends Banner (operator 2026-11-11)."""
-        import re as _re
-        for text in list(self.pack_texts.values()):
-            if _re.search(r"^" + _re.escape(cls) + r"\.", text, _re.M) and _re.search(r"^IMPORT banner\b", text, _re.M):
-                return True
-        return False
-
-    def _banner_complete(self, d) -> None:
-        """A banner instance of the model's own class (operator 2026-11-11: "our classes are already interfaces"):
-        every banner instance is a Banner, so the seat adds Banner to its `parents` (the class overrides only what it
-        wants; the rest, `text`, `lines`, the dials' getters, is inherited), and it gets the recall dials the seat copies
-        into the instances it makes itself. The standard class is left as it is."""
-        if d.cls == BANNER_CLASS or not self._extends_banner(d.cls):
-            return                                      # a class that replaces the banner outright keeps doing so
-        from . import recall_banner as RB
-        props = dict(d.properties or {})
-        dials = (self.est.docs or {}).get(DIALS_EID)
-        base = {k: v for k, v in ((dials.properties if dials is not None else None) or {}).items()
-                if k not in ("name", "summary", "parents", "born", "silent_birth", "refused", "error")}
-        base.update({"pool": base.get("pool", RB.POOL), "n": base.get("n", RB.BANNER_N)})
-        new = {k: v for k, v in base.items() if k not in props}
-        parents = list(props.get("parents") or [])
-        if BANNER_CLASS not in parents:
-            new["parents"] = parents + [BANNER_CLASS]
-        if new:
-            with W.as_writer(WRITER + "banner"):
-                d.properties = {**props, **new}
-                self.est.upsert(d, embedder=None)
-
     def _banner_instance(self, eid: str, owner: str, chat: str):
         d = (self.est.docs or {}).get(eid)
         if d is not None:
-            self._banner_complete(d)
             return d
         from . import recall_banner as RB
         from .entities import QuantumEntity
@@ -490,14 +459,14 @@ class Live:
         return {k: v for k, v in want.items() if k not in have}
 
     def banner(self, field, owner: str, chat: str, session: str, text: str, now: float | None = None,
-               facts: dict | None = None) -> dict:
+               facts: dict | None = None, default: bool = False) -> dict:
         """Run this chat's banner for the message: {eid, lines, text, error, state}. The pack decides what a message
         recalls and lays out the block (`text`); `facts` are the seat's facts for this turn (paused, alerts, tools, and
         Blurp's blurp / suggest when it is on), written as plain fields like the ask. A
         getter's error is the banner's error (shown, never replaced). The reads the pack asked for (sql, jsonl) are
         waited for here, outside the engine's lock and the GIL. `state` is None when nothing was recalled."""
         now = time.time() if now is None else now
-        eid = banner_eid(owner, chat)
+        eid = banner_eid(owner, chat) + (":default" if default else "")   # the default's own instance: the fallback
         writes: list = []
         ctx = {"field": field, "session": session, "now": now, "rows": {}, "timing": {}}
         with self.busy:
@@ -511,12 +480,15 @@ class Live:
                     for k, v in dials.items():
                         self.f.write(eid, k, _json(v), now)
             key = (d.cls, tuple((d.properties or {}).get("parents") or []))
-            if self.f.has(eid) and self._banner_loaded.get(eid) != key:     # switched, or loaded before this process knew
+            switched = self.f.has(eid) and self._banner_loaded.get(eid) != key   # or loaded before this process knew
+            if switched:
                 self.f.remove(eid, now)                # the model switched the class: reload it under the new one
                 self.f.settle(now)
             if not self.f.has(eid):
                 self.f.load(eid, d.cls, _json(dict(d.properties or {})))
-                self.f.settle(now)
+                if switched:
+                    self.f.rebuild(now)                # the new class's getters compute afresh: the old class's values
+                self.f.settle(now)                     # stored on the instance are not the new class's answer
                 self._apply()
             self._banner_loaded[eid] = key
             self.ctxs[eid] = ctx

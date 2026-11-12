@@ -85,17 +85,12 @@ def test_the_placeholder_comes_from_the_pack_not_from_python():
     assert "Banner.bare getter" in pack and "Banner.shown getter" in pack
 
 
-def test_the_map_block_carries_the_placeholder_first(monkeypatch):
+def test_the_map_block_is_the_banner_and_nothing_is_added_around_it(monkeypatch):
     from membrane import momentum_map as MM
     msgs = [{"role": "system", "content": "doctrine"}, {"role": "user", "content": "now"}]
     fld = __import__("types").SimpleNamespace(_states={}, _bg=lambda s: None)
-    monkeypatch.setattr(MM, "lines", lambda *a, **k: ["m:goal:x  ↗ 1.0  a · b · c"])
-    out = MM.rewrite(msgs, fld, None, "in: chat", chat="c", banner="BANNER: a tiny placeholder")
-    body = out[1]["content"]
-    assert body.startswith("BANNER: a tiny placeholder")
-    assert MM.HEADER in body and "m:goal:x" in body
-    plain = MM.rewrite(msgs, fld, None, "in: chat", chat="c")
-    assert not plain[1]["content"].startswith("BANNER")                 # no banner given: as before
+    out = MM.rewrite(msgs, fld, None, "in: chat", chat="c", banner="THE WHOLE BLOCK")
+    assert [m["content"] for m in out] == ["doctrine", "THE WHOLE BLOCK", "now"]
 
 
 def test_conv_banner_bare_asks_the_pack_with_the_map_fact_and_recalls_nothing(seat, monkeypatch):
@@ -163,27 +158,6 @@ def test_map_mode_never_rebuilds_the_history_or_past_answers(seat, monkeypatch):
     assert called == []
 
 
-def test_the_placeholder_is_asked_of_the_pack_once_per_chat_and_mode(seat, monkeypatch):
-    from membrane import conv_banner as CB
-    from membrane import lanes as L
-    monkeypatch.setattr(RB, "c1f_call", _fake)
-    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
-    builds = []
-    real = CB.pack_block
-
-    def counted(*a, **k):
-        builds.append(1)
-        return real(*a, **k)
-    monkeypatch.setattr(CB, "pack_block", counted)
-    body = {"_turn_sid": "ses_op"}
-    first = CB.bare(seat, body, "ses_op")
-    assert first.startswith("BANNER")
-    assert CB.bare(seat, body, "ses_op") == first and CB.bare(seat, body, "ses_op") == first
-    assert len(builds) == 1                                             # not once per turn
-    _dial(seat, mode="off")
-    assert CB.bare(seat, body, "ses_op") == "" and len(builds) == 2     # the dial changed: asked again
-
-
 def test_a_failed_build_is_never_shown_in_the_placeholders_place(seat, monkeypatch):
     from membrane import conv_banner as CB
     from membrane import lanes as L
@@ -197,7 +171,7 @@ def _own_banner(seat, getter):
     from membrane.entities import MEMBRANE_NS, QuantumEntity
     seat._loop_runner.sessions["ses_own"] = {"owner": "owner"}
     seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:ownbanner", cls="Pack", properties={
-        "name": "ownbanner", "c1f": "PACK ownbanner 1\nIMPORT banner 1\n" + getter + "\n"}))
+        "name": "ownbanner", "c1f": "PACK ownbanner 1\n" + getter + "\n"}))
     seat.live.settle()
     eid = FL.banner_eid("owner", "ses_own")
     seat.entity_store.upsert(QuantumEntity(eid=eid, cls="OwnBanner", properties={"name": "my banner"}))
@@ -211,7 +185,7 @@ def test_a_banner_of_the_models_own_class_is_what_a_map_seat_shows(seat, monkeyp
     from membrane import lanes as L
     monkeypatch.setattr(RB, "c1f_call", _fake)
     monkeypatch.setattr(L, "_efield_on", lambda srv: object())
-    _own_banner(seat, "OwnBanner.mine getter: 'MY BANNER · ' + str(this.chat)")
+    _own_banner(seat, "OwnBanner.text getter: 'MY BANNER · ' + str(this.chat)")
     out = CB.bare(seat, {"_turn_sid": "ses_own"}, "ses_own")
     assert out.startswith("MY BANNER") and "BANNER: nothing is pushed" not in out
     assert CB.bare(seat, {"_turn_sid": "ses_own"}, "ses_own") == out          # (same text; asked again each turn)
@@ -227,23 +201,15 @@ def test_an_error_in_the_models_own_banner_is_shown_not_replaced(seat, monkeypat
         return _fake(ctx, name, args)
     monkeypatch.setattr(RB, "c1f_call", broken)
     monkeypatch.setattr(L, "_efield_on", lambda srv: object())
-    _own_banner(seat, "OwnBanner.mine getter: join(recall(this.ask, 10, this.session), '\\n')")
+    _own_banner(seat, "OwnBanner.text getter: join(recall(this.ask, 10, this.session), '\\n')")
     body = {"_turn_sid": "ses_own", "messages": [{"role": "user", "content": ASK}]}
     out = CB.bare(seat, body, "ses_own")
     assert "the banner failed" in out and "the store is away" in out and out != CB.BARE_FALLBACK
 
 
-# ---- extending Banner (operator 2026-11-11: "our classes are already interfaces, why can't Memo extend Banner?") ----
-def _own_pack(seat, text_getter=""):
-    from membrane.entities import MEMBRANE_NS, QuantumEntity
-    seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:extbanner", cls="Pack", properties={
-        "name": "extbanner", "c1f": "PACK extbanner 1\nIMPORT banner 1\nExtBanner.m_head getter: 'MINE · ' + str(this.chat)\n"
-                                    + text_getter}))
-    seat.live.settle()
-
-
+# ---- a banner replaced outright (operator 2026-11-11): the instance's own class `text` is the whole banner ----
 def _standard_then(seat, monkeypatch, **switch):
-    """The seat makes the chat's banner (a Banner); then the model switches it (class / parents / properties)."""
+    """The seat makes the chat's banner (a Banner); then the model switches it to a class of its own."""
     seat._loop_runner.sessions["ses_ext"] = {"owner": "owner"}
     monkeypatch.setattr(RB, "c1f_call", _fake)
     eid = FL.banner_eid("owner", "ses_ext")
@@ -259,34 +225,13 @@ def _standard_then(seat, monkeypatch, **switch):
     return eid
 
 
-def test_switching_a_banner_instance_to_a_class_of_its_own_reaches_the_engine(seat, monkeypatch):
-    _own_pack(seat, "ExtBanner.mine getter: this.m_head + ' | mine'\n")
-    _standard_then(seat, monkeypatch, cls="ExtBanner")
+def test_switching_a_banner_instance_to_a_class_of_its_own_replaces_the_whole_banner(seat, monkeypatch):
+    from membrane.entities import MEMBRANE_NS, QuantumEntity
+    seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:repl", cls="Pack", properties={
+        "name": "repl", "c1f": "PACK repl 1\nReplBanner.text getter: 'MINE · ' + str(this.chat)\n"}))
+    seat.live.settle()
+    _standard_then(seat, monkeypatch, cls="ReplBanner")
     r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", ASK + " now", now=100.0, facts={})
     assert r["error"] is None, r
-    assert (r["text"] or "").startswith("MINE · ses_ext | mine")          # not the old Banner layout
+    assert r["text"] == "MINE · ses_ext"                  # exactly its text: no default layout, nothing the seat adds
 
-
-def test_a_class_that_extends_banner_inherits_what_it_does_not_override(seat, monkeypatch):
-    _own_pack(seat, "ExtBanner.mine getter: this.m_head + ' | ' + str(len(this.lines))\n")
-    _standard_then(seat, monkeypatch, cls="ExtBanner")                    # no parents named: the seat adds Banner
-    r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", ASK + " again", now=100.0, facts={})
-    assert r["error"] is None, r
-    assert len(r["lines"]) > 0                                            # Banner's own `lines` getter ran for it
-    assert (r["text"] or "").endswith(f"| {len(r['lines'])}")
-    d = seat.entity_store.docs[FL.banner_eid("owner", "ses_ext")]
-    assert "Banner" in (d.properties.get("parents") or [])
-
-
-def test_a_hand_made_banner_instance_gets_the_dials_and_its_parent(seat, monkeypatch):
-    from membrane.entities import QuantumEntity
-    _own_pack(seat, "")
-    seat._loop_runner.sessions["ses_ext"] = {"owner": "owner"}
-    monkeypatch.setattr(RB, "c1f_call", _fake)
-    eid = FL.banner_eid("owner", "ses_ext")
-    seat.entity_store.upsert(QuantumEntity(eid=eid, cls="ExtBanner", properties={"name": "mine"}))
-    seat.live.settle()
-    r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", ASK, now=100.0, facts={})
-    assert r["error"] is None, r                                          # was: Banner.lines: int(None)
-    d = seat.entity_store.docs[eid]
-    assert d.properties.get("n") and d.properties.get("pool") and "Banner" in (d.properties.get("parents") or [])

@@ -209,12 +209,9 @@ def lines(fld, est=None, max_lines: int = MAX_LINES, chat: str = "", held=()) ->
 
 
 def block(fld, est=None, ctx_line: str = "", chat: str = "", held=(), banner: str = "") -> str:
-    """`banner`: the banner pack's own tiny placeholder that instructs (conv_banner.bare), first in the block."""
-    ls = lines(fld, est, chat=chat, held=held)
-    text = (banner + "\n" if banner else "") + HEADER + ("\n" + ctx_line if ctx_line else "") + "\n" + \
-        ("\n".join(ls) if ls else "(nothing moved)")
-    print(f"[exp-map] {len(ls)} lines, ~{len(text) // 4} tokens", file=sys.stderr)
-    return text
+    """The block the model gets IS the banner (operator 2026-11-11): its instance's `text`, built by the banner pack
+    from the facts the seat wrote (`lines` below are the map's rows). Nothing is added around it here."""
+    return banner
 
 
 def rewrite(messages: list, fld, est=None, ctx_line: str = "", chat: str = "", held=(), banner: str = "") -> list:

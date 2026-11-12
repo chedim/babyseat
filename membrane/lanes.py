@@ -6114,7 +6114,10 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 _map_banner = ""
                 try:                              # the banner: the pack's placeholder, or the model's own class's text
                     from . import conv_banner as _CB
-                    _bare = "" if _is_loop_turn(srv, body) else _CB.bare(srv, body, _CAPMOD.current_conversation())
+                    _mv = [] if _is_loop_turn(srv, body) else _MM.lines(srv.efield, getattr(srv, "entity_store", None),
+                                                                        chat=_CC.current(srv), held=_CC.held(srv))
+                    _bare = "" if _is_loop_turn(srv, body) else _CB.bare(srv, body, _CAPMOD.current_conversation(),
+                                                                         moving=_mv, in_line=_cl)
                 except Exception as _be:
                     print(f"[exp-map] banner placeholder failed ({_be})", file=sys.stderr)
                     from .conv_banner import BARE_FALLBACK as _bare

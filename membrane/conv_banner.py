@@ -727,12 +727,12 @@ BARE_FALLBACK = ("BANNER (placeholder): no history reaches you, so keep your own
                  "to show>. Then: entity edit this chat's Banner class=MyBanner (it replaces the default banner). help(\"map\") has more.")
 
 
-def bare(srv, body: dict, conv: str) -> str:
-    """Map mode's banner (operator 2026-11-11): the banner pack's own tiny placeholder that instructs. The seat only
-    tells the pack `map`; the pack decides what the slot shows (its `mode` dial can bring the full block or nothing
-    back). No ask is written (so nothing is recalled) and no track alert is taken. When the pack cannot answer
-    (no field engine, an error, an empty answer) the fallback is the built-in introductory placeholder
-    (BARE_FALLBACK) -- never the standard banner (operator 2026-11-11: it must NEVER load in map mode)."""
+def bare(srv, body: dict, conv: str, moving=(), in_line: str = "") -> str:
+    """Map mode's banner (operator 2026-11-11): the WHOLE block the model gets comes from this chat's banner instance:
+    the seat only writes the facts (`map`, `moving` = the map's lines, `in_line`) and the instance's `text` is the
+    block. An instance of a class the model made replaces the default completely; when it fails or says nothing the
+    default banner is shown instead, headed by its error (the pack writes that line from the fact `failed`)."""
+    facts = {"map": True, "moving": list(moving or ()), "in_line": in_line or ""}
     try:
         from . import lanes as _L
         from . import fields_live as _FL
@@ -745,33 +745,22 @@ def bare(srv, body: dict, conv: str) -> str:
         sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
         owner = str(((sess.get(sid or conv) if sess is not None else None) or {}).get("owner") or "seat")
         d = (est.docs or {}).get(_FL.banner_eid(owner, sid or conv)) if est is not None else None
-        if d is not None and d.cls != "Banner":
-            # THE MODEL'S OWN BANNER (operator 2026-11-11, "free reign over your banner"): this chat's instance is of a
-            # class the model made; its own `text` is the banner, asked every turn with the person's words, an error
-            # shown as it is (never replaced). Only the standard class is held to the placeholder.
-            out = pack_block(srv, live, fld, conv, [], _L._last_user_text(body or {}), time.time(), sid, {"map": True})
-            return out or ""
-        # the standard class: the placeholder only changes with this chat's `mode` dial: ask the pack once, then per
-        # change of the dial (a build costs seconds on a busy field; a turn must not pay it every time)
-        cache = srv.__dict__.setdefault("_bare_cache", {})
-        mode = str(((d.properties or {}).get("mode") if d is not None else "") or "")
-        hit = cache.get(sid or conv)
-        if hit is not None and hit[0] == mode:
-            return hit[1]
-        out = pack_block(srv, live, fld, conv, [], "", time.time(), sid, {"map": True})
-    except Exception:                       # noqa: BLE001 -- the placeholder never breaks a turn
+        own = d is not None and d.cls != "Banner"
+        latest = _L._last_user_text(body or {}) if own else ""     # the standard banner recalls nothing here; a class of the model's own is asked with the person's words
+        out = pack_block(srv, live, fld, conv, [], latest, time.time(), sid, facts)
+        if not own and (not out or out.startswith("▸ the banner failed")):
+            return BARE_FALLBACK                # a failed standard build is never shown in the block's place
+        if own and (not out or out.startswith("▸ the banner failed")):
+            why = (out or "its text came back empty").removeprefix("▸ the banner failed").strip(" :")
+            out = pack_block(srv, live, fld, conv, [], latest, time.time(), sid, {**facts, "failed": why[:300]},
+                             default=True)
+    except Exception:                       # noqa: BLE001 -- the banner never breaks a turn
         return BARE_FALLBACK
-    if out is None:
-        out = ""                            # the pack's mode dial is 'off': nothing, by the person's choice
-    elif not out.startswith("BANNER"):
-        return BARE_FALLBACK                # a failed build is never shown in the placeholder's place
-    cache[sid or conv] = (mode, out)
-    while len(cache) > 64:
-        cache.pop(next(iter(cache)))
-    return out
+    return out or ""
 
 
-def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: str, facts: dict) -> str | None:
+def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: str, facts: dict,
+               default: bool = False) -> str | None:
     """#994: the whole block from this chat's banner instance (the banner pack: recall, OPEN, DECIDED, the layout);
     `facts` are the seat's facts for this turn, written as fields. A script's error is shown in the block's place,
     never replaced."""
@@ -781,7 +770,7 @@ def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: 
     sess = getattr(getattr(srv, "_loop_runner", None), "sessions", None)
     owner = str(((sess.get(chat) if sess is not None else None) or {}).get("owner") or "seat")
     try:
-        r = live.banner(fld, owner, chat, session or chat, latest or "", now=now, facts=facts)
+        r = live.banner(fld, owner, chat, session or chat, latest or "", now=now, facts=facts, default=default)
     except Exception as e:                        # noqa: BLE001 -- shown, never replaced (the operator, 2026-11-10)
         return f"▸ the banner failed: {type(e).__name__}: {e}"[:400]
     if r["error"]:
