@@ -227,3 +227,32 @@ def test_boot_methods_builds_only_the_methods(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_entities_matching_a_class_and_property_are_found_without_building_the_rest(tmp):
+    _seed(tmp)
+    db = sqlitedb.Database("field", tmp)
+    db.put_json("entities", "membrane::verb:run", json.dumps({"e": "membrane::verb:run", "d": {
+        "data": {"class": "Verb", "properties": {"name": "run", "aliased": [{"method": "x"}]}}}}))
+    db.close()
+    st, db, built, real = _open(tmp)
+    try:
+        got = st.docs.matching(lambda cls, props: cls == "Verb")
+        assert [k for k, _e in got] == ["membrane::verb:run"] and built == []
+        assert [k for k, _e in st.docs.matching(lambda cls, props: cls == "Verb" and props.get("aliased"))] == ["membrane::verb:run"]
+    finally:
+        _restore(real)
+        db.close()
+
+
+def test_verbs_boot_builds_only_the_verbs_and_the_methods(tmp):
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        from types import SimpleNamespace
+        from membrane import verbs
+        verbs.boot(SimpleNamespace(entity_store=st))
+        assert built == []
+    finally:
+        _restore(real)
+        db.close()

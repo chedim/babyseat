@@ -1374,23 +1374,28 @@ class _Docs(dict):
     def unbuilt(self) -> int:
         return self._n_raw
 
-    def with_property(self, name: str) -> list:
-        """(eid, entity) for every entity whose properties hold a truthy `name`, in store order. An unbuilt entity is
-        judged from its raw record and built only when it matches: a boot scan for "the methods" builds the methods."""
+    def matching(self, pred) -> list:
+        """(eid, entity) for every entity whose (class, properties) satisfy `pred`, in store order. An unbuilt entity is
+        judged from its raw record and built only when it matches: a boot scan for "the verbs" builds the verbs."""
         out = []
         for k in list(dict.keys(self)):
             v = dict.get(self, k)
             if type(v) is _Raw:
-                props = (v.rec.get("data") or {}).get("properties")
-                if not (isinstance(props, dict) and props.get(name)):
+                data = v.rec.get("data") or {}
+                props = data.get("properties")
+                if not isinstance(props, dict) or not pred(str(data.get("class") or CLASS_COMPONENT), props):
                     continue
-            elif not ((v.properties or {}).get(name)):
+            elif not pred(v.cls, v.properties or {}):
                 continue
             try:
                 out.append((k, self[k]))
             except KeyError:
                 continue
         return out
+
+    def with_property(self, name: str) -> list:
+        """The entities whose properties hold a truthy `name` (see matching)."""
+        return self.matching(lambda _cls, props: props.get(name))
 
     def built_items(self) -> list:
         """The entities that exist as objects (nothing is built to answer)."""

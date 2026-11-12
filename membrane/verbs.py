@@ -141,17 +141,15 @@ def boot(srv) -> dict:
     Aliases are rebuilt from scratch, and a verb left meaning nothing is removed (a stale alias
     of an older rule, a method that went)."""
     est = srv.entity_store
-    for d in list((est.docs or {}).values()):
-        if d.cls == CLASS_VERB and (d.properties or {}).get("aliased"):
-            d.properties = {**(d.properties or {}), "aliased": []}
+    for _k, d in est.docs.matching(lambda c, p: c == CLASS_VERB and p.get("aliased")):
+        d.properties = {**(d.properties or {}), "aliased": []}
     seen = set()
-    for d in list((est.docs or {}).values()):
-        if (d.properties or {}).get("method_name"):
-            e = note(est, d)
-            if e:
-                seen.add(e)
-    gone = [d.eid for d in list((est.docs or {}).values()) if d.cls == CLASS_VERB
-            and not (d.properties or {}).get("implemented_by") and not (d.properties or {}).get("aliased")
+    for _k, d in est.docs.with_property("method_name"):
+        e = note(est, d)
+        if e:
+            seen.add(e)
+    gone = [d.eid for _k, d in est.docs.matching(lambda c, p: c == CLASS_VERB)           # (only the verbs and the methods are built)
+            if not (d.properties or {}).get("implemented_by") and not (d.properties or {}).get("aliased")
             and not (d.properties or {}).get("same_as")]          # a taught synonym means something
     for eid in gone:
         try:
