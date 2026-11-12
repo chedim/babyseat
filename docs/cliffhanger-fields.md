@@ -302,3 +302,20 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
     and opencode's configs as disabled servers (`import_result`).
   - The I/O is `membrane/mcpfield.py` (one connection loop, no polling: list-changed notifications list again);
     enabled servers connect again at boot, stop with the seat, and are mounted into the Claude rung as its own tools.
+
+## 12. Pronouns (#1101)
+
+A bare `it`, `that`, `they` / `them`, `these` / `those`, `he` / `him` or `she` / `her` in an expression, with no
+variable of that name, resolves when the method runs, innermost first through the chat's context stack (the turn's
+last touch, the entered entities, the chat's promoted subjects, the person's registers; `callctx.pronoun`), to the
+entity (a list of them, for `they`) it stands for:
+
+```c1f
+it.run = {args: ["--offline"]}          # "it" = the Command the conversation is on
+read(that.path)                         # "that" = the file mentioned before
+```
+
+It is live, not copied: a method written with `it` follows whatever "it" means each time it runs. A variable of the
+same name wins. An unbound or expired pronoun fails naming itself (`the pronoun "it" is not bound here`), never a
+silent wrong target. `this` is not a pronoun: it is the method's own object. The engine asks the host through its
+`pronoun` built-in (`native/src/expr.rs`); the Python side is `fields_live._Host.call`.
