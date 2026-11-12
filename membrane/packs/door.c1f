@@ -59,7 +59,6 @@ Request.c_build getter: ([b.build_id for b in this.boots] or [None])[0]
 Request.conf_body getter: {'serve_ok': True, 'serve_url': 'standalone', 'standalone': True, 'build': this.c_build, 'name': this.c_name, 'named': this.c_named, 'aliases': this.c_aliases, 'stt': this.c_stt, 'voice_out': this.c_voice, 'language': this.c_lang, 'blurp': this.c_blurp, 'auth': 'jwt', 'who': this.who}
 Request.conf_reply getter:
   WHEN not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
-  ELSE WHEN not this.entrant: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'invalid token' if this.auth_error != 'no token' else 'missing or invalid token'}}
   ELSE: {'status': 200, 'body': this.conf_body}
 
 -- ---- /ui/login and /ui/logout: the cookie ------------------------------------------------------------------------------------
@@ -94,7 +93,31 @@ Request.logout_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.cookie_name + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict' + this.secure}, 'body': {'ok': True}}
 
-Request.shipped getter: this.conf_reply if this.path == '/ui/conf' else (this.login_reply if this.path == '/ui/login' else (this.logout_reply if this.path == '/ui/logout' else this.static_reply))
+-- ---- the gate: every route but the public shell needs a token (or a bare loopback caller) --------------------------------------
+Request.public getter: this.path in ['/', '/index.html', '/membrane', '/favicon.ico', '/ui/login', '/ui/logout'] or startswith(this.path, '/ui/www/')
+Request.gate getter: None if this.public or this.entrant else {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'invalid token' if this.auth_error != 'no token' else 'missing or invalid token'}}
+
+-- ---- the opencode client's boot probes ----------------------------------------------------------------------------------------------
+-- The launcher tells Boot:seat.seat_version, .seat_cwd, .seat_home and .seat_project.
+Request.f_version getter: ([b.seat_version for b in this.boots] or [''])[0]
+Request.f_cwd getter: ([b.seat_cwd for b in this.boots] or [''])[0]
+Request.f_home getter: ([b.seat_home for b in this.boots] or [''])[0]
+Request.f_project getter: ([b.seat_project for b in this.boots] or [''])[0]
+Request.ms getter: num(words(replace(str(clock * 1000), '.', ' '))[0])
+Request.path_body getter: {'home': this.f_home, 'state': this.f_home + '/.local/state/opencode', 'config': this.f_home + '/.config/opencode', 'worktree': this.f_cwd, 'directory': this.f_cwd}
+Request.project_body getter: {'id': this.f_project, 'worktree': this.f_cwd, 'vcs': 'git', 'time': {'created': this.ms, 'updated': this.ms}, 'sandboxes': []}
+Request.probe getter: this.path in ['/global/health', '/command', '/vcs', '/path', '/project', '/project/current'] or (startswith(this.path, '/project/') and '/directories' in this.path)
+Request.probe_reply getter:
+  WHEN not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN this.path == '/global/health': {'status': 200, 'body': {'healthy': True, 'version': this.f_version}}
+  ELSE WHEN this.path == '/command': {'status': 200, 'body': []}
+  ELSE WHEN this.path == '/vcs': {'status': 200, 'body': {'branch': None, 'default_branch': None}}
+  ELSE WHEN this.path == '/path': {'status': 200, 'body': this.path_body}
+  ELSE WHEN this.path == '/project' or this.path == '/project/current': {'status': 200, 'body': this.project_body}
+  ELSE: {'status': 200, 'body': []}
+
+Request.routed getter: this.conf_reply if this.path == '/ui/conf' else (this.login_reply if this.path == '/ui/login' else (this.logout_reply if this.path == '/ui/logout' else (this.probe_reply if this.probe else this.static_reply)))
+Request.shipped getter: this.gate if this.gate != None else this.routed
 
 Request.reply getter: this.override if this.override != None else this.shipped
 
