@@ -2315,6 +2315,20 @@ class TurnRunner:
                              name="quota-release").start()
         return len(mine)
 
+    def switch_held(self, model: str, use: str) -> int:
+        """The person's pick (#1134): the chats holding a message for the paused `model` take `use`
+        as their own model (the session's pick, the picker's store) and what waited goes on it.
+        The pause itself stays; a `use` that is paused too holds the message again."""
+        with self._held_lock:
+            sids = {h["sid"] for q in self._held.values() for h in q if h["model"] == model}
+        with self.sessions._lock:
+            for sid in sids:
+                row = self.sessions.sessions.get(sid)
+                if row is not None:
+                    row["model"] = {"id": use, "providerID": "membrane", "variant": "default"}
+                    self.sessions._flush(sid)
+        return self.release_held(model)
+
     def _on_quota(self, model: str, why: str) -> None:
         """quota.py's news: the page re-reads; a model free again sends what
         waited on it (a probe sends the oldest only)."""
@@ -4905,6 +4919,17 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 model = str((b or {}).get("model") or "").strip() if isinstance(b, dict) else ""
                 if not model:
                     return self._json_out({"error": "model required"}, code=400)
+                use = str((b or {}).get("use") or "").strip() if isinstance(b, dict) else ""
+                if use:
+                    # #1134: the person picked another model for the paused model's chats (never
+                    # automatic); the pause stays, the held messages go on the pick
+                    from . import minds_models as _MM
+                    psrv = getattr(runner, "srv", None) if runner is not None else None
+                    known = _MM.pickable(psrv) if psrv is not None else None
+                    if not _MM._NAME.match(use) or (known and use not in known):
+                        return self._json_out({"error": "unknown model"}, code=400)
+                    n = runner.switch_held(model, use) if runner is not None and hasattr(runner, "switch_held") else 0
+                    return self._json_out(dict(_QUOTA.status(psrv, runner), switched=n, use=use))
                 resumed = _QUOTA.resume(model)
                 if not resumed and runner is not None and hasattr(runner, "release_held"):
                     resumed = runner.release_held(model) > 0   # nothing paused, something waited

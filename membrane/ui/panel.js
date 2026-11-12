@@ -446,16 +446,38 @@ function quotaForChat(st, sid) {
   return null;
 }
 
-/** The popup's card for one paused model. */
-function quotaPopupHtml(p, nowMs) {
+/** The popup's card for one paused model; `sw` = the model switcher (quotaSwitchHtml), if any. The
+ *  canvas is the field animation (fieldanim.js) in its grey state: alive, but it cannot speak. */
+function quotaPopupHtml(p, nowMs, sw) {
   p = p || {};
   const held = (p.chats || []).length;
   return '<div class="qcard" role="alertdialog" aria-live="assertive" aria-label="out of tokens">' +
+    '<canvas class="qfield" aria-hidden="true"></canvas>' +
     '<div class="qhead">⏸ ' + escText(quotaLine(p.model, p.resumes_at, nowMs)) + "</div>" +
     '<p class="qsub">' + (held > 1 ? escText(held) + " messages wait" : "Your message waits") +
     (p.kind === "probe" ? "; the next try is a real call, at that time." : " and goes when it resumes.") + "</p>" +
     '<button class="btn primary" data-qresume="' + escAttr(p.model || "") + '">Resume now</button>' +
-    '<p class="qnote" aria-live="polite"></p></div>';
+    (sw || "") + '<p class="qnote" aria-live="polite"></p></div>';
+}
+
+/** The model switcher: every model the seat serves (the picker's own list, ollamaModels) but the paused
+ *  one -- a model that is paused too is named with its time and cannot be picked. A pick is the person's
+ *  (POST /membrane/quota/resume {model, use}); nothing here is ever chosen for them. */
+function quotaSwitchHtml(st, available, model, nowMs) {
+  const paused = {};
+  for (const q of (st && st.paused) || []) paused[q.model] = q;
+  const rows = (available || []).filter((m) => m && m !== model).map((m) => {
+    const q = paused[m];
+    return q ? '<div class="qopt off">' + escText(m) + " · paused until " + escText(quotaClock(q.resumes_at, nowMs).at) + "</div>"
+      : '<button class="qopt" data-quse="' + escAttr(m) + '">' + escText(m) + (/:cloud$|-cloud$/.test(m) ? " ☁" : "") + "</button>";
+  });
+  return rows.length ? '<div class="qsw"><p class="qsub">or carry on with another model:</p>' + rows.join("") + "</div>" : "";
+}
+
+/** The out-of-tokens window for `model` (GET /membrane/quota, the available models, now in ms). */
+function quotaWindowHtml(st, available, model, nowMs) {
+  const p = ((st && st.paused) || []).find((q) => q.model === model) || { model };
+  return quotaPopupHtml(p, nowMs, quotaSwitchHtml(st, available, model, nowMs));
 }
 
 /** The message a Retry re-sends: the person's text of the user row before the
@@ -2083,7 +2105,7 @@ function offlineNotice(data, zoo) {
     : { text: name + " is offline", switchTo: null };
 }
 
-const AiPanelLogic = { quotaClock, quotaLine, quotaForChat, quotaPopupHtml, QUOTA_PATH, offlineNotice, isPerson, SPEAKER_RE, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, shownModel, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { quotaClock, quotaLine, quotaForChat, quotaPopupHtml, quotaSwitchHtml, quotaWindowHtml, QUOTA_PATH, offlineNotice, isPerson, SPEAKER_RE, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, capHtml, busyHtml, retryText, isMove, loadPhantoms, guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, shownModel, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, sheetSleep, sleepBars, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -2160,6 +2182,11 @@ const STYLE = `
                  box-shadow:0 12px 40px rgba(0,0,0,.45); }
   .qpop .qhead { font-weight:600; font-size:15px; line-height:1.4; overflow-wrap:anywhere; }
   .qpop .qsub { margin:8px 0 14px; font-size:13px; opacity:.8; }
+  .qpop .qfield { width:100%; height:130px; display:block; margin:-8px 0 6px; }
+  .qpop .qsw { margin-top:12px; display:flex; flex-direction:column; gap:6px; }
+  .qpop .qsw .qsub { margin:0; }
+  .qpop .qopt { font:inherit; font-size:13px; padding:6px 10px; border-radius:8px; border:1px solid color-mix(in srgb, currentColor 25%, transparent); background:transparent; color:inherit; cursor:pointer; overflow-wrap:anywhere; }
+  .qpop .qopt.off { opacity:.5; cursor:default; }
   .qpop .qnote { margin:8px 0 0; min-height:1em; font-size:12px; opacity:.75; }
   .err .zswitch { font:inherit; margin-left:6px; padding:2px 10px; border-radius:999px; cursor:pointer;
                   border:1px solid currentColor; background:transparent; color:var(--primary-text-color,#ddd); }
@@ -2549,7 +2576,9 @@ function definePanel() {
       this._qpop = this.shadowRoot.querySelector(".qpop");
       this._qpop.addEventListener("click", (ev) => {
         const b = ev.target.closest("[data-qresume]");
-        if (b) this._quotaResume(b.dataset.qresume, b).catch(() => {});
+        if (b) { this._quotaResume(b.dataset.qresume, b).catch(() => {}); return; }
+        const u = ev.target.closest("[data-quse]");
+        if (u) this._quotaUse(this._qModel, u.dataset.quse, u).catch(() => {});
       });
       this._qTick = setInterval(() => { if (this._quota && (this._quota.paused || []).length) this._loadQuota().catch(() => {}); }, QUOTA_REPAINT_MS);
     }
@@ -2567,11 +2596,20 @@ function definePanel() {
     _paintQuota() {
       if (!this._qpop) return;
       const p = quotaForChat(this._quota, this._chat && this._chat.sid);
+      if (this._qanim) { this._qanim.stop(); this._qanim = null; }
       if (!p) { this._qpop.hidden = true; this._qpop.innerHTML = ""; this._qModel = ""; return; }
       const note = this._qpop.querySelector(".qnote");
       const keep = p.model === this._qModel && note ? note.textContent : "";
-      this._qpop.innerHTML = quotaPopupHtml(p, Date.now());
+      this._qpop.innerHTML = quotaWindowHtml(this._quota, this._models || [], p.model, Date.now());
       if (keep) this._qpop.querySelector(".qnote").textContent = keep;
+      const cv = this._qpop.querySelector(".qfield");           // the field, grey: alive but it cannot speak
+      if (cv && window.fieldAnim) {
+        const dpr = window.devicePixelRatio || 1;
+        cv.width = 420 * dpr; cv.height = 130 * dpr;
+        this._qanim = window.fieldAnim(cv, { fit: false });
+        this._qanim.set({ colour: "grey", progress: 1, instant: true });
+        this._qanim.start();
+      }
       this._qModel = p.model;
       this._qpop.hidden = false;
     }
@@ -2584,6 +2622,21 @@ function definePanel() {
       if (!r.ok) {
         if (btn) btn.disabled = false;
         if (note) note.textContent = this._apiErr("not resumed", r);
+        return;
+      }
+      this._quota = r.data;
+      this._paintQuota();
+    }
+
+    /** The person's pick of another model for the paused one's chats: the held messages go on it. */
+    async _quotaUse(model, use, btn) {
+      if (btn) btn.disabled = true;
+      const note = this._qpop && this._qpop.querySelector(".qnote");
+      if (note) note.textContent = "sending…";
+      const r = await this._api(SERVE + QUOTA_PATH + "/resume", { method: "POST", body: JSON.stringify({ model, use }) });
+      if (!r.ok) {
+        if (btn) btn.disabled = false;
+        if (note) note.textContent = this._apiErr("not switched", r);
         return;
       }
       this._quota = r.data;

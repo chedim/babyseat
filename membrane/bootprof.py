@@ -8,6 +8,7 @@ the 90 s hang) and the boot's one `[boot]` summary line come from the same few l
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 
 class Laps:
@@ -141,11 +142,18 @@ def status(laps: Laps, shape) -> dict:
             **{k: int(PROGRESS.get(k) or 0) for k in ("rows", "rows_total", "states", "states_total")}}
 
 
+# the field animation, ONE source (#1134): this file is embedded inline in the page below and loaded by
+# the UI with a <script> tag (membrane/ui/index.html)
+ANIM_JS = (Path(__file__).resolve().parent / "ui" / "fieldanim.js").read_text()
+
+
 def page_html(laps: Laps) -> str:
     import html
-    return (_PAGE.replace("__REFRESH__", str(REFRESH_S))
+    return (_PAGE.replace("__ANIM__", "\0")
+            .replace("__REFRESH__", str(REFRESH_S))
             .replace("__STEP__", html.escape(laps.now or "starting"))
-            .replace("__SECS__", str(int(laps.elapsed()))))
+            .replace("__SECS__", str(int(laps.elapsed())))
+            .replace("\0", ANIM_JS))
 
 
 # The field growing (#1115): the real shape from /__boot/shape (or a generated ball when there is
@@ -162,43 +170,21 @@ canvas{position:fixed;inset:0;width:100%;height:100%}
 #s{position:fixed;left:0;right:0;bottom:24px;text-align:center;opacity:.65;padding:0 16px}</style></head>
 <body><canvas id="f"></canvas><div id="s">__STEP__ &middot; __SECS__s</div>
 <noscript><meta http-equiv="refresh" content="__REFRESH__"><p style="position:fixed;top:40%;width:100%;text-align:center">loading the field&hellip;</p></noscript>
+<script>__ANIM__</script>
 <script>
 (function(){
-var R=__REFRESH__*1000,cv=document.getElementById('f'),cx=cv.getContext('2d'),txt=document.getElementById('s');
+var R=__REFRESH__*1000,cv=document.getElementById('f'),txt=document.getElementById('s');
 var cs=getComputedStyle(document.documentElement),C=function(n){return cs.getPropertyValue(n).trim();};
-var DOT=C('--dot'),LINE=C('--line'),PULSE=C('--pulse'),BG=C('--bg');
-var dpr=window.devicePixelRatio||1;function fit(){cv.width=innerWidth*dpr;cv.height=innerHeight*dpr;}
-addEventListener('resize',fit);fit();
-var P=[],M=[],O=[],E=[],st={},ready=false,readyAt=0,reveal=0,rot=0,pulses=[];
-function gen(n){P=[];M=[];O=[];E=[];for(var i=0;i<n;i++){var y=1-2*(i+.5)/n,r=Math.sqrt(1-y*y),a=i*2.399963,k=Math.cbrt(((i*37)%101+1)/101);
-P.push(.5+.5*Math.cos(a)*r*k,.5+.5*y*k,.5+.5*Math.sin(a)*r*k);M.push(255*Math.pow(1-i/n,3));O.push(((i*61)%n)/n);}
-for(var j=1;j<n;j++){E.push(j,(j*7919)%j);}}
-function target(){if(ready)return 1.01;if(st.states_total)return st.states/st.states_total;
-if(st.rows_total)return st.rows/st.rows_total;return Math.min(1,(st.steps||0)/12);}
+var a=fieldAnim(cv,{colors:{dot:C('--dot'),line:C('--line'),pulse:C('--pulse'),bg:C('--bg')}});
+a.start();
 fetch('/__boot/shape',{headers:{Accept:'application/json'},cache:'no-store'}).then(function(r){return r.json();})
-.then(function(d){if(d&&d.n){P=d.p.map(function(x){return x/1000;});M=d.m;O=d.o.map(function(x){return x/1000;});E=d.e;}else gen(1200);})
-.catch(function(){gen(1200);});
-function poll(){fetch('/global/health',{headers:{Accept:'application/json'},cache:'no-store'})
-.then(function(r){return r.json().catch(function(){return {};}).then(function(d){return [r,d];});})
-.then(function(x){var r=x[0],d=x[1];if(r.status===503&&d&&d.loading){st=d;txt.textContent=(d.step||'starting')+' \\u00b7 '+Math.round(d.elapsed_s||0)+'s';setTimeout(poll,R);}
-else{ready=true;readyAt=performance.now();txt.textContent='ready';setTimeout(function(){location.reload();},1400);}})
-.catch(function(){setTimeout(poll,R);});}
+.then(function(d){a.shape(d);}).catch(function(){a.shape(null);});
+var w=new SeatWatch({fails:2});
+function poll(){SeatWatch.probe(fetch.bind(window)).then(function(e){var r=w.note(e);
+if(e.kind==='loading'){a.set({dir:1,colour:'coloured',progress:r.progress,recall:!!e.d.recall});txt.textContent=(e.d.step||'starting')+' \u00b7 '+Math.round(e.d.elapsed_s||0)+'s';setTimeout(poll,R);}
+else if(e.kind==='up'){a.set({ready:true,dir:1,colour:'coloured'});txt.textContent='ready';setTimeout(function(){location.reload();},1400);}
+else{if(r.mode==='offline'){a.set({dir:-1,colour:'grey'});txt.textContent='the seat is not reachable \u00b7 waiting for it';}setTimeout(poll,R);}});}
 poll();
-function frame(now){var w=cv.width,h=cv.height;cx.fillStyle=BG;cx.fillRect(0,0,w,h);
-reveal+=(target()-reveal)*0.05;rot+=0.0012;var c=Math.cos(rot),s=Math.sin(rot),S=Math.min(w,h)*0.8;
-var glow=ready?Math.min(2,1+(now-readyAt)/600):0.35+0.65*Math.min(1,(st.steps||0)/12);
-var n=M.length,X=new Float32Array(n),Y=new Float32Array(n),Z=new Float32Array(n),on=new Uint8Array(n);
-for(var i=0;i<n;i++){var x=P[3*i]-.5,y=P[3*i+1]-.5,z=P[3*i+2]-.5,rx=x*c+z*s,rz=-x*s+z*c,q=1/(1.4+rz);
-X[i]=w/2+rx*S*q;Y[i]=h/2+y*S*q;Z[i]=q;on[i]=O[i]<=reveal?1:0;}
-cx.strokeStyle='rgba('+LINE+','+(0.07*glow).toFixed(3)+')';cx.lineWidth=dpr*0.6;cx.beginPath();
-var live=[];for(var k=0;k+1<E.length;k+=2){var a=E[k],b=E[k+1];if(on[a]&&on[b]){cx.moveTo(X[a],Y[a]);cx.lineTo(X[b],Y[b]);live.push(k);}}cx.stroke();
-for(i=0;i<n;i++){if(!on[i])continue;var m=M[i]/255,rad=dpr*(0.8+2.6*Math.sqrt(m))*Z[i]*1.2;
-cx.fillStyle='rgba('+DOT+','+Math.min(1,(0.18+0.7*m)*glow).toFixed(3)+')';cx.beginPath();cx.arc(X[i],Y[i],rad,0,6.283);cx.fill();}
-if((st.recall||ready)&&live.length){while(pulses.length<Math.min(60,live.length))pulses.push({k:live[(Math.random()*live.length)|0],t:0});
-cx.fillStyle='rgba('+PULSE+',0.9)';for(var p=pulses.length-1;p>=0;p--){var u=pulses[p];u.t+=0.02;if(u.t>=1){pulses.splice(p,1);continue;}
-var A=E[u.k],B=E[u.k+1];cx.beginPath();cx.arc(X[A]+(X[B]-X[A])*u.t,Y[A]+(Y[B]-Y[A])*u.t,dpr*1.6,0,6.283);cx.fill();}}
-requestAnimationFrame(frame);}
-requestAnimationFrame(frame);
 })();
 </script></body></html>"""
 
