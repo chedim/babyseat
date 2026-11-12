@@ -43,3 +43,12 @@ Request.reply getter: this.override if this.override != None else this.shipped
 Request.reply on-setter answer:
   WHEN this.reply != None:
     this.respond = this.reply
+
+-- ---- the boot starts the door ------------------------------------------------------------------------------------------------
+-- The launcher tells the seat's facts (Boot:seat.door_port, .door_secret_file, .ui_dir) before it says `started`; with a
+-- door_port the boot writes the listen. The verified token's secret is read by the door from that file (never a property).
+Http.up getter: this.listen_rc == 0 if this.listen_rc != None else None
+
+Boot.started on-setter door-listen:
+  WHEN this.door_port != None:
+    ('Http:door').listen = {'id': 'boot', 'port': this.door_port, 'secret_file': this.door_secret_file}
