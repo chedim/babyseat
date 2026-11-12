@@ -152,9 +152,14 @@ fn a_bad_url_says_so_and_https_needs_no_special_refusal() {
 
 /// A one-shot TLS server with a fresh self-signed certificate for 127.0.0.1; returns (port, cert pem, request seen).
 fn serve_tls(reply: impl Fn(&str) -> Vec<Vec<u8>> + Send + 'static) -> (u16, String, std::sync::mpsc::Receiver<String>) {
+    serve_tls_with(rcgen::SanType::IpAddress("127.0.0.1".parse().unwrap()), true, reply)
+}
+
+/// The same, with the certificate's one name chosen and whether the server says close_notify when it is done.
+fn serve_tls_with(san: rcgen::SanType, notify: bool, reply: impl Fn(&str) -> Vec<Vec<u8>> + Send + 'static) -> (u16, String, std::sync::mpsc::Receiver<String>) {
     use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
     let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
-    params.subject_alt_names = vec![rcgen::SanType::IpAddress("127.0.0.1".parse().unwrap())];
+    params.subject_alt_names = vec![san];
     let key = rcgen::KeyPair::generate().unwrap();
     let cert = params.self_signed(&key).unwrap();
     let pem = cert.pem();
@@ -180,7 +185,7 @@ fn serve_tls(reply: impl Fn(&str) -> Vec<Vec<u8>> + Send + 'static) -> (u16, Str
         let text = String::from_utf8_lossy(&buf).to_string();
         tx.send(text.clone()).unwrap();
         for part in reply(&text) { s.write_all(&part).unwrap(); s.flush().unwrap(); std::thread::sleep(std::time::Duration::from_millis(30)); }
-        s.conn.send_close_notify();
+        if notify { s.conn.send_close_notify(); }
         let _ = s.flush();
     });
     (port, pem, rx)
@@ -238,4 +243,97 @@ fn a_bad_ca_pem_is_a_refusal() {
     let r = &c.docs["Fetch:m"].props["request_result"];
     assert_eq!(r["rc"], json!(2), "{r}");
     assert!(r["head"].as_str().unwrap().contains("ca_pem"), "{r}");
+}
+
+#[test]
+fn a_certificate_for_another_name_is_refused_even_when_its_ca_is_trusted() {
+    let (port, pem, _rx) = serve_tls_with(rcgen::SanType::DnsName("wrong.test".try_into().unwrap()), true, |_| vec![b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi".to_vec()]);
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "n1", "url": format!("https://127.0.0.1:{port}/"), "ca_pem": pem, "timeout_s": 5}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert_eq!(r["rc"], json!(1), "a trusted CA does not make a certificate valid for another name: {r}");
+    assert!(r.get("body").is_none() && r.get("http_status").is_none(), "{r}");
+}
+
+#[test]
+fn a_body_cut_short_is_a_failure_not_a_quiet_end_over_plain_http() {
+    let (port, _rx) = serve(|_| vec![b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhell".to_vec()]);        // promises 10, sends 4, closes
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "t1", "url": format!("http://127.0.0.1:{port}/"), "timeout_s": 5}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert_eq!(r["rc"], json!(1), "{r}");
+    assert!(r["head"].as_str().unwrap().contains("truncated"), "{r}");
+}
+
+#[test]
+fn a_chunked_body_with_no_terminator_is_a_failure_too() {
+    let (port, _rx) = serve(|_| vec![b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n".to_vec()]);   // no 0-size chunk
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "t2", "url": format!("http://127.0.0.1:{port}/"), "timeout_s": 5}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert_eq!(r["rc"], json!(1), "{r}");
+    assert!(r["head"].as_str().unwrap().contains("truncated"), "{r}");
+}
+
+#[test]
+fn a_tls_peer_that_drops_the_socket_mid_body_is_a_failure() {
+    // no close_notify and a body shorter than it promised: a truncation an attacker can cause is not an end of stream
+    let (port, pem, _rx) = serve_tls_with(rcgen::SanType::IpAddress("127.0.0.1".parse().unwrap()), false, |_| vec![b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhell".to_vec()]);
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "t3", "url": format!("https://127.0.0.1:{port}/"), "ca_pem": pem, "timeout_s": 5}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert_eq!(r["rc"], json!(1), "{r}");
+    assert!(r["head"].as_str().unwrap().contains("truncated"), "{r}");
+}
+
+#[test]
+fn a_response_with_no_length_ends_at_the_close_as_before() {
+    let (port, _rx) = serve(|_| vec![b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nall of it".to_vec()]);
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "t4", "url": format!("http://127.0.0.1:{port}/"), "timeout_s": 5}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert_eq!(r["rc"], json!(0), "{r}");
+    assert_eq!(r["body"], json!("all of it"));
+}
+
+#[test]
+fn a_stream_that_fails_still_ends_with_a_done_chunk_that_says_why() {
+    // the consumer waits on `done`: a truncated stream must still end it, with the error on it
+    let (port, _rx) = serve(|_| vec![b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\ndata: partial\n\n".to_vec()]);
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "s9", "url": format!("http://127.0.0.1:{port}/"), "stream": true, "timeout_s": 5}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert_eq!(r["rc"], json!(1), "{r}");
+    pump(&mut c, &mut f, |c| c.docs.iter().any(|(k, e)| k.starts_with("Chunk:Fetch:m:") && e.props["done"] == json!(true)));
+    let done: Vec<&serde_json::Value> = c.docs.iter().filter(|(k, e)| k.starts_with("Chunk:Fetch:m:") && e.props["done"] == json!(true)).map(|(_, e)| &e.props["error"]).collect();
+    assert_eq!(done.len(), 1, "exactly one done chunk");
+    assert!(done[0].as_str().unwrap_or("").contains("truncated"), "{:?}", done);
+}
+
+#[test]
+fn a_stream_that_stalls_past_the_timeout_also_ends_with_a_done_chunk() {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut s, _) = l.accept().unwrap();
+        let mut b = [0u8; 2048];
+        let _ = s.read(&mut b);
+        s.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n").unwrap();
+        s.flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(4));              // then says nothing (longer than the 1 s timeout)
+    });
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "s8", "url": format!("http://127.0.0.1:{port}/"), "stream": true, "timeout_s": 1}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    assert_eq!(c.docs["Fetch:m"].props["request_result"]["rc"], json!(1));
+    pump(&mut c, &mut f, |c| c.docs.iter().any(|(k, e)| k.starts_with("Chunk:Fetch:m:") && e.props["done"] == json!(true)));
+    let done: Vec<&serde_json::Value> = c.docs.iter().filter(|(k, e)| k.starts_with("Chunk:Fetch:m:") && e.props["done"] == json!(true)).map(|(_, e)| &e.props["error"]).collect();
+    assert_eq!(done.len(), 1);
+    assert!(done[0].as_str().unwrap_or("").contains("read"), "{:?}", done);
 }

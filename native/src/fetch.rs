@@ -100,6 +100,14 @@ fn take_text(pending: &mut Vec<u8>) -> String {
     }
 }
 
+/// A failed stream still ends with a `done` chunk carrying the reason (the consumer waits on `done`).
+fn end_failed_stream(st: &Store, eid: &str, id: &J, n: i64, why: &str) {
+    let mut p = Map::new();
+    p.insert("fetch".into(), json!(eid)); p.insert("id".into(), id.clone()); p.insert("n".into(), json!(n + 1));
+    p.insert("data".into(), json!("")); p.insert("done".into(), json!(true)); p.insert("error".into(), json!(why));
+    st.push_inbound(format!("Chunk:{eid}:{}", n + 1), "Chunk".into(), p);
+}
+
 pub fn request(st: &Store, eid: &str, req: &J) -> J {
     let id = req.get("id").cloned().unwrap_or(J::Null);
     let url = req.get("url").and_then(|u| u.as_str()).unwrap_or("");
@@ -178,6 +186,7 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
         let t = take_text(pending);
         emit(t, body_out, n);
     };
+    let mut terminated = !chunked;                  // a chunked body must end with its zero-size chunk
     if chunked {
         // size line, data, CRLF; repeated; a zero size ends it
         let mut inbuf = rest;
@@ -185,14 +194,14 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
             loop {
                 let Some(i) = inbuf.windows(2).position(|w| w == b"\r\n") else { break };
                 let size = usize::from_str_radix(String::from_utf8_lossy(&inbuf[..i]).split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
-                if size == 0 { break 'outer; }
+                if size == 0 { terminated = true; break 'outer; }
                 if inbuf.len() < i + 2 + size + 2 { break }
                 let data = inbuf[i + 2..i + 2 + size].to_vec();
                 inbuf.drain(..i + 2 + size + 2);
                 total += data.len();
                 feed(&data, &mut pending, &mut body_out, &mut n_chunk);
             }
-            match s.read(&mut chunk) { Ok(0) => break, Ok(n) => inbuf.extend_from_slice(&chunk[..n]), Err(e) => { return refuse(&id, 1, format!("read: {e}")) } }
+            match s.read(&mut chunk) { Ok(0) => break, Ok(n) => inbuf.extend_from_slice(&chunk[..n]), Err(e) => { let why = format!("read: {e}"); if stream { end_failed_stream(st, eid, &id, n_chunk, &why); } return refuse(&id, 1, why) } }
         }
     } else {
         if !rest.is_empty() { total += rest.len(); let r = std::mem::take(&mut rest); feed(&r, &mut pending, &mut body_out, &mut n_chunk); }
@@ -201,9 +210,16 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
             match s.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(n) => { total += n; feed(&chunk[..n], &mut pending, &mut body_out, &mut n_chunk); if total > MAX_BODY { break; } }
-                Err(e) => { if stream || total == 0 { return refuse(&id, 1, format!("read: {e}")); } break; }
+                Err(e) => { if stream || total == 0 { let why = format!("read: {e}"); if stream { end_failed_stream(st, eid, &id, n_chunk, &why); } return refuse(&id, 1, why); } break; }
             }
         }
+    }
+    // a body cut short is a failure, never a quiet end (a truncation an attacker on the path can cause must not read as complete)
+    let cut: Option<String> = if !terminated { Some("response truncated: the chunked body ended without its last chunk".into()) }
+        else { want.filter(|w| total < *w).map(|w| format!("response truncated: got {total} of {w} bytes")) };
+    if let Some(why) = cut {
+        if stream { end_failed_stream(st, eid, &id, n_chunk, &why); }
+        return refuse(&id, 1, why);
     }
     if !pending.is_empty() { let t = String::from_utf8_lossy(&pending).to_string(); emit(t, &mut body_out, &mut n_chunk); }
     if stream {
