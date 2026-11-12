@@ -2250,7 +2250,7 @@ def _code_root(srv, est, fld, mem, doc) -> str:
     p = doc.properties or {}
     command = str(p.get("command") or "").strip()
     root = str(p.get("code") or "")
-    if root and root in (est.docs or {}) and _LG.text(est, root) == command:
+    if root and root in (est.docs or {}) and _LG.whole(est, root) and _LG.text(est, root) == command:
         return root
     with _LG._GC:                                 # minted and recorded before a collect can see it
         root = _LG.mint(_code_srv(est, fld, mem), "sh", command, params=True)

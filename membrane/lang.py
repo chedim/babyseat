@@ -631,6 +631,21 @@ def load(est, eid: str) -> Node:
     return Node(str(p.get("kind") or ""), str(p.get("text") or ""), [load(est, k) for k in p.get("args") or []])
 
 
+def whole(est, eid: str) -> bool:
+    """Every node of this tree exists (a tree that lost a node cannot be loaded: mint it again)."""
+    seen, stack = set(), [eid]
+    while stack:
+        k = stack.pop()
+        if k in seen:
+            continue
+        seen.add(k)
+        d = (est.docs or {}).get(k)
+        if d is None:
+            return False
+        stack.extend((d.properties or {}).get("args") or [])
+    return True
+
+
 def text(est, eid: str) -> str:
     """A root's code, printed from its tree."""
     lang = str((est.docs[eid].properties or {}).get("lang") or "")
