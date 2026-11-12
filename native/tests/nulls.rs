@@ -79,3 +79,44 @@ fn none_called_with_a_reason_is_a_null_that_says_why() {
     // a reason may be built from values
     assert_eq!(why(&run("None('no ' + 'file')", &[]).unwrap()).as_deref(), Some("no file"));
 }
+
+// ---- casts: a checked narrowing, spelled as the type's capitalized name -------------------------------------------------------
+// Int(x) is x when x is an int; otherwise None('not-a-type: int expected, got text'). A null stays the null it was (SQL's
+// CAST(NULL AS int) is NULL, and its reason survives). `Int(v) or Text(v)` is the union of two casts.
+fn is_nil_why(r: &V, want: &str) -> bool { why(r).map(|w| w == want).unwrap_or(false) }
+
+#[test]
+fn a_cast_gives_the_value_back_when_it_has_the_type() {
+    for (src, want) in [("Int(3)", V::Int(3)), ("Float(2.5)", V::Float(2.5)), ("Text('a')", V::Str("a".into())), ("Bool(True)", V::Bool(true)),
+                        ("Num(3)", V::Int(3)), ("Num(2.5)", V::Float(2.5)), ("List([1, 2])", V::List(vec![V::Int(1), V::Int(2)]))] {
+        let r = run(src, &[]).unwrap();
+        assert!(py_eq(&r, &want), "{src} -> {r:?}");
+    }
+    assert!(matches!(run("Dict({'a': 1})", &[]).unwrap(), V::Dict(_)));
+}
+
+#[test]
+fn a_cast_of_a_value_that_does_not_have_the_type_is_a_null_that_says_so() {
+    for (src, want) in [("Int('a')", "not-a-type: int expected, got text"), ("Int(3.0)", "not-a-type: int expected, got float"),
+                        ("Float(3)", "not-a-type: float expected, got int"), ("Text(3)", "not-a-type: text expected, got int"),
+                        ("Bool(1)", "not-a-type: bool expected, got int"), ("Num('3')", "not-a-type: num expected, got text"),
+                        ("List({})", "not-a-type: list expected, got dict"), ("Dict([])", "not-a-type: dict expected, got list")] {
+        let r = run(src, &[]).unwrap();
+        assert!(is_nil_why(&r, want), "{src} -> {:?}", why(&r));
+    }
+}
+
+#[test]
+fn a_cast_of_a_null_is_that_null() {
+    assert!(is_nil_why(&run("Int(p)", &[("p", pending())]).unwrap(), "pending: read(/a)"));
+    let r = run("Text(n)", &[("n", V::None)]).unwrap();
+    assert!(matches!(r, V::None | V::Nil(_)), "{r:?}");
+}
+
+#[test]
+fn casts_compose_with_or_as_a_union_and_propagate_like_any_null() {
+    assert!(py_eq(&run("Int(v) or Text(v)", &[("v", V::Str("x".into()))]).unwrap(), &V::Str("x".into())));
+    assert!(py_eq(&run("Int(v) or Text(v)", &[("v", V::Int(4))]).unwrap(), &V::Int(4)));
+    assert!(is_nil_why(&run("Int('a') + 1", &[]).unwrap(), "not-a-type: int expected, got text"));
+    assert!(py_eq(&run("Int('a') == None", &[]).unwrap(), &V::Bool(true)));
+}

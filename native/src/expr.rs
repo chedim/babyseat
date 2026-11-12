@@ -546,6 +546,18 @@ fn extreme(args: &[V], want: std::cmp::Ordering) -> Result<V, Err> {
 fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
     let argn = |n: usize| -> Result<(), Err> { if a.len() == n { Ok(()) } else { Err(format!("{}: takes {} arguments", f, n)) } };
     match f {
+        // a cast: Int(x) is x when x is an int, else None('not-a-type: int expected, got text'); a null stays the null it was
+        "Int" | "Float" | "Num" | "Text" | "Bool" | "List" | "Dict" => {
+            argn(1)?;
+            let v = &a[0];
+            if nullish(v) { return Ok(v.clone()); }
+            let ok = match (f, v) {
+                ("Int", V::Int(_)) | ("Float", V::Float(_)) | ("Num", V::Int(_) | V::Float(_)) | ("Text", V::Str(_)) | ("Bool", V::Bool(_))
+                | ("List", V::List(_)) | ("Dict", V::Dict(_)) => true,
+                _ => false,
+            };
+            Ok(if ok { v.clone() } else { V::Nil(format!("not-a-type: {} expected, got {}", f.to_lowercase(), kind_of(v))) })
+        }
         // None is a class like any other: None('why') constructs a null that carries its reason (None() says "null")
         "None" => Ok(V::Nil(match a.len() { 0 => "null".into(), 1 => py_str(&a[0]), _ => return Err("None: takes one reason".into()) })),
         "dot" => { argn(2)?; let (x, y) = (vec_of(&a[0])?, vec_of(&a[1])?); if x.len() != y.len() { return Err("dot: shapes not aligned".into()); } Ok(V::Float(x.iter().zip(&y).map(|(p, q)| p * q).sum())) }
