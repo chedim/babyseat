@@ -53,7 +53,8 @@ class TestStrictMcpArgv(unittest.TestCase):
     def test_the_allowed_tools_are_exactly_membranes(self):
         argv = self._argv()
         allowed = argv[argv.index("--allowedTools") + 1].split(",")
-        want = {CA.TOOL_PREFIX + t["name"] for t in MCP.TOOLS}
+        from membrane import cliffhanger_only as CO       # #1101: the no-bash seat's tool split
+        want = {CA.TOOL_PREFIX + t["name"] for t in CO.strip_tools(MCP.TOOLS)}
         self.assertEqual(set(allowed), want)
 
 

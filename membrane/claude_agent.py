@@ -115,12 +115,6 @@ MAX_TOOL_CALLS_PER_ANSWER = 2048    # the hard ceiling per answer; Continue
                                     # 2026-10-23, #467)
 MAX_TURNS = 2 * MAX_TOOL_CALLS_PER_ANSWER   # the SDK's backstop only: sized
                                     # never to bind before the ceiling (#425)
-CHAT_STEP_CEILING = 12              # a person's chat answer: acting API steps (operator 2026-11-11, #1120)
-CHAT_STEP_MESSAGE = (f"This answer reached its ceiling of {CHAT_STEP_CEILING} acting steps. "
-                     "Stop here: checkpoint what's left to the field (the goal, its decision cards, what's left) "
-                     "and say what you'll do next; the person can press Continue.")
-CHAT_STEP_LAST = (" · the next step is your last acting step in this answer: make it the checkpoint -- save the "
-                  "goal, its decision cards and what's left to the field -- then end with what you'll do next")
 WORKER_CEILING = 20                 # a goal worker's one step: at most this many calls (#857; #1116: then it splits)
 CEILING_MESSAGE = (f"This answer reached its ceiling of "
                    f"{MAX_TOOL_CALLS_PER_ANSWER} tool calls. Stop here; the "
@@ -309,28 +303,17 @@ class _Answer:
         self.acting = None              # the message id of that acting step
         self.split = False
         self.steps: list = []           # #1120: [message id, it only read] of each step that called tools
-        # #1120 (operator 2026-11-11): a person's chat answer gets CHAT_STEP_CEILING acting steps
-        self.step_limit = CHAT_STEP_CEILING if _DR.current().get("lane") == "chat" else None
         # #1120 ("using getters?"): a worker's step is judged by what its calls did -- the writes they made in the
         # field, counted on the turn's chain while this answer runs (stop() ends the count)
         from . import writes as _W
         self.chain = (_W.current() or {}).get("id") if self.one_step else None
         if self.chain:
             _W.watch_chain(self.chain)
-        self.acting_steps = 0
-        self._step_mid = None
-        self.over = False
 
     def saw_step(self, mid, reads: bool = False) -> None:
         """An assistant message carrying tool calls, by its API step's message id (the CLI sends one message per
         content block, all with their step's id). #1120: one reading step (every call read-only) and then one
-        acting step make one leaf; a step past them means more than one step. A chat answer counts its acting
-        steps against CHAT_STEP_CEILING."""
-        if mid != self._step_mid:
-            self._step_mid = mid
-            self.acting_steps += 1
-            if self.step_limit is not None and self.acting_steps > self.step_limit:
-                self.over = True
+        acting step make one leaf; a step past them means more than one step."""
         if not self.one_step:
             return
         if self.acting is None:
@@ -364,9 +347,7 @@ class _Answer:
         tid = str((hook_input or {}).get("tool_use_id") or tool_use_id or "")
         if self.split:
             self.message = STEP_MESSAGE
-        if self.over:
-            self.message = CHAT_STEP_MESSAGE
-        if self.calls >= self.limit or self.split or self.over:
+        if self.calls >= self.limit or self.split:
             self.ceiling = True
             self.denied.add(tid)
             return {"continue_": False, "stopReason": self.message,
@@ -750,9 +731,7 @@ def _footer(answer) -> str:
     if answer is None:
         return ""
     left = max(MAX_TOOL_CALLS_PER_ANSWER - answer.calls, 0)
-    lim = getattr(answer, "step_limit", None)
-    last = CHAT_STEP_LAST if lim is not None and getattr(answer, "acting_steps", 0) == lim - 1 else ""
-    return f"\n\n\u00b7 {left} calls left{last}"
+    return f"\n\n\u00b7 {left} calls left"
 
 
 # #1061: the agent of the turn this rung answers (set by the proxy when it hands the turn over; the SDK thread and
@@ -1108,8 +1087,7 @@ async def _consume_run(sdk, system, prompt, model, stream, put, port=None,
     answer.stop()
     if capped or answer.ceiling:
         _count("ceiling_hits")
-        put(("capped", {"session": session, "calls": answer.limit,
-                        **({"steps": answer.step_limit} if answer.over else {})}))   # #1120: the step ceiling
+        put(("capped", {"session": session, "calls": answer.limit}))
 
 
 def _quota_paused(model: str, why: str, until=None):

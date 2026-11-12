@@ -192,12 +192,11 @@ class TestManySilentMessages(_Case):
         self.assertEqual(self.sdk.seen_by_model, [])
         self.assertEqual(len(self.sdk.tool_runs), 50)
 
-    def test_a_chat_answer_stops_at_the_step_ceiling_not_for_silence(self):
-        # #1120 (operator 2026-11-11): a chat answer gets CHAT_STEP_CEILING acting steps; the 13th step's call is
-        # refused by the step ceiling (checkpoint + Continue), never for silence
+    def test_a_chat_answer_has_no_step_ceiling(self):
+        # the operator, 2026-11-12: the 12-step chat ceiling (#1120) is gone; chat runs like the other lanes
         self._on("chat")
-        self.assertEqual(len(self.sdk.tool_runs), CA.CHAT_STEP_CEILING)
-        self.assertEqual(self.sdk.seen_by_model, [CA.CHAT_STEP_MESSAGE])
+        self.assertEqual(self.sdk.seen_by_model, [])
+        self.assertEqual(len(self.sdk.tool_runs), 50)
 
 
 # ---- the ceiling ---------------------------------------------------------------
