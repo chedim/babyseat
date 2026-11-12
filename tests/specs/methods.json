@@ -1,0 +1,426 @@
+[
+ {
+  "name": "a plain method becomes a Command with its command and read_only",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/methods.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   },
+   {
+    "eid": "Tool:host.uptime",
+    "class": "Tool",
+    "props": {
+     "name": "host.uptime",
+     "method_name": "uptime",
+     "command": "uptime -p",
+     "read_only": true
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 5
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Command:host_uptime",
+    "prop": "cmd",
+    "equals": "uptime -p"
+   },
+   {
+    "eid": "Command:host_uptime",
+    "prop": "read_only",
+    "equals": true
+   },
+   {
+    "eid": "Command:host_uptime",
+    "prop": "from_method",
+    "equals": "Tool:host.uptime"
+   },
+   {
+    "eid": "Command:host_uptime",
+    "prop": "params",
+    "equals": []
+   }
+  ]
+ },
+ {
+  "name": "{{arg}} placeholders become positional words in param order, bare or quoted, repeats share one",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/methods.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   },
+   {
+    "eid": "Tool:gh.view",
+    "class": "Tool",
+    "props": {
+     "name": "gh.view",
+     "method_name": "view",
+     "command": "gh issue view {{n}} --repo '{{repo}}' && echo \"{{n}}\""
+    }
+   },
+   {
+    "eid": "Tool:gh.one",
+    "class": "Tool",
+    "props": {
+     "name": "gh.one",
+     "method_name": "one",
+     "command": "echo {{who}}"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 5
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Command:gh_view",
+    "prop": "cmd",
+    "equals": "gh issue view \"$1\" --repo \"$2\" && echo \"$1\""
+   },
+   {
+    "eid": "Command:gh_view",
+    "prop": "params",
+    "equals": [
+     "n",
+     "repo"
+    ]
+   },
+   {
+    "eid": "Command:gh_one",
+    "prop": "cmd",
+    "equals": "echo \"$1\""
+   },
+   {
+    "eid": "Command:gh_one",
+    "prop": "params",
+    "equals": [
+     "who"
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a global method (no owner name) is Command:<method>; a placeholder inside single quotes is not mechanical",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/methods.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   },
+   {
+    "eid": "Tool:any.disk",
+    "class": "Tool",
+    "props": {
+     "method_name": "disk",
+     "command": "df -h"
+    }
+   },
+   {
+    "eid": "Tool:sq",
+    "class": "Tool",
+    "props": {
+     "name": "box.sq",
+     "method_name": "sq",
+     "command": "echo 'hello {{x}}'"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 5
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Command:disk",
+    "prop": "cmd",
+    "equals": "df -h"
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "have",
+    "equals": [
+     "Command:disk"
+    ]
+   },
+   {
+    "eid": "Methods:review",
+    "prop": "untranslated.0.name",
+    "equals": "box.sq"
+   },
+   {
+    "eid": "Methods:review",
+    "prop": "untranslated.0.why",
+    "equals": "a placeholder inside single quotes"
+   },
+   {
+    "eid": "Methods:review",
+    "prop": "count",
+    "equals": 1
+   }
+  ]
+ },
+ {
+  "name": "steps, a guard, abstract methods, self./parent placeholders and more than four placeholders are listed, not translated",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/methods.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   },
+   {
+    "eid": "Tool:a",
+    "class": "Tool",
+    "props": {
+     "name": "p.steps",
+     "method_name": "steps",
+     "command": "",
+     "parents": [
+      "Tool:a:step1"
+     ]
+    }
+   },
+   {
+    "eid": "Tool:b",
+    "class": "Tool",
+    "props": {
+     "name": "p.guarded",
+     "method_name": "guarded",
+     "command": "echo hi",
+     "parents": [
+      "Tool:b:guard"
+     ]
+    }
+   },
+   {
+    "eid": "Tool:c",
+    "class": "Tool",
+    "props": {
+     "name": "p.abs",
+     "method_name": "abs",
+     "command": "",
+     "abstract": true,
+     "params": [
+      "x"
+     ]
+    }
+   },
+   {
+    "eid": "Tool:d",
+    "class": "Tool",
+    "props": {
+     "name": "p.selfy",
+     "method_name": "selfy",
+     "command": "ping {{self.host}}"
+    }
+   },
+   {
+    "eid": "Tool:e",
+    "class": "Tool",
+    "props": {
+     "name": "p.many",
+     "method_name": "many",
+     "command": "echo {{a}} {{b}} {{c}} {{d}} {{e}}"
+    }
+   },
+   {
+    "eid": "Tool:f",
+    "class": "Tool",
+    "props": {
+     "name": "p.gone",
+     "method_name": "gone",
+     "command": "echo x",
+     "retired": true
+    }
+   },
+   {
+    "eid": "Tool:g",
+    "class": "Tool",
+    "props": {
+     "name": "p.fine",
+     "method_name": "fine",
+     "command": "echo ok"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 5
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Methods:review",
+    "prop": "count",
+    "equals": 5
+   },
+   {
+    "eid": "Methods:review",
+    "prop": "untranslated",
+    "contains": {
+     "eid": "Tool:a",
+     "name": "p.steps",
+     "why": "steps or a guard (parents)"
+    }
+   },
+   {
+    "eid": "Methods:review",
+    "prop": "untranslated",
+    "contains": {
+     "eid": "Tool:b",
+     "name": "p.guarded",
+     "why": "steps or a guard (parents)"
+    }
+   },
+   {
+    "eid": "Methods:review",
+    "prop": "untranslated",
+    "contains": {
+     "eid": "Tool:c",
+     "name": "p.abs",
+     "why": "abstract (an interface signature)"
+    }
+   },
+   {
+    "eid": "Methods:review",
+    "prop": "untranslated",
+    "contains": {
+     "eid": "Tool:d",
+     "name": "p.selfy",
+     "why": "a placeholder it cannot bind (self., parent, steps. or odd)"
+    }
+   },
+   {
+    "eid": "Methods:review",
+    "prop": "untranslated",
+    "contains": {
+     "eid": "Tool:e",
+     "name": "p.many",
+     "why": "more than four placeholders"
+    }
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "have",
+    "equals": [
+     "Command:p_fine"
+    ]
+   },
+   {
+    "eid": "Command:p_fine",
+    "prop": "cmd",
+    "equals": "echo ok"
+   }
+  ]
+ },
+ {
+  "name": "a Command the model already has is left alone, and a second start rewrites nothing",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/methods.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   },
+   {
+    "eid": "Command:host_uptime",
+    "class": "Command",
+    "props": {
+     "cmd": "uptime",
+     "cwd": "/seat"
+    }
+   },
+   {
+    "eid": "Tool:host.uptime",
+    "class": "Tool",
+    "props": {
+     "name": "host.uptime",
+     "method_name": "uptime",
+     "command": "uptime -p"
+    }
+   },
+   {
+    "eid": "Tool:host.up2",
+    "class": "Tool",
+    "props": {
+     "name": "host.up2",
+     "method_name": "up2",
+     "command": "uptime -s"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 5
+   },
+   {
+    "eid": "Command:host_up2",
+    "prop": "cmd",
+    "value": "my own edit"
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 6
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Command:host_uptime",
+    "prop": "cmd",
+    "equals": "uptime"
+   },
+   {
+    "eid": "Command:host_uptime",
+    "prop": "from_method",
+    "none": true
+   },
+   {
+    "eid": "Command:host_up2",
+    "prop": "cmd",
+    "equals": "my own edit"
+   }
+  ]
+ }
+]

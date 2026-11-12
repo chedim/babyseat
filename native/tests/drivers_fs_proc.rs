@@ -107,6 +107,21 @@ fn a_command_runs_off_the_engine_and_can_be_stopped() {
     assert!(t.elapsed().as_secs() < 10);
 }
 
+/// A translated method (packs/methods.c1f) is a string `cmd` with "$1", "$2" for its {{params}}: the run's args are those words,
+/// each ONE word whatever they hold (spaces, quotes, `;`), as the old shell-quoting made them.
+#[test]
+fn a_translated_methods_params_are_positional_words_and_stay_one_word() {
+    let d = dir();
+    let (mut c, mut f) = world(&d);
+    c.load("Command:say".into(), "Command".into(), json!({"cmd": "echo \"$2\" \"$1\" \"$1\""}).as_object().unwrap().clone(), None, 0.0);
+    let mut s = 0; f.rebuild(&mut c, 1.0, &mut s);
+    put(&mut c, &mut f, "Command:say", "run", json!({"id": "r1", "args": ["a b; echo pwned", "it's"]}), "person");
+    land(&mut c, &mut f);
+    let r = &c.docs["Command:say"].props["run_result"];
+    assert_eq!(r["rc"], json!(0));
+    assert_eq!(r["stdout"], json!("it's a b; echo pwned a b; echo pwned\n"));
+}
+
 // ---- no work under a temporary folder (the operator, 2026-11-12: a battery restart wiped work done under /tmp) ----
 
 fn refused_write(path: &str) -> J {
