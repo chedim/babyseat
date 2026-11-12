@@ -36,6 +36,21 @@ lease cuts the process. A restart that was asked for still comes back: on the cu
 the same command starts as a fresh process, then the old one exits. A plain stop
 just stops.
 
+**While the seat boots.** The serve port is reserved at the top of the boot and
+answers at once: every request gets `503` with `Retry-After` and the step the boot
+is on (`{"loading": true, "step": ..., "rows": ..., "states": ..., "recall": ...}`) until
+the seat is up and the real surface takes the port over. A browser gets the field
+growing: the last clean stop's field shape (`/__boot/shape`: the field view's 3-D layout
+of the heaviest entities and their strongest relations, numbers only -- no names or
+words, since the door asks for no auth) appears as its rows load, pulses once recall's
+models are up, and the page reloads into the UI when `/global/health` answers. With no
+saved shape (a first boot) it draws a generated field driven by the same progress.
+Every clean stop saves the warm snapshot: the vector matrices, the hot rows, the word
+index and the shape; the next boot uses each only when it matches the store.
+Nothing reads a booting seat as ready: `/global/health` (Home Assistant's readiness)
+is `200` only from the real surface. The boot ends with one `[boot]` log line, each
+step's wall time.
+
 **New page code after a restart.** `/ui/conf` carries `build`, a hash of the files
 under `membrane/ui/` taken at boot. On every reconnect the open tab compares it with
 the build it loaded and, if the seat came back with new code, reloads itself once

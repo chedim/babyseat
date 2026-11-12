@@ -108,6 +108,9 @@
     });
   }
 
+  // the field animation, one piece (also the boot page's): the offline window greys the page when the seat goes away
+  await new Promise((ok) => { const sc = document.createElement("script"); sc.src = "/ui/www/fieldanim.js"; sc.onload = sc.onerror = ok; document.head.appendChild(sc); });
+  if (window.offlineWindow) window.offlineWindow({ every: 2000, fails: 2 });   // every = bootprof.REFRESH_S
   import("/ui/www/favicon.js").then((m) => m.startFavicon()).catch(() => {});   // the tab's rocking babyseat
   // THE VIEW (2026-10-13, the operator: the standalone burger menu links the
   // interfaces): ?view=chat -- the conversation alone; ?view=graph -- the
