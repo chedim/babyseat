@@ -180,6 +180,27 @@ def test_a_pack_in_the_field_loads_its_class_runs_live_and_reloads_when_edited(s
     assert "pack lamps" in p(seat, P, "error")
 
 
+def test_a_pack_that_no_longer_parses_at_boot_loads_its_last_good_text(seat):
+    est = seat.entity_store
+    L = MEMBRANE_NS + "lamp:desk"
+    est.upsert(QuantumEntity(eid=L, cls="Lamp", properties={"power": "off"}))
+    P = FL.PACK_NS + "lamps"
+    est.upsert(QuantumEntity(eid=P, cls=FL.PACK_CLASS, properties={"name": "lamps", "c1f": LAMPS}))
+    settle(seat)
+    assert est.docs[P].properties.get("good_c1f") == LAMPS         # the text that parsed is kept on the entity
+    d = est.docs[P]
+    d.properties = {**d.properties, "c1f": "Lamp.power on-setter:\n  this.lit = 1\n"}
+    est.upsert(d)
+    settle(seat)
+    FL.stop(seat)                                                  # the seat restarts with the broken text in the field
+    seat.live = FL.start(seat)
+    settle(seat)
+    assert "Lamp" in seat.live.classes
+    write(seat, L, "power", "on")
+    assert p(seat, L, "lit") is True                               # the old pack runs
+    assert "pack lamps" in p(seat, P, "error")                     # and the error is still shown
+
+
 def test_packs_in_the_pack_folder_load_at_start(tmp_path, monkeypatch):
     (tmp_path / "lamps.c1f").write_text(LAMPS)
     monkeypatch.setattr(FL, "PACK_DIR", tmp_path)

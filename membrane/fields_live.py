@@ -19,7 +19,8 @@ engine) nothing here runs and `goalgraph.seed` defines the triggers as before.
 - **Packs:** cliffhanglets in `.c1f` files load at runtime: `membrane/packs/*.c1f`, then `Pack` entities in the field
   (`membrane::pack:<name>`, the text in `c1f`; a field pack replaces a file pack of the same name). Editing a Pack
   entity reloads it; a pack that doesn't parse is refused, the last good one stays, and the error is written on the
-  entity (`error`). Every class a loaded pack declares is mirrored, and new getters compute as a rebuild.
+  entity (`error`); the text that last parsed is kept in `good_c1f`, and a seat that boots on a text that no
+  longer parses loads it. Every class a loaded pack declares is mirrored, and new getters compute as a rebuild.
 """
 from __future__ import annotations
 
@@ -239,6 +240,17 @@ class Live:
                 print(f"[fields] {err}"[:300], file=sys.stderr)
         if eid:
             self.pack_eids[name] = eid
+            d = (self.est.docs or {}).get(eid)
+            props = (d.properties or {}) if d is not None else {}
+            if not err and d is not None and props.get("good_c1f") != text:       # the text that parsed is kept: a seat that boots
+                with W.as_writer(WRITER + "pack"):                                   # on a text that no longer does loads this
+                    d.properties = {**props, "good_c1f": text}
+                    self.est.upsert(d, embedder=None)
+            elif err and "isn't loaded" not in err and "isn't active" not in err and props.get("good_c1f"):
+                try:
+                    self.f.set_pack(name, str(props["good_c1f"]))
+                except Exception:                  # noqa: BLE001
+                    pass
         # every Pack entity shows its pack's state: an import that arrived later clears a waiting pack's error
         waiting = json.loads(self.f.pack_errors())
         for n, e in list(self.pack_eids.items()):
