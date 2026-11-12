@@ -6114,8 +6114,11 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 _map_banner = ""
                 try:                              # the banner: the pack's placeholder, or the model's own class's text
                     from . import conv_banner as _CB
+                    _t_mv = time.time()
                     _mv = [] if _is_loop_turn(srv, body) else _MM.lines(srv.efield, getattr(srv, "entity_store", None),
                                                                         chat=_CC.current(srv), held=_CC.held(srv))
+                    print(f"[exp-map] {len(_mv)} lines in {time.time() - _t_mv:.2f}s "
+                          f"({len(getattr(srv.efield, '_states', {}) or {})} states)", file=sys.stderr)
                     _bare = "" if _is_loop_turn(srv, body) else _CB.bare(srv, body, _CAPMOD.current_conversation(),
                                                                          moving=_mv, in_line=_cl)
                 except Exception as _be:

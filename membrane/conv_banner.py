@@ -752,8 +752,8 @@ def bare(srv, body: dict, conv: str, moving=(), in_line: str = "") -> str:
             return BARE_FALLBACK                # a failed standard build is never shown in the block's place
         if own and (not out or out.startswith("▸ the banner failed")):
             why = (out or "its text came back empty").removeprefix("▸ the banner failed").strip(" :")
-            out = pack_block(srv, live, fld, conv, [], latest, time.time(), sid, {**facts, "failed": why[:300]},
-                             default=True)
+            out = pack_block(srv, live, fld, conv, [], "", time.time(), sid, {**facts, "failed": why[:300], "instance": _FL.banner_eid(owner, sid or conv)},
+                             default=True)                      # the default's block shows no recall: ask nothing
     except Exception:                       # noqa: BLE001 -- the banner never breaks a turn
         return BARE_FALLBACK
     return out or ""

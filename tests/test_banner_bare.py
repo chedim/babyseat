@@ -204,7 +204,7 @@ def test_an_error_in_the_models_own_banner_is_shown_not_replaced(seat, monkeypat
     _own_banner(seat, "OwnBanner.text getter: join(recall(this.ask, 10, this.session), '\\n')")
     body = {"_turn_sid": "ses_own", "messages": [{"role": "user", "content": ASK}]}
     out = CB.bare(seat, body, "ses_own")
-    assert "the banner failed" in out and "the store is away" in out and out != CB.BARE_FALLBACK
+    assert "your banner failed" in out and "the store is away" in out and out != CB.BARE_FALLBACK
 
 
 # ---- a banner replaced outright (operator 2026-11-11): the instance's own class `text` is the whole banner ----
@@ -235,3 +235,10 @@ def test_switching_a_banner_instance_to_a_class_of_its_own_replaces_the_whole_ba
     assert r["error"] is None, r
     assert r["text"] == "MINE · ses_ext"                  # exactly its text: no default layout, nothing the seat adds
 
+
+
+def test_the_seats_map_lines_and_in_line_reach_the_banner_block(seat, monkeypatch):
+    r = _run(seat, monkeypatch, facts={"map": True, "moving": ["m:goal:x  ↗ 1.0  a · b · c", "c:git  ↗ 0.5  d · e · f"],
+                                       "in_line": "in: chat (it=x)"})
+    t = r["text"] or ""
+    assert "m:goal:x" in t and "c:git" in t and "in: chat (it=x)" in t and "(nothing moved)" not in t
