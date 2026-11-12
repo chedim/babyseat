@@ -155,7 +155,8 @@ class Live:
         self.srv, self.est = srv, srv.entity_store
         self.f = MV.Fields(_Host(self))
         self.ctxs: dict = {}                       # banner eid -> its build's context while its getters run
-        self._banner_loaded: dict = {}              # banner eid -> (class, parents) the engine has it under
+        self._banner_loaded: dict = {}
+        self._engine_props: dict = {}               # banner eid -> the props its class's getters wrote (not the seat's, not the model's)              # banner eid -> (class, parents) the engine has it under
         self.cls_of: dict = {}                     # mirrored eid -> its class (a removal's event names it, #1054)
         self.store_path = _store_file(srv)
         if self.store_path:                        # the store driver: `sql(...)` in packs reads it, read-only
@@ -413,6 +414,8 @@ class Live:
             d = (self.est.docs or {}).get(w["eid"])
             if d is None or (d.properties or {}).get(w["prop"]) == w["new"]:
                 continue
+            if str(w.get("writer") or "").startswith("field:") and w["eid"].startswith(BANNER_NS):
+                self._engine_props.setdefault(w["eid"], set()).add(w["prop"])   # what a banner's class computed
             with W.as_writer(WRITER + str(w.get("writer") or "").removeprefix("field:")):
                 d.properties = {**(d.properties or {}), w["prop"]: w["new"]}
                 self.est.upsert(d, embedder=None)
@@ -485,11 +488,17 @@ class Live:
             if switched:
                 self.f.remove(eid, now)                # the model switched the class: reload it under the new one
                 self.f.settle(now)
+            if switched:                               # the old class's computed values are not the new class's answer
+                old = self._engine_props.pop(eid, set())
+                if old & set(d.properties or {}):
+                    with W.as_writer(WRITER + "banner"):
+                        d.properties = {k: v for k, v in (d.properties or {}).items() if k not in old}
+                        self.est.upsert(d, embedder=None)
             if not self.f.has(eid):
                 self.f.load(eid, d.cls, _json(dict(d.properties or {})))
                 if switched:
-                    self.f.rebuild(now)                # the new class's getters compute afresh: the old class's values
-                self.f.settle(now)                     # stored on the instance are not the new class's answer
+                    self.f.rebuild(now)                # the new class's getters compute afresh
+                self.f.settle(now)
                 self._apply()
             self._banner_loaded[eid] = key
             self.ctxs[eid] = ctx
@@ -511,13 +520,14 @@ class Live:
             # the pack's reads (sql, jsonl, recall, rerank): wait for each WITHOUT the field's lock (a slow one never
             # stalls the thinker or another chat), and settle after the last one too (its answer lands on the round
             # after it finishes); a round may ask for more (a read that needs another's answer)
+            custom = d.cls != BANNER_CLASS                # the limit is the model's own script's; the default has none
             deadline, late = time.monotonic() + BANNER_TIMEOUT_S, False
             while self.f.sql_pending():               # running, or finished and not landed yet
                 left = deadline - time.monotonic()
-                if left <= 0:
+                if custom and left <= 0:
                     late = True                       # the script is over its time: what it asked for lands later, unread
                     break
-                self.f.sql_wait(left)
+                self.f.sql_wait(left if custom else None)
                 with self.busy:
                     self.f.settle(now)
                     writes += self._apply().get("writes") or []

@@ -264,5 +264,26 @@ def test_a_banner_script_that_waits_longer_than_its_limit_is_an_error(seat, monk
     monkeypatch.setattr(live, "f", Slow())
     monkeypatch.setattr(RB, "c1f_call", _fake)
     t0 = _t.monotonic()
+    from membrane.entities import MEMBRANE_NS, QuantumEntity
+    seat.entity_store.upsert(QuantumEntity(eid=FL.banner_eid("owner", "ses_slow"), cls="Banner", properties={"name": "b"}))
+    live.settle()
+    d = seat.entity_store.docs[FL.banner_eid("owner", "ses_slow")]
+    d.cls = "SlowBanner"                                  # a class of the model's own: limited
+    seat.entity_store.upsert(d, embedder=None)
     r = live.banner(object(), "owner", "ses_slow", "ses_slow", ASK, now=100.0, facts={})
     assert _t.monotonic() - t0 < 3 and "took longer than 0.2 s" in (r["error"] or "")
+
+
+def test_memos_own_pack_takes_over_after_the_class_switch_and_keeps_its_notes(seat, monkeypatch):
+    # live 2026-11-11: Memo's MyBanner.text was right but the default's stored `text` stood in for it; Memo's own
+    # property (notes) must survive the switch
+    from membrane.entities import MEMBRANE_NS, QuantumEntity
+    pack = ("PACK memobanner 1\nMyBanner.notes_line getter: 'NOTES: ' + str(this.notes or '(none)')\n"
+            "MyBanner.text getter: join(['MINE', this.notes_line, this.in_line or ''], '\\n')\n")
+    seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:memobanner", cls="Pack",
+                                           properties={"name": "memobanner", "c1f": pack}))
+    seat.live.settle()
+    eid = _standard_then(seat, monkeypatch, cls="MyBanner", notes="remember the boat")
+    r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", "", now=100.0,
+                         facts={"map": True, "moving": ["a"], "in_line": "in: chat"})
+    assert r["text"] == "MINE\nNOTES: remember the boat\nin: chat", r["text"]
