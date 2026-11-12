@@ -51,7 +51,7 @@ def seat(monkeypatch, tmp_path):
         ("sid:ses_0", "[user#owner: owner]\n99 was said before the card existed", now - 1000, "person")])
     monkeypatch.setattr(FL, "_store_file", lambda srv: str(store / "field.sqlite3"))
     est = EntityStore(path=str(tmp_path / "e.json"), shared=False)
-    ledger = UserLedger(str(tmp_path / "f.ledger.jsonl"))
+    ledger = UserLedger(str(store / "f.ledger.jsonl"))       # in the seat's folder: the drivers refuse /tmp elsewhere
     told = []
     est._events_pool = types.SimpleNamespace(put=lambda ev: told.append(ev))
     est._decision_chat = lambda sid, text: None            # a card with its own chat hears it there

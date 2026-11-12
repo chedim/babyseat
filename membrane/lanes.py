@@ -4746,8 +4746,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._v1_embeddings(); return
         if path == "/membrane/delegate":
             self._membrane_delegate(); return
-        if path == "/membrane/learn":
-            self._membrane_learn(); return
         if path == "/membrane/forget":
             self._membrane_forget(); return
         if path == "/membrane/codegraph":
@@ -7029,45 +7027,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
     # audit trail (origin: mcp), same agent_writes kill switch. Returns are
     # JSON mirrors of the executors' text (the MCP layer formats for the
     # model); failures degrade to {"written": false} / {"removed": null}.
-    def _membrane_learn(self) -> None:
-        """POST /membrane/learn {lesson}: the MCP write lane -- a NOTE event."""
-        srv = self.server
-        payload = str(self._json_body().get("lesson") or "").strip()
-        if not payload:
-            self._json_err_raw(400, "lesson required"); return
-        if not getattr(srv, "agent_writes", True):
-            self._json_out({"written": False,
-                            "reason": "agent writes are off (--no-agent-writes)"}); return
-        why = _learn_refusal(payload)
-        if why:
-            self._json_out({"written": False, "reason": why}); return
-        note = _efield_learn(srv, payload, "model")
-        if not note:
-            self._json_out({"written": False, "reason": "the entity field is unavailable"})
-            return
-        _write_audit(srv.membrane, {"event": "agent-learn", "origin": "mcp",
-                                    "tag": "agent-note", "payload": _clip(payload, 400),
-                                    "note": note.strip()})
-        # THE RECEIPT (the '#None' defect): the note's event number (the
-        # forget-path's '#N' handle) + the field's live size -- the MCP
-        # tool renders from THESE keys, not the old exemplar shape.
-        import re as _re
-        _m = _re.search(r"#(\d+)", note)
-        fld = _efield_of(srv)
-        _live = 0
-        if fld is not None:
-            try:
-                _live = int(fld.b.count("events") or 0)
-            except Exception:
-                try:
-                    _live = sum(1 for _ in
-                                iter(fld.b.scan("events", None)))
-                except Exception:
-                    _live = 0
-        self._json_out({"written": True, "note": note.strip(),
-                        "ex_idx": int(_m.group(1)) if _m else None,
-                        "field_size": _live})
-
     def _membrane_forget(self) -> None:
         """POST /membrane/forget {spec}: '#N' / '3-7' forget those events
         (agent cap); anything wordier returns the nearest events as

@@ -690,26 +690,6 @@ def tool_state(args: dict, port: int) -> str:
     return "\n".join(lines)
 
 
-def tool_learn(args: dict, port: int) -> str:
-    payload = _arg(args, "lesson", "text", "value", "content", "data",
-                   "fact", "note", "learn", "summary")   # the seat's own spellings (2026-10-09)
-    if not payload:
-        raise ProxyError(400, "lesson required")
-    out = _http(port, "POST", "/membrane/learn", {"lesson": payload})
-    if not out.get("written"):
-        return ("Agent learn skipped by the field's own guards (dedup or "
-                "variety gate): nothing new written. "
-                + str(out.get("reason") or ""))
-    # THE RECEIPT (the '#None' defect): the route ships the note's
-    # EVENT number ('#N' -- the forget-path's handle) in ex_idx.
-    n = out.get("ex_idx")
-    head = (f"Learned as note #{n}" if n is not None
-            else "Learned as a note (number unavailable)")
-    return (f"{head} (no model call). Field now "
-            f"{out.get('field_size')} events.\n"
-            f"    note: {out.get('note', '')[:400]}")
-
-
 def tool_forget(args: dict, port: int) -> str:
     spec = str(args.get("spec") or "").strip()
     if not spec:
@@ -1527,19 +1507,6 @@ METHOD_TOOL_DEFS = [
             "inputSchema": {"type": "object", "properties": {}},
         },
     {
-            "name": "learn",
-            "description": (
-                'store ONE durable earned lesson (a note, not a transcript; no secrets, personal data, code, fences). guards: dedup, variety; may skip.'),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "lesson": {"type": "string",
-                               "description": "One sentence-ish durable lesson."},
-                },
-                "required": ["lesson"],
-            },
-        },
-    {
             "name": "forget",
             "description": (
                 "spec='#3-7, 9' deletes those cells (capped); wordy spec = proposal only, deletes nothing. after deleting prefer learn with the correction."),
@@ -1642,7 +1609,7 @@ METHOD_TOOL_DEFS = [
 # The tools that are not field manipulation or querying are METHODS, reached by name through `call` (operator,
 # 2026-11-12). Their implementations below are a labelled bridge: phase B moves each into c1f as the system behind it
 # (the intent board, watches, dials, memory, the peer channel) moves.
-METHOD_TOOLS = ("intend", "fulfill", "intents", "learn", "forget", "junk_cut",
+METHOD_TOOLS = ("intend", "fulfill", "intents", "forget", "junk_cut",
                 "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
 
 
@@ -1776,7 +1743,6 @@ TOOL_IMPLS = {
     "intend": tool_intend,
     "intents": tool_intents,
     "fulfill": tool_fulfill,
-    "learn": tool_learn,
     "forget": tool_forget,
     "entity_watch": tool_watch_entity,
     "field_watch": tool_field_watch,

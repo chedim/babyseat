@@ -35,6 +35,10 @@ def running(est, ledger=None, srv=None):
         if not hasattr(srv, k):
             setattr(srv, k, v)
     os.environ["MEMBRANE_FIELDS"] = "1"
+    here = os.getcwd()
+    led = str(getattr(getattr(srv, "user_ledger", None), "path", "") or "")
+    if led:
+        os.chdir(os.path.dirname(os.path.abspath(led)))      # the seat's folder holds its ledger (the drivers refuse /tmp elsewhere)
     FL.start(srv)
     AD.start(srv)
     try:
@@ -46,6 +50,7 @@ def running(est, ledger=None, srv=None):
     finally:
         AD.stop()
         FL.stop(srv)
+        os.chdir(here)
 
 
 def answer(est, ledger, spec, value, conv="", message="", work=None, tell=True, relayed=None):

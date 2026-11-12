@@ -110,16 +110,13 @@ FAMILIES: dict[str, dict] = {
                    "value": {}},
         "map": {"plant": lambda a: _pick(a, "text", "ttl"), "list": lambda a: {},
                 "close": lambda a: _pick(a, "spec", "evidence"),
-                "answer": lambda a: {"card": a.get("card") or a.get("spec"), "value": a.get("value"),
-                                     "quote": a.get("quote") or a.get("text") or ""}},
+                },
     },
     "memory": {
-        "description": "learn: keep one lesson you earned; forget: drop a memory (by #N or text).",
-        "actions": {"learn": "learn", "forget": "forget"},
-        "params": {"text": _S("learn: the lesson"), "spec": _S("forget: what to drop")},
-        "map": {"learn": lambda a: {"lesson": a.get("text") or a.get("lesson") or a.get("learn")
-                                           or a.get("summary")},
-                "forget": lambda a: _pick(a, "spec")},
+        "description": "forget: drop a memory (by #N or text). Keep a lesson by writing Memory:seat.learn.",
+        "actions": {"forget": "forget"},
+        "params": {"spec": _S("forget: what to drop")},
+        "map": {"forget": lambda a: _pick(a, "spec")},
     },
     "track": {
         "description": "Entity tracks ride your header every turn: watch one (boundary "

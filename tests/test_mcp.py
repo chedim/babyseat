@@ -273,17 +273,7 @@ class TestMcpTools(unittest.TestCase):
         self.assertIn("mean answer sim 0.81", text)
         self.assertIn("last night: births=2", text)
 
-    def test_learn_written(self):
-        text = _call("learn", {"lesson": "the cake is a lie"})
-        self.assertIn("#12", text)
-        self.assertIn("Field now 13", text)
 
-    def test_learn_skipped_by_guards(self):
-        _StubProxy.learn = {"written": False,
-                            "reason": "dedup or variety gate: nothing new"}
-        text = _call("learn", {"lesson": "dup"})
-        self.assertIn("skipped", text)
-        self.assertIn("nothing new", text)
 
     def test_forget_index_form_deletes(self):
         text = _call("forget", {"spec": "#3"})
@@ -300,8 +290,8 @@ class TestMcpTools(unittest.TestCase):
     def test_proxy_error_is_tool_error_not_protocol_error(self):
         _StubProxy.fail_next = (503, "router off")
         resp = _rpc([{"jsonrpc": "2.0", "id": 5, "method": "tools/call",
-                      "params": {"name": "learn",
-                                 "arguments": {"lesson": "x"}}}])[0]
+                      "params": {"name": "forget",
+                                 "arguments": {"spec": "x"}}}])[0]
         self.assertIn("result", resp)                     # RESULT, not error
         self.assertTrue(resp["result"]["isError"])
         self.assertIn("membrane tool error",

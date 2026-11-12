@@ -80,19 +80,11 @@ class TestToolsResolveAliases(unittest.TestCase):
             M.tool_intend({"goal": "wire the seat into HA"}, 0)
         self.assertEqual(h.calls[0][2]["text"], "wire the seat into HA")
 
-    def test_learn_text(self):
-        with _Http({"written": False}) as h:
-            M.tool_learn({"text": "adb cannot link"}, 0)
-        self.assertEqual(h.calls[0][2]["lesson"], "adb cannot link")
 
     def test_related_q(self):
         with _Http({"related": []}) as h:
             M.tool_related_entities({"q": "mqtt"}, 0)
         self.assertIn("q=mqtt", h.calls[0][1])
-
-    def test_missing_still_refused(self):
-        with self.assertRaises(M.ProxyError):
-            M.tool_learn({"lesson": "  "}, 0)
 
 
 class TestWatchdogDisarmsOnError(unittest.TestCase):

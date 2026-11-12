@@ -30,3 +30,6 @@ Define a Command once (its cmd, cwd) and run it again by writing `.run` -- the f
 
 ## Ready-made commands (the dev pack)
 `Command:git` and `Command:gh` exist on every seat: run one by writing `.run = {id, args: [...]}`, e.g. `Command:git.run = {id: 'wt', args: ['-C', '<dir>', 'worktree', 'add', '<path>', '-b', '<branch>']}`. Their cwd is the seat's folder; name the repository with `-C <dir>` (git) or `-R <owner/repo>` (gh). Define your own Commands the same way.
+
+## Not under /tmp
+A File write, move or delete, and a Command that runs in or is given a path under `/tmp`, `/private/tmp`, `/var/tmp` or `/var/folders`, is refused (rc 2): a reboot or a battery restart wipes those folders and the work in them is lost. Work in the project's `.worktrees/<name>` (a git worktree) or another folder that survives a reboot. Reading a temporary file is fine.

@@ -106,3 +106,70 @@ fn a_command_runs_off_the_engine_and_can_be_stopped() {
     assert_ne!(c.docs["Command:sleep"].props["run_rc"], json!(0));
     assert!(t.elapsed().as_secs() < 10);
 }
+
+// ---- no work under a temporary folder (the operator, 2026-11-12: a battery restart wiped work done under /tmp) ----
+
+fn refused_write(path: &str) -> J {
+    let d = dir();
+    let (mut c, mut f) = world(&d);
+    c.load("File:w".into(), "File".into(), json!({"path": path}).as_object().unwrap().clone(), None, 0.0);
+    put(&mut c, &mut f, "File:w", "write", json!({"id": "t", "content": "x"}), "model");
+    land(&mut c, &mut f);
+    c.docs["File:w"].props.get("write_result").cloned().unwrap_or(J::Null)
+}
+
+#[test]
+fn a_file_is_not_written_under_a_temporary_folder() {
+    for p in ["/tmp/work/a.txt", "/private/tmp/work/a.txt", "/var/tmp/a.txt", "/var/folders/xx/T/a.txt", "/private/var/folders/xx/T/a.txt"] {
+        let r = refused_write(p);
+        assert_eq!(r["rc"], json!(2), "{p}: {r}");
+        assert!(r["head"].as_str().unwrap().contains("temporary folder"), "{r}");
+        assert!(!std::path::Path::new(p).exists(), "{p} was written");
+    }
+}
+
+#[test]
+fn a_move_or_delete_into_or_out_of_a_temporary_folder_is_refused_too() {
+    let d = dir();
+    std::fs::write(d.join("keep.txt"), "x").unwrap();
+    let (mut c, mut f) = world(&d);
+    c.load("File:m".into(), "File".into(), json!({"path": d.join("keep.txt").to_str().unwrap()}).as_object().unwrap().clone(), None, 0.0);
+    put(&mut c, &mut f, "File:m", "move", json!({"id": "m", "to": "/tmp/elsewhere.txt"}), "model");
+    land(&mut c, &mut f);
+    let r = c.docs["File:m"].props.get("move_result").cloned().unwrap();
+    assert_eq!(r["rc"], json!(2), "{r}");
+    assert!(d.join("keep.txt").exists());
+}
+
+#[test]
+fn the_seats_own_folder_may_be_a_temporary_one_and_reading_a_temporary_file_is_fine() {
+    let d = dir();                                          // a throwaway seat's data folder lives under the OS temp dir
+    let (mut c, mut f) = world(&d);
+    c.load("File:ok".into(), "File".into(), json!({"path": d.join("ok.txt").to_str().unwrap()}).as_object().unwrap().clone(), None, 0.0);
+    put(&mut c, &mut f, "File:ok", "write", json!({"id": "w", "content": "fine"}), "model");
+    land(&mut c, &mut f);
+    assert_eq!(c.docs["File:ok"].props["write_result"]["rc"], json!(0));
+    assert_eq!(std::fs::read_to_string(d.join("ok.txt")).unwrap(), "fine");
+}
+
+fn run_result(cwd: Option<&str>, args: J) -> J {
+    let d = dir();
+    let (mut c, mut f) = world(&d);
+    let mut p = json!({"cmd": ["echo"]}).as_object().unwrap().clone();
+    if let Some(w) = cwd { p.insert("cwd".into(), json!(w)); }
+    c.load("Command:c".into(), "Command".into(), p, None, 0.0);
+    put(&mut c, &mut f, "Command:c", "run", json!({"id": "r", "args": args}), "model");
+    land(&mut c, &mut f);
+    c.docs["Command:c"].props.get("run_result").cloned().unwrap_or(J::Null)
+}
+
+#[test]
+fn a_command_does_not_run_in_or_on_a_temporary_folder() {
+    let r = run_result(Some("/tmp"), json!(["hi"]));
+    assert_eq!(r["rc"], json!(2), "{r}");
+    assert!(r["head"].as_str().unwrap().contains("temporary folder"));
+    let r = run_result(None, json!(["clone", "/private/tmp/wt"]));
+    assert_eq!(r["rc"], json!(2), "{r}");
+    let r = run_result(None, json!(["hello", "world"]));
+    assert_eq!(r["rc"], json!(0), "{r}");
+}

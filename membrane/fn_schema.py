@@ -19,7 +19,7 @@ import re
 
 # the tool names whose args parse as fn schemas (the known shapes)
 _KNOWN_OPS = ("edit", "bash", "read", "write", "query",
-              "learn", "state", "forget",
+              "state", "forget",
               "watch", "unwatch",
               "tracks", "related",
               "entity_add", "entity_edit",

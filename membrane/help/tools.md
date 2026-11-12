@@ -22,8 +22,7 @@ Read YOUR intent board: the seat's active set steered goals (the dream loop's st
 A METHOD: `call method='intents' args={...}`. args: none (* required).
 
 ## learn
-Write ONE durable earned lesson into membrane's field. A lesson is a note, not a transcript: no secrets, no user personal data, no code dumps, no fenced blocks. The proxy applies the same guards as any learned turn (dedup, variety gate) and may skip it. Use when you EARNED something durable (a fixed quirk, the command that worked, why a gate exists).
-A METHOD: `call method='learn' args={...}`. args: lesson* (string) (* required).
+Write ONE durable earned lesson into the seat's memory: `Memory:seat.learn = {lesson: '<the lesson, in prose>'}` (`entity_write` on the node). A lesson is a note, not a transcript: no secrets, no personal data, no fenced code, at most 2000 characters; the field's own guards (dedup, the variety gate) may decline it. Read the answer back: `learn_result` ({written: false, reason} when refused) and `note_result` (which note it became). Use it when you EARNED something durable (a fixed quirk, the command that worked, why a gate exists).
 
 ## forget
 Delete memories. Index form (e.g. '#3-7, 9' or '12') DELETES those cells (capped). Wordier asks return candidate indexes as a PROPOSAL -- they never delete. After deleting, prefer a learn that overwrites the lesson with the correction.

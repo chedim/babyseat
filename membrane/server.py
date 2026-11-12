@@ -1189,7 +1189,7 @@ OPERATOR_TOOLS = frozenset((
     "query", "state", "graph", "entities_related", "entity_query",
     "entity_read", "entity_tracks",
     # memory
-    "learn", "forget",
+    "forget",
     # steering (intentions -- THE OPERATOR'S PEN; fulfill = the close
     # with a receipt, the listeners' too: their landed work moves the board)
     "intend", "intents", "fulfill",
@@ -1239,7 +1239,7 @@ PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "method_define", "method_cal
 # becomes a visible goal (intend) the loops carry out.
 PHONE_TOOLS = frozenset(("query", "state", "graph", "entities_related",
                          "entity_query", "entity_read", "entity_tracks",
-                         "learn", "intend", "intents"))
+                         "intend", "intents"))
 
 _LANE_REFUSALS = {
     "pack": "plan mode: packs aren't loaded from a planning session -- the build-mode turn loads them",

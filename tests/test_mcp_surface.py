@@ -18,7 +18,7 @@ from membrane import mcp_server as M
 ADVERTISED = {"query", "state", "entities_related", "entity_add", "entity_edit", "entity_remove", "graph",
               "entity_inherit"}
 # the operator, 2026-11-12: what is not field manipulation or querying is a method, reached through `call`
-METHODS = {"learn", "forget", "entity_watch", "entity_unwatch", "entity_tracks", "junk_cut"}
+METHODS = {"forget", "entity_watch", "entity_unwatch", "entity_tracks", "junk_cut"}
 FILE_TOOLS = {"read", "write", "edit"}
 # opencode built-in names that must stay dead (the ablation) -- an MCP
 # surface name colliding with one of these would re-surface a builtin.

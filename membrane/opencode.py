@@ -1903,7 +1903,7 @@ def main() -> None:
                         print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
                     _boot_laps.step('loops: field engine')
                     _FL.start(srv)
-                    _FL.boot_started(srv.entity_store, ledger=getattr(getattr(srv, "user_ledger", None), "path", None))   # Boot:seat.started: the packs that start something answer (dev commands, the decisions' ledger file)
+                    _FL.boot_started(srv.entity_store, ledger=getattr(getattr(srv, "user_ledger", None), "path", None), facts={"agent_writes": bool(getattr(srv, "agent_writes", True))})   # Boot:seat.started: the packs that start something answer (dev commands, the decisions' ledger file)
                     _boot_laps.step('loops: owed tasks')             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
                     _r = _GG.reowe(srv)
                     _p = _GG.replan_lost(srv)

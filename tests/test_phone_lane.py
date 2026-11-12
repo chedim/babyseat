@@ -25,7 +25,7 @@ class TestLane(unittest.TestCase):
     def test_phone_is_its_own_lane(self):
         self.assertEqual(S._lane_of("phone"), "phone")
         tools = S._lane_tools("phone")
-        for t in ("entity_read", "query", "learn", "intend", "state"):
+        for t in ("entity_read", "query", "intend", "state"):
             self.assertIn(t, tools)
         for t in ("method_call", "entity_add", "entity_edit", "entity_remove",
                   "fulfill", "field_watch", "entity_inherit", "peer_post"):

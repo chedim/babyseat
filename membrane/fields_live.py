@@ -651,7 +651,7 @@ class Live:
                 next_tick = time.time() + GG.WAIT_TICK_S
 
 
-def boot_started(est, ledger: str | None = None) -> None:
+def boot_started(est, ledger: str | None = None, facts: dict | None = None) -> None:
     """The seat tells the field it has started: Boot:seat.started = now (data only, as About:seat is), with the facts packs
     need (`ledger`: the operator ledger's file). Packs answer with setters on Boot.started (the dev pack makes the dev
     Commands, the decisions pack its nodes)."""
@@ -661,8 +661,11 @@ def boot_started(est, ledger: str | None = None) -> None:
         est.upsert(QuantumEntity(eid="Boot:seat", cls="Boot", properties={"name": "this seat's start", "silent_birth": True}),
                    embedder=None)
         d = est.docs["Boot:seat"]
-    if ledger:                              # the facts first, the announcement last: a setter on `started` must find them
-        d.properties = {**(d.properties or {}), "ledger": str(Path(ledger).resolve())}      # absolute: the file driver resolves a relative path against the data folder
+    known = dict(facts or {})
+    if ledger:
+        known["ledger"] = str(Path(ledger).resolve())      # absolute: the file driver resolves a relative path against the data folder
+    for k, v in known.items():              # the facts first, the announcement last: a setter on `started` must find them
+        d.properties = {**(d.properties or {}), k: v}
         est.upsert(d, embedder=None)
     d.properties = {**(d.properties or {}), "started": time.time()}
     est.upsert(d, embedder=None)

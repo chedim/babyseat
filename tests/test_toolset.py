@@ -68,7 +68,6 @@ class TestResolve(unittest.TestCase):
         self.assertEqual(R("goal", {"action": "plant", "text": "wire it"}), ("intend", {"text": "wire it"}))
         self.assertEqual(R("goal", {"action": "close", "spec": "g", "evidence": "rc=0"}),
                          ("fulfill", {"spec": "g", "evidence": "rc=0"}))
-        self.assertEqual(R("memory", {"action": "learn", "text": "x"}), ("learn", {"lesson": "x"}))
         self.assertEqual(R("exec", {"action": "call", "object": "o", "method": "m"}),
                          ("method_call", {"object": "o", "method": "m"}))
         self.assertEqual(R("track", {"action": "list"}), ("entity_tracks", {}))
@@ -175,9 +174,6 @@ class TestLooseArgs(unittest.TestCase):
         leg, a = T.resolve("entity_edit", {"spec": "c:x", "scripts": {"getter": "result = {}"}})
         self.assertEqual(a.get("getter_script"), "result = {}")
         self.assertNotIn("scripts", a)
-
-    def test_learn_with_the_learn_key(self):
-        self.assertEqual(T.resolve("memory", {"action": "learn", "learn": "x"}), ("learn", {"lesson": "x"}))
 
     def test_parents_as_a_json_string(self):
         self.assertEqual(M._listish('["ha light"]'), ["ha light"])

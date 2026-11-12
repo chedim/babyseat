@@ -63,6 +63,20 @@ pub fn request(st: &Store, asker: &str, f: &str, path: &str) -> Poll {
 }
 pub fn key(st: &Store, f: &str, path: &str) -> String { format!("\u{2}{}\u{0}{}", f, resolve(&st.dir, path).display()) }
 
+/// Folders the operating system wipes (a reboot, a battery restart): work done there is lost (the operator, 2026-11-12).
+const EPHEMERAL: [&str; 5] = ["/tmp", "/private/tmp", "/var/tmp", "/var/folders", "/private/var/folders"];
+
+/// Is this path one the seat refuses to write or run in? The seat's own data folder is never refused: a throwaway seat
+/// (a test, a probe) lives under the OS temp folder.
+fn ephemeral(p: &std::path::Path, seat: &std::path::Path) -> bool {
+    !p.starts_with(seat) && EPHEMERAL.iter().any(|e| p.starts_with(e))
+}
+
+fn ephemeral_why(p: &std::path::Path) -> String {
+    format!("refused: {} is under a temporary folder (a reboot or a battery restart wipes it) -- work under the project's \
+             .worktrees/<name>, or another folder that survives a reboot", p.display())
+}
+
 fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
     let mut m = Map::new();
     m.insert("id".into(), id.clone());
@@ -93,6 +107,13 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
             let env_from: Vec<(String, String)> = props.get("env_from").and_then(|v| v.as_object())
                 .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()).unwrap_or_default();
             let args: Vec<String> = req.get("args").and_then(|a| a.as_array()).map(|a| a.iter().map(|x| x.as_str().map(|s| s.to_string()).unwrap_or_else(|| x.to_string())).collect()).unwrap_or_default();
+            let strange = std::iter::once(cwd.clone()).chain(args.iter().filter(|a| a.starts_with('/')).map(|a| resolve(&dir, a)))
+                .find(|p| ephemeral(p, &dir));
+            if let Some(bad) = strange {
+                let (id2, why) = (id.clone(), ephemeral_why(&bad));
+                st.effect(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new())));
+                return;
+            }
             st.effect(eid, verb, Box::new(move |sh, eid| {
                 let mut c = match &cmd {
                     J::Array(a) if !a.is_empty() => { let mut c = std::process::Command::new(a[0].as_str().unwrap_or_default()); for x in &a[1..] { c.arg(x.as_str().map(|s| s.to_string()).unwrap_or_else(|| x.to_string())); } c }
@@ -131,6 +152,12 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 st.effect(eid, verb, Box::new(move |_, _| receipt(&id2, 2, "a File needs `path`".into(), Map::new())));
                 return;
             };
+            let to = req.get("to").and_then(|t| t.as_str()).map(|t| resolve(&dir, t));
+            if let Some(bad) = [Some(path.clone()), to].into_iter().flatten().find(|p| ephemeral(p, &dir)) {
+                let (id2, why) = (id.clone(), ephemeral_why(&bad));
+                st.effect(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new())));
+                return;
+            }
             let req = req.clone();
             let v = v.to_string();
             st.effect(eid, verb, Box::new(move |_, _| {

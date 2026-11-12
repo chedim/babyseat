@@ -1,0 +1,29 @@
+PACK memory 1
+IMPORT boot 1
+-- THE SEAT'S MEMORY AS A NODE (operator, 2026-11-12: everything moves to cliffhanger). You teach it by WRITING:
+--   Memory:seat.learn = {lesson: '<one durable lesson, in prose>'}
+-- This pack is the policy: the agent-writes switch, an empty lesson, fenced code, the length of a note. A refusal is
+-- answered in `learn_result` ({written: false, reason}) and nothing is written. A fine lesson goes to the node's driver
+-- (`note`): the memory store writes it as a note event, and `note_result` says which note (or that the field's own guards,
+-- dedup and the variety gate, declined it).
+
+Memory.sent getter: this.note_rc == 0 if this.note_rc != None else None
+
+Memory.learn on-setter learn:
+  WHEN this.agent_writes == False:
+    this.learn_result = {'written': False, 'reason': 'agent writes are off (--no-agent-writes)'}
+  ELSE WHEN strip(str(prop(this.learn, 'lesson') or '')) == '':
+    this.learn_result = {'written': False, 'reason': 'nothing to learn (the payload was empty)'}
+  ELSE WHEN '```' in str(prop(this.learn, 'lesson')):
+    this.learn_result = {'written': False, 'reason': 'fenced code blocks are not memory material -- state the LESSON in prose'}
+  ELSE WHEN len(strip(str(prop(this.learn, 'lesson')))) > 2000:
+    this.learn_result = {'written': False, 'reason': 'payload too long (more than 2000 chars) -- a lesson is a note, not a transcript'}
+  ELSE:
+    this.learn_result = {'written': True}
+    this.note = {'lesson': strip(str(prop(this.learn, 'lesson')))}
+
+Boot.started on-setter memory-node:
+  ALWAYS:
+    ('Memory:seat').name = 'the seat memory'
+    ('Memory:seat').summary = 'Teach the seat one durable lesson: write learn = {lesson}. A refusal is in learn_result; the note is in note_result. A lesson is a note in prose, not a transcript (no fenced code, at most 2000 characters).'
+    ('Memory:seat').agent_writes = this.agent_writes

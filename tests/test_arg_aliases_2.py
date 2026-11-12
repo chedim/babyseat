@@ -56,13 +56,6 @@ class TestAliases(unittest.TestCase):
             M.tool_watch_entity({"entity": "f:x"}, 0)
         self.assertEqual(h.calls[0][2]["key"], "f:x")
 
-    def test_learn_data(self):
-        with _Http({"ok": True}) as h:
-            try:
-                M.tool_learn({"data": "the BMS soc lives in sensor.agatha_bms_battery"}, 0)
-            except Exception:
-                pass
-        self.assertTrue(h.calls, "learn refused `data`")
 
     def test_entity_add_forwards_its_scripts(self):
         with _Http({"ok": True, "name": "x", "class": "Component", "eid": "membrane::c:x"},
