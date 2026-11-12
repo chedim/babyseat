@@ -30,7 +30,8 @@ fn world() -> (Core, Fields, u64) {
     c.load("Http:door".into(), "Http".into(), json!({}).as_object().unwrap().clone(), None, 0.0);
     c.load("Boot:seat".into(), "Boot".into(), json!({"ui_dir": ui_dir()}).as_object().unwrap().clone(), None, 0.0);
     let mut s = 0; f.rebuild(&mut c, 1.0, &mut s);
-    put(&mut c, &mut f, "Http:door", "listen", json!({"id": "l1", "port": 0}));
+    std::env::set_var("DOOR_STATIC_SECRET", "0123456789abcdef0123456789abcdef");        // a door with a secret knows a bare loopback caller
+    put(&mut c, &mut f, "Http:door", "listen", json!({"id": "l1", "port": 0, "secret_env": "DOOR_STATIC_SECRET"}));
     pump(&mut c, &mut f, |c| c.docs["Http:door"].props.get("listen_result").is_some());
     let port = c.docs["Http:door"].props["listen_result"]["port"].as_u64().unwrap();
     (c, f, port)
