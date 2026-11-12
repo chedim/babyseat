@@ -88,7 +88,7 @@ fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
 }
 
 /// The driver verbs the engine runs: (class, verb).
-pub const VERBS: [(&str, &str); 9] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond"), ("Request", "verify")];
+pub const VERBS: [(&str, &str); 10] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond"), ("Request", "verify"), ("Fetch", "request")];
 
 /// Run one effect (the engine calls this for a write of a driver verb). `props` are the entity's.
 pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map<String, J>) {
@@ -103,6 +103,10 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 let h = Store::from_shared(sh);
                 if verb2 == "listen" { crate::http::listen(&h, eid, &req2) } else { crate::http::respond(&h, &req2, conn) }
             }));
+        }
+        ("Fetch", "request") => {                          // outbound http (fetch.rs): the receipt is data; a stream arrives as Chunk entities
+            let req2 = req.clone();
+            st.effect(eid, verb, Box::new(move |sh, eid| crate::fetch::request(&Store::from_shared(sh), eid, &req2)));
         }
         ("Request", "verify") => {                         // a token the request carries: checked with its door's secret
             let (req2, http) = (req.clone(), props.get("http").and_then(|h| h.as_str()).unwrap_or("").to_string());

@@ -33,6 +33,7 @@ pub mod drivers;
 pub mod web;
 pub mod http;
 pub mod jwt;
+pub mod fetch;
 #[cfg(feature = "python")]
 pub mod spec;
 
