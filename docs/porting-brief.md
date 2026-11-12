@@ -27,6 +27,11 @@ bare loopback) runs before you. Facts the launcher knows arrive on `Boot:seat` (
 Per-request outbound work (a model list, a backend call) is a per-request entity: write `('Fetch:' + this.conn).request = {...}`
 and read its `request_result`.
 
+## The contracts (docs/c1f-stdlib.md, enforced by `native/tests/contracts.rs`)
+A family pack defines `o_<f>`/`r_<f>` (and `m_<f>` for the declarative 405: prefer it to your own checks); use the shared getters
+`facts jbody qpairs person` and register every Boot fact you read in `membrane/packs/facts.json` (`wired: false` if the launcher
+does not write it yet). `cargo test --test contracts` must pass.
+
 ## Engine rules that bit (c1f)
 - An expression has at most **64 nodes**: split it into named getters.
 - A setter sees the getters as they were **before** the round: chain `stamp -> plan -> act`, carry data in the dict.

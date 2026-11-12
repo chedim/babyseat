@@ -45,6 +45,13 @@ The launcher writes each fact as a property of `Boot:seat` and also the whole se
 - `concat` joins lists (`+` is vector addition); there is no `int()` yet; `clock` is epoch seconds.
 - A class a shipped pack declares is owned: other packs `IMPORT` it.
 
+## The contracts are executable
+`native/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are
+the browser's); a route family pack imports door, defines both `o_<f>` and `r_<f>`, is a reserved family, and does not redefine the
+door's getters; every Boot fact a pack reads is in `membrane/packs/facts.json` (with a `why`), and a fact marked `wired` is written
+by the launcher. `wired: false` entries are the launcher's to-do list for the cutover. A new fact = a registry entry; a new family =
+a reserved name in `FAMILIES` and in the door's chain.
+
 ## Order of work
 1. This document and the Request contract's shared getters with specs (`tests/specs/door_std.json`): `facts`, `jbody`, `qpairs`,
    `person`, and the declarative method gate `m_<f>`.
