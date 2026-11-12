@@ -610,9 +610,7 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
     between boots must echo immediately, not wait for the next tick."""
     now = now or time.time()
     stats = {"deleted": 0, "nudged": 0, "errors": 0, "deferred": 0}
-    scripted = [(k, e) for k, e in est.docs.items()
-                if ((e.properties or {}).get("nudge_script")
-                    or (e.properties or {}).get("delete_script"))]
+    scripted = est.docs.matching(lambda _c, p: p.get("nudge_script") or p.get("delete_script"))   # only the scripted are built
     # THE DUTY CYCLE: pass number mod N -- the eid's hash spreads the
     # slots so entities don't bunch
     pass_no = int(now // 900)          # a 15-minute tick identity

@@ -86,7 +86,9 @@ class Trees:
     # ---- the census: who asks -----------------------------------------------------
     def census(self) -> tuple[dict, dict]:
         """(fs:dir askers, fs:code files): eid -> path, by the ISA chain."""
-        docs = dict(self.est.docs or {})
+        docs = self.est.docs or {}             # not a copy: a copy would build every entity (the pump runs at boot)
+        scan = docs.scan if hasattr(docs, "scan") else (
+            lambda pred: [(k, d) for k, d in list(docs.items()) if pred(k, d.cls, d.properties or {})])
         memo: dict = {}
 
         def under(eid: str, cls: str, depth=0) -> bool:
@@ -98,10 +100,9 @@ class Trees:
                 memo[k] = depth < 32 and any(p == cls or under(p, cls, depth + 1) for p in ps)
             return memo[k]
         dirs, codes = {}, {}
-        for eid, d in docs.items():
+        for eid, d in scan(lambda e, _c, p: not (e in _CLASSES or p.get("status") == RETIRED       # only what has parents is built
+                                                     or not MultiParentOps._parents_of(p))):
             p = d.properties or {}
-            if eid in _CLASSES or p.get("status") == RETIRED or not MultiParentOps._parents_of(p):
-                continue
             path = self._path(p)
             if path is None:
                 continue

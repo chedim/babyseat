@@ -283,3 +283,17 @@ def test_the_watcher_census_and_the_open_goals_build_only_what_they_return(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_the_fs_census_and_the_script_pass_build_only_what_they_use(tmp):
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        from types import SimpleNamespace
+        from membrane import fstree
+        dirs, codes = fstree.Trees.census(SimpleNamespace(est=st, _path=lambda p: None))
+        assert dirs == {} and codes == {} and built == []
+        assert st.docs.matching(lambda c, p: p.get("nudge_script") or p.get("delete_script")) == [] and built == []
+    finally:
+        _restore(real)
+        db.close()
