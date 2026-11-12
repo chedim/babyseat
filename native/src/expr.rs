@@ -360,11 +360,11 @@ pub fn parse_scaled(src: &str, scale: usize) -> Result<Node, Err> {
     let toks = lex(src)?;
     // the character cap is for logic: a string literal's text (a SQL query, a header) is one node, not counted here
     let quoted: usize = toks.iter().map(|t| if let Tok::Str(x) = t { x.chars().count() } else { 0 }).sum();
-    if src.chars().count().saturating_sub(quoted) > chars { return Err(format!("an expression is at most {} characters (string literals not counted)", EXPR_MAX)); }
+    if src.chars().count().saturating_sub(quoted) > chars { return Err(format!("an expression is at most {} characters (string literals not counted): name a part of it as a getter on the entity", EXPR_MAX)); }
     let mut p = P { t: toks, i: 0, nodes: 0 };
     let e = p.expr()?;
     if *p.peek() != Tok::End { return Err("not an expression: trailing input".into()); }
-    if p.nodes > nodes { return Err(format!("an expression is at most {} nodes", NODES_MAX)); }
+    if p.nodes > nodes { return Err(format!("an expression is at most {} nodes: name a part of it as a getter on the entity (the language has no local variables)", NODES_MAX)); }
     Ok(e)
 }
 
