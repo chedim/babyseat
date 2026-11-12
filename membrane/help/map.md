@@ -13,7 +13,7 @@ innermost context; a bare method name (`call` / an unknown tool name) and `it` /
 (this turn, then the stack, then the chat's own entities, then the seat). Your banner script can read all of it.
 
 ## Keeping state
-Anything that must outlive this turn goes into the field: a decision → a decision card; a fact → a property
+Anything that must outlive this turn goes into the field: a decision → asked in the chat, and kept as a decision card (answer_card passes the person's chat answer onto it); a fact → a property
 on its entity; work → a method or goal on the thing it is about. What isn't saved is gone next turn.
 
 ## The banner

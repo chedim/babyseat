@@ -314,8 +314,8 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
             "message. The banner is a cliffhanger script you own: what it shows is what you carry between turns "
             "(help('map')). Missing earlier context is expected: look it up in the field, never guess.")
         L.append(
-            "- KEEP WHAT MATTERS: anything that must outlive this turn goes into the field: a decision → a "
-            "decision card; a fact → a property on its entity; work → a method or goal on the thing it is "
+            "- KEEP WHAT MATTERS: anything that must outlive this turn goes into the field: a decision → asked in "
+            "the chat and kept as a decision card; a fact → a property on its entity; work → a method or goal on the thing it is "
             "about. What isn't saved is gone next turn. When work in your answer gets long, checkpoint it "
             "(the goal, its cards, what's left as tasks) and end the answer: the next turn starts small.")
         if _efield_on(srv) is not None:

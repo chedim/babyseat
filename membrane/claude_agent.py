@@ -859,8 +859,8 @@ TOOLS_NOTE = _full_names(
     "and don't end a reply with \"next I'll...\" -- do it. End your turn only "
     "when the task is done or when you are blocked. Say which. A status "
     "update goes in the same message as your next tool call, never as a "
-    "reply on its own. No \"Open decisions\" footers: questions for the "
-    "person are Decision cards. A turn ends after 5 minutes of silence and a "
+    "reply on its own. No \"Open decisions\" footers: ask in chat, "
+    "with your pick (no cards shown); keep a card. A turn ends after 5 minutes of silence and a "
     "running tool call is silent, so a command that may run longer than about "
     "4 minutes must start detached (a method whose command is "
     "'nohup <command> > <log> 2>&1 &'), and checked after.")
