@@ -1682,7 +1682,10 @@ def _due_goals(srv, est, now: float, min_age_s: float) -> list:
     loops = getattr(srv, "loops", None)
     held = set(getattr(loops, "_held", ()) or ())
     due = []
-    for doc in list((getattr(est, "docs", None) or {}).values()):
+    docs = getattr(est, "docs", None) or {}
+    open_goals = (docs.matching(lambda c, p: c == CLASS_GOAL and (p.get("status") or "open") == "open")   # only goals are built
+                  if hasattr(docs, "matching") else [(k, d) for k, d in list(docs.items())])
+    for _k, doc in open_goals:
         if doc is None or doc.cls != CLASS_GOAL:
             continue
         props = doc.properties or {}

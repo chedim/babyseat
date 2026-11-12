@@ -297,3 +297,16 @@ def test_the_fs_census_and_the_script_pass_build_only_what_they_use(tmp):
     finally:
         _restore(real)
         db.close()
+
+
+def test_the_due_goals_pass_builds_only_goals(tmp):
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        from types import SimpleNamespace
+        from membrane import watch_agents
+        assert watch_agents._due_goals(SimpleNamespace(loops=None), st, 1000.0, 0.0) == []
+        assert built == []
+    finally:
+        _restore(real)
+        db.close()
