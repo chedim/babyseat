@@ -304,7 +304,7 @@ type Engine = (vm::Core, fields::Fields, i64);
 /// method releases the GIL before it takes the engine's lock (so no thread ever waits for the engine while holding
 /// the GIL), and a round's Python callbacks take the GIL back only for themselves.
 #[pyclass]
-struct Fields { c: std::sync::Mutex<Engine>, host: Py<PyAny>, waiter: std::sync::Mutex<Option<crate::store::Waiter>> }
+struct Fields { c: std::sync::Mutex<Engine>, host: Py<PyAny>, waiter: std::sync::Mutex<Option<crate::store::Waiter>>, plan: std::sync::Mutex<Vec<crate::plan::Step>> }
 
 impl Fields {
     fn with<R: Send>(&self, py: Python<'_>, f: impl FnOnce(&mut Engine) -> R + Send) -> R {
@@ -317,7 +317,7 @@ impl Fields {
 impl Fields {
     #[new]
     fn new(host: Py<PyAny>) -> Self {
-        Fields { c: std::sync::Mutex::new((vm::Core::new(), fields::Fields::goalgraph(), 0)), host, waiter: std::sync::Mutex::new(None) }
+        Fields { c: std::sync::Mutex::new((vm::Core::new(), fields::Fields::goalgraph(), 0)), host, waiter: std::sync::Mutex::new(None), plan: std::sync::Mutex::new(Vec::new()) }
     }
     /// The store driver: `sql(...)` in getters and setters reads this SQLite file, read-only, on the process's one
     /// SQLite -- the native store's own (sqlexec.rs); Python's `sqlite3` is not used for the field (#1111).
@@ -428,6 +428,48 @@ impl Fields {
     /// Is this entity in the field's mirror?
     fn has(&self, py: Python<'_>, eid: String) -> bool { self.with(py, move |g| g.0.docs.contains_key(&eid)) }
     fn calls(&self, py: Python<'_>) -> String { self.with(py, |g| J::Array(g.1.calls.clone()).to_string()) }
+    /// THE BOOT (docs/python-to-c1f.md, piece 1): load `boot.c1f` + `boot.json` from `pack_dir` and run the plan's
+    /// foreground steps in the field's order. `bridge(name)` runs one step (a step with nothing to run returns False:
+    /// it is skipped). A step's exception is recorded and the boot goes on, unless the step is `essential` or the
+    /// exception is not an `Exception` (SystemExit, KeyboardInterrupt): that one is raised from here, unchanged.
+    /// -> {name: {state, error}}.
+    fn boot(&self, py: Python<'_>, pack_dir: &str, bridge: Py<PyAny>) -> PyResult<String> {
+        let dir = std::path::Path::new(pack_dir);
+        let read = |f: &str| std::fs::read_to_string(dir.join(f)).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("boot plan {f}: {e}")));
+        let (pack, src) = (read("boot.c1f")?, read("boot.json")?);
+        let steps = crate::plan::parse(&src).map_err(bad)?;
+        let host = self.host(py);
+        let load_steps = steps.clone();
+        self.with(py, move |g| crate::plan::load(g, &host, &pack, &load_steps)).map_err(bad)?;
+        *self.plan.lock().unwrap_or_else(|e| e.into_inner()) = steps;
+        self.walk(py, false, bridge)
+    }
+    /// The UI is up: the plan's background steps run, each failing alone. -> the same report.
+    fn boot_up(&self, py: Python<'_>, bridge: Py<PyAny>) -> PyResult<String> { self.walk(py, true, bridge) }
+}
+
+impl Fields {
+    fn walk(&self, py: Python<'_>, background: bool, bridge: Py<PyAny>) -> PyResult<String> {
+        use crate::plan::Outcome;
+        let steps = self.plan.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let host = self.host(py);
+        let last: std::sync::Mutex<Option<PyErr>> = std::sync::Mutex::new(None);
+        let res = py.detach(|| crate::plan::run(&self.c, &host, &steps, background, &mut |name| {
+            Python::attach(|py| match bridge.call1(py, (name,)) {
+                Ok(v) => if v.bind(py).extract::<bool>().map(|b| !b).unwrap_or(false) && v.bind(py).is_instance_of::<pyo3::types::PyBool>() { Outcome::Skipped } else { Outcome::Done },
+                Err(e) => {
+                    let msg = format!("{}: {}", e.get_type(py).name().map(|n| n.to_string()).unwrap_or_default(), e.value(py));
+                    let fatal = !e.is_instance_of::<pyo3::exceptions::PyException>(py);
+                    *last.lock().unwrap_or_else(|x| x.into_inner()) = Some(e);
+                    if fatal { Outcome::Fatal(msg) } else { Outcome::Failed(msg) }
+                }
+            })
+        }));
+        if let Err(m) = res {
+            return Err(last.into_inner().unwrap_or_else(|x| x.into_inner()).unwrap_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(m)));
+        }
+        Ok(self.with(py, |g| crate::plan::report(&g.0, &steps)).to_string())
+    }
 }
 
 #[pymodule]

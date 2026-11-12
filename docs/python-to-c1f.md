@@ -21,6 +21,10 @@ JWT check, the model runtimes. These are drivers, like `sql()`, `fs` and `proc` 
 In order, each piece deployed on its own and replacing its Python:
 1. **Boot:** `main()`'s 18 steps as entities with `after` edges and states; the heavy ones native; background steps
    after the UI is up (stage 1 native, stage 2 `boot.c1f`).
+   **Status (2026-11-12):** the order, edges, `essential` flags and background steps are data (`packs/boot.json`,
+   `packs/boot.c1f`) and the native VM walks them (`Fields.boot` / `boot_up`, `native/src/plan.rs`). `main()` still holds the
+   steps' bodies as Python closures, handed over by name through one bridge (a stopgap that shrinks as each step becomes
+   c1f or a native primitive).
 2. **The model's tools** (`mcp_server.py`, `toolset.py`: find, entity, exec, goal, memory, track, field_watch, state,
    peer): each a class whose setters are the effects.
 3. **The language layer** (`lang.py`, `language.py`, `verbs.py`, `instances.py`, `convgraph.py`): verbs and aliases

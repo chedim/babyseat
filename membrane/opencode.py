@@ -764,20 +764,39 @@ def _close_listeners(servers) -> None:
 def main() -> None:
     from .bootprof import Laps
     _boot_laps = Laps("boot", cpu=time.thread_time)   # #1115: each step's wall (+ cpu) time, one [boot] line
-    _deferred = []          # BACKGROUND STEPS: work that only warms things up starts once the UI is up, never during the boot
-                            # (it shares the interpreter with the boot and with a person's first turn)
+    # THE BOOT PLAN (docs/python-to-c1f.md, piece 1): the order, the edges, which step stops the boot and which run in
+    # the background once the UI is up are DATA (packs/boot.json, packs/boot.c1f) and the native VM walks them
+    # (Fields.boot / boot_up). Python only hands over the closures by name: `_STEPS` (the boot's) and `_BG` (background
+    # steps: warm-ups that share the interpreter with the boot and a person's first turn). A STOPGAP bridge: it shrinks
+    # as steps become c1f.
+    _STEPS = {}
+    _BG = {}
 
     def _defer(_name, _fn):
-        _deferred.append((_name, _fn))
+        _BG[_name] = _fn
+
+    def _bridge(_name):
+        _fn = _STEPS.get(_name)
+        if _fn is not None:
+            _boot_laps.step(_name)
+            return _fn()
+        _fn = _BG.pop(_name, None)
+        if _fn is None:
+            return False                 # nothing to run: the step is skipped
+        try:
+            _fn()
+        except Exception as _de:
+            print(f"[seat] {_name} skipped ({_de})", file=sys.stderr)
+            raise
+        print(f"[seat] background: {_name} started", file=sys.stderr)
+
+    class _NoHost:
+        pass
+    from . import membrane_vm as _VM
+    _plan = _VM.Fields(_NoHost())
 
     def _run_deferred():
-        for _n, _f0 in list(_deferred):
-            try:
-                _f0()
-                print(f"[seat] background: {_n} started", file=sys.stderr)
-            except Exception as _de:
-                print(f"[seat] {_n} skipped ({_de})", file=sys.stderr)
-        _deferred.clear()
+        _plan.boot_up(_bridge)
     # the boot's steps (docs/python-to-c1f.md): shared names are declared here, each step is a named closure
     JUNK_CUT_DEFAULT = None
     _ = None
@@ -809,9 +828,6 @@ def main() -> None:
     serve_wanted = None
     srv = None
     surf_host = None
-    def _run_step(_name, _fn):
-        _boot_laps.step(_name)
-        _fn()
     def _step_setup():
         nonlocal _JWT, _boot_door, _boot_sample_stop, _json, _log_fh, _serve_socket, _wdir, args, backend, chat_models, e, listen, mem, model, naming_on, passthrough, pid_path, serve_port, serve_wanted, srv
         from .bootprof import sample_while_booting
@@ -1168,7 +1184,7 @@ def main() -> None:
         # worker thread -- never in the chat
         # path. Couchbase for a real seat; RAM for lab paths or an unreachable
         # cluster (open_backend degrades, never raises).
-    _run_step('setup', _step_setup)
+    _STEPS['setup'] = _step_setup
     def _step_field_rows():
         nonlocal _origin_tag, e
         srv.capturer = srv.efield = None
@@ -1305,7 +1321,7 @@ def main() -> None:
             print(f"[efield] capture off ({e})", file=sys.stderr)
         # (srv.receipts is set above from --no-receipts; a re-assignment here
         # to True used to silently kill the kill switch)
-    _run_step('field rows', _step_field_rows)
+    _STEPS['field rows'] = _step_field_rows
     def _step_entities():
         nonlocal JUNK_CUT_DEFAULT, _origin_tag, e
         srv.entity_store = None
@@ -1679,7 +1695,7 @@ def main() -> None:
         # elected by reality's vote, GC'd by the ephemeral clock. The cell
         # pool's replacement (the same idle-cognition role, on the main
         # field, no parallel Membranes). --no-dreamer stands it down.
-    _run_step('entities', _step_entities)
+    _STEPS['entities'] = _step_entities
     def _step_minds():
         nonlocal e
         srv.dreamer = None
@@ -1808,7 +1824,7 @@ def main() -> None:
         # entity. Serve mode: the loops ride the TurnRunner (a loop's turn
         # IS a serve turn); proxy-only: the loop turns ride _model_chat
         # (one deliberation per loop, no tools -- the honest degrade).
-    _run_step('minds', _step_minds)
+    _STEPS['minds'] = _step_minds
     def _step_loops_goal_graph():
         nonlocal e
         srv.loops = None
@@ -1906,7 +1922,7 @@ def main() -> None:
         # the orchestration router (model-vs-model): discovered from the live
         # Ollama (locals AND remote-backed cloud entries), imprints seeded in the
         # background, records persisted beside the field. OFF with --no-router.
-    _run_step('loops + goal graph', _step_loops_goal_graph)
+    _STEPS['loops + goal graph'] = _step_loops_goal_graph
     def _step_router():
         nonlocal _, e
         srv.router = None
@@ -2009,7 +2025,7 @@ def main() -> None:
         # the embed role early rather than on the first chat).
         # a backend that doesn't answer at all fails every probe -- after up to 180 s
         # each (an HA child waited minutes for nothing): one quick check first
-    _run_step('router', _step_router)
+    _STEPS['router'] = _step_router
     def _step_embedder():
         nonlocal e
         _backend_up = True
@@ -2054,7 +2070,7 @@ def main() -> None:
             srv.router.embedder = mem.embedder
 
         srv.cell_pool = None
-    _run_step('embedder', _step_embedder)
+    _STEPS['embedder'] = _step_embedder
     def _step_config():
         nonlocal _NM, cfg, cfg_path, e, env, instr_path, legacy_serve, surf_host
 
@@ -2261,7 +2277,7 @@ def main() -> None:
                         f"  serve: {f'http://{serve_addr}:{serve_port} (native serve)' if serve_wanted else 'off'}\n"
               f"  opencode config: {cfg_path}",
               file=sys.stderr)
-    _run_step('config', _step_config)
+    _STEPS['config'] = _step_config
     def _step_serve():
         nonlocal _, _NM, _json, _serve_socket, e, pid_path
         if args.serve:
@@ -2859,7 +2875,8 @@ def main() -> None:
                 pass
             from .restarts import reexec_if_requested
             reexec_if_requested(srv)        # #151: a self-restart comes back (#395: the person's pause too)
-    _run_step('serve', _step_serve)
+    _STEPS['serve'] = _step_serve
+    _plan.boot(str(Path(__file__).resolve().parent / "packs"), _bridge)
 
 
 if __name__ == "__main__":

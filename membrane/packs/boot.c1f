@@ -1,6 +1,6 @@
 PACK boot 1
 -- THE BOOT PLAN (docs/python-to-c1f.md, piece 1): a boot step is a `Step` entity (boot.json lists them) and `blocks`
--- is the edge to the steps after it. A step is ready when every step before it has ended, done or failed: a failed
+-- is the edge to the steps after it. A step is ready when every step before it has ended (done, failed or skipped): a failed
 -- step does not hold the boot (whether it also stops the boot is its `essential` flag, read by the runner).
-Step.open getter: len([b for b in referencing(this, 'blocks') if b.state != 'done' and b.state != 'failed'])
+Step.open getter: len([b for b in referencing(this, 'blocks') if b.state != 'done' and b.state != 'failed' and b.state != 'skipped'])
 Step.ready getter: this.state == 'pending' and this.open == 0

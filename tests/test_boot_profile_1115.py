@@ -81,8 +81,8 @@ class TheSeatUsesThem(unittest.TestCase):
         main = SRC[SRC.index("\ndef main() -> None:"):]
         line = main.index("_boot_laps.done()")
         self.assertLess(line, main.index("signal.signal(signal.SIGTERM, _term)"))
-        for step in ("field rows", "entities", "serve"):          # the top-level steps are named closures (_run_step)
-            self.assertIn(f"_run_step('{step}'", main)
+        for step in ("field rows", "entities", "serve"):          # the top-level steps are named closures the plan runs (_STEPS)
+            self.assertIn(f"_STEPS['{step}']", main)
 
     def test_the_teardown_marks_with_the_same_timer(self):
         fin = SRC[SRC.index("# THE TEARDOWN'S BOUND"):]
