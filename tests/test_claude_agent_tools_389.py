@@ -188,9 +188,9 @@ class TestOptions(_SDKCase):
         by = {t.name: t for t in srv["tools"]}
         from membrane import cliffhanger_only as CO
         self.assertEqual(set(by), {t["name"] for t in CO.strip_tools(MCP.TOOLS)})
-        learn = next(t for t in MCP.TOOLS if t["name"] == "learn")
-        self.assertEqual(by["learn"].input_schema, learn["inputSchema"])
-        self.assertEqual(by["learn"].description, learn["description"])
+        q = next(t for t in MCP.TOOLS if t["name"] == "entity_query")
+        self.assertEqual(by["entity_query"].input_schema, q["inputSchema"])
+        self.assertEqual(by["entity_query"].description, q["description"])
 
 
 # ---- a tool call in the loop reaches the real tool function -----------------
@@ -218,8 +218,11 @@ def _seat():
     return srv, est
 
 
+ENTITY = {"class": "Component", "name": "keep the battery above 50%"}
+
+
 class TestToolReachesTheSeat(_SDKCase):
-    call = ("intend", {"text": "keep the boat's battery above 50%"})
+    call = ("entity_add", ENTITY)
 
     def setUp(self):
         super().setUp()
@@ -232,13 +235,13 @@ class TestToolReachesTheSeat(_SDKCase):
                                  port=self.seat.server_address[1]))
         goals = [e for e in self.est.docs.values()
                  if "battery above 50%" in str(e.properties.get("name") or "")]
-        self.assertEqual(len(goals), 1, list(self.est.docs))
+        self.assertEqual(len(goals), 1, [v for k, v in got if k == "tool"])
         tools = [v for k, v in got if k == "tool"]
         self.assertEqual(len(tools), 1)
         t = tools[0]
-        self.assertEqual(t["name"], "intend")
+        self.assertEqual(t["name"], "entity_add")
         self.assertEqual(t["id"], "toolu_1")
-        self.assertEqual(t["input"], {"text": "keep the boat's battery above 50%"})
+        self.assertEqual(t["input"], ENTITY)
         self.assertIn(goals[0].eid, t["output"])
         self.assertFalse(t["is_error"])
         self.assertIn("Done.", "".join(v for k, v in got if k == "text"))
@@ -293,11 +296,12 @@ def _proxy_srv(port):
                                  listen_port=port)
 
 
+ENTITY = {"class": "Component", "name": "keep the battery above 50%"}
 PERSON = "remember to keep the battery above 50%"
 
 
 class TestProxyLearns(_SDKCase):
-    call = ("intend", {"text": "keep the boat's battery above 50%"})
+    call = ("entity_add", ENTITY)
 
     def setUp(self):
         super().setUp()
@@ -320,12 +324,12 @@ class TestProxyLearns(_SDKCase):
         self.assertEqual(len(srv.capturer.calls), 1)       # its tool call too
         calls = srv.capturer.calls[0][1]
         c = list(calls.values())[0]
-        self.assertEqual(c["function"]["name"], "intend")
+        self.assertEqual(c["function"]["name"], "entity_add")
         self.assertEqual(json.loads(c["function"]["arguments"]),
-                         {"text": "keep the boat's battery above 50%"})
+                         ENTITY)
         self.assertEqual(len(srv.capturer.results), 1)     # and its result
         self.assertEqual(srv.capturer.results[0][0], "toolu_1")
-        self.assertEqual(srv.capturer.results[0][1], "intend")
+        self.assertEqual(srv.capturer.results[0][1], "entity_add")
 
     def test_streamed_turn_learns_the_reply_and_shows_the_tool(self):
         srv, raw = self._deliver(stream=True)
@@ -334,14 +338,14 @@ class TestProxyLearns(_SDKCase):
         chunks = [json.loads(ln[5:]) for ln in body.split(b"\n")
                   if ln.startswith(b"data:") and ln[5:].strip() != b"[DONE]"]
         tools = [c[CA.TOOL_KEY] for c in chunks if c.get(CA.TOOL_KEY)]
-        self.assertEqual([t["name"] for t in tools], ["intend"])
+        self.assertEqual([t["name"] for t in tools], ["entity_add"])
         self.assertTrue(all(c.get(CA.RESP_KEY) == CA.PROVIDER for c in chunks))
 
     def test_buffered_turn_learns_the_reply_and_shows_the_tool(self):
         srv, raw = self._deliver(stream=False)
         self._check_learned(srv)
         body = json.loads(raw.split(b"\r\n\r\n", 1)[1])
-        self.assertEqual([t["name"] for t in body[CA.TOOLS_KEY]], ["intend"])
+        self.assertEqual([t["name"] for t in body[CA.TOOLS_KEY]], ["entity_add"])
         self.assertIn("Done.", body["choices"][0]["message"]["content"])
 
     def test_the_reply_reaches_the_field_events(self):
@@ -377,7 +381,7 @@ def _ladder(resp, tools):
     return ladder
 
 
-TOOL = {"id": "toolu_1", "name": "intend", "input": {"text": "x"},
+TOOL = {"id": "toolu_1", "name": "entity_add", "input": {"text": "x"},
         "output": "Goal active (created + pinned): goal:abc", "is_error": False}
 
 
@@ -399,7 +403,7 @@ class TestTranscript(unittest.TestCase):
         r, sid, executed = self._run(stream)
         asst = [x for x in r.messages.list(sid) if x["info"]["role"] == "assistant"][-1]
         self.assertTrue(CA.is_claude_made(asst["info"]))
-        tparts = [p for p in asst["parts"] if p.get("type") == "tool" and p.get("tool") == "intend"]
+        tparts = [p for p in asst["parts"] if p.get("type") == "tool" and p.get("tool") == "entity_add"]
         self.assertEqual(len(tparts), 1, asst["parts"])
         p = tparts[0]
         self.assertEqual(p.get(CA.MARK_KEY), CA.PROVIDER)
@@ -424,7 +428,7 @@ class TestTranscript(unittest.TestCase):
         sid = r.sessions.create(title="t")["id"]
         r.run(sid, PERSON)
         asst = [x for x in r.messages.list(sid) if x["info"]["role"] == "assistant"][-1]
-        p = [p for p in asst["parts"] if p.get("tool") == "intend"][0]
+        p = [p for p in asst["parts"] if p.get("tool") == "entity_add"][0]
         self.assertEqual(p["state"]["status"], "error")
         self.assertIn("nope", p["state"]["error"])
 

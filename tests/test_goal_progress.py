@@ -146,7 +146,7 @@ class TestFulfillTool(unittest.TestCase):
         self.assertIn("fulfill", SRV.OPERATOR_TOOLS)
         self.assertNotIn("fulfill", SRV.PLAN_TOOLS)
         self.assertIn("fulfill", M.TOOL_IMPLS)
-        self.assertIn("fulfill", {t["name"] for t in M.TOOLS})
+        self.assertIn("fulfill", M.METHOD_TOOLS)          # a method, reached through `call`
 
     def test_task_text_names_the_close(self):
         task = WA.loop_task_text({"kind": "intent-planted",

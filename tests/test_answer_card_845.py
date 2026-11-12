@@ -132,7 +132,7 @@ class TestRelay(_Base):
 
 class TestLanes(unittest.TestCase):
     def test_only_the_chat_holds_the_tool(self):
-        self.assertIn("answer_card", {t["name"] for t in MCP.TOOLS})
+        self.assertIn("answer_card", MCP.METHOD_TOOLS)          # a method, reached through `call`
         self.assertIn("answer_card", MCP.TOOL_IMPLS)
         self.assertIn("answer_card", SRV.OPERATOR_TOOLS)
         for s in (SRV.LISTENER_TOOLS, SRV.PLAN_TOOLS, SRV.PHONE_TOOLS):

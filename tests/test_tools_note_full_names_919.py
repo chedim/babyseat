@@ -28,7 +28,7 @@ class ToolsNoteNamesTools(unittest.TestCase):
     def test_every_full_name_is_a_real_tool(self):
         named = set(re.findall(re.escape(CA.TOOL_PREFIX) + r"(\w+)", CA.TOOLS_NOTE))
         self.assertTrue({"code_run", "bash", "query", "entity_read", "entity_query"} <= named)
-        self.assertEqual(sorted(named - set(NAMES)), [])
+        self.assertEqual(sorted(named - {t["name"] for t in MCP.TOOLS}), [])      # (`call` is a tool, though not a bare-name check)
 
     def test_the_note_names_what_claude_may_call(self):
         """Every name the note gives is one the rung allows (tool_names)."""

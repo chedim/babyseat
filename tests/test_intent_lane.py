@@ -63,9 +63,8 @@ class TestMount(unittest.TestCase):
         """THE MOUNT: the steering wheel's tools are on the MCP surface
         (schemas + impls) -- the orphaned-pen exhibit."""
         import membrane.mcp_server as M
-        names = {t["name"] for t in M.TOOLS}
-        self.assertIn("intend", names)
-        self.assertIn("intents", names)
+        self.assertIn("intend", M.METHOD_TOOLS)          # the steering wheel is a method, reached through `call`
+        self.assertIn("intents", M.METHOD_TOOLS)
         self.assertEqual(M.TOOL_IMPLS.get("intend"), M.tool_intend)
         self.assertEqual(M.TOOL_IMPLS.get("intents"), M.tool_intents)
         for t in M.TOOLS:

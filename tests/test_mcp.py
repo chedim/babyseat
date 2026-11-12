@@ -150,22 +150,11 @@ class TestMcpProtocol(unittest.TestCase):
         (resp,) = _rpc([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])
         names = [t["name"] for t in resp["result"]["tools"]]
         self.assertEqual(names, ["query", "state",
-                                 "intend", "fulfill", "answer_card", "intents",
-                                 "learn", "forget",
-                                 "entity_watch",
-                                 "entity_unwatch",
-                                 # the board's spatial watches (2026-10-08)
-                                 "field_watch",
-                                 "attention",
-                                 "entity_tracks",
                                  "entities_related",
                                  "entity_query",
                                  "entity_add",
                                  "entity_edit",
                                  "entity_remove",
-                                 "junk_cut",
-                                 "peer_post",
-
                                  "graph",
                                  "entity_inherit",
                                  # #1043: the field engine's hands
@@ -176,7 +165,7 @@ class TestMcpProtocol(unittest.TestCase):
                                  "code_run", "bash", "method_each",
                                  "method_inspect",
                                  "entity_read",
-                                 # #1101: the context stack and bare method calls (the file tools only on a no-bash seat)
+                                 # #1101: the context stack and bare method calls (the file tools only on a no-bash seat
                                  "call", "entity_enter", "entity_exit"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)

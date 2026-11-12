@@ -15,10 +15,10 @@ from unittest import mock
 
 from membrane import mcp_server as M
 
-ADVERTISED = {"query", "state", "learn", "forget", "entity_watch",
-              "entity_unwatch", "entity_tracks", "entities_related",
-              "entity_add", "entity_edit", "entity_remove", "junk_cut",
-              "peer_post", "graph", "entity_inherit"}
+ADVERTISED = {"query", "state", "entities_related", "entity_add", "entity_edit", "entity_remove", "graph",
+              "entity_inherit"}
+# the operator, 2026-11-12: what is not field manipulation or querying is a method, reached through `call`
+METHODS = {"learn", "forget", "entity_watch", "entity_unwatch", "entity_tracks", "junk_cut", "peer_post"}
 FILE_TOOLS = {"read", "write", "edit"}
 # opencode built-in names that must stay dead (the ablation) -- an MCP
 # surface name colliding with one of these would re-surface a builtin.
@@ -51,6 +51,7 @@ class TestSurfaceNames(unittest.TestCase):
         self.assertTrue(ADVERTISED <= names, ADVERTISED - names)
         self.assertTrue(ADVERTISED <= set(M.TOOL_IMPLS),
                         ADVERTISED - set(M.TOOL_IMPLS))
+        self.assertTrue(METHODS <= set(M.TOOL_IMPLS) and METHODS <= set(M.METHOD_TOOLS))    # their bridge
 
 
 if __name__ == "__main__":

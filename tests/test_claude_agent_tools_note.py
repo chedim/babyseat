@@ -180,7 +180,7 @@ def _name_map():
 def test_the_note_maps_the_doctrine_families_to_the_tools():
     from membrane import mcp_server as M
     from membrane import toolset as T
-    tools = {t["name"] for t in M.TOOLS}
+    tools = {t["name"] for t in M.TOOLS} | set(M.METHOD_TOOLS)        # a method is reached through `call`
     pairs = _name_map()
     fams = {f for f, _, _ in pairs}
     assert {"exec", "entity", "goal", "memory", "find", "track", "peer"} <= fams, fams

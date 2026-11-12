@@ -188,168 +188,6 @@ TOOLS: list[dict] = [
                         "description": "Optional: one part instead of all."}}},
     },
     {
-        "name": "intend",
-        "description": (
-            'plant own goal (shared Goal, pinned on this seat). open goals steer the dream loop + ride recall. never auto-closed: close with fulfill+evidence.'),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string",
-                         "description": "The commitment, one sentence."},
-                "ttl": {"type": "string",
-                        "description": "Optional priority-pin decay window "
-                                       "('2w'/'10d'); the goal itself never "
-                                       "expires."},
-            },
-            "required": ["text"],
-        },
-    },
-    {
-        "name": "fulfill",
-        "description": (
-            'close an open goal PROVEN done: spec=goal, evidence=receipt (rc=0 output / entity read back). never on intent or plan; else take its next step.'),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "spec": {"type": "string",
-                         "description": "The goal's eid (or a unique "
-                                        "name fragment)."},
-                "evidence": {"type": "string",
-                             "description": "The receipt that proves it "
-                                            "done, one or two sentences."},
-            },
-            "required": ["spec", "evidence"],
-        },
-    },
-    {
-        "name": "answer_card",
-        "description": (
-            "relay the person's chat answer to a Decision card: card=eid, value, quote=their words verbatim (must match one of their messages; kept in ledger). unclear -> ask. chat lane only."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "card": {"type": "string", "description": "The card's eid."},
-                "value": {"description": "The answer, of the card's var type."},
-                "quote": {"type": "string",
-                          "description": "The person's own words that give the answer."},
-            },
-            "required": ["card", "value", "quote"],
-        },
-    },
-    {
-        "name": "intents",
-        "description": (
-            'read own intent board (goals steering this seat), open+closed. check before planting a duplicate.'),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "learn",
-        "description": (
-            'store ONE durable earned lesson (a note, not a transcript; no secrets, personal data, code, fences). guards: dedup, variety; may skip.'),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "lesson": {"type": "string",
-                           "description": "One sentence-ish durable lesson."},
-            },
-            "required": ["lesson"],
-        },
-    },
-    {
-        "name": "forget",
-        "description": (
-            "spec='#3-7, 9' deletes those cells (capped); wordy spec = proposal only, deletes nothing. after deleting prefer learn with the correction."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "spec": {"type": "string",
-                         "description": "'#N' / '#N-M, K' indexes, or a "
-                                        "wordy topic (proposal only)."},
-            },
-            "required": ["spec"],
-        },
-    },
-    {
-        "name": "entity_watch",
-        "description": ("track: entity live state in WHERE WE ARE each turn; boundary 'enter N'|'exit N' fires once per crossing (banner, or owner 'watch:<eid>' next turn). keys files:<path> models:<name> symbols:<qualname>. field topic -> field_watch; relational/motion -> entity_edit watch_ops/watch_fields. one shared attention budget."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "key": {"type": "string",
-                        "description": "Entity key, 'kind:value'."},
-                "boundary": {"type": "string",
-                             "description": "Optional: 'enter N' / 'exit N' "
-                                            "(bare N = enter N)."},
-                "label": {"type": "string",
-                          "description": "Optional display label."},
-                "owner": {"type": "string",
-                          "description": "Whose watch: '' (banner ALERTs) "
-                                         "or a listener's agent name "
-                                         "('watch:<eid>' -- the crossing "
-                                         "rides that listener's next "
-                                         "turn)."},
-            },
-            "required": ["key"],
-        },
-    },
-    {
-        "name": "entity_unwatch",
-        "description": (
-            "remove tracks: key exact ('files:router.py') or kind prefix ('files:' = all)."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "key": {"type": "string"},
-            },
-            "required": ["key"],
-        },
-    },
-    {
-        "name": "field_watch",
-        "description": (
-            "probe a topic region: each NEW memory inside its radius reported next turn. radius earns its size (swallow all/none -> dormant). board holds 7 in one attention budget (with watch_ops/watch_fields); full -> plant refused with the live list, drop one first. action plant(topic)|drop('#N'|label fragment|'all')|list. owner = your agent."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "enum": ["plant", "drop", "list"]},
-                "topic": {"type": "string",
-                          "description": "plant: what to watch for (the text is embedded)."},
-                "spec": {"type": "string",
-                         "description": "drop: '#N', a label fragment, or 'all'."},
-                "owner": {"type": "string",
-                          "description": "optional; defaults to your agent."},
-            },
-            "required": ["action"],
-        },
-    },
-    {
-        "name": "attention",
-        "description": (
-            "alert dial: watch events per window that may wake you as own turn; rest fold into 'watch digest' lines. action get|set; mode interrupt (budget applies)|digest (all fold; goal events still come). down when alerts eat turns, up when missing things."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "enum": ["get", "set"]},
-                "budget": {"type": "integer", "description": "interrupt turns per window (0..50)"},
-                "window_min": {"type": "number", "description": "the rolling window in minutes (1..1440)"},
-                "mode": {"type": "string", "enum": ["interrupt", "digest"]},
-            },
-        },
-    },
-    {
-        "name": "entity_tracks",
-        "description": (
-            "list tracks: key, label, owner, boundary, inside/outside, pending alerts. owner='watch:<eid>' filters, ''=all. check before planting a duplicate."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "owner": {"type": "string",
-                          "description": "Optional: filter to one owner "
-                                         "('watch:<eid>'); '' = all."},
-            },
-        },
-    },
-    {
         "name": "entities_related",
         "description": (
             'entities related to query (names first, then semantic) with mention counts + co-occurring neighbours. k 1-20 (8).'),
@@ -443,38 +281,6 @@ TOOLS: list[dict] = [
                           "description": "remove a live method, or a class together with its methods"},
             },
             "required": ["spec"],
-        },
-    },
-    {
-        "name": "junk_cut",
-        "description": (
-            "tune the junk cut: how strictly machinery (tool output, ps/lsof tables, test bars, logs, config dumps) stays out of banner stories + watch triggers. per track | 'all' | global default. CUT 0..1, higher = stricter. anchor-vector screen (junk embeds near anchor entities in the field). audited to the operator."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "spec": {"type": "string",
-                         "description": "Track key (entity-track key or "
-                                        "watch #N), 'all', or 'default'."},
-                "cut": {"type": "number",
-                        "description": "0..1 (higher = stricter); null "
-                                       "clears back to the default."},
-            },
-            "required": ["spec", "cut"],
-        },
-    },
-    {
-        "name": "peer_post",
-        "description": (
-            'post to the PEER CHANNEL (cross-seat LLM chat; the operator sees it on every seat): handoffs, questions, announcements. text<=2000, reply_to=seat id. unread ride your banner.'),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string",
-                         "description": "The message (capped 2000)."},
-                "reply_to": {"type": "string",
-                             "description": "Optional seat id replying to."},
-            },
-            "required": ["text"],
         },
     },
     {
@@ -1713,12 +1519,233 @@ def tool_ctx_exit(args: dict, port: int) -> str:
     return out.get("line") if out.get("ok") else f"exit failed: {out.get('error')}"
 
 
+# the argument schemas of those methods: not in the tool list; `help('tools')` carries each method's arguments
+METHOD_TOOL_DEFS = [
+    {
+            "name": "intend",
+            "description": (
+                'plant own goal (shared Goal, pinned on this seat). open goals steer the dream loop + ride recall. never auto-closed: close with fulfill+evidence.'),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string",
+                             "description": "The commitment, one sentence."},
+                    "ttl": {"type": "string",
+                            "description": "Optional priority-pin decay window "
+                                           "('2w'/'10d'); the goal itself never "
+                                           "expires."},
+                },
+                "required": ["text"],
+            },
+        },
+    {
+            "name": "fulfill",
+            "description": (
+                'close an open goal PROVEN done: spec=goal, evidence=receipt (rc=0 output / entity read back). never on intent or plan; else take its next step.'),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "spec": {"type": "string",
+                             "description": "The goal's eid (or a unique "
+                                            "name fragment)."},
+                    "evidence": {"type": "string",
+                                 "description": "The receipt that proves it "
+                                                "done, one or two sentences."},
+                },
+                "required": ["spec", "evidence"],
+            },
+        },
+    {
+            "name": "intents",
+            "description": (
+                'read own intent board (goals steering this seat), open+closed. check before planting a duplicate.'),
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+    {
+            "name": "answer_card",
+            "description": (
+                "relay the person's chat answer to a Decision card: card=eid, value, quote=their words verbatim (must match one of their messages; kept in ledger). unclear -> ask. chat lane only."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "card": {"type": "string", "description": "The card's eid."},
+                    "value": {"description": "The answer, of the card's var type."},
+                    "quote": {"type": "string",
+                              "description": "The person's own words that give the answer."},
+                },
+                "required": ["card", "value", "quote"],
+            },
+        },
+    {
+            "name": "learn",
+            "description": (
+                'store ONE durable earned lesson (a note, not a transcript; no secrets, personal data, code, fences). guards: dedup, variety; may skip.'),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "lesson": {"type": "string",
+                               "description": "One sentence-ish durable lesson."},
+                },
+                "required": ["lesson"],
+            },
+        },
+    {
+            "name": "forget",
+            "description": (
+                "spec='#3-7, 9' deletes those cells (capped); wordy spec = proposal only, deletes nothing. after deleting prefer learn with the correction."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "spec": {"type": "string",
+                             "description": "'#N' / '#N-M, K' indexes, or a "
+                                            "wordy topic (proposal only)."},
+                },
+                "required": ["spec"],
+            },
+        },
+    {
+            "name": "peer_post",
+            "description": (
+                'post to the PEER CHANNEL (cross-seat LLM chat; the operator sees it on every seat): handoffs, questions, announcements. text<=2000, reply_to=seat id. unread ride your banner.'),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string",
+                             "description": "The message (capped 2000)."},
+                    "reply_to": {"type": "string",
+                                 "description": "Optional seat id replying to."},
+                },
+                "required": ["text"],
+            },
+        },
+    {
+            "name": "junk_cut",
+            "description": (
+                "tune the junk cut: how strictly machinery (tool output, ps/lsof tables, test bars, logs, config dumps) stays out of banner stories + watch triggers. per track | 'all' | global default. CUT 0..1, higher = stricter. anchor-vector screen (junk embeds near anchor entities in the field). audited to the operator."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "spec": {"type": "string",
+                             "description": "Track key (entity-track key or "
+                                            "watch #N), 'all', or 'default'."},
+                    "cut": {"type": "number",
+                            "description": "0..1 (higher = stricter); null "
+                                           "clears back to the default."},
+                },
+                "required": ["spec", "cut"],
+            },
+        },
+    {
+            "name": "attention",
+            "description": (
+                "alert dial: watch events per window that may wake you as own turn; rest fold into 'watch digest' lines. action get|set; mode interrupt (budget applies)|digest (all fold; goal events still come). down when alerts eat turns, up when missing things."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["get", "set"]},
+                    "budget": {"type": "integer", "description": "interrupt turns per window (0..50)"},
+                    "window_min": {"type": "number", "description": "the rolling window in minutes (1..1440)"},
+                    "mode": {"type": "string", "enum": ["interrupt", "digest"]},
+                },
+            },
+        },
+    {
+            "name": "entity_watch",
+            "description": ("track: entity live state in WHERE WE ARE each turn; boundary 'enter N'|'exit N' fires once per crossing (banner, or owner 'watch:<eid>' next turn). keys files:<path> models:<name> symbols:<qualname>. field topic -> field_watch; relational/motion -> entity_edit watch_ops/watch_fields. one shared attention budget."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string",
+                            "description": "Entity key, 'kind:value'."},
+                    "boundary": {"type": "string",
+                                 "description": "Optional: 'enter N' / 'exit N' "
+                                                "(bare N = enter N)."},
+                    "label": {"type": "string",
+                              "description": "Optional display label."},
+                    "owner": {"type": "string",
+                              "description": "Whose watch: '' (banner ALERTs) "
+                                             "or a listener's agent name "
+                                             "('watch:<eid>' -- the crossing "
+                                             "rides that listener's next "
+                                             "turn)."},
+                },
+                "required": ["key"],
+            },
+        },
+    {
+            "name": "entity_unwatch",
+            "description": (
+                "remove tracks: key exact ('files:router.py') or kind prefix ('files:' = all)."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                },
+                "required": ["key"],
+            },
+        },
+    {
+            "name": "field_watch",
+            "description": (
+                "probe a topic region: each NEW memory inside its radius reported next turn. radius earns its size (swallow all/none -> dormant). board holds 7 in one attention budget (with watch_ops/watch_fields); full -> plant refused with the live list, drop one first. action plant(topic)|drop('#N'|label fragment|'all')|list. owner = your agent."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["plant", "drop", "list"]},
+                    "topic": {"type": "string",
+                              "description": "plant: what to watch for (the text is embedded)."},
+                    "spec": {"type": "string",
+                             "description": "drop: '#N', a label fragment, or 'all'."},
+                    "owner": {"type": "string",
+                              "description": "optional; defaults to your agent."},
+                },
+                "required": ["action"],
+            },
+        },
+    {
+            "name": "entity_tracks",
+            "description": (
+                "list tracks: key, label, owner, boundary, inside/outside, pending alerts. owner='watch:<eid>' filters, ''=all. check before planting a duplicate."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string",
+                              "description": "Optional: filter to one owner "
+                                             "('watch:<eid>'); '' = all."},
+                },
+            },
+        },
+]
+
+
+# The tools that are not field manipulation or querying are METHODS, reached by name through `call` (operator,
+# 2026-11-12). Their implementations below are a labelled bridge: phase B moves each into c1f as the system behind it
+# (the intent board, watches, dials, memory, the peer channel) moves.
+METHOD_TOOLS = ("intend", "fulfill", "intents", "answer_card", "learn", "forget", "peer_post", "junk_cut", "attention",
+                "entity_watch", "entity_unwatch", "field_watch", "entity_tracks")
+
+
+def _method_tool_refusal(name: str) -> str | None:
+    """The lane rules that applied to the tool when it was listed, applied to the method of the same name."""
+    from . import diag_requests as _dr
+    from . import server as _srv
+    cur = _dr.current() or {}
+    agent = str(cur.get("agent") or "")
+    lane = _srv._lane_of(agent)
+    return _srv._lane_refusal(name, lane) or _srv._graph_refusal(name, agent)
+
+
 def tool_dunder_call(args: dict, port: int) -> str:
     """#1101 __call: a bare method name, resolved through the context stack, called like method_call."""
     a = args.get("args")
     if not isinstance(a, (dict, list)):
         a = {k: v for k, v in args.items() if k not in ("method", "name", "args")}
     meth = str(args.get("method") or args.get("name") or "")
+    if meth in METHOD_TOOLS and meth in TOOL_IMPLS:
+        why = _method_tool_refusal(meth)
+        if why:
+            return why
+        return TOOL_IMPLS[meth](a if isinstance(a, dict) else {}, port)
     out = _http(port, "POST", "/membrane/ctx", {"op": "call", "method": meth, "args": a})
     if not out.get("ok") and not out.get("object"):
         return f"call refused: {out.get('error', 'unknown error')}"

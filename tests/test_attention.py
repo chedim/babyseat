@@ -197,17 +197,17 @@ class TestHandsAndTexts(unittest.TestCase):
         self.assertIn("field_watch", S.LISTENER_TOOLS)
         self.assertIn("field_watch", S.OPERATOR_TOOLS)
         self.assertNotIn("field_watch", S.PLAN_TOOLS)
-        tool = next(t for t in M.TOOLS if t["name"] == "field_watch")
+        tool = next(t for t in M.METHOD_TOOL_DEFS if t["name"] == "field_watch")
         props = tool["inputSchema"]["properties"]
         self.assertEqual(set(props["action"]["enum"]), {"plant", "drop", "list"})
         self.assertIn("field_watch", M.TOOL_IMPLS)
 
     def test_no_retired_mqtt_watch_kind_on_offer(self):
-        blob = json.dumps([t for t in M.TOOLS if t["name"] in ("entity_edit", "entity_watch", "field_watch")])
+        blob = json.dumps([t for t in M.TOOLS + M.METHOD_TOOL_DEFS if t["name"] in ("entity_edit", "entity_watch", "field_watch")])
         self.assertNotIn("mqtt", blob.lower())
 
     def test_watching_is_not_sold_as_shell_polling(self):
-        desc = next(t for t in M.TOOLS if t["name"] == "entity_watch")["description"]
+        desc = next(t for t in M.METHOD_TOOL_DEFS if t["name"] == "entity_watch")["description"]
         self.assertNotIn("shell:git", desc)
         self.assertIn("field_watch", desc)                    # points at the senses
 

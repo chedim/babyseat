@@ -8,36 +8,47 @@ Membrane's own live state: the entity field's vitals (live entities, events by s
 
 ## intend
 Plant YOUR commitment (the steering wheel of membrane's idle mind): create-or-pin a shared Goal + pin it on this seat's active set. Open intentions STEER the dream loop (quarantined timeline branches grow toward them, think-ahead extends them) and ride recall. An intention is never auto-closed: fulfillment is explicit (the `fulfill` tool with its evidence, or the operator's `membrane: fulfill #N` -- reality's signature; a similarity flag is only a 'maybe-done?' hint). Use when working toward a multi-session goal or when the field's work has a direction worth keeping.
+A METHOD: `call method='intend' args={...}`. args: text* (string), ttl (string) (* required).
 
 ## fulfill
 Close an OPEN goal you have PROVEN done: its status flips to fulfilled on the shared board (every seat's active set drops it). Requires evidence -- the receipt (a method call's rc=0 output, the entity state you read back). Never close on intent or a plan; an unfinished goal stays open and you take its next concrete step instead.
+A METHOD: `call method='fulfill' args={...}`. args: spec* (string), evidence* (string) (* required).
 
 ## answer_card
 Pass on a Decision card's answer the person gave you in this chat, so they need not answer again on the board. Only for words they really said about this card; if they said nothing clear, ask. The quote must match a message of theirs word for word, and it stays on the card and in the ledger. Chat lane only.
+A METHOD: `call method='answer_card' args={...}`. args: card* (string), value*, quote* (string) (* required).
 
 ## intents
 Read YOUR intent board: the seat's active set steered goals (the dream loop's steering coordinates), open + closed. Use before planting a duplicate or to review what commitments are alive.
+A METHOD: `call method='intents' args={...}`. args: none (* required).
 
 ## learn
 Write ONE durable earned lesson into membrane's field. A lesson is a note, not a transcript: no secrets, no user personal data, no code dumps, no fenced blocks. The proxy applies the same guards as any learned turn (dedup, variety gate) and may skip it. Use when you EARNED something durable (a fixed quirk, the command that worked, why a gate exists).
+A METHOD: `call method='learn' args={...}`. args: lesson* (string) (* required).
 
 ## forget
 Delete memories. Index form (e.g. '#3-7, 9' or '12') DELETES those cells (capped). Wordier asks return candidate indexes as a PROPOSAL -- they never delete. After deleting, prefer a learn that overwrites the lesson with the correction.
+A METHOD: `call method='forget' args={...}`. args: spec* (string) (* required).
 
 ## entity_watch
 Plant a TRACK: an entity's live state in the WHERE WE ARE header every turn. An optional boundary ('enter N' / 'exit N') fires once per crossing: into the banner (owner '') or into a listener's next turn (owner 'watch:<eid>'). Keys: 'files:router.py', 'models:<name>', 'symbols:<qualname>'. To watch the field instead: field_watch (a topic region), or entity_edit watch_ops / watch_fields (relational / motion) -- one shared attention budget.
+A METHOD: `call method='entity_watch' args={...}`. args: key* (string), boundary (string), label (string), owner (string) (* required).
 
 ## entity_unwatch
 Remove entity tracks: exact key ('files:router.py') or a kind prefix ('files:' removes all file tracks).
+A METHOD: `call method='entity_unwatch' args={...}`. args: key* (string) (* required).
 
 ## field_watch
 WATCH THE FIELD (a topic region): plant a probe on a topic; every NEW memory landing inside its radius is reported to you on your next turn. The radius EARNS its size (a watch that swallows too much collapses; one that swallows everything or starves goes dormant). The board holds 7, inside ONE attention budget shared with watch_ops and watch_fields: at the limit the plant is REFUSED with the list of live watches (sense, what, owner, age, hits) -- drop the ones you no longer need, then plant. Your agent is stamped as each watch's owner. action: plant (topic) | drop ('#N', a label fragment, or 'all') | list.
+A METHOD: `call method='field_watch' args={...}`. args: action* (string), topic (string), spec (string), owner (string) (* required).
 
 ## attention
 YOUR ALERT DIAL: how many watch events per window may wake you as their own interrupt turn; the rest fold into the 'watch digest' lines of your next WHERE WE ARE block (grouped per entity). mode 'interrupt' (the budget applies) | 'digest' (no interrupt turns; everything folds -- goal events always come through). Turn it down when alerts eat your turns, up when you're missing things. action get | set.
+A METHOD: `call method='attention' args={...}`. args: action (string), budget (integer), window_min (number), mode (string) (* required).
 
 ## entity_tracks
 List entity tracks: key, label, owner, boundary, current inside/outside state, and pending alert count. LANE-AWARE: a listener passes its own agent name to see ITS tracks; the operator sees all (with owners). Use before planting a duplicate track or to review your watches.
+A METHOD: `call method='entity_tracks' args={...}`. args: owner (string) (* required).
 
 ## entities_related
 Read the entity graph: entities related to a free-text query (named hits first, then semantic nearness), each with its mention count and co-occurrence neighbors. Use to explore what the field knows about a component before acting on it.
@@ -56,9 +67,11 @@ Remove an entity (noise cleanup): resolve by eid or exact name. Ambiguous fragme
 
 ## junk_cut
 Tune the junk cut: how aggressively machinery (raw tool output -- ps/lsof tables, test bars, log lines, config dumps) is kept out of YOUR banner stories and watch triggers. Per-track (raise for a paranoid trace, lower for a permissive one), 'all' tracks at once, or the global default. The screen is anchor-vector based: junk embeds near anchor entities stored IN the field; prose stays far. CUT 0..1 -- higher = stricter. Audited to the operator.
+A METHOD: `call method='junk_cut' args={...}`. args: spec* (string), cut* (number) (* required).
 
 ## peer_post
 Post a message to the PEER CHANNEL: a chat lane between the LLMs, visible to the operator on every connected opencode seat. Use for cross-seat coordination -- handoffs, questions to another seat's model, state announcements. Unread messages ride YOUR banner automatically.
+A METHOD: `call method='peer_post' args={...}`. args: text* (string), reply_to (string) (* required).
 
 ## graph
 The entity graph's subgraph reader (the model's eyes on the universe map): entities related to a query -- named hits first, then centroid-nearest -- as nodes (id/class/label/position/status/curiosity/fn_counts/properties) + edges (ISA/links/merged_into). The same data contract the universe viewer renders; other clients consume the same endpoints.

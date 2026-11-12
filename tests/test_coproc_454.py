@@ -424,7 +424,7 @@ class TestClaudeRungHidesLookalikeTools(unittest.TestCase):
     def test_off_keeps_every_tool(self):
         from membrane import claude_agent as CA
         with mock.patch.dict(os.environ, {"MEMBRANE_COPROC": "0"}):
-            self.assertIn(CA.TOOL_PREFIX + "intend", CA.tool_names())
+            self.assertIn(CA.TOOL_PREFIX + "entity_add", CA.tool_names())
 
     def test_on_hides_tools_named_like_the_calls(self):
         from membrane import claude_agent as CA
