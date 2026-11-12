@@ -132,18 +132,12 @@ RecallBanner.recall_block getter: concat([this.recall_header], this.lines) if th
 -- block. A seat in map mode writes the fact `map`: its banner is the placeholder or nothing (dial `mode`: 'off'),
 -- the block -- `full` is not honoured there. Every other seat: dial `mode` 'full' (the block, the default),
 -- 'help' (the placeholder: nothing is recalled) or 'off' (nothing).
-RecallBanner.shown getter WHEN this.map and this.mode == 'off': 'off'
-RecallBanner.shown getter WHEN this.map: 'map'
 RecallBanner.shown getter WHEN this.mode == 'help' or this.mode == 'off': this.mode
 RecallBanner.shown getter: 'full'
 RecallBanner.bare getter: join(['BANNER (placeholder): no history reaches you, so use this banner for continuity between your turns: it is the one block that carries your state, so make it show what matters each turn (what you are doing, what is open, what you decided).', 'How: load a pack: PACK mine 1 / MyBanner.text getter: <what to show: open goals, decisions, what you were doing>. Then: entity edit ' + (this.instance or this.eid) + ' class=MyBanner (this replaces the default banner completely). It is the first block of your next turn; if it fails you see the error there, under the default banner. mode help|off on it silences this. help("map") has more.'], '\n')
 RecallBanner.failed_lines getter: ['▸ your banner failed, the default banner is shown: ' + this.failed] if this.failed else []
-RecallBanner.in_lines getter: [this.in_line] if this.in_line else []
-RecallBanner.moving_lines getter: this.moving if this.moving else ['(nothing moved)']
-RecallBanner.map_block getter: join(concat(this.failed_lines, [this.bare, 'What is moving (id · speed · heading). No chat history is sent. Read any id with entity read for its full story.'], this.in_lines, this.moving_lines), '\n')
 RecallBanner.text getter:
   WHEN this.shown == 'off': None
-  ELSE WHEN this.shown == 'map': this.map_block
   ELSE WHEN this.shown == 'help': this.bare
   ELSE WHEN this.rows or this.lines: join(concat([this.now_line, this.conv_header], fit(this.rows, this.budget or 900, this.used), this.recall_block), '\n')
   ELSE: None
@@ -151,7 +145,7 @@ RecallBanner.text getter:
 -- THE DEFAULT BANNER IS INSTRUCTIONS (operator 2026-11-11): on a map seat the class `Banner` is only the short message that
 -- tells the model what this slot is and how to replace it. It reads nothing from the store and shows no map. The recall
 -- banner (recalled facts, open goals, decisions, the ledger) is the separate class RecallBanner, the default of the seats
--- that send history and recall; a model's own class replaces either completely (the seat gives it `moving` and `in_line`).
+-- that send history and recall; a model's own class replaces either completely.
 Banner.bare getter: join(['BANNER (placeholder): no history reaches you, so use this banner for continuity between your turns: it is the one block that carries your state, so make it show what matters each turn (what you are doing, what is open, what you decided).', 'How: load a pack: PACK mine 1 / MyBanner.text getter: <what to show: open goals, decisions, what you were doing>. Then: entity edit ' + (this.instance or this.eid) + ' class=MyBanner (this replaces the default banner completely). It is the first block of your next turn; if it fails you see the error there, under the default banner. mode help|off on it silences this. help("map") has more.'], '\n')
 Banner.failed_lines getter: ['▸ your banner failed, the default banner is shown: ' + this.failed] if this.failed else []
 Banner.shown getter WHEN this.mode == 'off': 'off'

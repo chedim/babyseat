@@ -440,14 +440,6 @@ class Live:
     def has_banner(self) -> bool:
         return BANNER_CLASS in self.classes
 
-    def class_reads(self, cls: str, prop: str) -> bool:
-        """Does a pack that declares `cls` read `this.<prop>` anywhere? The seat computes a costly fact (the map of what is
-        moving, seconds) only for a banner class that reads it."""
-        import re as _re
-        head = _re.compile(r"^" + _re.escape(cls) + r"\.", _re.M)
-        use = _re.compile(r"\bthis\." + _re.escape(prop) + r"\b")
-        return any(head.search(t) and use.search(t) for t in list(self.pack_texts.values()))
-
     def _banner_instance(self, eid: str, owner: str, chat: str, facts: dict | None = None):
         d = (self.est.docs or {}).get(eid)
         want = BANNER_CLASS if (facts or {}).get("map") else RECALL_CLASS

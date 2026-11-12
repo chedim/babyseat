@@ -310,12 +310,9 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
         _map_mode = False
     if _map_mode:                          # THROWAWAY EXPERIMENT: the card must not promise history or banners
         L.append(
-            "- CONTEXT: MAP MODE. No chat history is sent. Your memory is the field: the 'What is moving' "
-            "block shows what is live; the in: line shows where you are and what 'it' means. Read any id "
-            "with entity read. Missing earlier context is expected: look it up in the field, never guess. "
-            "There is no recall block or transcript on this seat, whatever else here mentions one; the banner is one "
-            "placeholder line with its settings. "
-            "help('map') has the details.")
+            "- CONTEXT: MAP MODE. No chat history is sent: your context is this card, your banner and the person's "
+            "message. The banner is a cliffhanger script you own: what it shows is what you carry between turns "
+            "(help('map')). Missing earlier context is expected: look it up in the field, never guess.")
         L.append(
             "- KEEP WHAT MATTERS: anything that must outlive this turn goes into the field: a decision → a "
             "decision card; a fact → a property on its entity; work → a method or goal on the thing it is "
@@ -6126,34 +6123,16 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         try:
             from . import momentum_map as _MM
             if _MM.on() and getattr(srv, "efield", None) is not None:
-                from . import callctx as _CC
-                _sid = str(body.get("_turn_sid") or "")
-                if _sid and not any(isinstance(m, dict) and m.get("role") == "tool"
-                                    for m in (body.get("messages") or [])[-1:]):
-                    _CC.new_turn(srv, _sid)
-                _cl = _CC.line(srv)
-                _st.mark("ctx")                   # the context stack's in: line
                 _map_banner = ""
-                try:                              # the banner: the pack's placeholder, or the model's own class's text
+                try:                              # the banner: ONE cliffhanger script of the model's own (the default is instructions)
                     from . import conv_banner as _CB
-                    _loop = _is_loop_turn(srv, body)
-
-                    def _moving(srv=srv, _CC=_CC):         # the map: only a banner class of the model's own reads it
-                        _t_mv = time.time()
-                        _mv = _MM.lines(srv.efield, getattr(srv, "entity_store", None),
-                                        chat=_CC.current(srv), held=_CC.held(srv))
-                        print(f"[exp-map] {len(_mv)} lines in {time.time() - _t_mv:.2f}s "
-                              f"({len(getattr(srv.efield, '_states', {}) or {})} states)", file=sys.stderr)
-                        return _mv
-                    _bare = "" if _loop else _CB.bare(srv, body, _CAPMOD.current_conversation(),
-                                                      moving=_moving, in_line=_cl)
+                    _bare = "" if _is_loop_turn(srv, body) else _CB.bare(srv, body, _CAPMOD.current_conversation())
                 except Exception as _be:
-                    print(f"[exp-map] banner placeholder failed ({_be})", file=sys.stderr)
+                    print(f"[exp-map] banner failed ({_be})", file=sys.stderr)
                     from .conv_banner import BARE_FALLBACK as _bare
                 _map_banner = _bare
                 up["messages"] = _MM.rewrite(up.get("messages") or (body.get("messages") or []), srv.efield,
-                                             getattr(srv, "entity_store", None), _cl,
-                                             chat=_CC.current(srv), held=_CC.held(srv), banner=_bare)
+                                             banner=_bare)
                 _st.mark("map")                   # the 'What is moving' block (was timed as 'router')
         except Exception as _e:
             print(f"[exp-map] skipped ({_e})", file=sys.stderr)

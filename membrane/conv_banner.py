@@ -727,12 +727,12 @@ BARE_FALLBACK = ("BANNER (placeholder): no history reaches you, so use this bann
                  "to show>. Then: entity edit this chat's Banner class=MyBanner (it replaces the default banner). help(\"map\") has more.")
 
 
-def bare(srv, body: dict, conv: str, moving=None, in_line: str = "") -> str:
+def bare(srv, body: dict, conv: str) -> str:
     """Map mode's banner (operator 2026-11-11): the WHOLE block the model gets comes from this chat's banner instance:
-    the seat only writes the facts (`map`, `moving` = the map's lines, `in_line`) and the instance's `text` is the
+    the seat only writes the fact `map` and the instance's `text` is the
     block. An instance of a class the model made replaces the default completely; when it fails or says nothing the
     default banner is shown instead, headed by its error (the pack writes that line from the fact `failed`)."""
-    facts = {"map": True, "in_line": in_line or ""}
+    facts = {"map": True}
     try:
         from . import lanes as _L
         from . import fields_live as _FL
@@ -746,8 +746,6 @@ def bare(srv, body: dict, conv: str, moving=None, in_line: str = "") -> str:
         owner = str(((sess.get(sid or conv) if sess is not None else None) or {}).get("owner") or "seat")
         d = (est.docs or {}).get(_FL.banner_eid(owner, sid or conv)) if est is not None else None
         own = d is not None and d.cls not in _FL.DEFAULT_CLASSES
-        if own and callable(moving) and live.class_reads(d.cls, "moving"):     # the map costs seconds: only for a class that reads it
-            facts["moving"] = list(moving() or ())
         latest = _L._last_user_text(body or {}) if own else ""     # the standard banner recalls nothing here; a class of the model's own is asked with the person's words
         out = pack_block(srv, live, fld, conv, [], latest, time.time(), sid, facts)
         if not own and (not out or out.startswith("▸ the banner failed")):

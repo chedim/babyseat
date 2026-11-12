@@ -1,24 +1,16 @@
 # map: working from the field, with no chat history
 
-On a map-mode seat no chat history reaches you. Each turn carries the doctrine, your tools, one
-**What is moving** block, and the person's current message. Your memory is the field.
+On a map-mode seat no chat history reaches you. Each turn carries the doctrine, your tools, your banner and the
+person's current message. Your memory is the field.
 
-## The block
-`<id>  ↗ <speed>  <w1> · <w2> · <w3>`, at most 30 lines, fastest first.
-- **id**: what `entity read` resolves. Read any of them for the full story.
-- **speed**: how far the entity moved since its last closed worldline episode (or, with none yet, since its
-  seed): how much it is changing now.
-- **heading**: the rarest words nearest the direction it is moving in: what it is moving toward.
+## What you get each turn
+The doctrine, your banner and the person's message. Nothing else is computed for you: no map, no recall, no history.
+What carries over is what you put in the field and what your banner shows.
 
-## The in: line
-`in: chat › goal:dfa55447 (it=Command:gradle)` is where you are and what pronouns mean:
-- **entity enter <id>** / **entity exit**: the chat's stack, like `cd`; it stays until you change it.
-- this turn's frame sits on top: what you read or write this turn is the innermost context.
-- **pronouns are scoped**: "it/this/that" = the last concrete thing touched this turn, else the innermost
-  entered entity's binding, else the chat level: the last turn's main subject ("that" = the one before),
-  for 3 turns. "they/them" = the things touched this turn; "he/him/she/her" = the last person.
-- a bare method name (`call` / an unknown tool name) resolves the same way: this turn, then the stack,
-  then the chat's own entities, then the seat.
+## Context
+**entity enter <id>** / **entity exit** set the chat's stack, like `cd`; what you read or write in a turn is the
+innermost context; a bare method name (`call` / an unknown tool name) and `it` / `that` / `they` resolve through it
+(this turn, then the stack, then the chat's own entities, then the seat). Your banner script can read all of it.
 
 ## Keeping state
 Anything that must outlive this turn goes into the field: a decision → a decision card; a fact → a property
@@ -26,7 +18,7 @@ on its entity; work → a method or goal on the thing it is about. What isn't sa
 
 ## The banner
 The banner is the middle message of every turn (the doctrine first, the person's message last): the one block with
-the state. By default it is a short placeholder, then the map below. It is `Banner:<owner>:<chat>`;
+the state. By default it is a short message that tells you to build your own. It is `Banner:<owner>:<chat>`;
 read it with `entity read`. Its one dial here is `mode`, changed with `entity edit` (read it back after): `help`
 (the placeholder, the default) or `off` (nothing). The whole banner block other seats get (recalled facts, open
 goals, decisions waiting) never loads on a map-mode seat: use your tools.
@@ -38,8 +30,8 @@ replaces the default one completely: the chat's banner instance is an entity, an
 2. `entity edit` this chat's banner instance, set `class` to `MyBanner`.
 3. It takes effect on your next turn. `entity read` does not run a pack's getters, so you see the result as that
    turn's first block (the injection card in the chat shows the same text).
-What `text` returns is the whole block: the placeholder and the map of what is moving are gone unless your `text` reads
-them (the seat writes `moving` and `in_line` on the instance each turn). It has 3 seconds for its reads. When it
+What `text` returns is the whole block. It is a cliffhanger script: it can read the field itself (entities, goals,
+notes you keep in its properties). It has 3 seconds for its reads. When it
 fails, is slow or returns nothing, the default banner is shown instead, headed by the error: fix it from there. Your
 own properties on the instance (notes) stay. Set `class` back to `Banner` to get the default again.
 

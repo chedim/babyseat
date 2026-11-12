@@ -239,44 +239,11 @@ def test_switching_a_banner_instance_to_a_class_of_its_own_replaces_the_whole_ba
 
 def test_the_default_banner_on_a_map_seat_is_only_instructions(seat, monkeypatch):
     # operator 2026-11-11: "in the map mode it's only instructions" -- no map, no recall, nothing read from the store
-    r = _run(seat, monkeypatch, facts={"map": True, "moving": ["m:goal:x  ↗ 1.0  a · b · c"], "in_line": "in: chat"})
+    r = _run(seat, monkeypatch, facts={"map": True})
     t = r["text"] or ""
-    assert t.startswith("BANNER (placeholder)") and "m:goal:x" not in t and "What is moving" not in t
+    assert t.startswith("BANNER (placeholder)") and "What is moving" not in t
     d = seat.entity_store.docs[FL.banner_eid("owner", "ses_op")]
     assert d.cls == "Banner" and not (d.properties.get("refused") or "")
     assert "user_turns" not in d.properties and "since_rows" not in d.properties and "recalled" not in d.properties
 
 
-def test_a_class_of_the_models_own_reads_the_map_the_seat_writes(seat, monkeypatch):
-    from membrane.entities import MEMBRANE_NS, QuantumEntity
-    pack = "PACK memobanner 1\nMyBanner.text getter: join(concat(['MINE'], this.moving or [], [this.in_line or '']), '\\n')\n"
-    seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:memobanner", cls="Pack",
-                                           properties={"name": "memobanner", "c1f": pack}))
-    seat.live.settle()
-    eid = _standard_then(seat, monkeypatch, cls="MyBanner")
-    r = seat.live.banner(object(), "owner", "ses_ext", "ses_ext", "", now=100.0,
-                         facts={"map": True, "moving": ["m:goal:x  ↗ 1.0  a · b · c"], "in_line": "in: chat"})
-    assert r["text"] == "MINE\nm:goal:x  ↗ 1.0  a · b · c\nin: chat", r["text"]
-
-
-def test_the_map_is_computed_only_for_a_class_that_reads_it(seat, monkeypatch):
-    from membrane import conv_banner as CB
-    from membrane import lanes as L
-    from membrane.entities import MEMBRANE_NS, QuantumEntity
-    for name, getter in (("readsmap", "ReadsMap.text getter: join(this.moving or [], '\\n')"),
-                         ("nomap", "NoMap.text getter: 'plain'")):
-        seat.entity_store.upsert(QuantumEntity(eid=MEMBRANE_NS + "pack:" + name, cls="Pack",
-                                               properties={"name": name, "c1f": f"PACK {name} 1\n{getter}\n"}))
-    seat.live.settle()
-    assert seat.live.class_reads("ReadsMap", "moving") and not seat.live.class_reads("NoMap", "moving")
-    monkeypatch.setattr(RB, "c1f_call", _fake)
-    monkeypatch.setattr(L, "_efield_on", lambda srv: object())
-    asked = []
-    for cls in ("ReadsMap", "NoMap"):
-        sid = "ses_" + cls                                       # one chat each: an upsert keeps an entity's first class
-        seat._loop_runner.sessions[sid] = {"owner": "owner"}
-        seat.entity_store.upsert(QuantumEntity(eid=FL.banner_eid("owner", sid), cls=cls, properties={"name": "b"}))
-        seat.live.settle()
-        asked.clear()
-        CB.bare(seat, {"_turn_sid": sid}, sid, moving=lambda: asked.append(1) or ["x"], in_line="in: chat")
-        assert (asked == [1]) == (cls == "ReadsMap"), cls
