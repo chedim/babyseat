@@ -58,3 +58,26 @@ Today `membrane/ui/` is about 16,100 lines of JavaScript (`home.js` 4,900, `pane
 - a piece keeps the seat bootable: a failed step records its error and the boot continues;
 - every step has a way back (replay from the journal, or the shipped pack restored);
 - stopgaps written in Python while a piece is pending are labelled and removed with it.
+
+## Status (2026-11-12) and the end state
+
+**End state (operator, 2026-11-12):** Python is the package wrapper and launcher only; everything else is Rust (native VM, webasm for
+pages) and `.c1f`, mostly c1f and Rust minimal (sockets, files, token checks, SQLite, vectors); the HTTP door is Rust, with no
+forwarding to Python; writes into entities through setters, not function calls; every piece test first.
+
+| piece | state |
+|---|---|
+| 1 boot | native plan (`plan.rs`); the door starts from the boot facts (`door.c1f`); the rest of `main()` still Python |
+| 2 model's tools | `learn`, `forget`, `intend`, `fulfill`, `intents`, `answer_card`, `peer_post`, `attention` are c1f writes (`memory`, `intents`, `decisions`, `peer`, `attention` packs); the watch family and `junk_cut` wait for piece 8; entity methods are disabled (creation refused, every call carries the deprecation note), to be translated to `Command:` entities and removed |
+| 3 language layer | pronouns: `Turn`/`Ctx` getters (`turn.c1f`); registers and `convgraph` not yet |
+| 4 sweeps and loops | not started |
+| 5 goals and decisions | decisions and the board's pen are c1f; the selection (pin, cap, ranking) stays with the dream loop |
+| 6 turn path and serve | the Rust door (`http.rs`, `jwt.rs`), the UI shell and files (`door.c1f`); every request is an entity a pack answers; 0 of ~140 routes ported; the message turn is untouched |
+| 7 the rest | not started |
+| 8 entity store and field engine | not started; the SQLite store is native (`db.rs`), `Store:<x>.run` writes from c1f |
+
+**"All" for the door** is the routes the UI, Memo, `opencode attach` and Home Assistant actually use; the routes that call the old
+engines (map tiles, the universe, `night`) answer 404 until their engine is native. Tests: JSON specs (`tests/specs/*.json`, run by
+`native/src/spec.rs`) for pack behavior, Rust tests for drivers, pytest for what remains Python. Engine rules found the hard way:
+the engine orders getters by finding other getters' *names* in an expression, strings included (a property named `this`, or a dict
+key equal to a getter's name, makes a cycle); a class a shipped pack declares is owned by it (other packs `IMPORT` it).
