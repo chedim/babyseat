@@ -1374,6 +1374,24 @@ class _Docs(dict):
     def unbuilt(self) -> int:
         return self._n_raw
 
+    def with_property(self, name: str) -> list:
+        """(eid, entity) for every entity whose properties hold a truthy `name`, in store order. An unbuilt entity is
+        judged from its raw record and built only when it matches: a boot scan for "the methods" builds the methods."""
+        out = []
+        for k in list(dict.keys(self)):
+            v = dict.get(self, k)
+            if type(v) is _Raw:
+                props = (v.rec.get("data") or {}).get("properties")
+                if not (isinstance(props, dict) and props.get(name)):
+                    continue
+            elif not ((v.properties or {}).get(name)):
+                continue
+            try:
+                out.append((k, self[k]))
+            except KeyError:
+                continue
+        return out
+
     def built_items(self) -> list:
         """The entities that exist as objects (nothing is built to answer)."""
         return [(k, v) for k, v in list(dict.items(self)) if type(v) is not _Raw]

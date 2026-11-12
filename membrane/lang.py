@@ -606,7 +606,7 @@ def boot_methods(srv) -> dict:
     other method on its skeleton's node. Idempotent."""
     est = srv.entity_store
     retired, noted = [], 0
-    for d in list((est.docs or {}).values()):
+    for d in [e for _k, e in est.docs.with_property("method_name")]:          # the methods only: nothing else is built
         p = d.properties or {}
         cmd = str(p.get("command") or "").strip()
         if not p.get("method_name") or not cmd or p.get("retired") or p.get("abstract"):

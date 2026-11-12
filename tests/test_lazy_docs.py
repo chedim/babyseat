@@ -196,3 +196,34 @@ def test_the_boot_entity_finds_the_previous_boot_without_building_the_store(tmp)
     finally:
         _restore(real)
         db.close()
+
+
+def test_entities_with_a_property_are_found_without_building_the_rest(tmp):
+    _seed(tmp)
+    db = sqlitedb.Database("field", tmp)
+    for i in range(3):
+        db.put_json("entities", f"membrane::method:{i}", json.dumps({"e": f"membrane::method:{i}", "d": {
+            "data": {"class": "Method", "properties": {"name": f"m{i}", "method_name": f"run{i}", "command": "echo"}}}}))
+    db.close()
+    st, db, built, real = _open(tmp)
+    try:
+        got = st.docs.with_property("method_name")
+        assert sorted(k for k, _e in got) == [f"membrane::method:{i}" for i in range(3)]
+        assert all(e.properties["method_name"] for _k, e in got)
+        assert built == []                                   # none of the `thing:` entities was built to answer
+    finally:
+        _restore(real)
+        db.close()
+
+
+def test_boot_methods_builds_only_the_methods(tmp):
+    _seed(tmp)
+    st, db, built, real = _open(tmp)
+    try:
+        from types import SimpleNamespace
+        from membrane import lang
+        lang.boot_methods(SimpleNamespace(entity_store=st))
+        assert built == []
+    finally:
+        _restore(real)
+        db.close()
