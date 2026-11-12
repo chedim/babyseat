@@ -433,6 +433,36 @@
     },
     "findings": []
   },
+  "door_self": {
+    "getters": {
+      "Feedback.kind_of": "Any",
+      "Request.fb_eid": "Text",
+      "Request.fb_err": "Text?",
+      "Request.fb_go": "Bool",
+      "Request.fb_kind": "Text",
+      "Request.fb_label": "Any",
+      "Request.fb_msg": "Text",
+      "Request.fb_obj": "Bool",
+      "Request.fb_session": "Text",
+      "Request.fb_summary": "Text?",
+      "Request.fb_why": "Text",
+      "Request.m_self": "List(Text)",
+      "Request.o_self": "Bool",
+      "Request.r_self": "Dict",
+      "Request.sf_why": "Any"
+    },
+    "writes": {
+      "Feedback.at": "Num",
+      "Feedback.by": "Any",
+      "Feedback.kind": "Text",
+      "Feedback.message": "Text",
+      "Feedback.name": "Text",
+      "Feedback.session": "Text",
+      "Feedback.summary": "Text?",
+      "Feedback.why": "Text"
+    },
+    "findings": []
+  },
   "door_state": {
     "getters": {
       "Request.m_state": "List(Text)?",
@@ -467,6 +497,44 @@
     },
     "writes": {
       "membrane.control": "Dict?"
+    },
+    "findings": []
+  },
+  "door_voice": {
+    "getters": {
+      "Request.m_voice": "List(Text)",
+      "Request.o_voice": "Bool",
+      "Request.pl_big": "Bool",
+      "Request.pl_dir": "Text",
+      "Request.pl_file": "Entity(File)?",
+      "Request.pl_info": "Any",
+      "Request.pl_ok": "Bool",
+      "Request.pl_open": "Dict?",
+      "Request.pl_path": "Text",
+      "Request.pl_ready": "Bool",
+      "Request.pl_reply": "Dict?",
+      "Request.pl_rotate": "Bool?",
+      "Request.pl_write": "Bool?",
+      "Request.r_voice": "Dict?",
+      "Request.stt_reply": "Dict",
+      "Request.vo_body": "Dict",
+      "Request.vo_go": "Bool",
+      "Request.vo_in": "Any",
+      "Request.vo_in_q": "Any",
+      "Request.vo_in_view": "Dict",
+      "Request.vo_out": "Any",
+      "Request.vo_out_q": "Any",
+      "Request.vo_out_view": "Dict",
+      "Request.vo_person": "Text",
+      "Request.vo_reply": "Dict?",
+      "Request.vo_slug": "Text"
+    },
+    "writes": {
+      "File.move": "Dict",
+      "File.path": "Text",
+      "File.write": "Dict",
+      "Request.pl_rotated": "Bool",
+      "Request.pl_written": "Bool"
     },
     "findings": []
   },
