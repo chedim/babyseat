@@ -1,0 +1,72 @@
+PACK door_state 1
+IMPORT door 1
+-- THE SEAT'S STATE AS A DOOR ROUTE FAMILY (#1143, the porting brief's `state` family): the reads and controls the page's panels use.
+--   GET  /membrane/seat, /membrane/seat/pause, /membrane/state (and /state), /membrane/self/card
+--   POST /membrane/seat/pause, /membrane/seat/control
+-- The seat's own facts are the presence entity (`membrane::presence`, class Seat): the seat panel refreshes its `state` and
+-- `events` there every few seconds, so a read is a getter over that entity and nothing else. The launcher's facts (Boot:seat):
+-- `nerve_pause_off` (MEMBRANE_NERVE_PAUSE=0).
+-- A control is a WRITE to the presence entity: `membrane::presence.control = {id, by, body}` for the verified person
+-- (Request.sub). THE GAP: nothing consumes that property yet -- the effect on the live seat (seat_panel.control /
+-- set_pause: the flag, the audit line, the self loop's mode) is still the Python the POST routes in server.py run; until the
+-- seat-state piece is native the door only records the ask and answers 202.
+-- NOT PORTED (they read live Python-only state; each answers 501 and names why): /membrane/stats (the windows' `models` is a
+-- dict keyed by model name and c1f has no way to build a dict with data-driven keys: a design fork, see docs/python-to-c1f.md),
+-- /membrane/quota (quota.py's RAM state and
+-- the loop runner's held chats), /membrane/minds (fieldpulse's loop sessions, the thinker's and dreamer's logs),
+-- /membrane/self/sheet and /membrane/self/recent (the self record, the sheet's computed numbers, the supervisor), and the
+-- /membrane/state ?section= pull (where_we_are).
+
+-- the class is declared here so the engine mirrors the presence entity
+Seat.is_presence getter: this.eid == 'membrane::presence'
+
+Request.o_state getter: this.path in ['/membrane/seat', '/membrane/seat/pause', '/membrane/seat/control', '/membrane/state', '/state', '/membrane/self/card', '/membrane/stats', '/membrane/quota', '/membrane/minds', '/membrane/self/sheet', '/membrane/self/recent']
+
+-- ---- the presence entity's facts ------------------------------------------------------------------------------------------------
+Request.st_seat getter: ([s for s in instances('Seat') if s.eid == 'membrane::presence'] or [None])[0]
+Request.st_state getter: prop(this.st_seat, 'state') or {}
+Request.st_events getter: prop(this.st_seat, 'events') or []
+Request.st_self getter: prop(this.st_state, 'self') or {}
+Request.st_off getter: ([b.nerve_pause_off for b in this.boots] or [False])[0] == True
+Request.st_paused getter: prop(this.st_state, 'paused') == True and not this.st_off
+
+-- ---- the answers --------------------------------------------------------------------------------------------------------------------
+Request.st_seat_body getter: {'state': this.st_state, 'events': this.st_events, 'controls': ['paused', 'loops_max', 'self', 'accept', 'self_name']} if this.st_seat != None else {}
+Request.st_pause_body getter: {'paused': this.st_paused, 'enabled': not this.st_off}
+Request.st_state_body getter: {'mode': 'DEV', 'paused': this.st_paused, 'seat': this.st_state}
+Request.st_card_mode getter: prop(this.st_self, 'mode') or 'off'
+Request.st_asleep getter: prop(this.st_self, 'asleep') == True
+Request.st_energy getter: prop(this.st_self, 'energy')
+Request.st_pull getter: prop(this.st_self, 'pull')
+Request.st_limiting getter: prop(this.st_self, 'limiting')
+Request.st_cap getter: prop(this.st_self, 'record_cap')
+Request.st_awake getter: this.st_card_mode != 'off' and not this.st_asleep
+Request.st_name getter: prop(this.st_state, 'self_name') or 'Blurp'
+Request.st_card_body getter: {'name': this.st_name, 'level': 0, 'rung_name': '', 'next': [], 'mode': this.st_card_mode, 'awake': this.st_awake, 'last_activity': None, 'generated': clock, 'energy': this.st_energy, 'asleep': this.st_asleep, 'pull': this.st_pull, 'limiting': this.st_limiting, 'record_cap': this.st_cap}
+
+-- ---- the control writes: validate, then record the ask on the presence entity ----------------------------------------------------------
+Request.st_json getter: json(this.body or '') if this.method == 'POST' else None
+Request.st_pause_ok getter: this.path == '/membrane/seat/pause' and (prop(this.st_json, 'paused') == True or prop(this.st_json, 'paused') == False)
+Request.st_ctl_ok getter: this.path == '/membrane/seat/control' and len([k for k in ['paused', 'loops_max', 'self', 'accept', 'self_name'] if prop(this.st_json, k) != None]) > 0
+Request.st_by getter: 'user:' + str(this.sub)
+Request.st_ask getter: {'id': this.eid, 'by': this.st_by, 'body': this.st_json} if this.method == 'POST' and this.authed == True and this.st_seat != None and (this.st_pause_ok or this.st_ctl_ok) else None
+Request.st_ask on-setter st-control:
+  WHEN this.st_ask != None:
+    ('membrane::presence').control = this.st_ask
+
+-- ---- the reply ---------------------------------------------------------------------------------------------------------------------------
+Request.st_gap getter: this.path in ['/membrane/stats', '/membrane/quota', '/membrane/minds', '/membrane/self/sheet', '/membrane/self/recent'] or (this.path in ['/membrane/state', '/state'] and 'section=' in this.query)
+Request.st_post getter: this.method == 'POST' and this.path in ['/membrane/seat/pause', '/membrane/seat/control']
+Request.st_read getter:
+  WHEN this.path == '/membrane/seat': this.st_seat_body
+  ELSE WHEN this.path == '/membrane/seat/pause': this.st_pause_body
+  ELSE WHEN this.path == '/membrane/self/card': this.st_card_body
+  ELSE: this.st_state_body
+Request.r_state getter:
+  WHEN this.st_gap: {'status': 501, 'body': {'error': 'not ported yet: reads the live seat'}}
+  ELSE WHEN this.path == '/membrane/seat/control' and this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN not this.st_post and not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN this.st_post and not (this.st_pause_ok or this.st_ctl_ok): {'status': 400, 'body': {'error': 'the body is {"paused": true|false}' if this.path == '/membrane/seat/pause' else 'the body names a control: paused, loops_max, self, accept or self_name'}}
+  ELSE WHEN this.st_post and this.st_seat == None: {'status': 503, 'body': {'error': 'no seat'}}
+  ELSE WHEN this.st_post: {'status': 202, 'body': {'ok': True, 'queued': this.st_ask, 'state': this.st_state}}
+  ELSE: {'status': 200, 'body': this.st_read}
