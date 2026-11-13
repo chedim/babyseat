@@ -137,8 +137,30 @@ struct Cur {
     memo: Memo,
 }
 
+/// The VM-provided, read-only property of every entity: the epoch time of its last write (the host stamps it with the write, in the same row; `Core::updated`).
+pub const UPDATED: &str = "updated";
+
+/// A stored row as the restore brings it back: its own class, the properties the engine takes back (a getter's value is computed again), its `updated`.
+/// How many times one evaluation is done again after it loaded stored entities it looked for (a chain of references loads one link a time).
+const FAULT_RETRIES: usize = 8;
+
+pub struct StoredRow { pub cls: String, pub props: Map<String, J>, pub updated: f64 }
+/// Reads one stored row by eid (the host's, from the store): how a LAZY entity loads when a setter writes it (docs/cliffvm.md, "Lazy load").
+pub type Loader = Box<dyn Fn(&str) -> Option<StoredRow> + Send>;
+
 pub struct Core {
     pub docs: HashMap<String, Ent>,
+    /// the stored entities that are NOT loaded (a lazy class): eid -> its class. Loaded on first reference: a write loads the row at once (`Fields::ensure`), a read that
+    /// finds nothing notes the eid in `wanted` and the host loads it between rounds (`Host::fault_wanted`); `instances` lists only `docs`.
+    pub unloaded: HashMap<String, String>,
+    pub wanted: std::cell::RefCell<std::collections::BTreeSet<String>>,
+    pub loader: Option<Loader>,
+    /// stored entities a read loaded in the middle of an evaluation (`fault_now`): in `docs` already, still to be registered with the field (`Fields::complete_arrivals`)
+    pub arrived: Vec<String>,
+    /// the time of the engine's last round: what a lazy load stamps as its `seen`
+    pub last_now: f64,
+    /// eid -> the time of its last write: what `<entity>.updated` reads (0 when it has none). Set by the host with each write; writing it is no write (no reaction, no recompute)
+    pub updated: HashMap<String, f64>,
     /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
     /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
     pub why: std::collections::BTreeMap<(String, String), String>,
@@ -204,12 +226,16 @@ struct View<'a> { core: &'a Core }
 
 impl<'a> expr::World for View<'a> {
     fn attr(&self, eid: &str, attr: &str) -> V {
-        let Some(e) = self.core.docs.get(eid) else { return V::None };
+        let Some(e) = self.core.docs.get(eid) else {
+            if self.core.unloaded.contains_key(eid) { self.core.wanted.borrow_mut().insert(eid.to_string()); }   // stored, not loaded: asked for (the host loads it between rounds)
+            return V::None;
+        };
         match attr {
             "eid" => V::Str(eid.to_string()),
             // the first class of the list (the eid class when it is the first, as written there otherwise)
             "cls" => V::Str(match e.class_names().into_iter().next() { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }),
             "position" => e.pos.as_ref().map(|p| V::List(p.iter().map(|x| V::Float(*x)).collect())).unwrap_or(V::None),
+            UPDATED => V::Float(self.core.updated.get(eid).copied().unwrap_or(0.0)),   // provided by the VM: shadows a stored property of that name
             _ => match e.props.get(attr) {
                 Some(j) if !j.is_null() => expr::from_json(j),
                 _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or(V::None),
@@ -285,7 +311,7 @@ impl Core {
     pub fn new() -> Self {
         Core {
             why: Default::default(), locals: Default::default(),
-            docs: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
+            docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
@@ -391,6 +417,7 @@ impl Core {
 
     fn remove(&mut self, eid: &str) {
         if let Some(i) = self.at.remove(eid) { self.order[i] = None; }
+        self.updated.remove(eid);
         if let Some(e) = self.docs.remove(eid) { self.reindex_entity(eid, Some(&e.props), None); }
     }
 
@@ -716,11 +743,38 @@ impl Core {
     }
 
     fn eval(&mut self, src: &str, env: &HashMap<String, V>) -> Result<V, String> {
-        let parsed = self.cache.get(src);
-        match &*parsed {
-            Ok(node) => { let n: &Node = node; expr::eval(n, env, &View { core: self }) }
-            Err(e) => Err(e.clone()),
+        for _ in 0..FAULT_RETRIES {
+            let r = {
+                let parsed = self.cache.get(src);
+                match &*parsed {
+                    Ok(node) => { let n: &Node = node; expr::eval(n, env, &View { core: self }) }
+                    Err(e) => Err(e.clone()),
+                }
+            };
+            if !self.fault_now() { return r; }   // the read found nothing but the store has it: it is loaded now, and the evaluation is done again on it
         }
+        Err("a read keeps asking for stored entities that are not loaded".into())
+    }
+
+    /// Entities an evaluation looked for and did not find, though the store has them (`wanted`): load them NOW (a lazy class loads on first reference), as the store holds
+    /// them (a getter's stored value too: the read is right away, and the getters of the entity recompute once it is registered, `Fields::complete_arrivals`). -> whether any loaded.
+    pub fn fault_now(&mut self) -> bool {
+        if self.wanted.borrow().is_empty() { return false; }
+        let wanted: Vec<String> = std::mem::take(&mut *self.wanted.borrow_mut()).into_iter().collect();
+        let mut any = false;
+        for e in wanted { any |= self.fault_one(&e); }
+        any
+    }
+
+    /// Load one stored entity that is not loaded: its row into `docs`, noted in `arrived` for the field to register. -> whether it loaded.
+    pub fn fault_one(&mut self, eid: &str) -> bool {
+        if self.unloaded.remove(eid).is_none() { return false; }
+        let Some(r) = self.loader.as_ref().and_then(|l| l(eid)) else { return false };
+        self.updated.insert(eid.to_string(), r.updated);
+        let now = self.last_now;
+        self.load(eid.to_string(), r.cls, r.props, None, now);
+        self.arrived.push(eid.to_string());
+        true
     }
 
     /// Evaluate and return what it read (#994 getters). `vars` bind names to entities, `extra` to values.
@@ -728,21 +782,28 @@ impl Core {
         -> (Result<serde_json::Value, String>, Vec<(String, String)>, Option<String>, Vec<(String, V)>) {
         let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
         for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
-        let parsed = self.cache.get(src);
-        let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
-        let mut nil: Option<String> = None;
-        let mut locals = vec![];
-        let r = match &*parsed {
-            Ok(node) => {
-                let n: &Node = node;
-                let (r, l) = expr::eval_locals(n, &env, &tv);
-                locals = l;
-                r.and_then(|v| { if let V::Nil(why) = &v { nil = Some(why.clone()); } expr::to_json(&v) })
-            }
-            Err(e) => Err(e.clone()),
-        };
-        let reads = tv.reads.into_inner();
-        (r, reads, nil, locals)
+        let mut tries = 0;
+        loop {
+            let (r, reads, nil, locals) = {
+                let parsed = self.cache.get(src);
+                let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
+                let mut nil: Option<String> = None;
+                let mut locals = vec![];
+                let r = match &*parsed {
+                    Ok(node) => {
+                        let n: &Node = node;
+                        let (r, l) = expr::eval_locals(n, &env, &tv);
+                        locals = l;
+                        r.and_then(|v| { if let V::Nil(why) = &v { nil = Some(why.clone()); } expr::to_json(&v) })
+                    }
+                    Err(e) => Err(e.clone()),
+                };
+                let reads = tv.reads.into_inner();
+                (r, reads, nil, locals)
+            };
+            tries += 1;
+            if tries >= FAULT_RETRIES || !self.fault_now() { return (r, reads, nil, locals); }   // loaded what it looked for: once more, on it
+        }
     }
 
     fn bindings(&mut self, host: &dyn Host, sp: &Spec, memo: &mut Memo, fixed: Binding) -> Vec<Binding> {

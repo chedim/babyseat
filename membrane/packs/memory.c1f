@@ -1,5 +1,6 @@
 PACK memory 1
 IMPORT boot 1
+RESIDENT Memory
 -- THE SEAT'S MEMORY AS A NODE (operator, 2026-11-12: everything moves to cliffhanger). You teach it by WRITING:
 --   Memory:seat.learn = {lesson: '<one durable lesson, in prose>'}
 -- This pack is the policy: the agent-writes switch, an empty lesson, fenced code, the length of a note. A refusal is

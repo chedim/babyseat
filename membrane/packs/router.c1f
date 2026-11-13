@@ -2,6 +2,8 @@ PACK router 1
 IMPORT boot 1
 IMPORT door 1
 IMPORT fetch 1
+RESIDENT Model
+RESIDENT Minds
 -- THE MODELS (docs/python-to-c1f.md, piece 7: the router's data and the rules the routes need). A model is the entity `Model:<name>`:
 --   name, backend ('ollama' for the local backend's tags -- its own cloud tags included -- else the provider's tag), kind
 --   (local | cloud), size (bytes), capabilities, rung (True for a provider's cloud rung the launcher registered), listed (the

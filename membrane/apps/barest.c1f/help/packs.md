@@ -102,6 +102,40 @@ Fixture.brightness getter: 'dim'
 Writing `parents` is also the second way to replace your banner: give a class of your own a `text` getter and write `parents: ["cls:<yourclass>"]`
 on `Banner:owner:main` (`Help:banner`).
 
+## Storage: stored and loaded on demand, resident, or only in memory
+
+A class has one of three storage modes, and ONLY THE PACK THAT OWNS THE CLASS declares it, in the header, one class per line (like `IMPORT`):
+
+- (nothing) the default: its entities are STORED and loaded ON DEMAND. A restart does not load them; one loads when something refers to it (a read by id, a write, a getter that names it)
+  and the seat also loads the newest ones in the background after it starts. `instances('<Class>')` lists only the entities that are LOADED. Use this for what can grow: messages, notes.
+- `RESIDENT <Class>`: stored and ALWAYS loaded (at start, and the moment the pack declares it). `instances` lists them all. Use it for a class you list or scan as a whole, or that has a sensor, a command or a watcher.
+- `VIRTUAL <Class>`: kept in memory only: never stored, never restored, not in the journal, not in `entity_query` (a block still reads the live ones with `instances` and by id). Use it for
+  what describes the running process. What your setters write to stored entities while a virtual one triggers them is journalled, so a replay still ends in the same state.
+
+A class belongs to one pack: a `VIRTUAL` or `RESIDENT` line in any other pack is refused, and naming both modes for one class is refused.
+
+```c1f
+-- given Stop:a {"due": 5}
+-- given Stop:b {"due": 500}
+-- given Report:r {}
+-- reads Report:r.count = 2
+-- reads Stop:a.late = true
+PACK stops 1
+RESIDENT Stop
+Stop.late getter: this.due != None and this.due < 100
+Report.count getter: len(instances('Stop'))
+```
+
+```c1f-error
+-- error: only the owner
+PACK greedy 1
+IMPORT proc 1
+VIRTUAL Command
+```
+
+Every entity also has `updated`, read-only and provided by the VM: the time of its last write (seconds since 1970), stamped with the write; reading it causes no recompute, writing it is refused:
+`Note:a.updated`.
+
 ## Habits that keep packs working
 
 - Load, then read `Pack:<name>.state`; fix `error` before anything else.

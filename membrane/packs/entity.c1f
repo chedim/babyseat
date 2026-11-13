@@ -4,4 +4,7 @@ PACK entity 1
 -- declares `<Class>.summary getter: ...` (its class is nearer: it wins) and imports this pack only when it declares on `Entity` itself.
 -- `summary` is what an entity IS in one line, from its id and its class list (`parents`; the eid's class when it has none) and nothing else (no property values: a getter
 -- is eager, so the root getter stays as cheap as a string join): `Trip:main (cls:trip, cls:semnoun)`.
+-- `updated` is the other thing every entity has and no pack defines: PROVIDED BY THE VM (native/src/vm.rs), read-only. `<entity>.updated` is the epoch time of the
+-- entity's last write, stamped by the host in the same row and transaction as the write (the store's indexed `updated` column): no write of its own, no reaction, no
+-- getter recompute (a getter that reads it keeps what it read until something else it reads changes). A setter that writes it is refused; a stored property of that name is shadowed.
 Entity.summary getter: this.eid + ' (' + join(this.parents or [this.cls], ', ') + ')'

@@ -4,6 +4,7 @@ IMPORT decisions 1
 IMPORT goalgraph 1
 IMPORT banner 1
 IMPORT intents 1
+RESIDENT Message
 -- THE DECISION BOARD'S ROUTES (operator, 2026-11-12: all logic is c1f; the door only listens). The route family `decisions` of the
 -- door (docs/porting-brief.md): the board and its writes, the goals, the work graph, an entity's history, an item's chat.
 --   GET  /membrane/decisions        {cards, edges}: every Decision card (merged ones left out), by status then title

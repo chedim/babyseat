@@ -2,6 +2,7 @@ PACK chat_turn 1
 IMPORT chat 1
 IMPORT proc 1
 IMPORT boot 1
+VIRTUAL Chunk
 -- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
 -- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
 -- membrane MCP set (the door's `POST /mcp`, packs/door_tools.c1f), one continuous run per answer with a ceiling, the system prompt is the
@@ -148,10 +149,18 @@ Chat.spent on-setter slim-run:
   WHEN this.spent == True:
     membrane::Command:chat[this.mid].run_result = {'id': prop(this.rr, 'id'), 'status': prop(this.rr, 'status'), 'rc': this.rc, 'stderr': prop(this.rr, 'stderr')}
 
+-- ---- the chat names its last finished turn -----------------------------------------------------------------------------------------------
+-- Any turn that ends (done or error: the answer, a refusal, an interruption) writes its eid to `last_turn` of its chat (`membrane::Chat:main`): the banner's
+-- previous-turn error line reads it (apps/barest.c1f/default_banner.c1f) with one reference, because the turns are a lazy class and cannot be listed.
+Chat.state on-setter last-turn:
+  WHEN this.kind == 'turn' and (this.state == 'done' or this.state == 'error'):
+    membrane::Chat:main.last_turn = this.eid
+
 -- ---- at start: a turn the last run left running ----------------------------------------------------------------------------------------------
 -- A turn whose state is `running` and that started before this run's start (`Boot.started`) lost its CLI with the old process (its Command never got a
 -- receipt, and a restore runs no setter): it becomes an error with a response that says so. A turn of this run started after `started`, so it is never listed.
-Boot.interrupted getter: [replace(replace(t.eid, 'membrane::Chat:message:', ''), ':turn', '') for t in instances('Chat') if t.kind == 'turn' and t.state == 'running' and t.started != None and t.started < this.started] if this.started != None else []
+-- (the turns are a LAZY class: the store is asked, not the engine's `instances`, which lists only what is loaded.)
+Boot.interrupted getter: [replace(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), ':turn', '') for r in sql('SELECT k, json_extract(body, \'$.props.started\') AS started FROM c_field WHERE cls = \'Chat\' AND k LIKE \'%:turn\' AND json_extract(body, \'$.props.state\') = \'running\'') if prop(r, 'started') != None and prop(r, 'started') < this.started] if this.started != None else []
 Boot.interrupted on-setter turn-interrupted:
   WHEN len(this.interrupted) > 0:
     FOR i IN this.interrupted:

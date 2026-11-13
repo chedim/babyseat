@@ -196,6 +196,9 @@ pub struct Pack {
     pub name: Option<String>,
     pub version: String,
     pub imports: Vec<(String, u32)>,
+    /// `VIRTUAL <Class>` / `RESIDENT <Class>` header lines: the classes this pack declares RAM-only / always loaded (docs/cliffvm.md, "Storage modes")
+    pub virtuals: Vec<String>,
+    pub residents: Vec<String>,
     pub setters: Vec<OnSet>,
     pub getters: Vec<Getter>,
 }
@@ -231,10 +234,23 @@ pub fn parse_full(src: &str) -> Result<Pack, String> {
             let major = match it.next() { Some(m) => m.parse::<u32>().map_err(|_| format!("line {}: IMPORT {} needs a major version number", n + 1, name))?, None => 1 };
             pack.imports.push((name.to_string(), major));
             body.push('\n');
+        } else if line == "VIRTUAL" || line.starts_with("VIRTUAL ") || line == "RESIDENT" || line.starts_with("RESIDENT ") {
+            // a STORAGE MODE of a class (docs/cliffvm.md, "Storage modes"): one class per line, declared by the pack that owns the class
+            let (word, rest) = line.split_once(' ').unwrap_or((line, ""));
+            let mut it = rest.split_whitespace();
+            let class = it.next().ok_or(format!("line {}: {} needs a class name (one class per line: `{} Request`)", n + 1, word, word))?;
+            if it.next().is_some() { return Err(format!("line {}: {} takes one class per line: `{} {}`, then another line for the next class", n + 1, word, word, class)); }
+            if !class.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { return Err(format!("line {}: {} {}: a class name is letters, digits and underscores", n + 1, word, class)); }
+            let mine = if word == "VIRTUAL" { &mut pack.virtuals } else { &mut pack.residents };
+            if !mine.iter().any(|c| c == class) { mine.push(class.to_string()); }
+            body.push('\n');
         } else {
             body.push_str(raw);
             body.push('\n');
         }
+    }
+    if let Some(c) = pack.virtuals.iter().find(|c| pack.residents.contains(c)) {
+        return Err(format!("{c} is declared both VIRTUAL and RESIDENT: a class has one storage mode (VIRTUAL = kept in memory only, RESIDENT = stored and always loaded; leave both out for stored and loaded on demand)"));
     }
     let (setters, getters) = parse_pack(&body)?;
     pack.setters = setters;

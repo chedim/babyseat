@@ -1,4 +1,5 @@
 PACK turn 1
+RESIDENT Ctx
 -- A TURN IS AN ENTITY (operator, 2026-11-12) and the pronouns are getters on it, with the rules callctx.py had. `Turn:<id>`
 -- holds `sid`, `ctx` (its chat's `Ctx:<sid>`), `touched` (what it touched, NEWEST FIRST) and `state`; the `Ctx` holds the entered
 -- `frames` (innermost first, each {eid, bind: {sing, pers, place}}) and the chat's `promoted` subjects ({main, prev, age}).

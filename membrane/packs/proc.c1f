@@ -1,4 +1,5 @@
 PACK proc 1
+RESIDENT Command
 -- THE proc STDLIB PACK (#1044): commands as entities, run by a write. Native, no Python.
 --   Command:<name> {cmd: an argument list, or a string run by `sh -c`; cwd; env_from {VAR: ENV_VAR}}
 -- Run it with a write; the run never blocks the field, and its receipt lands when it ends:

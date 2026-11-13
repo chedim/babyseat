@@ -284,6 +284,7 @@ fn reads_name(expr: &str, name: &str) -> bool {
 }
 
 /// The words of the safety rule in a refusal (set_pack tells a refusal from a pack that waits for its imports by them).
+const UPDATED_PROP: &str = crate::vm::UPDATED;
 const OVERRIDE_RULE: &str = "a layer overrides only what it imports";
 
 /// How many times the start-up pass may repeat while values still change (see `rebuild`).
@@ -343,14 +344,50 @@ pub struct Fields {
     claimed: std::collections::HashMap<(String, String), (String, String)>,
     /// skipped writes (eid, prop, pack, setter) -> the pack that overrode it, as `why_layer` tells
     skipped: std::collections::BTreeMap<(String, String, String, String), String>,
+    /// class -> its storage mode, from the active owner packs' VIRTUAL / RESIDENT header lines (`compose`)
+    storage: std::collections::HashMap<String, Storage>,
+    /// set while the setters of a write on a VIRTUAL entity run: what they write to a stored entity is marked `virt` in `out`, so the host journals it as an
+    /// outside write (the virtual trigger is not in the journal, a replay could not derive it again)
+    trigger_virtual: bool,
+}
+
+/// How a class is stored (docs/cliffvm.md, "Storage modes"): its OWN class (the eid's), declared by the pack that owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Storage { Lazy, Virtual, Resident }
+
+/// A storage line of pack `n` (`VIRTUAL X` / `RESIDENT X`) that the pack may not make: the class belongs to another pack, which alone declares its mode.
+/// The text says what to do, for a pack written by a model.
+fn storage_conflict(n: &str, p: &crate::syntax::Pack, owner: &std::collections::HashMap<String, String>, packs: &std::collections::BTreeMap<String, crate::syntax::Pack>) -> Option<String> {
+    for (word, list) in [("VIRTUAL", &p.virtuals), ("RESIDENT", &p.residents)] {
+        for c in list {
+            let Some(o) = owner.get(c).filter(|o| *o != n) else { continue };
+            let theirs = packs.get(o).map(|q| if q.virtuals.contains(c) { " (it declares it VIRTUAL)" } else if q.residents.contains(c) { " (it declares it RESIDENT)" } else { " (it declares no storage mode: the class is stored and loaded on demand)" }).unwrap_or("");
+            return Some(format!("pack {n}: {word} {c}: pack {o} owns {c}{theirs} and only the owner of a class declares its storage mode. Remove the line from pack {n}; to change the mode, change it in pack {o}"));
+        }
+    }
+    None
 }
 
 impl Fields {
+    /// Whether a write the running setter makes to `eid` comes from a VIRTUAL trigger and lands on a stored entity (then the host journals it as an outside write).
+    fn from_virtual(&self, core: &Core, eid: &str) -> bool {
+        self.trigger_virtual && core.docs.get(eid).map_or(false, |e| self.storage_of(&e.cls) != Storage::Virtual)
+    }
+    /// The `out` entry of a birth by a setter (the entity is in `core` already).
+    fn born_entry(&self, core: &Core, eid: &str, cls: &str) -> J {
+        let mut o = json!({"eid": eid, "born": cls});
+        if self.from_virtual(core, eid) { o["virt"] = json!(true); }
+        o
+    }
+    /// The classes declared with this storage mode.
+    pub fn classes_with(&self, s: Storage) -> Vec<String> { let mut v: Vec<String> = self.storage.iter().filter(|(_, m)| **m == s).map(|(c, _)| c.clone()).collect(); v.sort(); v }
+    /// The storage mode of a class (its own class, the eid's): what its OWNER pack declared; Lazy when none did.
+    pub fn storage_of(&self, cls: &str) -> Storage { self.storage.get(cls).copied().unwrap_or(Storage::Lazy) }
     pub fn goalgraph() -> Self {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
-            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default() };
+            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
         f.load_order.push("goalgraph".into());
@@ -466,6 +503,9 @@ impl Fields {
                 }
                 // THE SAFETY RULE (docs/c1f-layers.md): a layer overrides only what it imports
                 if let Some(why) = self.override_without_import(n, &active) { self.pack_errors.insert(n.clone(), why); continue; }
+                // STORAGE MODES (docs/cliffvm.md): only the class OWNER declares VIRTUAL / RESIDENT; a storage line claims a class no pack owns yet
+                if let Some(why) = storage_conflict(n, p, &owner, &self.packs) { self.pack_errors.insert(n.clone(), why); continue; }
+                for c in p.virtuals.iter().chain(p.residents.iter()) { owner.entry(c.clone()).or_insert_with(|| n.clone()); }
                 for c in p.classes() { owner.entry(c).or_insert_with(|| n.clone()); }
                 active.push(n.clone());
             }
@@ -528,6 +568,8 @@ impl Fields {
             getters.push(g);
         }
         self.imports = active.iter().map(|n| (n.clone(), self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect())).collect();
+        self.storage = HashMap::new();
+        for n in &active { for c in &self.packs[n].virtuals { self.storage.insert(c.clone(), Storage::Virtual); } for c in &self.packs[n].residents { self.storage.insert(c.clone(), Storage::Resident); } }
         self.owner = owner;
         self.setters = setters;
         self.set_getters(getters);
@@ -1094,7 +1136,9 @@ impl Fields {
         self.writes += 1;
         let old = core.docs.get(eid).and_then(|e| e.props.get(prop).cloned()).unwrap_or(J::Null);
         let w = Write { eid: eid.into(), prop: prop.into(), new, old, writer: format!("field:{}", writer), chain: json!({}), seq: *seq };
-        self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+        let mut o = json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer});
+        if self.from_virtual(core, eid) { o["virt"] = json!(true); }
+        self.out.push(o);
         core.hear(w.clone(), None, now);
         work.push_back(w);
     }
@@ -1149,6 +1193,8 @@ impl Fields {
     /// A round: the queued writes run (getters marked, setters fired); when the queue is empty, the dirty getters
     /// recalculate, lowest level first, and a changed value is written (which can queue more). Until both are empty.
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
+        core.last_now = now;
+        self.complete_arrivals(core, now);
         self.sync(core, now, seq);
         for k in core.sql_ready() { self.mark_key(&(crate::vm::SQL.to_string(), k)); }   // a query's rows are in
         if !self.inbound_by_host { for (e, cls, props) in core.inbound() { self.arrive(core, e, cls, props, now); } }   // the door pushed an entity (a request): born
@@ -1159,6 +1205,7 @@ impl Fields {
             self.emit_unchecked(core, &mut work, &e, &format!("{}_rc", verb), rc, &format!("driver:{}", verb), seq, now);
         }
         loop {
+            if !core.arrived.is_empty() { self.complete_arrivals(core, now); }   // an evaluation loaded stored entities: they join the field before the next step
             if let Some(w) = work.pop_front() {
                 self.step(core, host, &mut work, w, now, seq);
                 continue;
@@ -1169,6 +1216,31 @@ impl Fields {
             let Some(v) = self.compute(core, Some(host), &e, gi, now, seq) else { continue };
             let prop = self.getters[gi].prop.clone();
             self.emit_unchecked(core, &mut work, &e, &prop, v, &format!("getter:{}", prop), seq, now);
+        }
+    }
+
+    /// Load a stored entity that is not loaded yet (a lazy class), as a restore does: its row's properties (a getter's value is computed again), its `updated`, its
+    /// getters dirty. A write calls this before it looks for its target, so a setter finds the stored entity and never makes it anew. -> whether it loaded.
+    pub fn ensure(&mut self, core: &mut Core, eid: &str, now: f64) -> bool {
+        core.last_now = now;
+        let loaded = core.fault_one(eid);
+        if loaded || !core.arrived.is_empty() { self.complete_arrivals(core, now); }
+        loaded
+    }
+
+    /// Register the entities a read loaded in the middle of an evaluation (`Core::fault_one`): as `arrive` does, minus the load itself. Their getters recompute (the stored
+    /// values were read right away, the recompute corrects what changed since), what listed their class (`instances`) or read their fields recalculates.
+    pub fn complete_arrivals(&mut self, core: &mut Core, now: f64) {
+        let _ = now;
+        for e in std::mem::take(&mut core.arrived) {
+            let Some(d) = core.docs.get(&e) else { continue };
+            let (cls, keys): (String, Vec<String>) = (d.cls.clone(), d.props.keys().cloned().collect());
+            self.mark_key(&(crate::vm::CLASS_READ.to_string(), cls));
+            self.known.insert(e.clone());
+            for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
+            for p in keys { self.mark(&e, &p); }
+            // what read this eid while it was not there (its `eid`, its class) reads it now
+            for k in ["eid", "cls", crate::vm::UPDATED] { self.mark(&e, k); }
         }
     }
 
@@ -1208,6 +1280,7 @@ impl Fields {
             if w.writer.starts_with(DIRECT) { return; }   // rule 6: an own-name store bypasses the setters (getters above still ran)
             let hits: Vec<usize> = (0..self.setters.len())
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, &self.setters[i].cls)).collect();
+            self.trigger_virtual = core.docs.get(&w.eid).map_or(false, |e| self.storage_of(&e.cls) == Storage::Virtual);
             for i in hits {
                 let name = self.setters[i].name.clone();
                 let truthy = |v: &J| match v {
@@ -1236,6 +1309,7 @@ impl Fields {
                     self.receipt(core, &w.eid, &name, reason, J::Null, seq, now);
                 }
             }
+            self.trigger_virtual = false;
     }
 
     /// A chosen branch's writes, in order: FOR blocks run their body once per item of their list, read when the
@@ -1302,6 +1376,10 @@ impl Fields {
                     }
                 }
             }
+            if prop == crate::vm::UPDATED {
+                self.receipt(core, eid, name, format!("refused: `{UPDATED_PROP}` is provided by the VM (the time of the entity's last write) and is read-only: no setter writes it"), J::Null, seq, now);
+                continue;
+            }
             let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
             if let Some(k) = claim { self.claimed.insert(k, (pack.to_string(), name.to_string())); }   // a write that was made: it is the first
             if target == LLM_CALL { self.calls.push(v); continue; }
@@ -1311,12 +1389,13 @@ impl Fields {
             if grant.is_some() {
                 if let Err(why) = self.grant_check(pack) { self.receipt(core, eid, name, why, J::Null, seq, now); continue; }
             }
+            self.ensure(core, &tgt, now);   // stored but not loaded: it loads, it is not created anew
             if !core.docs.contains_key(&tgt) {
                 // creation: `<Class>:<key>` of a class the pack owns or imports (a privileged pack: any class)
                 let Some((cls, _)) = tgt.split_once(':') else { continue };
                 if !self.is_privileged(pack) && (self.owner.get(cls).is_none() || self.may_write(pack, cls).is_err()) { continue; }
                 core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
-                self.out.push(json!({"eid": tgt, "born": cls}));
+                self.out.push(self.born_entry(core, &tgt, cls));
                 self.birth(core, &tgt, now, seq);
             }
             if let Err(why) = self.may_write_ent(core, pack, &tgt) {
@@ -1357,6 +1436,7 @@ impl Fields {
         }
         if let Err(why) = self.may_write(pack, &cls) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
         let mut args = args;
+        self.ensure(core, &tgt, now);   // stored but not loaded: it loads, it is not created anew
         if !core.docs.contains_key(&tgt) {
             // the class the eid names: after a namespace, up to the next colon
             let tail = tgt.rsplit_once("::").map_or(tgt.as_str(), |(_, r)| r);
@@ -1365,7 +1445,7 @@ impl Fields {
             // the birth default of the class list: the eid's class first, then the constructor's class when it differs (the stamp), then any `parents` argument
             if own != cls && !args.iter().any(|(k, _)| k == "parents") { args.push(("parents".into(), json!([format!("cls:{}", cls.to_lowercase())]))); }
             core.load(tgt.clone(), own.clone(), Default::default(), None, now);
-            self.out.push(json!({"eid": tgt, "born": own}));
+            self.out.push(self.born_entry(core, &tgt, &own));
             self.birth(core, &tgt, now, seq);
         } else {
             if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }

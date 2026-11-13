@@ -1,4 +1,5 @@
 PACK mcp 1
+RESIDENT McpServer
 -- MCP servers, and the tools, resources and prompts they offer, as entities (#963). The seat's adapter only does the
 -- I/O (membrane/mcpfield.py): it starts or connects a server when its `link` is written, writes back what the
 -- server lists, and runs a tool's call; everything else is here.

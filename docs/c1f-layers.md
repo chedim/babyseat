@@ -36,6 +36,18 @@ the LOWEST layer of data files. The FIRST app is the root of trust (see Privileg
 | data files as entities of their path | not built: the door searches the folders with the fs driver; no entity per file |
 | a layer's setter that differs in name and writes a target a lower layer also writes, without importing it | not refused (writes are computed, so it cannot be known at load); the first write wins |
 
+## Header lines
+
+A pack's header is its first lines (anywhere before the code, one per line): `PACK <name> <version>`, `IMPORT <pack> <major>`, and the STORAGE MODE of a class (`docs/cliffvm.md`, "Storage modes"):
+
+| line | meaning |
+|---|---|
+| `VIRTUAL <Class>` | the class lives in memory only: never stored, restored or journalled |
+| `RESIDENT <Class>` | stored and always loaded; the default, with no line, is stored and loaded on demand |
+
+Rule A applies: only the OWNER of a class declares its mode (a storage line claims a class no pack owns yet, like a getter does); any other pack, imported or not, is refused with a text naming both packs ("pack b: RESIDENT X: pack a owns X (it declares it VIRTUAL) and only the
+owner of a class declares its storage mode"). One class per line; a class that is both `VIRTUAL` and `RESIDENT` in one pack is a parse error. The surface and types snapshots (`surface.json`, `types.json`) list a pack's `virtual` and `resident` classes.
+
 ## Layers: the upper layer wins (the way an overlay filesystem works)
 
 | construct | rule |

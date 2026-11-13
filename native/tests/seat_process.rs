@@ -93,6 +93,9 @@ fn call(port: u16, tool: &str, args: J) -> (String, bool) {
     (r["result"]["content"][0]["text"].as_str().unwrap_or_else(|| panic!("{r}")).to_string(), r["result"]["isError"].as_bool().unwrap())
 }
 
+/// the LIVE Request entities: a Request is VIRTUAL (RAM only, not a row), so `entity_query` never lists it; a block run by `run_cliff` reads the engine's `instances`
+fn clifflet(port: u16, code: &str) -> String { let (t, e) = call(port, "run_cliff", json!({"code": code})); assert!(!e, "{t}"); t }
+
 fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
     let t = Instant::now();
     loop {
@@ -205,8 +208,10 @@ fn a_message_posted_to_the_chat_is_answered_by_the_fake_and_found_through_the_mc
     assert_eq!(page2.lines().collect::<Vec<_>>(), rows[1..].to_vec(), "offset skips rows");
     let (page, _) = call(port, "entity_query", json!({"q": "name~:membrane::", "k": 2, "offset": 2}));
     assert_eq!(page.lines().collect::<Vec<_>>(), rows[2..4].to_vec(), "k and offset page");
+    // a Request is VIRTUAL: live in the engine (a block sees it through `instances`), never a row (the query does not list it)
     let (every, _) = call(port, "entity_query", json!({"q": "", "k": 100}));
-    assert!(every.lines().any(|l| l.ends_with("(Request)")), "the requests are rows when not excluded");
+    assert!(!every.lines().any(|l| l.ends_with("(Request)")), "the requests are not rows: {every}");
+    assert_ne!(clifflet(port, "len(instances('Request')) > 0"), "False", "the live requests are in the engine");
     let (no_req, _) = call(port, "entity_query", json!({"q": "kind!:Request", "k": 100}));
     assert!(no_req.lines().count() >= 4 && !no_req.lines().any(|l| l.ends_with("(Request)")), "{no_req}");
     let (n_all, _) = call(port, "entity_query", json!({"q": "kind!:Request & name~:membrane::", "count": true}));
@@ -242,9 +247,7 @@ fn the_barest_seat_loads_only_its_own_packs_and_seeds_no_command_or_ledger_file(
     assert!(!none.contains("Command:git") && !none.contains("Command:gh"), "no seeded commands: {none}");
     let (led, _) = call(port, "entity_query", json!({"q": "name~:File:", "k": 100}));
     assert!(!led.contains("operator-ledger"), "no seeded ledger file: {led}");
-    // the door's requests carry none of the not-ported families' getters
-    let (reqs, _) = call(port, "entity_query", json!({"q": "kind:Request", "k": 100, "full": true}));
-    for g in ["minds_reply", "r_models", "r_self", "stt_reply"] { assert!(!reqs.contains(g), "{g} on a Request: {reqs}"); }
+    // (the door's requests carry none of the not-ported families' getters: those packs are not loaded, checked above; a Request is no row to read them from)
     assert!(terminate(&mut run));
 }
 
@@ -253,18 +256,20 @@ fn an_answered_request_drops_its_body_and_is_retired_after_request_keep_s() {
     let (mut run, port) = seat_with("collect", true, &["request_keep_s=2"]);
     call(port, "entity_query", json!({"q": "name~:membrane::", "k": 5}));
     // the first request is answered: its heavy state is gone, the entity (and its small facts) stays for request_keep_s
-    let first = wait("request 1 answered and dropped", || {
-        let (rows, _) = call(port, "entity_query", json!({"q": "kind:Request", "k": 100, "full": true}));
-        rows.lines().find(|l| l.contains("\"dropped\":true")).map(String::from)
+    // (a Request is VIRTUAL: a block reads the live ones through `instances`)
+    let eid = wait("request 1 answered and dropped", || {
+        let t = clifflet(port, "join([r.eid for r in instances('Request') if r.dropped == True], ' ')");
+        t.split_whitespace().next().map(String::from)
     });
-    let props: J = serde_json::from_str(first.split_once(" (Request) ").unwrap().1).unwrap();
-    assert!(props.get("body").is_none() && props.get("headers").is_none(), "heavy state still there: {first}");
-    assert!(props["respond_result"]["rc"] == 0, "answered once, and the connection took it: {}", props["respond_result"]);
-    let eid = first.split_whitespace().next().unwrap().to_string();
-    // ... then it is deleted (the engine's entity and the stored row)
+    let (body, _) = call(port, "entity_read", json!({"spec": eid, "prop": "body"}));
+    let (headers, _) = call(port, "entity_read", json!({"spec": eid, "prop": "headers"}));
+    assert!(body.contains("has no body") && headers.contains("has no headers"), "heavy state still there: {body} {headers}");
+    let (rc, _) = call(port, "entity_read", json!({"spec": eid, "prop": "respond_result"}));
+    assert!(rc.contains("'rc': 0") || rc.contains("\"rc\":0") || rc.contains("rc: 0"), "answered once, and the connection took it: {rc}");
+    // ... then it is deleted (the engine's entity; a virtual one has no row)
     wait("the request retired", || {
-        let (rows, _) = call(port, "entity_query", json!({"q": "kind:Request", "k": 100}));
-        (!rows.lines().any(|l| l.starts_with(&format!("{eid} ")))).then_some(())
+        let t = clifflet(port, &format!("join([r.eid for r in instances('Request') if r.eid == '{eid}'], ' ')"));
+        (t == "none" || t == "null" || t.is_empty() || !t.contains(&eid)).then_some(())
     });
     let (read, _) = call(port, "entity_read", json!({"spec": eid}));
     assert!(read.contains("no such") || read.contains("not found") || read.contains("none") || read.contains("{}"), "{read}");
@@ -281,8 +286,7 @@ fn request_keep_s_zero_retires_a_request_as_soon_as_it_is_answered_and_the_door_
     assert_eq!(st, 200); assert!(html.contains("<html") || html.contains("<!doctype") || html.contains("<!DOCTYPE"));
     // no Request stays: the count is read through the door, itself a request, so it counts at most that one
     wait("no answered request left", || {
-        let (n, _) = call(port, "entity_query", json!({"q": "kind:Request", "count": true}));
-        let n: u32 = n.split_whitespace().next().unwrap().parse().unwrap();
+        let n: u32 = clifflet(port, "len(instances('Request'))").trim().parse().unwrap();
         (n <= 1).then_some(())
     });
     // the chat still works
@@ -431,6 +435,22 @@ fn a_restart_restores_the_models_entities_and_still_sweeps_old_requests() {
     assert!(terminate(&mut run2));
 }
 
+#[test]
+fn the_previous_turns_error_is_still_in_the_banner_after_a_restart_with_the_warm_boot_off() {
+    // the turns are a lazy class: after the restart none is loaded (warm_rows=0); the banner reaches the previous turn through the chat's `last_turn`
+    let (mut run, port) = seat_with("lastturn", false, &["warm_rows=0"]);
+    let (_, _, body) = http(port, "POST", "/membrane/chat/message", &json!({"text": "hi"}).to_string());
+    let id = serde_json::from_str::<J>(&body).unwrap()["id"].as_str().unwrap().to_string();
+    wait("the error turn", || { let (_, _, b) = http(port, "GET", &format!("/membrane/chat/message/{id}"), ""); (serde_json::from_str::<J>(&b).unwrap()["state"] == "error").then_some(()) });
+    wait("the banner names it", || banner(port).contains("THE PREVIOUS TURN ENDED WITH AN ERROR").then_some(()));
+    let dir = handover(&mut run);
+    let (mut run2, port2) = seat_at(dir, false, &["warm_rows=0"]);
+    let b = wait("the banner after the restart", || { let b = banner(port2); b.contains("CONVERSATION: main").then_some(b) });
+    wait("the error line", || banner(port2).contains(&format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:message:{id}:turn:response")).then_some(()));
+    let _ = b;
+    assert!(terminate(&mut run2));
+}
+
 // ---- an entity of two extra classes (#1143) -----------------------------------------------------------------------------------------------
 const TWO: &str = "PACK two 1\nAlpha.sa getter: 'alpha:' + str(this.n)\nBeta.sb getter: 'beta:' + str(this.n)\nAlpha.go_a on-setter run-a:\n  WHEN this.go_a == True:\n    this.did_a = True\nBeta.go_b on-setter run-b:\n  WHEN this.go_b == True:\n    this.did_b = True\n";
 fn read(port: u16, eid: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": eid, "prop": prop})).0 }
@@ -519,4 +539,22 @@ fn the_seat_script_forwards_each_fact_to_cliffvm_run() {
     assert_eq!(facts, ["request_keep_s=0", "chat_max_turns=5", "chat_claude_bin=/bin/echo"], "{args:?}");
     assert_eq!(args[0], "run");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn updated_is_readable_from_a_clifflet_and_entity_read_and_moves_with_a_write() {
+    let (mut run, port) = seat("updated", true);
+    w(port, "Note:u", "text", json!("one"));
+    let first: f64 = read(port, "Note:u", "updated").trim().parse().unwrap_or_else(|_| panic!("a number"));
+    assert!(first > 1.0e9, "an epoch time: {first}");
+    assert_eq!(clifflet(port, "Note:u.updated > 1000000000"), "True");
+    std::thread::sleep(Duration::from_millis(50));
+    w(port, "Note:u", "text", json!("two"));
+    let second: f64 = read(port, "Note:u", "updated").trim().parse().unwrap();
+    assert!(second > first, "a write moves it: {first} -> {second}");
+    // read-only: the door refuses a write of it
+    let (r, _) = call(port, "entity_write", json!({"spec": "Note:u", "prop": "updated", "value": 5}));
+    assert!(r.contains("refused") || r.contains("updated"), "{r}");
+    assert_eq!(read(port, "Note:u", "updated").trim().parse::<f64>().unwrap(), second);
+    assert!(terminate(&mut run));
 }

@@ -130,7 +130,8 @@ fn the_list_survives_a_journal_replay_and_a_restart() {
         h.born("Own:y", "Own", props(json!({"n": 2})), "person");
     }
     let h = open(); h.load_pack("abc", PACK).unwrap();
-    assert_eq!(h.load_stored_entities(), 2);
+    h.load_stored_entities();
+    assert_eq!(h.load_everything(), 2, "Own is a lazy class: its rows load on reference (here: all at once)");
     h.rebuild();
     assert_eq!(h.get("Own:x", "parents"), json!(["cls:beta"]), "the restored list is the stored one: no prefix put back");
     assert_eq!(h.get("Own:x", "text"), json!("beta"));
