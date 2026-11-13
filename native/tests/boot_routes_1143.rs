@@ -279,3 +279,33 @@ fn the_field_map_routes_answer_the_empty_field_in_the_released_shapes() {
     assert_eq!(api(&run, "POST", "/ui/serve/membrane/map/field", json!({})).0, 405);
     assert_eq!(api(&run, "GET", "/membrane/map/field", J::Null).0, 200, "the bare path too");
 }
+
+// ---- the browser VM's start: GET /ui/fieldvm -------------------------------------------------------------------------------------------------------------
+fn bare(run: &Run, method: &str, path: &str) -> u16 {
+    let mut s = TcpStream::connect(("127.0.0.1", run.port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
+    let mut out = vec![];
+    let _ = s.read_to_end(&mut out);
+    String::from_utf8_lossy(&out).split_whitespace().nth(1).unwrap().parse().unwrap()
+}
+
+#[test]
+fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
+    let run = seat("fieldvm");
+    assert_eq!(bare(&run, "GET", "/ui/fieldvm"), 401, "the snapshot is the seat's field: not public");
+    let (st, s) = api(&run, "GET", "/ui/fieldvm", J::Null);
+    assert_eq!(st, 200, "{s}");
+    // the packs that import `dom` (they run in the page; the page has `dom`), by name, with their text; none of the seat's own
+    let packs = s["packs"].as_object().unwrap_or_else(|| panic!("{s}"));
+    let names: Vec<&String> = packs.keys().collect();
+    assert_eq!(names, ["about"], "only the packs that import dom: {names:?}");
+    let about = packs["about"].as_str().unwrap();
+    assert!(about.starts_with("PACK about 1") && about.contains("IMPORT dom 1"), "{about}");
+    assert_eq!(about, std::fs::read_to_string(format!("{}/../membrane/packs/about.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap(), "the file's text, whole");
+    assert_eq!(s["entities"], json!([]), "no entity of a view class is mirrored yet");
+    // the same through the page's prefix; read only
+    let (st, s2) = api(&run, "GET", "/ui/serve/ui/fieldvm", J::Null);
+    assert_eq!((st, s2["packs"].as_object().map(|m| m.len())), (200, Some(1)), "{s2}");
+    assert_eq!(api(&run, "POST", "/ui/fieldvm", json!({})).0, 405);
+}

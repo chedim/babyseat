@@ -18,14 +18,13 @@ const port = 19000 + Math.floor(Math.random() * 1000), dbg = port + 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // THE BACKLOG, measured on the first full-set boot (docs/release-parity.md section 6). Matched on the path without the query, METHOD included for
 // the hangs. Each list is checked both ways: a call that is answered now must leave its list (the test says so), a new gap fails the test.
-//   MISSING (404): `map/locate` is a REASONED 404, the released answer "<eid> is not in this projection" (the empty field has no entity; home.js `_trackNb` catches it and tries the next candidate: it stays here, tolerated).
-//   Also the session routes the chat view tolerates (<sid>/voice and <sid>/predict: `.catch` in panel.js), /agent and /config (opencode probes); /ui/fieldvm (the browser VM's start snapshot), /membrane/options and the
-//   map routes are used routes not built yet (docs/release-parity.md section 1, rows 4, 5, 8, 61-68).
+//   MISSING (404): `map/locate` only, a REASONED 404: the released answer "<eid> is not in this projection" (the empty field has no entity; home.js `_trackNb` catches it and
+//   tries the next candidate), so it stays here, tolerated. Every other boot call is answered (the swap's step 3 built /agent, /config, /membrane/options, /membrane/quota, the map
+//   routes, /ui/fieldvm and the session's voice and predict reads, and made POST /membrane/voice/state answer: docs/release-parity.md section 6).
 //   HANGS (no answer): none (POST /membrane/voice/state used to wait on the Python voice table a fresh store does not have; it reads the seat's own table now).
 //   NOT_BUILT (501, a deliberate "not built" with its reason): informational, never a failure.
 const MISSING = new Set(process.env.PAGE_BOOT_MISSING ? process.env.PAGE_BOOT_MISSING.split(',') : [
-  '/ui/serve/session/<sid>/voice', '/ui/serve/session/<sid>/predict',
-  '/ui/fieldvm', '/ui/serve/membrane/map/locate',
+  '/ui/serve/session/<sid>/voice', '/ui/serve/session/<sid>/predict', '/ui/serve/membrane/map/locate',
 ]);
 const HANGS = new Set(process.env.PAGE_BOOT_HANGS ? process.env.PAGE_BOOT_HANGS.split(',') : []);
 if (!existsSync(bin)) { console.log(`page boot: skipped, no cliffvm at ${bin} (build it, or set CLIFFVM)`); process.exit(0); }
