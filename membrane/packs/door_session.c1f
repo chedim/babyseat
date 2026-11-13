@@ -13,6 +13,8 @@ VIRTUAL SesBus
 --   GET  /session/<sid>/message/<mid>      one row
 --   POST /session/<sid>/prompt_async {parts}  start a turn (204)                 POST /session/<sid>/message {parts}   the same, answered when the turn ends
 --   POST /session/<sid>/abort              stop the turn (true)
+--   GET  /session/<sid>/voice, /predict, /todo, /children, /diff   []: the released answers of a seat with no voice lines of its own, no predictor and nothing to list for
+--                                          the TUI's stubs (the chat view asks the first two beside the messages; the POST of /voice, the vote / rewrite teaching, is not here: 405)
 --   GET  /event, GET /global/event         the event streams (text/event-stream)
 -- A SESSION IS A CHAT: `membrane::Chat:session:<sid>` (the kind ChatSession: stitle, born, upd = epoch ms). A MESSAGE of the page is a ChatMessage (packs/chat.c1f) with
 -- `sid` naming its session, and the model's answer to it is its turn (chat_turn.c1f). One message = TWO rows of the opencode API: the user row (the text) and the assistant row
@@ -32,9 +34,10 @@ Request.ss_route getter:
   ELSE WHEN this.ss_n == 2 and this.ss_segs[1] == 'status': 'status'
   ELSE WHEN this.ss_n == 2: 'one'
   ELSE WHEN this.ss_n == 3 and this.ss_segs[2] in ['message', 'prompt_async', 'abort']: this.ss_segs[2]
+  ELSE WHEN this.ss_n == 3 and this.ss_segs[2] in ['voice', 'predict', 'todo', 'children', 'diff']: 'empty'
   ELSE WHEN this.ss_n == 4 and this.ss_segs[2] == 'message': 'msg1'
   ELSE: 'other'
-Request.ss_allowed getter: {'event': ['GET'], 'root': ['GET', 'POST'], 'status': ['GET'], 'one': ['GET', 'PATCH', 'DELETE'], 'message': ['GET', 'POST'], 'prompt_async': ['POST'], 'abort': ['POST'], 'msg1': ['GET']}[this.ss_route]
+Request.ss_allowed getter: {'event': ['GET'], 'root': ['GET', 'POST'], 'status': ['GET'], 'one': ['GET', 'PATCH', 'DELETE'], 'message': ['GET', 'POST'], 'prompt_async': ['POST'], 'abort': ['POST'], 'msg1': ['GET'], 'empty': ['GET']}[this.ss_route]
 Request.o_session getter:
   WHEN this.ss_on: True
 Request.m_session getter:
@@ -54,6 +57,7 @@ Request.ss_reply getter:
   ELSE WHEN this.ss_route == 'msg1': this.m1_reply
   ELSE WHEN this.ss_route == 'event': {'status': 200, 'stream': True}
   ELSE WHEN this.ss_route == 'abort': this.ab_reply
+  ELSE WHEN this.ss_route == 'empty': {'status': 200, 'body': []}
   ELSE: this.ss_missing
 
 -- ---- the session --------------------------------------------------------------------------------------------------------------------------

@@ -24,7 +24,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 //   HANGS (no answer): none (POST /membrane/voice/state used to wait on the Python voice table a fresh store does not have; it reads the seat's own table now).
 //   NOT_BUILT (501, a deliberate "not built" with its reason): informational, never a failure.
 const MISSING = new Set(process.env.PAGE_BOOT_MISSING ? process.env.PAGE_BOOT_MISSING.split(',') : [
-  '/ui/serve/session/<sid>/voice', '/ui/serve/session/<sid>/predict', '/ui/serve/membrane/map/locate',
+  '/ui/serve/membrane/map/locate',
 ]);
 const HANGS = new Set(process.env.PAGE_BOOT_HANGS ? process.env.PAGE_BOOT_HANGS.split(',') : []);
 if (!existsSync(bin)) { console.log(`page boot: skipped, no cliffvm at ${bin} (build it, or set CLIFFVM)`); process.exit(0); }

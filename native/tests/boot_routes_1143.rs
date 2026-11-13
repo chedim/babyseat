@@ -309,3 +309,23 @@ fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
     assert_eq!((st, s2["packs"].as_object().map(|m| m.len())), (200, Some(1)), "{s2}");
     assert_eq!(api(&run, "POST", "/ui/fieldvm", json!({})).0, 405);
 }
+
+// ---- the session's side reads the chat view asks beside the messages (tolerated when absent; answered now) -----------------------------------------------
+#[test]
+fn the_sessions_voice_and_predict_reads_are_the_empty_lists_of_a_seat_with_neither() {
+    let run = seat("session-empty");
+    let (st, s) = api(&run, "POST", "/ui/serve/session", json!({"title": "T"}));
+    assert_eq!(st, 200, "{s}");
+    let sid = s["id"].as_str().unwrap().to_string();
+    // the released handler answers these for any session id: membrane's own voice lines (none: no voice state here), its guesses of the seat's next moves
+    // (phantoms: none: no predictor here) and the TUI's stubs
+    for what in ["voice", "predict", "todo", "children", "diff"] {
+        for id in [sid.as_str(), "ses_unknown"] {
+            let (st, l) = api(&run, "GET", &format!("/ui/serve/session/{id}/{what}"), J::Null);
+            assert_eq!((st, l), (200, json!([])), "{what} of {id}");
+        }
+    }
+    // only reads: the vote / rewrite teaching of the released POST /voice is not here
+    assert_eq!(api(&run, "POST", &format!("/ui/serve/session/{sid}/predict"), json!({})).0, 405);
+    assert_eq!(api(&run, "GET", &format!("/ui/serve/session/{sid}/nonsense"), J::Null).0, 404);
+}
