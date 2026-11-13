@@ -28,6 +28,18 @@ ws = [l.watts for l in instances('Lamp')]
 [l.room for l in instances('Lamp') if l.on]
 ```
 
+## What an entity is called: `eid`, `cls`, `parents`
+
+Every entity reads `eid` (its id: `Lamp:desk`), `cls` (its class) and `parents` (its class list, when it has one) next to its own properties; there is no `name` or `id`
+(those read null). One call can list every pack with its state: the clifflet's own scratch packs are not listed, so the list is the field's (a Pack with no text yet reads `waiting`, a loaded one `loaded`):
+
+```cliff
+-- given Lamp:desk {"parents": ["cls:lamp"]}
+-- given Pack:demo {}
+-- value [["Pack:demo", "waiting"], "Lamp:desk Lamp [\"cls:lamp\"]"]
+concat([[p.eid, p.state] for p in instances('Pack') if startswith(p.eid, 'Pack:d')], [join([l.eid, l.cls, str(l.parents)], ' ') for l in instances('Lamp')])
+```
+
 ## A value that is null says why
 
 A null with a reason comes back as `error: <the reason>`; a plain null is the text `null`:

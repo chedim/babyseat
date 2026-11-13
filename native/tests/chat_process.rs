@@ -829,3 +829,27 @@ fn a_banner_change_returns_reactions_that_do_not_grow_with_the_finished_messages
     assert!(n50 < small + 1500, "the reply does not grow with the finished messages: {small} -> {n50}");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn a_clifflet_reads_eid_cls_and_parents_and_lists_the_same_packs_as_entity_query() {
+    let (mut run, port) = start("cliffpacks", MCP_PACKS, &[]);
+    put(port, "Pack:boxes", "text", json!(BOXES));
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:boxes", "prop": "state"})).0 == "loaded").then_some(()));
+    put(port, "Box:1", "n", json!(4));
+    put(port, "Box:1", "parents", json!(["cls:box", "cls:thing"]));
+    // eid, cls and parents are readable on any entity (parents is the entity's class list when it has one)
+    let (t, e) = cliff(port, "b = instances('Box')[0]\n[b.eid, b.cls, b.parents]");
+    assert!(!e, "{t}");
+    let v: J = serde_json::from_str(&t).unwrap_or_else(|e| panic!("{e}: {t}"));
+    assert_eq!((v[0].clone(), v[1].clone()), (json!("Box:1"), json!("Box")), "{t}");
+    assert!(v[2].is_array() && v[2][0] == json!("cls:box"), "parents is the class list: {t}");
+    // the packs a clifflet lists are the ones entity_query lists (its own scratch packs are not among them)
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:Pack", "k": 100}));
+    let (t, e) = cliff(port, "[[p.eid, p.state] for p in instances('Pack')]");
+    assert!(!e, "{t}");
+    let listed: Vec<String> = serde_json::from_str::<Vec<J>>(&t).unwrap_or_else(|e| panic!("{e}: {t}")).iter().map(|r| r[0].as_str().unwrap().to_string()).collect();
+    assert!(listed.iter().all(|p| !p.contains("cliffg") && !p.contains("cliffs")), "the clifflet's scratch packs are listed: {listed:?}");
+    for p in &listed { assert!(q.contains(p.as_str()), "{p} is not in entity_query: {q}"); }
+    assert_eq!(listed.len(), q.matches("Pack:").count(), "the same set: {listed:?} vs {q}");
+    assert!(terminate(&mut run));
+}

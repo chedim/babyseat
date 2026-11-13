@@ -102,6 +102,8 @@ fn run_cliff(b: &Block, at: &str) {
         if let Err(e) = &loaded { assert!(e.contains(w), "{at}: the loader said {e:?}, the help says it holds {w:?}"); return; }
     }
     loaded.unwrap_or_else(|e| panic!("{at}: the loader refused the example: {e}"));
+    h.write("Pack:cliffx", "scratch", J::Bool(true), "person");   // the door marks its scratch packs so `instances` does not list them
+    h.pump();
     h.rebuild();
     if write {
         h.write("Pack:cliffx", "privileged", J::Bool(true), "person");   // the door grants its scratch setter pack the privilege, so a block may write any class
@@ -128,7 +130,7 @@ fn run_cliff(b: &Block, at: &str) {
         return;
     }
     let want: J = serde_json::from_str(b.body.lines().find_map(|l| l.strip_prefix("-- value ")).unwrap_or_else(|| panic!("{at}: a cliff block says `-- value <json>` or `-- error: <text>`"))).unwrap();
-    assert!(same(&shown["v"], &want), "{at}: the clifflet returns {}, the help says {want}", shown["v"]);
+    assert!(same(&shown["v"], &want), "{at}: the clifflet returns {}, the help says {want} (why: {})", shown["v"], shown["why"]);
 }
 
 /// A ```c1f-run block is RUN through the real drivers: `-- write <eid>.<prop> = <json>` writes (a write of `run` waits for that run's receipt, matched by its id),
@@ -218,8 +220,9 @@ const DOCTRINE: &str = "Modify your banner to help you maintain continuity. Use 
 #[test]
 fn the_doctrine_in_the_chat_turn_is_the_operators_four_sentences_and_the_help_tells_where_it_lives() {
     let t = std::fs::read_to_string(repo().join("membrane/packs/chat_turn.c1f")).unwrap();
-    let note = t.lines().find(|l| l.starts_with("ChatMessage.note getter:")).unwrap();
-    assert_eq!(note, format!("ChatMessage.note getter: '{DOCTRINE}'"), "the note is exactly the four sentences");
+    let at = t.lines().position(|l| l.starts_with("ChatMessage.note getter:")).unwrap();
+    let note = t.lines().nth(at + 2).unwrap();   // the second line: `WHEN this.over: None` guards it (a finished message holds no prompt props), then the sentences
+    assert_eq!(note, format!("  ELSE: '{DOCTRINE}'"), "the note is exactly the four sentences");
     assert!(!note.contains("YOUR BANNER IS") && !note.contains("Good luck"), "the old long doctrine is gone: {note}");
     // the static instructions live in the help: where Help is, and how the banner is replaced
     let c = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help/c1f.md")).unwrap();

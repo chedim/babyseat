@@ -119,6 +119,8 @@ Request.cl_stext getter: 'PACK cliffs' + this.cl_n + ' 1\nIMPORT door 1\nIMPORT 
 Request.cl_start getter: this.cl_code if this.cl_on else None
 Request.cl_start on-setter cliff-load:
   WHEN this.cl_start != None:
+    (this.cl_gp).scratch = True
+    (this.cl_sp).scratch = True
     (this.cl_sp).privileged = True
     (this.cl_gp).text = this.cl_gtext
     (this.cl_sp).text = this.cl_stext
