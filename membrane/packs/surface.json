@@ -137,7 +137,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 39,
+    "members": 40,
     "writes": [
       "*.retire",
       "membrane:*.calls",
@@ -152,7 +152,8 @@
       "membrane:*.usage",
       "membrane:*=ChatResponse()",
       "membrane:*=ChatTool()",
-      "membrane:*=Command()"
+      "membrane:*=Command()",
+      "membrane::Chat:main.last_turn"
     ],
     "claims": [],
     "boot_facts": [

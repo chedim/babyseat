@@ -218,6 +218,7 @@
       "Chat.cost": "Any",
       "Chat.duration": "Any",
       "Chat.ended": "Num",
+      "Chat.last_turn": "Any",
       "Chat.result": "Text",
       "Chat.started": "Num",
       "Chat.state": "Text",

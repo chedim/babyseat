@@ -379,6 +379,8 @@ impl Fields {
         if self.from_virtual(core, eid) { o["virt"] = json!(true); }
         o
     }
+    /// The classes declared with this storage mode.
+    pub fn classes_with(&self, s: Storage) -> Vec<String> { let mut v: Vec<String> = self.storage.iter().filter(|(_, m)| **m == s).map(|(c, _)| c.clone()).collect(); v.sort(); v }
     /// The storage mode of a class (its own class, the eid's): what its OWNER pack declared; Lazy when none did.
     pub fn storage_of(&self, cls: &str) -> Storage { self.storage.get(cls).copied().unwrap_or(Storage::Lazy) }
     pub fn goalgraph() -> Self {
@@ -1191,6 +1193,8 @@ impl Fields {
     /// A round: the queued writes run (getters marked, setters fired); when the queue is empty, the dirty getters
     /// recalculate, lowest level first, and a changed value is written (which can queue more). Until both are empty.
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
+        core.last_now = now;
+        self.complete_arrivals(core, now);
         self.sync(core, now, seq);
         for k in core.sql_ready() { self.mark_key(&(crate::vm::SQL.to_string(), k)); }   // a query's rows are in
         if !self.inbound_by_host { for (e, cls, props) in core.inbound() { self.arrive(core, e, cls, props, now); } }   // the door pushed an entity (a request): born
@@ -1201,6 +1205,7 @@ impl Fields {
             self.emit_unchecked(core, &mut work, &e, &format!("{}_rc", verb), rc, &format!("driver:{}", verb), seq, now);
         }
         loop {
+            if !core.arrived.is_empty() { self.complete_arrivals(core, now); }   // an evaluation loaded stored entities: they join the field before the next step
             if let Some(w) = work.pop_front() {
                 self.step(core, host, &mut work, w, now, seq);
                 continue;
@@ -1211,6 +1216,31 @@ impl Fields {
             let Some(v) = self.compute(core, Some(host), &e, gi, now, seq) else { continue };
             let prop = self.getters[gi].prop.clone();
             self.emit_unchecked(core, &mut work, &e, &prop, v, &format!("getter:{}", prop), seq, now);
+        }
+    }
+
+    /// Load a stored entity that is not loaded yet (a lazy class), as a restore does: its row's properties (a getter's value is computed again), its `updated`, its
+    /// getters dirty. A write calls this before it looks for its target, so a setter finds the stored entity and never makes it anew. -> whether it loaded.
+    pub fn ensure(&mut self, core: &mut Core, eid: &str, now: f64) -> bool {
+        core.last_now = now;
+        let loaded = core.fault_one(eid);
+        if loaded || !core.arrived.is_empty() { self.complete_arrivals(core, now); }
+        loaded
+    }
+
+    /// Register the entities a read loaded in the middle of an evaluation (`Core::fault_one`): as `arrive` does, minus the load itself. Their getters recompute (the stored
+    /// values were read right away, the recompute corrects what changed since), what listed their class (`instances`) or read their fields recalculates.
+    pub fn complete_arrivals(&mut self, core: &mut Core, now: f64) {
+        let _ = now;
+        for e in std::mem::take(&mut core.arrived) {
+            let Some(d) = core.docs.get(&e) else { continue };
+            let (cls, keys): (String, Vec<String>) = (d.cls.clone(), d.props.keys().cloned().collect());
+            self.mark_key(&(crate::vm::CLASS_READ.to_string(), cls));
+            self.known.insert(e.clone());
+            for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
+            for p in keys { self.mark(&e, &p); }
+            // what read this eid while it was not there (its `eid`, its class) reads it now
+            for k in ["eid", "cls", crate::vm::UPDATED] { self.mark(&e, k); }
         }
     }
 
@@ -1359,6 +1389,7 @@ impl Fields {
             if grant.is_some() {
                 if let Err(why) = self.grant_check(pack) { self.receipt(core, eid, name, why, J::Null, seq, now); continue; }
             }
+            self.ensure(core, &tgt, now);   // stored but not loaded: it loads, it is not created anew
             if !core.docs.contains_key(&tgt) {
                 // creation: `<Class>:<key>` of a class the pack owns or imports (a privileged pack: any class)
                 let Some((cls, _)) = tgt.split_once(':') else { continue };
@@ -1405,6 +1436,7 @@ impl Fields {
         }
         if let Err(why) = self.may_write(pack, &cls) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
         let mut args = args;
+        self.ensure(core, &tgt, now);   // stored but not loaded: it loads, it is not created anew
         if !core.docs.contains_key(&tgt) {
             // the class the eid names: after a namespace, up to the next colon
             let tail = tgt.rsplit_once("::").map_or(tgt.as_str(), |(_, r)| r);

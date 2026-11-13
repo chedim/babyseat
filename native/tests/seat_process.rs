@@ -435,6 +435,22 @@ fn a_restart_restores_the_models_entities_and_still_sweeps_old_requests() {
     assert!(terminate(&mut run2));
 }
 
+#[test]
+fn the_previous_turns_error_is_still_in_the_banner_after_a_restart_with_the_warm_boot_off() {
+    // the turns are a lazy class: after the restart none is loaded (warm_rows=0); the banner reaches the previous turn through the chat's `last_turn`
+    let (mut run, port) = seat_with("lastturn", false, &["warm_rows=0"]);
+    let (_, _, body) = http(port, "POST", "/membrane/chat/message", &json!({"text": "hi"}).to_string());
+    let id = serde_json::from_str::<J>(&body).unwrap()["id"].as_str().unwrap().to_string();
+    wait("the error turn", || { let (_, _, b) = http(port, "GET", &format!("/membrane/chat/message/{id}"), ""); (serde_json::from_str::<J>(&b).unwrap()["state"] == "error").then_some(()) });
+    wait("the banner names it", || banner(port).contains("THE PREVIOUS TURN ENDED WITH AN ERROR").then_some(()));
+    let dir = handover(&mut run);
+    let (mut run2, port2) = seat_at(dir, false, &["warm_rows=0"]);
+    let b = wait("the banner after the restart", || { let b = banner(port2); b.contains("CONVERSATION: main").then_some(b) });
+    wait("the error line", || banner(port2).contains(&format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:message:{id}:turn:response")).then_some(()));
+    let _ = b;
+    assert!(terminate(&mut run2));
+}
+
 // ---- an entity of two extra classes (#1143) -----------------------------------------------------------------------------------------------
 const TWO: &str = "PACK two 1\nAlpha.sa getter: 'alpha:' + str(this.n)\nBeta.sb getter: 'beta:' + str(this.n)\nAlpha.go_a on-setter run-a:\n  WHEN this.go_a == True:\n    this.did_a = True\nBeta.go_b on-setter run-b:\n  WHEN this.go_b == True:\n    this.did_b = True\n";
 fn read(port: u16, eid: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": eid, "prop": prop})).0 }

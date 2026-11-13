@@ -58,6 +58,29 @@ pub fn class_of_eid(eid: &str) -> String {
     tail.split(':').next().unwrap_or("").to_string()
 }
 
+/// How many lazy rows the warm boot loads in the background by default (the boot fact `warm_rows`; a threshold, flagged for the operator).
+pub const DEFAULT_WARM_ROWS: usize = 1000;
+/// One slice of the warm boot loads at most this many rows and stops after this long (flagged for the operator: the loop must answer the door between slices).
+pub const WARM_SLICE_ROWS: usize = 64;
+pub const WARM_SLICE_MS: u64 = 20;
+
+/// What a restore takes back of a stored row: its properties without the ones a GETTER wrote (the rebuild computes them again from the restored inputs, so a getter that
+/// changed since the row was stored shows its new value).
+fn restore_props(row: &J) -> Map<String, J> {
+    let writers = row["writers"].as_object().cloned().unwrap_or_default();
+    row["props"].as_object().cloned().unwrap_or_default().into_iter().filter(|(k, _)| !writers.get(k).and_then(|w| w.as_str()).map_or(false, is_getter_write)).collect()
+}
+
+/// The engine's loader of one stored row (`Fields::ensure`): the store's row of `eid`, as a restore would bring it.
+fn stored_loader(db: Arc<Mutex<Connection>>) -> crate::vm::Loader {
+    Box::new(move |eid: &str| {
+        let db = db.lock().unwrap_or_else(|e| e.into_inner());
+        let (body, updated): (String, f64) = db.query_row(&format!("SELECT body, updated FROM {ROWS} WHERE k = ?"), params![eid], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten()?;
+        let row: J = serde_json::from_str(&body).ok()?;
+        Some(crate::vm::StoredRow { cls: row["cls"].as_str().unwrap_or("").to_string(), props: row["props"].as_object().cloned().unwrap_or_default(), updated })   // a getter's stored value too: the read is right away
+    })
+}
+
 /// A store stamp of a value the engine computes again from its inputs (a getter's, a rebuild's).
 pub fn is_getter_write(stamp: &str) -> bool { stamp.starts_with("trigger:field:getter:") || stamp == "trigger:field:rebuild" }
 
@@ -126,7 +149,7 @@ pub struct Loaded { pub names: Vec<String>, pub msgs: Vec<String> }
 
 pub struct Host {
     eng: Mutex<Engine>,
-    db: Mutex<Connection>,
+    db: Arc<Mutex<Connection>>,
     journal: Mutex<Vec<Line>>,
     clock: Box<dyn Fn() -> f64 + Send + Sync>,
     waiter: Option<crate::store::Waiter>,
@@ -144,6 +167,9 @@ pub struct Host {
     wrote: AtomicBool,
     /// the time of the OUTSIDE write whose round is being applied (f64 bits; 0 = none): what that round's derived writes are stamped with, so a replay (the journal's time) ends with the same `updated`
     round_ts: std::sync::atomic::AtomicU64,
+    /// the warm boot: how many lazy rows to load in the background (newest `updated` first) and the ones still waiting (docs/cliffvm.md)
+    warm_rows: std::sync::atomic::AtomicUsize,
+    warm: Mutex<std::collections::VecDeque<String>>,
 }
 
 struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool, updated: f64 }
@@ -167,7 +193,7 @@ fn migrate(db: &Connection) -> Result<(), String> {
     let had_updated = cols.iter().any(|c| c == "updated");
     if !cols.iter().any(|c| c == "cls") { db.execute_batch("ALTER TABLE c_field ADD COLUMN cls TEXT").map_err(dbe)?; }
     if !had_updated { db.execute_batch("ALTER TABLE c_field ADD COLUMN updated REAL NOT NULL DEFAULT 0").map_err(dbe)?; }
-    db.execute_batch("CREATE INDEX IF NOT EXISTS c_field_cls ON c_field(cls); CREATE INDEX IF NOT EXISTS c_field_updated ON c_field(updated)").map_err(dbe)?;
+    db.execute_batch("CREATE INDEX IF NOT EXISTS c_field_cls ON c_field(cls, k); CREATE INDEX IF NOT EXISTS c_field_updated ON c_field(updated, k)").map_err(dbe)?;
     db.execute_batch("UPDATE c_field SET cls = json_extract(body, '$.cls') WHERE cls IS NULL").map_err(dbe)?;
     if !had_updated {
         let mut last: std::collections::HashMap<String, f64> = Default::default();
@@ -198,7 +224,9 @@ impl Host {
             db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {t} (k TEXT PRIMARY KEY, body TEXT NOT NULL)")).map_err(dbe)?;
         }
         migrate(&db)?;
+        let db = Arc::new(Mutex::new(db));
         let mut core = Core::new();
+        if o.store.is_some() { core.loader = Some(stored_loader(db.clone())); }   // a lazy entity a setter writes loads from the store
         let mut waiter = None;
         if o.effects {
             let st = match &o.store {
@@ -212,7 +240,7 @@ impl Host {
         let mut fields = Fields::goalgraph();
         fields.inbound_by_host = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default() })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default() })
     }
 
     /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
@@ -296,6 +324,7 @@ impl Host {
     fn inject_write(&self, ts: f64, eid: &str, prop: &str, new: J, engine_writer: &str, stamp: &str) {
         let _t = self.txn();
         let _r = self.round_at(ts);
+        self.ensure_loaded(eid, ts);
         self.store_prop(eid, None, prop, &new, stamp);
         if prop == "text" { self.pack_text(eid, &new); }
         if prop == "privileged" { self.note_outside_grant(eid, &new, stamp); }
@@ -316,6 +345,7 @@ impl Host {
     fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
         let _t = self.txn();
         let _r = self.round_at(ts);
+        self.ensure_loaded(eid, ts);
         let props = crate::vm::birth_props(cls, props);   // the eid class is the birth default of the class list (the journal keeps what was said)
         self.store_born(eid, cls, &props, stamp);
         if let Some(t) = props.get("text") { self.pack_text(eid, t); }
@@ -395,7 +425,9 @@ impl Host {
         while !stop.load(Ordering::SeqCst) {
             self.pump();
             if self.now() - last >= tick_s { self.tick(); last = self.now(); }
+            let warming = self.warm_step();   // the warm boot, a slice between turns: the door is never kept waiting for it
             each(self);
+            if warming { continue; }
             match &self.waiter { Some(w) => { w.wait(Some(Duration::from_millis(50))); } None => std::thread::sleep(Duration::from_millis(50)) }
         }
         if let Some(w) = &self.waiter { w.interrupt_all(); }
@@ -405,6 +437,7 @@ impl Host {
     /// Take what the engine did since the last drain and apply it to the store, stamped. -> whether there was any.
     fn drain_apply(&self) -> bool {
         let _t = self.txn();
+        self.fault_wanted();
         let (out, _calls) = { let mut g = self.eng(); let f = &mut g.1; (std::mem::take(&mut f.out), std::mem::take(&mut f.calls)) };
         let any = !out.is_empty();
         let ts = self.stamp_ts();
@@ -430,6 +463,7 @@ impl Host {
         for eid in &retired {
             let below = format!("{eid}:");
             let owned: Vec<String> = { let g = self.eng(); g.0.docs.keys().filter(|k| k.starts_with(&below)).cloned().collect() };
+            self.eng().0.unloaded.retain(|k, _| k != eid && !k.starts_with(&below));   // a stored child that was never loaded is deleted with the rest, and does not wait to load
             for e in std::iter::once(eid).chain(owned.iter()) {
                 { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, e, ts, seq); }
             }
@@ -442,7 +476,7 @@ impl Host {
         // writes of the same round are what it caused. The list goes back on that Request as `reactions` (a derived write, never journalled; a replay drains the same way).
         let any = any || !reactions.is_empty();
         for (req, list) in reactions { self.inject_write(ts, &req, "reactions", list, "reactions", &stamp_writer("reactions")); }
-        if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); return true; }
+        if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); self.load_new_residents(); return true; }
         any
     }
 
@@ -527,7 +561,7 @@ impl Host {
     /// Start-up: every stored `Pack:*` row loads (name order) from its `text`, else from `good_text` (the error stays shown). The rows
     /// arrive in the engine as they are (no rewrite, no journal: they were journalled when written). -> the names that loaded.
     pub fn load_stored_packs(&self) -> Vec<String> {
-        let rows: Vec<(String, Map<String, J>)> = self.rows().into_iter()
+        let rows: Vec<(String, Map<String, J>)> = self.rows_of_classes(&[PACK_CLASS]).into_iter()
             .filter(|(k, v)| k.starts_with(PACK_PREFIX) && v["cls"] == json!(PACK_CLASS))
             .map(|(k, v)| (k, v["props"].as_object().cloned().unwrap_or_default())).collect();
         let now = self.now();
@@ -551,33 +585,145 @@ impl Host {
         names
     }
 
-    /// Start-up, after the packs: every other stored entity row arrives in the engine (its class, its props, the `parents` stamp among them),
-    /// so what the model wrote (a banner line, a trip, a message) outlives the process. The rows come back as they are, with two exceptions:
-    ///   - a prop a GETTER wrote (`trigger:field:getter:*`, `trigger:field:rebuild`) is not read back: the rebuild that follows computes it
-    ///     again from the restored inputs, so a getter that changed since the row was stored shows its new value;
-    ///   - a VIRTUAL class (docs/cliffvm.md, "Storage modes": the door's listener and requests, the boot's facts and plan, ...) is about THIS process and is
-    ///     never restored: a row of one an older run stored stays text, which the new run makes again (or sweeps).
-    /// No setter runs and nothing is journalled or rewritten (a restore runs no effects). -> how many entities arrived.
+    /// Start-up, after the packs: the RESIDENT classes' rows arrive in the engine (their class, their props, the `parents` stamp among them), so what the model wrote
+    /// (a banner line, a trip, a message) outlives the process; every other stored row of a LAZY class is only NOTED (`Core::unloaded`: eid -> class) and loads
+    /// when something refers to it (`fault_wanted`, `Fields::ensure`) or in the background (`warm_step`). A VIRTUAL class's row (an older run stored it) is neither. The rows
+    /// come back as they are, with one exception: a prop a GETTER wrote (`trigger:field:getter:*`, `trigger:field:rebuild`) is not read back: the rebuild that follows
+    /// computes it again from the restored inputs, so a getter that changed since the row was stored shows its new value. No setter runs and nothing is journalled or
+    /// rewritten (a restore runs no effects). -> how many entities arrived.
     pub fn load_stored_entities(&self) -> usize {
         let now = self.now();
+        let resident: Vec<String> = { let g = self.eng(); g.1.classes_with(crate::fields::Storage::Resident) };
         let mut n = 0;
-        let stamps: std::collections::HashMap<String, f64> = {
-            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-            let mut st = db.prepare(&format!("SELECT k, updated FROM {ROWS}")).expect("rows");
-            st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))).expect("rows").filter_map(|r| r.ok()).collect()
-        };
-        for (eid, row) in self.rows() {
+        for (eid, row, updated) in self.rows_with_updated(&resident.iter().map(|s| s.as_str()).collect::<Vec<_>>()) {
             let cls = row["cls"].as_str().unwrap_or("").to_string();
-            if cls.is_empty() || cls == PACK_CLASS || self.storage_of(&cls) == crate::fields::Storage::Virtual { continue; }
-            let writers = row["writers"].as_object().cloned().unwrap_or_default();
-            let props: Map<String, J> = row["props"].as_object().cloned().unwrap_or_default().into_iter()
-                .filter(|(k, _)| !writers.get(k).and_then(|w| w.as_str()).map_or(false, is_getter_write)).collect();
+            if cls.is_empty() || cls == PACK_CLASS { continue; }
             let mut g = self.eng(); let (core, f, _) = &mut *g;
-            if let Some(u) = stamps.get(&eid) { core.updated.insert(eid.clone(), *u); }
-            f.arrive(core, eid, cls, props, now);
+            core.updated.insert(eid.clone(), updated);
+            f.arrive(core, eid, cls, restore_props(&row), now);
             n += 1;
         }
+        self.note_unloaded();
+        self.start_warm();
         n
+    }
+
+    /// Every stored row that is neither loaded, nor of a VIRTUAL class, nor a Pack: noted as unloaded (eid -> class). A covering index answers it (no body is read).
+    fn note_unloaded(&self) {
+        let rows: Vec<(String, String)> = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            self.flush(&db);
+            let mut st = db.prepare(&format!("SELECT k, cls FROM {ROWS} INDEXED BY c_field_cls")).expect("rows");
+            st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default()))).expect("rows").filter_map(|r| r.ok()).collect()
+        };
+        let mut g = self.eng(); let (core, f, _) = &mut *g;
+        for (eid, cls) in rows {
+            if cls.is_empty() || cls == PACK_CLASS || f.storage_of(&cls) != crate::fields::Storage::Lazy || core.docs.contains_key(&eid) { continue; }
+            core.unloaded.insert(eid, cls);
+        }
+    }
+
+    /// The warm boot's queue: the newest-`updated` unloaded rows, up to the `warm_rows` budget (the index on `updated` is covering: no body is read).
+    fn start_warm(&self) {
+        let budget = self.warm_rows.load(Ordering::SeqCst);
+        let mut q = std::collections::VecDeque::new();
+        if budget > 0 {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let g = self.eng();
+            let mut st = db.prepare(&format!("SELECT k FROM {ROWS} INDEXED BY c_field_updated ORDER BY updated DESC")).expect("rows");
+            let mut rows = st.query([]).expect("rows");
+            while let Ok(Some(r)) = rows.next() {
+                let k: String = r.get(0).unwrap_or_default();
+                if g.0.unloaded.contains_key(&k) { q.push_back(k); if q.len() >= budget { break; } }
+            }
+        }
+        *self.warm.lock().unwrap_or_else(|e| e.into_inner()) = q;
+    }
+
+    /// The boot fact `warm_rows`: how many lazy rows load in the background after start (newest `updated` first). Set before `load_stored_entities`.
+    pub fn set_warm_rows(&self, n: usize) { self.warm_rows.store(n, Ordering::SeqCst); }
+
+    /// One slice of the warm boot: load queued rows until `WARM_SLICE_ROWS` or `WARM_SLICE_MS`, then let the loop answer the door. -> whether more is waiting.
+    pub fn warm_step(&self) -> bool {
+        let t = std::time::Instant::now();
+        let mut done = 0;
+        let mut loaded = false;
+        while done < WARM_SLICE_ROWS && t.elapsed() < Duration::from_millis(WARM_SLICE_MS) {
+            let Some(eid) = self.warm.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else { break };
+            done += 1;
+            let now = self.now();
+            let mut g = self.eng(); let (core, f, _) = &mut *g;
+            loaded |= f.ensure(core, &eid, now);
+        }
+        if loaded { self.settle_loaded(); }
+        !self.warm.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+    }
+
+    /// Load every stored row now (what a restore did before there were lazy classes): for tools and tests that want the whole store in the engine.
+    pub fn load_everything(&self) -> usize {
+        let now = self.now();
+        let eids: Vec<String> = { let g = self.eng(); g.0.unloaded.keys().cloned().collect() };
+        let mut n = 0;
+        for e in eids { let mut g = self.eng(); let (core, f, _) = &mut *g; if f.ensure(core, &e, now) { n += 1; } }
+        self.settle_loaded();
+        n
+    }
+
+    /// How many stored entities are not loaded (lazy classes).
+    pub fn unloaded_count(&self) -> usize { self.eng().0.unloaded.len() }
+
+    /// A class a runtime pack just declared RESIDENT loads its stored rows now (it is "always loaded").
+    fn load_new_residents(&self) {
+        let now = self.now();
+        let eids: Vec<String> = { let g = self.eng(); let (core, f, _) = &*g; core.unloaded.iter().filter(|(_, c)| f.storage_of(c) == crate::fields::Storage::Resident).map(|(e, _)| e.clone()).collect() };
+        for e in eids { let mut g = self.eng(); let (core, f, _) = &mut *g; f.ensure(core, &e, now); }
+        self.settle_loaded();
+    }
+
+    /// Rows were loaded: their getters (dirty since the arrival) are computed, and what the engine made of them is stored.
+    fn settle_loaded(&self) {
+        let _t = self.txn();
+        let now = self.now();
+        { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.settle(core, &NullHost, now, seq); }
+        self.drain_apply();
+    }
+
+    /// What the engine looked for and did not find, though the store has it (`Core::wanted`): load those rows, let what read them recompute, until nothing more is asked.
+    fn fault_wanted(&self) {
+        for _ in 0..64 {
+            let now = self.now();
+            let mut g = self.eng();
+            let (core, f, seq) = &mut *g;
+            let any = core.fault_now() || !core.arrived.is_empty();
+            if !any { return; }
+            f.complete_arrivals(core, now);
+            f.settle(core, &NullHost, now, seq);
+        }
+    }
+
+    /// An OUTSIDE write or birth of an entity the store has and the engine has not (a lazy class): it loads first, so the write is made on what is stored.
+    fn ensure_loaded(&self, eid: &str, ts: f64) {
+        let mut g = self.eng(); let (core, f, _) = &mut *g;
+        f.ensure(core, eid, ts);
+    }
+
+    /// The rows of the given classes, in key order (the `cls` index: no other row is read).
+    fn rows_of_classes(&self, classes: &[&str]) -> std::collections::BTreeMap<String, J> {
+        self.rows_with_updated(classes).into_iter().map(|(k, v, _)| (k, v)).collect()
+    }
+
+    fn rows_with_updated(&self, classes: &[&str]) -> Vec<(String, J, f64)> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        self.flush(&db);
+        let mut out = vec![];
+        for c in classes {
+            let mut st = db.prepare(&format!("SELECT k, body, updated FROM {ROWS} WHERE cls = ?1")).expect("rows");
+            for r in st.query_map(params![c], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?))).expect("rows").filter_map(|r| r.ok()) {
+                out.push((r.0, serde_json::from_str(&r.1).unwrap_or(J::Null), r.2));
+            }
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
     }
 
     // ---- the store ---------------------------------------------------------------------------------------------------
@@ -660,7 +806,7 @@ impl Host {
         }
         slot.dirty = changed;   // nothing that differs: the row is not written
         if wrote { slot.updated = ts; }
-        drop(g);
+        drop(g); drop(db);   // the engine's lock is never taken under the store's (the loader takes the store's under the engine's)
         if wrote { self.eng().0.updated.insert(eid.to_string(), ts); }
     }
 
@@ -689,7 +835,7 @@ impl Host {
         w.insert(prop.into(), json!(stamp));
         slot.dirty = true;
         slot.updated = ts;
-        drop(g);
+        drop(g); drop(db);   // the engine's lock is never taken under the store's (the loader takes the store's under the engine's)
         self.eng().0.updated.insert(eid.to_string(), ts);
     }
 
@@ -732,7 +878,11 @@ impl Host {
     }
 
     // ---- reading -----------------------------------------------------------------------------------------------------
-    pub fn get(&self, eid: &str, prop: &str) -> J { self.eng().0.docs.get(eid).and_then(|e| e.props.get(prop).cloned()).unwrap_or(J::Null) }
+    /// One property of an entity as the engine holds it (null when it has none). A stored entity that is not loaded (a lazy class) is a REFERENCE like any other: it loads first.
+    pub fn get(&self, eid: &str, prop: &str) -> J {
+        if self.eng().0.unloaded.contains_key(eid) { self.ensure_loaded(eid, self.now()); self.settle_loaded(); }
+        self.eng().0.docs.get(eid).and_then(|e| e.props.get(prop).cloned()).unwrap_or(J::Null)
+    }
     /// The engine's mirror: eid -> {cls, props}.
     pub fn snapshot(&self) -> std::collections::BTreeMap<String, J> {
         self.eng().0.docs.iter().map(|(k, e)| (k.clone(), json!({"cls": e.cls, "props": e.props}))).collect()

@@ -38,12 +38,15 @@ fn a_fresh_banner_is_born_once_and_its_text_is_the_default_banner() {
 
 fn turn(h: &Host, n: u32, state: &str, ended: f64, said: Option<&str>) {
     // as the chat makes them: the class of the eid's namespace (Chat), the kind in `parents`
-    let mut p = Map::new(); p.insert("state".into(), json!(state)); p.insert("ended".into(), json!(ended)); p.insert("parents".into(), json!(["cls:chatturn"]));
-    h.born(&format!("membrane::Chat:message:{n}:turn"), "Chat", p, "person");
+    let eid = format!("membrane::Chat:message:{n}:turn");
+    let mut p = Map::new(); p.insert("ended".into(), json!(ended)); p.insert("parents".into(), json!(["cls:chatturn"]));
+    h.born(&eid, "Chat", p, "person");
     if let Some(t) = said {
         let mut r = Map::new(); r.insert("text".into(), json!(t)); r.insert("error".into(), json!(state == "error")); r.insert("parents".into(), json!(["cls:chatresponse"]));
-        h.born(&format!("membrane::Chat:message:{n}:turn:response"), "Chat", r, "person");
+        h.born(&format!("{eid}:response"), "Chat", r, "person");
     }
+    h.born("membrane::Chat:main", "Chat", Map::new(), "person");
+    h.write(&eid, "state", json!(state), "person");   // the turn ends with a write of `state`, as the chat's setters do: the chat then names it its last turn
     h.pump();
 }
 

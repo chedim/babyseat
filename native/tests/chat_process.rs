@@ -700,6 +700,21 @@ fn a_turn_that_was_running_when_the_seat_stopped_is_an_error_after_the_restart()
     assert!(terminate(&mut run2));
 }
 
+#[test]
+fn an_interrupted_turn_is_found_in_the_store_not_through_what_the_warm_boot_loaded() {
+    // the turns are a LAZY class: the warm boot is off here (warm_rows=0), so the running turn is not loaded when the seat starts, and is still found
+    let (mut run, port, dir) = fake_seat("interrupted-cold", &["--fact", "warm_rows=0"]);
+    let id = send(port, "stopped midway");
+    wait("running", || (view(port, &id)["state"] == "running").then_some(()));
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
+    // read the STORE's rows only (a poll of the message would load it, and the load itself would make the engine look at the turn)
+    let turn = format!("membrane::Chat:message:{id}:turn");
+    wait("the turn marked error in the store", || { let (r, _) = call(port2, "entity_query", json!({"q": format!("name~:{turn}"), "full": true})); (r.contains("\"state\":\"error\"")).then_some(()) });
+    assert_eq!(view(port2, &id)["response"], "interrupted: the seat stopped while this turn was running");
+    assert!(terminate(&mut run2));
+}
+
 fn returns(port: u16) -> String { call(port, "entity_query", json!({"q": "kind:Return", "count": true})).0 }
 
 #[test]

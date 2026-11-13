@@ -4,7 +4,7 @@ use membrane_vm::host::{Host, Options};
 use rusqlite::Connection;
 use serde_json::{json, Map, Value as J};
 
-const PACK: &str = "PACK churn 1\nBox.double getter: this.n * 2\nBox.label getter: 'box ' + str(this.n)\n";
+const PACK: &str = "PACK churn 1\nRESIDENT Box\nBox.double getter: this.n * 2\nBox.label getter: 'box ' + str(this.n)\n";
 
 fn tmpfile(tag: &str) -> String {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();

@@ -266,3 +266,179 @@ fn an_old_store_gets_the_columns_and_a_backfill_from_the_journal_once() {
     let n: i64 = db.query_row("SELECT count(*) FROM pragma_table_info('c_field') WHERE name IN ('cls', 'updated')", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 2, "each column once");
 }
+
+// ---- LAZY LOAD and the WARM BOOT: the packs and the RESIDENT rows at start, the rest on first reference and in the background, newest first --------------------------
+const LAZY: &str = "PACK l 1
+RESIDENT Peek
+Peek.val getter: prop(this.target, 'n')
+Box.double getter: this.n * 2
+Box.go on-setter bump:
+  WHEN this.go == True:
+    this.n = this.n + 10
+Box.made on-setter make:
+  WHEN this.made == True:
+    ('Box:new').n = 7
+";
+
+/// a store of an earlier run: `n` Box rows (n = i) and what a resident class holds
+fn earlier(file: &str, n: usize) {
+    let h = file_host(file);
+    h.load_pack("l", LAZY).unwrap();
+    h.rebuild();
+    for i in 0..n { h.born(&format!("Box:{i}"), "Box", props(serde_json::json!({"n": i})), "person"); }
+    h.born("Peek:p", "Peek", props(serde_json::json!({"target": "Box:3"})), "person");
+    h.pump();
+}
+fn restarted(file: &str) -> Host {
+    let h = file_host(file);
+    h.load_pack("l", LAZY).unwrap();
+    h.load_stored_entities();
+    h.rebuild();
+    h
+}
+
+#[test]
+fn the_restore_loads_the_resident_rows_and_leaves_the_lazy_ones_in_the_store() {
+    let file = tmpfile("lazy1");
+    earlier(&file, 50);
+    let h = restarted(&file);
+    assert!(h.snapshot().contains_key("Peek:p"), "a RESIDENT class is loaded at start");
+    assert!(!h.snapshot().keys().any(|k| k.starts_with("Box:")) || h.snapshot().keys().filter(|k| k.starts_with("Box:")).count() < 50, "the lazy rows are not all loaded");
+    assert_eq!(h.unloaded_count(), 50 - h.snapshot().keys().filter(|k| k.starts_with("Box:")).count());
+}
+
+#[test]
+fn a_getter_that_reads_an_unloaded_entity_recomputes_when_it_loads() {
+    let file = tmpfile("lazy2");
+    earlier(&file, 10);
+    let h = restarted(&file);
+    h.pump();
+    assert_eq!(h.get("Peek:p", "val"), serde_json::json!(3), "the reference loaded Box:3 and the getter that read it recomputed");
+    assert!(h.snapshot().contains_key("Box:3"));
+    assert_eq!(h.get("Box:3", "double"), serde_json::json!(6), "and its own getters ran");
+}
+
+#[test]
+fn a_lazy_entity_written_by_a_setter_after_a_restart_behaves_as_if_it_had_been_loaded() {
+    let file = tmpfile("lazy3");
+    earlier(&file, 10);
+    let h = restarted(&file);
+    assert!(!h.snapshot().contains_key("Box:5"));
+    // an outside write
+    h.write("Box:5", "go", serde_json::json!(true), "person");
+    assert_eq!(h.get("Box:5", "n"), serde_json::json!(15), "the stored n (5) was there when the setter read it");
+    // a setter's write to another entity: it exists in the store, the setter must not create it anew
+    h.write("Box:6", "made", serde_json::json!(true), "person");
+    assert_eq!(h.get("Box:6", "n"), serde_json::json!(6));
+    let again = restarted(&file);
+    again.write("Box:2", "made", serde_json::json!(true), "person");
+    let db = rusqlite::Connection::open(&file).unwrap();
+    let body: String = db.query_row("SELECT body FROM c_field WHERE k = 'Box:5'", [], |r| r.get(0)).unwrap();
+    assert!(body.contains("\"n\":15"), "{body}");
+}
+
+#[test]
+fn a_setter_that_writes_a_stored_but_unloaded_entity_changes_that_entity_not_a_new_one() {
+    let file = tmpfile("lazy4");
+    {
+        let h = file_host(&file);
+        h.load_pack("l", LAZY).unwrap();
+        h.rebuild();
+        h.born("Box:new", "Box", props(serde_json::json!({"n": 1, "keep": "me"})), "person");
+        h.born("Box:t", "Box", props(serde_json::json!({"n": 0})), "person");
+    }
+    let h = restarted(&file);
+    assert!(!h.snapshot().contains_key("Box:new"));
+    h.write("Box:t", "made", serde_json::json!(true), "person");   // ('Box:new').n = 7
+    assert_eq!(h.get("Box:new", "n"), serde_json::json!(7));
+    assert_eq!(h.get("Box:new", "keep"), serde_json::json!("me"), "the stored properties came with it");
+}
+
+#[test]
+fn instances_of_a_lazy_class_sees_only_the_loaded_ones_and_a_resident_class_sees_all() {
+    let file = tmpfile("lazy5");
+    {
+        let h = file_host(&file);
+        h.load_pack("l", "PACK l 1\nRESIDENT Res\nBox.n getter: 1\nSee.lazy getter: len(instances('Box'))\nSee.res getter: len(instances('Res'))\n").unwrap();
+        h.rebuild();
+        for i in 0..20 { h.born(&format!("Box:{i}"), "Box", props(serde_json::json!({})), "person"); h.born(&format!("Res:{i}"), "Res", props(serde_json::json!({})), "person"); }
+    }
+    let h = file_host(&file);
+    h.load_pack("l", "PACK l 1\nRESIDENT Res\nBox.n getter: 1\nSee.lazy getter: len(instances('Box'))\nSee.res getter: len(instances('Res'))\n").unwrap();
+    h.load_stored_entities();
+    h.born("See:x", "See", props(serde_json::json!({})), "person");
+    h.pump();
+    assert_eq!(h.get("See:x", "res"), serde_json::json!(20), "a RESIDENT class is whole");
+    assert_eq!(h.get("See:x", "lazy"), serde_json::json!(0), "a lazy class lists only what is loaded");
+    h.write("Box:4", "touch", serde_json::json!(1), "person");
+    h.pump();
+    assert_eq!(h.get("See:x", "lazy"), serde_json::json!(1), "a reference loaded one, and the reader of the class recomputed");
+}
+
+#[test]
+fn the_warm_boot_loads_the_newest_rows_first_up_to_the_budget_in_the_background() {
+    let file = tmpfile("warm");
+    {
+        let h = timed(Some(&file), 1000.0);
+        h.load_pack("l", LAZY).unwrap();
+        h.rebuild();
+        for i in 0..40 { h.born(&format!("Box:{i}"), "Box", props(serde_json::json!({"n": i})), "person"); }
+        h.write("Box:7", "n", serde_json::json!(70), "person");   // the newest write
+    }
+    let h = timed(Some(&file), 9000.0);
+    h.load_pack("l", LAZY).unwrap();
+    h.set_warm_rows(10);
+    h.load_stored_entities();
+    assert_eq!(h.snapshot().keys().filter(|k| k.starts_with("Box:")).count(), 0, "start loads no lazy row");
+    let mut steps = 0;
+    while h.warm_step() { steps += 1; assert!(steps < 100); }
+    let loaded: Vec<String> = h.snapshot().keys().filter(|k| k.starts_with("Box:")).cloned().collect();
+    assert_eq!(loaded.len(), 10, "the budget: {loaded:?}");
+    assert!(loaded.contains(&"Box:7".to_string()), "the last written first");
+    assert!(loaded.contains(&"Box:39".to_string()) && !loaded.contains(&"Box:0".to_string()), "newest first: {loaded:?}");
+    assert_eq!(h.get("Box:7", "n"), serde_json::json!(70));
+    assert_eq!(h.get("Box:7", "double"), serde_json::json!(140), "warmed rows run their getters");
+}
+
+#[test]
+fn a_retired_entity_takes_its_unloaded_children_with_it() {
+    let file = tmpfile("lazy6");
+    {
+        let h = file_host(&file);
+        h.load_pack("l", "PACK l 1\nBox.done on-setter bye:\n  WHEN this.done == True:\n    this.retire = True\n").unwrap();
+        h.rebuild();
+        h.born("Box:a", "Box", props(serde_json::json!({})), "person");
+        h.born("Box:a:child", "Box", props(serde_json::json!({})), "person");
+    }
+    let h = file_host(&file);
+    h.load_pack("l", "PACK l 1\nBox.done on-setter bye:\n  WHEN this.done == True:\n    this.retire = True\n").unwrap();
+    h.load_stored_entities();
+    h.write("Box:a", "done", serde_json::json!(true), "person");
+    assert_eq!(count(&file, "Box:%"), 0, "both rows are gone");
+    assert_eq!(h.unloaded_count(), 0, "and the child is not waiting to load");
+}
+
+#[test]
+fn a_class_a_pack_lists_with_instances_is_loaded_whole_or_is_virtual() {
+    // `instances('<Class>')` sees only the loaded entities of a lazy class: a shipped pack that lists a class must declare it RESIDENT (or VIRTUAL: all live ones are loaded)
+    let mut all = shipped_texts();
+    let r = repo();
+    all.push(("goalgraph".into(), std::fs::read_to_string(r.join("native/packs/goalgraph.c1f")).unwrap()));   // the built-in pack owns Goal, Task, Wait and Decision
+    for f in std::fs::read_dir(r.join("membrane/packs")).unwrap().flatten() {
+        let p = f.path();
+        if p.extension().map_or(false, |e| e == "c1f") { let n = p.file_stem().unwrap().to_string_lossy().to_string(); if !all.iter().any(|(m, _)| *m == n) { all.push((n, std::fs::read_to_string(&p).unwrap())); } }
+    }
+    let mut declared = std::collections::BTreeSet::new();
+    for (_, t) in &all { let p = parse_full(t).unwrap(); for c in p.virtuals.iter().chain(p.residents.iter()) { declared.insert(c.clone()); } }
+    let mut bad = vec![];
+    for (n, t) in &all {
+        for l in t.lines().filter(|l| !l.trim_start().starts_with("--")) {
+            for (i, _) in l.match_indices("instances('") {
+                let c: String = l[i + 11..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                if !declared.contains(&c) { bad.push(format!("{n}: instances('{c}')")); }
+            }
+        }
+    }
+    bad.sort(); bad.dedup();
+    assert!(bad.is_empty(), "a class listed with instances must be declared RESIDENT or VIRTUAL by its owner pack:\n{}", bad.join("\n"));
+}
