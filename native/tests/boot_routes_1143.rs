@@ -117,3 +117,36 @@ fn the_voice_state_write_and_read_answer_on_a_fresh_store_in_the_released_shape(
     assert_eq!(st, 200, "{s}");
     assert_eq!(s["state"]["in"], json!({"on": false, "mode": "ptt", "device": "phone"}), "{s}");
 }
+
+// ---- the opencode stubs the chat reads on boot: /agent and /config -----------------------------------------------------------------------------------
+#[test]
+fn the_agent_list_carries_the_primary_agents_the_chat_picker_needs_in_the_released_shape() {
+    let run = seat("agent");
+    for path in ["/ui/serve/agent", "/agent"] {
+        let (st, a) = api(&run, "GET", path, J::Null);
+        same_shape("agent", st, &a);
+        let rows = a.as_array().unwrap();
+        let names: Vec<&str> = rows.iter().map(|r| r["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["build", "plan", "general", "explore", "watch"], "{path}: the released rows, in order");
+        let primary: Vec<&str> = rows.iter().filter(|r| r["mode"] == "primary").map(|r| r["name"].as_str().unwrap()).collect();
+        assert_eq!(primary, ["build", "plan"], "{path}: with NO primary agent the attached TUI's Enter does nothing");
+        assert_eq!(api(&run, "POST", path, json!({})).0, 405, "{path}: read only");
+    }
+}
+
+#[test]
+fn the_config_names_the_model_the_page_shows_and_the_provider_that_serves_it() {
+    let run = seat("config");
+    for path in ["/ui/serve/config", "/config"] {
+        let (st, c) = api(&run, "GET", path, J::Null);
+        assert_eq!(st, 200, "{c}");
+        // the page's `_loadModel` reads `model`; seat-full's default model is claude
+        assert_eq!(c["model"], json!("membrane/claude"), "{c}");
+        assert_eq!(c["small_model"], json!("membrane/claude"), "{c}");
+        assert_eq!(c["$schema"], json!("https://opencode.ai/config.json"), "{c}");
+        assert_eq!(c["provider"]["membrane"]["npm"], json!("@ai-sdk/openai-compatible"), "{c}");
+        assert_eq!(c["provider"]["membrane"]["options"]["baseURL"], json!(format!("http://127.0.0.1:{}/v1", run.port)), "{c}");
+        assert_eq!(c["provider"]["membrane"]["models"], json!({"claude": {"name": "claude"}}), "{c}");
+        assert_eq!(c["mcp"], json!({}), "{c}");
+    }
+}
