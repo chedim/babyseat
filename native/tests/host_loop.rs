@@ -371,3 +371,32 @@ fn a_request_streams_head_then_frames_in_write_order_and_end_closes() {
     assert_eq!(h.get(&req, "send_result")["rc"], json!(2));
     expr::set_clock(None);
 }
+
+/// one `send` may carry SEVERAL frames (`frames: [{event?, data}, ...]`): they are queued in that order, as if each had been a send of its own
+/// (a producer that has three things to say in one round writes the stream once: two setters of one round writing `send` would drop the second)
+#[test]
+fn one_send_may_carry_several_frames_that_arrive_in_order() {
+    use_clock(0);
+    let h = Host::open({ let mut o = Options::new(None); o.plain = true; o.clock = ticking(); o }).unwrap();
+    h.load_pack("st", STREAMER).unwrap();
+    h.rebuild();
+    h.born("Http:door", "Http", Map::new(), host::BOOT_WRITER);
+    h.write("Http:door", "listen", json!({"id": "l1", "port": 0}), host::BOOT_WRITER);
+    pump_until(&h, |h| !h.get("Http:door", "listen_result").is_null());
+    let port = h.get("Http:door", "listen_result")["port"].as_u64().unwrap();
+    let rx = client(port, "/s");
+    pump_until(&h, |h| h.snapshot().iter().any(|(k, v)| k.starts_with("Request:") && !v["props"]["send_result"].is_null()));
+    let req = h.snapshot().keys().find(|k| k.starts_with("Request:")).unwrap().clone();
+    h.write(&req, "send", json!({"id": "many", "frames": [{"event": "a", "data": 1}, {"data": "two"}, {"event": "c", "data": {"k": [3]}}]}), "person");
+    pump_until(&h, |h| h.get(&req, "send_result")["id"] == json!("many"));
+    assert_eq!(h.get(&req, "send_result")["rc"], json!(0));
+    h.write(&req, "send", json!({"id": "bad", "frames": [{"event": "x\ny", "data": 1}]}), "person");
+    pump_until(&h, |h| h.get(&req, "send_result")["id"] == json!("bad"));
+    assert_eq!(h.get(&req, "send_result")["rc"], json!(2), "a frame with a bad event name refuses the whole send");
+    h.write(&req, "end", json!({"id": "e"}), "person");
+    pump_until(&h, |h| !h.get(&req, "end_result").is_null());
+    let got = rx.recv_timeout(Duration::from_secs(10)).expect("the client reads to the end once closed");
+    let (_, body) = got.split_once("\r\n\r\n").unwrap();
+    assert_eq!(body, "event: hello\ndata: {\"n\":1}\n\nevent: a\ndata: 1\n\ndata: \"two\"\n\nevent: c\ndata: {\"k\":[3]}\n\n");
+    expr::set_clock(None);
+}

@@ -5,7 +5,7 @@
 //! is read by Content-Length (no chunked bodies: 411).
 //! An EVENT STREAM is the other way to answer (docs/cliffvm.md, "The event stream"): `Request.stream = {id, status?, headers?}` writes the head
 //! of a `text/event-stream` response and keeps the connection open; `Request.send = {id, event?, data}` appends one event
-//! (`event: <name>` and `data: <json>`); `Request.end = {id}` closes. The frames are queued in the order the writes were made (on the
+//! (`event: <name>` and `data: <json>`; `{id, frames: [{event?, data}, ...]}` appends several in one write); `Request.end = {id}` closes. The frames are queued in the order the writes were made (on the
 //! engine's thread) and written by the effect threads, so two sends never swap.
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -256,13 +256,20 @@ pub fn stream_push(st: &Store, req: &J, conn: Option<u64>, end: bool) -> Result<
     let mut g = s.lock().unwrap_or_else(|e| e.into_inner());
     if g.dead || g.closed { return Err(refuse("no open stream (closed already, or the client went away)")); }
     if end { g.closed = true; g.queue.push_back(None); return Ok(conn); }
-    let mut frame = String::new();
-    if let Some(e) = req.get("event").and_then(|e| e.as_str()) {
-        if e.contains(['\r', '\n']) { return Err(refuse("an event name is one line")); }
-        frame.push_str(&format!("event: {}\n", e));
+    // one frame: {event?, data}; or SEVERAL in one write: {frames: [{event?, data}, ...]}, queued in that order (all or none: one bad name refuses the send)
+    let one = [req.clone()];
+    let list: &[J] = match req.get("frames").and_then(|f| f.as_array()) { Some(fs) => fs, None => &one };
+    let mut queued = Vec::with_capacity(list.len());
+    for f in list {
+        let mut frame = String::new();
+        if let Some(e) = f.get("event").and_then(|e| e.as_str()) {
+            if e.contains(['\r', '\n']) { return Err(refuse("an event name is one line")); }
+            frame.push_str(&format!("event: {}\n", e));
+        }
+        frame.push_str(&format!("data: {}\n\n", f.get("data").cloned().unwrap_or(J::Null)));
+        queued.push(frame.into_bytes());
     }
-    frame.push_str(&format!("data: {}\n\n", req.get("data").cloned().unwrap_or(J::Null)));
-    g.queue.push_back(Some(frame.into_bytes()));
+    for b in queued { g.queue.push_back(Some(b)); }
     Ok(conn)
 }
 
