@@ -44,6 +44,8 @@ pub mod cli;
 #[cfg(feature = "store")]
 pub mod http;
 pub mod jwt;
+#[cfg(unix)]
+pub mod owner;
 #[cfg(feature = "store")]
 pub mod fetch;
 #[cfg(feature = "store")]
