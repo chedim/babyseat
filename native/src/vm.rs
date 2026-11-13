@@ -647,8 +647,31 @@ impl Core {
 
     /// A write's target: an entity, or the id of one (a string).
     pub fn eval_ref(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Option<String> {
+        self.eval_target(src, vars, extra).ok()
+    }
+
+    /// `eval_ref`, with the reason when there is no entity (a null key's own reason, an error).
+    pub fn eval_target(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<String, String> {
         let env = Self::env_of(vars, extra);
-        match self.eval(src, &env) { Ok(V::Ent(e)) | Ok(V::Str(e)) => Some(e), _ => None }
+        match self.eval(src, &env) {
+            Ok(V::Ent(e)) | Ok(V::Str(e)) => Ok(e),
+            Ok(V::Nil(r)) => Err(r),
+            Ok(V::None) => Err("error: the target is null".into()),
+            Ok(_) => Err("error: the target of a write is an entity or the id of one".into()),
+            Err(e) => Err(format!("error: {}", e)),
+        }
+    }
+
+    /// A constructor `Class(name: value, ...)`: its class and its arguments' values (a null argument is `null`).
+    pub fn eval_ctor(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<(String, Vec<(String, J)>), String> {
+        let env = Self::env_of(vars, extra);
+        let (cls, args) = expr::parse_ctor(src)?;
+        let mut out = vec![];
+        for (name, node) in &args {
+            let v = expr::eval(node, &env, &View { core: self }).map_err(|e| format!("{}({}: ...): {}", cls, name, e))?;
+            out.push((name.clone(), expr::to_json(&v).map_err(|e| format!("{}({}: ...): {}", cls, name, e))?));
+        }
+        Ok((cls, out))
     }
 
     /// Is the entity of this class (its own, or an ancestor's)?

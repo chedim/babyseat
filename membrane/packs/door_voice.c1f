@@ -14,8 +14,10 @@ IMPORT fs 1
 --   below is the kind the engine mirrors them under (they stay class Config; a Voice getter is all the mirror needs), and the setter
 --   writes the entity the Python seat reads: the engine's write is applied to the seat's store entity (same eid, same properties).
 --   Same rules as voice_io.set_state: in_mode outside IN_MODES falls back to 'off', device is clipped to 80, an absent in_on /
---   out_on / in_mode / device leaves the old value, state_ts is stamped. A person with no voice entity yet (nothing made them:
---   a write never creates a Config entity) gets 404 'no voice entity yet'.
+--   out_on / in_mode / device leaves the old value, state_ts is stamped. A person with no voice entities yet gets them on the first
+--   state write: a CONSTRUCTOR (`membrane::Config:voice:in[slug] = Voice(...)`, idempotent, the target is the identity) makes each at
+--   the Python seat's name and stamps the kind mirror (`parents: ['cls:voice']`, as voice_io.entity does). The old values (what the
+--   body leaves out keeps) are read from the store row by eid, stamped or not, so an old unstamped entity is mirrored, not reset.
 -- NOT PORTED (501, with the reason; docs/python-to-c1f.md):
 --   /ui/stt: a recording is bytes; the door's body is text (lossy for a WAV), and the forward is a multipart upload.
 -- /ui/log is a File write per request: rotate to .log.old past 2 MB (File.move), then append (File.write), 204 when the receipt is in.
@@ -46,36 +48,39 @@ Request.vo_reply getter:
 
 -- ---- /membrane/voice/state ----------------------------------------------------------------------------------------------------------
 Request.vs_go getter: this.path == '/membrane/voice/state' and this.method == 'POST' and this.vo_person != ''
--- the entity is in the store AND carries the kind (parents has cls:voice): only then does the engine hold it, and a write reaches it
+-- the store's rows by eid (none for a person with no entities yet)
 Request.vs_in_eid getter: 'membrane::Config:voice:in:' + this.vo_slug
 Request.vs_out_eid getter: 'membrane::Config:voice:out:' + this.vo_slug
-Request.vs_in_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ? AND json_extract(body, '$.d.data.properties.parents') LIKE '%cls:voice%'", this.vs_in_eid) if this.vs_go else None
-Request.vs_out_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ? AND json_extract(body, '$.d.data.properties.parents') LIKE '%cls:voice%'", this.vs_out_eid) if this.vs_go else None
-Request.vs_found getter: len(this.vs_in_q or []) > 0 and len(this.vs_out_q or []) > 0
+Request.vs_in_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", this.vs_in_eid) if this.vs_go else None
+Request.vs_out_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", this.vs_out_eid) if this.vs_go else None
+-- both reads have landed (a row or none: a person with no entities yet is made by the constructors below)
+Request.vs_landed getter: this.vs_in_q != None and this.vs_out_q != None
 Request.vs_in getter: (json(prop(this.vs_in_q[0], 'p')) or {}) if len(this.vs_in_q or []) > 0 else {}
 Request.vs_out getter: (json(prop(this.vs_out_q[0], 'p')) or {}) if len(this.vs_out_q or []) > 0 else {}
-Request.vs_ready getter: this.vs_go and this.vs_found
+Request.vs_ready getter: this.vs_go and this.vs_landed
 -- each value is the one the body asks for, else the one the entity has (voice_io.set_state)
-Request.vs_in_on getter: (not not prop(this.jbody, 'in_on')) if prop(this.jbody, 'in_on') != None else prop(this.vs_in, 'on')
-Request.vs_out_on getter: (not not prop(this.jbody, 'out_on')) if prop(this.jbody, 'out_on') != None else prop(this.vs_out, 'on')
-Request.vs_mode getter: (prop(this.jbody, 'in_mode') if prop(this.jbody, 'in_mode') in ['off', 'ptt', 'lock', 'hotword', 'addressed'] else 'off') if prop(this.jbody, 'in_mode') != None else prop(this.vs_in, 'mode')
+Request.vs_in_on getter: (not not prop(this.jbody, 'in_on')) if prop(this.jbody, 'in_on') != None else (prop(this.vs_in, 'on') or False)
+Request.vs_out_on getter: (not not prop(this.jbody, 'out_on')) if prop(this.jbody, 'out_on') != None else (prop(this.vs_out, 'on') or False)
+Request.vs_mode getter: (prop(this.jbody, 'in_mode') if prop(this.jbody, 'in_mode') in ['off', 'ptt', 'lock', 'hotword', 'addressed'] else 'off') if prop(this.jbody, 'in_mode') != None else (prop(this.vs_in, 'mode') or 'off')
 Request.vs_dev getter: str(prop(this.jbody, 'device') or '')
 Request.vs_in_dev getter: head(this.vs_dev, 80) if this.vs_dev != '' else prop(this.vs_in, 'device')
 Request.vs_out_dev getter: head(this.vs_dev, 80) if this.vs_dev != '' else prop(this.vs_out, 'device')
 Request.vs_write getter: True if this.vs_ready else None
 Request.vs_write on-setter voice-state:
   WHEN this.vs_write == True:
-    ('membrane::Config:voice:in:' + this.vo_slug).on = this.vs_in_on
-    ('membrane::Config:voice:in:' + this.vo_slug).mode = this.vs_mode
-    ('membrane::Config:voice:in:' + this.vo_slug).device = this.vs_in_dev
-    ('membrane::Config:voice:in:' + this.vo_slug).state_ts = clock
-    ('membrane::Config:voice:out:' + this.vo_slug).on = this.vs_out_on
-    ('membrane::Config:voice:out:' + this.vo_slug).device = this.vs_out_dev
-    ('membrane::Config:voice:out:' + this.vo_slug).state_ts = clock
+    slug = this.vo_slug
+    membrane::Config:voice:in[slug] = Voice(voice_io: 'in', person: prop(this.vs_in, 'person') or this.vo_person)
+    membrane::Config:voice:out[slug] = Voice(voice_io: 'out', person: prop(this.vs_out, 'person') or this.vo_person)
+    membrane::Config:voice:in[slug].on = this.vs_in_on
+    membrane::Config:voice:in[slug].mode = this.vs_mode
+    membrane::Config:voice:in[slug].device = this.vs_in_dev
+    membrane::Config:voice:in[slug].state_ts = clock
+    membrane::Config:voice:out[slug].on = this.vs_out_on
+    membrane::Config:voice:out[slug].device = this.vs_out_dev
+    membrane::Config:voice:out[slug].state_ts = clock
 Request.vs_reply getter:
   WHEN this.vo_person == '': {'status': 200, 'body': {'ok': False, 'error': 'no person'}}
   ELSE WHEN this.vs_in_q == None or this.vs_out_q == None: None
-  ELSE WHEN not this.vs_found: {'status': 404, 'body': {'ok': False, 'error': 'no voice entity yet'}}
   ELSE: {'status': 200, 'body': {'ok': True, 'state': {'in': {'on': this.vs_in_on, 'mode': this.vs_mode, 'device': this.vs_in_dev}, 'out': {'on': this.vs_out_on, 'device': this.vs_out_dev}}}}
 
 -- ---- /ui/stt ------------------------------------------------------------------------------------------------------------------------

@@ -71,6 +71,45 @@ A bare line `name = expr` (no dotted target; a write always has one, like `this.
   a local twice in one block is refused too; a block that ends in a local (no value) is refused; a local goes before the value.
 No other syntax was added (no `;`, no multi-line local).
 
+## Entity literals and `[key]` (operator, 2026-11-12)
+An entity name written WITHOUT quotes is an entity, in an expression and on the left of a write: `membrane::Config:voice:in`,
+`Goal:board`. `::` follows a namespace, `:` joins the segments. A colon is part of a name only when a name character follows it
+DIRECTLY (`Goal:board`, `Config:voice:in`); the colon that ends a line (`WHEN cond:`, `X.f getter:`) or is followed by a space is
+what it always was, and so is everything inside quotes. A segment after a colon may be a word that is an operator elsewhere
+(`voice:in` is a segment, not the `in` operator). Write named arguments with a space after the colon (`kind: 'in'`): `kind:x` would
+read as an entity.
+- `[expr]` directly after an entity literal appends `:<value>` as the last segment: `membrane::Chat:message[123]` is
+  `membrane::Chat:message:123`, `membrane::Config:voice:in[slug]` evaluates `slug` (a local, a getter or a loop name; a bare name
+  is NEVER a literal segment). The value must be an integer or non-empty text. A float, bool, list, dict, entity or null gives a
+  reasoned null (`error: the key of <entity> is ...`) and, on the left of a write, creates and writes nothing; a null key passes on
+  its own reason.
+- The path may go on after a `]`: `:segment` (directly after the `]`) is a CHILD entity, `.name` is a PROPERTY.
+  `membrane::Chat:message[id]:response` is `membrane::Chat:message:<id>:response` (an entity); `message[id].response` reads the
+  property `response` of the message. A `]` then a colon then a space or the end of the line still ends a `WHEN` / header line.
+  Further `[key]`s may follow (`Chat:a[1]:b[2]`); `.prop` after the path reads a property: `membrane::Config:voice:in[slug].on`.
+- On a list or dict, `[x]` stays an index; it is a key only when its left operand is an entity literal.
+- The quoted spellings keep working unchanged: `('Goal:' + slug).status = ..` creates `Goal:<slug>` exactly as before (creation:
+  `<Class>:<key>` of a class the pack owns or imports). Inference: a literal is `Entity(Class)` (the first segment after a
+  namespace), nullable when a key may be null or is not an int or text.
+
+## Constructors (entity classes only)
+A call to a class name with NAMED arguments, on the right of a write whose left is an entity, makes that entity:
+`membrane::Config:voice:in[slug] = Voice(kind: 'in', person: p)`, `membrane::Chat:message[id]:response = Response(text: t)`.
+- **The identity comes from the target** (the left side). There is no `key` argument and no declared identity: the same class is
+  made at any eid the target names, and the same target is the same entity.
+- Creation is a write's creation path with a write's rules: the class must be one the pack OWNS (declares a getter or setter on) or
+  IMPORTS; otherwise nothing is created and a receipt says `error: constructor ...` (a reasoned refusal, never a crash). A null or
+  bad `[key]` creates nothing and the receipt carries its reason. The named arguments are set as the first properties (a null
+  argument sets nothing); arguments are all named (`Voice(1)` is not a constructor) and none repeats.
+- **Idempotent**: if the entity exists nothing is created again, and an argument fills only a property that has no value (an existing
+  value is never overwritten). So a setter may construct on every request.
+- **Foreign eid prefix**: when the target's first segment is not the class (`membrane::Config:...` built as `Voice(...)`; the class
+  cannot be read from the eid) the entity is created as the class its eid names (`Config`, as the Python seat made it) and stamped
+  `parents: ['cls:voice']`, the ISA kind-mirror (`voice_io.entity()` stamps the same), so the engine mirrors it by kind. A `Voice`
+  getter then runs on it.
+- Outside the right of such a write a constructor is a reasoned error. Inference: it is `Entity(Class)`, and its arguments are typed.
+- Out of scope: value classes (`Std.Url(raw: x)` natives), `Import`, identity declarations.
+
 ## Limits: the step budget (a dial)
 The old caps (an expression at most 64 nodes / 400 characters) are removed from the native VM; `membrane/ch.py` keeps them for its own
 triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is a reasoned null `error: budget exceeded (N steps)` (a getter's
@@ -89,7 +128,7 @@ a reserved name in `FAMILIES` and in the door's chain.
 `membrane/packs/surface.json` records, per pack, everything it touches from outside: its imports, its declared classes (and a count
 of members), the Boot facts it reads, the paths it claims, and the properties it WRITES on other entities (`Goal:*.status`, `*.answer` for
 a dynamic target, `ref(goal).replan` through a reference). `native/tests/contracts.rs` recomputes it from the pack text and fails on any
-difference. Reviewing a pack, an agent's branch or Memo's edit means reading the surface diff, not the code: a pack that starts
+difference (unquoted entity targets count like quoted ones: a keyed `membrane::Config:voice:in[slug].on = ..` is `membrane:*.on`, and a constructor is listed as `membrane:*=Voice()`). Reviewing a pack, an agent's branch or Memo's edit means reading the surface diff, not the code: a pack that starts
 writing a new property, claiming a new path or importing a new pack fails the test until the change is reviewed and recorded
 (`SURFACE_UPDATE=1 cargo test --test contracts surface`). There is no `private` keyword: the contract is the surface.
 

@@ -26,6 +26,10 @@
 //!   under `X.f getter:` are a block: locals, then the last line is the value; each WHEN arm is its own block
 //!   (`X.f getter WHEN c:` or `WHEN c:` with its lines indented below). A local may not shadow a property of `this`,
 //!   a getter of the class, a builtin, a loop name or an earlier local (the loader refuses it). A local is one line.
+//! - An entity name written without quotes is an entity literal, in expressions and on the left of a write: `Goal:board.status = 'x'`,
+//!   `membrane::Config:voice:in`. `::` follows a namespace, `:` joins segments, each colon directly followed by a name character
+//!   (`WHEN c:` at the end of a line still ends the condition). `[expr]` appends `:<value>` (an integer or text) as the last
+//!   segment: `Chat:message[id]`; the path may go on after it (`Chat:message[id]:response`, a child entity; `.response` is a property).
 //! - `--` starts a comment outside quotes.
 use crate::fields::{Getter, OnSet, LLM_CALL};
 
@@ -61,8 +65,32 @@ fn top_level(s: &str, hit: impl Fn(&str, usize) -> bool) -> Option<usize> {
     None
 }
 
-/// The colon that ends a branch's condition: the first one at depth 0 outside quotes.
-fn branch_colon(s: &str) -> Option<usize> { top_level(s, |s, i| s.as_bytes()[i] == b':') }
+/// A colon inside an unquoted entity name (`Goal:board`, `membrane::Config:x`, `Chat:message[id]:response`): directly between a name
+/// character (or a `]`, or the first colon of `::`) and a name character. The end-of-line colon of `WHEN c:` is not one.
+fn name_colon(s: &str, i: usize) -> bool {
+    let b = s.as_bytes();
+    if b[i] != b':' { return false; }
+    let nc = |x: Option<&u8>| x.map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_' || *c >= 0x80);
+    let (prev, next) = (if i > 0 { b.get(i - 1) } else { None }, b.get(i + 1));
+    (nc(next) && (nc(prev) || prev == Some(&b']') || prev == Some(&b':'))) || (next == Some(&b':') && nc(prev) && nc(b.get(i + 2)))
+}
+
+/// The colon that ends a branch's condition: the first one at depth 0 outside quotes that is not inside an entity name.
+fn branch_colon(s: &str) -> Option<usize> { top_level(s, |s, i| s.as_bytes()[i] == b':' && !name_colon(s, i)) }
+
+/// The last `.` at bracket depth 0 outside quotes: the property of a write's target (`Goal:g[a.b].status`, `(x.y).status`).
+fn last_top_dot(s: &str) -> Option<usize> {
+    let (mut q, mut depth, mut last) = (None::<char>, 0i32, None);
+    for (i, c) in s.char_indices() {
+        match q {
+            Some(o) => { if c == o { q = None; } continue; }
+            None if c == '\'' || c == '"' => { q = Some(c); continue; }
+            _ => {}
+        }
+        match c { '(' | '[' | '{' => depth += 1, ')' | ']' | '}' => depth -= 1, '.' if depth == 0 => last = Some(i), _ => {} }
+    }
+    last
+}
 
 /// The `=` of an assignment: not part of `==`, `!=`, `<=`, `>=`.
 fn assign_eq(s: &str) -> Option<usize> {
@@ -77,6 +105,9 @@ pub const FOR: &str = "FOR";
 pub const END: &str = "END";
 /// A local in a setter's writes: `(LET, name, expr)`.
 pub const LET: &str = "LET";
+/// A constructor in a setter's writes: `(<entity>, CTOR, "Class(name: value, ...)")`, written `<entity> = Class(name: value, ...)`.
+/// The entity is the identity of what is made; its text has no `.field`.
+pub const CTOR: &str = "(new)";
 
 fn is_name(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') && !s.chars().next().unwrap().is_ascii_digit()
@@ -143,7 +174,15 @@ fn statement(s: &str, at: usize) -> Result<W, String> {
     let rhs = rhs.as_str();
     if lhs == LLM_CALL { return Ok((LLM_CALL.into(), String::new(), rhs.into())); }
     if is_name(lhs) { return Ok((LET.into(), lhs.into(), rhs.into())); }    // a local
-    let (tgt, field) = lhs.rsplit_once('.').ok_or(format!("line {}: `{}` needs a target: write `this.{}`", at, lhs, lhs))?;
+    let Some(d) = last_top_dot(lhs) else {
+        // `<entity> = Class(name: value, ...)`: a constructor, the entity written is its identity
+        if top_level(lhs, name_colon).is_some() {
+            crate::expr::parse_ctor(rhs).map_err(|e| format!("line {}: `{}`: {}", at, lhs, e))?;
+            return Ok((lhs.into(), CTOR.into(), rhs.into()));
+        }
+        return Err(format!("line {}: `{}` needs a target: write `this.{}`", at, lhs, lhs));
+    };
+    let (tgt, field) = (&lhs[..d], &lhs[d + 1..]);
     if tgt.is_empty() || field.is_empty() { return Err(format!("line {}: bad target `{}`", at, lhs)); }
     Ok((tgt.into(), field.into(), rhs.into()))
 }
@@ -413,6 +452,7 @@ fn print_writes(out: &mut String, ws: &[W], indent: &str) {
         else if t == END { ind.truncate(ind.len().saturating_sub(2)); }
         else if t == LET { out.push_str(&format!("{}{} = {}\n", ind, p, v)); }
         else if t == LLM_CALL { out.push_str(&format!("{}{} = {}\n", ind, LLM_CALL, v)); }
+        else if p == CTOR { out.push_str(&format!("{}{} = {}\n", ind, t, v)); }
         else { out.push_str(&format!("{}{}.{} = {}\n", ind, t, p, v)); }
     }
 }
