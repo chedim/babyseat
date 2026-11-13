@@ -20,7 +20,7 @@ RESIDENT Pack
 -- receipt lands as `<verb>_result` on the entity: read it back.
 -- Methods: initialize, notifications/* (a request without an id: 202, no body), ping, tools/list, tools/call.
 
-Request.o_tools getter: this.path == '/mcp'
+Request.o_tools getter: this.route == '/mcp'
 Request.m_tools getter: ['POST']
 
 -- ---- Pack entities: the model's own packs (docs/cliffvm.md, "Pack entities") ----------------------------------------------------------

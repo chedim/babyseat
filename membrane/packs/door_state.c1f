@@ -21,7 +21,7 @@ RESIDENT Seat
 -- the class is declared here so the engine mirrors the presence entity
 Seat.is_presence getter: this.eid == 'membrane::presence'
 
-Request.o_state getter: this.path in ['/membrane/seat', '/membrane/seat/pause', '/membrane/seat/control', '/membrane/state', '/state', '/membrane/self/card', '/membrane/stats', '/membrane/quota', '/membrane/minds']
+Request.o_state getter: this.route in ['/membrane/seat', '/membrane/seat/pause', '/membrane/seat/control', '/membrane/state', '/state', '/membrane/self/card', '/membrane/stats', '/membrane/quota', '/membrane/minds']
 
 -- ---- the presence entity's facts ------------------------------------------------------------------------------------------------
 Request.st_seat getter: ([s for s in instances('Seat') if s.eid == 'membrane::presence'] or [None])[0]
@@ -48,13 +48,13 @@ Request.st_card_body getter: {'name': this.st_name, 'level': 0, 'rung_name': '',
 -- the allowed methods (the door answers 405 + allow); the not-ported routes answer 501 whatever the method (None: the family answers)
 Request.m_state getter:
   WHEN this.st_gap: None
-  ELSE WHEN this.path == '/membrane/seat/control': ['POST']
-  ELSE WHEN this.path == '/membrane/seat/pause': ['GET', 'POST']
+  ELSE WHEN this.route == '/membrane/seat/control': ['POST']
+  ELSE WHEN this.route == '/membrane/seat/pause': ['GET', 'POST']
   ELSE: ['GET']
 
 -- ---- the control writes: validate, then record the ask on the presence entity ----------------------------------------------------------
-Request.st_pause_ok getter: this.path == '/membrane/seat/pause' and (prop(this.jbody, 'paused') == True or prop(this.jbody, 'paused') == False)
-Request.st_ctl_ok getter: this.path == '/membrane/seat/control' and len([k for k in ['paused', 'loops_max', 'self', 'accept', 'self_name'] if prop(this.jbody, k) != None]) > 0
+Request.st_pause_ok getter: this.route == '/membrane/seat/pause' and (prop(this.jbody, 'paused') == True or prop(this.jbody, 'paused') == False)
+Request.st_ctl_ok getter: this.route == '/membrane/seat/control' and len([k for k in ['paused', 'loops_max', 'self', 'accept', 'self_name'] if prop(this.jbody, k) != None]) > 0
 Request.st_by getter: 'user:' + str(this.sub)
 Request.st_ask getter: {'id': this.eid, 'by': this.st_by, 'body': this.jbody} if this.method == 'POST' and this.authed == True and this.st_seat != None and (this.st_pause_ok or this.st_ctl_ok) else None
 Request.st_ask on-setter st-control:
@@ -62,16 +62,16 @@ Request.st_ask on-setter st-control:
     ('membrane::presence').control = this.st_ask
 
 -- ---- the reply ---------------------------------------------------------------------------------------------------------------------------
-Request.st_gap getter: this.path in ['/membrane/stats', '/membrane/quota', '/membrane/minds'] or (this.path in ['/membrane/state', '/state'] and 'section=' in this.query)
-Request.st_post getter: this.method == 'POST' and this.path in ['/membrane/seat/pause', '/membrane/seat/control']
+Request.st_gap getter: this.route in ['/membrane/stats', '/membrane/quota', '/membrane/minds'] or (this.route in ['/membrane/state', '/state'] and 'section=' in this.query)
+Request.st_post getter: this.method == 'POST' and this.route in ['/membrane/seat/pause', '/membrane/seat/control']
 Request.st_read getter:
-  WHEN this.path == '/membrane/seat': this.st_seat_body
-  ELSE WHEN this.path == '/membrane/seat/pause': this.st_pause_body
-  ELSE WHEN this.path == '/membrane/self/card': this.st_card_body
+  WHEN this.route == '/membrane/seat': this.st_seat_body
+  ELSE WHEN this.route == '/membrane/seat/pause': this.st_pause_body
+  ELSE WHEN this.route == '/membrane/self/card': this.st_card_body
   ELSE: this.st_state_body
 Request.r_state getter:
   WHEN this.st_gap: {'status': 501, 'body': {'error': 'not ported yet: reads the live seat'}}
-  ELSE WHEN this.st_post and not (this.st_pause_ok or this.st_ctl_ok): {'status': 400, 'body': {'error': 'the body is {"paused": true|false}' if this.path == '/membrane/seat/pause' else 'the body names a control: paused, loops_max, self, accept or self_name'}}
+  ELSE WHEN this.st_post and not (this.st_pause_ok or this.st_ctl_ok): {'status': 400, 'body': {'error': 'the body is {"paused": true|false}' if this.route == '/membrane/seat/pause' else 'the body names a control: paused, loops_max, self, accept or self_name'}}
   ELSE WHEN this.st_post and this.st_seat == None: {'status': 503, 'body': {'error': 'no seat'}}
   ELSE WHEN this.st_post: {'status': 202, 'body': {'ok': True, 'queued': this.st_ask, 'state': this.st_state}}
   ELSE: {'status': 200, 'body': this.st_read}

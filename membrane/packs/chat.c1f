@@ -55,12 +55,12 @@ ChatTurn.kind getter: 'turn'
 -- `state` is written once per step (running, then done/error): a turn that has none yet is queued (a constructor's first value and the start's write would be two writes in one round, which the loop guard refuses).
 ChatTurn.status getter: this.state or 'queued'
 
-Request.o_session getter: this.path == '/membrane/chat/message' or this.path == '/membrane/chat/messages' or startswith(this.path, '/membrane/chat/message/')
-Request.m_session getter: ['POST'] if this.path == '/membrane/chat/message' else ['GET']
+Request.o_session getter: this.route == '/membrane/chat/message' or this.route == '/membrane/chat/messages' or startswith(this.route, '/membrane/chat/message/')
+Request.m_session getter: ['POST'] if this.route == '/membrane/chat/message' else ['GET']
 
 -- ---- POST: the message --------------------------------------------------------------------------------------------------------------
 Request.cm_text getter: strip(str(prop(this.jbody, 'text') or ''))
-Request.cm_go getter: this.method == 'POST' and this.path == '/membrane/chat/message' and this.cm_text != ''
+Request.cm_go getter: this.method == 'POST' and this.route == '/membrane/chat/message' and this.cm_text != ''
 Request.cm_go on-setter chat-stamp:
   WHEN this.cm_go:
     this.cm_at = clock
@@ -80,8 +80,8 @@ Request.cm_post getter:
   ELSE: {'status': 202, 'body': {'id': this.cm_id}}
 
 -- ---- GET: one message --------------------------------------------------------------------------------------------------------------------
-Request.cm_gid getter: replace(replace(this.path, '/membrane/chat/message/', ''), '/events', '')
-Request.cm_events getter: startswith(this.path, '/membrane/chat/message/') and replace(this.path, '/events', '') != this.path
+Request.cm_gid getter: replace(replace(this.route, '/membrane/chat/message/', ''), '/events', '')
+Request.cm_events getter: startswith(this.route, '/membrane/chat/message/') and replace(this.route, '/events', '') != this.route
 Request.cm_view getter: prop('membrane::Chat:message:' + this.cm_gid, 'view')
 Request.cm_get getter: {'status': 200, 'body': this.cm_view} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
 
@@ -100,7 +100,7 @@ Request.ev_snap on-setter ev-send:
 -- ---- GET: the history (the newest turns, then older ones) ------------------------------------------------------------------------------
 -- {messages: [history_view, ...] oldest first, more: older turns exist, next: the oldest id of the page (pass it as `before`) or null}.
 -- `limit` (default 20, at least 1), `before` = a message id: only turns older than it; an unknown id is a 404. Only a history request computes any of this.
-Request.hs_on getter: this.path == '/membrane/chat/messages'
+Request.hs_on getter: this.route == '/membrane/chat/messages'
 Request.hs_limit getter: max(1, (num(([q[1] for q in this.qpairs if q[0] == 'limit'] or ['20'])[0]) or 20))
 Request.hs_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [None])[0]
 -- the message ids come from the STORE (a message is lazy: `instances` would list only the loaded ones); each is then read by eid, which loads it. `at` orders them, then the request number in the id.
@@ -117,7 +117,7 @@ Request.hs_get getter:
   ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'page_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None}}
 
 Request.r_session getter:
-  WHEN this.path == '/membrane/chat/message': this.cm_post
+  WHEN this.route == '/membrane/chat/message': this.cm_post
   ELSE WHEN this.hs_on: this.hs_get
   ELSE WHEN this.cm_events: this.cm_stream
   ELSE: this.cm_get

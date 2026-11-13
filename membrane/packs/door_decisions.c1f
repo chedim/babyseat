@@ -27,14 +27,14 @@ RESIDENT Message
 
 -- ---- which route ------------------------------------------------------------------------------------------------------------
 Request.dm_route getter:
-  WHEN this.path == '/membrane/decisions': 'board'
-  ELSE WHEN this.path == '/membrane/goals': 'goals'
-  ELSE WHEN this.path == '/membrane/work-graph': 'graph'
-  ELSE WHEN this.path == '/membrane/entity-history': 'history'
-  ELSE WHEN this.path == '/membrane/item-chat': 'chat_of'
-  ELSE WHEN this.path == '/membrane/decision/answer': 'answer'
-  ELSE WHEN this.path == '/membrane/decision/drop': 'drop'
-  ELSE WHEN this.path == '/membrane/decision/chat': 'chat'
+  WHEN this.route == '/membrane/decisions': 'board'
+  ELSE WHEN this.route == '/membrane/goals': 'goals'
+  ELSE WHEN this.route == '/membrane/work-graph': 'graph'
+  ELSE WHEN this.route == '/membrane/entity-history': 'history'
+  ELSE WHEN this.route == '/membrane/item-chat': 'chat_of'
+  ELSE WHEN this.route == '/membrane/decision/answer': 'answer'
+  ELSE WHEN this.route == '/membrane/decision/drop': 'drop'
+  ELSE WHEN this.route == '/membrane/decision/chat': 'chat'
   ELSE: None
 Request.o_decisions getter: this.dm_route != None
 Request.dm_write getter: this.dm_route in ['answer', 'drop', 'chat']
