@@ -54,12 +54,12 @@ The barest usable agent seat: one command starts `cliffvm` on the shipped packs 
 
 ```
 (cd native && cargo build --release --no-default-features --features bin)      # once; the launcher builds nothing
-scripts/seat [--store ./.cliffvm/seat.sqlite] [--port 4096] [--open]
+scripts/seat [--store ./.cliffvm/seat.sqlite] [--port 4096] [--open] [--fact name=value ...]
 ```
 
-It runs `cliffvm run <the packs of membrane/apps/barest.packs, one file each> membrane/apps/barest.c1f --store <sqlite> --port <n> --fact chat_claude_bin=<claude>`
+It runs `cliffvm run <the packs of membrane/apps/barest.packs, one file each> membrane/apps/barest.c1f --store <sqlite> --port <n> [--fact name=value ...] --fact chat_claude_bin=<claude>`
 from the repo root and prints the URL. `CLIFFVM` names the binary (else `native/target/release/cliffvm`, else PATH); `CLAUDE_BIN` names the claude CLI
-(else the one on PATH; with none, the seat starts and the chat answers with how to name it). `--open` opens the page on macOS. The launcher starts nothing else
+(else the one on PATH; with none, the seat starts and the chat answers with how to name it). `--fact name=value` (repeatable) is passed on as a Boot fact (`--fact request_keep_s=0`). `--open` opens the page on macOS. The launcher starts nothing else
 (no Ollama, nothing under `~/.membrane`) and uses no port but `--port`.
 
 **What you see** (`membrane/apps/barest.c1f/ui/`: `index.html`, `app.css`, `app.js`, `mcp.js`, `graph.js`, `chat.js`; plain static JavaScript served by the door

@@ -498,3 +498,23 @@ fn a_turn_is_an_entity_that_owns_its_answer_and_tools_and_retiring_it_retires_th
     });
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn the_seat_script_forwards_each_fact_to_cliffvm_run() {
+    // a fake cliffvm (the CLIFFVM variable) writes the arguments it was given, one per line; no seat starts
+    let dir = tmp("seatscript");
+    let fake = dir.join("fake-cliffvm");
+    std::fs::write(&fake, "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done > \"$ARGS_OUT\"\n").unwrap();
+    { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    let out = dir.join("args");
+    let st = Command::new(repo().join("scripts/seat"))
+        .args(["--store", dir.join("s.sqlite").to_str().unwrap(), "--port", "0", "--fact", "request_keep_s=0", "--fact", "chat_max_turns=5"])
+        .env("CLIFFVM", &fake).env("CLAUDE_BIN", "/bin/echo").env("ARGS_OUT", &out)
+        .stdout(Stdio::null()).status().unwrap();
+    assert!(st.success());
+    let args: Vec<String> = std::fs::read_to_string(&out).unwrap().lines().map(String::from).collect();
+    let facts: Vec<&str> = args.windows(2).filter(|w| w[0] == "--fact").map(|w| w[1].as_str()).collect();
+    assert_eq!(facts, ["request_keep_s=0", "chat_max_turns=5", "chat_claude_bin=/bin/echo"], "{args:?}");
+    assert_eq!(args[0], "run");
+    let _ = std::fs::remove_dir_all(&dir);
+}
