@@ -20,13 +20,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // the hangs. Each list is checked both ways: a call that is answered now must leave its list (the test says so), a new gap fails the test.
 //   MISSING (404): the session routes the chat view tolerates (<sid>/voice and <sid>/predict: `.catch` in panel.js), /agent and /config (opencode probes); /ui/fieldvm (the browser VM's start snapshot), /membrane/options and the
 //   map routes are used routes not built yet (docs/release-parity.md section 1, rows 4, 5, 8, 61-68).
-//   HANGS (no answer): POST /membrane/voice/state waits on the voice tables a fresh store does not have (section 6, "reads that hang").
+//   HANGS (no answer): none (POST /membrane/voice/state used to wait on the Python voice table a fresh store does not have; it reads the seat's own table now).
 //   NOT_BUILT (501, a deliberate "not built" with its reason): informational, never a failure.
 const MISSING = new Set(process.env.PAGE_BOOT_MISSING ? process.env.PAGE_BOOT_MISSING.split(',') : [
   '/ui/serve/session/<sid>/voice', '/ui/serve/session/<sid>/predict', '/ui/serve/agent', '/ui/serve/config',
   '/ui/serve/membrane/map/field3d', '/ui/serve/membrane/map/blurp', '/ui/fieldvm', '/membrane/options',
 ]);
-const HANGS = new Set(process.env.PAGE_BOOT_HANGS ? process.env.PAGE_BOOT_HANGS.split(',') : ['POST /ui/serve/membrane/voice/state']);
+const HANGS = new Set(process.env.PAGE_BOOT_HANGS ? process.env.PAGE_BOOT_HANGS.split(',') : []);
 if (!existsSync(bin)) { console.log(`page boot: skipped, no cliffvm at ${bin} (build it, or set CLIFFVM)`); process.exit(0); }
 if (!existsSync(chrome)) { console.log(`page boot: skipped, no Chrome at ${chrome} (set CHROME)`); process.exit(0); }
 const data = mkdtempSync(path.join(tmpdir(), 'seat-full-'));

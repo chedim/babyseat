@@ -7,8 +7,10 @@ IMPORT fs 1
 --   POST /ui/stt                a recording to the seat's speech server
 --   POST /ui/log                one line of the page's voice log, appended to <data dir>/page-voice.log
 -- WHO: the verified person (Request.person); a caller with no token (this machine, bare loopback) is the person the page stamps
--- in the body. The voice entities are the Python seat's (`membrane::Config:voice:in|out:<slug>`, voice_io.py): the read is a
--- `sql()` over the store's entity rows, so it sees exactly what the Python seat wrote.
+-- in the body. The voice entities are `membrane::Config:voice:in|out:<slug>` (the names voice_io.py gave them): the read is a `sql()` over the
+-- store's own entity table `c_field` (k = eid, body.props), the table a store made by cliffvm always has. (It used to read the Python seat's
+-- `c_entities`, a table a fresh cliffvm store lacks: the query failed and the request never answered. A store that comes from the Python seat
+-- is moved into `c_field` by the data migration, docs/release-parity.md section 8, phase 4.)
 -- PORTED: /membrane/voice/state is a WRITE of those entities (on, mode, device, state_ts), and so it is the kind-mirror's: the
 --   Python seat stamps `parents: ['cls:voice']` on every voice entity it makes (voice_io.entity, old ones too), the class `Voice`
 --   below is the kind the engine mirrors them under (they stay class Config; a Voice getter is all the mirror needs), and the setter
@@ -34,8 +36,8 @@ Request.vo_person getter: str(this.person or prop(this.jbody, 'person') or '')
 -- slug: lowercase, every run of other characters one '-' (speakers.slug); nothing left = 'unknown'
 Request.vo_slug getter: join(words(plain(replace(replace(replace(replace(replace(replace(lower(this.vo_person), '_', ' '), '#', ' '), '.', ' '), '/', ' '), ':', ' '), '-', ' '))), '-') or 'unknown'
 Request.vo_go getter: this.route == '/membrane/voice' and this.method == 'POST' and this.vo_person != ''
-Request.vo_in_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", 'membrane::Config:voice:in:' + this.vo_slug) if this.vo_go else None
-Request.vo_out_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", 'membrane::Config:voice:out:' + this.vo_slug) if this.vo_go else None
+Request.vo_in_q getter: sql("SELECT json_extract(body, '$.props') AS p FROM c_field WHERE k = ?", 'membrane::Config:voice:in:' + this.vo_slug) if this.vo_go else None
+Request.vo_out_q getter: sql("SELECT json_extract(body, '$.props') AS p FROM c_field WHERE k = ?", 'membrane::Config:voice:out:' + this.vo_slug) if this.vo_go else None
 Request.vo_in getter: (json(prop(this.vo_in_q[0], 'p')) or {}) if len(this.vo_in_q or []) > 0 else {}
 Request.vo_out getter: (json(prop(this.vo_out_q[0], 'p')) or {}) if len(this.vo_out_q or []) > 0 else {}
 Request.vo_in_view getter: {'on': prop(this.vo_in, 'on'), 'mode': prop(this.vo_in, 'mode'), 'device': prop(this.vo_in, 'device'), 'session': prop(this.vo_in, 'session'), 'log': prop(this.vo_in, 'heard') or []}
@@ -51,8 +53,8 @@ Request.vs_go getter: this.route == '/membrane/voice/state' and this.method == '
 -- the store's rows by eid (none for a person with no entities yet)
 Request.vs_in_eid getter: 'membrane::Config:voice:in:' + this.vo_slug
 Request.vs_out_eid getter: 'membrane::Config:voice:out:' + this.vo_slug
-Request.vs_in_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", this.vs_in_eid) if this.vs_go else None
-Request.vs_out_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", this.vs_out_eid) if this.vs_go else None
+Request.vs_in_q getter: sql("SELECT json_extract(body, '$.props') AS p FROM c_field WHERE k = ?", this.vs_in_eid) if this.vs_go else None
+Request.vs_out_q getter: sql("SELECT json_extract(body, '$.props') AS p FROM c_field WHERE k = ?", this.vs_out_eid) if this.vs_go else None
 -- both reads have landed (a row or none: a person with no entities yet is made by the constructors below)
 Request.vs_landed getter: this.vs_in_q != None and this.vs_out_q != None
 Request.vs_in getter: (json(prop(this.vs_in_q[0], 'p')) or {}) if len(this.vs_in_q or []) > 0 else {}

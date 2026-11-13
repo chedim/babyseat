@@ -27,15 +27,15 @@ fn dir() -> std::path::PathBuf {
     d
 }
 
-/// A store with the Python seat's voice entities as it writes them (c_entities: k = eid, body.d.data.properties).
+/// A store with the voice entities as the seat's own table holds them (c_field: k = eid, body {cls, props}).
 fn db(d: &std::path::Path) -> std::path::PathBuf {
     let p = d.join("field.sqlite3");
     let c = rusqlite::Connection::open(&p).unwrap();
     c.pragma_update(None, "journal_mode", "WAL").unwrap();
-    c.execute_batch("CREATE TABLE IF NOT EXISTS c_entities (k TEXT PRIMARY KEY, body TEXT NOT NULL);").unwrap();
+    c.execute_batch("CREATE TABLE IF NOT EXISTS c_field (k TEXT PRIMARY KEY, body TEXT NOT NULL, cls TEXT, updated REAL NOT NULL DEFAULT 0);").unwrap();
     let put = |k: &str, props: J| {
-        let body = json!({"e": k, "d": {"meta": {"type": "QuantumEntity"}, "type": "entities", "data": {"class": "Config", "properties": props}}});
-        c.execute("INSERT OR REPLACE INTO c_entities VALUES (?1, ?2)", (k, body.to_string())).unwrap();
+        let body = json!({"cls": "Config", "props": props});
+        c.execute("INSERT OR REPLACE INTO c_field (k, body, cls) VALUES (?1, ?2, 'Config')", (k, body.to_string())).unwrap();
     };
     put("membrane::Config:voice:in:dmitrii-chechetkin", json!({"person": "Dmitrii Chechetkin", "on": true, "mode": "addressed", "device": "phone", "session": "ses_1",
         "heard": [{"ts": 1.0, "text": "hey memo", "session": "ses_1"}], "last_heard": "hey memo"}));
