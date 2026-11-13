@@ -34,7 +34,6 @@ pub const PACK_PREFIX: &str = "Pack:";
 pub const PACK_CLASS: &str = "Pack";
 pub const PACK_WRITER: &str = "pack";
 /// The pack the host itself marks privileged (packs/boot.c1f): the root of trust.
-pub const BOOT_PACK: &str = "boot";
 
 /// The store writer for an engine write (fields_live.stamp_writer): derived, except a trip (outside).
 pub fn stamp_writer(engine_writer: &str) -> String {
@@ -106,6 +105,10 @@ impl Options {
     pub fn new(store: Option<String>) -> Options { Options { store, effects: true, clock: Box::new(system_now), plain: false, bind: None } }
 }
 
+/// What `load_app` loaded: the pack names in load order, and the messages for what could not load.
+#[derive(Debug, Default)]
+pub struct Loaded { pub names: Vec<String>, pub msgs: Vec<String> }
+
 pub struct Host {
     eng: Mutex<Engine>,
     db: Mutex<Connection>,
@@ -143,11 +146,12 @@ impl Host {
         }
         let mut fields = Fields::goalgraph();
         fields.inbound_by_host = true;
-        fields.note_grant(BOOT_PACK, true, "host");      // the root of trust: the boot app; every other grant is a write by a privileged writer
+        // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
         Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false) })
     }
 
-    /// Whether the named pack holds the privilege (exempt from rule B): the boot pack by the host, any other by a privileged writer's grant.
+    /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
+    /// privileged writer's grant.
     pub fn pack_privileged(&self, name: &str) -> bool { self.eng().1.is_privileged(name) }
     pub fn now(&self) -> f64 { (self.clock)() }
     fn eng(&self) -> std::sync::MutexGuard<'_, Engine> { self.eng.lock().unwrap_or_else(|e| e.into_inner()) }
@@ -157,24 +161,33 @@ impl Host {
     // ---- packs -------------------------------------------------------------------------------------------------------
     pub fn load_pack(&self, name: &str, text: &str) -> Result<(), String> { self.eng().1.set_pack(name, text) }
 
-    /// Every `*.c1f` in a folder, in name order (an import's owner may come later: the pack waits and activates). -> messages
-    /// for what could not load (a view pack waiting for `dom` is not one).
-    pub fn load_pack_dir(&self, dir: &std::path::Path) -> Result<Vec<String>, String> {
-        let mut files: Vec<_> = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?
-            .filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().map_or(false, |x| x == "c1f")).collect();
-        files.sort();
-        let mut msgs = vec![];
+    /// Load an APP (docs/c1f-layers.md): a folder `<name>.c1f/` or one pack file (the loader tells them apart). The `.c1f` files of a folder (its
+    /// whole tree) are packs, loaded in dependency order (a pack after the packs of this app it imports; of those ready, the alphabetically first
+    /// path next); every other file is data, not loaded here. A pack whose name is already loaded is skipped (the lower layer stays). `trusted`
+    /// is the root of trust: the packs loaded here are marked privileged by the host (the FIRST app only; nothing is trusted by name).
+    pub fn load_app(&self, path: &std::path::Path, trusted: bool) -> Result<Loaded, String> {
+        let mut files = vec![];
+        if path.is_dir() { crate::apps::pack_files(path, &mut files).map_err(|e| format!("{}: {e}", path.display()))?; } else { files.push(path.to_path_buf()); }
+        let mut packs = vec![];
         for p in files {
             let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            if self.eng().1.has_pack(&name) { continue; }
             let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+            packs.push((name, text));
+        }
+        let mut l = Loaded { names: vec![], msgs: vec![] };
+        for (name, text) in crate::apps::in_dependency_order(packs) {
+            if trusted { self.eng().1.note_grant(&name, true, "host"); }
             if let Err(e) = self.load_pack(&name, &text) {
-                if !(e.contains("isn't loaded") || e.contains("isn't active")) { msgs.push(e); }
+                if !(e.contains("isn't loaded") || e.contains("isn't active")) { l.msgs.push(e); }
             }
+            l.names.push(name);
         }
         for (n, why) in self.eng().1.pack_errors.clone() {
-            if !why.is_empty() && !(why.contains("dom")) { msgs.push(format!("pack {n}: {why}")); }
+            if !why.is_empty() && !(why.contains("dom")) { l.msgs.push(format!("pack {n}: {why}")); }
         }
-        Ok(msgs)
+        if trusted { self.packs_dirty.store(true, Ordering::SeqCst); }
+        Ok(l)
     }
 
     /// Start-up: compute every getter once and keep the values, running no setter (a rebuild runs no effects).
@@ -333,7 +346,7 @@ impl Host {
             f.remove_pack_clean(core, &NullHost, name, self.now(), seq);        // its getters' values are cleared too
             refusals.remove(name);
         } else {
-            match f.set_pack(name, src) {
+            match f.set_pack_clean(core, &NullHost, name, src, self.now(), seq) {
                 Ok(()) => { refusals.remove(name); }
                 // a NEW pack waiting for an import stays in the engine and its reason is the engine's (it clears when the import arrives)
                 Err(_) if f.pack_errors.contains_key(name) => { refusals.remove(name); }

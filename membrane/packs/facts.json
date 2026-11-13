@@ -21,6 +21,10 @@
    "wired": true,
    "why": "the JWT secret file the door verifies tokens with"
   },
+  "app_dirs": {
+   "wired": false,
+   "why": "told by `cliffvm run` (the Python seat has no apps yet): the folders of the apps given to it, the upper layer first; the door serves an app's `ui/` files, an upper layer's file shadowing a lower one's (docs/c1f-layers.md)"
+  },
   "ui_dir": {
    "wired": true,
    "why": "the folder of the UI's files (membrane/ui)"

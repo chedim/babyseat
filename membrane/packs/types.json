@@ -256,6 +256,7 @@
     "getters": {
       "Http.up": "Bool?",
       "Request.allow": "List(Text)?",
+      "Request.app_dirs": "Any",
       "Request.boots": "List(Entity(Boot))",
       "Request.c_aliases": "Any",
       "Request.c_blurp": "Bool",
@@ -265,6 +266,7 @@
       "Request.c_named": "Bool",
       "Request.c_stt": "Text",
       "Request.c_voice": "Bool",
+      "Request.cand": "Text?",
       "Request.conf_body": "Dict",
       "Request.conf_reply": "Dict",
       "Request.cookie_name": "Any",
@@ -284,10 +286,13 @@
       "Request.fwd": "Bool",
       "Request.fwdh": "Text",
       "Request.gate": "Dict?",
+      "Request.hit": "Bool",
       "Request.https": "Bool",
       "Request.internal": "Bool",
       "Request.is_read": "Bool",
       "Request.jbody": "Any",
+      "Request.last": "Bool",
+      "Request.layer_files": "List(Text?)",
       "Request.login_age": "Text?",
       "Request.login_ask": "Dict?",
       "Request.login_cookie": "Text?",
@@ -321,11 +326,13 @@
       "Request.static": "Text?",
       "Request.static_reply": "Dict?",
       "Request.ui_root": "Any",
+      "Request.ui_roots": "List(Any)",
       "Request.who": "Dict?"
     },
     "writes": {
       "Http.listen": "Dict",
       "Request.respond": "Any",
+      "Request.skip": "Num?",
       "Request.verify": "Dict?"
     },
     "findings": []

@@ -211,9 +211,9 @@ fn a_pack_entity_written_outside_loads_reloads_refuses_and_replays_to_the_same_p
 fn the_boot_pack_grants_the_tools_pack_at_start_and_a_replay_ends_in_the_same_privilege_state() {
     use_clock(0);
     let boot = std::fs::read_to_string(format!("{}/../membrane/packs/boot.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap();
-    let fresh = || { let h = Host::open({ let mut o = Options::new(None); o.clock = ticking(); o.effects = false; o }).unwrap(); h.load_pack("boot", &boot).unwrap(); h.rebuild(); h };
+    let fresh = || { let h = Host::open({ let mut o = Options::new(None); o.clock = ticking(); o.effects = false; o }).unwrap(); let d = std::env::temp_dir().join(format!("hl-boot-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap(); std::fs::write(d.join("boot.c1f"), &boot).unwrap(); h.load_app(&d.join("boot.c1f"), true).unwrap(); h.rebuild(); h };
     let h = fresh();
-    assert!(h.pack_privileged("boot"), "the host marks the boot pack");
+    assert!(h.pack_privileged("boot"), "the host marks the first app's pack");
     assert!(!h.pack_privileged("door_tools") && !h.pack_privileged("fs"));
     host::boot_started(&h, &Map::new(), true);
     assert!(h.pack_privileged("door_tools"));

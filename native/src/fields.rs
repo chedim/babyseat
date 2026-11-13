@@ -356,8 +356,25 @@ impl Fields {
     /// Remove a pack AND clear what its getters left on entities: a getter's value is a plain property once the getter is gone, and a stale value
     /// of a pack that no longer exists must not linger. Derived writes of none (journal-neutral); a property another pack still computes stays.
     pub fn remove_pack_clean(&mut self, core: &mut Core, host: &dyn Host, name: &str, now: f64, seq: &mut i64) -> bool {
-        let gone: Vec<(String, String)> = self.packs.get(name).map(|p| p.getters.iter().map(|g| (g.cls.clone(), g.prop.clone())).collect()).unwrap_or_default();
+        let gone = self.pack_getters(name);
         let had = self.remove_pack(name);
+        self.clear_gone(core, host, gone, now, seq);
+        had
+    }
+
+    /// Replace a pack's text AND clear what a getter of the OLD text left when the NEW text lacks it (the same cleanup as a removal).
+    pub fn set_pack_clean(&mut self, core: &mut Core, host: &dyn Host, name: &str, src: &str, now: f64, seq: &mut i64) -> Result<(), String> {
+        let before = self.pack_getters(name);
+        let r = self.set_pack(name, src);
+        self.clear_gone(core, host, before, now, seq);        // a refused text changes nothing: every getter is still there, nothing clears
+        r
+    }
+
+    fn pack_getters(&self, name: &str) -> Vec<(String, String)> {
+        self.packs.get(name).map(|p| p.getters.iter().map(|g| (g.cls.clone(), g.prop.clone())).collect()).unwrap_or_default()
+    }
+
+    fn clear_gone(&mut self, core: &mut Core, host: &dyn Host, gone: Vec<(String, String)>, now: f64, seq: &mut i64) {
         let mut work = VecDeque::new();
         for (cls, prop) in gone {
             if self.has_getter(&cls, &prop) { continue; }
@@ -366,7 +383,6 @@ impl Fields {
             for e in eids { self.emit_unchecked(core, &mut work, &e, &prop, J::Null, "pack-removed", seq, now); }
         }
         if !work.is_empty() { self.visited.clear(); self.run(core, host, work, now, seq); }
-        had
     }
 
     /// Activate packs in import order: a pack is active once every pack it imports is active with the same major

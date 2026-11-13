@@ -73,7 +73,6 @@ fn trust_is_by_position_never_by_name() {
     assert!(h.pack_privileged("rootpack") && h.pack_privileged("second"), "the first argument is the root of trust, whatever it is called");
     assert!(!h.pack_privileged("boot"), "a pack named boot that is not first is not trusted");
     assert!(!h.pack_privileged("plain"), "a later app has no privilege");
-    assert_eq!(h.get("Pack:rootpack", "granted_by"), json!("host"));
     // until a grant: the root's pack grants (a write by a privileged writer), and the layer pack then holds it
     h.write("Pack:plain", "privileged", json!(true), "person");
     assert!(h.pack_privileged("plain"));

@@ -27,7 +27,7 @@ fn start(tag: &str, packs: &[(&str, &str)], ui: &[(&str, &str)], extra: &[&str])
     for (n, t) in packs { std::fs::write(pd.join(format!("{n}.c1f")), t).unwrap(); }
     for (n, t) in ui { std::fs::write(ud.join(n), t).unwrap(); }
     let mut child = Command::new(BIN)
-        .args(["run", pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", ud.to_str().unwrap()])
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", ud.to_str().unwrap()])
         .args(extra).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
@@ -114,7 +114,7 @@ fn the_binary_boots_through_the_plan_and_answers_the_shipped_routes() {
     std::fs::create_dir_all(&pd).unwrap();
     for (n, t) in &files { std::fs::write(pd.join(n), t).unwrap(); }
     let mut child = Command::new(BIN).current_dir(&dir)
-        .args(["run", pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
@@ -134,4 +134,32 @@ fn the_binary_boots_through_the_plan_and_answers_the_shipped_routes() {
     let (head, _) = get(port, "GET /membrane/decision/answer HTTP/1.1\r\nHost: t\r\n\r\n");
     assert!(head.starts_with("HTTP/1.1 405"), "{head}");
     assert!(terminate(&mut run).expect("exits on SIGTERM").success());
+}
+
+#[test]
+fn apps_are_layers_the_upper_apps_file_wins_and_the_first_argument_is_the_root() {
+    let dir = tmp("layers");
+    let (root, a, b) = (dir.join("root"), dir.join("a.c1f"), dir.join("b.c1f"));
+    for (d, f, t) in [(&root, "boot.c1f", BOOT), (&root, "door.c1f", DOOR), (&a, "ui/x.js", "from a"), (&a, "ui/only_a.js", "a"), (&b, "ui/x.js", "from b")] {
+        let p = d.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, t).unwrap();
+    }
+    let mut child = Command::new(BIN).current_dir(&dir)
+        .args(["run", root.join("boot.c1f").to_str().unwrap(), root.to_str().unwrap(), a.to_str().unwrap(), b.to_str().unwrap(),
+               "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0"])
+        .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let out = child.stdout.take().unwrap();
+    let (tx, rx) = channel();
+    std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
+    let run = Run { child, _lines: rx, dir: dir.clone() };
+    let line = run._lines.recv_timeout(Duration::from_secs(30)).expect("the door came up");
+    let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap();
+    for (path, want) in [("/ui/www/x.js", "from b"), ("/ui/www/only_a.js", "a")] {
+        let (head, body) = get(port, &format!("GET {path} HTTP/1.1\r\nHost: t\r\n\r\n"));
+        assert!(head.starts_with("HTTP/1.1 200"), "{path}: {head}");
+        assert_eq!(String::from_utf8_lossy(&body), want, "{path}");
+    }
+    assert!(get(port, "GET /ui/www/none.js HTTP/1.1\r\nHost: t\r\n\r\n").0.starts_with("HTTP/1.1 404"));
+    drop(run);
 }
