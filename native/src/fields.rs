@@ -50,7 +50,28 @@ pub const LLM_CALL: &str = "membrane::llm.call";
 
 /// The entities a getter of `cls` applies to: that class, or an entity with it among its ISA parents.
 fn of_kind(core: &Core, cls: &str) -> Vec<String> {
-    core.docs.iter().filter(|(k, e)| e.cls == cls || has_kind(core, k, &e.props, cls)).map(|(k, _)| k.clone()).collect()
+    core.docs.iter().filter(|(k, e)| cls == ROOT_CLASS || e.cls == cls || has_kind(core, k, &e.props, cls)).map(|(k, _)| k.clone()).collect()
+}
+
+/// The implicit root class: every entity's chain of classes ends in it (docs/c1f-layers.md, "One rule").
+pub const ROOT_CLASS: &str = "Entity";
+
+/// How near a getter's class `gcls` is to an entity: 0 its own class (the eid class), 1+i the i-th of its `parents` list, FAR a kind
+/// found up the ISA chain, ROOT the root `Entity`; None when the class does not apply. The nearest class's arms are tried first.
+const FAR: usize = 1_000_000;
+const ROOT: usize = usize::MAX;
+fn class_rank(core: &Core, eid: &str, e: &crate::vm::Ent, gcls: &str) -> Option<usize> {
+    if e.cls == gcls { return Some(0); }
+    if let Some(ps) = e.props.get("parents").filter(|p| !p.is_null()) {
+        let named = |p: &J| p.as_str().map(|s| s.rsplit(':').next().unwrap_or("").eq_ignore_ascii_case(gcls)).unwrap_or(false);
+        match ps {
+            J::Array(a) => if let Some(i) = a.iter().position(named) { return Some(1 + i); },
+            p => if named(p) { return Some(1); },
+        }
+    }
+    if gcls == ROOT_CLASS { return Some(ROOT); }
+    if has_kind(core, eid, &e.props, gcls) { return Some(FAR); }
+    None
 }
 
 /// A kind among an entity's ISA parents: named by the parent's id (`cls:chatthing` is ChatThing, mirrored or not),
@@ -507,7 +528,7 @@ impl Fields {
                 g.arms = parts.len();
                 g.layers = list;
             }
-            g.parts = vec![];
+            if layers.len() > 1 { g.parts = vec![]; }               // a lone layer keeps its arms: they join the other classes' arms (`arms_of`)
             getters.push(g);
         }
         self.imports = active.iter().map(|n| (n.clone(), self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect())).collect();
@@ -604,13 +625,40 @@ impl Fields {
 
     fn has_getter(&self, cls: &str, prop: &str) -> bool { self.getters.iter().any(|g| g.cls == cls && g.prop == prop) }
 
+    /// The getters that apply to an entity for ONE property, nearest class first (the one rule: own class, `parents` in list order, the root
+    /// `Entity`; ties by declaration). The first is the property's node; the rest are only the arms it falls through to.
+    fn chain(&self, core: &Core, eid: &str, prop: &str) -> Vec<usize> {
+        let Some(e) = core.docs.get(eid) else { return vec![] };
+        let mut v: Vec<(usize, usize)> = (0..self.getters.len()).filter(|&i| self.getters[i].prop == prop)
+            .filter_map(|i| class_rank(core, eid, e, &self.getters[i].cls).map(|r| (r, i))).collect();
+        v.sort();
+        v.into_iter().map(|(_, i)| i).collect()
+    }
+
+    /// One node per property: the nearest class's getter (its chain holds the rest).
     fn getters_of(&self, core: &Core, eid: &str) -> Vec<usize> {
         let Some(e) = core.docs.get(eid) else { return vec![] };
-        // its own class, or a kind among its ISA parents (`parents: ["cls:chatthing"]`), as setters bind (core.is_a)
-        let mut v: Vec<usize> = (0..self.getters.len()).filter(|&i| self.getters[i].cls == e.cls
-            || has_kind(core, eid, &e.props, &self.getters[i].cls)).collect();
-        v.sort_by_key(|&i| self.glevel[i]);
+        let mut best: std::collections::HashMap<&str, (usize, usize)> = Default::default();
+        for i in 0..self.getters.len() {
+            let Some(r) = class_rank(core, eid, e, &self.getters[i].cls) else { continue };
+            let b = best.entry(self.getters[i].prop.as_str()).or_insert((r, i));
+            if (r, i) < *b { *b = (r, i); }
+        }
+        let mut v: Vec<usize> = best.into_values().map(|(_, i)| i).collect();
+        v.sort_by_key(|&i| (self.glevel[i], i));
         v
+    }
+
+    /// Is getter `gi` the node of its property on this entity (the nearest class's)?
+    fn is_node(&self, core: &Core, eid: &str, gi: usize) -> bool {
+        self.chain(core, eid, &self.getters[gi].prop).first() == Some(&gi)
+    }
+
+    /// The arms of a getter in order: (pack, WHEN or None, expression). A lone layer carries them as `parts`, a stack as `layers`.
+    fn arms_of(g: &Getter) -> Vec<(String, Option<String>, String)> {
+        if !g.layers.is_empty() { return g.layers.clone(); }
+        if g.parts.is_empty() { return vec![(g.pack.clone(), None, g.expr.clone())]; }
+        g.parts.iter().map(|(w, e)| (g.pack.clone(), w.clone(), e.clone())).collect()
     }
 
     /// Evaluate one getter instance, record what it read as its inputs, and return its value (None on an error,
@@ -633,13 +681,21 @@ impl Fields {
             }
         }
         let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
-        let (r, reads, nil, locals, layer) = if g.layers.is_empty() {
+        // the arms of every class that applies, the nearest class's first; the first arm whose WHEN holds wins, a default ends the search
+        let chain = self.chain(core, eid, &g.prop);
+        let lone = chain.len() <= 1 && g.layers.is_empty();
+        let all_arms: Vec<(String, Option<String>, String)> = if lone { vec![] } else {
+            let mut list = vec![];
+            'cls: for &ci in &chain { for a in Self::arms_of(&self.getters[ci]) { let end = a.1.is_none(); list.push(a); if end { break 'cls; } } }
+            list
+        };
+        let (r, reads, nil, locals, layer) = if lone {
             let (r, reads, nil, locals) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker);
             (r, reads, nil, locals, None)
         } else {
             // several layers define it: the arms in order, the top layer's first; the first WHEN that holds supplies the value
             let (mut reads_all, mut res) = (vec![], None);
-            for (pack, when, expr) in &g.layers {
+            for (pack, when, expr) in &all_arms {
                 if let Some(c) = when {
                     let (rc, rd, _, _) = core.eval_traced(c, &me(eid), &[("clock", json!(now))], host, &asker);
                     reads_all.extend(rd);
@@ -667,7 +723,7 @@ impl Fields {
         }
         if let Some(old) = self.reads.remove(&key) { for k in old { if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); } } }
         let mut ins: Vec<(String, String)> = reads.into_iter().filter(|(e, p)| !(e == eid && *p == g.prop)).collect();
-        if reads_name(&g.expr, "clock") { ins.push((CLOCK.into(), String::new())); }
+        if reads_name(&g.expr, "clock") || chain.iter().any(|&c| reads_name(&self.getters[c].expr, "clock")) { ins.push((CLOCK.into(), String::new())); }
         ins.sort(); ins.dedup();
         for k in &ins { self.deps.entry(k.clone()).or_default().insert(key.clone()); }
         self.reads.insert(key, ins);
@@ -830,6 +886,7 @@ impl Fields {
             let mut es: Vec<String> = of_kind(core, &cls);
             es.sort();
             for e in es {
+                if !self.is_node(core, &e, gi) { continue; }
                 let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
                 if core.docs.get(&e).and_then(|d| d.props.get(&prop)) != Some(&v) { self.dirty.insert((self.glevel[gi], e, gi)); }
             }
@@ -853,6 +910,7 @@ impl Fields {
                 let mut es: Vec<String> = of_kind(core, &cls);
                 es.sort();
                 for e in es {
+                    if !self.is_node(core, &e, gi) { continue; }
                     let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
                     let prop = self.getters[gi].prop.clone();
                     let was = core.docs.get(&e).and_then(|d| d.props.get(&prop)).cloned();

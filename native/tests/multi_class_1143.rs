@@ -36,14 +36,15 @@ fn a_parents_write_on_an_existing_entity_binds_the_getters_and_setters_of_both_k
     assert_eq!(r.snapshot()["Thing:x"], h.snapshot()["Thing:x"]);
 }
 
-/// Today there is no root class: a getter on `Entity` applies to entities whose class or parents say `Entity`, and to no other.
+/// The root class `Entity` is implicit (#1143): a getter on it applies to every entity, and a getter of the entity's own class beats it.
 #[test]
-fn a_getter_on_entity_applies_to_no_entity_without_that_class_today() {
+fn a_getter_on_entity_applies_to_every_entity_and_a_nearer_class_beats_it() {
     let h = Host::open({ let mut o = Options::new(None); o.effects = false; o }).unwrap();
     h.load_pack("root", "PACK root 1\nEntity.summary getter: this.cls + ' ' + this.eid\n").unwrap();
+    h.load_pack("own", "PACK own 1\nIMPORT root 1\nOwn.summary getter: 'own'\n").unwrap();
     h.rebuild();
     h.born("Thing:x", "Thing", props(json!({"n": 1})), "person");
-    assert_eq!(h.get("Thing:x", "summary"), J::Null, "no implicit root class");
-    h.born("Entity:y", "Entity", Map::new(), "person");
-    assert_eq!(h.get("Entity:y", "summary"), json!("Entity Entity:y"));
+    h.born("Own:z", "Own", Map::new(), "person");
+    assert_eq!(h.get("Thing:x", "summary"), json!("Thing Thing:x"), "the implicit root class");
+    assert_eq!(h.get("Own:z", "summary"), json!("own"));
 }

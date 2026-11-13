@@ -1,0 +1,7 @@
+PACK entity 1
+-- THE ROOT CLASS (docs/c1f-layers.md, "One rule"). `Entity` is implicit: every entity's chain of classes ends in it, so a getter declared
+-- here applies to every entity that has no nearer class answering. This pack owns it; a pack that wants another `summary` for its own class
+-- declares `<Class>.summary getter: ...` (its class is nearer: it wins) and imports this pack only when it declares on `Entity` itself.
+-- `summary` is what an entity IS in one line, from its id, its class and its `parents` list and nothing else (no property values: a getter
+-- is eager, so the root getter stays as cheap as a string join): `Trip:main (Trip, cls:semnoun)`.
+Entity.summary getter: this.eid + ' (' + join(concat([this.cls], this.parents or []), ', ') + ')'

@@ -690,6 +690,13 @@
     },
     "findings": []
   },
+  "entity": {
+    "getters": {
+      "Entity.summary": "Text?"
+    },
+    "writes": {},
+    "findings": []
+  },
   "fetch": {
     "getters": {
       "Fetch.kind": "Text"
