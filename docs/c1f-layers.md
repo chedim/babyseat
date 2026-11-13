@@ -37,3 +37,21 @@ command line; each app is a LAYER and a later app is above an earlier one (withi
   loaded last and is therefore on top.
 - The doctrine says a model "replaces the banner completely by giving its entity a class of its own"; with layers a model could
   instead override the banner's `text` arms. Keep both until a real case chooses.
+
+## Privilege (design, decided 2026-11-13; not built)
+
+The ownership rule has two parts. A: only the owner of a class (the pack that declares it) defines its getters and setters; other packs
+`IMPORT` it. B: a pack may WRITE only entities of classes it owns or imports (a guard against a pack's own mistakes; the seat has no
+security by decision). A PRIVILEGED pack is exempt from B only: it may write, and create, entities of any class. A stays: privilege never
+lets a pack define getters or setters on a class it does not own or import.
+
+- **Granted at load, by a write.** The boot app (the root of trust) marks a pack by writing `Pack:<name>.privileged = true`; the loader
+  reads it and loads the pack with the right. No header keyword, no self-declaration. First grant: `door_tools` (the pack that serves
+  the model's `entity_write`), so the model's tool can write a class a model-written pack owns.
+- **Only a privileged writer can set `privileged`.** An unprivileged pack's write to it is refused by rule B, so a pack cannot promote
+  itself. A privileged pack can grant it to a pack it loads (a chain of trust): boot -> `door_tools` -> packs the model loads through it.
+  (The model's tool is privileged, so the model can also promote its own packs: consistent with "no security, the model owns its
+  environment"; B stays as the guard between unprivileged packs.)
+- **Provenance.** The host records who granted: `Pack:<name>.granted_by`, from the writer of the grant, never from the pack's text.
+- **Revocation (proposed).** A grant persists until a privileged writer writes `privileged = false`; it does not die with the granter.
+- Review: the surface snapshot lists which shipped packs hold a grant (a diff the contracts test fails on until reviewed).
