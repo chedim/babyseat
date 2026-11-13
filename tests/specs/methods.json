@@ -209,6 +209,7 @@
      "method_name": "steps",
      "command": "",
      "parents": [
+      "cls:tool",
       "Tool:a:step1"
      ]
     }
@@ -221,6 +222,7 @@
      "method_name": "guarded",
      "command": "echo hi",
      "parents": [
+      "cls:tool",
       "Tool:b:guard"
      ]
     }

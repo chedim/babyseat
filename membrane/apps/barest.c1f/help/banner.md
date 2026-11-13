@@ -27,6 +27,10 @@ Banner.undone getter: sort_by([{'name': s.name, 'k': s.eid} for s in instances('
 Banner.text getter: 'trip: ' + str(len([s for s in instances('Stop') if s.done == True])) + ' of ' + str(len(instances('Stop'))) + ' stops done; next ' + str((pluck(this.undone, 'name') or ['none'])[0])
 ```
 
+A second way: give a class of your own the `text` getter and make it the banner's nearest class by writing the list of classes:
+`entity_write {spec: "Banner:owner:main", prop: "parents", value: ["cls:mybanner"]}`. The entity's classes are the list in `parents`, so
+the starting `Banner` class is then no longer one of them: its `text` stops, and what only it computed goes away. Write `["cls:banner"]` to go back.
+
 A banner of several parts is one getter that joins them, in the order you choose:
 
 ```c1f

@@ -26,7 +26,7 @@ the LOWEST layer of data files. The FIRST app is the root of trust (see Privileg
 | data files served by the door, upper layer shadowing (`Boot:seat.app_dirs`, `door.c1f`, one stat at a time) | built; `door_static.rs`, `cliffvm_process.rs` |
 | replacing a pack's text with one that lacks a getter clears the value | built; `apps_1143.rs` |
 | getter arms stacked across packs, top first, an upper default ends it | built; `layers_1143.rs` |
-| one resolution rule across the classes of an entity (own class, `parents` in order, root `Entity`); root pack `entity.c1f` with `Entity.summary` | built; `resolution_1143.rs` |
+| one resolution rule across the classes of an entity (the class list `parents` in order, root `Entity`); root pack `entity.c1f` with `Entity.summary` | built; `resolution_1143.rs` |
 | setters: top first, same-name replacement, first write wins (quiet skip before the right-hand side), in-layer double write stays the error | built |
 | `Why`: `Fields::why_layer` (`layer: <pack>`, `overridden by <pack>: <pack>'s <setter> write skipped`) | built as a Rust API; no door route shows it yet |
 | safety rule (override only what you import), stale-setter check across layers | built |
@@ -41,7 +41,7 @@ the LOWEST layer of data files. The FIRST app is the root of trust (see Privileg
 | construct | rule |
 |---|---|
 | getter | the arms of every layer form ONE list, the top layer's arms first; the first arm whose `WHEN` holds wins and the search falls through to lower layers; a default arm (`ELSE:`) in an upper layer ends it there. This is the getter-arms machinery (`fold_arms`) with arms ordered across packs. |
-| classes of one entity | ONE rule over getters (#1143): for each (entity, property) one ordered list of arms, NEAREST CLASS first: the entity's own class (the eid class), then its `parents` in list order, then the implicit root `Entity`; within a class the top layer first (the row above). The first arm whose `WHEN` holds wins, an `ELSE:` arm ends the search, a failing `WHEN` falls through to the next-nearer class. `Trip.summary` beats `Entity.summary`; a `parents` class never beats the entity's own class. Setters keep their own rule (below). `native/tests/resolution_1143.rs`. |
+| classes of one entity | ONE rule over getters (#1143): for each (entity, property) one ordered list of arms, NEAREST CLASS first: the entity's class list (`parents`, nearest first; the eid class is only the birth default and the whole list when there is none), then the implicit root `Entity`; within a class the top layer first (the row above). The first arm whose `WHEN` holds wins, an `ELSE:` arm ends the search, a failing `WHEN` falls through to the next-nearer class. `Trip.summary` beats `Entity.summary`; writing `parents` reorders, adds or replaces the classes (the eid class has no standing after the birth), so a class written first beats the one the id names. Setters keep their own rule (below) and bind through the same list. `native/tests/classlist_1143.rs`. `native/tests/resolution_1143.rs`. |
 | setter | every setter on the same property fires, TOP layer first (the original: "reverse order of layer loading"). A setter with the SAME NAME as a lower layer's replaces it: the lower one is dropped when the layers are composed and is never evaluated (explicit override). A differently named one stacks, and when two stacked setters write the same target (an entity and a property) in one round the FIRST write wins, which is the top layer's: before a write line's right-hand side is evaluated the engine checks whether its target was already written this round by a higher layer, and if so skips the line without evaluating it and without running any effect (an overridden `Command:x.run` never runs). A setter's `WHEN` is still evaluated, because the engine cannot know statically which writes it would make. Inside ONE layer a double write to a target stays the existing error ("already written this round"); across layers it is the override and a quiet skip, and `Why` says `overridden by <layer>`. |
 | class | the lowest layer that declares a class owns it. An upper layer must `IMPORT` the owner, EXCEPT when every declaration it makes on that class overrides what a pack it imports DIRECTLY defines (see below); otherwise it is refused with `add IMPORT <owner>`. |
 | data file | a file at the same path in an upper layer shadows the lower one. |
@@ -93,6 +93,10 @@ own or import (`compose` refuses it, tested).
   imports the class Pack; otherwise a receipt (`pack <p> can't grant privilege`) and nothing is written. A privileged pack grants to a
   pack it loads (a chain of trust: boot -> `door_tools` -> packs the model loads through it). Outside writes (the host, the door's
   person) are never subject to rule B or to this check.
+- **Rule B follows the class list.** A pack may write an existing entity when ANY class of the entity's list (`parents`; the eid class when
+  there is none) is one the pack owns or imports, or when no class of it has an owner; otherwise the write is refused for the nearest owned
+  class. A write of `parents` itself is a write like any other (same check, against the list the entity has at that moment). The rule guards a
+  pack's own mistakes; the seat has no security by decision (outside writes and privileged packs are exempt). `classlist_1143.rs`.
 - **Provenance.** The host mirrors `Pack:<name>.granted_by` as a derived, non-journalled write (like `loaded`, `error`): `pack:<pack>:<setter>`
   for a setter's grant, the outside writer's name (`person`, `host`) otherwise; never from the pack's own text. A grant persists until a
   privileged writer revokes it; it does not die with the granter. A stored `privileged = true` row is read back at start.

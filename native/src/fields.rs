@@ -50,25 +50,21 @@ pub const LLM_CALL: &str = "membrane::llm.call";
 
 /// The entities a getter of `cls` applies to: that class, or an entity with it among its ISA parents.
 fn of_kind(core: &Core, cls: &str) -> Vec<String> {
-    core.docs.iter().filter(|(k, e)| cls == ROOT_CLASS || e.cls == cls || has_kind(core, k, &e.props, cls)).map(|(k, _)| k.clone()).collect()
+    core.docs.iter().filter(|(k, e)| cls == ROOT_CLASS || e.in_classes(cls) || has_kind(core, k, &e.props, cls)).map(|(k, _)| k.clone()).collect()
 }
 
 /// The implicit root class: every entity's chain of classes ends in it (docs/c1f-layers.md, "One rule").
 pub const ROOT_CLASS: &str = "Entity";
 
-/// How near a getter's class `gcls` is to an entity: 0 its own class (the eid class), 1+i the i-th of its `parents` list, FAR a kind
-/// found up the ISA chain, ROOT the root `Entity`; None when the class does not apply. The nearest class's arms are tried first.
+/// How near a getter's class `gcls` is to an entity: its place in the class list (`parents`, nearest first; the eid class when there is none),
+/// FAR a kind found up the ISA chain, ROOT the root `Entity`; None when the class does not apply. The nearest class's arms are tried first.
 const FAR: usize = 1_000_000;
 const ROOT: usize = usize::MAX;
 fn class_rank(core: &Core, eid: &str, e: &crate::vm::Ent, gcls: &str) -> Option<usize> {
-    if e.cls == gcls { return Some(0); }
-    if let Some(ps) = e.props.get("parents").filter(|p| !p.is_null()) {
-        let named = |p: &J| p.as_str().map(|s| s.rsplit(':').next().unwrap_or("").eq_ignore_ascii_case(gcls)).unwrap_or(false);
-        match ps {
-            J::Array(a) => if let Some(i) = a.iter().position(named) { return Some(1 + i); },
-            p => if named(p) { return Some(1); },
-        }
-    }
+    class_rank_in(core, eid, e, &e.class_names(), gcls)
+}
+fn class_rank_in(core: &Core, eid: &str, e: &crate::vm::Ent, names: &[String], gcls: &str) -> Option<usize> {
+    if let Some(i) = names.iter().position(|n| n.eq_ignore_ascii_case(gcls)) { return Some(i); }
     if gcls == ROOT_CLASS { return Some(ROOT); }
     if has_kind(core, eid, &e.props, gcls) { return Some(FAR); }
     None
@@ -428,7 +424,7 @@ impl Fields {
         let mut work = VecDeque::new();
         for (cls, prop) in gone {
             if self.has_getter(&cls, &prop) { continue; }
-            let mut eids: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == cls && e.props.contains_key(&prop)).map(|(k, _)| k.clone()).collect();
+            let mut eids: Vec<String> = core.docs.iter().filter(|(_, e)| e.in_classes(&cls) && e.props.contains_key(&prop)).map(|(k, _)| k.clone()).collect();
             eids.sort();
             for e in eids { self.emit_unchecked(core, &mut work, &e, &prop, J::Null, "pack-removed", seq, now); }
         }
@@ -586,13 +582,38 @@ impl Fields {
 
     /// May a setter from `pack` write an entity of class `cls`? Its own classes, an imported pack's, or a class no
     /// pack owns. A setter built outside a pack ("") is not checked.
+    /// The pack that owns a class; the name may come lower-cased from a `parents` entry (`cls:alpha` is Alpha).
+    fn owner_of(&self, cls: &str) -> Option<&String> {
+        self.owner.get(cls).or_else(|| self.owner.iter().find(|(k, _)| k.eq_ignore_ascii_case(cls)).map(|(_, v)| v))
+    }
+
     fn may_write(&self, pack: &str, cls: &str) -> Result<(), String> {
         if pack.is_empty() || self.is_privileged(pack) { return Ok(()); }
-        match self.owner.get(cls) {
+        match self.owner_of(cls) {
             None => Ok(()),
             Some(o) if o == pack || self.imports.get(pack).map(|v| v.contains(o)).unwrap_or(false) => Ok(()),
-            Some(o) => Err(format!("pack {} can't write {} (pack {} owns it): add IMPORT {}", pack, cls, o, o)),
+            Some(o) => {
+                let cls = self.owner.keys().find(|k| k.eq_ignore_ascii_case(cls)).map_or(cls, |k| k.as_str());   // as declared (a `parents` entry is lower-cased)
+                Err(format!("pack {} can't write {} (pack {} owns it): add IMPORT {}", pack, cls, o, o))
+            }
         }
+    }
+
+    /// Rule B on an existing entity, by its class list (`parents`, #1143): allowed when ANY of its classes may be written by `pack` (it owns or
+    /// imports it), or when no class has an owner; otherwise refused for the nearest owned class. A write of `parents` itself is a write.
+    fn may_write_ent(&self, core: &Core, pack: &str, eid: &str) -> Result<(), String> {
+        if pack.is_empty() || self.is_privileged(pack) { return Ok(()); }
+        let Some(e) = core.docs.get(eid) else { return Ok(()) };
+        let names = e.class_names();
+        let mut first_err = None;
+        for c in &names {
+            match self.may_write(pack, c) {
+                Ok(()) if self.owner_of(c).is_some() => return Ok(()),
+                Ok(()) => {}
+                Err(w) => { first_err.get_or_insert(w); }
+            }
+        }
+        match first_err { Some(w) => Err(w), None => Ok(()) }
     }
 
     /// Every class a loaded setter or getter is declared on.
@@ -646,6 +667,21 @@ impl Fields {
         }
         let mut v: Vec<usize> = best.into_values().map(|(_, i)| i).collect();
         v.sort_by_key(|&i| (self.glevel[i], i));
+        v
+    }
+
+    /// The properties getters wrote for the entity under its OLD `parents` value that no getter of its present list writes (and that it holds).
+    fn lost_props(&self, core: &Core, eid: &str, old: &J) -> Vec<String> {
+        let Some(e) = core.docs.get(eid) else { return vec![] };
+        let mut old_names = crate::vm::parent_names(old);
+        if old_names.is_empty() { old_names.push(e.cls.clone()); }
+        let mut v: Vec<String> = vec![];
+        for g in &self.getters {
+            if e.props.get(&g.prop).map_or(true, |x| x.is_null()) || v.contains(&g.prop) { continue; }
+            if class_rank_in(core, eid, e, &old_names, &g.cls).is_none() { continue; }
+            if (0..self.getters.len()).any(|i| self.getters[i].prop == g.prop && class_rank(core, eid, e, &self.getters[i].cls).is_some()) { continue; }
+            v.push(g.prop.clone());
+        }
         v
     }
 
@@ -1128,6 +1164,8 @@ impl Fields {
                 continue;
             }
             let Some((_, e, gi)) = self.dirty.pop_first() else { break };
+            // a getter of a class the entity no longer has (its `parents` changed after something marked it) computes nothing
+            if !core.docs.get(&e).map_or(false, |d| class_rank(core, &e, d, &self.getters[gi].cls).is_some()) { continue; }
             let Some(v) = self.compute(core, Some(host), &e, gi, now, seq) else { continue };
             let prop = self.getters[gi].prop.clone();
             self.emit_unchecked(core, &mut work, &e, &prop, v, &format!("getter:{}", prop), seq, now);
@@ -1151,6 +1189,9 @@ impl Fields {
         // that gets a value then is an ordinary change: its setters fire)
         if w.prop == "parents" && self.known.contains(&w.eid) && w.new != w.old {
             for gi in self.getters_of(core, &w.eid) { self.dirty.insert((self.glevel[gi], w.eid.clone(), gi)); }
+            // the classes the entity lost: what their getters wrote is cleared (as a removed pack's), unless another class still has the getter
+            let gone = self.lost_props(core, &w.eid, &w.old);
+            for p in gone { self.emit_unchecked(core, work, &w.eid, &p, J::Null, "class-dropped", seq, now); }
         }
         if w.prop == "active" && w.eid.starts_with(TRIP_PREFIX) { self.trip_arrived(core, &w.eid); }
         self.mark_refs(&w.prop, &w.old, &w.new);
@@ -1277,8 +1318,7 @@ impl Fields {
                 self.out.push(json!({"eid": tgt, "born": cls}));
                 self.birth(core, &tgt, now, seq);
             }
-            let cls = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
-            if let Err(why) = self.may_write(pack, &cls) {
+            if let Err(why) = self.may_write_ent(core, pack, &tgt) {
                 self.receipt(core, eid, name, why, J::Null, seq, now);
                 continue;
             }
@@ -1321,13 +1361,21 @@ impl Fields {
             let tail = tgt.rsplit_once("::").map_or(tgt.as_str(), |(_, r)| r);
             let own = tail.split(':').next().unwrap_or("").to_string();
             if let Err(why) = self.may_write(pack, &own) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+            // the birth default of the class list: the eid's class first, then the constructor's class when it differs (the stamp), then any `parents` argument
             if own != cls && !args.iter().any(|(k, _)| k == "parents") { args.push(("parents".into(), json!([format!("cls:{}", cls.to_lowercase())]))); }
             core.load(tgt.clone(), own.clone(), Default::default(), None, now);
             self.out.push(json!({"eid": tgt, "born": own}));
             self.birth(core, &tgt, now, seq);
         } else {
+            if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+        }
+        // a `parents` argument on an entity that has no list yet (its list is the birth default, the eid's class): the eid's class stays first
+        if core.docs.get(&tgt).map_or(false, |e| e.props.get("parents").map_or(true, |p| p.is_null())) {
             let own = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
-            if let Err(why) = self.may_write(pack, &own) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+            for a in args.iter_mut().filter(|(k, _)| k == "parents") {
+                let mut m = serde_json::Map::new(); m.insert("parents".into(), a.1.clone());
+                a.1 = crate::vm::birth_props(&own, m).remove("parents").unwrap_or(J::Null);
+            }
         }
         let kind_stamped = args.iter().any(|(k, _)| k == "parents");
         for (prop, v) in args {

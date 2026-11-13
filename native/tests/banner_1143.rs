@@ -67,17 +67,16 @@ fn a_model_pack_that_defines_banner_text_replaces_the_default_completely() {
     assert_eq!(text(&h), "stops done: 1", "nothing of the default is left, nothing is added");
 }
 
-/// FINDING (reported to the operator): the VM has no "nearest class wins". Writing `parents` on the banner to a class of the model's own
-/// binds that class's `text` getter in addition to the `Banner` one; both are getters of the one property, and the order of the two decides.
-/// Observed: the `Banner` getter keeps the value (the pack loaded before or after the parents write, same result), so the model's own class
-/// `text` never shows. The way that works is the pack that defines `Banner.text` itself (the test above).
+/// The second way to replace the banner (operator 2026-11-13, the class list): the entity's classes are the list in `parents`, nearest first,
+/// and the eid class is only the birth default. Writing `parents` to a class of the model's own makes ITS `text` getter the nearest.
 #[test]
-fn reassigning_parents_to_a_class_with_its_own_text_getter_leaves_the_default_text_standing() {
+fn reassigning_parents_to_a_class_with_its_own_text_getter_replaces_the_default_text() {
     let own = "PACK own 1\nIMPORT default_banner 1\nOwnBanner.text getter: 'own text'\n";
     let h = seat(); h.load_pack("own", own).unwrap(); h.rebuild(); h.pump();
+    assert!(text(&h).contains("CONVERSATION: main"));
     h.write(B, "parents", json!(["cls:ownbanner"]), "person"); h.pump();
-    assert!(text(&h).contains("CONVERSATION: main") && !text(&h).contains("own text"), "{}", text(&h));
+    assert_eq!(text(&h), "own text");
     let h = seat(); h.write(B, "parents", json!(["cls:ownbanner"]), "person"); h.pump();
     h.load_pack("own", own).unwrap(); h.rebuild(); h.pump();
-    assert!(text(&h).contains("CONVERSATION: main") && !text(&h).contains("own text"), "{}", text(&h));
+    assert_eq!(text(&h), "own text");
 }

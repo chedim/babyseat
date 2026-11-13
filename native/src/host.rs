@@ -238,6 +238,7 @@ impl Host {
     }
 
     fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
+        let props = crate::vm::birth_props(cls, props);   // the eid class is the birth default of the class list (the journal keeps what was said)
         self.store_born(eid, cls, &props, stamp);
         if let Some(t) = props.get("text") { self.pack_text(eid, t); }
         if let Some(v) = props.get("privileged") { self.note_outside_grant(eid, v, stamp); }

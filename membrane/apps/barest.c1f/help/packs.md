@@ -64,12 +64,13 @@ Note.line getter: 'note: ' + this.title
 
 ## Classes of one entity: the nearest wins
 
-An entity has its own class (the class in its id) and may list more in `parents`. Every entity also ends in the root class `Entity`
-(the pack `entity` declares `Entity.summary`: the id, the classes and the parents, in one line, on every entity). For one property the
-getters of all those classes form ONE list of arms: the entity's own class first, then its `parents` in list order, then `Entity`; within
-a class the top layer first. The first arm whose `WHEN` holds wins, and an `ELSE:` arm ends the search. A `WHEN` that fails falls through
-to the next-nearer class, so an arm with no `ELSE:` adds to what the farther class says instead of hiding it. Note the order: the entity's
-OWN class is nearest, so a `parents` entry never replaces a getter of the entity's own class (to replace that, define it again in a pack on top).
+An entity has ONE ordered list of classes, its `parents` (`cls:<name>` entries); the nearest class is the first entry, and the root class
+`Entity` is implicitly last (the pack `entity` declares `Entity.summary`: the id and the class list, in one line, on every entity). The class in
+the id only starts the list: an entity born with no `parents` is the list [its id's class], one born with `parents` gets its id's class put
+first; after that the id has no standing, and writing `parents` (the whole list) reorders, adds or replaces classes. For one property the
+getters of all those classes form ONE list of arms, in list order, then `Entity`; within a class the top layer first. The first arm whose
+`WHEN` holds wins, and an `ELSE:` arm ends the search. A `WHEN` that fails falls through to the next-nearer class, so an arm with no `ELSE:`
+adds to what the farther class says instead of hiding it. A class you drop from the list takes its getters' values with it, and its setters stop firing.
 
 ```c1f
 -- given Lamp:desk {"watts": 60, "parents": ["cls:fixture"]}
@@ -80,11 +81,18 @@ OWN class is nearest, so a `parents` entry never replaces a getter of the entity
 -- reads Lamp:desk.brightness = "dim"
 -- reads Fixture:x.brightness = "dim"
 -- reads Fixture:x.summary = "Fixture:x (Fixture)"
+-- write Lamp:desk.parents = ["cls:fixture", "cls:lamp"]
+-- reads Lamp:desk.label = "fixture"
+-- write Lamp:desk.parents = ["cls:fixture"]
+-- reads Lamp:desk.summary = "Lamp:desk (cls:fixture)"
 Lamp.label getter: 'lamp'
 Lamp.brightness getter WHEN this.watts > 40: 'bright'
 Fixture.label getter: 'fixture'
 Fixture.brightness getter: 'dim'
 ```
+
+Writing `parents` is also the second way to replace your banner: give a class of your own a `text` getter and write `parents: ["cls:<yourclass>"]`
+on `Banner:owner:main` (`Help:banner`).
 
 ## Habits that keep packs working
 

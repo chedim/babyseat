@@ -44,6 +44,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hello"
@@ -54,6 +55,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1"
@@ -228,6 +230,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hello"
@@ -238,6 +241,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1"
@@ -311,6 +315,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hello"
@@ -321,6 +326,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1"
@@ -396,6 +402,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hello"
@@ -406,6 +413,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1"
@@ -481,6 +489,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hi"
@@ -491,6 +500,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1",
@@ -617,6 +627,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hi"
@@ -627,6 +638,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1",
@@ -710,6 +722,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hi"
@@ -720,6 +733,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1",
@@ -809,6 +823,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hi"
@@ -819,6 +834,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1",
@@ -902,6 +918,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ],
      "text": "hi"
@@ -912,6 +929,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:1-1",

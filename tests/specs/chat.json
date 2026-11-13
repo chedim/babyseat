@@ -64,6 +64,7 @@
     "eid": "membrane::Chat:message:2000-1",
     "prop": "parents",
     "equals": [
+     "cls:chat",
      "cls:chatmessage"
     ]
    },
@@ -332,6 +333,7 @@
     "props": {
      "text": "q?",
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ]
     }
@@ -341,6 +343,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:9-9"
@@ -427,6 +430,7 @@
       "entity_read"
      ],
      "parents": [
+      "cls:chat",
       "cls:chatmessage"
      ]
     }
@@ -436,6 +440,7 @@
     "class": "Chat",
     "props": {
      "parents": [
+      "cls:chat",
       "cls:chatturn"
      ],
      "message": "membrane::Chat:message:9-9",
@@ -448,6 +453,7 @@
     "props": {
      "text": "the answer",
      "parents": [
+      "cls:chat",
       "cls:chatresponse"
      ]
     }

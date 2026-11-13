@@ -188,7 +188,7 @@ fn the_state_route_writes_the_persons_two_voice_entities() {
     assert_eq!((props(&c, O)["on"].clone(), props(&c, O)["device"].clone()), (json!(false), json!("phone")));
     assert!(props(&c, I)["state_ts"].is_number() && props(&c, O)["state_ts"].is_number());
     assert_eq!(props(&c, O)["person"], "Alice B");                                  // the rest of the entity is untouched
-    assert_eq!(props(&c, I)["parents"], json!(["cls:voice"]));
+    assert_eq!(props(&c, I)["parents"], json!(["cls:voice"]), "a stored list is what it is (no prefix put back)");
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn a_person_with_no_voice_entities_gets_them_on_the_first_state_write() {
     assert_eq!(r["body"], json!({"ok": true, "state": {"in": {"on": true, "mode": "ptt", "device": "mic"}, "out": {"on": false, "device": "mic"}}}), "{r}");
     let (i, o) = ("membrane::Config:voice:in:nobody", "membrane::Config:voice:out:nobody");
     for (e, io) in [(i, "in"), (o, "out")] {
-        assert_eq!(props(&c, e)["parents"], json!(["cls:voice"]), "{e}: the kind mirror");
+        assert_eq!(props(&c, e)["parents"], json!(["cls:config", "cls:voice"]), "{e}: the kind mirror");
         assert_eq!((props(&c, e)["person"].clone(), props(&c, e)["voice_io"].clone()), (json!("Nobody"), json!(io)));
         assert_eq!(c.docs[e].cls, "Config", "the class the Python seat gives it");
         assert!(props(&c, e)["state_ts"].is_number());
@@ -232,7 +232,7 @@ fn an_old_entity_without_the_kind_stamp_is_mirrored_and_keeps_its_values() {
     let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true}", Some("Old One"));
     assert_eq!(r["status"], 200, "{r}");
     let i = "membrane::Config:voice:in:old-one";
-    assert_eq!(props(&c, i)["parents"], json!(["cls:voice"]), "stamped now, as voice_io.entity stamps old ones");
+    assert_eq!(props(&c, i)["parents"], json!(["cls:config", "cls:voice"]), "stamped now, as voice_io.entity stamps old ones");
     assert_eq!(props(&c, i)["person"], "Old One", "the person the store has is not overwritten");
     assert_eq!(props(&c, i)["on"], true);
 }

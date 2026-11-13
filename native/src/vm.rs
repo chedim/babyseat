@@ -47,6 +47,36 @@ pub struct Ent {
     pub pos: Option<Vec<f64>>,
 }
 
+/// The class names of a `parents` value (`cls:<name>` entries, the name after the last colon): a list, or one entry.
+pub fn parent_names(parents: &J) -> Vec<String> {
+    let name = |p: &J| p.as_str().filter(|s| !s.is_empty()).map(|s| s.rsplit(':').next().unwrap_or("").to_string());
+    match parents { J::Array(a) => a.iter().filter_map(name).collect(), p => name(p).into_iter().collect() }
+}
+
+/// A BIRTH with its own `parents`: the eid class is the birth default, so it goes first unless the list names it (#1143). No `parents`: nothing
+/// is stored, the list is [the eid class]. After the birth the eid class has no standing: a `parents` write is the whole list.
+pub fn birth_props(cls: &str, mut props: Map<String, J>) -> Map<String, J> {
+    if let Some(ps) = props.get("parents") {
+        let names = parent_names(ps);
+        if !names.is_empty() && !cls.is_empty() && !names.iter().any(|n| n.eq_ignore_ascii_case(cls)) {
+            let mut l = vec![J::String(format!("cls:{}", cls.to_lowercase()))];
+            match ps { J::Array(a) => l.extend(a.iter().cloned()), p => l.push(p.clone()) }
+            props.insert("parents".into(), J::Array(l));
+        }
+    }
+    props
+}
+
+impl Ent {
+    /// THE CLASS LIST (#1143): the entity's `parents`, nearest first; the eid class (`cls`) only when it has none (the birth default).
+    /// The root `Entity` is implicitly last and is not in the list.
+    pub fn class_names(&self) -> Vec<String> {
+        let l = self.props.get("parents").map(parent_names).unwrap_or_default();
+        if l.is_empty() { vec![self.cls.clone()] } else { l }
+    }
+    pub fn in_classes(&self, cls: &str) -> bool { self.class_names().iter().any(|c| c.eq_ignore_ascii_case(cls)) }
+}
+
 #[derive(Clone)]
 pub struct Spec {
     pub when: Vec<Vec<J>>,
@@ -177,7 +207,8 @@ impl<'a> expr::World for View<'a> {
         let Some(e) = self.core.docs.get(eid) else { return V::None };
         match attr {
             "eid" => V::Str(eid.to_string()),
-            "cls" => V::Str(e.cls.clone()),
+            // the first class of the list (the eid class when it is the first, as written there otherwise)
+            "cls" => V::Str(match e.class_names().into_iter().next() { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }),
             "position" => e.pos.as_ref().map(|p| V::List(p.iter().map(|x| V::Float(*x)).collect())).unwrap_or(V::None),
             _ => match e.props.get(attr) {
                 Some(j) if !j.is_null() => expr::from_json(j),
@@ -450,7 +481,7 @@ impl Core {
         let key = (eid.to_string(), c.clone());
         if let Some(v) = memo.isa.get(&key) { return *v; }
         let Some(e) = self.docs.get(eid) else { return false };
-        let mut ok = e.cls.to_lowercase() == c;
+        let mut ok = e.in_classes(&c);   // the class list: a kind named there binds with no ISA parent entity
         if !ok {
             let suffix = format!(":{}", c);
             let mut seen: HashSet<String> = HashSet::from([eid.to_string()]);

@@ -64,10 +64,10 @@ fn a_foreign_prefix_is_stamped_with_the_kind_so_the_engine_mirrors_it() {
     let (c, _) = run("    membrane::Config:voice:in[this.slug] = Thing(kind: 'in')\n    membrane::Chat:message[this.n]:response = Reply(text: 'hi')\n", json!({"slug": "ann-b", "n": 9}));
     let v = p(&c, "membrane::Config:voice:in:ann-b");
     assert_eq!(v["kind"], json!("in"));
-    assert_eq!(v["parents"], json!(["cls:thing"]));
+    assert_eq!(v["parents"], json!(["cls:config", "cls:thing"]), "the eid class first (the birth default), then the stamp");
     assert_eq!(c.docs["membrane::Config:voice:in:ann-b"].cls, "Config", "it stays the class its eid names (the Python seat's)");
     let r = p(&c, "membrane::Chat:message:9:response");
-    assert_eq!(r["parents"], json!(["cls:reply"]));
+    assert_eq!(r["parents"], json!(["cls:chat", "cls:reply"]));
     assert_eq!(r["text"], json!("hi"));
 }
 
@@ -153,7 +153,7 @@ fn a_foreign_prefix_entity_gets_its_kinds_getters_at_once() {
     // the kind stamp (`parents`) is set after the birth: the kind's getters must still be computed for what was just made
     let pack = "PACK t 1\nVoice.shown getter: 'v:' + this.eid\nVoice.twice getter: this.n * 2\nBox.go on-setter t:\n  ALWAYS:\n    Config:x = Voice(n: 4)\n";
     let (c, _) = run_with(pack, json!({}), &[]);
-    assert_eq!(p(&c, "Config:x")["parents"], json!(["cls:voice"]));
+    assert_eq!(p(&c, "Config:x")["parents"], json!(["cls:config", "cls:voice"]));
     assert_eq!(p(&c, "Config:x")["shown"], json!("v:Config:x"), "{:?}", p(&c, "Config:x"));
     assert_eq!(p(&c, "Config:x")["twice"], json!(8));
 }

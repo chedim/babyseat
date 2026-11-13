@@ -124,7 +124,7 @@ fn the_barest_seats_entity_pack_gives_every_entity_a_summary_from_its_id_class_a
     h.born("Trip:main", "Trip", props(json!({"parents": ["cls:semnoun"]})), "person");
     h.born("Note:a", "Note", props(json!({"text": "secret value"})), "person");
     h.pump();
-    assert_eq!(h.get("Trip:main", "summary"), json!("Trip:main (Trip, cls:semnoun)"));
+    assert_eq!(h.get("Trip:main", "summary"), json!("Trip:main (cls:trip, cls:semnoun)"));
     assert_eq!(h.get("Note:a", "summary"), json!("Note:a (Note)"), "no values of the entity, only its id and classes");
 }
 
