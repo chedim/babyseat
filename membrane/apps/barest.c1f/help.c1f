@@ -12,3 +12,4 @@ Boot.started on-setter seed-help:
     Help:c1f.file = dir + '/help/c1f.md'
     Help:packs.file = dir + '/help/packs.md'
     Help:upgrade.file = dir + '/help/upgrade.md'
+    Help:banner.file = dir + '/help/banner.md'

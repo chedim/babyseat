@@ -73,11 +73,6 @@
     "equals": "main"
    },
    {
-    "eid": "membrane::Banner:owner:main",
-    "prop": "chat",
-    "equals": "main"
-   },
-   {
     "eid": "membrane::Chat:message:2000-1",
     "prop": "queued",
     "equals": true

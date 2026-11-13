@@ -1,6 +1,5 @@
 PACK chat 1
 IMPORT door 1
-IMPORT banner 1
 -- THE BARE CHAT (#1143, operator 2026-11-12): ONE chat, `membrane::Chat:main`, no persons, no security. The route is the door's
 -- `session` family:
 --   POST /membrane/chat/message {text}   the person's message becomes an entity under the chat; 202 {id}
@@ -10,8 +9,8 @@ IMPORT banner 1
 -- `membrane::Chat:message:<id>:tool:<tool id>` (ChatTool {name, input, result}); packs/chat_turn.c1f runs the turn. The kinds are
 -- ChatMessage / ChatResponse / ChatTool, not Message / Response: a pack owns the classes it declares on, and Message was retired
 -- from messages.c1f for that reason.
--- The chat's banner is the class `Banner` instance `membrane::Banner:owner:main` (the map-mode placeholder that tells the model how to
--- build its own). `queued` is written AFTER the message is born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
+-- The chat's banner is the instance `membrane::Banner:owner:main`, born at start by the app's banner_lines pack (a banner made of
+-- BannerLine entities); chat_turn.c1f reads its `text`. `queued` is written AFTER the message is born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
 -- The id is the arrival time in milliseconds and the request's number: `<ms>-<n>`.
 
 Chat.title getter: 'main'
@@ -35,7 +34,6 @@ Request.cm_at on-setter chat-message:
   WHEN this.cm_at != None:
     id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
     membrane::Chat:main = Chat(name: 'main')
-    membrane::Banner:owner:main = Banner(chat: 'main', owner: 'owner')
     membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
     membrane::Chat:message[id].queued = True
     this.cm_id = id

@@ -42,8 +42,12 @@ Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate ent
 -- ---- entity_write: a write by name (a computed property name) -------------------------------------------------------------------------------
 Request.mc_w_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
 Request.mc_w_prop getter: strip(str(prop(this.mc_args, 'prop') or ''))
+-- A bare id names the `membrane::` one when only that exists: the chat's own entities (Chat:main, Banner:owner:main, ...) are spelled with that
+-- namespace in their packs, and a bare spelling of one of them reaches it instead of creating a second entity. An id that already has a row,
+-- or has no `membrane::` twin, is used as written.
+Request.mc_w_id getter: ('membrane::' + this.mc_w_spec) if prop('membrane::' + this.mc_w_spec, 'eid') != None and prop(this.mc_w_spec, 'eid') == None else this.mc_w_spec
 Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop' if this.mc_w_spec == '' or this.mc_w_prop == '' else None
-Request.mc_write getter: {'spec': this.mc_w_spec, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None else None
+Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None else None
 Request.mc_write on-setter mcp-write:
   WHEN this.mc_write != None:
     (prop(this.mc_write, 'spec')).[prop(this.mc_write, 'prop')] = prop(this.mc_write, 'value')
@@ -52,21 +56,22 @@ Request.mc_w_text getter:
   WHEN this.mc_write == None: None
   ELSE WHEN this.mc_done != True: None
   ELSE WHEN this.refused != None: 'refused: ' + str(this.refused)
-  ELSE: 'wrote ' + this.mc_w_spec + '.' + this.mc_w_prop
+  ELSE: 'wrote ' + this.mc_w_id + '.' + this.mc_w_prop
 
 -- ---- entity_read: the store's row (stored properties) or one property through the field ---------------------------------------------------
 Request.mc_r_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
 Request.mc_r_prop getter: prop(this.mc_args, 'prop')
+Request.mc_r_id getter: ('membrane::' + this.mc_r_spec) if prop('membrane::' + this.mc_r_spec, 'eid') != None and prop(this.mc_r_spec, 'eid') == None else this.mc_r_spec
 Request.mc_r_bad getter: 'entity_read needs spec (the entity\'s id)' if this.mc_r_spec == '' else None
-Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_extract(body, \'$.props\') AS props FROM c_field WHERE k = ?', this.mc_r_spec) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
-Request.mc_r_val getter: prop(this.mc_r_spec, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None else None
+Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_extract(body, \'$.props\') AS props FROM c_field WHERE k = ?', this.mc_r_id) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
+Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None else None
 Request.mc_r_text getter:
   WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
-  ELSE WHEN this.mc_r_prop != None and this.mc_r_val == None: this.mc_r_spec + ' has no ' + str(this.mc_r_prop)
+  ELSE WHEN this.mc_r_prop != None and this.mc_r_val == None: this.mc_r_id + ' has no ' + str(this.mc_r_prop)
   ELSE WHEN this.mc_r_prop != None: str(this.mc_r_val)
   ELSE WHEN this.mc_r_rows == None: None
   ELSE WHEN len(this.mc_r_rows) == 0: 'no such entity: ' + this.mc_r_spec
-  ELSE: this.mc_r_spec + ' (' + str(prop(this.mc_r_rows[0], 'cls')) + ') ' + str(prop(this.mc_r_rows[0], 'props'))
+  ELSE: this.mc_r_id + ' (' + str(prop(this.mc_r_rows[0], 'cls')) + ') ' + str(prop(this.mc_r_rows[0], 'props'))
 
 -- ---- entity_query: the store's rows by kind and eid prefix -----------------------------------------------------------------------------------
 Request.mc_q_terms getter: words(replace(str(prop(this.mc_args, 'q') or ''), '&', ' '))

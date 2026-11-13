@@ -6,7 +6,6 @@ fs
 proc
 fetch
 store
-banner
 door_tools
 chat
 chat_turn

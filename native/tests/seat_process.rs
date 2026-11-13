@@ -306,14 +306,84 @@ fn request_rows_of_an_earlier_run_are_retired_when_the_seat_starts() {
 #[test]
 fn help_topics_are_entities_the_model_lists_and_reads() {
     let (mut run, port) = seat("help", true);
-    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 3).then_some((l, e)) });
-    for t in ["c1f", "packs", "upgrade"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
-    for t in ["c1f", "packs", "upgrade"] {
+    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 4).then_some((l, e)) });
+    for t in ["c1f", "packs", "upgrade", "banner"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
+    for t in ["c1f", "packs", "upgrade", "banner"] {
         let disk = std::fs::read_to_string(repo().join(format!("membrane/apps/barest.c1f/help/{t}.md"))).unwrap();
         let (text, err) = wait("the topic's text", || { let (x, e) = call(port, "entity_read", json!({"spec": format!("Help:{t}"), "prop": "text"})); (x.len() > 100).then_some((x, e)) });
         assert!(!err && text == disk, "Help:{t}.text is the file's text");
     }
     let (whole, _) = call(port, "entity_read", json!({"spec": "Help:c1f"}));
     assert!(whole.contains("the language of the field"), "a plain read shows the text: {}", &whole[..whole.len().min(200)]);
+    assert!(terminate(&mut run));
+}
+
+// ---- the banner is lines (#1143) ----------------------------------------------------------------------------------------------------------
+fn banner(port: u16) -> String { call(port, "entity_read", json!({"spec": "membrane::Banner:owner:main", "prop": "text"})).0 }
+
+#[test]
+fn a_fresh_seats_banner_is_the_howto_line_in_positive_words() {
+    let (mut run, port) = seat("bannerfresh", true);
+    let b = wait("the banner", || { let b = banner(port); (b.contains("BannerLine:howto")).then_some(b) });
+    for need in ["continuity", "BannerLine:<name>", "text", "order", "retire", "getter", "Help:banner"] { assert!(b.contains(need), "the howto says {need}: {b}"); }
+    let low = b.to_lowercase();
+    for bad in ["placeholder", "no history", "cannot", "does not", "not yet", "class=MyBanner"] { assert!(!low.contains(&bad.to_lowercase()), "the howto says {bad:?}: {b}"); }
+    let (line, _) = call(port, "entity_read", json!({"spec": "BannerLine:howto"}));
+    assert!(line.contains("(BannerLine)"), "{line}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn writing_banner_lines_changes_the_banner_in_order_and_retiring_a_line_removes_it() {
+    let (mut run, port) = seat("bannerlines", true);
+    wait("the howto", || banner(port).contains("BannerLine:howto").then_some(()));
+    for (n, o, t) in [("b", 2, "second line"), ("a", 1, "first line")] {
+        call(port, "entity_write", json!({"spec": format!("BannerLine:{n}"), "prop": "text", "value": t}));
+        call(port, "entity_write", json!({"spec": format!("BannerLine:{n}"), "prop": "order", "value": o}));
+    }
+    let b = wait("both lines", || { let b = banner(port); (b.contains("second line") && b.contains("first line")).then_some(b) });
+    assert!(b.find("first line").unwrap() < b.find("second line").unwrap() && b.find("BannerLine:howto").unwrap() < b.find("first line").unwrap(), "{b}");
+    // an empty text adds nothing; a text write replaces the line
+    call(port, "entity_write", json!({"spec": "BannerLine:a", "prop": "text", "value": ""}));
+    wait("line a gone", || { let b = banner(port); (!b.contains("first line") && b.contains("second line")).then_some(()) });
+    // retire removes the line and its entity
+    call(port, "entity_write", json!({"spec": "BannerLine:howto", "prop": "retire", "value": true}));
+    let b = wait("howto retired", || { let b = banner(port); (!b.contains("BannerLine:howto")).then_some(b) });
+    assert_eq!(b, "second line");
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:BannerLine"}));
+    assert!(!q.contains("BannerLine:howto"), "{q}");
+    // the chat's next turn carries the lines: the banner's text is what chat_turn reads
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_pack_with_a_banner_line_getter_shows_live_state() {
+    let (mut run, port) = seat("bannerlive", true);
+    wait("the howto", || banner(port).contains("BannerLine:howto").then_some(()));
+    let pack = "PACK tripban 1\nIMPORT banner_lines 1\nBannerLine.live getter:\n  WHEN this.eid == 'BannerLine:trip': 'stops done: ' + str(len([s for s in instances('Stop') if s.done == True]))\n  ELSE: None\n";
+    call(port, "entity_write", json!({"spec": "BannerLine:trip", "prop": "order", "value": 5}));
+    let (r, e) = call(port, "entity_write", json!({"spec": "Pack:tripban", "prop": "text", "value": pack.replace("\\n", "\n")}));
+    assert!(!e, "{r}");
+    let (st, _) = wait("the pack state", || { let (s, _) = call(port, "entity_read", json!({"spec": "Pack:tripban", "prop": "state"})); (s != "waiting").then_some((s, ())) });
+    assert_eq!(st, "loaded");
+    let b = wait("0 done", || { let b = banner(port); b.contains("stops done: 0").then_some(b) });
+    assert!(b.contains("BannerLine:howto") && b.find("BannerLine:howto").unwrap() < b.find("stops done").unwrap(), "the other lines keep their text: {b}");
+    call(port, "entity_write", json!({"spec": "Stop:a", "prop": "done", "value": true}));
+    wait("1 done", || banner(port).contains("stops done: 1").then_some(()));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_bare_entity_id_names_the_membrane_one_when_only_that_exists() {
+    let (mut run, port) = seat("bareid", true);
+    wait("the banner", || banner(port).contains("BannerLine:howto").then_some(()));
+    let (t, _) = call(port, "entity_read", json!({"spec": "Banner:owner:main", "prop": "text"}));
+    assert!(t.contains("BannerLine:howto"), "{t}");
+    let (w, e) = call(port, "entity_write", json!({"spec": "Banner:owner:main", "prop": "note", "value": "x"}));
+    assert!(!e, "{w}");
+    let (n, _) = call(port, "entity_read", json!({"spec": "membrane::Banner:owner:main", "prop": "note"}));
+    assert_eq!(n, "x", "the write landed on the membrane:: entity");
+    let (q, _) = call(port, "entity_query", json!({"q": "name~:Banner:owner"}));
+    assert_eq!(q, "0 entity(ies)", "no second Banner:owner:main was made: {q}");
     assert!(terminate(&mut run));
 }

@@ -75,7 +75,7 @@ from the app folder, no build step, no dependencies; a later piece ports it to c
 **`entity_query` additions for the viewer**: `offset` (paging), `kind!:<Class>` (all but a class) and `full` (rows carry the stored properties).
 **Data** is the `--store` file (default `./.cliffvm/seat.sqlite`).
 
-**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `scripts/seat` and `seat_process.rs` read it): `boot door fs proc fetch store banner door_tools chat chat_turn`,
+**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `scripts/seat` and `seat_process.rs` read it): `boot door fs proc fetch store door_tools chat chat_turn`,
 each a single-file app (the first, `boot`, is the root of trust), then the app folder. The Python-era packs (`door_self`, `door_models`, `door_voice`, `door_state`, `door_decisions`,
 `router`, `decisions`, `dev`, ...) stay in `membrane/packs/` for the Python seat and are NOT loaded here: a request carries none of their getters, and the seat seeds no
 `Command:git`, `Command:gh` (dev.c1f) or `File:operator-ledger` (decisions.c1f).
@@ -88,10 +88,19 @@ predecessors' whole state and the sizes doubled per request (a 100-row query rea
 At start the collector retires the Request rows an earlier run left in the store (`Boot.old_requests`, setter `sweep-old-requests`).
 
 **The help** (`membrane/apps/barest.c1f/help.c1f`, `help/c1f.md`, `help/packs.md`, `help/upgrade.md`): `Help:<topic>` entities whose `text` is the topic's markdown file (a getter reading it; `Boot.started` seeds
-`Help:c1f`, `Help:packs`, `Help:upgrade` from the first of `app_dirs`). The model reads them with `entity_read` and lists them with `entity_query` `kind:Help`; the doctrine in `chat_turn.c1f` points at `Help:c1f` first.
+`Help:c1f`, `Help:packs`, `Help:upgrade` from the first of `app_dirs`). The model reads them with `entity_read` and lists them with `entity_query` `kind:Help`; the doctrine in `chat_turn.c1f` points at `Help:c1f` first. `help/banner.md` (`Help:banner`) teaches the banner's lines.
 `c1f` is the syntax (getters, setters, blocks, entity literals, constructors, nulls with reasons, the operators c1f has: the default is `or`, there is no `??`), `packs` is writing a pack through `Pack:<name>.text`
 (ownership, rule B, layers), `upgrade` is what changed since 0.7.53 plus a SQL / Vue / JavaScript lookup table. **Every code block is a test**: `native/tests/help_1143.rs` loads each ```c1f block through the
 loader and checks its `-- given / -- write / -- reads` lines (```c1f-error blocks must be refused with the text in `-- error:`), so the help cannot lie. Also `seat_process.rs` (the topics through the MCP door).
+
+**The banner** (`membrane/apps/barest.c1f/banner_lines.c1f`, the Python-era `banner.c1f` is not loaded here): `Banner:owner:main` (spelled `membrane::Banner:owner:main`, the chat's namespace) is the entity `chat_turn.c1f` reads into every turn.
+Its `text` is the text of every `BannerLine` entity, ordered by `order` (number, default 0) then eid, joined with newlines; a line whose text is empty adds nothing. A line shows its `live` when a pack gives it one
+(`BannerLine.live getter WHEN this.eid == '...'`, ending `ELSE: None`), else its stored `text` (a getter named `text` would stand over every line's stored `text`: a getter hides the stored property of the same name, it does not fall back to it). The model
+adds, replaces and removes lines with `entity_write` (`text`, `order`, `retire = true`); the first line, `BannerLine:howto`, explains this. Boot seeds the banner and the howto line (`Boot.started`, `seed-banner`; the chat no longer
+constructs the banner). Reassigning an entity's class by writing a `class` property does not work in the VM, so there is no class switch: the banner is lines. Tests: `seat_process.rs` (`a_fresh_seats_banner...`,
+`writing_banner_lines...`, `a_pack_with_a_banner_line_getter...`), `help_1143.rs` (every `Help:banner` example). **Known limit:** the engine restores only `Pack` rows at start, so a restart loses the banner's lines (the howto returns); until entities are restored the model's lines
+live as long as the process.
+**Bare ids** (`door_tools.c1f`): `entity_read` and `entity_write` take `Banner:owner:main` for `membrane::Banner:owner:main` when only the `membrane::` row exists (an id with its own row, or no twin, is used as written); `entity_query name~:` stays a literal prefix.
 
 **Retiring an entity** (`native/src/fields.rs` `retired`, `host.rs` `drain_apply`): a write of `retire = true` to ANY entity, by any writer (a pack's setter: the ordinary ownership rules
 apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
@@ -170,7 +179,7 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
   `Pack:<name>.text`, see "Pack entities"; the privilege grant is the one other Pack property the host reads, `privileged`). Pack FILES are loaded once at start: no mtime rescan. A Pack
   entity can not be deleted (its text emptied removes the pack). Only Pack rows are restored from the store at start, not other
   entities.
-- **Banner instances** (`Banner:<owner>:<chat>`), the dials (`recall:dials`), the class switch, facts per turn, `sql_forget`,
+- **Banner instances per owner and chat** (the barest seat has the one `Banner:owner:main`, made of lines: see "The banner"), the dials (`recall:dials`), the class switch (writing `class` does not reassign an instance), facts per turn, `sql_forget`,
   the 3 s banner time limit, `mark_delivered` / `mark_seq`.
 - **LLM call plumbing**: `Fields::calls` (the planner's `membrane::llm.call`) are drained and dropped; no LLM adapter.
 - **Host callbacks** (`_Host.call`: `pronoun`, `recall`, `rerank`, the banner's built-ins): `NullHost` knows none; `resolve`,
@@ -194,7 +203,7 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 The app is packs only: `door_tools.c1f` (the model's tools), `chat.c1f` (the one chat), `chat_turn.c1f` (the turn). Rust added
 only three small things: a write with a computed property name (`<target>.[expr] = v`, `fields.rs`), the kind getters of a constructed
 entity (a kind stamp came after the birth), and `cliffvm run ... --fact name=value` (any Boot fact, JSON or text). Run it with the
-shipped packs (`boot fs proc fetch store banner door door_tools chat chat_turn`) and
+shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus the barest app folder (its `banner_lines.c1f` births the banner) and
 `--fact chat_claude_bin=<path to the claude CLI>` (no default: without it a message is answered with an error and nothing runs).
 
 **Routes** (no persons, no auth, one chat `membrane::Chat:main`):
@@ -229,7 +238,7 @@ env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 <chat_claude_bin> -p --output-format strea
 
 Built-in tools off, no user MCP config (the config is an inline JSON string, generated by a getter from `Http:door`'s real port), no
 settings files, allowed tools exactly the membrane server's, one continuous run, the system prompt is the barest doctrine
-(`docs/doctrine-barest-draft.md`, the operator chose it for now) plus `Banner:owner:main`'s text (the map-mode placeholder), the prompt is the message ALONE: no history. `--` ends the options (the
+(`docs/doctrine-barest-draft.md`, the operator chose it for now) plus `Banner:owner:main`'s text (the banner's lines, see "The banner"), the prompt is the message ALONE: no history. `--` ends the options (the
 list-valued `--allowedTools` / `--mcp-config` would swallow a prompt). `--bare` is NOT used: per `claude --help` (2.1.323) it never
 reads OAuth or the keychain, only an API key, so it cannot use the operator's CLI login. The stream-json stdout is read by c1f
 (`json()` per line): the `result` line's text is the answer, else the assistant's text in order; `is_error` or a failing exit with no
