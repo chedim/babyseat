@@ -23,6 +23,8 @@ ChatMessage.said getter: prop(this.resp_eid, 'text')
 ChatMessage.turn_view getter: {'state': this.tstate, 'started': prop(this.turn_eid, 'started'), 'ended': prop(this.turn_eid, 'ended')}
 ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view}
 ChatResponse.kind getter: 'response'
+-- a response's summary is its whole text (nearer class than the root `Entity.summary`, packs/entity.c1f): the banner's error line shows it.
+ChatResponse.summary getter: str(this.text or '')
 ChatTool.kind getter: 'tool'
 ChatTurn.kind getter: 'turn'
 -- `state` is written once per step (running, then done/error): a turn that has none yet is queued (a constructor's first value and the start's write would be two writes in one round, which the loop guard refuses).

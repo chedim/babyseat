@@ -329,7 +329,7 @@ pub const RESERVED: &[&str] = &[
     "Int", "Float", "Num", "Text", "Bool", "List", "Dict", "None", "True", "False", "this", "x", "clock",
     "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words",
     "join", "head", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
-    "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop",
+    "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop", "why",
     "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun",
     "it", "that", "they", "them", "these", "those", "he", "him", "she", "her",
     "and", "or", "not", "in", "is", "if", "else", "lambda", "for", "await", "yield",
@@ -817,6 +817,8 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         }
         // None is a class like any other: None('why') constructs a null that carries its reason (None() says "null")
         "None" => Ok(V::Nil(match a.len() { 0 => "null".into(), 1 => py_str(&a[0]), _ => return Err("None: takes one reason".into()) })),
+        // why(x): the reason a null carries as text (`absent ...`, `error: ...`, `pending: ...`, the text of None('...')); None when x is not a reasoned null
+        "why" => { argn(1)?; Ok(match &a[0] { V::Nil(r) => V::Str(r.clone()), _ => V::None }) }
         "dot" => { argn(2)?; let (x, y) = (vec_of(&a[0])?, vec_of(&a[1])?); if x.len() != y.len() { return Err("dot: shapes not aligned".into()); } Ok(V::Float(x.iter().zip(&y).map(|(p, q)| p * q).sum())) }
         "norm" => { argn(1)?; Ok(V::Float(norm(&vec_of(&a[0])?))) }
         "distance" => { argn(2)?; Ok(V::Float(dist(&vec_of(&a[0])?, &vec_of(&a[1])?))) }

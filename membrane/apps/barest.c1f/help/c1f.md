@@ -113,7 +113,7 @@ N.largest getter: max([this.a, this.b])
 ```
 
 Builtins: `len abs min max lower strip replace startswith lines words join head sort_by before after pluck distinct concat json str num
-prop instances referencing`, plus the readers `sql read listdir stat`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
+prop why instances referencing`, plus the readers `sql read listdir stat`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
 refused when the pack loads:
 
 ```c1f-error

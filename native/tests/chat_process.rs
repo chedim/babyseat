@@ -139,6 +139,7 @@ argv = sys.argv[1:]
 prompt = argv[-1]
 tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
 json.dump({"argv": argv, "auto_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"), "cwd": os.getcwd()}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
+errp = os.path.join(here, "err")   # a file `err`: the CLI ends with a result line that reports this text as an error
 if os.path.exists(os.path.join(here, "fail")):
     sys.stderr.write("fake: not logged in\n"); sys.exit(3)
 def out(o):
@@ -160,13 +161,17 @@ out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_i
 r = rpc("tools/call", {"name": "entity_read", "arguments": {"spec": "Command:probe", "prop": "cmd"}}, 4)["content"][0]["text"]
 out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tu2", "name": "mcp__membrane__entity_read", "input": {"spec": "Command:probe", "prop": "cmd"}}]}})
 out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu2", "content": r}]}})
+if os.path.exists(errp):
+    out({"type": "result", "subtype": "success", "is_error": True, "result": open(errp).read(), "num_turns": 1, "session_id": "fake-1"}); sys.exit(0)
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt, "num_turns": 3, "session_id": "fake-1"})
 "#;
 
 const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "chat.c1f", "chat_turn.c1f"];
 
 /// the seat's folder holds the fake; the binary is told its path as a fact
-fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) {
+fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) { fake_seat_with(tag, extra, &[]) }
+/// the same, with more packs (name, text) in the seat's pack folder: a model's own banner pack, for one
+fn fake_seat_with(tag: &str, extra: &[&str], packs: &[(&str, &str)]) -> (Run, u16, std::path::PathBuf) {
     let dir = tmp(tag);
     let bin = dir.join("fake-claude");
     std::fs::write(&bin, FAKE).unwrap();
@@ -175,6 +180,7 @@ fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) {
     std::fs::create_dir_all(&pd).unwrap();
     for (n, t) in shipped(CHAT_PACKS) { std::fs::write(pd.join(n), t).unwrap(); }
     std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();   // the barest app's default banner pack
+    for (n, t) in packs { std::fs::write(pd.join(n), t).unwrap(); }
     let fact = format!("chat_claude_bin={}", bin.display());
     let mut child = Command::new(BIN).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
@@ -270,5 +276,60 @@ fn a_cli_that_fails_is_an_error_answer_with_its_stderr_and_a_missing_one_says_ho
     let id = send(port, "hello");
     let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
     assert!(v["response"].as_str().unwrap().contains("chat_claude_bin"), "{v}");
+    assert!(terminate(&mut run));
+}
+
+/// the system prompt of the run the fake recorded for `prompt`
+fn system_prompt(dir: &std::path::Path, prompt: &str) -> String {
+    let a: J = wait("the fake's argv file", || std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of(prompt)))).ok().and_then(|t| serde_json::from_str(&t).ok()));
+    let args = a["argv"].as_array().unwrap();
+    let i = args.iter().position(|x| x == "--system-prompt").expect("a --system-prompt");
+    args[i + 1].as_str().unwrap().to_string()
+}
+/// let the fake run on and wait for the message's end state
+fn finish(port: u16, dir: &std::path::Path, id: &str, prompt: &str) -> J {
+    wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of(prompt))).exists().then_some(()));
+    std::fs::write(dir.join(format!("go.{}", tag_of(prompt))), "").unwrap();
+    wait("the end state", || { let v = view(port, id); if v["state"] == "done" || v["state"] == "error" { Some(v) } else { None } })
+}
+
+#[test]
+fn a_banner_without_text_still_runs_the_turn_and_the_system_prompt_shows_the_banner_error() {
+    // the model's pack leaves Banner.text null (it reads an entity that is not there): the message must not sit queued
+    let pack = "PACK nulltext 1\nIMPORT default_banner 1\nBanner.text getter: prop('Missing:one', 'text')\n";
+    let (mut run, port, dir) = fake_seat_with("bannernull", &[], &[("nulltext.c1f", pack)]);
+    let id = send(port, "still there");
+    let sys = system_prompt(&dir, "still there");
+    assert!(sys.contains("BANNER ERROR:") && sys.contains("Help:banner"), "{sys}");
+    assert!(sys.contains("has no `text`"), "{sys}");
+    assert!(sys.contains("YOUR BANNER IS YOUR TOOL FOR CONTINUITY"), "the doctrine is still there: {sys}");
+    assert_eq!(finish(port, &dir, &id, "still there")["state"], "done");
+    assert!(terminate(&mut run));
+    // a null with a reason of its own: the reason is in the banner error
+    let pack = "PACK nulltext 1\nIMPORT default_banner 1\nBanner.text getter: None('the model emptied it')\n";
+    let (mut run, port, dir) = fake_seat_with("bannernull2", &[], &[("nulltext.c1f", pack)]);
+    send(port, "again");
+    let sys = system_prompt(&dir, "again");
+    assert!(sys.contains("BANNER ERROR:") && sys.contains("the reason: the model emptied it"), "{sys}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_banner_shows_the_previous_errors_entity_and_its_whole_text_until_a_turn_succeeds() {
+    let (mut run, port, dir) = fake_seat("bannererr", &[]);
+    let long = format!("start {} end-of-the-error", "word ".repeat(400));   // 2000+ characters
+    std::fs::write(dir.join("err"), &long).unwrap();
+    let id1 = send(port, "first");
+    assert_eq!(finish(port, &dir, &id1, "first")["state"], "error");
+    std::fs::remove_file(dir.join("err")).unwrap();
+    let id2 = send(port, "second");
+    let sys = system_prompt(&dir, "second");
+    let line = format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:message:{id1}:turn:response - claude reported an error: {long}");
+    assert!(sys.contains(&line), "the eid, the summary, no cap: {sys}");
+    assert_eq!(finish(port, &dir, &id2, "second")["state"], "done");
+    let id3 = send(port, "third");
+    let sys = system_prompt(&dir, "third");
+    assert!(!sys.contains("ENDED WITH AN ERROR"), "a later successful turn clears the line: {sys}");
+    assert_eq!(finish(port, &dir, &id3, "third")["state"], "done");
     assert!(terminate(&mut run));
 }

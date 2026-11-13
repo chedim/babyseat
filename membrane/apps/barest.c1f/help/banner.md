@@ -5,7 +5,7 @@ Your banner reaches you at the start of every turn, between the standing text an
 so it is live: it is recomputed when what it reads changes, and every turn shows the world as it is now.
 
 Read it with `entity_read {spec: "Banner:owner:main", prop: "text"}` to see the banner as it will reach you. The banner you start with
-shows the conversation and the time, and the previous turn's error when there was one. It is a starting point for your own.
+shows the conversation and the time, and the previous turn's error when there was one (its entity id and its whole text). It is a starting point for your own.
 
 ## Write your banner
 

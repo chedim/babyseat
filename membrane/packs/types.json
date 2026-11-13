@@ -139,6 +139,7 @@
       "ChatMessage.turn_view": "Dict",
       "ChatMessage.view": "Dict",
       "ChatResponse.kind": "Text",
+      "ChatResponse.summary": "Text",
       "ChatTool.kind": "Text",
       "ChatTurn.kind": "Text",
       "ChatTurn.status": "Any",
@@ -163,6 +164,7 @@
     "getters": {
       "ChatMessage.answer": "Text?",
       "ChatMessage.argv": "List(Any)?",
+      "ChatMessage.banner_slot": "Any",
       "ChatMessage.banner_text": "Any",
       "ChatMessage.bin": "Any",
       "ChatMessage.capped": "Bool",
@@ -178,7 +180,7 @@
       "ChatMessage.rc": "Any",
       "ChatMessage.rr": "Any",
       "ChatMessage.spoken": "Text",
-      "ChatMessage.sys": "Text?",
+      "ChatMessage.sys": "Text",
       "ChatMessage.texts": "List(Text)",
       "ChatMessage.tools_names": "List(Text)"
     },

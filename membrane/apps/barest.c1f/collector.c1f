@@ -4,7 +4,7 @@ IMPORT boot 1
 -- THE REQUEST COLLECTOR (#1143, operator 2026-11-13). A door request is the entity `Request:<n>`; a seat that polls makes one every few
 -- hundred ms, and each holds its headers and body and the whole derived state of its answer (an entity_query reply can be megabytes). Once
 -- the request is ANSWERED (the driver's receipt `respond_result` has landed) it drops what it holds, and `request_keep_s` seconds after the
--- answer (the Boot fact, default 600) the entity is retired: `retire = True` removes it from the engine and the store (docs/cliffvm.md,
+-- answer (the Boot fact, default 600; 0 retires it as soon as it is answered) the entity is retired: `retire = True` removes it from the engine and the store (docs/cliffvm.md,
 -- "Retiring an entity").
 --   dropped: set with the drop; the door's `answer` setter does not answer again once it is true
 --   kept_at: the clock at the answer

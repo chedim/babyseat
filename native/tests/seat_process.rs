@@ -273,6 +273,30 @@ fn an_answered_request_drops_its_body_and_is_retired_after_request_keep_s() {
 }
 
 #[test]
+fn request_keep_s_zero_retires_a_request_as_soon_as_it_is_answered_and_the_door_still_serves() {
+    let (mut run, port) = seat_with("keep0", true, &["request_keep_s=0"]);
+    let (st, _, html) = http(port, "GET", "/", "");
+    assert_eq!(st, 200); assert!(html.contains("<html") || html.contains("<!doctype") || html.contains("<!DOCTYPE"));
+    // no Request stays: the count is read through the door, itself a request, so it counts at most that one
+    wait("no answered request left", || {
+        let (n, _) = call(port, "entity_query", json!({"q": "kind:Request", "count": true}));
+        let n: u32 = n.split_whitespace().next().unwrap().parse().unwrap();
+        (n <= 1).then_some(())
+    });
+    // the chat still works
+    let (st, _, body) = http(port, "POST", "/membrane/chat/message", &json!({"text": "hello zero"}).to_string());
+    assert_eq!(st, 202, "{body}");
+    let id = serde_json::from_str::<J>(&body).unwrap()["id"].as_str().unwrap().to_string();
+    let v = wait("the answer", || {
+        let (_, _, b) = http(port, "GET", &format!("/membrane/chat/message/{id}"), "");
+        let v: J = serde_json::from_str(&b).unwrap();
+        if v["state"] == "done" || v["state"] == "error" { Some(v) } else { None }
+    });
+    assert_eq!(v["state"], "done", "{v}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
 fn an_entity_query_without_full_returns_a_small_reply_for_an_entity_with_large_state() {
     let (mut run, port) = seat("small", true);
     let big = "x".repeat(200_000);

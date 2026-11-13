@@ -107,7 +107,7 @@
   },
   "request_keep_s": {
    "wired": false,
-   "why": "the barest seat's request collector (membrane/apps/barest.c1f/collector.c1f): seconds an ANSWERED door request is kept before it is retired (deleted); default 600 in the pack (operator-approved 2026-11-13); told by `--fact request_keep_s=<n>`"
+   "why": "the barest seat's request collector (membrane/apps/barest.c1f/collector.c1f): seconds an ANSWERED door request is kept before it is retired (deleted); default 600 in the pack (operator-approved 2026-11-13), 0 = retired as soon as it is answered; told by `--fact request_keep_s=<n>`"
   }
  }
 }

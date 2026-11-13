@@ -435,6 +435,7 @@ fn call_ty(f: &str, args: &[Node], env: &Env) -> Ty {
             }
         }
         "len" => { if ar(1, 1) { chk(0, Acc::Len); } Ty::int() }
+        "why" => { ar(1, 1); Ty::text().null_if(true) }
         "lower" | "strip" | "plain" | "unspeak" => { if ar(1, 1) { chk(0, Acc::Text); } Ty::text() }
         "replace" => { if ar(3, 3) { for i in 0..3 { chk(i, Acc::Text); } } Ty::text() }
         "startswith" => { if ar(2, 2) { chk(0, Acc::Text); chk(1, Acc::Text); } Ty::bool() }

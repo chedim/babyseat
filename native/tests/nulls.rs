@@ -120,3 +120,12 @@ fn casts_compose_with_or_as_a_union_and_propagate_like_any_null() {
     assert!(is_nil_why(&run("Int('a') + 1", &[]).unwrap(), "not-a-type: int expected, got text"));
     assert!(py_eq(&run("Int('a') == None", &[]).unwrap(), &V::Bool(true)));
 }
+
+#[test]
+fn why_reads_the_reason_of_a_null_as_text_and_is_null_for_anything_else() {
+    let txt = |v: V| if let V::Str(t) = v { Some(t) } else { None };
+    assert_eq!(txt(run("why(None('no file'))", &[]).unwrap()).as_deref(), Some("no file"));
+    assert_eq!(txt(run("why(x)", &[("x", V::Nil("pending: read(/a)".into()))]).unwrap()).as_deref(), Some("pending: read(/a)"));
+    assert!(matches!(run("why(1)", &[]).unwrap(), V::None));
+    assert_eq!(txt(run("why('t') or 'none'", &[]).unwrap()).as_deref(), Some("none"));
+}
