@@ -235,7 +235,8 @@ def test_an_entity_is_never_written_into_the_field(vm):
     die = _ent(vm.est, "die", cls="toy", a=1)
     t = vm.define("leak", when=[["changed", "?x.a"]], where=[["isa", "?x", "toy"]], write=["?x.b", "x"])
     die.properties["a"] = 2; vm.est.upsert(die); vm.drain()
-    assert "b" not in die.properties and "cannot write" in vm.errors[t]
+    # (#1143, intended: an entity is stored as a reference, never as the entity object, so the field stays JSON)
+    assert die.properties["b"] == {"$ref": die.eid} and t not in vm.errors
     json.dumps(die.properties)
 
 
@@ -250,8 +251,9 @@ def test_arithmetic_is_pythons_and_refuses_the_undefined():
 
 
 def test_one_bad_trigger_does_not_starve_the_sweep(vm):
+    # (#1143: a missing property is now a reasoned null, not an error, so the bad trigger divides by zero)
     s = _ent(vm.est, "t", cls="sensor", temp=20)
-    bad = vm.define("bad", when=[["above", "x.temp + x.missing", 5]], where=[["isa", "?x", "sensor"]],
+    bad = vm.define("bad", when=[["above", "x.temp / 0", 5]], where=[["isa", "?x", "sensor"]],
                     write=["?x.z", "1"])
     vm.define("good", when=[["above", "x.temp", 25]], where=[["isa", "?x", "sensor"]], write=["?x.alarm", "1"])
     vm.sweep()
