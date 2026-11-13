@@ -125,8 +125,24 @@ subtract there). Over it, that node (only) becomes a reasoned null `error: timeo
 prints it like the budget's reason; the rest of the engine keeps running. The clock is read twice per evaluation (start, end),
 and the step counter doubles as the in-evaluation backstop: every `TIME_CHECK_EVERY` (256) steps it reads the clock again, so a
 runaway loop inside one evaluation trips before it ends. The clock is injectable (`expr::set_clock`) for tests.
-**Replay caveat (open).** A time trip is non-deterministic, and the journal records outside writes only (not getter outcomes),
-so a replay re-evaluates getters and re-measures: a recorded trip is not yet applied from the record. See the report on #1143.
+**A kill is recorded, a timing is not** (operator, 2026-11-12). A time trip is the one outcome that is not deterministic, so
+exactly the kills are written down, as TRIP ENTITIES (`membrane/packs/trip.c1f` declares the class, so the host mirrors it): when
+a getter evaluation is killed the engine writes `Trip:<eid>#<prop>` {`node`, `self_ms`, `allowance_ms`, `at`, `active`} the way an effect
+receipt arrives (writer `field:driver:trip`, a `born` then one write per property), so a journal that keeps the outside writes keeps
+the kill and needs no new line type. An evaluation that finishes in time writes nothing: there is no timing log. The budget trip
+(`budget exceeded`) is deterministic and is not recorded.
+- **While it applies.** A node whose own Trip is `active` IS the reasoned null `error: timeout N ms (allowance M ms)` (read from the
+  Trip's numbers; nothing is evaluated), and `Why` points at the Trip (`trip: <eid>`). It applies until one of the node's inputs changes:
+  then the node is evaluated fresh, and a fresh evaluation that does not trip writes `active: false` (the kill stays as history; this
+  write is derived, not journalled); one that trips again rewrites the Trip (a new `self_ms`/`at`, `active` written true again).
+- **No loop.** The engine's own Trip write is applied to its mirror at once and is not an input of the node: the node is not
+  re-evaluated for it, and the write is never fed back.
+- **Replay.** A replay re-evaluates the node (fast: it does not trip), then the journalled Trip arrives and the node recomputes to the
+  same null: the final state equals the live run. If an input changes in the same round as a Trip arrives, the input wins.
+- **Not covered.** A SETTER's trip is a `refused` receipt on every run, not a node with a lifetime: it is not recorded yet. A Trip
+  that is already in a restored state is not applied after a restart (the first evaluation is a fresh chance).
+- **Host duty.** The host must journal the `field:driver:trip` writes as outside writes (today `fields_live.py` stamps every engine
+  write `trigger:field:*`, which replay treats as derived), and feed them back on replay like any outside write.
 
 ## The contracts are executable
 `native/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are

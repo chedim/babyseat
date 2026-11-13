@@ -73,6 +73,16 @@ impl Host for NoHost {
     fn live(&self, _: &str, _: bool) -> Option<String> { None }
 }
 
+/// The recorded kills (a getter evaluation that the self-time allowance stopped): `Trip:<eid>#<prop>` entities.
+const TRIP_CLASS: &str = "Trip";
+const TRIP_PREFIX: &str = "Trip:";
+fn trip_eid(eid: &str, prop: &str) -> String { format!("{TRIP_PREFIX}{eid}#{prop}") }
+/// The null's reason a Trip entity stands for, in the words of the live trip.
+fn trip_reason(core: &Core, trip: &str) -> String {
+    let n = |p: &str| core.docs.get(trip).and_then(|t| t.props.get(p)).and_then(|v| v.as_u64()).unwrap_or(0);
+    format!("error: {}", crate::expr::timeout_reason(n("self_ms"), n("allowance_ms")))
+}
+
 /// writer prefix of an own-name store (rule 6): it fires getters but not setters
 const DIRECT: &str = "field:direct:";
 
@@ -204,6 +214,8 @@ pub struct Fields {
     deps: std::collections::HashMap<(String, String), std::collections::BTreeSet<(String, usize)>>,
     reads: std::collections::HashMap<(String, usize), Vec<(String, String)>>,
     dirty: std::collections::BTreeSet<(usize, String, usize)>,
+    /// getter instances dirtied ONLY by their own Trip entity arriving (not by an input): the Trip applies to these
+    trip_only: std::collections::BTreeSet<(String, usize)>,
     /// entities whose getters are registered; `primed` once the start-up rebuild ran
     known: std::collections::HashSet<String>,
     primed: bool,
@@ -221,7 +233,7 @@ pub struct Fields {
 impl Fields {
     pub fn goalgraph() -> Self {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![],
-            getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
+            getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![] };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
@@ -365,6 +377,21 @@ impl Fields {
     /// with a receipt). Its own field is never an input (rule 3: own name = previous value).
     fn compute(&mut self, core: &mut Core, host: Option<&dyn Host>, eid: &str, gi: usize, now: f64, seq: &mut i64) -> Option<J> {
         let g = self.getters[gi].clone();
+        let key = (eid.to_string(), gi);
+        let trip = trip_eid(eid, &g.prop);
+        // The Trip (a recorded kill) of this node applies until an input changes: the node is that null, nothing is evaluated
+        if self.trip_only.remove(&key) {
+            match core.docs.get(&trip).map(|t| t.props.get("active") == Some(&json!(true))) {
+                Some(true) => {
+                    let reason = trip_reason(core, &trip);
+                    core.why.insert((eid.to_string(), g.prop.clone()), reason);
+                    core.locals.remove(&(eid.to_string(), g.prop.clone()));
+                    return Some(J::Null);
+                }
+                Some(false) => return None,   // its half-written or cleared Trip: nothing changed for the node
+                None => {}
+            }
+        }
         let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
         let (r, reads, nil, locals) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker);
         let key2 = (eid.to_string(), g.prop.clone());
@@ -374,7 +401,6 @@ impl Fields {
                 v => crate::expr::to_json(v).unwrap_or(J::Null),
             })).collect());
         }
-        let key = (eid.to_string(), gi);
         if let Some(old) = self.reads.remove(&key) { for k in old { if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); } } }
         let mut ins: Vec<(String, String)> = reads.into_iter().filter(|(e, p)| !(e == eid && *p == g.prop)).collect();
         if reads_name(&g.expr, "clock") { ins.push((CLOCK.into(), String::new())); }
@@ -383,8 +409,16 @@ impl Fields {
         self.reads.insert(key, ins);
         match r {
             Ok(v) => {
+                self.clear_trip(core, &trip, seq, now);   // a fresh evaluation in time: the kill no longer applies
                 match &nil { Some(why) if v.is_null() => { core.why.insert(key2, why.clone()); } _ => { core.why.remove(&key2); } }   // a null remembers why
                 Some(v)
+            }
+            Err(e) if crate::expr::parse_timeout(&e).is_some() => {
+                // killed by the time allowance: the one outcome that is not deterministic, so it is the one recorded (as a Trip entity)
+                let (n, m) = crate::expr::parse_timeout(&e).unwrap_or((0, 0));
+                self.write_trip(core, &trip, eid, &g.prop, n, m, now);
+                core.why.insert(key2, format!("error: {}", e));
+                Some(J::Null)
             }
             Err(e) => {
                 // an error is a null with the error as its reason (it no longer keeps a stale value); the receipt still says where
@@ -394,6 +428,44 @@ impl Fields {
                 Some(J::Null)
             }
         }
+    }
+
+    /// A Trip entity became active (the journal's write, or a restore): its node is dirty, as "the kill, nothing else" (so the node
+    /// recomputes to the reasoned null without being evaluated). Any other dirtying of the node (an input) ends the kill.
+    fn trip_arrived(&mut self, core: &Core, trip: &str) {
+        let Some((eid, prop)) = trip.strip_prefix(TRIP_PREFIX).and_then(|r| r.rsplit_once('#')) else { return };
+        if core.docs.get(trip).map(|t| t.props.get("active") != Some(&json!(true))).unwrap_or(true) { return; }
+        for gi in self.getters_of(core, eid) {
+            if self.getters[gi].prop == prop { self.trip_only.insert((eid.to_string(), gi)); self.dirty.insert((self.glevel[gi], eid.to_string(), gi)); }
+        }
+    }
+
+    /// Record a kill: `Trip:<eid>#<prop>` {node, self_ms, allowance_ms, at, active}, written like an effect receipt (writer
+    /// `field:driver:trip`, so a journal of outside writes keeps it). The engine's own write is known to it at once (no echo round).
+    fn write_trip(&mut self, core: &mut Core, trip: &str, eid: &str, prop: &str, self_ms: u64, allowance_ms: u64, now: f64) {
+        if !core.docs.contains_key(trip) {
+            core.load(trip.to_string(), TRIP_CLASS.to_string(), Default::default(), None, now);
+            self.known.insert(trip.to_string());
+            self.out.push(json!({"eid": trip, "born": TRIP_CLASS}));
+        }
+        let props = [("node", json!(format!("{eid}.{prop}"))), ("self_ms", json!(self_ms)), ("allowance_ms", json!(allowance_ms)), ("at", json!(now)), ("active", json!(true))];
+        // `active` is written every time, even when it was already true: a replay may have cleared it on the way, and this is the write that re-arms it
+        for (p, v) in props { self.trip_prop(core, trip, p, v, "field:driver:trip", now, p == "active"); }
+    }
+
+    /// A fresh evaluation that did not trip: an active Trip stops applying (the kill stays as history). Derived, so not journalled.
+    fn clear_trip(&mut self, core: &mut Core, trip: &str, _seq: &mut i64, now: f64) {
+        if core.docs.get(trip).map(|t| t.props.get("active") == Some(&json!(true))).unwrap_or(false) {
+            self.trip_prop(core, trip, "active", json!(false), "field:trip-clear", now, false);
+        }
+    }
+
+    fn trip_prop(&mut self, core: &mut Core, trip: &str, prop: &str, new: J, writer: &str, now: f64, force: bool) {
+        let old = core.docs.get(trip).and_then(|e| e.props.get(prop).cloned()).unwrap_or(J::Null);
+        if old == new && !force { return; }
+        let w = Write { eid: trip.into(), prop: prop.into(), new: new.clone(), old, writer: writer.into(), chain: json!({}), seq: -1 };
+        self.out.push(json!({"eid": trip, "prop": prop, "new": new, "writer": writer}));
+        core.hear(w, None, now);
     }
 
     /// The chain behind a null: [{eid, prop, reason}] from the property asked about back to the first null that has a reason of
@@ -410,6 +482,8 @@ impl Fields {
             let reason = core.why.get(&cur).cloned();
             let mut node = json!({"eid": cur.0, "prop": cur.1, "reason": reason});
             if let Some(l) = core.locals.get(&cur) { node["locals"] = J::Object(l.clone()); }
+            let trip = trip_eid(&cur.0, &cur.1);
+            if core.docs.get(&trip).map(|t| t.props.get("active") == Some(&json!(true))).unwrap_or(false) { node["trip"] = json!(trip); }
             out.push(node);
             let Some(r) = reason else { break };
             // the input that is itself a null getter with the same reason is where this one came from
@@ -429,7 +503,11 @@ impl Fields {
     fn mark_key(&mut self, k: &(String, String)) {
         if let Some(s) = self.deps.get(k) {
             let hit: Vec<(String, usize)> = s.iter().cloned().collect();
-            for (e, gi) in hit { self.dirty.insert((self.glevel[gi], e, gi)); }
+            for (e, gi) in hit {
+                // an input changed: that ends the kill (the node gets a fresh chance)
+                self.trip_only.remove(&(e.clone(), gi));
+                self.dirty.insert((self.glevel[gi], e, gi));
+            }
         }
     }
 
@@ -544,6 +622,7 @@ impl Fields {
         for gi in self.getters_of(core, eid) { self.dirty.insert((self.glevel[gi], eid.to_string(), gi)); }
         let props: Vec<String> = core.docs.get(eid).map(|e| e.props.keys().cloned().collect()).unwrap_or_default();
         for p in props { self.mark(eid, &p); }
+        if eid.starts_with(TRIP_PREFIX) { self.trip_arrived(core, eid); }
         self.visited.clear();
         self.run(core, host, VecDeque::new(), now, seq);
     }
@@ -738,6 +817,7 @@ impl Fields {
     fn step(&mut self, core: &mut Core, host: &dyn Host, work: &mut VecDeque<Write>, w: Write, now: f64, seq: &mut i64) {
         self.driver_effect(core, work, &w, now, seq);
         self.mark(&w.eid, &w.prop);
+        if w.prop == "active" && w.eid.starts_with(TRIP_PREFIX) { self.trip_arrived(core, &w.eid); }
         self.mark_refs(&w.prop, &w.old, &w.new);
         {
             let cls = core.docs.get(&w.eid).map(|e| e.cls.clone()).unwrap_or_default();

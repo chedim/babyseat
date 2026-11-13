@@ -106,8 +106,18 @@ impl Budget {
     /// Over the allowance: `timeout N ms (allowance M ms)` (N rounded up).
     pub fn check_time(&self) -> Result<(), Err> {
         let ns = self.self_ns();
-        if ns > self.allow_ns { Err(format!("timeout {} ms (allowance {} ms)", ns.div_ceil(1_000_000), self.allow_ns / 1_000_000)) } else { Ok(()) }
+        if ns > self.allow_ns { Err(timeout_reason(ns.div_ceil(1_000_000), self.allow_ns / 1_000_000)) } else { Ok(()) }
     }
+}
+
+/// The words of a time trip.
+pub fn timeout_reason(self_ms: u64, allowance_ms: u64) -> String { format!("timeout {self_ms} ms (allowance {allowance_ms} ms)") }
+/// `(N, M)` out of a `timeout N ms (allowance M ms)` error; None for any other error.
+pub fn parse_timeout(e: &str) -> Option<(u64, u64)> {
+    let r = e.strip_prefix("timeout ")?;
+    let (n, r) = r.split_once(" ms (allowance ")?;
+    let m = r.strip_suffix(" ms)")?;
+    Some((n.parse().ok()?, m.parse().ok()?))
 }
 
 /// What one evaluation carries: its budget, its depth, and (when asked) the locals it bound, in order.
