@@ -2,6 +2,7 @@ PACK chat_turn 1
 IMPORT chat 1
 IMPORT proc 1
 IMPORT boot 1
+VIRTUAL Chunk
 -- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
 -- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
 -- membrane MCP set (the door's `POST /mcp`, packs/door_tools.c1f), one continuous run per answer with a ceiling, the system prompt is the

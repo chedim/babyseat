@@ -1,5 +1,6 @@
 PACK default_banner 1
 IMPORT boot 1
+RESIDENT Banner
 -- THE DEFAULT BANNER OF THE BAREST SEAT (#1143, operator 2026-11-13). `membrane::Banner:owner:main` is the entity `chat_turn.c1f` reads into
 -- every turn's system text, and it is FULLY the model's: the seat never segments, orders or joins what the model puts there. This pack is
 -- only the banner the seat is born with, the barest seat's cut of Memo's recall banner (membrane/packs/banner.c1f, RecallBanner), which stays

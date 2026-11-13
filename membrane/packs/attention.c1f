@@ -1,5 +1,6 @@
 PACK attention 1
 IMPORT boot 1
+RESIDENT Attention
 -- THE ALERT DIAL (operator, 2026-11-12: everything moves to cliffhanger). How many watch events per window may wake the
 -- model as their own turn; the rest fold into the digest of its next WHERE WE ARE block. One write sets it:
 --   Attention:seat.dial = {budget: 0..50, window_min: 1..1440, mode: 'interrupt' | 'digest'}   (only the given fields)

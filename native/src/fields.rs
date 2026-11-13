@@ -343,14 +343,35 @@ pub struct Fields {
     claimed: std::collections::HashMap<(String, String), (String, String)>,
     /// skipped writes (eid, prop, pack, setter) -> the pack that overrode it, as `why_layer` tells
     skipped: std::collections::BTreeMap<(String, String, String, String), String>,
+    /// class -> its storage mode, from the active owner packs' VIRTUAL / RESIDENT header lines (`compose`)
+    storage: std::collections::HashMap<String, Storage>,
+}
+
+/// How a class is stored (docs/cliffvm.md, "Storage modes"): its OWN class (the eid's), declared by the pack that owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Storage { Lazy, Virtual, Resident }
+
+/// A storage line of pack `n` (`VIRTUAL X` / `RESIDENT X`) that the pack may not make: the class belongs to another pack, which alone declares its mode.
+/// The text says what to do, for a pack written by a model.
+fn storage_conflict(n: &str, p: &crate::syntax::Pack, owner: &std::collections::HashMap<String, String>, packs: &std::collections::BTreeMap<String, crate::syntax::Pack>) -> Option<String> {
+    for (word, list) in [("VIRTUAL", &p.virtuals), ("RESIDENT", &p.residents)] {
+        for c in list {
+            let Some(o) = owner.get(c).filter(|o| *o != n) else { continue };
+            let theirs = packs.get(o).map(|q| if q.virtuals.contains(c) { " (it declares it VIRTUAL)" } else if q.residents.contains(c) { " (it declares it RESIDENT)" } else { " (it declares no storage mode: the class is stored and loaded on demand)" }).unwrap_or("");
+            return Some(format!("pack {n}: {word} {c}: pack {o} owns {c}{theirs} and only the owner of a class declares its storage mode. Remove the line from pack {n}; to change the mode, change it in pack {o}"));
+        }
+    }
+    None
 }
 
 impl Fields {
+    /// The storage mode of a class (its own class, the eid's): what its OWNER pack declared; Lazy when none did.
+    pub fn storage_of(&self, cls: &str) -> Storage { self.storage.get(cls).copied().unwrap_or(Storage::Lazy) }
     pub fn goalgraph() -> Self {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
-            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default() };
+            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default() };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
         f.load_order.push("goalgraph".into());
@@ -466,6 +487,9 @@ impl Fields {
                 }
                 // THE SAFETY RULE (docs/c1f-layers.md): a layer overrides only what it imports
                 if let Some(why) = self.override_without_import(n, &active) { self.pack_errors.insert(n.clone(), why); continue; }
+                // STORAGE MODES (docs/cliffvm.md): only the class OWNER declares VIRTUAL / RESIDENT; a storage line claims a class no pack owns yet
+                if let Some(why) = storage_conflict(n, p, &owner, &self.packs) { self.pack_errors.insert(n.clone(), why); continue; }
+                for c in p.virtuals.iter().chain(p.residents.iter()) { owner.entry(c.clone()).or_insert_with(|| n.clone()); }
                 for c in p.classes() { owner.entry(c).or_insert_with(|| n.clone()); }
                 active.push(n.clone());
             }
@@ -528,6 +552,8 @@ impl Fields {
             getters.push(g);
         }
         self.imports = active.iter().map(|n| (n.clone(), self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect())).collect();
+        self.storage = HashMap::new();
+        for n in &active { for c in &self.packs[n].virtuals { self.storage.insert(c.clone(), Storage::Virtual); } for c in &self.packs[n].residents { self.storage.insert(c.clone(), Storage::Resident); } }
         self.owner = owner;
         self.setters = setters;
         self.set_getters(getters);

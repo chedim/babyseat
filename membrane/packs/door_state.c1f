@@ -1,5 +1,6 @@
 PACK door_state 1
 IMPORT door 1
+RESIDENT Seat
 -- THE SEAT'S STATE AS A DOOR ROUTE FAMILY (#1143, the porting brief's `state` family): the reads and controls the page's panels use.
 --   GET  /membrane/seat, /membrane/seat/pause, /membrane/state (and /state), /membrane/self/card
 --   POST /membrane/seat/pause, /membrane/seat/control

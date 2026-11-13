@@ -4,6 +4,8 @@ IMPORT fs 1
 IMPORT proc 1
 IMPORT fetch 1
 IMPORT store 1
+VIRTUAL Return
+RESIDENT Pack
 -- THE MODEL'S TOOLS AS AN MCP DOOR (#1143, the `tools` route family): `POST /mcp` speaks MCP over plain HTTP, JSON-RPC 2.0, one JSON
 -- answer per request (no SSE stream: a GET is a 405). The model's CLI (`claude --mcp-config`) connects here; the tools are the FIELD
 -- operations only (operator, 2026-11-12: field manipulation and querying, nothing else; a shell, a file or a fetch is a Command:, File:

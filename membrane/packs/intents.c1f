@@ -1,6 +1,7 @@
 PACK intents 1
 IMPORT goalgraph 1
 IMPORT boot 1
+RESIDENT Intent
 -- THE GOALS TRIO AS WRITES AND A GETTER (operator, 2026-11-12: everything moves to cliffhanger). The seat's intent board is one
 -- node, `Intent:board`:
 --   Intent:board.intend  = {text, ttl?, by?}           plant a Goal (or find the open one with the same words: case and spacing do not matter)

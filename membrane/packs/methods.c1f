@@ -1,6 +1,7 @@
 PACK methods 1
 IMPORT boot 1
 IMPORT proc 1
+RESIDENT Tool
 -- ENTITY METHODS BECOME COMMANDS (docs/python-to-c1f.md, piece 2; methods are retired, #1101). A method is a Tool entity
 -- {method_name, command, read_only, name, ...}. When the seat starts (Boot:seat.started) this pack writes the matching
 -- `Command:<name>` (name = the method's `name`, "owner.method", with '.' ':' and ' ' as '_'): `cmd` = the command,

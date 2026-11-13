@@ -262,7 +262,12 @@ fn surface_of(text: &str) -> serde_json::Value {
     }
     let boot_decl: BTreeSet<String> = declared_own(text).iter().filter(|(c, _)| c == "Boot").map(|(_, p)| p.clone()).collect();
     facts.retain(|f| !boot_decl.contains(f) && !["eid", "name", "summary", "cls", "state", "facts"].contains(&f.as_str()));
-    json!({"imports": imports(text), "classes": classes, "members": members.len(), "writes": writes, "claims": claims, "boot_facts": facts})
+    let mut s = json!({"imports": imports(text), "classes": classes, "members": members.len(), "writes": writes, "claims": claims, "boot_facts": facts});
+    // the storage modes the pack declares (header lines `VIRTUAL <Class>` / `RESIDENT <Class>`), listed only when there are some
+    let p = membrane_vm::syntax::parse_full(text).expect("a shipped pack parses");
+    if !p.virtuals.is_empty() { s["virtual"] = json!(p.virtuals); }
+    if !p.residents.is_empty() { s["resident"] = json!(p.residents); }
+    s
 }
 
 #[test]
@@ -309,7 +314,12 @@ fn the_inferred_types_of_every_pack_match_the_reviewed_snapshot() {
     for ((stem, _), (_, r)) in all.iter().zip(&reports) {
         total += r.getters.len();
         concrete += r.getters.values().filter(|t| *t != "Any").count();
-        now.insert(stem.clone(), json!({"getters": r.getters, "writes": r.writes, "findings": r.findings}));
+        let mut entry = json!({"getters": r.getters, "writes": r.writes, "findings": r.findings});
+        // the storage modes the pack declares, listed only when there are some
+        let p = membrane_vm::syntax::parse_full(&all.iter().find(|(s, _)| s == stem).unwrap().1).expect("a shipped pack parses");
+        if !p.virtuals.is_empty() { entry["virtual"] = json!(p.virtuals); }
+        if !p.residents.is_empty() { entry["resident"] = json!(p.residents); }
+        now.insert(stem.clone(), entry);
     }
     eprintln!("inferred types: {concrete} of {total} getters resolve to a type other than Any");
     let path = root().join("membrane/packs/types.json");

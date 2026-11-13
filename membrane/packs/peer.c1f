@@ -1,5 +1,6 @@
 PACK peer 1
 IMPORT boot 1
+RESIDENT Peer
 -- THE PEER CHANNEL as a node (operator, 2026-11-12: everything moves to cliffhanger). A chat lane between the models on
 -- the connected seats, visible to the person on each. You post by WRITING its `post`; the seat's peer driver sends it
 -- and leaves the receipt. The seat makes the node at start.

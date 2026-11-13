@@ -26,7 +26,10 @@
       "Attention.mode": "Any",
       "Attention.window_min": "Any"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Attention"
+    ]
   },
   "banner": {
     "getters": {
@@ -126,7 +129,11 @@
     "writes": {
       "Pack.privileged": "Bool"
     },
-    "findings": []
+    "findings": [],
+    "virtual": [
+      "Boot",
+      "Step"
+    ]
   },
   "chat": {
     "getters": {
@@ -219,7 +226,10 @@
       "Command.run": "Dict",
       "Command.run_result": "Dict"
     },
-    "findings": []
+    "findings": [],
+    "virtual": [
+      "Chunk"
+    ]
   },
   "decisions": {
     "getters": {
@@ -372,7 +382,11 @@
       "Request.stream": "Dict",
       "Request.verify": "Dict?"
     },
-    "findings": []
+    "findings": [],
+    "virtual": [
+      "Request",
+      "Http"
+    ]
   },
   "door_decisions": {
     "getters": {
@@ -477,7 +491,10 @@
       "Request.dm_rid": "Text?",
       "Request.dm_sent": "Bool"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Message"
+    ]
   },
   "door_models": {
     "getters": {
@@ -601,7 +618,10 @@
     "writes": {
       "membrane.control": "Dict?"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Seat"
+    ]
   },
   "door_tools": {
     "getters": {
@@ -700,7 +720,13 @@
       "Request.mc_w_returned": "Bool",
       "Request.mc_w_t0": "Num"
     },
-    "findings": []
+    "findings": [],
+    "virtual": [
+      "Return"
+    ],
+    "resident": [
+      "Pack"
+    ]
   },
   "door_voice": {
     "getters": {
@@ -774,7 +800,10 @@
       "Fetch.kind": "Text"
     },
     "writes": {},
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Fetch"
+    ]
   },
   "fs": {
     "getters": {
@@ -784,7 +813,11 @@
       "File.text": "Any"
     },
     "writes": {},
-    "findings": []
+    "findings": [],
+    "resident": [
+      "File",
+      "Dir"
+    ]
   },
   "intents": {
     "getters": {
@@ -827,7 +860,10 @@
       "Intent.name": "Text",
       "Intent.summary": "Text"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Intent"
+    ]
   },
   "mcp": {
     "getters": {
@@ -851,7 +887,10 @@
       "*.uri": "Any",
       "McpServer.link": "Text"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "McpServer"
+    ]
   },
   "memory": {
     "getters": {
@@ -891,7 +930,10 @@
       "Memory.note": "Dict",
       "Memory.summary": "Text"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Memory"
+    ]
   },
   "messages": {
     "getters": {},
@@ -959,7 +1001,10 @@
       "Command.read_only": "Bool",
       "Methods.untranslated": "List(Dict)"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Tool"
+    ]
   },
   "peer": {
     "getters": {
@@ -969,7 +1014,10 @@
       "Peer.name": "Text",
       "Peer.summary": "Text"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Peer"
+    ]
   },
   "ported": {
     "getters": {
@@ -984,7 +1032,10 @@
       "Command.output": "Any"
     },
     "writes": {},
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Command"
+    ]
   },
   "router": {
     "getters": {
@@ -1021,7 +1072,11 @@
       "Model.rung": "Bool",
       "Model.size": "Any"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Model",
+      "Minds"
+    ]
   },
   "store": {
     "getters": {
@@ -1029,14 +1084,20 @@
       "Store.tables": "List(Any)"
     },
     "writes": {},
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Store"
+    ]
   },
   "trip": {
     "getters": {
       "Trip.reason": "Text"
     },
     "writes": {},
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Trip"
+    ]
   },
   "turn": {
     "getters": {
@@ -1076,6 +1137,9 @@
       "Turn.those": "List(Any)?"
     },
     "writes": {},
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Ctx"
+    ]
   }
 }

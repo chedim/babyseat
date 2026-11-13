@@ -1,4 +1,5 @@
 PACK trip 1
+RESIDENT Trip
 -- A Trip is the record of ONE kill (operator, 2026-11-12: record only the kills, never timings): the engine writes
 -- `Trip:<eid>#<prop>` {node, self_ms, allowance_ms, at, active} when a getter evaluation passes its self-time allowance. The node
 -- is that reasoned null while `active` (until one of its inputs changes). The class is declared here so the host mirrors it.

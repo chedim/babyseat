@@ -1,4 +1,8 @@
 PACK goalgraph 1
+RESIDENT Goal
+RESIDENT Task
+RESIDENT Wait
+RESIDENT Decision
 -- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).
 -- Migrated from packs/goalgraph.json by the translator; tests/syntax_994.rs holds the two equal.
 --

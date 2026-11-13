@@ -62,7 +62,10 @@
       "Attention:seat.window_min"
     ],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Attention"
+    ]
   },
   "banner": {
     "imports": [
@@ -91,6 +94,10 @@
     "claims": [],
     "boot_facts": [
       "started"
+    ],
+    "virtual": [
+      "Boot",
+      "Step"
     ]
   },
   "chat": {
@@ -152,6 +159,9 @@
       "chat_claude_bin",
       "chat_max_turns",
       "started"
+    ],
+    "virtual": [
+      "Chunk"
     ]
   },
   "decisions": {
@@ -240,6 +250,10 @@
       "seat_version",
       "seat_voice_out",
       "ui_dir"
+    ],
+    "virtual": [
+      "Request",
+      "Http"
     ]
   },
   "door_decisions": {
@@ -273,7 +287,10 @@
       "/membrane/item-chat",
       "/membrane/work-graph"
     ],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Message"
+    ]
   },
   "door_models": {
     "imports": [
@@ -358,6 +375,9 @@
     ],
     "boot_facts": [
       "nerve_pause_off"
+    ],
+    "resident": [
+      "Seat"
     ]
   },
   "door_tools": {
@@ -387,7 +407,13 @@
     "claims": [
       "/mcp"
     ],
-    "boot_facts": []
+    "boot_facts": [],
+    "virtual": [
+      "Return"
+    ],
+    "resident": [
+      "Pack"
+    ]
   },
   "door_voice": {
     "imports": [
@@ -435,7 +461,10 @@
     "members": 1,
     "writes": [],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Fetch"
+    ]
   },
   "fs": {
     "imports": [],
@@ -446,7 +475,11 @@
     "members": 4,
     "writes": [],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "File",
+      "Dir"
+    ]
   },
   "intents": {
     "imports": [
@@ -473,7 +506,10 @@
       "Intent:board.summary"
     ],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Intent"
+    ]
   },
   "mcp": {
     "imports": [],
@@ -500,7 +536,10 @@
       "McpTool:*.server"
     ],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "McpServer"
+    ]
   },
   "memory": {
     "imports": [
@@ -519,6 +558,9 @@
     "claims": [],
     "boot_facts": [
       "agent_writes"
+    ],
+    "resident": [
+      "Memory"
     ]
   },
   "messages": {
@@ -548,7 +590,10 @@
       "Methods:review.untranslated"
     ],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Tool"
+    ]
   },
   "peer": {
     "imports": [
@@ -564,7 +609,10 @@
       "Peer:channel.summary"
     ],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Peer"
+    ]
   },
   "ported": {
     "imports": [],
@@ -584,7 +632,10 @@
     "members": 2,
     "writes": [],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Command"
+    ]
   },
   "router": {
     "imports": [
@@ -625,6 +676,10 @@
       "minds",
       "router_on",
       "seat_backend"
+    ],
+    "resident": [
+      "Model",
+      "Minds"
     ]
   },
   "store": {
@@ -635,7 +690,10 @@
     "members": 2,
     "writes": [],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Store"
+    ]
   },
   "trip": {
     "imports": [],
@@ -645,7 +703,10 @@
     "members": 1,
     "writes": [],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Trip"
+    ]
   },
   "turn": {
     "imports": [],
@@ -656,6 +717,9 @@
     "members": 34,
     "writes": [],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Ctx"
+    ]
   }
 }

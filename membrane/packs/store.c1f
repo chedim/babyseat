@@ -1,4 +1,5 @@
 PACK store 1
+RESIDENT Store
 -- THE STORE DRIVER (the operator, 2026-11-10): the seat's SQLite store, read by the engine itself -- no Python in the
 -- data path. Built-ins, in any getter or setter of any pack:
 --   sql(query, args...)  a read (SELECT / WITH; anything else is refused), arguments bound by `?`, rows as dicts;
