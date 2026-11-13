@@ -287,15 +287,16 @@
     "props": {
      "parents": [
       "cls:chatmessage"
-     ]
+     ],
+     "text": "hello"
     }
    }
   ],
   "writes": [
    {
     "eid": "membrane::Chat:message:1-1",
-    "prop": "text",
-    "value": "hello"
+    "prop": "queued",
+    "value": true
    }
   ],
   "expect": [
@@ -361,15 +362,16 @@
     "props": {
      "parents": [
       "cls:chatmessage"
-     ]
+     ],
+     "text": "hello"
     }
    }
   ],
   "writes": [
    {
     "eid": "membrane::Chat:message:1-1",
-    "prop": "text",
-    "value": "hello"
+    "prop": "queued",
+    "value": true
    }
   ],
   "expect": [

@@ -146,6 +146,7 @@
       "Request.r_session": "Dict?"
     },
     "writes": {
+      "Chat.queued": "Bool",
       "Request.cm_at": "Num",
       "Request.cm_id": "Text?"
     },

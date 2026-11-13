@@ -105,6 +105,7 @@
     ],
     "members": 17,
     "writes": [
+      "membrane:*.queued",
       "membrane:*=ChatMessage()",
       "membrane::Banner:owner:main=Banner()",
       "membrane::Chat:main=Chat()"
