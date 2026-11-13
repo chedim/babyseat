@@ -1,0 +1,109 @@
+PACK door_tools 1
+IMPORT door 1
+IMPORT fs 1
+IMPORT proc 1
+IMPORT fetch 1
+IMPORT store 1
+-- THE MODEL'S TOOLS AS AN MCP DOOR (#1143, the `tools` route family): `POST /mcp` speaks MCP over plain HTTP, JSON-RPC 2.0, one JSON
+-- answer per request (no SSE stream: a GET is a 405). The model's CLI (`claude --mcp-config`) connects here; the tools are the FIELD
+-- operations only (operator, 2026-11-12: field manipulation and querying, nothing else; a shell, a file or a fetch is a Command:, File:
+-- or Fetch: entity the model writes):
+--   entity_query {q, k, count}        which entities exist: `kind:<Class>` and `name~:<eid prefix>`, joined with `&`; k rows (default 20, at most 100)
+--   entity_read  {spec, prop}         an entity's stored properties, or one property in full (a getter's value too)
+--   entity_write {spec, prop, value}  set one property; what reacts to the write runs (a setter, a driver verb: `Command:x.run = {id, args}`)
+-- `spec` is an entity id as the field spells it (`Command:build`, `membrane::Chat:main`). A write is a write like any pack's: the class
+-- must be one this pack owns or imports (door, fs, proc, fetch, store) or one no pack owns yet; a refusal is in the reply. An effect's
+-- receipt lands as `<verb>_result` on the entity: read it back.
+-- Methods: initialize, notifications/* (a request without an id: 202, no body), ping, tools/list, tools/call.
+
+Request.o_tools getter: this.path == '/mcp'
+Request.m_tools getter: ['POST']
+
+-- ---- the JSON-RPC request ---------------------------------------------------------------------------------------------------------------
+Request.mc_rpc getter: json(this.body or '')
+Request.mc_ok getter: prop(this.mc_rpc, 'jsonrpc') == '2.0' and prop(this.mc_rpc, 'method') != None
+Request.mc_id getter: prop(this.mc_rpc, 'id')
+Request.mc_method getter: str(prop(this.mc_rpc, 'method') or '')
+Request.mc_params getter: prop(this.mc_rpc, 'params') or {}
+Request.mc_args getter: prop(this.mc_params, 'arguments') or {}
+Request.mc_tool getter: prop(this.mc_params, 'name')
+Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write']
+
+-- ---- the tools' list -----------------------------------------------------------------------------------------------------------------------
+Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate entities. q: kind:<Class> and name~:<eid prefix>, joined with & (empty = all). k = the row cap (default 20, at most 100). count=true gives only the number.', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'the query line, e.g. kind:Command & name~:Command:b'}, 'k': {'type': 'integer', 'description': 'the row cap (default 20, at most 100)'}, 'count': {'type': 'boolean', 'description': 'only the count'}}}}, {'name': 'entity_read', 'description': 'read an entity: its stored properties, or with prop one property in full (a getter value too).', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'one property'}}, 'required': ['spec']}}, {'name': 'entity_write', 'description': 'act by writing: set one property. What reacts to the write runs (pack setters, driver verbs such as Command run or File write). An effect receipt lands as <prop>_result on the entity: read it back.', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'the property'}, 'value': {'description': 'the value (any JSON)'}}, 'required': ['spec', 'prop']}}]
+
+-- ---- entity_write: a write by name (a computed property name) -------------------------------------------------------------------------------
+Request.mc_w_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
+Request.mc_w_prop getter: strip(str(prop(this.mc_args, 'prop') or ''))
+Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop' if this.mc_w_spec == '' or this.mc_w_prop == '' else None
+Request.mc_write getter: {'spec': this.mc_w_spec, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None else None
+Request.mc_write on-setter mcp-write:
+  WHEN this.mc_write != None:
+    (prop(this.mc_write, 'spec')).[prop(this.mc_write, 'prop')] = prop(this.mc_write, 'value')
+    this.mc_done = True
+Request.mc_w_text getter:
+  WHEN this.mc_write == None: None
+  ELSE WHEN this.mc_done != True: None
+  ELSE WHEN this.refused != None: 'refused: ' + str(this.refused)
+  ELSE: 'wrote ' + this.mc_w_spec + '.' + this.mc_w_prop
+
+-- ---- entity_read: the store's row (stored properties) or one property through the field ---------------------------------------------------
+Request.mc_r_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
+Request.mc_r_prop getter: prop(this.mc_args, 'prop')
+Request.mc_r_bad getter: 'entity_read needs spec (the entity\'s id)' if this.mc_r_spec == '' else None
+Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_extract(body, \'$.props\') AS props FROM c_field WHERE k = ?', this.mc_r_spec) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
+Request.mc_r_val getter: prop(this.mc_r_spec, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None else None
+Request.mc_r_text getter:
+  WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
+  ELSE WHEN this.mc_r_prop != None and this.mc_r_val == None: this.mc_r_spec + ' has no ' + str(this.mc_r_prop)
+  ELSE WHEN this.mc_r_prop != None: str(this.mc_r_val)
+  ELSE WHEN this.mc_r_rows == None: None
+  ELSE WHEN len(this.mc_r_rows) == 0: 'no such entity: ' + this.mc_r_spec
+  ELSE: this.mc_r_spec + ' (' + str(prop(this.mc_r_rows[0], 'cls')) + ') ' + str(prop(this.mc_r_rows[0], 'props'))
+
+-- ---- entity_query: the store's rows by kind and eid prefix -----------------------------------------------------------------------------------
+Request.mc_q_terms getter: words(replace(str(prop(this.mc_args, 'q') or ''), '&', ' '))
+Request.mc_q_kinds getter: [after(t, 'kind:') for t in this.mc_q_terms if startswith(t, 'kind:')]
+Request.mc_q_names getter: [after(t, 'name~:') for t in this.mc_q_terms if startswith(t, 'name~:')]
+Request.mc_q_other getter: [t for t in this.mc_q_terms if not startswith(t, 'kind:') and not startswith(t, 'name~:')]
+Request.mc_q_kind getter: ([x for x in this.mc_q_kinds if x != '*'] or [''])[0]
+Request.mc_q_name getter: (this.mc_q_names or [''])[0]
+Request.mc_q_k getter: min(max(num(prop(this.mc_args, 'k')) or 20, 1), 100)
+Request.mc_q_bad getter: 'entity_query: unsupported term ' + this.mc_q_other[0] + ' (kind:<Class> and name~:<eid prefix>, joined with &)' if len(this.mc_q_other) > 0 else None
+Request.mc_q_on getter: this.mc_tool == 'entity_query' and this.mc_q_bad == None
+Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ?) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_name, this.mc_q_name, this.mc_q_k) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
+Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ?) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_name, this.mc_q_name) if this.mc_q_on and prop(this.mc_args, 'count') == True else None
+Request.mc_q_text getter:
+  WHEN not this.mc_q_on: None
+  ELSE WHEN prop(this.mc_args, 'count') == True: (str(prop(this.mc_q_count[0], 'n')) + ' entity(ies)') if this.mc_q_count != None and len(this.mc_q_count) > 0 else None
+  ELSE WHEN this.mc_q_rows == None: None
+  ELSE WHEN len(this.mc_q_rows) == 0: '0 entity(ies)'
+  ELSE: join([prop(r, 'k') + ' (' + str(prop(r, 'cls')) + ')' for r in this.mc_q_rows], '\n')
+
+-- ---- the tool call's result ---------------------------------------------------------------------------------------------------------------------
+Request.mc_bad getter: (this.mc_w_bad if this.mc_tool == 'entity_write' else (this.mc_r_bad if this.mc_tool == 'entity_read' else this.mc_q_bad))
+Request.mc_text getter:
+  WHEN not this.mc_known: 'unknown tool: ' + str(this.mc_tool)
+  ELSE WHEN this.mc_bad != None: this.mc_bad
+  ELSE WHEN this.mc_tool == 'entity_write': this.mc_w_text
+  ELSE WHEN this.mc_tool == 'entity_read': this.mc_r_text
+  ELSE: this.mc_q_text
+Request.mc_is_err getter: (not this.mc_known) or this.mc_bad != None or startswith(str(this.mc_text or ''), 'refused')
+Request.mc_call getter: {'content': [{'type': 'text', 'text': this.mc_text}], 'isError': this.mc_is_err} if this.mc_text != None else None
+
+-- ---- the answers ----------------------------------------------------------------------------------------------------------------------------------
+Request.mc_init getter: {'protocolVersion': prop(this.mc_params, 'protocolVersion') or '2025-03-26', 'capabilities': {'tools': {'listChanged': False}}, 'serverInfo': {'name': 'membrane', 'version': str(prop(this.facts, 'seat_version') or '')}}
+Request.mc_result getter:
+  WHEN this.mc_method == 'initialize': this.mc_init
+  ELSE WHEN this.mc_method == 'ping': {}
+  ELSE WHEN this.mc_method == 'tools/list': {'tools': this.mc_tools}
+  ELSE WHEN this.mc_method == 'tools/call': this.mc_call
+  ELSE: None
+Request.mc_known_method getter: this.mc_method in ['initialize', 'ping', 'tools/list', 'tools/call']
+Request.r_tools getter:
+  WHEN this.mc_rpc == None: {'status': 400, 'body': {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'parse error'}}}
+  ELSE WHEN not this.mc_ok: {'status': 400, 'body': {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32600, 'message': 'invalid request'}}}
+  ELSE WHEN this.mc_id == None: {'status': 202}
+  ELSE WHEN not this.mc_known_method: {'status': 200, 'body': {'jsonrpc': '2.0', 'id': this.mc_id, 'error': {'code': -32601, 'message': 'method not found: ' + this.mc_method}}}
+  ELSE WHEN this.mc_result == None: None
+  ELSE: {'status': 200, 'body': {'jsonrpc': '2.0', 'id': this.mc_id, 'result': this.mc_result}}

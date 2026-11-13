@@ -296,6 +296,26 @@
       "nerve_pause_off"
     ]
   },
+  "door_tools": {
+    "imports": [
+      "door",
+      "fs",
+      "proc",
+      "fetch",
+      "store"
+    ],
+    "classes": [
+      "Request"
+    ],
+    "members": 42,
+    "writes": [
+      "*.[]"
+    ],
+    "claims": [
+      "/mcp"
+    ],
+    "boot_facts": []
+  },
   "door_voice": {
     "imports": [
       "door",

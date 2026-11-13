@@ -1,0 +1,1035 @@
+[
+ {
+  "name": "initialize answers the server's name, the tools capability and echoes the client's protocol version",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"initialize\", \"params\": {\"protocolVersion\": \"2025-06-18\", \"capabilities\": {}, \"clientInfo\": {\"name\": \"claude\", \"version\": \"1\"}}}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.id",
+    "equals": 1
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.jsonrpc",
+    "equals": "2.0"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.protocolVersion",
+    "equals": "2025-06-18"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.serverInfo.name",
+    "equals": "membrane"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.serverInfo.version",
+    "equals": "9.9"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.capabilities.tools.listChanged",
+    "equals": false
+   }
+  ]
+ },
+ {
+  "name": "initialize with no protocol version offers the default",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"initialize\"}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.protocolVersion",
+    "equals": "2025-03-26"
+   }
+  ]
+ },
+ {
+  "name": "a notification (no id) is a 202 with no body",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"method\": \"notifications/initialized\"}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 202
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "ping is an empty result",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 7, \"method\": \"ping\"}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.id",
+    "equals": 7
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result",
+    "equals": {}
+   }
+  ]
+ },
+ {
+  "name": "tools/list names exactly the three field tools, each with an input schema",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 2, \"method\": \"tools/list\"}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.tools.0.name",
+    "equals": "entity_query"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.tools.1.name",
+    "equals": "entity_read"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.tools.2.name",
+    "equals": "entity_write"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.tools.3",
+    "none": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.tools.0.inputSchema.type",
+    "equals": "object"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.tools.2.inputSchema.required.0",
+    "equals": "spec"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.tools.2.inputSchema.required.1",
+    "equals": "prop"
+   }
+  ]
+ },
+ {
+  "name": "an unknown method is -32601 with the request's id",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 3, \"method\": \"resources/list\"}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.id",
+    "equals": 3
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error.code",
+    "equals": -32601
+   }
+  ]
+ },
+ {
+  "name": "a body that is not JSON is -32700 (400)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{not json",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error.code",
+    "equals": -32700
+   }
+  ]
+ },
+ {
+  "name": "JSON that is not a JSON-RPC 2.0 request is -32600 (400)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"hello\": 1}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error.code",
+    "equals": -32600
+   }
+  ]
+ },
+ {
+  "name": "GET /mcp is a 405 that allows POST",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"ping\"}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "tools/call of an unknown tool is a tool error, not a protocol error",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 4, \"method\": \"tools/call\", \"params\": {\"name\": \"rm_rf\", \"arguments\": {}}}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.isError",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.content.0.text",
+    "equals": "unknown tool: rm_rf"
+   }
+  ]
+ },
+ {
+  "name": "entity_write sets one property of an entity, and the reply says so",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   },
+   {
+    "eid": "Scratch:a",
+    "class": "Scratch",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"jsonrpc\": \"2.0\", \"id\": 5, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_write\", \"arguments\": {\"spec\": \"Scratch:a\", \"prop\": \"color\", \"value\": {\"r\": [1, 2]}}}}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.isError",
+    "equals": false
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.content.0.type",
+    "equals": "text"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.content.0.text",
+    "contains": "wrote Scratch:a.color"
+   },
+   {
+    "eid": "Scratch:a",
+    "prop": "color",
+    "equals": {
+     "r": [
+      1,
+      2
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "entity_write creates an entity of a class the door's pack imports (a Command), and a write of a verb is a run",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"jsonrpc\": \"2.0\", \"id\": 6, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_write\", \"arguments\": {\"spec\": \"Command:hello\", \"prop\": \"cmd\", \"value\": [\"echo\", \"hi\"]}}}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.isError",
+    "equals": false
+   },
+   {
+    "eid": "Command:hello",
+    "prop": "cmd",
+    "equals": [
+     "echo",
+     "hi"
+    ]
+   }
+  ]
+ },
+ {
+  "name": "entity_write needs spec and prop",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   },
+   {
+    "eid": "Scratch:a",
+    "class": "Scratch",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"jsonrpc\": \"2.0\", \"id\": 8, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_write\", \"arguments\": {\"spec\": \"Scratch:a\"}}}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.isError",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.content.0.text",
+    "equals": "entity_write needs spec (the entity's id) and prop"
+   },
+   {
+    "eid": "Scratch:a",
+    "prop": "color",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "a write the pack may not make (a class another pack owns and the door's pack does not import) is refused in the reply",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"jsonrpc\": \"2.0\", \"id\": 9, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_write\", \"arguments\": {\"spec\": \"Boot:seat\", \"prop\": \"seat_name\", \"value\": \"x\"}}}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.isError",
+    "equals": true
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "seat_name",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "entity_read of one property gives its value as text",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 10, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_read\", \"arguments\": {\"spec\": \"Scratch:a\", \"prop\": \"n\"}}}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   },
+   {
+    "eid": "Scratch:a",
+    "class": "Scratch",
+    "props": {
+     "n": 42
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.isError",
+    "equals": false
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.content.0.text",
+    "equals": "42"
+   }
+  ]
+ },
+ {
+  "name": "entity_read of a property that is not there says so",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/store.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_tools.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "9.9",
+     "facts": {
+      "seat_version": "9.9"
+     }
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/mcp",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 11, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_read\", \"arguments\": {\"spec\": \"Scratch:a\", \"prop\": \"zz\"}}}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   },
+   {
+    "eid": "Scratch:a",
+    "class": "Scratch",
+    "props": {
+     "n": 42
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.content.0.text",
+    "equals": "Scratch:a has no zz"
+   }
+  ]
+ }
+]

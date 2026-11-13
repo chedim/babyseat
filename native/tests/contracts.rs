@@ -207,6 +207,13 @@ fn surface_of(text: &str) -> serde_json::Value {
         // a write to ANOTHER entity: ('Class:key').prop = ..., ('Class:' + expr).prop = ..., (expr).prop = ... (a dynamic target,
         // shown as `*`), or this.<ref>.prop = ... (through a reference property). `this.prop = ...` is the entity's own: not listed.
         let mut note = |target: String, rest: &str| {
+            // `.[expr] = ..`: a COMPUTED property name, listed as `[]` (#1143: the MCP door's entity_write)
+            if rest.starts_with('[') {
+                let (mut depth, mut end) = (0, None);
+                for (i, c) in rest.char_indices() { if c == '[' { depth += 1; } if c == ']' { depth -= 1; if depth == 0 { end = Some(i); break; } } }
+                if let Some(e) = end { if rest[e + 1..].trim_start().starts_with('=') && !rest[e + 1..].trim_start().starts_with("==") { writes.insert(format!("{target}.[]")); } }
+                return;
+            }
             let prop: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
             if !prop.is_empty() && rest[prop.len()..].trim_start().starts_with('=') && !rest[prop.len()..].trim_start().starts_with("==") { writes.insert(format!("{target}.{prop}")); }
         };
