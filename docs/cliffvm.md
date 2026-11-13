@@ -48,6 +48,38 @@ cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--
 - The boot plan: this host runs none of the plan's steps (they are the Python seat's), so each is `skipped` and the plan only says
   when the boot is over. Then `started`.
 
+## Run a seat
+
+The barest usable agent seat: one command starts `cliffvm` on the shipped packs and the barest app, and the page is a graph viewer plus the one chat.
+
+```
+(cd native && cargo build --release --no-default-features --features bin)      # once; the launcher builds nothing
+scripts/seat [--store ./.cliffvm/seat.sqlite] [--port 4096] [--open]
+```
+
+It runs `cliffvm run membrane/packs/boot.c1f membrane/packs membrane/apps/barest.c1f --store <sqlite> --port <n> --fact chat_claude_bin=<claude>`
+from the repo root and prints the URL. `CLIFFVM` names the binary (else `native/target/release/cliffvm`, else PATH); `CLAUDE_BIN` names the claude CLI
+(else the one on PATH; with none, the seat starts and the chat answers with how to name it). `--open` opens the page on macOS. The launcher starts nothing else
+(no Ollama, nothing under `~/.membrane`) and uses no port but `--port`.
+
+**What you see** (`membrane/apps/barest.c1f/ui/`: `index.html`, `app.css`, `app.js`, `mcp.js`, `graph.js`, `chat.js`; plain static JavaScript served by the door
+from the app folder, no build step, no dependencies; a later piece ports it to c1f view packs in the browser VM):
+- Left, the GRAPH VIEWER: every entity as a node (a canvas force layout written for this page: repulsion, springs, centring, pan, zoom, node drag), coloured by class.
+  Edges are ownership (`A:b:c` hangs under `A:b`, or under its nearest listed ancestor) and references (a `{"$ref": eid}` value or a string that is another listed eid, dashed).
+  It polls every 3 s keeping positions, has a substring filter, a `requests` switch (the door's own Request entities are hidden by default), a list view, and a side panel with the
+  selected entity's properties (a reference is a link). Keys on the canvas: arrows pan, `+`/`-` zoom, `0` fits.
+- Right, the CHAT: the history is the chat's entities, so a reload brings it back; Enter sends, Shift+Enter adds a line; a sent message is polled every 700 ms (queued, working, answer) and
+  shows the tools Claude ran with a short input. An answer that asks for something (no CLI named) is shown as a note.
+- The page reads through `POST /mcp` (`entity_query`, `entity_read`) and `/membrane/chat/message`.
+
+**`entity_query` additions for the viewer**: `offset` (paging), `kind!:<Class>` (all but a class) and `full` (rows carry the stored properties).
+**Data** is the `--store` file (default `./.cliffvm/seat.sqlite`).
+
+**Not there yet**: the UI as c1f view packs; tokens and persons (no security, one superuser chat); the chat's SSE stream (it polls); a message's class is `Chat` (its eid
+names it), so the viewer finds chat entities by the `membrane::Chat:message:` prefix, not by a `ChatMessage` kind; the viewer lists at most 600 entities and reads the
+properties of 6 per poll for reference edges (more as it keeps running); no entity removal.
+**Tests**: `native/tests/seat_process.rs` (the page and its files, a chat turn with a fake claude, the query options, `node --check` of every script).
+
 ## The host loop (`native/src/host.rs`)
 
 Ported from `membrane/fields_live.py`, the minimum the door and the boot need:

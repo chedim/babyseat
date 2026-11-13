@@ -8,7 +8,8 @@ IMPORT store 1
 -- answer per request (no SSE stream: a GET is a 405). The model's CLI (`claude --mcp-config`) connects here; the tools are the FIELD
 -- operations only (operator, 2026-11-12: field manipulation and querying, nothing else; a shell, a file or a fetch is a Command:, File:
 -- or Fetch: entity the model writes):
---   entity_query {q, k, count}        which entities exist: `kind:<Class>` and `name~:<eid prefix>`, joined with `&`; k rows (default 20, at most 100)
+--   entity_query {q, k, offset, full, count}  which entities exist: `kind:<Class>`, `kind!:<Class>` (all but that class) and `name~:<eid prefix>`,
+--                                     joined with `&`; k rows (default 20, at most 100) from row `offset` (default 0); full=true adds each row's stored properties
 --   entity_read  {spec, prop}         an entity's stored properties, or one property in full (a getter's value too)
 --   entity_write {spec, prop, value}  set one property; what reacts to the write runs (a setter, a driver verb: `Command:x.run = {id, args}`)
 -- `spec` is an entity id as the field spells it (`Command:build`, `membrane::Chat:main`). A write is a write like any pack's: the class
@@ -36,7 +37,7 @@ Request.mc_tool getter: prop(this.mc_params, 'name')
 Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write']
 
 -- ---- the tools' list -----------------------------------------------------------------------------------------------------------------------
-Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate entities. q: kind:<Class> and name~:<eid prefix>, joined with & (empty = all). k = the row cap (default 20, at most 100). count=true gives only the number.', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'the query line, e.g. kind:Command & name~:Command:b'}, 'k': {'type': 'integer', 'description': 'the row cap (default 20, at most 100)'}, 'count': {'type': 'boolean', 'description': 'only the count'}}}}, {'name': 'entity_read', 'description': 'read an entity: its stored properties, or with prop one property in full (a getter value too).', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'one property'}}, 'required': ['spec']}}, {'name': 'entity_write', 'description': 'act by writing: set one property. What reacts to the write runs (pack setters, driver verbs such as Command run or File write). An effect receipt lands as <prop>_result on the entity: read it back.', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'the property'}, 'value': {'description': 'the value (any JSON)'}}, 'required': ['spec', 'prop']}}]
+Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate entities. q: kind:<Class>, kind!:<Class> (all but that class) and name~:<eid prefix>, joined with & (empty = all). k = the row cap (default 20, at most 100), offset = rows to skip (paging), full=true adds the properties of each row, count=true gives only the number.', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'the query line, e.g. kind:Command & name~:Command:b'}, 'k': {'type': 'integer', 'description': 'the row cap (default 20, at most 100)'}, 'offset': {'type': 'integer', 'description': 'rows to skip, for paging'}, 'full': {'type': 'boolean', 'description': 'add the stored properties of each row'}, 'count': {'type': 'boolean', 'description': 'only the count'}}}}, {'name': 'entity_read', 'description': 'read an entity: its stored properties, or with prop one property in full (a getter value too).', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'one property'}}, 'required': ['spec']}}, {'name': 'entity_write', 'description': 'act by writing: set one property. What reacts to the write runs (pack setters, driver verbs such as Command run or File write). An effect receipt lands as <prop>_result on the entity: read it back.', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'the property'}, 'value': {'description': 'the value (any JSON)'}}, 'required': ['spec', 'prop']}}]
 
 -- ---- entity_write: a write by name (a computed property name) -------------------------------------------------------------------------------
 Request.mc_w_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
@@ -71,20 +72,23 @@ Request.mc_r_text getter:
 Request.mc_q_terms getter: words(replace(str(prop(this.mc_args, 'q') or ''), '&', ' '))
 Request.mc_q_kinds getter: [after(t, 'kind:') for t in this.mc_q_terms if startswith(t, 'kind:')]
 Request.mc_q_names getter: [after(t, 'name~:') for t in this.mc_q_terms if startswith(t, 'name~:')]
-Request.mc_q_other getter: [t for t in this.mc_q_terms if not startswith(t, 'kind:') and not startswith(t, 'name~:')]
+Request.mc_q_nots getter: [after(t, 'kind!:') for t in this.mc_q_terms if startswith(t, 'kind!:')]
+Request.mc_q_other getter: [t for t in this.mc_q_terms if not startswith(t, 'kind:') and not startswith(t, 'kind!:') and not startswith(t, 'name~:')]
 Request.mc_q_kind getter: ([x for x in this.mc_q_kinds if x != '*'] or [''])[0]
 Request.mc_q_name getter: (this.mc_q_names or [''])[0]
+Request.mc_q_not getter: (this.mc_q_nots or [''])[0]
+Request.mc_q_off getter: max(num(prop(this.mc_args, 'offset')) or 0, 0)
 Request.mc_q_k getter: min(max(num(prop(this.mc_args, 'k')) or 20, 1), 100)
-Request.mc_q_bad getter: 'entity_query: unsupported term ' + this.mc_q_other[0] + ' (kind:<Class> and name~:<eid prefix>, joined with &)' if len(this.mc_q_other) > 0 else None
+Request.mc_q_bad getter: 'entity_query: unsupported term ' + this.mc_q_other[0] + ' (kind:<Class>, kind!:<Class> and name~:<eid prefix>, joined with &)' if len(this.mc_q_other) > 0 else None
 Request.mc_q_on getter: this.mc_tool == 'entity_query' and this.mc_q_bad == None
-Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ?) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_name, this.mc_q_name, this.mc_q_k) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
-Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ?) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_name, this.mc_q_name) if this.mc_q_on and prop(this.mc_args, 'count') == True else None
+Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls, json_extract(body, \'$.props\') AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ?) AND (? = \'\' OR json_extract(body, \'$.cls\') != ?) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
+Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ?) AND (? = \'\' OR json_extract(body, \'$.cls\') != ?) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name) if this.mc_q_on and prop(this.mc_args, 'count') == True else None
 Request.mc_q_text getter:
   WHEN not this.mc_q_on: None
   ELSE WHEN prop(this.mc_args, 'count') == True: (str(prop(this.mc_q_count[0], 'n')) + ' entity(ies)') if this.mc_q_count != None and len(this.mc_q_count) > 0 else None
   ELSE WHEN this.mc_q_rows == None: None
   ELSE WHEN len(this.mc_q_rows) == 0: '0 entity(ies)'
-  ELSE: join([prop(r, 'k') + ' (' + str(prop(r, 'cls')) + ')' for r in this.mc_q_rows], '\n')
+  ELSE: join([prop(r, 'k') + ' (' + str(prop(r, 'cls')) + ')' + ((' ' + str(prop(r, 'props'))) if prop(this.mc_args, 'full') == True else '') for r in this.mc_q_rows], '\n')
 
 -- ---- the tool call's result ---------------------------------------------------------------------------------------------------------------------
 Request.mc_bad getter: (this.mc_w_bad if this.mc_tool == 'entity_write' else (this.mc_r_bad if this.mc_tool == 'entity_read' else this.mc_q_bad))
