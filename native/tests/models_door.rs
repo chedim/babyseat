@@ -48,10 +48,10 @@ fn world(backend_url: &str) -> (Core, Fields) {
     (c, f)
 }
 
-/// the request arrives as the door's inbound entity does (born in the engine's next round): the pack's setters see it
+/// the request arrives as the door's inbound entity does (born in the engine's next round): the pack's setters see it. It carries the owner's identity (a verified token), as the strict door needs: the door itself is not weakened
 fn arrive(c: &mut Core) {
     c.store.as_ref().unwrap().push_inbound("Request:1".into(), "Request".into(), json!({"method": "GET", "query": "", "headers": {}, "body": "",
-        "peer": "127.0.0.1:5", "authed": false, "auth_error": "no token", "path": "/v1/models"}).as_object().unwrap().clone());
+        "peer": "127.0.0.1:5", "authed": true, "sub": "owner", "claims": {"sub": "owner"}, "path": "/v1/models"}).as_object().unwrap().clone());
 }
 
 fn until_reply(c: &mut Core, f: &mut Fields) -> J {
