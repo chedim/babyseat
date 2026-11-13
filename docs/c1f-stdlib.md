@@ -46,8 +46,14 @@ them empty (see the router pack's `router-rungs` / `router-minds`).
 ## Conventions (the traps that bit)
 - There is no size cap on an expression (the old 64-node / 400-character caps are gone). Name a part with a LOCAL (below) when it
   reads better; an evaluation has a step budget instead (see Blocks and locals).
-- Never name a getter or a dict key after another getter in the same class (the engine orders getters by finding names, strings
-  excepted only as the last argument of a call); never name a property `this`.
+- How getters are ordered (computed once per pack load, never per write): a getter sits above the getters it reads. The read is
+  class-aware: `this.n` is `n` of the getter's own class; `x.n`, `g.n` and `prop(x, 'n')` are `n` of x's class when it is known
+  (`this`, a loop variable over `instances('X')` or over a getter of known element type, a constructor, an entity literal, a
+  literal-key subscript `x['n']` of such an entity). Where x's class is unknown (a plain property, a dict) the read still orders
+  after every getter of that name, EXCEPT where that would close a cycle the known reads do not: a name shared with an unrelated
+  class can no longer make a getter compute from a stale input. Strings in dict literals and list elements are data, never reads
+  (a string is a name only as the last argument of a call). A cycle keeps the level it reached (its closing edge reads the
+  previous value). Never name a property `this`.
 - `concat` joins lists (`+` is vector addition); there is no `int()` yet; `clock` is epoch seconds.
 - A class a shipped pack declares is owned: other packs `IMPORT` it.
 

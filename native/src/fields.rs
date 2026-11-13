@@ -100,9 +100,84 @@ pub struct Getter {
 /// The input key of a getter that reads `clock`.
 const CLOCK: &str = "\u{0}clock";
 
-/// Getter levels: a getter that reads another getter's field (by name) sits above it, so a round computes
-/// lower levels first. A cycle keeps the level it reached (its closing edge reads the previous value, rule 8).
-fn levels(gs: &[Getter]) -> Vec<usize> {
+/// Getter levels: a getter that reads another getter's field sits above it, so a round computes lower levels first. A cycle
+/// keeps the level it reached (its closing edge reads the previous value, rule 8).
+///
+/// Which getters a read lands on is class-aware (the same expression types `infer.rs` uses): `this.n` reads `n` of THIS getter's
+/// class; `x.n` / `g.n` / `prop(x, 'n')` read `n` of x's class when it is known (`this`, a loop variable over `instances('X')`
+/// or over a getter of known element type, a constructor, an entity literal). Where the class is unknown the read is
+/// conservative (every getter of that name), but such an edge is dropped when it would close a cycle that the known edges do
+/// not: a name collision between unrelated classes can never order a getter after what depends on it. Strings in dict
+/// literals and list elements are data, not reads.
+pub fn levels(gs: &[Getter]) -> Vec<usize> {
+    let n = gs.len();
+    let mut by_key: std::collections::HashMap<(&str, &str), Vec<usize>> = Default::default();
+    let mut by_name: std::collections::HashMap<&str, Vec<usize>> = Default::default();
+    for (i, g) in gs.iter().enumerate() { by_key.entry((&g.cls, &g.prop)).or_default().push(i); by_name.entry(&g.prop).or_default().push(i); }
+    let triples: Vec<(&str, &str, &str)> = gs.iter().map(|g| (g.cls.as_str(), g.prop.as_str(), g.expr.as_str())).collect();
+    let reads = crate::infer::getter_reads(&triples);
+    // known edges first, then the conservative ones that close no cycle
+    let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
+    let mut loose: Vec<(usize, usize)> = vec![];
+    for i in 0..n {
+        let rs = reads[i].clone().unwrap_or_else(|| text_reads(&gs[i].expr));
+        for r in rs {
+            match &r.cls {
+                Some(c) => for &j in by_key.get(&(c.as_str(), r.name.as_str())).into_iter().flatten() {
+                    if !(gs[j].cls == gs[i].cls && gs[j].prop == gs[i].prop) { adj[i].push(j); }
+                },
+                None => for &j in by_name.get(r.name.as_str()).into_iter().flatten() {
+                    if gs[j].prop != gs[i].prop { loose.push((i, j)); }
+                },
+            }
+        }
+    }
+    for l in adj.iter_mut() { l.sort_unstable(); l.dedup(); }
+    loose.sort_unstable(); loose.dedup();
+    let mut stamp = vec![0usize; n];
+    let mut tick = 0usize;
+    for (i, j) in loose {
+        if adj[i].contains(&j) { continue; }
+        tick += 1;
+        let mut todo = vec![j];
+        let mut closes = false;
+        while let Some(x) = todo.pop() {
+            if x == i { closes = true; break; }
+            if stamp[x] == tick { continue; }
+            stamp[x] = tick;
+            todo.extend(adj[x].iter().copied());
+        }
+        if !closes { adj[i].push(j); }
+    }
+    for l in adj.iter_mut() { l.sort_unstable(); l.dedup(); }
+    let mut lv = vec![0usize; n];
+    for _ in 0..n {
+        let mut moved = false;
+        for i in 0..n {
+            for &j in &adj[i] {
+                if lv[i] <= lv[j] && lv[j] + 1 <= n { lv[i] = lv[j] + 1; moved = true; }
+            }
+        }
+        if !moved { break; }
+    }
+    lv
+}
+
+/// The reads of an expression that does not parse: every word of its code (the old, conservative scan).
+fn text_reads(expr: &str) -> Vec<crate::infer::Read> {
+    let c = code_only(expr);
+    let mut out = vec![];
+    let mut w = String::new();
+    for ch in c.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() || ch == '_' { w.push(ch); }
+        else if !w.is_empty() { out.push(crate::infer::Read { name: std::mem::take(&mut w), cls: None }); }
+    }
+    out.sort(); out.dedup();
+    out
+}
+
+/// The old ordering, by NAME across all classes: the reference the class-aware `levels` is tested against.
+pub fn levels_by_name(gs: &[Getter]) -> Vec<usize> {
     let exprs: Vec<String> = gs.iter().map(|g| code_only(&g.expr)).collect();
     let mut lv = vec![0usize; gs.len()];
     for _ in 0..gs.len() {
