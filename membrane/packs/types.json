@@ -179,6 +179,7 @@
       "Request.r_session": "Dict?"
     },
     "writes": {
+      "Chat.mention": "Bool",
       "Chat.queued": "Bool",
       "Request.cm_at": "Num",
       "Request.cm_id": "Text?",
@@ -235,6 +236,7 @@
       "Chat.duration": "Any",
       "Chat.ended": "Num",
       "Chat.last_turn": "Any",
+      "Chat.mention": "Bool",
       "Chat.result": "Text",
       "Chat.started": "Num",
       "Chat.state": "Text",
@@ -958,6 +960,46 @@
       "Memory"
     ]
   },
+  "mentions": {
+    "getters": {
+      "Identifier.texts": "Int",
+      "Path.texts": "Int",
+      "SemAllCaps.form": "Text",
+      "SemCapital.form": "Text",
+      "SemIdentifier.form": "Text",
+      "SemIdentifier.lemma": "Any",
+      "SemNumber.form": "Text",
+      "SemPath.form": "Text",
+      "SemPath.lemma": "Any",
+      "SemPlural.form": "Text",
+      "SemPlural.lemma": "Text",
+      "SemText.mention_cap": "Int",
+      "SemText.mention_done": "List(Dict)",
+      "SemText.mention_table": "List(Dict)?",
+      "SemText.related": "List(Dict)?",
+      "Span.f_allcaps": "Text?",
+      "Span.f_capital": "Text?",
+      "Span.f_initial": "Bool",
+      "Span.f_number": "Text?",
+      "Span.f_plural": "Text?",
+      "Span.forms": "List(Text?)?",
+      "Span.sentence_no": "Int",
+      "Span.target": "(Entity(Identifier)|Entity(Path)|Entity(Word))?",
+      "Word.texts": "Int"
+    },
+    "writes": {
+      "Identifier.mentioned_in": "List(Any)",
+      "Path.mentioned_in": "List(Any)",
+      "SemText.mention_n": "Int",
+      "SemText.mentioned": "Bool?",
+      "SemText.mentions": "List((Entity(Identifier)|Entity(Path)|Entity(Word))?)",
+      "Span.armed": "Bool",
+      "Span.classified": "Bool",
+      "Span.parents": "List(Text?)?",
+      "Word.mentioned_in": "List(Any)"
+    },
+    "findings": []
+  },
   "messages": {
     "getters": {},
     "writes": {},
@@ -1107,6 +1149,27 @@
     "resident": [
       "Model",
       "Minds"
+    ]
+  },
+  "semtext": {
+    "getters": {
+      "SemText.identifiers": "List(Dict)",
+      "SemText.numbers": "List(Dict)",
+      "SemText.paths": "List(Dict)",
+      "SemText.sentences": "List(Dict)",
+      "SemText.skey": "Text",
+      "SemText.urls": "List(Dict)",
+      "SemText.words": "List(Dict)",
+      "Span.lemma": "Text",
+      "Span.text": "Any"
+    },
+    "writes": {
+      "SemText.attach_result": "Entity(Span)?",
+      "Span.armed": "Bool"
+    },
+    "findings": [],
+    "virtual": [
+      "Span"
     ]
   },
   "stats": {

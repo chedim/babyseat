@@ -15,3 +15,4 @@ Boot.started on-setter seed-help:
     Help:upgrade.file = dir + '/help/upgrade.md'
     Help:banner.file = dir + '/help/banner.md'
     Help:cliff.file = dir + '/help/cliff.md'
+    Help:semtext.file = dir + '/help/semtext.md'

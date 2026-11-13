@@ -7,6 +7,7 @@
    "membrane/packs/proc.c1f",
    "membrane/packs/banner.c1f",
    "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f"
   ],
   "given": [
@@ -88,6 +89,7 @@
    "membrane/packs/proc.c1f",
    "membrane/packs/banner.c1f",
    "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f"
   ],
   "given": [
@@ -141,6 +143,7 @@
    "membrane/packs/proc.c1f",
    "membrane/packs/banner.c1f",
    "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f"
   ],
   "given": [
@@ -194,6 +197,7 @@
    "membrane/packs/proc.c1f",
    "membrane/packs/banner.c1f",
    "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f"
   ],
   "given": [
@@ -246,6 +250,7 @@
    "membrane/packs/proc.c1f",
    "membrane/packs/banner.c1f",
    "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f"
   ],
   "given": [
@@ -298,6 +303,7 @@
    "membrane/packs/proc.c1f",
    "membrane/packs/banner.c1f",
    "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f"
   ],
   "given": [
@@ -392,6 +398,7 @@
    "membrane/packs/proc.c1f",
    "membrane/packs/banner.c1f",
    "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f"
   ],
   "given": [
@@ -488,6 +495,7 @@
    "membrane/packs/proc.c1f",
    "membrane/packs/banner.c1f",
    "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f"
   ],
   "given": [

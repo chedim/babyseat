@@ -9,5 +9,7 @@ proc
 fetch
 store
 door_tools
+semtext
+mentions
 chat
 chat_turn

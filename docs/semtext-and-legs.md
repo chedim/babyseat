@@ -1,6 +1,6 @@
-# SemText and legs: how code builds the graph (design, 2026-11-13; the tokenizer is built, the rest is not)
+# SemText and legs: how code builds the graph (design, 2026-11-13; built in part: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges)
 
-A conversation between the operator and the assistant, written down. Only the tokenizer is built (see "Tokenizer (built)" at the end). The rest is not built. It is the shape the semantic field
+A conversation between the operator and the assistant, written down. The first slice is built (see "Built: the first slice" at the end); vectors, the recall index, the field engine's use of the legs and everything under "Not built" there are not. It is the shape the semantic field
 takes in the barest seat: ONE graph (the VM's entities), with the semantic state an opt-in component of an entity, and code (c1f
 packs) building the graph from text.
 
@@ -74,5 +74,56 @@ in a debug build).
   `Hello.World` are dotted identifiers; `/help` is not a path (an absolute path needs a second `/` or an extension); paths cannot hold
   spaces. No lemma, no part of speech, no emoji kind (emoji and punctuation are skipped by the word layer), no markdown beyond the
   line rules above (fence content is read as ordinary lines).
-- **Not built:** the `SemText` class and its stored string, virtual child spans (`…:s[2]:w[3]`), mention rules (spans to entities and
-  edges), sentence embeddings, the recall index and the field engine's use of any of it.
+
+## Built: the first slice (#1143, operator decisions 2026-11-13)
+What landed, where, and what it changed against the design above. Packs: `membrane/packs/semtext.c1f` (class, layers, spans) and `membrane/packs/mentions.c1f`
+(form classes, mentions, recall by edges), both in `membrane/apps/barest.packs`; the chat packs write the bodies. Tests: `native/tests/semtext_1143.rs`,
+`semtext_process_1143.rs`, `chat_process.rs` (`a_message_body_and_the_answer_are_semtexts_...`), `help_1143.rs`. Model-facing page: `Help:semtext`
+(`membrane/apps/barest.c1f/help/semtext.md`); it never teaches `spans`, the builtin is internal to the SemText pack.
+
+- **`SemText` is a CLASS**, made by a constructor (`<owner>:body = SemText(text: ...)`); its `text` is the one stored string; `sentences words identifiers paths
+  urls numbers` are getters over `spans(this.text, <layer>)`, recomputed when `text` changes. Storage: the default (lazy: stored, loaded on reference). RESIDENT would
+  load every text ever said at start. (Each layer is a cached getter value, so a stored body also holds its layers' rows: the cost of an eager layer; see "Cost".)
+- **Spans are VIRTUAL entities, attached by one explicit write.** `<semtext>.attach = {layer: 'word', start: 5}` makes `Span:of:<key>:<letter>:<start>` (letters
+  s w i p u n; the key is the text's eid with `::` written `/`, because the storage mode follows the eid's class and an eid that began with the text's class, `Chat`, would
+  be a stored entity). `Span` is VIRTUAL; it has `of` (a `$ref` to the text), `layer`, `start`, `end`; its `text` is a getter that cuts the parent's string, so nothing
+  is duplicated. What holds it is a `$ref`: the write's receipt `attach_result` (the last one) or any live entity that keeps it; the garbage collector
+  (docs/cliffvm.md) collects the rest at the end of the round. Differences from the design: (1) the key is the START OFFSET (`:w:5`), not a list index (`:w[3]`): c1f has no
+  enumerate, and (layer, start) is unique; (2) the colon-path ownership rule is not used: the span is not a child by path of the text (that would need the eid to begin with the text's
+  class, which would make it a stored entity), so it lives by references; (3) there are no lazy reads of `<semtext>:w[3]`: the VM cannot make an entity from a read, so attach is the one way.
+- **K = 1.** Every word becomes an entity at its first mention (no nursery: the K-distinct-sentences gate of the design is K = 1). Words fold by lowercase only (no stemming)
+  and by their form class's lemma. No collection of stored Word entities.
+- **Form classes (c1f, mentions.c1f).** A span's class list `parents` is written from its `forms` getter (a setter on the getter, because a born entity's getters are computed when
+  the round ends and a birth runs no setter): `SemNumber` (a `number` span), `SemPlural`, `SemAllCaps`, `SemCapital` (not the first word of a sentence), `SemIdentifier`, `SemPath`,
+  then `span`. A word may carry several. Each class has its own getters (`form`, `lemma`); the nearest class answers first, and a layer can override one
+  (`SemPlural.lemma` in a pack that imports `mentions`). The rules are crude and documented in the pack: plural = more than 3 letters, ends in s, not ss/us/is, and the suffix
+  rules `ies -> y`, `ses xes zes ches shes -> drop es`, else drop s (`houses` -> `hous`); all-caps looks at the first two and last two letters (c1f cannot walk a text letter by letter).
+- **Mentions.** `<semtext>.mention = true` births armed spans for the words (not those inside an identifier, a path or a url), identifiers and paths of the text, the first MENTION_CAP
+  of each layer; they classify themselves and know their `lemma` (words: lowercase + class; identifiers and paths: the exact text) and `target`, the `$ref` edge from the span to the
+  entity: `Word:lemma:<lemma>`, `Identifier:name:<text>`, `Path:path:<text>`. When every span is classified one setter makes the entities by constructor and writes each entity's
+  `mentioned_in` (`[{text: <SemText eid>, sentence: <n>}]`, no copy of any text, one write per entity per mention so two spans never write the same target in a cascade) and the text's
+  `mentions` (a list of `$ref`s to the entities). The spans are then held by nothing and collected. Writing `mention` again replaces the text's own entries (no duplicates).
+  The entity ids carry a literal word before the key (`Word:lemma:cat`) because an entity literal with a computed key needs one; the old Python seat's `Word:<x>` ids are not reused. A path
+  is a `Path`, not a `File`: a `File` entity reads the disk and is RESIDENT.
+- **The message body.** `chat.c1f` makes `membrane::Chat:message:<id>:body` and asks for its mentions; `chat_turn.c1f` makes `...:turn:response:body` when the turn ends without an
+  error. `text` on the message is unchanged (the page's API). Tool results are not tokenized.
+- **Recall by edges.** `<semtext>.related_n = N` then `<semtext>.related`: `[{semtext, sentence_index, text, shared}]`, the sentences of other texts that mention the same entities,
+  ranked by the sum over the shared entities of 1 / (the number of `mentioned_in` entries of that entity), `shared` being the plain count. It follows `mentions` and `mentioned_in`;
+  no embedding, no search. Computed only while `related_n` is set (a getter is eager).
+
+### Cost (one mention)
+A text of W words, I identifiers and P paths makes at most W + I + P virtual spans (each layer capped at 400), all collected when the cascade ends, and at most D new stored
+entities (D = the distinct lemmas, identifiers and paths not seen before) with one write of `mentioned_in` each. A 300-word chat message: 1 body entity (stored; with the
+layer rows cached on it), up to 300 transient spans, up to 300 new Word entities in the very first message and a handful afterwards (a common word costs one list entry).
+Measured on the fake-CLI chat test: one message with its answer = 7 entities under the message (message, turn, body, response, response body, 2 tools) + 8 Word entities and 1
+Identifier. `mentioned_in` of a very common word grows by one entry per sentence that holds it and is rewritten whole at each mention: the cost of K = 1 with no cut, flagged below.
+
+### Thresholds flagged for the operator
+MENTION_CAP = 400 per layer (`SemText.mention_cap`; none was given). `related_n` has no default: the asker gives it. The frequency divisor of `related` is the count itself (no number).
+Open: a cut for the entities mentioned by very many sentences (their `mentioned_in` grows without bound and `related` reads it whole; one evaluation past the step budget answers a
+reasoned null); the self-time allowance of a getter or setter (10 ms) applies to the mention setter of a big text.
+
+### Not built
+Vectors and embeddings (sentences carry none), paragraphs, syntax, coreference, the recall index, the field engine's use of the legs, a collection of stored Word entities, the
+mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, embeddings budget,
+untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).

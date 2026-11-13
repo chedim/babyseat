@@ -41,6 +41,7 @@ them empty (see the router pack's `router-rungs` / `router-minds`).
 `[{start, end, text}]`, the layer's spans sorted and non-overlapping, `start`/`end` in chars (the unit of `len`, `head`, `tail`), `text`
 the surface. `layer` is one of `sentence word identifier path url number`; another name is an error that lists them. Typed
 `List(Dict)`; a pack cannot do this itself (UAX #29 tables are compiled in). `Msg.sents getter: spans(this.text, 'sentence')`.
+It is INTERNAL: only the SemText pack (`membrane/packs/semtext.c1f`) calls it, and a model reads a text's `sentences`, `words`, ... properties instead (`Help:semtext`, which never teaches `spans`).
 There is no `slice` builtin: a span's `text` is already cut, and `head(tail(t, len(t) - start), end - start)` cuts by offsets when a
 pack holds only the offsets.
 

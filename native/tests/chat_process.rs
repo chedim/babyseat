@@ -171,7 +171,7 @@ if os.path.exists(errp):
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt, "num_turns": 3, "duration_ms": 4321, "total_cost_usd": 0.0123, "usage": {"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44}, "session_id": "fake-1"})
 "#;
 
-const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "chat.c1f", "chat_turn.c1f"];
+const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f"];
 
 /// the seat's folder holds the fake; the binary is told its path as a fact
 fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) { fake_seat_with(tag, extra, &[]) }
@@ -1493,4 +1493,52 @@ fn the_chat_turn_is_not_killed_by_the_default_and_a_timed_out_receipt_survives_a
     assert_eq!(before, after, "the receipt is the journalled write; a replay runs nothing");
     assert!(!alive("sleep 67.9"));
     assert!(terminate(&mut run2));
+}
+
+#[test]
+fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_tool_result_is_not() {
+    let (mut run, port, dir) = fake_seat("body", &[]);
+    let text = "Dogs chase the cats near my_fn.";
+    let id = send(port, text);
+    let v = finish(port, &dir, &id, text);
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(v["text"], text, "the page's `text` keeps working");
+    let body = format!("membrane::Chat:message:{id}:body");
+    assert_eq!(call(port, "entity_read", json!({"spec": &body, "prop": "text"})).0, text);
+    let words = wait("the body's words", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "words"})).0; if t.contains("Dogs") { Some(t) } else { None } });
+    assert!(words.contains("chase"), "{words}");
+    // its words are entities that name the body
+    let cat = wait("Word:lemma:cat", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:cat", "prop": "mentioned_in"})).0; if t.contains(&body) { Some(t) } else { None } });
+    assert!(cat.contains("\"sentence\":0"), "{cat}");
+    wait("the identifier", || { let t = call(port, "entity_read", json!({"spec": "Identifier:name:my_fn", "prop": "mentioned_in"})).0; t.contains(&body).then_some(()) });
+    // the answer is a SemText too, under the response
+    let rbody = format!("membrane::Chat:message:{id}:turn:response:body");
+    assert_eq!(call(port, "entity_read", json!({"spec": &rbody, "prop": "text"})).0, format!("Final answer to: {text}"));
+    wait("the answer's words", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:answer", "prop": "mentioned_in"})).0; t.contains(&rbody).then_some(()) });
+    // recall by edges: ask the body for the sentences that mention the same things (the dial is the question), read them through the door
+    let (t, e) = call(port, "entity_write", json!({"spec": &body, "prop": "related_n", "value": 3}));
+    assert!(!e, "{t}");
+    let rel = wait("the related rows", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "related"})).0; if t.contains(&rbody) { Some(t) } else { None } });
+    assert!(rel.contains("\"shared\":6") && rel.contains("Final answer to"), "{rel}");
+    let (t, e) = call(port, "run_cliff", json!({"code": format!("[r['semtext'] for r in prop('{body}', 'related')]")}));
+    assert!(!e && t.contains(&rbody), "{t}");
+    // a tool's result is NOT tokenized: the only SemTexts of the message are the two bodies
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:SemText & name~:membrane::Chat:message:"}));
+    assert!(q.contains(&body) && q.contains(&rbody) && !q.contains(":tool:"), "{q}");
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:SemText", "count": true}));
+    assert!(n.starts_with("2 entity"), "{n}");
+    // what one message costs in entities (the fake runs two tools): the message, its turn, its body, the response and ITS body, two tools = 7; the words are Word entities
+    let (n, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:message:", "count": true}));
+    assert!(n.starts_with("7 entity"), "{n}");
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:Word", "count": true}));
+    println!("WORDS after one message and its answer: {n}");
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:Span", "count": true}));
+    assert!(n.starts_with("0 entity"), "the spans were collected: {n}");
+    // the history route still answers with the same view
+    let (st, h) = http(port, "GET", "/membrane/chat/messages", "");
+    assert_eq!(st, 200, "{h}");
+    let hv: J = serde_json::from_str(&h).unwrap();
+    assert_eq!(hv["messages"][0]["text"], text);
+    assert_eq!(hv["messages"][0]["response"], format!("Final answer to: {text}"));
+    assert!(terminate(&mut run));
 }

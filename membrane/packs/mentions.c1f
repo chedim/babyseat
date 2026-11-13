@@ -1,0 +1,151 @@
+PACK mentions 1
+IMPORT semtext 1
+-- MENTIONS (#1143, docs/semtext-and-legs.md): the rules (in c1f, so a model can layer over them) that turn the spans of a text into
+-- classes, entities and edges. THIS PART: the FORM CLASSES of a span.
+--
+-- A span that is attached (`SemText.attach`, semtext.c1f) is classified at once: its `parents` list is written, nearest class first, the
+-- class `span` last. A word span carries SEVERAL classes; the first class whose getter answers a property wins (docs/c1f-layers.md), so
+-- `SemPlural.lemma` beats the default `Span.lemma`, and a model's pack that IMPORTs mentions and defines `SemPlural.lemma` is the
+-- upper layer and beats both.
+--   layer word:        SemNumber (the word is a `number` span: digits, 3.5, 1,000)
+--                      SemPlural (CRUDE, English only: more than 3 letters, ends in s, not ss / us / is: `cats` `boxes` `cities`; `bus` `class` are not)
+--                      SemAllCaps (two letters or more; the first two and the last two letters are upper case: `NASA`)
+--                      SemCapital (first letter upper case, not all caps, NOT the first word of a sentence: `Rex`, not `Dogs bark`'s `Dogs`)
+--   layer identifier:  SemIdentifier        layer path: SemPath        (url, number and sentence spans have no form class)
+-- `form` names the nearest form class in one word; a class's other getters are its own (`lemma`).
+-- The lemma of a plural strips the plural suffix by a crude rule: `ies` -> `y`, `ses` `xes` `zes` `ches` `shes` -> drop `es`, else drop `s`
+-- (`houses` -> `hous`: a rule, not a dictionary; the model overrides it in a layer).
+
+SemNumber.form getter: 'number'
+SemPlural.form getter: 'plural'
+SemAllCaps.form getter: 'allcaps'
+SemCapital.form getter: 'capital'
+SemIdentifier.form getter: 'identifier'
+SemPath.form getter: 'path'
+
+SemPlural.lemma getter:
+  WHEN tail(lower(this.text), 3) == 'ies': head(lower(this.text), len(this.text) - 3) + 'y'
+  ELSE WHEN tail(lower(this.text), 3) in ['ses', 'xes', 'zes'] or tail(lower(this.text), 4) in ['ches', 'shes']: head(lower(this.text), len(this.text) - 2)
+  ELSE: head(lower(this.text), len(this.text) - 1)
+
+Span.f_number getter: 'cls:semnumber' if this.layer == 'word' and len([n for n in prop(this.of, 'numbers') if n['start'] == this.start and n['end'] == this.end]) > 0 else None
+Span.f_plural getter: 'cls:semplural' if this.layer == 'word' and this.f_number == None and len(this.text) > 3 and tail(lower(this.text), 1) == 's' and tail(lower(this.text), 2) not in ['ss', 'us', 'is'] else None
+-- c1f cannot walk a text letter by letter, so the rule looks at four letters: the first two and the last two are all upper case (`NASA`, `OK`, `HTTP`; `HTTP2` is not, `McDonald` is not, `ABcD` is, a known crude edge)
+Span.f_allcaps getter: 'cls:semallcaps' if this.layer == 'word' and len(this.text) >= 2 and head(this.text, 2) != lower(head(this.text, 2)) and tail(this.text, 2) != lower(tail(this.text, 2)) and head(this.text, 1) != lower(head(this.text, 1)) and tail(this.text, 1) != lower(tail(this.text, 1)) else None
+Span.f_initial getter: len([s for s in prop(this.of, 'sentences') if s['start'] == this.start]) > 0
+Span.f_capital getter: 'cls:semcapital' if this.layer == 'word' and this.f_allcaps == None and not this.f_initial and head(this.text, 1) != lower(head(this.text, 1)) else None
+Span.forms getter:
+  WHEN this.armed != True: None
+  ELSE WHEN this.layer == 'word': concat([c for c in [this.f_number, this.f_plural, this.f_allcaps, this.f_capital] if c != None], ['cls:span'])
+  ELSE WHEN this.layer == 'identifier': ['cls:semidentifier', 'cls:span']
+  ELSE WHEN this.layer == 'path': ['cls:sempath', 'cls:span']
+  ELSE: ['cls:span']
+
+-- A span is classified when its `forms` arrive: a setter on the getter's own property (the way a getter's value is heard, `Request.ev_snap` in
+-- chat.c1f) writes the class list, nearest class first, `span` last. (A birth runs no setter and the getters of an entity born in a round
+-- are computed when it ends, so a setter of the attach or of a `classify` write would read them as nothing.) A change of the text that changes
+-- the forms re-classifies the span; `forms` does not read `parents`, so the write does not come back.
+Span.forms on-setter classify-span:
+  WHEN this.forms != None:
+    this.parents = this.forms
+    this.classified = True
+
+SemIdentifier.lemma getter: this.text
+SemPath.lemma getter: this.text
+
+-- ---- the mentions: spans -> Word / Identifier / Path entities and the edges ------------------------------------------------------------
+-- `<semtext>.mention = <any value but null>` (the chat writes it on a new body; a model's pack writes it on a leg of its own) asks for the mentions of a text.
+-- WHAT IT DOES, in order, all inside the one cascade of that write:
+--   1. births an ARMED span (semtext.c1f) for each word, identifier and path of the text: the first MENTION_CAP of each layer (a word span that lies
+--      inside an identifier, a path or a url is skipped: `my_fn` is an Identifier, not a Word);
+--   2. each span classifies itself (above) and so knows its `lemma`: words by their lowercase form and their class (`dogs` -> `dog`), identifiers and paths
+--      by their exact text; `target` is the EDGE from the span to the entity it mentions (a `$ref` value): `Word:lemma:<lemma>`, `Identifier:name:<text>`,
+--      `Path:path:<text>` (not File: a `File` entity reads the disk and is RESIDENT, a mention must not);
+--   3. when every span is classified, `mention_table` groups them by entity and ONE setter makes each entity by a constructor (K = 1: every word becomes an
+--      entity at its first mention; a stored entity stays, nothing collects Words) and writes its `mentioned_in`, the edge FROM the entity:
+--      `[{text: <SemText eid>, sentence: <sentence number>}]`, one entry per (text, sentence), no copy of any text. Writing again replaces the text's own entries (no duplicates).
+--      The SemText keeps the edge the other way too: `mentions`, the list of the entities it mentions (`$ref` values).
+--   4. the spans are held by nothing (virtual): the engine collects them when the cascade ends. The durable edges are the `mentioned_in` lists and the SemTexts.
+-- COST of one mention of a text with W words, I identifiers and P paths: at most 2 x MENTION_CAP + ... spans (virtual, transient) and, for the distinct lemmas D,
+-- at most D new stored entities (D <= W) with one write of `mentioned_in` each. A 300-word message makes at most 300 transient spans and at most 300 new Word
+-- entities (a common word is already there: it costs only its list entry). `mentioned_in` of a very common word grows by one entry per text that holds it.
+-- MENTION_CAP is a threshold FLAGGED FOR THE OPERATOR (no value was given): 400 per layer.
+SemText.mention_cap getter: 400
+
+SemText.mention on-setter mention-spans:
+  WHEN this.mention != None:
+    cap = this.mention_cap
+    inner = concat(concat(this.identifiers, this.paths), this.urls)
+    ws = head([w for w in this.words if len([c for c in inner if c['start'] <= w['start'] and w['end'] <= c['end']]) == 0], cap)
+    ids = head(this.identifiers, cap)
+    ps = head(this.paths, cap)
+    this.mentioned = None
+    this.mention_n = len(ws) + len(ids) + len(ps)
+    FOR r IN ws:
+      Span:of[this.skey]['w'][r['start']] = Span(of: this, layer: 'word', start: r['start'], end: r['end'])
+      Span:of[this.skey]['w'][r['start']].armed = True
+    FOR r IN ids:
+      Span:of[this.skey]['i'][r['start']] = Span(of: this, layer: 'identifier', start: r['start'], end: r['end'])
+      Span:of[this.skey]['i'][r['start']].armed = True
+    FOR r IN ps:
+      Span:of[this.skey]['p'][r['start']] = Span(of: this, layer: 'path', start: r['start'], end: r['end'])
+      Span:of[this.skey]['p'][r['start']].armed = True
+
+Span.sentence_no getter: len([s for s in prop(this.of, 'sentences') if s['start'] <= this.start]) - 1
+Span.target getter:
+  WHEN this.classified != True: None
+  ELSE WHEN this.layer == 'word': Word:lemma[this.lemma]
+  ELSE WHEN this.layer == 'identifier': Identifier:name[this.lemma]
+  ELSE WHEN this.layer == 'path': Path:path[this.lemma]
+  ELSE: None
+
+-- the classified spans of this text, as rows; only while a mention is under way (a text that was mentioned, or never, reads nothing of the spans)
+SemText.mention_done getter:
+  WHEN this.mention == None or this.mentioned == True: []
+  ELSE: [{'id': s.layer + ':' + s.lemma, 'layer': s.layer, 'k': s.lemma, 'sent': s.sentence_no} for s in instances('Span') if s.of == this and s.classified == True]
+SemText.mention_table getter:
+  WHEN this.mention_n == None or this.mention_n == 0 or len(this.mention_done) != this.mention_n: None
+  ELSE: group_by(this.mention_done, 'id')
+
+SemText.mention_table on-setter record-mentions:
+  WHEN this.mention_table != None:
+    FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'word']:
+      k = g['rows'][0]['k']
+      Word:lemma[k] = Word(lemma: k)
+      Word:lemma[k].mentioned_in = concat([e for e in (prop('Word:lemma:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
+    FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'identifier']:
+      k = g['rows'][0]['k']
+      Identifier:name[k] = Identifier(name: k)
+      Identifier:name[k].mentioned_in = concat([e for e in (prop('Identifier:name:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
+    FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'path']:
+      k = g['rows'][0]['k']
+      Path:path[k] = Path(path: k)
+      Path:path[k].mentioned_in = concat([e for e in (prop('Path:path:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
+    this.mentions = concat([Word:lemma[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'word'], [Identifier:name[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'identifier'], [Path:path[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'path'])
+    this.mentioned = True
+
+-- how many texts mention an entity
+Word.texts getter: len(this.mentioned_in or [])
+Identifier.texts getter: len(this.mentioned_in or [])
+Path.texts getter: len(this.mentioned_in or [])
+
+-- ---- RECALL BY EDGES: `SemText.related` ----------------------------------------------------------------------------------------------
+-- Which OTHER sentences, in other texts, mention the same things? Ask by writing the dial on a text:  `<semtext>.related_n = 5`  and read  `<semtext>.related`
+-- (entity_read, or `prop(<semtext>, 'related')` in run_cliff): at most `related_n` rows `{semtext, sentence_index, text, shared}`, best first.
+--   * The edges followed are the text's `mentions` (its Word / Identifier / Path entities) and their `mentioned_in` lists: nothing is searched, nothing is embedded.
+--   * `shared` is the number of the text's entities that sentence mentions (a plain count: the rows are the sentences that hold at least one).
+--   * THE RANK is frequency-weighted: each shared entity counts 1 / (the number of entries in its `mentioned_in`), so `the`, mentioned everywhere, adds almost
+--     nothing and a word two texts have between them adds half (the old BOILERPLATE idea: a word's weight falls with how often it is said). The sum is
+--     `dot(weights, ones)` (c1f has no sum). Ties keep the order the edges came in. No threshold: the divisor is the count itself.
+--   * It is computed only while `related_n` is set (a getter is eager: with no dial nothing is read, and no row of text or entity is touched). `related_n` has NO default: the
+--     asker says how many. A text that was never mentioned (no `mentions`) answers null.
+--   * COST: it reads the `mentioned_in` of every entity of the text, so a very common word makes it linear in the number of entries of that word; one evaluation
+--     past the step budget answers a reasoned null (`budget exceeded`), never a wrong list. Flagged for the operator: whether very common entities should be skipped by a cut.
+--   * The edges are flattened through JSON text (c1f has no nested comprehension): each entity makes the text of its rows, the texts are joined and parsed once.
+SemText.related getter:
+  WHEN this.related_n == None or this.mentions == None: None
+  ELSE:
+    parts = [join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(prop(m, 'mentioned_in'))}) for e in prop(m, 'mentioned_in') if e['text'] != this.eid], ',') for m in this.mentions]
+    hits = json('[' + join([p for p in parts if p != ''], ',') + ']')
+    rows = [{'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'shared': len(g['rows']), 'score': dot([r['w'] for r in g['rows']], [1 for r in g['rows']])} for g in group_by(hits, 'key')]
+    [{'semtext': r['text'], 'sentence_index': r['sent'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'shared': r['shared']} for r in head(sort_by(rows, 'score', True), this.related_n)]

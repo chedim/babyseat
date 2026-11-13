@@ -338,6 +338,7 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
   THE TURN is the entity `membrane::Chat:message:<id>:turn` (ChatTurn: `state` written running, then done/error; `status` a getter over it, `queued` while
   there is none: a first value written with the birth and the start's write would be two writes in one round, which the loop guard refuses; `started`, `ended` = the clock; `queued_at`; `message`).
   It owns, by the colon path, the answer `...:turn:response` (ChatResponse: text, error, rc) and each tool Claude ran `...:turn:tool:<tool_use id>` (ChatTool: name, input, result).
+  The message also has a body, `...:body`, and the answer (when it is not an error) `...:turn:response:body`: SemTexts whose words become Word entities (docs/semtext-and-legs.md, "Built: the first slice"); a tool's result is not tokenized.
   **A parent owns its children** (`host.rs` `drain_apply`): `retire = true` on an entity also retires every entity whose eid starts with `<eid>:` (engine and store), so retiring a turn retires its
   answer and tools, retiring a message its turn. Tests: `host_loop.rs` (`retiring_an_entity_retires_what_its_path_owns...`), `seat_process.rs` (`a_turn_is_an_entity...`).
   `GET /membrane/chat/messages?limit=N&before=<message id>` is THE HISTORY, one answer `{messages, more, next}`: the newest N turns (default 20, at least 1),
