@@ -19,17 +19,37 @@ IMPORT boot 1
 -- `--` ends the options (the CLI's --allowedTools and --mcp-config take lists: without it they would swallow the prompt).
 -- The login is the CLI's own; --bare is NOT used: it never reads the login (OAuth/keychain), only an API key.
 
-ChatMessage.bin getter: ([b.chat_claude_bin for b in instances('Boot') if b.chat_claude_bin != None] or [''])[0]
-ChatMessage.max_turns getter: ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
-ChatMessage.port getter: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
-ChatMessage.mcp_json getter: str({'mcpServers': {'membrane': {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp'}}}) if this.port != None else None
-ChatMessage.banner_text getter: prop('membrane::Banner:owner:main', 'text')
-ChatMessage.note getter: 'Modify your banner to help you maintain continuity. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.'
+ChatMessage.bin getter:
+  WHEN this.over: None
+  ELSE: ([b.chat_claude_bin for b in instances('Boot') if b.chat_claude_bin != None] or [''])[0]
+ChatMessage.max_turns getter:
+  WHEN this.over: None
+  ELSE: ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
+ChatMessage.port getter:
+  WHEN this.over: None
+  ELSE: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
+ChatMessage.mcp_json getter:
+  WHEN this.over: None
+  ELSE: str({'mcpServers': {'membrane': {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp'}}}) if this.port != None else None
+ChatMessage.banner_text getter:
+  WHEN this.over: None
+  ELSE: prop('membrane::Banner:owner:main', 'text')
+ChatMessage.note getter:
+  WHEN this.over: None
+  ELSE: 'Modify your banner to help you maintain continuity. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.'
+-- THE PROMPT PROPS END WITH THE TURN (#1143): bin, max_turns, port, mcp_json, banner_text, banner_slot, sys, argv and note are none once the turn is over (done/error): a finished message
+-- no longer reads the banner, so a banner change recomputes only unfinished messages (not every message ever sent), the reply of a write carries none of them and the
+-- stored rows hold no copy of the system prompt. The view, the text, the response and the tools are not among them.
 -- A banner with no `text` (the model's pack left it null) is SHOWN, not skipped: the turn runs with the banner error in the banner's slot, so the model can repair it (Help:banner).
-ChatMessage.banner_slot getter: this.banner_text if this.banner_text != None else 'BANNER ERROR: your banner `Banner:owner:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
-ChatMessage.sys getter: join([this.note, this.banner_slot], '\n\n')
+ChatMessage.banner_slot getter:
+  WHEN this.over: None
+  ELSE: this.banner_text if this.banner_text != None else 'BANNER ERROR: your banner `Banner:owner:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
+ChatMessage.sys getter:
+  WHEN this.over: None
+  ELSE: join([this.note, this.banner_slot], '\n\n')
 ChatMessage.argv getter:
-  WHEN this.bin == '' or this.mcp_json == None or this.sys == None or this.text == None: None
+  WHEN this.over: None
+  ELSE WHEN this.bin == '' or this.mcp_json == None or this.sys == None or this.text == None: None
   ELSE: ['env', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence', '--max-turns', str(this.max_turns), '--system-prompt', this.sys, '--', this.text]
 
 -- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------

@@ -810,3 +810,22 @@ fn a_command_run_again_with_the_same_id_runs_but_only_a_new_id_gives_a_receipt_t
     assert_eq!(n(), 3);
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn a_banner_change_returns_reactions_that_do_not_grow_with_the_finished_messages() {
+    let pack = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'n=' + str(prop('Note:x', 'n'))\n";
+    let (mut run, port, _dir) = fake_seat_with("reactfinished", &[], &[("mine.c1f", pack)]);
+    put(port, "Note:x", "n", json!(0));
+    let size = |port: u16, n: i64| -> (usize, String) { let (t, e) = put(port, "Note:x", "n", json!(n)); assert!(!e, "{t}"); (t.len(), t) };
+    let (small, _) = size(port, 1);
+    // 50 FINISHED messages, as the chat makes them (class Chat, kind in parents, the state on the :turn entity)
+    for i in 0..50 {
+        let (t, e) = call(port, "run_cliff", json!({"code": format!("membrane::Chat:message[{i}] = ChatMessage(text: 'q{i}')\nmembrane::Chat:message[{i}]:turn = ChatTurn(message: 'membrane::Chat:message:{i}')\nmembrane::Chat:message[{i}]:turn.state = 'done'")}));
+        assert!(!e, "{t}");
+    }
+    let (n50, t) = size(port, 2);
+    eprintln!("reactions reply: {small} bytes with no finished message, {n50} bytes with 50");
+    assert!(!t.contains("membrane::Chat:message:"), "no finished message is in the reactions: {}", &t[..t.len().min(600)]);
+    assert!(n50 < small + 1500, "the reply does not grow with the finished messages: {small} -> {n50}");
+    assert!(terminate(&mut run));
+}

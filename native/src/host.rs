@@ -152,7 +152,7 @@ impl Host {
             None => Connection::open_in_memory().map_err(dbe)?,
         };
         db.busy_timeout(Duration::from_millis(5000)).map_err(dbe)?;
-        if o.store.is_some() { let _: String = db.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0)).map_err(dbe)?; }
+        if o.store.is_some() { let _: String = db.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0)).map_err(dbe)?; db.execute_batch("PRAGMA synchronous = NORMAL").map_err(dbe)?; }   // WAL + NORMAL: a power loss may lose the last commits, never corrupts (what the Python store does too)
         for t in [ROWS, JOURNAL] {
             db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {t} (k TEXT PRIMARY KEY, body TEXT NOT NULL)")).map_err(dbe)?;
         }
@@ -524,6 +524,11 @@ impl Host {
     }
 
     /// How many times the host has committed to the store (a transaction counts once, a statement outside one counts itself).
+    /// A pragma of the store's connection, as text (tests and `doctor`-style checks: journal_mode, synchronous).
+    pub fn store_pragma(&self, name: &str) -> String {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.query_row(&format!("PRAGMA {name}"), [], |r| r.get::<_, rusqlite::types::Value>(0)).map(|v| match v { rusqlite::types::Value::Text(t) => t, rusqlite::types::Value::Integer(i) => i.to_string(), o => format!("{o:?}") }).unwrap_or_default()
+    }
     pub fn store_commits(&self) -> usize { self.commits.load(Ordering::SeqCst) }
 
     /// Open a transaction (a nested one joins the outer one): the host's writes of a round are ONE commit, and a row it changes is written once.

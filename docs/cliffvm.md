@@ -46,6 +46,7 @@ cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--
 - `--store`: one SQLite file (default `./cliffvm.sqlite3`), WAL: the entity rows (`c_field`: eid -> {cls, props, writers}), the
   journal (`c_journal`), and what `sql(...)` in packs reads (read-only connections of the same process).
   The WAL is folded back and truncated by the clock tick once it is over `WAL_LIMIT_BYTES` (8 MB, `host.rs` `trim_wal`; a reader holding a snapshot stops SQLite's own reset, and SQLite never shrinks the log file by itself; the wait for readers is 50 ms, then the next tick tries again). The main file does not shrink after rows are retired (freed pages are reused, `auto_vacuum` is off); test `native/tests/wal_1143.rs`.
+  DURABILITY: the store is WAL with `PRAGMA synchronous = NORMAL` (`Host::open`; the operator approved it, the Python store does the same): a commit is not fsynced one by one, so a power loss (not a process crash) may lose the last commits, never corrupts the file; a clean restart keeps everything (test `finished_guard_1143.rs`).
 - The boot plan: this host runs none of the plan's steps (they are the Python seat's), so each is `skipped` and the plan only says
   when the boot is over. Then `started`.
 
@@ -110,6 +111,8 @@ the door's listener, a held request, an open event stream and `Command.stop` tak
 
 **The turn's numbers** (`chat_turn.c1f`): the result line of the CLI's stream carries `usage` {input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens}, `total_cost_usd`, `num_turns` and `duration_ms`; the finish writes them on the turn
 entity (`...:turn`) as `usage`, `cost`, `calls` and `duration`, and the message view's `turn` (and so the event stream's events) carries them. A run that ended with no result line has none. Test: `chat_process.rs` `the_turn_carries_usage...`.
+**Finished messages stop reading the banner** (`chat_turn.c1f`): the per-message prompt getters (`bin`, `max_turns`, `port`, `mcp_json`, `banner_text`, `banner_slot`, `sys`, `argv`, `note`) are `WHEN this.over: None`, so once the turn is done/error they hold none (derived, cleared in the store) and no longer depend on the banner: a banner change recomputes only unfinished messages. Measured on the fake seat: the reply of an `entity_write` that changes the banner was 61871 bytes with 50 finished messages (121 without), and is 121 bytes with 50 now (tests `finished_guard_1143.rs`, `chat_process.rs` `a_banner_change_returns_reactions...`).
+
 **Resource hygiene** (`chat_turn.c1f` `spent`, `slim-run`): once a turn is over (done/error) the Command's receipt `run_result` is replaced by `{id, status, rc, stderr}` (the raw stdout and its twin `head` were each stored again with the getters' cached parses, hundreds of KB a turn);
 the answer, the tools and the numbers are entities. The finish (`turn-finish`) runs only while the turn is not over, so the slimming's recompute leaves the response alone. The JOURNAL still holds the raw lines: each partial `Chunk:` birth is an outside birth and is journalled (about 1.6 times the
 raw output, 324 KB for a 200 KB turn); compaction of a finished turn's chunks is proposed, not built. Test: `chat_process.rs` `a_finished_turn_keeps_its_answer...` (rows under a 16 KB bound).
