@@ -56,6 +56,25 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 - Process tests (`native/tests/cliffvm_process.rs`): the built binary on an ephemeral port serves a static file, boots through the
   real plan and answers a decisions route and a 501 route, stops on SIGTERM (hard timeouts, the child is always killed).
 
+## Pack entities: the model loads its own packs (design, 2026-11-13)
+
+- A **Pack** is an entity `Pack:<name>` whose `text` property holds c1f. The model writes it with the tool it already has:
+  `entity_write {spec: 'Pack:mine', prop: 'text', value: '<c1f>'}`. No new tool, no new syntax. The name is what follows `Pack:`.
+- Writing `text` loads (or replaces) the pack at once through `Fields::set_pack(name, text)`: its classes, getters and setters are live
+  for the next write. Writing `text` to none or empty removes it (`remove_pack`; the host has no entity removal yet).
+- The host mirrors the outcome back as DERIVED writes (`trigger:field:pack`, never journalled): `loaded` (true when the pack is active),
+  `error` (the loader's message, absent when fine) and `good_text` (the last text that loaded). The text write itself is the model's
+  write (a Request's setter in the MCP door) and is replayed, so a replay loads the same packs in the same order.
+- A refused text keeps the previous pack running: `set_pack` parses and checks (stale setter reads) BEFORE it replaces anything, and an
+  import problem restores the old one. A refusal sets `error`; `loaded` stays what the running pack is. Restart: the packs folder loads
+  first, then every stored `Pack:*` row (name order) from its `text`, falling back to `good_text` when the text is refused.
+- The name and the text's `PACK` line: `set_pack` refuses a text whose `PACK <name>` line names another pack, so the id wins by
+  refusal (the line is optional; the message says what it found). The same as `fields_live`.
+- A Pack that imports a pack that is not there yet WAITS (kept, inactive) and activates when the import arrives; its `error` says
+  what it waits for (Python leaves `error` empty for that and only for view packs waiting for `dom`; here the model needs to see it).
+- Packs from the FOLDER stay files: loaded once at start, not entities, not reloaded. A Pack entity of the same name replaces the
+  file's pack (it loads later).
+
 ## What `fields_live.py` does that the Rust loop does NOT yet do
 
 - **Mirroring the Python entity store**: there is none here; the rows are the host's own table. No `est.docs` hear/mirror, no
