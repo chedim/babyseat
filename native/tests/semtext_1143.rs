@@ -61,3 +61,77 @@ fn a_change_of_the_text_recomputes_every_layer() {
     assert_eq!(h.get(B, "words").as_array().unwrap().len(), 4);
     assert_eq!(h.get(B, "sentences").as_array().unwrap().len(), 2);
 }
+
+// ---- item 2: the span entities (virtual, attached by a write, held while something holds them) ------------------------------------------
+fn live(h: &Host, eid: &str) -> bool { h.snapshot().contains_key(eid) }
+const T: &str = "Open my_fn now. Then stop.";
+fn span(layer: &str, start: usize) -> String { format!("Span:of:Box:a:body:{}:{start}", &layer[..1]) }
+
+#[test]
+fn a_write_of_attach_makes_the_virtual_span_entity_with_its_offsets_and_a_text_cut_from_the_parent() {
+    let h = with_body(T);
+    h.write(B, "attach", json!({"layer": "word", "start": 5}), "person");
+    h.pump();
+    let s = span("word", 5);
+    assert!(live(&h, &s), "no {s}");
+    assert_eq!(h.get(&s, "layer"), json!("word"));
+    assert_eq!(h.get(&s, "start"), json!(5));
+    assert_eq!(h.get(&s, "end"), json!(10));
+    assert_eq!(h.get(&s, "text"), json!("my_fn"));
+    assert_eq!(h.get(&s, "of"), json!({"$ref": B}));
+    // the text is a getter over the parent's (no copy): the parent's text changes, the cut follows
+    h.write(B, "text", json!("Open my_fn now. Then stop. "), "person");
+    h.pump();
+    assert_eq!(h.get(&s, "text"), json!("my_fn"));
+    h.write(B, "text", json!("Open MY_FN now. Then stop."), "person");
+    h.pump();
+    assert_eq!(h.get(&s, "text"), json!("MY_FN"));
+    h.write(B, "text", json!(T), "person");
+    h.pump();
+    // a SENTENCE and an IDENTIFIER are spans too, under their own letters
+    h.write(B, "attach", json!({"layer": "sentence", "start": 16}), "person");
+    h.pump();
+    assert_eq!(h.get(&span("sentence", 16), "text"), json!("Then stop."));
+}
+
+#[test]
+fn a_span_is_virtual_never_a_stored_row() {
+    let h = with_body(T);
+    h.write(B, "attach", json!({"layer": "word", "start": 0}), "person");
+    h.pump();
+    assert_eq!(h.storage_of("Span"), membrane_vm::fields::Storage::Virtual);
+}
+
+#[test]
+fn a_span_nothing_holds_is_collected_and_what_holds_one_keeps_it() {
+    let h = with_body(T);
+    h.write(B, "attach", json!({"layer": "word", "start": 0}), "person");
+    h.pump();
+    assert!(live(&h, &span("word", 0)), "the attach receipt holds the span it made");
+    // the next attach replaces the receipt: the first span is held by nothing now and is collected; the second is held
+    h.write(B, "attach", json!({"layer": "word", "start": 5}), "person");
+    h.pump();
+    assert!(!live(&h, &span("word", 0)), "an unheld span is collected");
+    assert!(live(&h, &span("word", 5)));
+    // a live entity that holds it by a reference keeps it past the next attach (a model's pack: `Reader.keep = Span:...`)
+    h.born("Reader:r", "Reader", Default::default(), "person");
+    h.write("Reader:r", "keep", json!({"$ref": span("word", 5)}), "person");
+    h.pump();
+    h.write(B, "attach", json!({"layer": "word", "start": 11}), "person");
+    h.pump();
+    assert!(live(&h, &span("word", 5)), "held by Reader:r");
+    h.write("Reader:r", "keep", J::Null, "person");
+    h.pump();
+    assert!(!live(&h, &span("word", 5)), "released, collected");
+}
+
+#[test]
+fn attaching_a_span_the_text_has_not_makes_nothing() {
+    let h = with_body(T);
+    h.write(B, "attach", json!({"layer": "word", "start": 3}), "person");   // no word starts at 3
+    h.pump();
+    assert!(!live(&h, &span("word", 3)));
+    h.write(B, "attach", json!({"layer": "paragraph", "start": 0}), "person");
+    h.pump();
+    assert!(!live(&h, &span("paragraph", 0)));
+}

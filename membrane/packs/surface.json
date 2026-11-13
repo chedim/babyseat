@@ -690,12 +690,18 @@
   "semtext": {
     "imports": [],
     "classes": [
-      "SemText"
+      "SemText",
+      "Span"
     ],
-    "members": 6,
-    "writes": [],
+    "members": 9,
+    "writes": [
+      "Span:*=Span()"
+    ],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [],
+    "virtual": [
+      "Span"
+    ]
   },
   "stats": {
     "imports": [],

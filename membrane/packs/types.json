@@ -1113,11 +1113,18 @@
       "SemText.numbers": "List(Dict)",
       "SemText.paths": "List(Dict)",
       "SemText.sentences": "List(Dict)",
+      "SemText.skey": "Text",
       "SemText.urls": "List(Dict)",
-      "SemText.words": "List(Dict)"
+      "SemText.words": "List(Dict)",
+      "Span.text": "Any"
     },
-    "writes": {},
-    "findings": []
+    "writes": {
+      "SemText.attach_result": "Entity(Span)?"
+    },
+    "findings": [],
+    "virtual": [
+      "Span"
+    ]
   },
   "stats": {
     "getters": {},
