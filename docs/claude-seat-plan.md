@@ -75,7 +75,7 @@ plan.md and take it as your handoff") and this file does the rest.
 - Branch `main` at `88fb61e` — the field's METABOLISM (docs/comparison.md
   §5 item 1, from holomem): mass decays read-time on a half-life from
   `last_accrue_ts`, re-inflates on accreting mentions, conflict-damped;
-  behind `MEMBRANE_MASS_METABOLISM=1`, default OFF (flag off = provably
+  behind the `MASS_METABOLISM` constant in efield.py, default False (off = provably
   raw accr). FULL SUITE GREEN at it (1701). ONE commit unpushed — push
   only on the operator's word.
 - The PyPI lane is live (publish.yml + PYPI_TOKEN secret; 0.3.4

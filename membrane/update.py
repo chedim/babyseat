@@ -151,7 +151,7 @@ def check(source: Path | None = None, timeout: float = _CHECK_TIMEOUT) -> dict:
     Returns {available, repo?, behind, changelog?, local?, remote?,
              upstream, mode} -- `mode` is 'git' | 'direct' | 'none'."""
     repo = source or _find_repo()
-    if repo is not None and os.environ.get("MEMBRANE_GIT_UPDATES", "1") != "0":
+    if repo is not None:
         branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD") or "main"
         local = _git(repo, "rev-parse", "HEAD")
         remote = _fetch_remote(repo, branch) if local else None

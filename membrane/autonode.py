@@ -36,8 +36,6 @@ from .codegraph import _SKIP_DIRS as SKIP_DIRS, _MAX_FILES
 MEMBRANE_AUTONODE_SCAN_S = 10.0   # the day cadence (the 2s scan was the
                                   # 100%-idle-CPU exhibit's burner; the
                                   # night's x4 lives in run())
-MEMBRANE_AUTONODE_SCAN_S = float(
-    os.environ.get("MEMBRANE_AUTONODE_SCAN_S") or MEMBRANE_AUTONODE_SCAN_S)
 TRIGGER_WORKERS = 4            # how many (possibly blocking) scripts at once
 TRIGGER_BACKLOG = 64           # queued triggers before drop-oldest bites
 WATCH_TIMEOUT_S = 10.0         # a fire's budget; overrun strikes, not kills

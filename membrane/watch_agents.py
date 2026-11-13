@@ -1381,8 +1381,8 @@ def notify_intent_planted(est, pool, goal_eid: str, text: str,
 # live event), a few per beat, oldest wake first, and BACKING OFF a goal
 # its loops keep ignoring (each trailing 'ignored' landing doubles its
 # wait, capped x16) so a parked goal does not burn the cloud credits.
-GOAL_REWAKE_S = float(os.environ.get("MEMBRANE_GOAL_REWAKE_S", "1800"))
-GOAL_PULSE_S = float(os.environ.get("MEMBRANE_GOAL_PULSE_S", "300"))
+GOAL_REWAKE_S = 1800.0
+GOAL_PULSE_S = 300.0
 GOAL_REWAKE_BATCH = 3
 
 

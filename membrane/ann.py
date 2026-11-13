@@ -23,7 +23,7 @@ import urllib.request
 
 
 def _search_host() -> str:
-    return os.environ.get("MEMBRANE_SEARCH_HOST", "http://127.0.0.1:8094")
+    return "http://127.0.0.1:8094"
 
 
 def ann_search(index: str, vec: list, k: int = 5,
