@@ -21,14 +21,16 @@ const DOOR: &str = include_str!("../../membrane/packs/door.c1f");
 
 fn ui_dir() -> String { format!("{}/../membrane/ui", env!("CARGO_MANIFEST_DIR")) }
 
-fn world() -> (Core, Fields, u64) {
+fn world() -> (Core, Fields, u64) { world_with(json!({"ui_dir": ui_dir()})) }
+
+fn world_with(boot: J) -> (Core, Fields, u64) {
     let mut f = Fields::goalgraph();
     f.set_pack("boot", include_str!("../../membrane/packs/boot.c1f")).unwrap();
     f.set_pack("door", DOOR).unwrap();
     let mut c = Core::new();
     c.store = Some(Store::io_only(std::env::temp_dir().to_str().unwrap()));
     c.load("Http:door".into(), "Http".into(), json!({}).as_object().unwrap().clone(), None, 0.0);
-    c.load("Boot:seat".into(), "Boot".into(), json!({"ui_dir": ui_dir()}).as_object().unwrap().clone(), None, 0.0);
+    c.load("Boot:seat".into(), "Boot".into(), boot.as_object().unwrap().clone(), None, 0.0);
     let mut s = 0; f.rebuild(&mut c, 1.0, &mut s);
     std::env::set_var("DOOR_STATIC_SECRET", "0123456789abcdef0123456789abcdef");        // a door with a secret knows a bare loopback caller
     put(&mut c, &mut f, "Http:door", "listen", json!({"id": "l1", "port": 0, "secret_env": "DOOR_STATIC_SECRET"}));
@@ -98,4 +100,27 @@ fn a_missing_file_a_traversal_and_a_post_are_refused() {
         let (head, _) = split(&get(&mut c, &mut f, port, raw));
         assert!(head.starts_with(&format!("HTTP/1.1 {status}")), "{raw}: {head}");
     }
+}
+
+fn layer(tag: &str, files: &[(&str, &str)]) -> String {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let d = std::env::temp_dir().join(format!("door-layers-{tag}-{}-{n}", std::process::id()));
+    for (f, t) in files { let p = d.join("ui").join(f); std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, t).unwrap(); }
+    d.to_string_lossy().to_string()
+}
+
+#[test]
+fn an_upper_layers_file_shadows_the_lower_and_a_file_only_below_falls_through() {
+    // app_dirs is the folders of the apps, the UPPER layer first (each app's files are under its `ui/`); --ui-dir is the lowest layer
+    let upper = layer("up", &[("x.js", "upper x"), ("only_up.js", "up")]);
+    let lower = layer("low", &[("x.js", "lower x"), ("only_low.js", "low"), ("index.html", "<h1>low</h1>")]);
+    let flat = format!("{}/ui", layer("flat", &[("x.js", "flat x"), ("only_flat.js", "flat"), ("index.html", "<h1>flat</h1>")]));
+    let (mut c, mut f, port) = world_with(json!({"app_dirs": [upper, lower], "ui_dir": flat}));
+    for (path, want) in [("/ui/www/x.js", "upper x"), ("/ui/www/only_up.js", "up"), ("/ui/www/only_low.js", "low"), ("/ui/www/only_flat.js", "flat"), ("/", "<h1>low</h1>")] {
+        let (head, body) = split(&get(&mut c, &mut f, port, &format!("GET {path} HTTP/1.1\r\nHost: t\r\n\r\n")));
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{path}: {head}");
+        assert_eq!(String::from_utf8_lossy(&body), want, "{path}");
+    }
+    let (head, _) = split(&get(&mut c, &mut f, port, "GET /ui/www/nowhere.js HTTP/1.1\r\nHost: t\r\n\r\n"));
+    assert!(head.starts_with("HTTP/1.1 404"), "{head}");
 }
