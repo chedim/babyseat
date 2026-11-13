@@ -11,8 +11,8 @@
 //!
 //! Getters are resolved lazily, depth first, each once; a getter that reads itself (through any chain) is a cycle: its type is
 //! `Any` and the cycle is a finding. That is the fixpoint of an acyclic system.
-use crate::expr::{parse, parse_scaled, Cmp, Node, Op, V};
-use crate::syntax::{parse_full, END, FOR};
+use crate::expr::{parse, parse_block, Cmp, Node, Op, V};
+use crate::syntax::{parse_full, END, FOR, LET};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -354,6 +354,7 @@ pub fn infer_expr(n: &Node, env: &Env) -> Ty {
             }
             Ty::bool()
         }
+        Node::Let(name, v, rest) => { let t = infer_expr(v, env); infer_expr(rest, &env.bind(name, t)) }
         Node::If(a, c, b) => { infer_expr(c, env); infer_expr(a, env).join(&infer_expr(b, env)) }
         Node::Comp(elt, var, iter, cond) => {
             let it = infer_expr(iter, env);
@@ -509,7 +510,7 @@ struct Session {
 
 impl Session {
     fn resolve(&self, key: &Key) -> Option<Ty> {
-        let (expr, arms) = self.defs.get(key)?;
+        let (expr, _arms) = self.defs.get(key)?;
         if let Some(t) = self.done.borrow().get(key) { return Some(t.clone()); }
         // a getter that reads its own name reads the property's WRITTEN value (`X.f getter: this.f` is the fallback arm): an untyped edge
         if self.stack.borrow().last() == Some(key) { return Some(Ty::any()); }
@@ -524,7 +525,7 @@ impl Session {
         self.stack.borrow_mut().push(key.clone());
         let sink = RefCell::new(vec![]);
         let lookup = |c: &str, p: &str| self.resolve(&(c.to_string(), p.to_string()));
-        let t = match parse_scaled(expr, (*arms).max(1)) {
+        let t = match parse_block(expr) {
             Ok(node) => { let env = Env::new(&lookup, &sink).with("this", Ty::entity(&key.0)); infer_expr(&node, &env) }
             Err(e) => { sink.borrow_mut().push(format!("not an expression: {e}")); Ty::any() }
         };
@@ -597,6 +598,11 @@ pub fn infer_packs(texts: &[&str]) -> Result<Vec<(String, PackReport)>, String> 
                         continue;
                     }
                     if tgt == END { if let Some(v) = scopes.pop() { env.vars = v; } continue; }
+                    if tgt == LET {
+                        let t = match parse(rhs) { Ok(n) => infer_expr(&n, &env), Err(_) => Ty::any() };
+                        env.vars.insert(field.clone(), t);
+                        continue;
+                    }
                     let t = match parse(rhs) { Ok(n) => infer_expr(&n, &env), Err(e) => { sink.borrow_mut().push(format!("not an expression: {e}")); Ty::any() } };
                     if tgt == crate::fields::LLM_CALL { continue; }
                     let c = target_class(tgt, &st.cls, &env);

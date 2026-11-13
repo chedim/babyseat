@@ -99,11 +99,11 @@ fn unspeak_group_by_distinct_before() {
 }
 
 #[test]
-fn a_long_string_literal_does_not_count_toward_the_character_cap() {
+fn a_long_string_literal_and_long_logic_both_evaluate() {
     let q = "x".repeat(900);
     assert_eq!(ev(&format!("len('{}')", q), json!({})), json!(900));
-    let long_logic = vec!["a"; 220].join(" + ");                      // ~880 characters of logic: still refused
-    assert!(membrane_vm::evaluate_json(&long_logic, "{\"a\": 1}").unwrap_err().contains("at most"));
+    let long_logic = vec!["a"; 220].join(" + ");                      // ~880 characters of logic: no cap any more (the step budget holds)
+    assert_eq!(ev(&long_logic, json!({"a": 1})), json!(220));
 }
 
 #[test]

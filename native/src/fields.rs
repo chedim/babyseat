@@ -83,7 +83,7 @@ pub fn on_setters() -> Vec<OnSet> { crate::translate::goalgraph_setters() }
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Getter {
     pub cls: String, pub prop: String, pub expr: String,
-    /// how many written arms were folded into `expr` (the size caps hold per arm: the fold may be that many times longer)
+    /// how many written arms were folded into `expr` (informational)
     pub arms: usize,
 }
 
@@ -366,7 +366,14 @@ impl Fields {
     fn compute(&mut self, core: &mut Core, host: Option<&dyn Host>, eid: &str, gi: usize, now: f64, seq: &mut i64) -> Option<J> {
         let g = self.getters[gi].clone();
         let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
-        let (r, reads, nil) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker, g.arms.max(1));
+        let (r, reads, nil, locals) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker);
+        let key2 = (eid.to_string(), g.prop.clone());
+        if locals.is_empty() { core.locals.remove(&key2); } else {
+            core.locals.insert(key2.clone(), locals.iter().map(|(k, v)| (k.clone(), match v {
+                crate::expr::V::Nil(why) => J::String(format!("null ({why})")),
+                v => crate::expr::to_json(v).unwrap_or(J::Null),
+            })).collect());
+        }
         let key = (eid.to_string(), gi);
         if let Some(old) = self.reads.remove(&key) { for k in old { if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); } } }
         let mut ins: Vec<(String, String)> = reads.into_iter().filter(|(e, p)| !(e == eid && *p == g.prop)).collect();
@@ -374,7 +381,6 @@ impl Fields {
         ins.sort(); ins.dedup();
         for k in &ins { self.deps.entry(k.clone()).or_default().insert(key.clone()); }
         self.reads.insert(key, ins);
-        let key2 = (eid.to_string(), g.prop.clone());
         match r {
             Ok(v) => {
                 match &nil { Some(why) if v.is_null() => { core.why.insert(key2, why.clone()); } _ => { core.why.remove(&key2); } }   // a null remembers why
@@ -402,7 +408,9 @@ impl Fields {
             let gi = self.getters_of(core, &cur.0).into_iter().find(|&i| self.getters[i].prop == cur.1);
             if !null || gi.is_none() || !seen.insert(cur.clone()) { break; }
             let reason = core.why.get(&cur).cloned();
-            out.push(json!({"eid": cur.0, "prop": cur.1, "reason": reason}));
+            let mut node = json!({"eid": cur.0, "prop": cur.1, "reason": reason});
+            if let Some(l) = core.locals.get(&cur) { node["locals"] = J::Object(l.clone()); }
+            out.push(node);
             let Some(r) = reason else { break };
             // the input that is itself a null getter with the same reason is where this one came from
             let next = self.reads.get(&(cur.0.clone(), gi.unwrap())).and_then(|ins| ins.iter().find(|k| {
@@ -781,9 +789,17 @@ impl Fields {
     /// list stops here (the writes above it stand).
     fn run_writes(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, wprop: &str, name: &str, pack: &str,
                   ws: &[(String, String, String)], binds: &[(String, crate::vm::Item)], now: f64, seq: &mut i64) -> Result<(), String> {
+        let mut binds = binds.to_vec();      // a local joins them for the lines below it, in this block only
         let mut k = 0;
         while k < ws.len() {
             let (target, prop, value) = &ws[k];
+            if target == crate::syntax::LET {
+                let item = { let (vars, extra) = scope(eid, &binds, now); core.eval_item(value, &vars, &extra).map_err(|e| format!("{} = {}: {}", prop, value, e))? };
+                binds.retain(|(n, _)| n != prop);
+                binds.push((prop.clone(), item));
+                k += 1;
+                continue;
+            }
             if target == crate::syntax::FOR {
                 let mut depth = 0; let mut j = k + 1;
                 while j < ws.len() {
@@ -792,7 +808,7 @@ impl Fields {
                     j += 1;
                 }
                 let items = {
-                    let (vars, extra) = scope(eid, binds, now);
+                    let (vars, extra) = scope(eid, &binds, now);
                     core.eval_items(value, &vars, &extra).map_err(|e| format!("FOR {} IN {}: {}", prop, value, e))?
                 };
                 for it in items {
@@ -806,7 +822,7 @@ impl Fields {
             }
             k += 1;
             if target == crate::syntax::END { continue; }
-            let (vars, extra) = scope(eid, binds, now);
+            let (vars, extra) = scope(eid, &binds, now);
             let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
             if target == LLM_CALL { self.calls.push(v); continue; }
             let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };

@@ -34,7 +34,7 @@ does not write it yet). `cargo test --test contracts` must pass. If your pack's 
 review the diff it prints, then regenerate `membrane/packs/surface.json` with `SURFACE_UPDATE=1 cargo test --test contracts surface` and commit it.
 
 ## Engine rules that bit (c1f)
-- An expression has at most **64 nodes**: split it into named getters.
+- An expression has no size cap; use a **local** (`name = expr` line in a getter or setter block, docs/c1f-stdlib.md) to name a part. An evaluation has a step budget (default 10000, `MEMBRANE_EVAL_BUDGET`): over it the value is a null with the reason `error: budget exceeded`.
 - A setter sees the getters as they were **before** the round: chain `stamp -> plan -> act`, carry data in the dict.
 - A class a shipped pack declares is **owned**: another pack declaring on it must `IMPORT` that pack. Do not declare on `Message`,
   `Chat` or other classes Memo's packs use.

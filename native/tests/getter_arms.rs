@@ -203,15 +203,14 @@ fn instances_lists_a_class_and_follows_births_and_writes() {
 }
 
 #[test]
-fn the_size_caps_hold_per_arm_not_for_the_fold() {
-    // three arms near the cap each fold into one expression longer than the cap: it loads and runs
+fn long_arms_fold_and_run_and_no_size_cap_refuses_them() {
     let arm = "this.label + ' ' + this.label + ' ' + this.label + ' ' + this.label + ' ' + this.label + ' ' + this.label";
     let pack = format!("PACK t 1\nLight.long getter:\n  WHEN this.level > 5: {arm}\n  ELSE WHEN this.level > 0: {arm}\n  ELSE: {arm}\n");
     let c = run(&pack, &[("level", json!(1))]);
     assert!(c.docs["Light:a"].props["long"].as_str().unwrap().starts_with("start start"));
-    // one arm over the cap is refused when the pack loads
+    // there is no size cap any more: a long arm loads (the evaluation has a step budget instead)
     let big = format!("PACK t 1\nLight.big getter: {}\n", vec!["this.label"; 40].join(" + "));
-    assert!(parse_full(&big).unwrap_err().contains("at most"));
+    assert!(parse_full(&big).is_ok());
 }
 
 #[test]

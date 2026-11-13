@@ -112,6 +112,8 @@ pub struct Core {
     /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
     /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
     pub why: std::collections::BTreeMap<(String, String), String>,
+    /// the locals a getter's block bound in its last evaluation: (eid, prop) -> name -> value (a null shows its reason). `Why` prints them.
+    pub locals: std::collections::BTreeMap<(String, String), serde_json::Map<String, J>>,
     order: Vec<Option<String>>,
     at: HashMap<String, usize>,
     pub triggers: Vec<Trig>,
@@ -251,7 +253,7 @@ pub enum Step {
 impl Core {
     pub fn new() -> Self {
         Core {
-            why: Default::default(),
+            why: Default::default(), locals: Default::default(),
             docs: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
@@ -637,6 +639,12 @@ impl Core {
         }
     }
 
+    /// A setter local's value: an entity (bound as one) or a value (a null stays null).
+    pub fn eval_item(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<Item, String> {
+        let env = Self::env_of(vars, extra);
+        match self.eval(src, &env)? { V::Ent(e) => Ok(Item::Ent(e)), v => expr::to_json(&v).map(Item::Val) }
+    }
+
     /// A write's target: an entity, or the id of one (a string).
     pub fn eval_ref(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Option<String> {
         let env = Self::env_of(vars, extra);
@@ -661,19 +669,25 @@ impl Core {
     }
 
     /// Evaluate and return what it read (#994 getters). `vars` bind names to entities, `extra` to values.
-    pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)], host: Option<&dyn Host>, asker: &str, scale: usize)
-        -> (Result<serde_json::Value, String>, Vec<(String, String)>, Option<String>) {
+    pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)], host: Option<&dyn Host>, asker: &str)
+        -> (Result<serde_json::Value, String>, Vec<(String, String)>, Option<String>, Vec<(String, V)>) {
         let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
         for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
-        let parsed = self.cache.get_scaled(src, scale);
+        let parsed = self.cache.get(src);
         let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
         let mut nil: Option<String> = None;
+        let mut locals = vec![];
         let r = match &*parsed {
-            Ok(node) => { let n: &Node = node; expr::eval(n, &env, &tv).and_then(|v| { if let V::Nil(why) = &v { nil = Some(why.clone()); } expr::to_json(&v) }) }
+            Ok(node) => {
+                let n: &Node = node;
+                let (r, l) = expr::eval_locals(n, &env, &tv);
+                locals = l;
+                r.and_then(|v| { if let V::Nil(why) = &v { nil = Some(why.clone()); } expr::to_json(&v) })
+            }
             Err(e) => Err(e.clone()),
         };
         let reads = tv.reads.into_inner();
-        (r, reads, nil)
+        (r, reads, nil, locals)
     }
 
     fn bindings(&mut self, host: &dyn Host, sp: &Spec, memo: &mut Memo, fixed: Binding) -> Vec<Binding> {
