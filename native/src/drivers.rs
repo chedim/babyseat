@@ -6,7 +6,7 @@
 //! - Effects are writes the engine runs itself (fields.rs `effect`), off its lock, with a receipt on the entity as
 //!   `<verb>_result` = {id, status, rc, head, ...} and `<verb>_rc` at the next round:
 //!     File:<...>.write  = {id, content, append}     File.move = {id, to}     File.delete = {id}
-//!     Command:<...>.run = {id, args}  (the entity's cmd: an argument list, or a string run by `sh -c`; cwd;
+//!     Command:<...>.run = {id, args}  (the entity's cmd, or the `cmd` in the run value (also stored on the entity): an argument list, or a string run by `sh -c`; cwd;
 //!                                     env_from {VAR: ENV_VAR}: secrets named, read here, never stored)
 //!     Command.stop      = {id}        (kills the running child; its run's receipt says so)
 //! - Reach (the operator): everything the VM's OS user can do. Entity scripts and peers never trigger an effect
@@ -83,6 +83,8 @@ fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
     m.insert("status".into(), json!(if rc == 0 { "ok" } else { "error" }));
     m.insert("rc".into(), json!(rc));
     m.insert("head".into(), json!(head.chars().take(HEAD_CHARS).collect::<String>()));
+    // when the receipt was made (epoch seconds): a Command's `status` tells an old receipt from a refusal of the run in flight by it
+    m.insert("finished".into(), json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)));
     for (k, v) in extra { m.insert(k, v); }
     J::Object(m)
 }
@@ -147,7 +149,7 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 if killed { "stopped".into() } else { "nothing was running".into() }, Map::new())));
         }
         ("Command", "run") => {
-            let cmd = props.get("cmd").cloned().unwrap_or(J::Null);
+            let cmd = req.get("cmd").or(props.get("cmd")).cloned().unwrap_or(J::Null);        // `run = {id, cmd}` starts a command in ONE write; else the entity's cmd
             let cwd = props.get("cwd").and_then(|v| v.as_str()).map(|p| resolve(&dir, p)).unwrap_or(dir.clone());
             let env_from: Vec<(String, String)> = props.get("env_from").and_then(|v| v.as_object())
                 .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()).unwrap_or_default();
@@ -170,6 +172,8 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 for (k, var) in &env_from {
                     match std::env::var(var) { Ok(v) => { c.env(k, v); } Err(_) => return receipt(&id, 2, format!("environment variable {} is not set (for {})", var, k), Map::new()) }
                 }
+                let epoch = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+                let (t_start, t_clock) = (epoch(), std::time::Instant::now());
                 let child = match c.spawn() { Ok(ch) => ch, Err(e) => return receipt(&id, 127, format!("{}", e), Map::new()) };
                 let slot = crate::store::child_slot(sh, eid);
                 let (mut out_r, mut err_r) = {
@@ -215,6 +219,12 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 let mut extra = Map::new();
                 extra.insert("stdout".into(), json!(out));
                 extra.insert("stderr".into(), json!(err));
+                let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
+                extra.insert("started".into(), json!(round3(t_start)));       // epoch seconds: reruns with the same output are told apart by them
+                extra.insert("finished".into(), json!(round3(epoch())));
+                extra.insert("ms".into(), json!(t_clock.elapsed().as_millis() as u64));
+                extra.insert("stdout_bytes".into(), json!(out.len()));
+                extra.insert("stderr_bytes".into(), json!(err.len()));
                 let head = if out.trim().is_empty() { err.clone() } else { out.clone() };
                 receipt(&id, rc, head, extra)
             }));

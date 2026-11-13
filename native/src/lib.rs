@@ -37,8 +37,10 @@ pub mod apps;
 pub mod host;
 #[cfg(feature = "store")]
 pub mod cli;
+#[cfg(feature = "store")]
 pub mod http;
 pub mod jwt;
+#[cfg(feature = "store")]
 pub mod fetch;
 #[cfg(feature = "store")]
 pub mod spec;

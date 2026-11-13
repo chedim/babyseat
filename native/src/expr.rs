@@ -65,6 +65,18 @@ pub fn eval_time_ms() -> u64 {
     *ENV.get_or_init(|| std::env::var("MEMBRANE_EVAL_TIME_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|n| *n > 0).unwrap_or(DEFAULT_EVAL_TIME_MS))
 }
 
+/// The browser build: std's Instant panics on wasm32-unknown-unknown, so the clock is the host's `Date.now` (milliseconds,
+/// which is all a 10 ms allowance needs; the same import works in a page, a worker and Node).
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+fn real_clock() -> u64 {
+    #[wasm_bindgen::prelude::wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = Date, js_name = now)]
+        fn date_now() -> f64;
+    }
+    (date_now() * 1_000_000.0) as u64
+}
+#[cfg(not(all(target_arch = "wasm32", feature = "wasm")))]
 fn real_clock() -> u64 {
     static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
@@ -328,7 +340,7 @@ struct P { t: Vec<Tok>, i: usize, depth: usize, block: bool }
 pub const RESERVED: &[&str] = &[
     "Int", "Float", "Num", "Text", "Bool", "List", "Dict", "None", "True", "False", "this", "x", "clock",
     "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words",
-    "join", "head", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
+    "join", "head", "tail", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
     "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop", "why",
     "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun",
     "it", "that", "they", "them", "these", "those", "he", "him", "she", "her",
@@ -848,6 +860,13 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             let n = match &a[1] { V::Int(n) => (*n).max(0) as usize, V::Float(f) => f.max(0.0) as usize, _ => return Err("head(text, n): n is a number".into()) };
             if let V::List(l) = &a[0] { return Ok(V::List(l.iter().take(n).cloned().collect())); }   // a list's first n
             Ok(V::Str(text_of(&a[0])?.chars().take(n).collect()))
+        }
+        "tail" => {      // the mirror of head: a text's last n characters, a list's last n
+            argn(2)?;
+            let n = match &a[1] { V::Int(n) => (*n).max(0) as usize, V::Float(f) => f.max(0.0) as usize, _ => return Err("tail(text, n): n is a number".into()) };
+            if let V::List(l) = &a[0] { return Ok(V::List(l[l.len().saturating_sub(n)..].to_vec())); }
+            let t: Vec<char> = text_of(&a[0])?.chars().collect();
+            Ok(V::Str(t[t.len().saturating_sub(n)..].iter().collect()))
         }
         // ---- lists ----
         "sort_by" => {

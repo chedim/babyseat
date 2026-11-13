@@ -1407,6 +1407,11 @@ impl Fields {
             if !crate::drivers::VERBS.iter().any(|(c, v)| *c == cls && *v == w.prop) { return; }
             let props = core.docs.get(&w.eid).map(|e| e.props.clone()).unwrap_or_default();
             self.emit_unchecked(core, work, &w.eid, &w.prop.clone(), json!(""), "direct:consumed", seq, now);
+            if cls == "Command" && w.prop == "run" {
+                if let Some(c) = w.new.get("cmd").filter(|c| !c.is_null()) { self.emit_unchecked(core, work, &w.eid, "cmd", c.clone(), "driver:cmd", seq, now); }   // `run = {id, cmd}`: the cmd is kept on the entity
+                // a run in flight reads `running` (proc.c1f `status`) until its receipt lands
+                self.emit_unchecked(core, work, &w.eid, "running", json!({"id": w.new.get("id").cloned().unwrap_or(J::Null), "started": now}), "driver:running", seq, now);
+            }
             if w.writer.starts_with("script:") || w.writer.starts_with("peer") {
                 let id = w.new.get("id").cloned().unwrap_or(J::Null);
                 let rec = json!({"id": id, "status": "error", "rc": 2, "head": "refused: entity scripts and peers don't run effects"});

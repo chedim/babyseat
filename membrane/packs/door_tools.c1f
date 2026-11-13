@@ -89,10 +89,27 @@ Request.mc_w_sent on-setter mcp-return-retire:
   WHEN this.mc_w_sent == True:
     (this.mc_w_ret).retire = True
 Request.mc_w_head getter: 'wrote ' + this.mc_w_id + '.' + this.mc_w_prop
+-- THE REPLY'S SIZE (operator, 2026-11-13: the Claude CLI refuses a tool result over its MCP limit and the model then gets nothing): the reply carries the first
+-- and the last `mc_w_cap` characters (8192, about 8 KB) of each stream, with its total size in bytes (`stdout_bytes`); a stream of at most twice the cap comes whole
+-- (`stdout`). The FULL text stays on the Command: `Command:x.output` (stdout), `Command:x.errors` (stderr): read it with entity_read or cut it with run_cliff.
+-- (`tail(text, n)` is the mirror of `head`: the language has no slice.)
+Request.mc_w_cap getter: 8192
+Request.mc_w_so getter: str(prop(this.mc_w_new, 'stdout') or '')
+Request.mc_w_se getter: str(prop(this.mc_w_new, 'stderr') or '')
+Request.mc_w_sob getter: prop(this.mc_w_new, 'stdout_bytes') or 0
+Request.mc_w_seb getter: prop(this.mc_w_new, 'stderr_bytes') or 0
+Request.mc_w_pout getter:
+  WHEN this.mc_w_sob == 0: None
+  ELSE WHEN this.mc_w_sob <= 2 * this.mc_w_cap: {'stdout': this.mc_w_so}
+  ELSE: {'stdout_head': head(this.mc_w_so, this.mc_w_cap), 'stdout_tail': tail(this.mc_w_so, this.mc_w_cap)}
+Request.mc_w_perr getter:
+  WHEN this.mc_w_seb == 0: None
+  ELSE WHEN this.mc_w_seb <= 2 * this.mc_w_cap: {'stderr': this.mc_w_se}
+  ELSE: {'stderr_head': head(this.mc_w_se, this.mc_w_cap), 'stderr_tail': tail(this.mc_w_se, this.mc_w_cap)}
 Request.mc_w_rcpt getter:
   WHEN not this.mc_w_effect: []
-  ELSE WHEN this.mc_w_new != None: ['receipt: ' + str({'rc': prop(this.mc_w_new, 'rc'), 'ok': prop(this.mc_w_id, 'ok'), 'stdout': prop(this.mc_w_new, 'stdout'), 'stderr': prop(this.mc_w_new, 'stderr'), 'head': prop(this.mc_w_new, 'head'), 'status': prop(this.mc_w_new, 'status'), 'id': prop(this.mc_w_new, 'id')})]
-  ELSE: ['pending: read ' + this.mc_w_id + '.' + this.mc_w_rprop + ' later']
+  ELSE WHEN this.mc_w_new != None: concat(concat(concat(concat(concat(['receipt: ' + str({'id': prop(this.mc_w_new, 'id'), 'status': prop(this.mc_w_new, 'status'), 'rc': prop(this.mc_w_new, 'rc'), 'ok': prop(this.mc_w_id, 'ok'), 'started': prop(this.mc_w_new, 'started'), 'finished': prop(this.mc_w_new, 'finished'), 'ms': prop(this.mc_w_new, 'ms'), 'stdout_bytes': prop(this.mc_w_new, 'stdout_bytes'), 'stderr_bytes': prop(this.mc_w_new, 'stderr_bytes')})], ['stdout: ' + str(x) for x in [this.mc_w_pout] if x != None]), ['stderr: ' + str(x) for x in [this.mc_w_perr] if x != None]), ['full output: read ' + this.mc_w_id + '.output' for x in [this.mc_w_pout] if x != None and prop(x, 'stdout_head') != None]), ['full stderr: read ' + this.mc_w_id + '.errors' for x in [this.mc_w_perr] if x != None and prop(x, 'stderr_head') != None]), ['error: ' + str(prop(this.mc_w_new, 'head')) for x in [this.mc_w_new] if prop(x, 'status') == 'error' and prop(x, 'stdout_bytes') == None])
+  ELSE: ['pending: id: ' + str(prop(prop(this.mc_args, 'value'), 'id')) + ', status: running, started: ' + str(prop(prop(this.mc_w_id, 'running'), 'started') or this.mc_w_t0) + '; read ' + this.mc_w_id + '.' + this.mc_w_rprop + ' later']
 Request.mc_w_text getter:
   WHEN this.mc_write == None: None
   ELSE WHEN this.mc_done != True: None

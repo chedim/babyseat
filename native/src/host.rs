@@ -395,14 +395,17 @@ impl Host {
         let asked: Vec<String> = out.iter().filter(|w| w["prop"] == "mc_done" && (w["writer"] == "field:mcp-write" || w["writer"] == "field:cliff-run")).filter_map(|w| w["eid"].as_str().map(String::from)).collect();
         if asked.is_empty() { return vec![]; }
         let g = self.eng();
-        let derived = |w: &J| w["writer"].as_str().map_or(false, |x| x.starts_with("field:") && x != "field:mcp-write" && x != "field:cliff-run");
+        // a reaction is a REAL change: not a verb slot being consumed (`direct:consumed`, `call-consumed`), and not a birth's silent compute of a getter to none WITHOUT a reason (`rebuild`: none to none; a none that says why stays)
+        let derived = |w: &J| w["writer"].as_str().map_or(false, |x| x.starts_with("field:") && x != "field:mcp-write" && x != "field:cliff-run"
+            && !x.ends_with("consumed"));
         let list: Vec<J> = out.iter().enumerate()
             .filter(|(_, w)| derived(w) && w.get("prop").is_some() && w["eid"].as_str().map_or(false, |e| !e.starts_with("Request:") && !e.starts_with("Return:") && !e.starts_with(PACK_PREFIX)))
             .filter(|(i, w)| !out[i + 1..].iter().any(|x| derived(x) && x["eid"] == w["eid"] && x["prop"] == w["prop"]))   // the last value of each property in the round
-            .map(|(_, w)| {
+            .filter_map(|(_, w)| {
                 let (eid, prop) = (w["eid"].as_str().unwrap_or(""), w["prop"].as_str().unwrap_or(""));
                 let why = if w["new"].is_null() { g.1.why_chain(&g.0, eid, prop).first().and_then(|c| c.get("reason").cloned()).unwrap_or(J::Null) } else { J::Null };
-                json!({"eid": eid, "prop": prop, "new": w["new"], "by": w["writer"].as_str().unwrap_or("").trim_start_matches("field:"), "why": why})
+                if w["new"].is_null() && why.is_null() && w["writer"] == "field:rebuild" { return None; }
+                Some(json!({"eid": eid, "prop": prop, "new": w["new"], "by": w["writer"].as_str().unwrap_or("").trim_start_matches("field:"), "why": why}))
             }).collect();
         asked.into_iter().map(|r| (r, J::Array(list.clone()))).collect()
     }

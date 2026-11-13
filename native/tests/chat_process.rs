@@ -582,8 +582,8 @@ fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_
     assert!(t.starts_with("wrote Command:e1.run\nreceipt: "), "{t}");
     let line = t.lines().find(|l| l.starts_with("receipt: ")).unwrap();
     let rc: J = serde_json::from_str(&line["receipt: ".len()..]).unwrap_or_else(|e| panic!("{e}: {line}"));
-    assert_eq!((rc["rc"].clone(), rc["ok"].clone(), rc["stdout"].as_str().unwrap().trim().to_string()), (json!(0), json!(true), "hi there".to_string()), "{t}");
-    assert!(rc.get("stderr").is_some());
+    assert_eq!((rc["rc"].clone(), rc["ok"].clone(), reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().trim().to_string()), (json!(0), json!(true), "hi there".to_string()), "{t}");
+    assert_eq!(rc["stderr_bytes"], json!(0));
     assert!(!t.contains("Return:"), "the Return entity is a carrier, the reply does not name it: {t}");
     let (r, _) = call(port, "entity_read", json!({"spec": "Command:e1", "prop": "run_result"}));
     assert!(r.contains("hi there"), "the receipt stays on the entity: {r}");
@@ -592,14 +592,14 @@ fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_
     let t0 = Instant::now();
     let (t, _) = put(port, "Command:slow", "run", json!({"id": "s1", "args": []}));
     assert!(t0.elapsed() < Duration::from_millis(1800), "no wait, no holding: {:?}", t0.elapsed());
-    assert!(t.contains("pending: read Command:slow.run_result later"), "{t}");
+    assert!(t.contains("status: running") && t.contains("read Command:slow.run_result later"), "{t}");
     assert!(!t.contains("Return:"), "{t}");
     let r = wait("the late receipt on the entity", || { let (r, _) = call(port, "entity_read", json!({"spec": "Command:slow", "prop": "run_result"})); r.contains("late").then_some(r) });
     assert!(r.contains("late"), "{r}");
     // a wait that is too short answers pending
     put(port, "Command:slow2", "cmd", json!(["sh", "-c", "sleep 4; echo x"]));
     let (t, _) = put_wait(port, "Command:slow2", "run", json!({"id": "s2", "args": []}), 1.0);
-    assert!(t.contains("pending: read Command:slow2.run_result later"), "{t}");
+    assert!(t.contains("status: running") && t.contains("read Command:slow2.run_result later"), "{t}");
     // a plain write has no receipt to wait for
     let (t, _) = put_wait(port, "Note:a", "n", json!(1), 30.0);
     assert!(t.starts_with("wrote Note:a.n\nreactions: ") && !t.contains("pending"), "{t}");
@@ -793,17 +793,17 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
 }
 
 #[test]
-fn a_command_run_again_with_the_same_id_runs_but_only_a_new_id_gives_a_receipt_the_reply_recognises() {
+fn a_command_run_again_with_the_same_id_runs_and_its_receipt_is_new_by_its_timestamps() {
     let (mut run, port) = start("rerun", MCP_PACKS, &[]);
     let log = run.dir.join("ticks");
     put(port, "Command:tick", "cmd", json!(["sh", "-c", format!("echo x >> {}", log.display())]));
     let n = || std::fs::read_to_string(&log).map(|t| t.lines().count()).unwrap_or(0);
     let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 20.0);
     assert!(t.contains("receipt: "), "{t}");
-    // the same id and the same output: it runs again, but its receipt is equal to the one there, so the reply cannot tell it from the old one
-    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 2.0);
-    assert!(t.contains("pending: read Command:tick.run_result later"), "{t}");
-    wait("the second run", || (n() == 2).then_some(()));
+    // the same id and the same output: it runs again, and its receipt differs by `started` (the reply recognises it)
+    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 20.0);
+    assert!(t.contains("receipt: "), "{t}");
+    assert_eq!(n(), 2);
     // a new id: a new receipt, the reply carries it
     let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t2", "args": []}), 20.0);
     assert!(t.contains("receipt: ") && t.contains("\"id\":\"t2\""), "{t}");
@@ -851,6 +851,132 @@ fn a_clifflet_reads_eid_cls_and_parents_and_lists_the_same_packs_as_entity_query
     assert!(listed.iter().all(|p| !p.contains("cliffg") && !p.contains("cliffs")), "the clifflet's scratch packs are listed: {listed:?}");
     for p in &listed { assert!(q.contains(p.as_str()), "{p} is not in entity_query: {q}"); }
     assert_eq!(listed.len(), q.matches("Pack:").count(), "the same set: {listed:?} vs {q}");
+    assert!(terminate(&mut run));
+}
+
+// ---- the reply of a write that ran a command: size, timing, noise, one write (#1143, the model's findings) -----------------------------------------
+/// the lines of a reply: `receipt: {json}`, `stdout: {json}`, `stderr: {json}` as parsed objects by their label
+fn reply_part(t: &str, label: &str) -> Option<J> {
+    t.lines().find_map(|l| l.strip_prefix(&format!("{label}: "))).map(|j| serde_json::from_str(j).unwrap_or_else(|e| panic!("{label}: {e}: {j}")))
+}
+
+#[test]
+fn a_big_output_comes_back_as_its_first_and_last_8_kb_with_its_size_and_the_full_text_stays_on_the_entity() {
+    let (mut run, port) = start("big", MCP_PACKS, &[]);
+    put(port, "Command:big", "cmd", json!(["sh", "-c", "printf HEAD; head -c 50000 /dev/zero | tr '\\0' x; printf TAIL; printf oops >&2"]));
+    let (t, e) = put_wait(port, "Command:big", "run", json!({"id": "b1", "args": []}), 20.0);
+    assert!(!e, "{t}");
+    assert!(t.len() < 20000, "the reply is small ({} bytes): the CLI refuses a tool result over its limit", t.len());
+    let rc = reply_part(&t, "receipt").unwrap_or_else(|| panic!("{t}"));
+    assert_eq!((rc["stdout_bytes"].clone(), rc["stderr_bytes"].clone()), (json!(50008), json!(4)), "{t}");
+    assert!(rc.get("head").is_none() && rc.get("stdout").is_none(), "no duplicate of the output in the receipt line: {t}");
+    let so = reply_part(&t, "stdout").unwrap_or_else(|| panic!("{t}"));
+    let (h, tl) = (so["stdout_head"].as_str().unwrap_or_else(|| panic!("{}", &t[..600.min(t.len())])), so["stdout_tail"].as_str().unwrap_or_else(|| panic!("tail {}", &t[..600.min(t.len())])));
+    assert!(h.starts_with("HEAD") && h.chars().count() == 8192 && tl.ends_with("TAIL") && tl.chars().count() == 8192, "{} {}", h.len(), tl.len());
+    assert!(so.get("stdout").is_none(), "{so}");
+    // a short stream comes whole, under its plain name
+    assert_eq!(reply_part(&t, "stderr").unwrap()["stderr"], json!("oops"), "{t}");
+    assert!(t.contains("full output: read Command:big.output"), "{t}");
+    let (full, _) = call(port, "entity_read", json!({"spec": "Command:big", "prop": "output"}));
+    assert!(full.len() >= 50008 && full.starts_with("HEAD") && full.ends_with("TAIL"), "the full text stays on the entity: {}", full.len());
+    // an output of exactly 16 KB still comes whole
+    put(port, "Command:edge", "cmd", json!(["sh", "-c", "head -c 16384 /dev/zero | tr '\\0' y"]));
+    let (t, _) = put_wait(port, "Command:edge", "run", json!({"id": "e1", "args": []}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().len() == 16384 && !t.contains("full output"), "{}", t.len());
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_receipt_in_the_reply_echoes_the_run_id() {
+    let (mut run, port) = start("rid", MCP_PACKS, &[]);
+    put(port, "Command:i", "cmd", json!(["echo", "x"]));
+    let (t, _) = put_wait(port, "Command:i", "run", json!({"id": "my-run-7", "args": []}), 20.0);
+    assert_eq!(reply_part(&t, "receipt").unwrap()["id"], json!("my-run-7"), "{t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_receipt_carries_started_finished_and_ms_so_a_rerun_with_the_same_output_is_new() {
+    let (mut run, port) = start("tim", MCP_PACKS, &[]);
+    put(port, "Command:t", "cmd", json!(["sh", "-c", "sleep 0.4; echo same"]));
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let t0 = now();
+    let (a, _) = put_wait(port, "Command:t", "run", json!({"id": "same", "args": []}), 20.0);
+    let t1 = now();
+    let ra = reply_part(&a, "receipt").unwrap_or_else(|| panic!("{a}"));
+    let (st, fin, ms) = (ra["started"].as_f64().unwrap_or_else(|| panic!("{a}")), ra["finished"].as_f64().unwrap(), ra["ms"].as_f64().unwrap());
+    assert!(st >= t0 - 0.01 && fin <= t1 + 0.01 && st < fin, "{st} {fin} within {t0}..{t1}");
+    assert!(ms >= 350.0 && ms < 3000.0 && ((fin - st) * 1000.0 - ms).abs() < 5.0, "ms {ms} vs {st}..{fin}");
+    // the SAME id and the same output again: still a new receipt (the timestamps differ), never `pending`
+    let (b, _) = put_wait(port, "Command:t", "run", json!({"id": "same", "args": []}), 20.0);
+    let rb = reply_part(&b, "receipt").unwrap_or_else(|| panic!("a rerun with the same id and output answers its receipt: {b}"));
+    assert!(rb["started"].as_f64().unwrap() > fin - 0.01, "{ra} {rb}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_running_command_reads_as_running_with_its_id_and_start_and_a_pending_reply_says_so() {
+    let (mut run, port) = start("runn", MCP_PACKS, &[]);
+    put(port, "Command:r", "cmd", json!(["sh", "-c", "sleep 2; echo late"]));
+    // never started: no status
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert!(s != "running", "a command that was never run is not running: {s}");
+    let (t, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
+    assert!(t.contains("pending: ") && t.contains("r9") && t.contains("status: running") && t.contains("started: "), "{t}");
+    assert!(t.contains("read Command:r.run_result"), "{t}");
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert_eq!(s, "running");
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "running"}));
+    assert!(s.contains("r9") && s.contains("started"), "{s}");
+    wait("the receipt", || (call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"})).0 == "ok").then_some(()));
+    // a rerun reads running again until its own receipt lands
+    let (_, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert_eq!(s, "running", "the old receipt is not the new run's");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn reactions_list_only_real_changes_not_null_to_null_rebuilds_or_the_consumed_verb() {
+    let (mut run, port) = start("noise", MCP_PACKS, &[]);
+    let reactions = |t: &str| -> Vec<J> { serde_json::from_str(t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap_or_else(|| panic!("{t}"))).unwrap() };
+    // the live shape: a new Command's cmd, then its run
+    let (t, _) = put(port, "Command:q", "cmd", json!(["echo", "hi"]));
+    let rs = reactions(&t);
+    assert!(rs.iter().all(|r| !(r["new"].is_null() && r["by"] == "rebuild")), "no null-to-null rebuild reactions: {t}");
+    let (t, _) = put_wait(port, "Command:q", "run", json!({"id": "q1", "args": []}), 20.0);
+    let rs = reactions(&t);
+    assert!(rs.iter().all(|r| !r["by"].as_str().unwrap().contains("consumed")), "the consumed verb is not a reaction: {t}");
+    assert!(rs.iter().any(|r| r["prop"] == "running"), "real changes stay: {t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_run_value_may_carry_the_cmd_so_one_write_starts_a_command() {
+    let (mut run, port) = start("one", MCP_PACKS, &[]);
+    // ONE write on a Command that does not exist yet: the cmd rides in the run value
+    let (t, e) = put_wait(port, "Command:solo", "run", json!({"id": "o1", "cmd": ["echo", "one", "write"]}), 20.0);
+    assert!(!e, "{t}");
+    assert_eq!(reply_part(&t, "stdout").unwrap_or_else(|| panic!("{t}"))["stdout"].as_str().unwrap().trim(), "one write", "{t}");
+    // the cmd is written on the entity too, so a later run (no cmd in the value) uses it
+    let (c, _) = call(port, "entity_read", json!({"spec": "Command:solo", "prop": "cmd"}));
+    assert_eq!(serde_json::from_str::<J>(&c).unwrap(), json!(["echo", "one", "write"]), "{c}");
+    let (t, _) = put_wait(port, "Command:solo", "run", json!({"id": "o2", "args": ["again"]}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().contains("one write again"), "{t}");
+    // a string cmd runs by sh -c, as before
+    let (t, _) = put_wait(port, "Command:sh1", "run", json!({"id": "s", "cmd": "echo $((1+2))"}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().trim() == "3", "{t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_run_the_driver_refused_says_why_in_the_reply() {
+    let (mut run, port) = start("why", MCP_PACKS, &[]);
+    let (t, _) = put_wait(port, "Command:nocmd", "run", json!({"id": "n1", "args": []}), 20.0);
+    assert!(t.contains("error: a command needs `cmd`"), "the reason of a refusal is in the reply (the receipt line has no head): {t}");
+    // a command that ran and failed keeps its output lines, no duplicated error line
+    let (t, _) = put_wait(port, "Command:bad", "run", json!({"id": "n2", "cmd": ["sh", "-c", "echo boom >&2; exit 3"]}), 20.0);
+    assert!(t.contains("\"rc\":3") && t.contains("boom") && !t.contains("\nerror: "), "{t}");
     assert!(terminate(&mut run));
 }
 
