@@ -639,9 +639,6 @@ def escalate(srv, ev: dict, ent: str, line: str = "", chat: str = "") -> bool:
     return True
 
 
-_WAKE = threading.local()                       # the running wake's turn facts, for its ledger line
-
-
 def _goal_doc(srv, eid: str):
     from .entities import CLASS_GOAL
     doc = (getattr(getattr(srv, "entity_store", None), "docs", None) or {}).get(eid) if eid else None
@@ -765,39 +762,10 @@ class _LoopDrainer:
         threading.Thread(target=run, daemon=True, name="loop-turn").start()
 
     def handle(self, ev: dict) -> str:
-        """One event -> at most one loop turn (_handle), and its line in the
-        wake ledger (wakes.py: outcome learning's training set)."""
-        _WAKE.info = None
-        feats = shadow = None
+        """One event -> at most one loop turn (_handle)."""
         if not is_operator_event(ev) and self._quota_park(ev):
-            return "held"               # out of tokens: the event waits, unlogged
-        if not is_operator_event(ev):
-            try:                               # what the wake arrived with, BEFORE its turn stamps the entity
-                from . import wakes as _WK
-                feats = _WK.features(self.srv, ev, time.time())
-            except Exception:
-                feats = None
-            try:                               # THE SHADOW GATE (outcomes.py): its guess, BLIND --
-                from . import outcomes as _OC  # it never enters the task text; nothing is skipped
-                shadow = _OC.predict(self.srv, ev)
-            except Exception:
-                shadow = None
-        out = self._handle(ev)
-        if shadow is not None:
-            try:
-                _OC.learn(self.srv, ev, shadow, out)
-            except Exception:
-                pass
-        if feats is not None:
-            try:
-                info = getattr(_WAKE, "info", None) or {}
-                if shadow is not None:
-                    info = {**info, "shadow": {k: shadow.get(k) for k in ("predict", "p_ignore", "level", "n", "sig")}}
-                if out != "requeue":         # waiting for a slot is not an outcome
-                    _WK.log(self.srv, ev, "folded" if out == "skip" else out, feats=feats, **info)
-            except Exception:
-                pass
-        return out
+            return "held"               # out of tokens: the event waits
+        return self._handle(ev)
 
     def _quota_park(self, ev: dict, model: str | None = None) -> bool:
         """OUT OF TOKENS (quota.py): the Goal worker's model is paused (or
@@ -1108,7 +1076,6 @@ class _LoopDrainer:
                                                "session": sid, "ts": time.time()})
             except Exception:
                 pass
-        _WAKE.info = {"session": sid, "decision": line[:160], "tools": len(out.get("trail") or [])}
         if verdict == "ignored":
             return "ignored"
         return self._escalated(ev, ent, line)
@@ -1174,8 +1141,6 @@ class _LoopDrainer:
                           "session": sid, "ts": time.time()})
             except Exception:
                 pass
-            _WAKE.info = {"session": sid, "decision": decision[:160],
-                          "tools": len(out.get("trail") or [])}
             if verdict in ("done", "step") and not ev.get("readonly"):
                 try:                           # consequences.py: looked at again 1 h / 24 h / 72 h on
                     from . import consequences as _CQ
