@@ -1,3 +1,18 @@
+# Doctrine for the barest seat
+
+Status: SHIPPED. This is the whole system text of the standalone `cliffvm` chat turn (`ChatMessage.note` in `membrane/packs/chat_turn.c1f`,
+see `docs/cliffvm.md`), in the operator's own words (2026-11-13), followed by the chat's banner. The static instructions are the
+help entities: `Help:c1f` (where the help is and the language), `Help:packs`, `Help:banner`, `Help:upgrade`; the model reads them with
+`entity_read` and lists them with `entity_query` `kind:Help`. `native/tests/help_1143.rs` pins the text.
+
+```
+Modify your banner to help you maintain continuity. Use help tool for help. Program the graph as your memory. Process updates on the graph and react to them.
+```
+
+---
+
+# Earlier draft, for comparison (not shipped)
+
 # Doctrine for the barest seat: DRAFT for the operator to read (not wired in)
 
 Status: a draft of the system text for the standalone `cliffvm` chat turn (see `docs/cliffvm.md`). Today the chat turn sends a

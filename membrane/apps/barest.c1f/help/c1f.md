@@ -3,6 +3,8 @@
 A pack is a text of getters and setters over entities. A getter is a cached value that recomputes when what it read changes. A
 setter runs when its property is written. Acting is writing. Every code block below is loaded and run by a test, so it is real.
 
+The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `entity_read {spec: "Help:<topic>"}` reads one. `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>` and `name~:<prefix>`, joined with `&`), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); everything else is an entity you make and write to.
+
 ## Getters
 
 ```c1f

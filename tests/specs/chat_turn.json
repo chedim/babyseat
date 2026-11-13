@@ -249,22 +249,17 @@
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "sys",
-    "contains": "entity_write"
-   },
-   {
-    "eid": "membrane::Chat:message:1-1",
-    "prop": "sys",
     "contains": "BANNER (placeholder)"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "sys",
-    "contains": "YOUR BANNER IS YOUR TOOL FOR CONTINUITY"
+    "contains": "Modify your banner to help you maintain continuity."
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "sys",
-    "contains": "YOUR PURPOSE: make yourself less needed"
+    "contains": "Program the graph as your memory."
    },
    {
     "eid": "membrane::Chat:message:1-1",

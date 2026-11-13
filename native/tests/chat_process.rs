@@ -235,7 +235,7 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert_eq!(after("--setting-sources"), "", "no settings files");
     assert_eq!(after("--max-turns"), "5", "the ceiling is the fact");
     assert!(after("--system-prompt").contains("CONVERSATION: main") && !after("--system-prompt").contains("BannerLine"), "the system prompt carries the default banner");
-    assert!(after("--system-prompt").contains("YOUR BANNER IS YOUR TOOL FOR CONTINUITY"), "the system prompt carries the doctrine");
+    assert!(after("--system-prompt").contains("Modify your banner to help you maintain continuity."), "the system prompt carries the doctrine");
     assert!(!after("--system-prompt").to_lowercase().contains("history reaches"), "the prompt never says what the model lacks (it makes Claude panic)");
     assert!(after("--mcp-config").contains(&format!("127.0.0.1:{port}/mcp")));
     assert_eq!(args[args.len() - 2], "--", "the options end before the prompt");
@@ -318,7 +318,7 @@ fn a_banner_without_text_still_runs_the_turn_and_the_system_prompt_shows_the_ban
     let sys = system_prompt(&dir, "still there");
     assert!(sys.contains("BANNER ERROR:") && sys.contains("Help:banner"), "{sys}");
     assert!(sys.contains("has no `text`"), "{sys}");
-    assert!(sys.contains("YOUR BANNER IS YOUR TOOL FOR CONTINUITY"), "the doctrine is still there: {sys}");
+    assert!(sys.contains("Modify your banner to help you maintain continuity."), "the doctrine is still there: {sys}");
     assert_eq!(finish(port, &dir, &id, "still there")["state"], "done");
     assert!(terminate(&mut run));
     // a null with a reason of its own: the reason is in the banner error

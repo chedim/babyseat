@@ -103,9 +103,17 @@ fn the_help_is_positive_and_domain_neutral() {
     }
 }
 
+const DOCTRINE: &str = "Modify your banner to help you maintain continuity. Use help tool for help. Program the graph as your memory. Process updates on the graph and react to them.";
+
 #[test]
-fn the_doctrine_in_the_chat_turn_points_the_model_at_the_help() {
+fn the_doctrine_in_the_chat_turn_is_the_operators_four_sentences_and_the_help_tells_where_it_lives() {
     let t = std::fs::read_to_string(repo().join("membrane/packs/chat_turn.c1f")).unwrap();
-    assert!(t.contains("Help:<topic> entities teach the language: read Help:c1f first"));
-    for topic in TOPICS { assert!(t.contains(&format!("Help:{topic}")) || topic == "c1f", "{topic}"); }
+    let note = t.lines().find(|l| l.starts_with("ChatMessage.note getter:")).unwrap();
+    assert_eq!(note, format!("ChatMessage.note getter: '{DOCTRINE}'"), "the note is exactly the four sentences");
+    assert!(!note.contains("YOUR BANNER IS") && !note.contains("Good luck"), "the old long doctrine is gone: {note}");
+    // the static instructions live in the help: where Help is, and how the banner is replaced
+    let c = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help/c1f.md")).unwrap();
+    assert!(c.contains("entity_query `kind:Help`") && c.contains("Help:banner") && c.contains("Help:packs"), "Help:c1f lists the topics and how to list them");
+    let b = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help/banner.md")).unwrap();
+    assert!(b.contains("Banner.text") && b.contains("default_banner"), "Help:banner teaches the replacement");
 }
