@@ -60,7 +60,7 @@ ChatMessage.partial_tools getter: [replace(str(prop(prop(v, 'content_block'), 'n
 
 -- once the run has its answer the chunks are retired. A getter + setter, not a line in `turn-finish`: the receipt can be heard BEFORE the last
 -- chunk is born (the two come from different threads), and a late chunk marks the class's readers, so this fires again for it.
-ChatMessage.stale_chunks getter: [c.eid for c in instances('Chunk') if c.cmd == this.cmd_eid] if this.answer != None else []
+ChatMessage.stale_chunks getter: [c.eid for c in instances('Chunk') if c.cmd == this.cmd_eid] if this.over else []
 ChatMessage.stale_chunks on-setter retire-chunks:
   WHEN len(this.stale_chunks) > 0:
     FOR k IN this.stale_chunks:
@@ -87,8 +87,11 @@ ChatMessage.answer getter:
   ELSE WHEN strip(str(prop(this.final, 'result') or '')) != '': str(prop(this.final, 'result'))
   ELSE: this.spoken
 ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evs if prop(e, 'type') == 'assistant'], ' '))
+-- the turn is over once its state is done or error. The finish below runs only while it is not: the answer is derived from the receipt, and the slimming
+-- below changes the receipt, so a finished turn keeps the response it wrote.
+ChatMessage.over getter: this.tstate == 'done' or this.tstate == 'error'
 Chat.answer on-setter turn-finish:
-  WHEN this.answer != None:
+  WHEN this.answer != None and not this.over:
     membrane::Chat:message[this.mid]:turn.state = 'error' if this.failed != None else 'done'
     membrane::Chat:message[this.mid]:turn.ended = clock
     this.tools_run = this.tools_names
@@ -101,3 +104,13 @@ Chat.answer on-setter turn-finish:
         body = prop(b, 'content')
         membrane::Chat:message[this.mid]:turn:tool[prop(b, 'tool_use_id')].result = Text(body) or join([prop(c, 'text') for c in (List(body) or [])], '\n')
 
+
+-- ---- after the answer: the raw output is dropped ----------------------------------------------------------------------------------------------
+-- The receipt holds the CLI's whole stdout (and `head`, its twin), and the getters above cached parses of it on the message: a long turn is
+-- hundreds of KB, stored again and again. Once the turn is over and its answer, tools and numbers are entities, the receipt is replaced by what
+-- is useful: the id, the status, the rc and the stderr (the same replay-safe derived clearing the request collector does). The journal keeps
+-- the partial chunks it was given (docs/cliffvm.md, "Resource hygiene").
+ChatMessage.spent getter: this.over and this.rr != None and prop(this.rr, 'stdout') != None and this.said != None
+Chat.spent on-setter slim-run:
+  WHEN this.spent == True:
+    membrane::Command:chat[this.mid].run_result = {'id': prop(this.rr, 'id'), 'status': prop(this.rr, 'status'), 'rc': this.rc, 'stderr': prop(this.rr, 'stderr')}

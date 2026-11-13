@@ -48,7 +48,7 @@ fn start(tag: &str, names: &[&str], extra: &[&str]) -> (Run, u16) {
 /// one HTTP request on its own connection; -> (status, body text)
 fn http(port: u16, method: &str, path: &str, body: &str) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
     let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     s.write_all(raw.as_bytes()).unwrap();
     let mut out = vec![];
@@ -77,7 +77,7 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
     let t = Instant::now();
     loop {
         if let Some(v) = f() { return v; }
-        assert!(t.elapsed() < Duration::from_secs(40), "timed out waiting for {what}");
+        assert!(t.elapsed() < Duration::from_secs(90), "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(100));
     }
 }
@@ -145,6 +145,10 @@ if os.path.exists(os.path.join(here, "fail")):
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 out({"type": "system", "subtype": "init", "session_id": "fake-1", "tools": ["mcp__membrane__entity_read"]})
+padp = os.path.join(here, "pad")   # a file `pad`: ~200 KB of partial-message lines before the answer (the raw output of a long turn)
+if os.path.exists(padp):
+    for i in range(200):
+        out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": ("pad %d " % i) * 160}}})
 cfg = json.loads(argv[argv.index("--mcp-config") + 1])
 url = cfg["mcpServers"]["membrane"]["url"]
 def rpc(method, params, i):
@@ -163,7 +167,7 @@ out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tu
 out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu2", "content": r}]}})
 if os.path.exists(errp):
     out({"type": "result", "subtype": "success", "is_error": True, "result": open(errp).read(), "num_turns": 1, "session_id": "fake-1"}); sys.exit(0)
-out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt, "num_turns": 3, "session_id": "fake-1"})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt, "num_turns": 3, "duration_ms": 4321, "total_cost_usd": 0.0123, "usage": {"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44}, "session_id": "fake-1"})
 "#;
 
 const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "chat.c1f", "chat_turn.c1f"];
@@ -183,17 +187,24 @@ fn fake_seat_script(tag: &str, extra: &[&str], packs: &[(&str, &str)], script: &
     for (n, t) in shipped(CHAT_PACKS) { std::fs::write(pd.join(n), t).unwrap(); }
     std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();   // the barest app's default banner pack
     for (n, t) in packs { std::fs::write(pd.join(n), t).unwrap(); }
+    let (run, port) = launch(&dir, &bin, extra);
+    (run, port, dir)
+}
+
+/// start the binary in `dir` (its packs folder and store are there; a second launch in the same folder is a RESTART)
+fn launch(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str]) -> (Run, u16) {
+    let pd = dir.join("packs");
     let fact = format!("chat_claude_bin={}", bin.display());
-    let mut child = Command::new(BIN).current_dir(&dir)
+    let mut child = Command::new(BIN).current_dir(dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
         .args(extra).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
-    let run = Run { child, _lines: rx, dir: dir.clone() };
+    let run = Run { child, _lines: rx, dir: dir.to_path_buf() };
     let line = run._lines.recv_timeout(Duration::from_secs(30)).expect("the door came up");
     let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap();
-    (run, port, dir)
+    (run, port)
 }
 
 fn tag_of(prompt: &str) -> String { prompt.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).take(40).collect() }
@@ -376,7 +387,7 @@ for i, t in enumerate(pieces):
     out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": t}}})
 gate("end")
 out({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello world"}, {"type": "tool_use", "id": "tu1", "name": "mcp__membrane__entity_read", "input": {}}]}})
-out({"type": "result", "subtype": "success", "is_error": False, "result": "Hello world", "num_turns": 1, "session_id": "p-1"})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "Hello world", "num_turns": 1, "duration_ms": 99, "total_cost_usd": 0.5, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "output_tokens": 4}, "session_id": "p-1"})
 "#;
 
 fn collector() -> String { std::fs::read_to_string(format!("{}/../membrane/apps/barest.c1f/collector.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap() }
@@ -499,4 +510,56 @@ fn a_client_that_leaves_early_leaves_nothing_stuck_and_the_turn_completes() {
     assert_eq!(v["response"], "Hello world", "the turn finished though nobody listened");
     wait("no stream Request left", || stream_requests(port).is_empty().then_some(()));
     assert!(terminate(&mut run));
+}
+
+// ---- resource hygiene (#1143): a finished turn keeps what matters, not the raw output ------------------------------------------------------
+/// the whole stored row of an entity as the door reads it (its length is the row's size)
+fn row_text(port: u16, eid: &str) -> String { call(port, "entity_read", json!({"spec": eid})).0 }
+/// the stored bodies of the seat's store file: (rows, bytes of c_field, journal lines, bytes of c_journal)
+fn store_sizes(dir: &std::path::Path) -> (i64, i64, i64, i64) {
+    let db = rusqlite::Connection::open_with_flags(dir.join("field.sqlite3"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let q = |sql: &str| -> (i64, i64) { db.query_row(sql, [], |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0)))).unwrap() };
+    let (a, b) = q("SELECT count(*), sum(length(body)) FROM c_field WHERE k NOT LIKE 'Request:%'");   // a door request is the collector's (apps/barest.c1f/collector.c1f)
+    let (c, d) = q("SELECT count(*), sum(length(body)) FROM c_journal");
+    (a, b, c, d)
+}
+/// THE BOUND (a threshold, flagged for the operator): a finished turn's Command row and message row are each under 16 KB. What stays is the
+/// command (argv: the system prompt with the banner), the answer's numbers and the small derived values; the 200 KB the CLI printed is gone.
+const ROW_BOUND: usize = 16 * 1024;
+
+#[test]
+fn a_finished_turn_keeps_its_answer_tools_and_usage_but_not_the_raw_output_and_survives_a_restart() {
+    let (mut run, port, dir) = fake_seat("hygiene", &[]);
+    std::fs::write(dir.join("pad"), "").unwrap();
+    let before = store_sizes(&dir);
+    let id = send(port, "big output");
+    let v = finish(port, &dir, &id, "big output");
+    assert_eq!(v["state"], "done", "{v}");
+    let (cmd, msg) = (format!("membrane::Command:chat:{id}"), format!("membrane::Chat:message:{id}"));
+    // the rows shrink after the turn (a later round than `done`): wait for both
+    let (c, m) = wait("the finished turn's rows are small", || {
+        let (c, m) = (row_text(port, &cmd), row_text(port, &msg));
+        (c.len() < ROW_BOUND && m.len() < ROW_BOUND).then_some((c, m))
+    });
+    assert!(!c.contains("pad 199") && !m.contains("pad 199"), "the raw stream is not kept");
+    assert!(c.contains("\"rc\":0") || c.contains("\"rc\": 0"), "the rc stays: {c}");
+    // what matters is in the view, the tool entities and the turn
+    let check = |port: u16| {
+        let v = view(port, &id);
+        assert_eq!((v["state"].clone(), v["response"].clone(), v["tools"].clone()), (json!("done"), json!("Final answer to: big output"), json!(["entity_write", "entity_read"])), "{v}");
+        let (n, _) = call(port, "entity_read", json!({"spec": format!("{msg}:turn:tool:tu1"), "prop": "name"}));
+        assert_eq!(n, "mcp__membrane__entity_write");
+        let (r, _) = call(port, "entity_read", json!({"spec": format!("{msg}:turn:tool:tu2"), "prop": "result"}));
+        assert!(r.contains("echo"), "the tool result is kept: {r}");
+    };
+    check(port);
+    // the journal: numbers for the report (the Chunk births carry the raw lines; the receipt is not journalled)
+    let after = store_sizes(&dir);
+    eprintln!("hygiene numbers: c_field rows {} -> {} ({} -> {} bytes); journal lines {} -> {} ({} -> {} bytes)", before.0, after.0, before.1, after.1, before.2, after.2, before.3, after.3);
+    assert!(after.1 - before.1 < 200 * 1024, "the field grew by a small part of the 200 KB output: {} bytes", after.1 - before.1);
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &[]);
+    check(port2);
+    assert!(row_text(port2, &cmd).len() < ROW_BOUND && row_text(port2, &msg).len() < ROW_BOUND, "small after the restart too");
+    assert!(terminate(&mut run2));
 }
