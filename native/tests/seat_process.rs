@@ -134,11 +134,13 @@ fn module_imports(js: &str) -> Vec<String> {
 #[test]
 fn the_page_and_its_files_are_served_with_their_content_types_and_every_reference_exists() {
     let (mut run, port) = seat("page", true);
+    assert!(std::fs::read_to_string(app_ui().join("graph.js")).unwrap().contains("['zoomin', 1.15], ['zoomout', 1 / 1.15]") && std::fs::read_to_string(app_ui().join("graph.js")).unwrap().contains("this.zoomAt(this.w / 2, this.h / 2, f)"), "graph.js wires both buttons to zoomAt");
     let (st, ct, html) = http(port, "GET", "/", "");
     assert_eq!(st, 200);
     assert!(ct.starts_with("text/html"), "{ct}");
     assert!(html.contains("<canvas") && html.contains("id=\"composer\""), "the page holds the graph canvas and the chat composer");
     assert_eq!(http(port, "GET", "/index.html", "").0, 200);
+    assert!(html.contains("id=\"zoomin\"") && html.contains("id=\"zoomout\"") && html.contains("aria-label=\"Zoom in\"") && html.contains("aria-label=\"Zoom out\""), "the zoom buttons are in the page");
     let files = page_files(&html);
     assert!(files.iter().any(|f| f.ends_with("app.js")) && files.iter().any(|f| f.ends_with("app.css")), "{files:?}");
     let mut js: Vec<String> = vec![];

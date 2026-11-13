@@ -181,6 +181,7 @@ export class Graph {
     cv.addEventListener('pointerup', up);
     cv.addEventListener('pointercancel', () => { this.drag = null; });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); const [sx, sy] = pos(e); this.zoomAt(sx, sy, e.deltaY < 0 ? 1.15 : 1 / 1.15); }, { passive: false });
+    for (const [id, f] of [['zoomin', 1.15], ['zoomout', 1 / 1.15]]) { const btn = document.getElementById(id); if (btn) btn.addEventListener('click', () => this.zoomAt(this.w / 2, this.h / 2, f)); }
     cv.addEventListener('keydown', (e) => {
       const step = 40, k = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
       if (k) { this.view.x += k[0]; this.view.y += k[1]; this.draw(); e.preventDefault(); }
