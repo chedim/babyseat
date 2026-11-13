@@ -99,8 +99,11 @@ A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebu
 
 Limits an evaluation runs under (native): a step budget (default 100,000, env `MEMBRANE_EVAL_BUDGET`) and a self-time allowance
 (default 10 ms, env `MEMBRANE_EVAL_TIME_MS`; the time spent in host calls that wait is not counted). Over either, the node is a
-reasoned null (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`). The budget is deterministic; the time trip is not,
-and replay does not yet apply a recorded trip (it re-measures): see docs/c1f-stdlib.md, Limits.
+reasoned null (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`). The budget is deterministic. The time trip is not, so
+replay needs it recorded: the kills only, never timings. A kill is a `Trip:<eid>#<prop>` entity written as a host write after the
+evaluation (like an effect receipt: writer `field:driver:trip`), which the journal keeps as an outside write; on replay the node
+evaluates, the journalled Trip arrives, and the node recomputes to the same null. It applies until an input of the node changes
+(see docs/c1f-stdlib.md, Limits). The host must journal those writes as outside writes (open: `fields_live.py` stamps them `trigger:*`).
 
 ## 6. The native VM (`native/`, `membrane/ch_native.py`, #971 step 3)
 

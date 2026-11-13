@@ -822,6 +822,13 @@
     "writes": {},
     "findings": []
   },
+  "trip": {
+    "getters": {
+      "Trip.reason": "Text"
+    },
+    "writes": {},
+    "findings": []
+  },
   "turn": {
     "getters": {
       "Ctx.depth": "Int",
