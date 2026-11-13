@@ -33,6 +33,8 @@ pub const BOOT_WRITER: &str = "host:boot";
 pub const PACK_PREFIX: &str = "Pack:";
 pub const PACK_CLASS: &str = "Pack";
 pub const PACK_WRITER: &str = "pack";
+/// The pack the host itself marks privileged (packs/boot.c1f): the root of trust.
+pub const BOOT_PACK: &str = "boot";
 
 /// The store writer for an engine write (fields_live.stamp_writer): derived, except a trip (outside).
 pub fn stamp_writer(engine_writer: &str) -> String {
@@ -141,9 +143,12 @@ impl Host {
         }
         let mut fields = Fields::goalgraph();
         fields.inbound_by_host = true;
+        fields.note_grant(BOOT_PACK, true, "host");      // the root of trust: the boot app; every other grant is a write by a privileged writer
         Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false) })
     }
 
+    /// Whether the named pack holds the privilege (exempt from rule B): the boot pack by the host, any other by a privileged writer's grant.
+    pub fn pack_privileged(&self, name: &str) -> bool { self.eng().1.is_privileged(name) }
     pub fn now(&self) -> f64 { (self.clock)() }
     fn eng(&self) -> std::sync::MutexGuard<'_, Engine> { self.eng.lock().unwrap_or_else(|e| e.into_inner()) }
     /// The engine, for the boot plan's walker (plan.rs takes the lock itself, never held while a step runs).
@@ -198,6 +203,7 @@ impl Host {
     fn inject_write(&self, ts: f64, eid: &str, prop: &str, new: J, engine_writer: &str, stamp: &str) {
         self.store_prop(eid, None, prop, &new, stamp);
         if prop == "text" { self.pack_text(eid, &new); }
+        if prop == "privileged" { self.note_outside_grant(eid, &new, stamp); }
         {
             let mut g = self.eng();
             let (core, f, seq) = &mut *g;
@@ -215,6 +221,7 @@ impl Host {
     fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
         self.store_born(eid, cls, &props, stamp);
         if let Some(t) = props.get("text") { self.pack_text(eid, t); }
+        if let Some(v) = props.get("privileged") { self.note_outside_grant(eid, v, stamp); }
         {
             let mut g = self.eng();
             let (core, f, seq) = &mut *g;
@@ -299,6 +306,7 @@ impl Host {
             let stamp = stamp_writer(w["writer"].as_str().unwrap_or(""));
             self.store_prop(eid, None, prop, &w["new"], &stamp);
             if prop == "text" { self.pack_text(eid, &w["new"]); }
+            if prop == "privileged" && eid.starts_with(PACK_PREFIX) { self.packs_dirty.store(true, Ordering::SeqCst); }   // `granted_by` is mirrored
             if is_outside(&stamp) { self.journal_push(Line::Write { ts, writer: stamp, eid: eid.into(), prop: prop.into(), new: w["new"].clone() }); }
         }
         if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); return true; }
@@ -306,15 +314,23 @@ impl Host {
     }
 
     // ---- Pack entities -----------------------------------------------------------------------------------------------
+    /// An OUTSIDE write of `Pack:<name>.privileged` (the host's, the door's person): a grant or a revoke, by that writer. (A setter's own
+    /// write is noted by the engine, with the pack that wrote it.)
+    fn note_outside_grant(&self, eid: &str, new: &J, writer: &str) {
+        let Some(name) = eid.strip_prefix(PACK_PREFIX).filter(|n| !n.is_empty()) else { return };
+        self.eng().1.note_grant(name, *new == json!(true), writer);
+        self.packs_dirty.store(true, Ordering::SeqCst);
+    }
+
     /// A write to `text` of `Pack:<name>` loads, replaces or (none/empty) removes the pack; the outcome is mirrored at the end of the drain.
     fn pack_text(&self, eid: &str, text: &J) {
         let Some(name) = eid.strip_prefix(PACK_PREFIX).filter(|n| !n.is_empty()) else { return };
         let src = text.as_str().unwrap_or("");
         let mut g = self.eng();
-        let f = &mut g.1;
+        let (core, f, seq) = &mut *g;
         let mut refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
         if src.trim().is_empty() {
-            f.remove_pack(name);
+            f.remove_pack_clean(core, &NullHost, name, self.now(), seq);        // its getters' values are cleared too
             refusals.remove(name);
         } else {
             match f.set_pack(name, src) {
@@ -339,7 +355,8 @@ impl Host {
                 let err = refusals.get(name).cloned().or_else(|| g.1.pack_errors.get(name).cloned());
                 let text = e.props.get("text").cloned().unwrap_or(J::Null);
                 let good = if active && !refusals.contains_key(name) { text } else { e.props.get("good_text").cloned().unwrap_or(J::Null) };
-                (k.clone(), json!(active), json!({"error": err.map(J::from).unwrap_or(J::Null), "good_text": good}))
+                let by = g.1.granted_by(name).map(|b| json!(b)).unwrap_or(J::Null);
+                (k.clone(), json!(active), json!({"error": err.map(J::from).unwrap_or(J::Null), "good_text": good, "granted_by": by}))
             }).collect()
         };
         let ts = self.now();
@@ -351,6 +368,7 @@ impl Host {
             set("loaded", loaded);
             set("error", rest["error"].clone());
             set("good_text", rest["good_text"].clone());
+            set("granted_by", rest["granted_by"].clone());      // who wrote the grant, from the engine: never from the pack's own text
         }
     }
 
@@ -365,7 +383,12 @@ impl Host {
         for (eid, props) in rows {
             { let mut g = self.eng(); let (core, f, _) = &mut *g; f.arrive(core, eid.clone(), PACK_CLASS.into(), props.clone(), now); }
             let name = eid[PACK_PREFIX.len()..].to_string();
-            let text = props.get("text").cloned().unwrap_or(J::Null);
+            if props.get("privileged") == Some(&json!(true)) {      // a stored grant is read back (the grant is by name)
+                let by = props.get("granted_by").and_then(|b| b.as_str()).unwrap_or("stored").to_string();
+                self.eng().1.note_grant(&name, true, &by);
+            }
+            // a Pack entity with NO text (a grant for a pack loaded from a file) does not remove that pack: only a written empty text does
+            let Some(text) = props.get("text").cloned() else { names.push(name); continue };
             self.pack_text(&eid, &text);
             let refused = self.refusals.lock().unwrap_or_else(|e| e.into_inner()).get(&name).cloned();
             if let (Some(why), Some(good)) = (refused, props.get("good_text").and_then(|g| g.as_str())) {

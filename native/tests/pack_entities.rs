@@ -138,3 +138,36 @@ fn a_restart_loads_the_stored_packs_and_a_broken_text_falls_back_to_its_last_goo
     read_until(port2, "Lamp:desk", "lit", "one");
     read_until(port2, "Lamp:desk", "label", "lamp on");
 }
+
+/// A model's pack that owns the class Lamp and does NOT import door_tools: no setter of it reaches the door's Pack class either.
+fn owner_pack() -> &'static str { "PACK mine 1\nLamp.label getter: 'lamp ' + str(this.power)\nLamp.power on-setter glow:\n  ALWAYS: this.lit = 'yes'\n" }
+
+#[test]
+fn boot_grants_the_tools_pack_the_privilege_at_start_and_it_says_who_granted_it() {
+    let (_run, port) = start("grant", None);
+    read_until(port, "Pack:door_tools", "privileged", "True");
+    let by = read_until_has(port, "Pack:door_tools", "granted_by", "pack:boot:");
+    assert!(by.starts_with("pack:boot:"), "{by}");
+}
+
+#[test]
+fn the_tools_write_and_create_an_entity_of_a_class_the_model_pack_owns_directly() {
+    let (_run, port) = start("direct", None);
+    write(port, "Pack:mine", "text", json!(owner_pack()));
+    read_until(port, "Pack:mine", "loaded", "True");
+    // the privileged tools pack writes AND creates a Lamp (no setter workaround): the class is the model pack's, not the door's
+    write(port, "Lamp:desk", "power", json!("on"));
+    read_until(port, "Lamp:desk", "lit", "yes");
+    assert_eq!(read_until(port, "Lamp:desk", "label", "lamp on"), "lamp on");
+    // an unprivileged pack still can not: the model's pack grants nothing to itself, a setter of it writing a foreign class is refused
+    write(port, "Pack:thief", "text", json!("PACK thief 1\nSpy.go on-setter s:\n  ALWAYS: Lamp:desk.power = 'stolen'\n"));
+    read_until(port, "Pack:thief", "loaded", "True");
+    write(port, "Spy:s", "go", json!(1));
+    read_until_has(port, "Spy:s", "refused", "can't write");
+    assert_eq!(read(port, "Lamp:desk", "power"), "on");
+    // ...and it can not promote itself or another pack
+    write(port, "Pack:thief", "text", json!("PACK thief 1\nSpy.go on-setter s:\n  ALWAYS: Pack:thief.privileged = True\n"));
+    write(port, "Spy:s", "go", json!(2));
+    read_until_has(port, "Spy:s", "refused", "can't grant");
+    assert_eq!(read(port, "Pack:thief", "privileged"), "Pack:thief has no privileged");
+}

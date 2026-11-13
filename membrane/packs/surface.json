@@ -84,8 +84,10 @@
       "Boot",
       "Step"
     ],
-    "members": 3,
-    "writes": [],
+    "members": 4,
+    "writes": [
+      "Pack:door_tools.privileged"
+    ],
     "claims": [],
     "boot_facts": [
       "started"

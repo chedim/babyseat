@@ -303,6 +303,9 @@ pub struct Fields {
     /// the order packs were first loaded in: earlier packs keep the classes they own (a pack can't take a class
     /// by its name sorting first)
     load_order: Vec<String>,
+    /// PRIVILEGE: pack -> who granted it (docs/c1f-layers.md). A privileged pack is exempt from rule B (it may write and create any class)
+    /// and from nothing else: rule A (only the owner declares getters and setters on a class) is `compose`'s and stays.
+    granted: std::collections::BTreeMap<String, String>,
 }
 
 impl Fields {
@@ -310,7 +313,7 @@ impl Fields {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
-            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![] };
+            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default() };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
         f.load_order.push("goalgraph".into());
@@ -347,6 +350,22 @@ impl Fields {
         let had = self.packs.remove(name).is_some();
         self.load_order.retain(|n| n != name);
         if had { self.compose(); }
+        had
+    }
+
+    /// Remove a pack AND clear what its getters left on entities: a getter's value is a plain property once the getter is gone, and a stale value
+    /// of a pack that no longer exists must not linger. Derived writes of none (journal-neutral); a property another pack still computes stays.
+    pub fn remove_pack_clean(&mut self, core: &mut Core, host: &dyn Host, name: &str, now: f64, seq: &mut i64) -> bool {
+        let gone: Vec<(String, String)> = self.packs.get(name).map(|p| p.getters.iter().map(|g| (g.cls.clone(), g.prop.clone())).collect()).unwrap_or_default();
+        let had = self.remove_pack(name);
+        let mut work = VecDeque::new();
+        for (cls, prop) in gone {
+            if self.has_getter(&cls, &prop) { continue; }
+            let mut eids: Vec<String> = core.docs.iter().filter(|(_, e)| e.cls == cls && e.props.contains_key(&prop)).map(|(k, _)| k.clone()).collect();
+            eids.sort();
+            for e in eids { self.emit_unchecked(core, &mut work, &e, &prop, J::Null, "pack-removed", seq, now); }
+        }
+        if !work.is_empty() { self.visited.clear(); self.run(core, host, work, now, seq); }
         had
     }
 
@@ -405,10 +424,26 @@ impl Fields {
         self.set_getters(getters);
     }
 
+    /// Record a grant (`on`) or a revoke of `Pack:<name>.privileged`, with the writer that wrote it. The grant is by NAME: it holds for a pack
+    /// loaded from a file or from `Pack:<name>.text`, before it is loaded and after it is removed, until a privileged writer revokes it.
+    pub fn note_grant(&mut self, name: &str, on: bool, by: &str) {
+        if on { self.granted.insert(name.to_string(), by.to_string()); } else { self.granted.remove(name); }
+    }
+    pub fn is_privileged(&self, name: &str) -> bool { self.granted.contains_key(name) }
+    pub fn granted_by(&self, name: &str) -> Option<&String> { self.granted.get(name) }
+
+    /// A write from `pack` to `Pack:<x>.privileged` is a grant: only a privileged writer makes one (a setter built outside a pack is not checked,
+    /// as in `may_write`). Whatever the pack owns or imports: a pack cannot promote itself or another by owning the class Pack, or by a
+    /// constructor, a computed name or a chain of setters (all of them run as the pack that declared the setter).
+    fn grant_check(&self, pack: &str) -> Result<(), String> {
+        if pack.is_empty() || self.is_privileged(pack) { return Ok(()); }
+        Err(format!("pack {} can't grant privilege (only a privileged pack can)", pack))
+    }
+
     /// May a setter from `pack` write an entity of class `cls`? Its own classes, an imported pack's, or a class no
     /// pack owns. A setter built outside a pack ("") is not checked.
     fn may_write(&self, pack: &str, cls: &str) -> Result<(), String> {
-        if pack.is_empty() { return Ok(()); }
+        if pack.is_empty() || self.is_privileged(pack) { return Ok(()); }
         match self.owner.get(cls) {
             None => Ok(()),
             Some(o) if o == pack || self.imports.get(pack).map(|v| v.contains(o)).unwrap_or(false) => Ok(()),
@@ -988,10 +1023,14 @@ impl Fields {
             if target == LLM_CALL { self.calls.push(v); continue; }
             let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
             let Some(tgt) = tgt else { continue };
+            let grant = tgt.strip_prefix("Pack:").filter(|n| !n.is_empty() && prop == "privileged").map(String::from);
+            if grant.is_some() {
+                if let Err(why) = self.grant_check(pack) { self.receipt(core, eid, name, why, J::Null, seq, now); continue; }
+            }
             if !core.docs.contains_key(&tgt) {
-                // creation: `<Class>:<key>` of a class the pack owns or imports
+                // creation: `<Class>:<key>` of a class the pack owns or imports (a privileged pack: any class)
                 let Some((cls, _)) = tgt.split_once(':') else { continue };
-                if self.owner.get(cls).is_none() || self.may_write(pack, cls).is_err() { continue; }
+                if !self.is_privileged(pack) && (self.owner.get(cls).is_none() || self.may_write(pack, cls).is_err()) { continue; }
                 core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
                 self.out.push(json!({"eid": tgt, "born": cls}));
                 self.birth(core, &tgt, now, seq);
@@ -1002,9 +1041,12 @@ impl Fields {
                 continue;
             }
             if tgt == eid && prop == wprop {   // rule 6: own name inside its setter stores directly
-                self.emit_unchecked(core, work, &tgt, prop, v, &format!("direct:{}", name), seq, now);
+                self.emit_unchecked(core, work, &tgt, prop, v.clone(), &format!("direct:{}", name), seq, now);
             } else {
-                self.emit(core, work, &tgt, prop, v, name, seq, now);
+                self.emit(core, work, &tgt, prop, v.clone(), name, seq, now);
+            }
+            if let Some(n) = grant {
+                if core.docs.get(&tgt).and_then(|e| e.props.get("privileged")) == Some(&v) { self.note_grant(&n, v == json!(true), &format!("pack:{}:{}", pack, name)); }
             }
         }
         Ok(())
@@ -1026,7 +1068,7 @@ impl Fields {
             Ok(x) => x,
             Err(why) => { self.receipt(core, eid, name, format!("error: constructor {}: {}; nothing was created", tgt, why), J::Null, seq, now); return; }
         };
-        if self.owner.get(&cls).is_none() {
+        if self.owner.get(&cls).is_none() && !self.is_privileged(pack) {
             self.receipt(core, eid, name, format!("error: constructor {}({}): no pack owns the class {} (a pack owns a class it declares a getter or a setter on)", cls, tgt, cls), J::Null, seq, now);
             return;
         }
@@ -1049,7 +1091,14 @@ impl Fields {
         for (prop, v) in args {
             if v.is_null() { continue; }
             if core.docs.get(&tgt).and_then(|e| e.props.get(&prop)).map_or(false, |old| !old.is_null()) { continue; }   // only what is unset
-            self.emit(core, work, &tgt, &prop, v, name, seq, now);
+            let grant = tgt.strip_prefix("Pack:").filter(|n| !n.is_empty() && prop == "privileged").map(String::from);
+            if grant.is_some() {
+                if let Err(why) = self.grant_check(pack) { self.receipt(core, eid, name, why, J::Null, seq, now); continue; }
+            }
+            self.emit(core, work, &tgt, &prop, v.clone(), name, seq, now);
+            if let Some(n) = grant {
+                if core.docs.get(&tgt).and_then(|e| e.props.get("privileged")) == Some(&v) { self.note_grant(&n, v == json!(true), &format!("pack:{}:{}", pack, name)); }
+            }
         }
         // the kind stamp came after the birth: the getters of the kind (ISA mirror) are computed now, for what was just made
         if kind_stamped { self.birth(core, &tgt, now, seq); }

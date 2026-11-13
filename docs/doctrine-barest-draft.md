@@ -66,7 +66,7 @@ What the text promises, and where the barest seat stands today:
 | three tools: entity_query, entity_read, entity_write | built (`door_tools.c1f`) |
 | Command / File / Fetch entities act by writes | the drivers exist in the VM; each is reached through entity_write |
 | the banner is an entity whose class the model can replace | the banner packs exist (`banner.c1f`); reassigning an instance's class from entity_write is NOT verified in the barest seat |
-| write a `.c1f` pack | built (#1143): `entity_write {spec: 'Pack:<name>', prop: 'text', value: <c1f>}` loads or reloads it; read `Pack:<name>.state` / `.error`. The pack must make its own entities (it owns its classes; the door cannot write them): see docs/cliffvm.md, "Pack entities" |
+| write a `.c1f` pack | built (#1143): `entity_write {spec: 'Pack:<name>', prop: 'text', value: <c1f>}` loads or reloads it; read `Pack:<name>.state` / `.error`. The tools pack is privileged (granted by boot), so entity_write also writes and creates the entities of a class the model's pack owns; the model's own packs are not privileged and may write only classes they own or import: see docs/cliffvm.md, "Pack entities" |
 | `Why`, locals, blocks | engine features, built |
 | recall brings facts | not yet: the semantic field port is not done (the banner is the entity map only) |
 | help topics | not in the draft; `help('map')`, `help('packs')` etc. still live in Python and would need to become entities |

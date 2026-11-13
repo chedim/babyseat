@@ -195,7 +195,7 @@ fn a_pack_entity_written_outside_loads_reloads_refuses_and_replays_to_the_same_p
     assert_eq!(h.get("Pack:mine", "loaded"), json!(false));
     assert_eq!(h.get("Pack:mine", "error"), J::Null);
     h.write("Box:a", "w", json!(3), "person");
-    assert_eq!(h.get("Box:a", "label"), json!("two 2"), "removed: the getter no longer runs (its last value stays a plain property)");
+    assert_eq!(h.get("Box:a", "label"), J::Null, "removed: the getter no longer runs and its stale value is cleared (derived, journal-neutral)");
     // a pack that imports one that arrives later waits (its error says so) and activates when the import arrives
     h.born("Pack:late", "Pack", props(json!({"text": "PACK late 1\nIMPORT base 1\nBox.late getter: 'late'\n"})), "person");
     assert_eq!(h.get("Pack:late", "loaded"), json!(false));
@@ -204,5 +204,27 @@ fn a_pack_entity_written_outside_loads_reloads_refuses_and_replays_to_the_same_p
     assert_eq!(h.get("Pack:late", "loaded"), json!(true));
     assert_eq!(h.get("Pack:late", "error"), J::Null);
     assert_eq!(h.get("Box:a", "late"), json!("late"));
+    expr::set_clock(None);
+}
+
+#[test]
+fn the_boot_pack_grants_the_tools_pack_at_start_and_a_replay_ends_in_the_same_privilege_state() {
+    use_clock(0);
+    let boot = std::fs::read_to_string(format!("{}/../membrane/packs/boot.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let fresh = || { let h = Host::open({ let mut o = Options::new(None); o.clock = ticking(); o.effects = false; o }).unwrap(); h.load_pack("boot", &boot).unwrap(); h.rebuild(); h };
+    let h = fresh();
+    assert!(h.pack_privileged("boot"), "the host marks the boot pack");
+    assert!(!h.pack_privileged("door_tools") && !h.pack_privileged("fs"));
+    host::boot_started(&h, &Map::new(), true);
+    assert!(h.pack_privileged("door_tools"));
+    assert!(!h.pack_privileged("fs"), "nothing else is granted");
+    assert_eq!(h.get("Pack:door_tools", "privileged"), json!(true));
+    assert_eq!(h.get("Pack:door_tools", "granted_by"), json!("pack:boot:grant-door-tools"));
+    let j = h.journal();
+    assert!(!j.iter().any(|l| matches!(l, Line::Write { eid, .. } if eid.starts_with("Pack:"))), "the grant is derived from `started`: not journalled itself");
+    let r = fresh();
+    r.replay(&j);
+    assert!(r.pack_privileged("door_tools"));
+    assert_eq!(state(&r), state(&h));
     expr::set_clock(None);
 }

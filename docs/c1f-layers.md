@@ -38,20 +38,34 @@ command line; each app is a LAYER and a later app is above an earlier one (withi
 - The doctrine says a model "replaces the banner completely by giving its entity a class of its own"; with layers a model could
   instead override the banner's `text` arms. Keep both until a real case chooses.
 
-## Privilege (design, decided 2026-11-13; not built)
+## Privilege (built 2026-11-13, #1143)
 
 The ownership rule has two parts. A: only the owner of a class (the pack that declares it) defines its getters and setters; other packs
 `IMPORT` it. B: a pack may WRITE only entities of classes it owns or imports (a guard against a pack's own mistakes; the seat has no
-security by decision). A PRIVILEGED pack is exempt from B only: it may write, and create, entities of any class. A stays: privilege never
-lets a pack define getters or setters on a class it does not own or import.
+security by decision). A PRIVILEGED pack is exempt from B only: it may write, and create, entities of any class (a class no pack owns too:
+the class comes from the eid, as creation does). A stays: privilege never lets a pack define getters or setters on a class it does not
+own or import (`compose` refuses it, tested).
 
-- **Granted at load, by a write.** The boot app (the root of trust) marks a pack by writing `Pack:<name>.privileged = true`; the loader
-  reads it and loads the pack with the right. No header keyword, no self-declaration. First grant: `door_tools` (the pack that serves
-  the model's `entity_write`), so the model's tool can write a class a model-written pack owns.
-- **Only a privileged writer can set `privileged`.** An unprivileged pack's write to it is refused by rule B, so a pack cannot promote
-  itself. A privileged pack can grant it to a pack it loads (a chain of trust): boot -> `door_tools` -> packs the model loads through it.
-  (The model's tool is privileged, so the model can also promote its own packs: consistent with "no security, the model owns its
-  environment"; B stays as the guard between unprivileged packs.)
-- **Provenance.** The host records who granted: `Pack:<name>.granted_by`, from the writer of the grant, never from the pack's text.
-- **Revocation (proposed).** A grant persists until a privileged writer writes `privileged = false`; it does not die with the granter.
-- Review: the surface snapshot lists which shipped packs hold a grant (a diff the contracts test fails on until reviewed).
+- **Granted by a write.** `Pack:<name>.privileged = true`. The grant is by NAME (`Fields::note_grant`): it holds for a pack loaded from a
+  file of the packs folder, from `Pack:<name>.text`, before it is loaded and after it is removed. A Pack entity with no text does not
+  remove a file-loaded pack (start-up skips such a row; only a written empty text removes). No header keyword, no self-declaration.
+  `privileged = false` (or none) revokes.
+- **Root of trust.** The host marks the pack named `boot` (packs/boot.c1f) privileged and nothing else (`Host::open`); boot.c1f grants
+  `door_tools` at start with a setter on `Boot.started` (`Pack:door_tools.privileged = True`), so the model's `entity_write` can write the
+  class a model-written pack owns. Anything that loads a pack named `boot` gets that trust: the model's tool (privileged) can write
+  `Pack:boot.text`; consistent with "no security, the model owns its environment".
+- **Only a privileged writer grants.** A setter's write to `Pack:<x>.privileged`, by any path (direct, a computed name, a constructor
+  argument, a chain of setters: all run as the pack that declared the setter), needs a privileged pack, whether or not that pack owns or
+  imports the class Pack; otherwise a receipt (`pack <p> can't grant privilege`) and nothing is written. A privileged pack grants to a
+  pack it loads (a chain of trust: boot -> `door_tools` -> packs the model loads through it). Outside writes (the host, the door's
+  person) are never subject to rule B or to this check.
+- **Provenance.** The host mirrors `Pack:<name>.granted_by` as a derived, non-journalled write (like `loaded`, `error`): `pack:<pack>:<setter>`
+  for a setter's grant, the outside writer's name (`person`, `host`) otherwise; never from the pack's own text. A grant persists until a
+  privileged writer revokes it; it does not die with the granter. A stored `privileged = true` row is read back at start.
+- **Replay.** A person's grant is an outside write (journalled); a setter's grant re-derives from the write that triggered the setter, so a
+  replay ends in the same privilege state (`host_loop.rs`, `privilege_1143.rs`).
+- **Review.** The surface snapshot lists `Pack:door_tools.privileged` among boot's writes (`surface.json`; `types.json` shows `Pack.privileged`);
+  a new grant is a diff the contracts test fails on until reviewed.
+- **Removed pack cleanup.** When a pack is removed, the values its getters left on entities are cleared (derived writes of none), so stale
+  values of a pack that no longer exists do not linger (`Fields::remove_pack_clean`).
+- A getter named `privileged` on the class Pack computes a stored value but grants nothing: only writes grant.

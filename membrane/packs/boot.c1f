@@ -8,3 +8,10 @@ Step.ready getter: this.state == 'pending' and this.open == 0
 -- the seat's start: the seat writes Boot:seat.started once, after the field engine is up; packs answer with setters on
 -- Boot.started (they IMPORT boot 1: this pack owns the class)
 Boot.up getter: this.started != None
+
+-- THE ROOT OF TRUST (docs/c1f-layers.md, "Privilege"): the host marks THIS pack privileged and nothing else. It grants the tools pack
+-- (the model's MCP door, which writes any class the model's own packs own) at the seat's start: a grant is a write, and the host records
+-- `Pack:door_tools.granted_by` from the writer (this setter), never from a pack's own text.
+Boot.started on-setter grant-door-tools:
+  ALWAYS:
+    Pack:door_tools.privileged = True
