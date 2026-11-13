@@ -662,19 +662,26 @@
       "Request.mc_tool": "Any",
       "Request.mc_tools": "List(Dict)",
       "Request.mc_w_bad": "Text?",
+      "Request.mc_w_cap": "Int",
       "Request.mc_w_cls": "Text?",
       "Request.mc_w_effect": "Bool",
       "Request.mc_w_head": "Text",
       "Request.mc_w_id": "Text",
       "Request.mc_w_n": "Text",
       "Request.mc_w_new": "Any",
+      "Request.mc_w_perr": "Dict?",
+      "Request.mc_w_pout": "Dict?",
       "Request.mc_w_prop": "Text",
       "Request.mc_w_rcpt": "List(Text)",
       "Request.mc_w_ready": "Bool",
       "Request.mc_w_rec": "Any",
       "Request.mc_w_ret": "Text",
       "Request.mc_w_rprop": "Text",
+      "Request.mc_w_se": "Text",
+      "Request.mc_w_seb": "Any",
       "Request.mc_w_sent": "Bool",
+      "Request.mc_w_so": "Text",
+      "Request.mc_w_sob": "Any",
       "Request.mc_w_spec": "Text",
       "Request.mc_w_text": "Text?",
       "Request.mc_w_wait": "Num",
@@ -980,8 +987,10 @@
   },
   "proc": {
     "getters": {
+      "Command.errors": "Any",
       "Command.ok": "Bool?",
-      "Command.output": "Any"
+      "Command.output": "Any",
+      "Command.status": "Any"
     },
     "writes": {},
     "findings": []

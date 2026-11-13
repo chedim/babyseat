@@ -34,6 +34,8 @@ source leaves its fact out (never None); `door_port` exists only when `MEMBRANE_
 router step: they are added then (`boot_started(..., announce=False)`), after `started` was said, so a setter on `started` sees
 them empty (see the router pack's `router-rungs` / `router-minds`).
 
+`tail(text, n)` (added with the reply cap, #1143) is the mirror of `head`: a text's last n characters, a list's last n.
+
 ## Builtins proposed (each needs the operator's approval; none is added yet)
 | builtin | why a pack cannot work around it |
 |---|---|

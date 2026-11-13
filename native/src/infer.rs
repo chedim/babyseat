@@ -441,14 +441,14 @@ fn call_ty(f: &str, args: &[Node], env: &Env) -> Ty {
         "startswith" => { if ar(2, 2) { chk(0, Acc::Text); chk(1, Acc::Text); } Ty::bool() }
         "lines" | "words" => { if ar(1, 1) { chk(0, Acc::Text); } Ty::list(Ty::text()) }
         "join" => { if ar(2, 2) { chk(0, Acc::List); chk(1, Acc::Text); } Ty::text() }
-        "head" => {
+        "head" | "tail" => {
             if !ar(2, 2) { return Ty::any(); }
             chk(1, Acc::Num);
             let t = &tys[0];
             if t.any { return Ty::any(); }
             let mut r = Ty::never();
             for k in &t.kinds { match k { Kind::List(_) => r = r.join(&Ty::of(k.clone())), _ => r = r.join(&Ty::text()) } }
-            if t.kinds.iter().any(|k| matches!(k, Kind::Dict)) { env.find(format!("head: argument 1 is {}, expected text or a list", t)); }
+            if t.kinds.iter().any(|k| matches!(k, Kind::Dict)) { env.find(format!("{}: argument 1 is {}, expected text or a list", f, t)); }
             if r.kinds.is_empty() { Ty::text() } else { r }
         }
         "sort_by" | "distinct" => {

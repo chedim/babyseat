@@ -64,7 +64,12 @@ A block that runs past its step or time budget answers with that reason (`error:
 
 A block whose last line is a write (`<entity>.<prop> = value`) runs its lines as writes, like a setter body (locals feed the lines below). It answers
 with the `reactions:` of the round (each value the engine wrote because of the block, with the setter or getter that wrote it). A write that starts an
-effect (`Command:x.run = ...`) has its receipt in a LATER round: read `<entity>.<verb>_result` afterwards (`Help:c1f`, "Effects are writes").
+effect (`Command:x.run = ...`) has its receipt in a LATER round: read `<entity>.<verb>_result` afterwards (`Help:c1f`, "Effects are writes"). A Command starts with ONE write, its `cmd` in the run value:
+
+```c1f-run
+-- write Command:cl.run = {"id": "c1", "cmd": ["echo", "from a block"]}
+-- receipt Command:cl.run_result.stdout = "from a block\n"
+```
 
 ```cliff-write
 -- given Lamp:desk {"watts": 40}
