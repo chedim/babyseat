@@ -59,14 +59,12 @@ Request.static_reply getter:
 
 -- ---- /ui/conf: the page's config -------------------------------------------------------------------------------------------
 -- The launcher tells the facts (Boot:seat.seat_name, .seat_named, .seat_aliases, .seat_stt, .seat_voice_out, .seat_language,
--- .seat_blurp, .build_id). WHO comes from the door's verified token (`authed`, `sub`, `claims`). A caller with no token passes as
--- the seat itself when it is bare loopback (this machine, nothing forwarded); a token that is sent and bad is refused like any other.
+-- .seat_blurp, .build_id). WHO comes from the door's verified token (`authed`, `sub`, `claims`). A localhost peer is NOT the owner (operator, #842):
+-- once the door has a secret, a request with no token, from loopback or anywhere, is refused; the owner's token is the file the seat writes at boot
+-- (docs/auth.md). A token that is sent and bad is refused the same way. A door with no secret at all (the barest seat) is open by decision.
 Request.loop getter: startswith(this.peer or '', '127.0.0.1:') or startswith(this.peer or '', '[::1]:')
 Request.fwd getter: prop(this.headers, 'x-forwarded-for') != None or prop(this.headers, 'forwarded') != None
-Request.internal getter: this.loop and not this.fwd and this.auth_error == 'no token'
--- the page's own calls (`/ui/serve/...`) are the one place a tokenless loopback caller is NOT the seat: the page is given its token (door_auth.c1f),
--- so a call through the prefix with none is refused (the operator's no-tokenless rule, #842); a bare `curl` on the unprefixed routes still passes
-Request.entrant getter: this.authed == True or (this.internal and not this.ui_served)
+Request.entrant getter: this.authed == True
 Request.who getter: {'sub': this.sub, 'name': prop(this.claims, 'name') or this.sub} if this.authed == True else None
 Request.boots getter: [b for b in instances('Boot')]
 Request.c_stt getter: 'server' if startswith(str(([b.seat_stt for b in this.boots] or [''])[0] or ''), 'http') else 'browser'
@@ -118,7 +116,7 @@ Request.logout_reply getter:
 -- missing and a refused token alike (a refusal never says which), under `error.message`, and `WWW-Authenticate: Bearer realm="membrane"`.
 Request.unauthorized getter: {'status': 401, 'headers': {'www-authenticate': 'Bearer realm="membrane"'}, 'body': {'error': {'message': 'missing or invalid token', 'type': 'unauthorized'}}}
 
--- ---- the gate: every route but the public shell needs a token (or a bare loopback caller) --------------------------------------
+-- ---- the gate: every route but the public shell needs a verified token --------------------------------------
 Request.public getter: not this.ui_served and (this.route in ['/', '/index.html', '/membrane', '/favicon.ico', '/ui/login', '/ui/logout'] or startswith(this.route, '/ui/www/'))
 Request.gate getter: None if this.public or this.entrant else this.unauthorized
 

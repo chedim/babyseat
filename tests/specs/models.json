@@ -270,11 +270,14 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/v1/models",
      "models_asked": true,
-     "models_ready": true
+     "models_ready": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -385,11 +388,14 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/v1/models/",
      "models_asked": true,
-     "models_ready": true
+     "models_ready": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -438,10 +444,13 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/v1/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -529,11 +538,14 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/v1/models",
      "models_asked": true,
-     "models_ready": true
+     "models_ready": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],

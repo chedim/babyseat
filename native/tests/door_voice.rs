@@ -133,10 +133,11 @@ fn a_person_with_no_voice_entities_reads_empty_state_and_logs() {
 }
 
 #[test]
-fn a_caller_with_no_token_is_the_person_the_page_stamped_in_the_body() {
+fn a_caller_with_no_token_is_refused_even_from_this_machine() {
+    // a localhost peer is not the owner (#842): the body's `person` no longer names anyone for a caller with no token
     let d = dir();
     let r = ask(&d, "/membrane/voice", "{\"person\": \"owner\"}", None);
-    assert_eq!(r["body"]["in"]["mode"], "ptt", "{r}");
+    assert_eq!(r["status"], 401, "{r}");
 }
 
 #[test]
@@ -238,13 +239,13 @@ fn an_old_entity_without_the_kind_stamp_is_mirrored_and_keeps_its_values() {
 }
 
 #[test]
-fn the_state_route_names_the_person_from_the_body_without_a_token() {
+fn the_state_route_refuses_a_caller_with_no_token_and_names_the_person_from_the_token() {
     let d = dir();
-    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"person\": \"Alice B\", \"out_on\": false}", None);
+    let (r, _) = ask_in(&d, "/membrane/voice/state", "{\"person\": \"Alice B\", \"out_on\": false}", None);
+    assert_eq!(r["status"], 401, "{r}");
+    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"out_on\": false}", Some("Alice B"));
     assert_eq!(r["status"], 200, "{r}");
     assert_eq!(props(&c, O)["on"], false);
-    let (r, _) = ask_in(&d, "/membrane/voice/state", "{\"out_on\": false}", None);
-    assert_eq!(r["body"], json!({"ok": false, "error": "no person"}));
 }
 
 #[test]

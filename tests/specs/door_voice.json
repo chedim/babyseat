@@ -48,7 +48,7 @@
   ]
  },
  {
-  "name": "POST /membrane/voice with no person at all says no person (200, as the page expects)",
+  "name": "POST /membrane/voice with no token is refused, whatever the body says (#842)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -89,20 +89,12 @@
    {
     "eid": "Request:1",
     "prop": "reply.status",
-    "equals": 200
-   },
-   {
-    "eid": "Request:1",
-    "prop": "reply.body",
-    "equals": {
-     "ok": false,
-     "error": "no person"
-    }
+    "equals": 401
    }
   ]
  },
  {
-  "name": "POST /membrane/voice/state with no person at all says no person (200, as the page expects)",
+  "name": "POST /membrane/voice/state with no token is refused, whatever the body says (#842)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -143,15 +135,7 @@
    {
     "eid": "Request:1",
     "prop": "reply.status",
-    "equals": 200
-   },
-   {
-    "eid": "Request:1",
-    "prop": "reply.body",
-    "equals": {
-     "ok": false,
-     "error": "no person"
-    }
+    "equals": 401
    }
   ]
  },

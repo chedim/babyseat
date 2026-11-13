@@ -125,7 +125,7 @@
   ]
  },
  {
-  "name": "a bare loopback caller passes as the seat itself: no who",
+  "name": "a bare loopback caller with no token is refused (#842)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/door.c1f"
@@ -168,17 +168,7 @@
    {
     "eid": "Request:1",
     "prop": "reply.status",
-    "equals": 200
-   },
-   {
-    "eid": "Request:1",
-    "prop": "reply.body.auth",
-    "equals": "jwt"
-   },
-   {
-    "eid": "Request:1",
-    "prop": "reply.body.who",
-    "none": true
+    "equals": 401
    }
   ]
  },
