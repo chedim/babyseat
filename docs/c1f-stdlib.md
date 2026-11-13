@@ -116,6 +116,15 @@ A call to a class name with NAMED arguments, on the right of a write whose left 
 - Outside the right of such a write a constructor is a reasoned error. Inference: it is `Entity(Class)`, and its arguments are typed.
 - Out of scope: value classes (`Std.Url(raw: x)` natives), `Import`, identity declarations.
 
+## A write with a computed property name (#1143)
+`<target>.[<expr>] = value` writes the property whose NAME the expression gives (non-empty text; anything else writes nothing, no
+error). Everything else is a write: the creation path, the class ownership check (`IMPORT`), the receipt `refused`. The surface
+snapshot lists it as `<target>.[]`. It exists for the MCP door's `entity_write {spec, prop, value}` (`door_tools.c1f`); a pack that
+knows its property writes it by name.
+A constructor of a foreign-prefix entity (`Config:x = Voice(...)`) computes the kind's getters at once: the kind stamp (`parents`)
+is written after the birth, and the entity is born again for the getters. A SETTER of a kind still needs an ISA parent entity
+(`cls:voice`): a setter on a kind reaches only entities whose parent chain holds that entity; write the setter on the class instead.
+
 ## Limits: the step budget and the time allowance (dials)
 The old caps (an expression at most 64 nodes / 400 characters) are removed from the native VM; `membrane/ch.py` keeps them for its own
 triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is a reasoned null `error: budget exceeded (N steps)` (a getter's
