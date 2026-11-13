@@ -379,6 +379,7 @@
       "*.go",
       "*.privileged",
       "*.retire",
+      "*.scratch",
       "*.seed",
       "*.text",
       "Return:*=Return()"
