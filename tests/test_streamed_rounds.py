@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import server as MS  # noqa: E402
 
-CARD = {"injection": "[membrane] from the field: the battery sits near 92%", "massage": {"alignment": 0.9}}
+CARD = {"injection": "[membrane] from the field: the battery sits near 92%"}
 
 
 def _runner(ladder):

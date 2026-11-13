@@ -1136,27 +1136,14 @@ def _digest_lines(srv, drain: bool = True) -> list[str]:
 
 
 def _injection_mode(srv) -> str:
-    """'massage' (the field's words, picked), 'conversation' (THIS
-    CONVERSATION, #429: the chat's own state, conv_banner.py) or 'banner'
-    (the old state block)."""
-    # the CONVERSATION block is the default since its measurement (#429:
-    # 0 banner echoes vs 9, decided 5/5, open 5/5); MEMBRANE_INJECTION=banner
-    # restores the old state block
+    """'conversation' (THIS CONVERSATION, #429: the chat's own state, conv_banner.py,
+    the default) or 'banner' (the old state block)."""
     m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "conversation")
     m = str(m).strip().lower()
-    return m if m in ("massage", "banner") else "conversation"
+    return "banner" if m == "banner" else "conversation"
 
 
-def _note_massage(srv, stats: dict) -> None:
-    """The ruler's running record: alignment + tokens, last 50 turns."""
-    hist = getattr(srv, "_massage_hist", None)
-    if hist is None:
-        hist = srv._massage_hist = []
-    hist.append({"alignment": stats.get("alignment", 0.0), "tokens": stats.get("tokens", 0)})
-    del hist[:-50]
-
-
-def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> str | None:
+def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     """THE 'I' TRACK -- the model's position, not its persona.
 
     One compact header computed per turn (zero model calls): what we're
@@ -1173,7 +1160,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
     alerts -- the curl-drained-the-ALERT bug).
 
     Each part is also pullable on its own (#429): where_section()."""
-    lines = [ln for _sec, ln in _where_lines(srv, vec, drain, events_only)]
+    lines = [ln for _sec, ln in _where_lines(srv, vec, drain)]
     if not lines:
         return None
     return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
@@ -1207,7 +1194,7 @@ def where_section(srv, section: str) -> str | None:
     return "\n".join("- " + ln for ln in lines) if lines else None
 
 
-def _where_lines(srv, vec, drain: bool = True, events_only: bool = False,
+def _where_lines(srv, vec, drain: bool = True,
                  only: str | None = None) -> list[tuple[str, str]]:
     """WHERE WE ARE's lines as (section, line), in banner order. `only` names
     one section: the others are not computed at all (nothing of theirs is
@@ -1271,9 +1258,7 @@ def _where_lines(srv, vec, drain: bool = True, events_only: bool = False,
                         speak(srv, ln, kind="note")
                 _bmark("t.alerts")
                 from .entity_block import now_line, track_line
-                # THE MASSAGE MODE: the events stay (they happened); the
-                # track stories are state, and the massage replaces state
-                for t in ([] if (events_only or not want("tracks")) else est.list_tracks()):
+                for t in ([] if not want("tracks") else est.list_tracks()):
                     if t["key"] == "session:now":
                         _t0 = time.time(); fld.flush(); _bs["t.flush"] = round(time.time() - _t0, 3)
                         _t0 = time.time()
@@ -1307,7 +1292,7 @@ def _where_lines(srv, vec, drain: bool = True, events_only: bool = False,
     #    branches under the true timeline, as tracks -- the model sees what
     #    futures are open from the present (suggestions, never lived).
     est = getattr(srv, "entity_store", None)
-    if est is not None and not events_only and want("timelines"):
+    if est is not None and want("timelines"):
         try:
             tls = est.open_timelines(limit=3)
             if tls:
@@ -1326,7 +1311,7 @@ def _where_lines(srv, vec, drain: bool = True, events_only: bool = False,
     # 4.5. THE LOOPS LINE (the reactive layer's ambient load): the
     # thinking loops' running + queued counts + their agent titles.
     try:
-        _loops_line = None if (events_only or not want("loops")) else loops_banner_line(srv)
+        _loops_line = None if not want("loops") else loops_banner_line(srv)
         if _loops_line:
             lines.append(("loops", _loops_line))
     except Exception:
@@ -1341,7 +1326,7 @@ def _where_lines(srv, vec, drain: bool = True, events_only: bool = False,
     try:
         _fr = getattr(srv, "_frame", None)
         from .frame import Frame as _Frame
-        _fl = (_fr.line() if (isinstance(_fr, _Frame) and not events_only and want("frame"))
+        _fl = (_fr.line() if (isinstance(_fr, _Frame) and want("frame"))
                else "")
         if _fl:
             lines.append(("frame", _fl))
@@ -1372,22 +1357,21 @@ def _where_lines(srv, vec, drain: bool = True, events_only: bool = False,
         except Exception:
             pass
     _bmark("peers")
-    if not events_only:
-        try:
-            from .night import command_library
-            lib = command_library(getattr(srv, "entity_store", None)) if want("commands") else None
-            if lib:
-                lines.append(("commands", lib))
-            from .night import interfaces_line
-            il = interfaces_line(srv) if want("interfaces") else None
-            if il:
-                lines.append(("interfaces", il))
-            from .classes import proposals_line
-            cp = proposals_line(srv) if want("classes") else None
-            if cp:
-                lines.append(("classes", cp))
-        except Exception:
-            pass
+    try:
+        from .night import command_library
+        lib = command_library(getattr(srv, "entity_store", None)) if want("commands") else None
+        if lib:
+            lines.append(("commands", lib))
+        from .night import interfaces_line
+        il = interfaces_line(srv) if want("interfaces") else None
+        if il:
+            lines.append(("interfaces", il))
+        from .classes import proposals_line
+        cp = proposals_line(srv) if want("classes") else None
+        if cp:
+            lines.append(("classes", cp))
+    except Exception:
+        pass
     _bmark("library")
     return lines
 
@@ -4466,7 +4450,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     """The turn's state blocks -> (ctx, the field watermark to keep once the
     turn is delivered). MEMBRANE_INJECTION picks the block: 'banner' (the
     default: WHERE WE ARE behind its delta gate, the entity diff, the open
-    intentions), 'massage', or 'conversation' (#429: THIS CONVERSATION,
+    intentions), or 'conversation' (#429: THIS CONVERSATION,
     sent every turn while it has content; it replaces all three)."""
     mark = mark or (lambda name: None)
     _st = types.SimpleNamespace(mark=mark)
@@ -4500,34 +4484,15 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
                 print(f"[conv-banner] error: {e}", file=sys.stderr)
         mark("recall+banner")
         return _with_referent(srv, body, ctx, _is_tool_round), efield_mark
-    _massage = _injection_mode(srv) == "massage"
     banner_block = (None if _no_banner
-                    else _where_delta(srv, _where_we_are(srv, vec, events_only=_massage)))
+                    else _where_delta(srv, _where_we_are(srv, vec)))
     if banner_block:
         ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
     _st.mark("recall+banner")
-    srv._massage_last = None
-    if _massage and not _is_tool_round:
-        _mf = _efield_of(srv)
-        if _mf is not None:
-            try:
-                from . import massage as _MSG
-                _own = [str(m.get("content") or "") for m in (body.get("messages") or [])
-                        if isinstance(m, dict) and isinstance(m.get("content"), str)]
-                _mo = _MSG.build(_mf, query_vec=vec, exclude_texts=_own)
-                srv._massage_last = {k: _mo[k] for k in ("alignment", "tokens", "candidates")}
-                srv._massage_last["picked"] = len(_mo["picked"])
-                _note_massage(srv, srv._massage_last)
-                if _mo["block"]:
-                    ctx = (ctx + "\n\n" + _mo["block"]) if ctx else _mo["block"]
-            except Exception as e:
-                srv._massage_last = {"error": f"{type(e).__name__}: {e}"[:200]}
-                print(f"[massage] error: {e}", file=sys.stderr)
     # THE ENTITY DIFF (normal mode): what changed in the entities since
     # the last message the model processed -- code, entity scripts and
     # other sessions quoted, this conversation's own turns counted. The
     # watermark advances only once this turn is delivered.
-    _st.mark("massage")
     fld = _efield_on(srv)
     efield_mark = None
     if fld is not None:
@@ -4538,7 +4503,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
                 diff = state_diff(fld, getattr(srv, "_efield_mark", None) or efield_mark,
                                   _own_session_prefix(srv),
                                   include_own=not _is_tool_round)
-                if diff and not _massage:
+                if diff:
                     ctx = (ctx + "\n\n" + diff) if ctx else diff
         except Exception as e:
             print(f"[efield] diff error: {e}", file=sys.stderr)
@@ -4547,7 +4512,7 @@ def _state_ctx(srv, body: dict, vec, is_tool_round: bool, mark=None):
     # builder existed and was never called -- the OPEN INTENTIONS view
     # and the empty-board nudge ride turns only from now; the nudge
     # is rate-limited inside the builder).
-    if not _is_tool_round and not _massage:
+    if not _is_tool_round:
         try:
             i_block = _intents_context_block(srv)
             if i_block:
@@ -4697,8 +4662,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 self._json_out(_CHB.overlay(self.server)); return
             if path == "/membrane/map/field3d":
                 self._map_field3d(); return
-            if path == "/membrane/massage/preview":
-                self._massage_preview(); return
             if path == "/membrane/map/tile":
                 self._map_tile(); return
             if path == "/membrane/map/locate":
@@ -5068,39 +5031,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         except Exception as e:                          # noqa: BLE001
             self._json_err_raw(500, f"field3d failed: {e!r}"[:200]); return
         self._json_out(out)
-
-    def _massage_preview(self):
-        """GET /membrane/massage/preview?q=...: the massage's picks for q on
-        the live field, next to the current banner -- read-only (no turn,
-        no drain, nothing written); both blocks' alignment with the same
-        target, so they compare at their own token cost."""
-        from urllib.parse import parse_qs
-        from . import massage as _MSG
-        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
-        q = (qs.get("q") or [""])[0].strip()
-        fld = _efield_of(self.server)
-        emb = getattr(getattr(self.server, "membrane", None), "embedder", None)
-        if fld is None or emb is None or not q:
-            self._json_err_raw(400, "q required (and a loaded field)"); return
-        try:
-            qv = np.asarray(emb.embed([q])[0], dtype=float)
-            out = _MSG.build(fld, query_vec=qv, exclude_texts=[q])
-            t = _MSG.target(fld, qv)
-            banner = _where_we_are(self.server, qv, drain=False) or ""
-            b_align = None
-            if banner and t is not None:
-                bv = np.asarray(emb.embed([banner[:4000]])[0], dtype=float)
-                b_align = round(float(bv @ t / (np.linalg.norm(bv) + 1e-12)), 4)
-            p_align = None
-            if out["picked"] and t is not None:
-                pv = np.asarray(emb.embed([" ".join(out["picked"])[:4000]])[0], dtype=float)
-                p_align = round(float(pv @ t / (np.linalg.norm(pv) + 1e-12)), 4)
-        except Exception as e:                          # noqa: BLE001
-            self._json_err_raw(500, f"preview failed: {e!r}"[:200]); return
-        self._json_out({"q": q, "massage": {"picked": out["picked"], "tokens": out["tokens"],
-                                            "alignment_sum": out["alignment"], "alignment_text": p_align,
-                                            "candidates": out["candidates"]},
-                        "banner": {"text": banner, "tokens": len(banner) // 4, "alignment_text": b_align}})
 
     def _field3d_of(self, qs):
         pid = (qs.get("pid") or [""])[0]
@@ -5917,11 +5847,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # removes the banner from the injection entirely (recall stays --
         # it is content). The ruler's third arm; the flag exists so the
         # measurement can actually run.
-        # THE MASSAGE (2026-10-08, the operator's design): the injection is
-        # the field's own sentences picked to align the input with where
-        # the field is -- not its state verbatim. Only the EVENTS keep the
-        # banner (pause, alerts, announcements, the digest, peers).
-        # MEMBRANE_INJECTION=banner restores the old block (the A/B arm).
+        # MEMBRANE_INJECTION=banner restores the old state block (the A/B arm).
         ctx, efield_mark = _state_ctx(srv, body, vec, _is_tool_round, _st.mark)
         fld = _efield_on(srv)
         # THE SPEECH RELAY: membrane's held messages ride the next
@@ -6419,7 +6345,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             if getattr(self, "_membrane_ext", False) and ctx:
                 # the card's data FIRST (the serve shows it before the words)
                 self.wfile.write(_sse_line({"membrane": {"injection": ctx,
-                                                         "massage": getattr(srv, "_massage_last", None),
                                                          "gate_s": getattr(self, "_gate_s", None)}}))
             elif getattr(srv, "gate_monologue", True) and ctx:
                 for chunk in _openai_sse_chunks(
@@ -6599,7 +6524,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             # the response so the serve can show it like a tool call
             if resp_obj is not None and ctx:
                 resp_obj["membrane"] = {"injection": ctx,
-                                        "massage": getattr(srv, "_massage_last", None),
                                         "gate_s": getattr(self, "_gate_s", None)}
                 resp_bytes = json.dumps(resp_obj).encode()
             if resp_obj is not None and not (resp_obj.get("usage") or {}):
@@ -7734,12 +7658,8 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             # the vector indexes the recall searches (built rows / pending)
             "vector_index": (_efield_of(srv).b.vec_status()
                              if _efield_of(srv) is not None and hasattr(_efield_of(srv).b, "vec_status") else None),
-            # the massage's ruler: the injection mode + the last turns'
-            # alignment with the field state and their token cost
-            "injection": {"mode": _injection_mode(srv), "last": getattr(srv, "_massage_last", None),
-                          "avg_alignment": (round(sum(h["alignment"] for h in getattr(srv, "_massage_hist", []) or [])
-                                                  / max(1, len(getattr(srv, "_massage_hist", []) or [])), 4)
-                                            if getattr(srv, "_massage_hist", None) else None)},
+            # the injection mode
+            "injection": {"mode": _injection_mode(srv)},
             # the watch frame: what the seat watches, as axes (lean = fast - slow)
             "frame": (getattr(srv, "_frame", None).readings()
                       if getattr(srv, "_frame", None) is not None else None),
