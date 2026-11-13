@@ -72,7 +72,7 @@ from the app folder, no build step, no dependencies; a later piece ports it to c
   selected entity's properties (a reference is a link). Keys on the canvas: arrows pan, `+`/`-` zoom, `0` fits.
 - Right, the CHAT: the history is the chat's entities, so a reload brings it back; Enter sends, Shift+Enter adds a line; a running message is read from its event stream (see "The event stream": the answer appears as it is written; the page falls back to polling it every 700 ms only when the stream cannot be had) and
   shows the tools Claude ran with a short input. An answer that asks for something (no CLI named) is shown as a note.
-- The page reads through `POST /mcp` (`entity_query`, `entity_read`) and `/membrane/chat/message`.
+- The graph reads through `POST /mcp` (`entity_query`, `entity_read`); the chat reads `/membrane/chat/messages` (history) and `/membrane/chat/message/<id>/events`.
 
 **`entity_query` additions for the viewer**: `offset` (paging), `kind!:<Class>` (all but a class) and `full` (rows carry the stored properties).
 **Data** is the `--store` file (default `./.cliffvm/seat.sqlite`).
@@ -272,7 +272,17 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
   It owns, by the colon path, the answer `...:turn:response` (ChatResponse: text, error, rc) and each tool Claude ran `...:turn:tool:<tool_use id>` (ChatTool: name, input, result).
   **A parent owns its children** (`host.rs` `drain_apply`): `retire = true` on an entity also retires every entity whose eid starts with `<eid>:` (engine and store), so retiring a turn retires its
   answer and tools, retiring a message its turn. Tests: `host_loop.rs` (`retiring_an_entity_retires_what_its_path_owns...`), `seat_process.rs` (`a_turn_is_an_entity...`).
-  The page (`ui/chat.js`) draws each turn as one group: the message, the answer, the tools folded under it, the turn's seconds.
+  `GET /membrane/chat/messages?limit=N&before=<message id>` is THE HISTORY, one answer `{messages, more, next}`: the newest N turns (default 20, at least 1),
+  oldest first inside the page, each the message's `history_view` (the `view` of the per-message route plus `tool_calls: [{name, input, result}]`, the finished tools
+  read from the ChatTool entities under the turn; `[]` while the turn runs, `tools` stays the names). `before` = a message id gives the turns older than it (an unknown
+  id is a 404; a POST is a 405); `more` says older turns exist and `next` is the oldest id of the page, the next `before` (null at the end). Order = the message's `at`, then the
+  request number in its id. The view is `ChatMessage.history_view` (+ `order_row`), separate from the route (`Request.hs_*` in `packs/chat.c1f`) so another adapter can list the same view;
+  an `instances` call lists by the eid class, so the messages and tools are found as the `Chat` entities with the matching eid shape. A tool result is whole (no cap): a turn that read
+  a large result makes a large page. Tests: `chat_process.rs` (`the_history_route_...`, `the_pages_loading_path_...`, `an_empty_chat_...`, `chat_js_is_valid_...`).
+  The page (`ui/chat.js`) draws each turn as one group: the message, the answer, the tools folded under it, the turn's seconds. On load it makes ONE history request (20 turns);
+  a 'Load older turns' button at the top fetches the next page with `before`; every 3 s (and every 700 ms while a message runs without a stream) it re-reads the newest 10 turns and draws
+  the unknown or unfinished ones; a running message streams through its event stream, and its finished tools arrive with that refresh. It no longer lists entities or reads the
+  per-message route (the old load: ~2,000 requests for 300 messages, each also a Request entity).
   The UI's own message route is opencode's `POST /session/<sid>/prompt_async` (`membrane/ui/panel.js`): a richer shape (parts, agent,
   model); this door does not speak it (open question below).
 

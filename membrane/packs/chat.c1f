@@ -4,6 +4,8 @@ IMPORT door 1
 -- `session` family:
 --   POST /membrane/chat/message {text}   the person's message becomes an entity under the chat; 202 {id}
 --   GET  /membrane/chat/message/<id>     {id, text, state, response, tools}: poll it until `state` is done (or error)
+--   GET  /membrane/chat/messages?limit=N&before=<id>   the HISTORY, one answer: the newest N turns (default 20), oldest first, each the
+--                                         message view plus its tools; `before` pages to older turns (see "GET: the history" below)
 --   GET  /membrane/chat/message/<id>/events   the same message as an event stream (text/event-stream): one `message` event per change of
 --                                         `stream_view` (the partial answer and the tools' names as they are written), the last one when
 --                                         `state` is done or error, then the connection closes (docs/cliffvm.md, "The event stream")
@@ -28,6 +30,14 @@ ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.tstat
 -- what the event stream sends: the view, but while the turn runs `response` is the partial answer (chat_turn.c1f `partial_text`, null until a word is out)
 -- and `tools` the names of the tool blocks started so far; once the turn has finished they are the final ones
 ChatMessage.stream_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said or (this.partial_text or None), 'tools': this.tools_run or this.partial_tools or [], 'turn': this.turn_view}
+-- THE HISTORY VIEW (#1143): the message view plus the tools it ran, finished (name, input, result) so a page draws the folded group from ONE
+-- answer. `tools` stays the view's names; `tool_calls` are the ChatTool entities under the turn (listed with `instances('Chat')`, the eid class; none while the turn runs: they are born with
+-- the answer). Separate from the route: another adapter lists the same view.
+ChatMessage.tool_rows getter: [{'name': replace(str(prop(t, 'name')), 'mcp__membrane__', ''), 'input': prop(t, 'input'), 'result': prop(t, 'result')} for t in instances('Chat') if startswith(t.eid, this.turn_eid + ':tool:')]
+ChatMessage.history_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': this.tool_rows}
+-- (`instances` lists by the eid class, Chat: a message is the Chat entity whose eid has no further colon after the prefix)
+-- the row the history sorts by: arrival time `at`, then the request number `n` inside the id `<ms>-<n>` (two messages of one clock reading)
+ChatMessage.order_row getter: {'eid': this.eid, 'id': this.mid, 'at': this.at, 'n': num(after(this.mid, '-'))}
 ChatResponse.kind getter: 'response'
 -- a response's summary is its whole text (nearer class than the root `Entity.summary`, packs/entity.c1f): the banner's error line shows it.
 ChatResponse.summary getter: str(this.text or '')
@@ -36,7 +46,7 @@ ChatTurn.kind getter: 'turn'
 -- `state` is written once per step (running, then done/error): a turn that has none yet is queued (a constructor's first value and the start's write would be two writes in one round, which the loop guard refuses).
 ChatTurn.status getter: this.state or 'queued'
 
-Request.o_session getter: this.path == '/membrane/chat/message' or startswith(this.path, '/membrane/chat/message/')
+Request.o_session getter: this.path == '/membrane/chat/message' or this.path == '/membrane/chat/messages' or startswith(this.path, '/membrane/chat/message/')
 Request.m_session getter: ['POST'] if this.path == '/membrane/chat/message' else ['GET']
 
 -- ---- POST: the message --------------------------------------------------------------------------------------------------------------
@@ -76,7 +86,23 @@ Request.ev_snap on-setter ev-send:
   ELSE WHEN this.ev_snap != None:
     this.send = {'id': 'event', 'event': 'message', 'data': this.ev_snap}
 
+-- ---- GET: the history (the newest turns, then older ones) ------------------------------------------------------------------------------
+-- {messages: [history_view, ...] oldest first, more: older turns exist, next: the oldest id of the page (pass it as `before`) or null}.
+-- `limit` (default 20, at least 1), `before` = a message id: only turns older than it; an unknown id is a 404. Only a history request computes any of this.
+Request.hs_on getter: this.path == '/membrane/chat/messages'
+Request.hs_limit getter: max(1, (num(([q[1] for q in this.qpairs if q[0] == 'limit'] or ['20'])[0]) or 20))
+Request.hs_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [None])[0]
+Request.hs_all getter: sort_by(sort_by([m.order_row for m in instances('Chat') if startswith(m.eid, 'membrane::Chat:message:') and not ':' in after(m.eid, 'membrane::Chat:message:')], 'n', True), 'at', True) if this.hs_on else []
+Request.hs_cut getter: ([r for r in this.hs_all if r['id'] == this.hs_before] or [None])[0]
+Request.hs_older getter: [r for r in this.hs_all if this.hs_before == None or r['at'] < this.hs_cut['at'] or (r['at'] == this.hs_cut['at'] and r['n'] < this.hs_cut['n'])]
+Request.hs_page getter: sort_by(sort_by(head(this.hs_older, this.hs_limit), 'n'), 'at')
+Request.hs_more getter: len(this.hs_older) > this.hs_limit
+Request.hs_get getter:
+  WHEN this.hs_before != None and this.hs_cut == None: {'status': 404, 'body': {'error': 'no such message'}}
+  ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'history_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None}}
+
 Request.r_session getter:
   WHEN this.path == '/membrane/chat/message': this.cm_post
+  ELSE WHEN this.hs_on: this.hs_get
   ELSE WHEN this.cm_events: this.cm_stream
   ELSE: this.cm_get
