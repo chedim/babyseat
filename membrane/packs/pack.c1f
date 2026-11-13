@@ -1,0 +1,5 @@
+PACK pack 1
+-- A Pack is an entity `Pack:<name>` whose `text` is c1f (docs/cliffvm.md, "Pack entities"). The host loads the text when it is written
+-- and mirrors the outcome back as `loaded`, `error` and `good_text`; this pack only names the class (so a write to a new `Pack:x` makes
+-- the entity) and says in one word what became of the last text.
+Pack.state getter: 'error' if this.error != None else ('loaded' if this.loaded == True else 'waiting')
