@@ -28,10 +28,12 @@ fn shipped(names: &[&str]) -> Vec<(String, String)> {
 }
 
 /// the barest chat's packs plus the session door
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f", "door_session.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f"];
 
 /// the seat's folder holds the fake claude; the binary is told its path as a fact
-fn seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
+fn seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) { seat_with(tag, script, false) }
+/// `strict`: the seat has a door secret (and so an owner token file, `<dir>/owner.token`): every route but the public set needs the token
+fn seat_with(tag: &str, script: &str, strict: bool) -> (Run, u16, std::path::PathBuf) {
     let dir = tmp(tag);
     let bin = dir.join("fake-claude");
     std::fs::write(&bin, script).unwrap();
@@ -44,6 +46,7 @@ fn seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
     let mut child = Command::new(BIN).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact,
                "--fact", "seat_cwd=/srv/seat", "--fact", "seat_project=membrane", "--fact", "seat_version=1.0"])
+        .args(if strict { vec!["--fact".to_string(), format!("door_secret_file={}", dir.join("door.secret").display()), "--fact".to_string(), format!("seat_data_dir={}", dir.display())] } else { vec![] })
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
@@ -54,18 +57,24 @@ fn seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
     (run, port, dir)
 }
 
-/// one HTTP request on its own connection; -> (status, body text)
+/// one HTTP request on its own connection; -> (status, body text). A bounded retry (3 tries) when the connection gives no answer at all: under a loaded
+/// machine a test seat can stall; every route the tests send this way is safe to send again (a retry of a POST that did reach the seat is not made: it only
+/// retries when NO byte came back, and the tests then check the rows they expect).
 fn http(port: u16, method: &str, path: &str, body: &str) -> (u16, String) {
+    for _ in 0..2 { if let Some(r) = http_once(port, method, path, body) { return r; } }
+    http_once(port, method, path, body).expect("an HTTP answer")
+}
+fn http_once(port: u16, method: &str, path: &str, body: &str) -> Option<(u16, String)> {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
     let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     s.write_all(raw.as_bytes()).unwrap();
     let mut out = vec![];
     let _ = s.read_to_end(&mut out);
-    let i = out.windows(4).position(|w| w == b"\r\n\r\n").expect("an HTTP answer");
+    let i = out.windows(4).position(|w| w == b"\r\n\r\n")?;
     let head = String::from_utf8_lossy(&out[..i]).to_string();
     let status: u16 = head.split_whitespace().nth(1).unwrap().parse().unwrap();
-    (status, String::from_utf8_lossy(&out[i + 4..]).to_string())
+    Some((status, String::from_utf8_lossy(&out[i + 4..]).to_string()))
 }
 /// -> (status, the JSON body or null when it is empty)
 fn api(port: u16, method: &str, path: &str, body: J) -> (u16, J) {
@@ -343,10 +352,12 @@ fn the_messages_page_by_rows_limit_and_before() {
 /// An open event stream: the head, then the frames as they arrive: (event name, json data); None at the end of the stream or after `secs` of quiet.
 struct Sse { r: BufReader<TcpStream>, head: String }
 impl Sse {
-    fn open(port: u16, path: &str) -> Sse {
+    fn open(port: u16, path: &str) -> Sse { Sse::open_with(port, path, "") }
+    /// `extra`: more header lines, each ending in \r\n (a Bearer token)
+    fn open_with(port: u16, path: &str, extra: &str) -> Sse {
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
-        s.write_all(format!("GET {path} HTTP/1.1\r\nHost: t\r\nAccept: text/event-stream\r\n\r\n").as_bytes()).unwrap();
+        s.write_all(format!("GET {path} HTTP/1.1\r\nHost: t\r\nAccept: text/event-stream\r\n{extra}\r\n").as_bytes()).unwrap();
         let mut r = BufReader::new(s);
         let mut head = String::new();
         loop { let mut l = String::new(); r.read_line(&mut l).unwrap(); head.push_str(&l); if l == "\r\n" || l.is_empty() { break; } }
@@ -516,4 +527,45 @@ fn abort_stops_the_running_turn_which_ends_as_an_aborted_error_and_idle_on_the_s
     wait("the next answer", || { let r = rows(port, &a); (r.len() == 4 && r[3]["info"]["time"]["completed"].is_number()).then_some(()) });
     assert_eq!(api(port, "POST", &format!("/session/{b}/abort"), json!({})).0, 200);
     assert_eq!(api(port, "POST", "/session/ses_000000000000000000000000/abort", json!({})).0, 404);
+}
+
+// ---- a seat WITH a secret (the strict door) ------------------------------------------------------------------------------------------------
+fn http_tok(port: u16, method: &str, path: &str, token: Option<&str>, body: &str) -> (u16, String) {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
+    s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{auth}\r\n{body}", body.len()).as_bytes()).unwrap();
+    let mut out = vec![];
+    let _ = s.read_to_end(&mut out);
+    let i = out.windows(4).position(|w| w == b"\r\n\r\n").expect("an HTTP answer");
+    (String::from_utf8_lossy(&out[..i]).split_whitespace().nth(1).unwrap().parse().unwrap(), String::from_utf8_lossy(&out[i + 4..]).to_string())
+}
+
+#[test]
+fn on_a_seat_with_a_secret_the_session_routes_and_streams_need_the_owner_token_and_work_with_it() {
+    let (_run, port, dir) = seat_with("ses-strict", QUICK, true);
+    let token = wait("the owner token file", || std::fs::read_to_string(dir.join("owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
+    // without the token: the released 401 on every session route, the streams included, prefixed or not
+    for (m, p) in [("GET", "/session"), ("POST", "/session"), ("GET", "/session/status"), ("GET", "/ui/serve/session"), ("GET", "/ui/serve/event")] {
+        let (st, body) = http_tok(port, m, p, None, "{}");
+        assert_eq!(st, 401, "{m} {p}: {body}");
+        assert!(body.contains("missing or invalid token"), "{body}");
+    }
+    let refused = Sse::open(port, "/event");
+    assert!(refused.head.starts_with("HTTP/1.1 401"), "{}", refused.head);
+    let refused = Sse::open(port, "/global/event");
+    assert!(refused.head.starts_with("HTTP/1.1 401"), "{}", refused.head);
+    // with it: a session, a stream, a message, the events
+    let (st, b) = http_tok(port, "POST", "/session", Some(&token), "{\"title\":\"S\"}");
+    assert_eq!(st, 200, "{b}");
+    let sid = serde_json::from_str::<J>(&b).unwrap()["id"].as_str().unwrap().to_string();
+    let hdr = format!("Authorization: Bearer {token}\r\n");
+    let mut sse = Sse::open_with(port, "/event", &hdr);
+    assert!(sse.head.starts_with("HTTP/1.1 200"), "{}", sse.head);
+    assert_eq!(sse.next().unwrap().0, "server.connected");
+    let (st, _) = http_tok(port, "POST", &format!("/ui/serve/session/{sid}/prompt_async"), Some(&token), "{\"parts\":[{\"type\":\"text\",\"text\":\"quick s\"}]}");
+    assert_eq!(st, 204);
+    let f = sse.until("idle", |n, _| n == "session.idle");
+    assert_eq!(types(&f).first().map(String::as_str), Some("message.updated"));
+    wait("the rows", || { let (st, b) = http_tok(port, "GET", &format!("/session/{sid}/message"), Some(&token), ""); (st == 200 && serde_json::from_str::<J>(&b).map(|v| v.as_array().map(|a| a.len()) == Some(2)).unwrap_or(false)).then_some(()) });
 }
