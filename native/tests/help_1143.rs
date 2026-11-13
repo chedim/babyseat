@@ -8,7 +8,7 @@ use serde_json::Value as J;
 use std::path::PathBuf;
 
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
-const TOPICS: [&str; 4] = ["c1f", "packs", "upgrade", "banner"];
+const TOPICS: [&str; 5] = ["c1f", "packs", "upgrade", "banner", "cliff"];
 
 struct Block { topic: String, kind: String, body: String, line: usize }
 
@@ -18,7 +18,7 @@ fn blocks(topic: &str) -> Vec<Block> {
     let mut cur: Option<(String, String, usize)> = None;
     for (i, l) in text.lines().enumerate() {
         match &mut cur {
-            None => if let Some(k) = l.strip_prefix("```c1f") { cur = Some((format!("c1f{k}"), String::new(), i + 1)); },
+            None => if let Some(k) = l.strip_prefix("```c1f") { cur = Some((format!("c1f{k}"), String::new(), i + 1)); } else if let Some(k) = l.strip_prefix("```cliff") { cur = Some((format!("cliff{k}"), String::new(), i + 1)); },
             Some((k, b, at)) => if l.starts_with("```") { out.push(Block { topic: topic.into(), kind: k.clone(), body: b.clone(), line: *at }); cur = None; } else { b.push_str(l); b.push('\n'); },
         }
     }
@@ -26,8 +26,11 @@ fn blocks(topic: &str) -> Vec<Block> {
     out
 }
 
-fn host() -> Host {
-    let h = Host::open({ let mut o = Options::new(None); o.effects = false; o }).unwrap();
+fn host() -> Host { let mut o = Options::new(None); o.effects = false; host_with(o) }
+/// the same host with the real drivers: a store in a folder of its own (the commands run there)
+fn host_live(dir: &std::path::Path) -> Host { host_with(Options::new(Some(dir.join("s.sqlite3").to_string_lossy().to_string()))) }
+fn host_with(o: Options) -> Host {
+    let h = Host::open(o).unwrap();
     let r = repo();
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
     for (i, n) in list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).enumerate() {
@@ -43,6 +46,8 @@ fn target(s: &str) -> (String, String) { let (e, p) = s.rsplit_once('.').unwrap_
 
 fn run(b: &Block, n: usize) {
     let at = format!("{}.md line {} ({})", b.topic, b.line, b.kind);
+    if b.kind == "c1f-run" { return run_live(b, &at); }
+    if b.kind.starts_with("cliff") { return run_cliff(b, &at); }
     let h = host();
     let name = b.body.lines().find_map(|l| l.strip_prefix("PACK ")).and_then(|r| r.split_whitespace().next()).map(String::from).unwrap_or(format!("ex{n}"));
     let res = h.load_pack(&name, &b.body);
@@ -73,6 +78,111 @@ fn run(b: &Block, n: usize) {
             assert!(same(&got, &want), "{at}: {e}.{p} reads {got}, the help says {want}");
         }
     }
+}
+
+/// A ```cliff block is a clifflet (the `run_cliff` tool, packs/door_tools.c1f): its non-directive lines are loaded the way the door loads them, as the body of a getter
+/// (`cliff`, the value is read) or of an on-setter (`cliff-write`, the writes run). Directives: `-- given <eid> <json>`, `-- value <json>` (the value), `-- error: <text>`
+/// (the loader's message or the null's reason holds the text), `-- reads <eid>.<prop> = <json>` (after a `cliff-write` ran).
+fn run_cliff(b: &Block, at: &str) {
+    let h = host();
+    let code: String = b.body.lines().filter(|l| !l.starts_with("-- ")).collect::<Vec<_>>().join("\n");
+    let indent = |n: usize| code.lines().map(|l| format!("{}{l}\n", " ".repeat(n))).collect::<String>();
+    let write = b.kind == "cliff-write";
+    for l in b.body.lines() {
+        if let Some(r) = l.strip_prefix("-- given ") {
+            let (eid, props) = r.split_once(' ').unwrap();
+            h.born(eid, eid.split(':').next().unwrap(), serde_json::from_str::<J>(props).unwrap().as_object().unwrap().clone(), "person");
+            h.pump();
+        }
+    }
+    let want_err = b.body.lines().find_map(|l| l.strip_prefix("-- error: ")).map(str::trim);
+    let text = if write { format!("PACK cliffx 1\nCliffx.go on-setter run:\n  ALWAYS:\n{}", indent(4)) } else { format!("PACK cliffx 1\nCliffx.val getter:\n{}Cliffx.shown getter: {{'v': this.val, 'why': why(this.val)}}\n", indent(2)) };
+    let loaded = h.load_pack("cliffx", &text);
+    if let Some(w) = want_err {
+        if let Err(e) = &loaded { assert!(e.contains(w), "{at}: the loader said {e:?}, the help says it holds {w:?}"); return; }
+    }
+    loaded.unwrap_or_else(|e| panic!("{at}: the loader refused the example: {e}"));
+    h.rebuild();
+    if write {
+        h.write("Pack:cliffx", "privileged", J::Bool(true), "person");   // the door grants its scratch setter pack the privilege, so a block may write any class
+        h.pump();
+        h.born("Cliffx:x", "Cliffx", Default::default(), "person");
+        h.write("Cliffx:x", "go", J::Bool(true), "person");
+        h.pump();
+        for l in b.body.lines() {
+            if let Some(r) = l.strip_prefix("-- reads ") {
+                let (t, v) = r.split_once(" = ").unwrap();
+                let (e, p) = target(t);
+                let want: J = serde_json::from_str(v).unwrap();
+                assert!(same(&h.get(&e, &p), &want), "{at}: {e}.{p} reads {}, the help says {want} (refused: {}, {})", h.get(&e, &p), h.get(&e, "refused"), h.get("Cliffx:x", "refused"));
+            }
+        }
+        return;
+    }
+    h.born("Cliffx:x", "Cliffx", Default::default(), "person");
+    h.pump();
+    let shown = h.get("Cliffx:x", "shown");
+    if let Some(w) = want_err {
+        let why = shown["why"].as_str().unwrap_or("");
+        assert!(why.contains(w), "{at}: the null's reason is {why:?}, the help says it holds {w:?}");
+        return;
+    }
+    let want: J = serde_json::from_str(b.body.lines().find_map(|l| l.strip_prefix("-- value ")).unwrap_or_else(|| panic!("{at}: a cliff block says `-- value <json>` or `-- error: <text>`"))).unwrap();
+    assert!(same(&shown["v"], &want), "{at}: the clifflet returns {}, the help says {want}", shown["v"]);
+}
+
+/// A ```c1f-run block is RUN through the real drivers: `-- write <eid>.<prop> = <json>` writes (a write of `run` waits for that run's receipt, matched by its id),
+/// `-- receipt <eid>.<prop> = <json>` reads a property of the receipt (`run_result.stdout`) and compares it.
+fn run_live(b: &Block, at: &str) {
+    let dir = std::env::temp_dir().join(format!("help-live-{}-{}", std::process::id(), b.line));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let h = host_live(&dir);
+    for l in b.body.lines() {
+        if let Some(r) = l.strip_prefix("-- write ") {
+            let (t, v) = r.split_once(" = ").unwrap();
+            let (e, p) = target(t);
+            let val: J = serde_json::from_str(v).unwrap();
+            if !h.snapshot().contains_key(&e) { h.born(&e, e.split(':').next().unwrap(), Default::default(), "person"); }   // a write makes the entity, as the door does
+            h.write(&e, &p, val.clone(), "person");
+            if p == "run" {
+                let id = val.get("id").cloned().unwrap_or(J::Null);
+                let t0 = std::time::Instant::now();
+                loop {
+                    h.pump();
+                    let got = h.get(&e, "run_result");
+                    if got.get("id") == Some(&id) { break; }
+                    assert!(t0.elapsed() < std::time::Duration::from_secs(20), "{at}: no receipt for run id {id} on {e} (the example does not run); run_result is {got}");
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            } else { h.pump(); }
+        } else if let Some(r) = l.strip_prefix("-- receipt ") {
+            let (t, v) = r.split_once(" = ").unwrap();
+            let (path, field) = t.rsplit_once('.').unwrap();
+            let (e, p) = path.rsplit_once('.').unwrap();
+            let got = h.get(e.trim(), p.trim()).get(field.trim()).cloned().unwrap_or(J::Null);
+            let want: J = serde_json::from_str(v).unwrap();
+            assert!(same(&got, &want), "{at}: {e}.{p}.{field} reads {got}, the help says {want}");
+        }
+    }
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_command_in_the_help_names_its_cmd_before_it_runs_and_runs_for_real() {
+    let mut runs = 0;
+    for t in TOPICS {
+        for b in blocks(t) {
+            if b.kind == "c1f-run" { runs += 1; continue; }
+            // a pack that writes `Command:<name>.run` also writes `Command:<name>.cmd` (the driver answers 'a command needs `cmd`' otherwise)
+            for l in b.body.lines().filter(|l| l.contains(".run = ") && l.contains("Command:")) {
+                let name = l.trim().split(".run").next().unwrap().to_string();
+                assert!(b.body.contains(&format!("{name}.cmd = ")), "{}.md line {}: `{l}` runs a command that was never given a cmd", t, b.line);
+            }
+        }
+    }
+    assert!(runs >= 1, "the help shows a Command example that is run through the real driver (a ```c1f-run block)");
 }
 
 #[test]

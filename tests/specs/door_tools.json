@@ -253,7 +253,7 @@
   ]
  },
  {
-  "name": "tools/list names exactly the three field tools, each with an input schema",
+  "name": "tools/list names exactly the four tools (three field tools and run_cliff), each with an input schema",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -314,7 +314,12 @@
    },
    {
     "eid": "Request:1",
-    "prop": "reply.body.result.tools.3",
+    "prop": "reply.body.result.tools.3.name",
+    "equals": "run_cliff"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.result.tools.4",
     "none": true
    },
    {

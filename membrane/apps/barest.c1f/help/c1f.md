@@ -3,7 +3,7 @@
 A pack is a text of getters and setters over entities. A getter is a cached value that recomputes when what it read changes. A
 setter runs when its property is written. Acting is writing. Every code block below is loaded and run by a test, so it is real.
 
-The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `entity_read {spec: "Help:<topic>"}` reads one. `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>` and `name~:<prefix>`, joined with `&`), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); everything else is an entity you make and write to.
+The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `entity_read {spec: "Help:<topic>"}` reads one. `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:cliff` a block of the language run in one call (the `run_cliff` tool), `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>` and `name~:<prefix>`, joined with `&`), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); `run_cliff` (one call: a small block of the language that reads, filters, joins and may write; `Help:cliff`); everything else is an entity you make and write to.
 
 ## Getters
 
@@ -191,18 +191,31 @@ Shelf.add on-setter add-book:
 
 ## Effects are writes
 
-A driver is an entity class whose verb property is the effect; its receipt lands as `<verb>_result` on the same entity:
+A driver is an entity class whose verb property is the effect; its receipt lands as `<verb>_result` on the same entity. A command is
+two writes: its `cmd` (an argument list, or a text that `sh -c` runs) first, then `run`:
 
 ```c1f
 IMPORT proc 1
 Job.go on-setter start:
   ALWAYS:
-    Command:build.run = {'id': 'b1', 'args': ['ls', '-l']}
+    Command:build.cmd = ['ls', '-l']
+    Command:build.run = {'id': 'b1', 'args': []}
 Job.report getter: Command:build.output
 ```
 
-`Command:<name>.run = {id, args}` runs a program (receipt `run_result`, `run_rc`, getter `output`). `File:<name>.write`,
-`Fetch:<name>.request` and `Store:<name>.run` follow the same shape: write, then read the receipt back.
+`Command:<name>.run = {id, args}` runs the program (the `args` are added after `cmd`) and lands the receipt `run_result` (`rc`, `stdout`,
+`stderr`, `head`, `status`, `id`), `run_rc` and the getter `output`. A `run` without a `cmd` is answered with `a command needs cmd`. The same `run` value
+written again runs it again; the reply of `entity_write` recognises a receipt as new when it differs from the one there before, so give each run a NEW `id` (the same `id` with the same output reads as `pending` though it ran). This runs for real here:
+
+```c1f-run
+-- write Command:hello.cmd = ["echo", "hi"]
+-- write Command:hello.run = {"id": "h1", "args": ["there"]}
+-- receipt Command:hello.run_result.stdout = "hi there\n"
+-- write Command:hello.run = {"id": "h2", "args": ["again"]}
+-- receipt Command:hello.run_result.stdout = "hi again\n"
+```
+
+`File:<name>.write`, `Fetch:<name>.request` and `Store:<name>.run` follow the same shape: write, then read the receipt back.
 
 What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write that starts an effect the `receipt:` (rc, ok, stdout,
 stderr, head) when it has arrived, or `pending: read <entity>.<verb>_result later`; then the `reactions:` (every value the engine wrote in the

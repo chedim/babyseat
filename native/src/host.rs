@@ -371,10 +371,10 @@ impl Host {
     /// getters' writes, each `{eid, prop, new, by, why}`; `why` is the reason of a null). The door's own bookkeeping (Request, Return, Pack entities) and the
     /// write itself are left out.
     fn reactions_of(&self, out: &[J]) -> Vec<(String, J)> {
-        let asked: Vec<String> = out.iter().filter(|w| w["prop"] == "mc_done" && w["writer"] == "field:mcp-write").filter_map(|w| w["eid"].as_str().map(String::from)).collect();
+        let asked: Vec<String> = out.iter().filter(|w| w["prop"] == "mc_done" && (w["writer"] == "field:mcp-write" || w["writer"] == "field:cliff-run")).filter_map(|w| w["eid"].as_str().map(String::from)).collect();
         if asked.is_empty() { return vec![]; }
         let g = self.eng();
-        let derived = |w: &J| w["writer"].as_str().map_or(false, |x| x.starts_with("field:") && x != "field:mcp-write");
+        let derived = |w: &J| w["writer"].as_str().map_or(false, |x| x.starts_with("field:") && x != "field:mcp-write" && x != "field:cliff-run");
         let list: Vec<J> = out.iter().enumerate()
             .filter(|(_, w)| derived(w) && w.get("prop").is_some() && w["eid"].as_str().map_or(false, |e| !e.starts_with("Request:") && !e.starts_with("Return:") && !e.starts_with(PACK_PREFIX)))
             .filter(|(i, w)| !out[i + 1..].iter().any(|x| derived(x) && x["eid"] == w["eid"] && x["prop"] == w["prop"]))   // the last value of each property in the round

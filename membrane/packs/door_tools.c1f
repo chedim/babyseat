@@ -34,10 +34,10 @@ Request.mc_method getter: str(prop(this.mc_rpc, 'method') or '')
 Request.mc_params getter: prop(this.mc_rpc, 'params') or {}
 Request.mc_args getter: prop(this.mc_params, 'arguments') or {}
 Request.mc_tool getter: prop(this.mc_params, 'name')
-Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write']
+Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write', 'run_cliff']
 
 -- ---- the tools' list -----------------------------------------------------------------------------------------------------------------------
-Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate entities. q: kind:<Class>, kind!:<Class> (all but that class) and name~:<eid prefix>, joined with & (empty = all). k = the row cap (default 20, at most 100), offset = rows to skip (paging), full=true adds the properties of each row, count=true gives only the number.', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'the query line, e.g. kind:Command & name~:Command:b'}, 'k': {'type': 'integer', 'description': 'the row cap (default 20, at most 100)'}, 'offset': {'type': 'integer', 'description': 'rows to skip, for paging'}, 'full': {'type': 'boolean', 'description': 'add the stored properties of each row'}, 'count': {'type': 'boolean', 'description': 'only the count'}}}}, {'name': 'entity_read', 'description': 'read an entity: its stored properties, or with prop one property in full (a getter value too).', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'one property'}}, 'required': ['spec']}}, {'name': 'entity_write', 'description': 'act by writing: set one property. What reacts to the write runs (pack setters, driver verbs such as Command run or File write). The reply carries the receipt of an effect the write started (stdout, stderr, rc), the reactions (what the engine wrote because of this write, each with its reason). wait (seconds) holds the reply until the receipt arrives; with no wait a receipt that is not there yet is named, to read as <prop>_result.', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'the property'}, 'value': {'description': 'the value (any JSON)'}, 'wait': {'type': 'number', 'description': 'seconds to hold the reply for the receipt of an effect (optional)'}}, 'required': ['spec', 'prop']}}]
+Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate entities. q: kind:<Class>, kind!:<Class> (all but that class) and name~:<eid prefix>, joined with & (empty = all). k = the row cap (default 20, at most 100), offset = rows to skip (paging), full=true adds the properties of each row, count=true gives only the number.', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'the query line, e.g. kind:Command & name~:Command:b'}, 'k': {'type': 'integer', 'description': 'the row cap (default 20, at most 100)'}, 'offset': {'type': 'integer', 'description': 'rows to skip, for paging'}, 'full': {'type': 'boolean', 'description': 'add the stored properties of each row'}, 'count': {'type': 'boolean', 'description': 'only the count'}}}}, {'name': 'entity_read', 'description': 'read an entity: its stored properties, or with prop one property in full (a getter value too).', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'one property'}}, 'required': ['spec']}}, {'name': 'entity_write', 'description': 'act by writing: set one property. What reacts to the write runs (pack setters, driver verbs such as Command run or File write). The reply carries the receipt of an effect the write started (stdout, stderr, rc), the reactions (what the engine wrote because of this write, each with its reason). wait (seconds) holds the reply until the receipt arrives; with no wait a receipt that is not there yet is named, to read as <prop>_result.', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'the property'}, 'value': {'description': 'the value (any JSON)'}, 'wait': {'type': 'number', 'description': 'seconds to hold the reply for the receipt of an effect (optional)'}}, 'required': ['spec', 'prop']}}, {'name': 'run_cliff', 'description': 'run a clifflet: a small block of the field language (help entity Help:cliff) in ONE call. Its lines may define locals; the last line is the value, which comes back as text (JSON for a list or dict), so one call can read several entities, filter and join them. A block whose last line is a write (<entity>.<prop> = value) runs its writes instead and answers with their reactions; an effect started that way has its receipt in a later round: read <entity>.<verb>_result. A block that does not load answers with the loader error, one that runs past its step or time budget answers with that reason.', 'inputSchema': {'type': 'object', 'properties': {'code': {'type': 'string', 'description': 'the block: lines, the last one the value (or a write)'}}, 'required': ['code']}}]
 
 -- ---- entity_write: a write by name (a computed property name) -------------------------------------------------------------------------------
 Request.mc_w_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
@@ -100,6 +100,71 @@ Request.mc_w_text getter:
   ELSE WHEN this.mc_w_returned != True: None
   ELSE: join(concat(concat([this.mc_w_head], this.mc_w_rcpt), ['reactions: ' + str(this.reactions)]), '\n')
 
+-- ---- run_cliff: a clifflet, one call (docs/cliffvm.md, "run_cliff") ------------------------------------------------------------------------------
+-- The block is loaded as two scratch packs at once, `cliffg<n>` (the block as a getter: a value) and `cliffs<n>` (the block as an on-setter body: writes; privileged,
+-- so it may write any class like entity_write does), each with its own class. Whichever loads runs: a block that is a value runs as the getter (its entity is
+-- born by a write), one whose last line is a write runs as the setter (`go`), and one that loads as neither answers with both loader errors. The answer is read
+-- from the scratch entity, then the packs, the entity and any trip entity are retired: nothing accumulates. The getter runs under the engine's step budget and
+-- time allowance (docs/c1f-stdlib.md): a runaway block answers with that reason and the seat stays up. A write's reactions come from the host like entity_write's.
+Request.cl_code getter: str(prop(this.mc_args, 'code') or '')
+Request.cl_bad getter: 'run_cliff needs code (a block of lines; the last one is the value)' if this.mc_tool == 'run_cliff' and strip(this.cl_code) == '' else None
+Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None
+Request.cl_n getter: replace(this.eid, 'Request:', '')
+Request.cl_gp getter: 'Pack:cliffg' + this.cl_n
+Request.cl_sp getter: 'Pack:cliffs' + this.cl_n
+Request.cl_ge getter: 'Cliffg' + this.cl_n + ':x'
+Request.cl_se getter: 'Cliffs' + this.cl_n + ':x'
+Request.cl_gtext getter: 'PACK cliffg' + this.cl_n + ' 1\nCliffg' + this.cl_n + '.val getter:\n' + join(['  ' + l for l in lines(this.cl_code)], '\n') + '\nCliffg' + this.cl_n + '.shown getter: {\'v\': this.val, \'why\': why(this.val)}\n'
+Request.cl_stext getter: 'PACK cliffs' + this.cl_n + ' 1\nIMPORT door 1\nIMPORT fs 1\nIMPORT proc 1\nIMPORT fetch 1\nIMPORT store 1\nCliffs' + this.cl_n + '.go on-setter run:\n  ALWAYS:\n' + join(['    ' + l for l in lines(this.cl_code)], '\n') + '\n'
+Request.cl_start getter: this.cl_code if this.cl_on else None
+Request.cl_start on-setter cliff-load:
+  WHEN this.cl_start != None:
+    (this.cl_sp).privileged = True
+    (this.cl_gp).text = this.cl_gtext
+    (this.cl_sp).text = this.cl_stext
+    this.cl_loading = True
+Request.cl_gstate getter: prop(this.cl_gp, 'state') if this.cl_loading == True else None
+Request.cl_sstate getter: prop(this.cl_sp, 'state') if this.cl_loading == True else None
+Request.cl_mode getter:
+  WHEN this.cl_gstate == 'loaded': 'value'
+  ELSE WHEN this.cl_gstate == 'error' and this.cl_sstate == 'loaded': 'write'
+  ELSE WHEN this.cl_gstate == 'error' and this.cl_sstate == 'error': 'error'
+  ELSE: None
+Request.cl_mode on-setter cliff-run:
+  WHEN this.cl_mode == 'value':
+    (this.cl_ge).seed = True
+  ELSE WHEN this.cl_mode == 'write':
+    (this.cl_se).go = True
+    this.mc_done = True
+Request.cl_shown getter: prop(this.cl_ge, 'shown') if this.cl_mode == 'value' else None
+Request.cl_out getter:
+  WHEN this.cl_final != None: this.cl_final
+  ELSE WHEN this.cl_mode == 'error': {'text': 'the block did not load.\nas a value: ' + str(prop(this.cl_gp, 'error')) + '\nas writes: ' + str(prop(this.cl_sp, 'error')), 'err': True}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'why') != None: {'text': str(prop(this.cl_shown, 'why')) if startswith(str(prop(this.cl_shown, 'why')), 'error') else 'error: ' + str(prop(this.cl_shown, 'why')), 'err': True}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'v') == None: {'text': 'null', 'err': False}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None: {'text': str(prop(this.cl_shown, 'v')), 'err': False}
+  ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': 'ran the writes of the block\nreactions: ' + str(this.reactions) + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
+  ELSE: None
+Request.cl_out on-setter cliff-finish:
+  WHEN this.cl_out != None and this.cl_final == None and this.cl_mode == 'error':
+    this.cl_final = this.cl_out
+    (this.cl_gp).retire = True
+    (this.cl_sp).retire = True
+  ELSE WHEN this.cl_out != None and this.cl_final == None and this.cl_mode == 'value':
+    this.cl_final = this.cl_out
+    (this.cl_ge).retire = True
+    (this.cl_gp).text = ''
+    (this.cl_sp).text = ''
+    (this.cl_gp).retire = True
+    (this.cl_sp).retire = True
+  ELSE WHEN this.cl_out != None and this.cl_final == None and this.cl_mode == 'write':
+    this.cl_final = this.cl_out
+    (this.cl_se).retire = True
+    (this.cl_gp).text = ''
+    (this.cl_sp).text = ''
+    (this.cl_gp).retire = True
+    (this.cl_sp).retire = True
+
 -- ---- entity_read: the store's row (stored properties) or one property through the field ---------------------------------------------------
 Request.mc_r_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
 Request.mc_r_prop getter: prop(this.mc_args, 'prop')
@@ -138,14 +203,15 @@ Request.mc_q_text getter:
   ELSE: join([prop(r, 'k') + ' (' + str(prop(r, 'cls')) + ')' + ((' ' + str(prop(r, 'props'))) if prop(this.mc_args, 'full') == True else '') for r in this.mc_q_rows], '\n')
 
 -- ---- the tool call's result ---------------------------------------------------------------------------------------------------------------------
-Request.mc_bad getter: (this.mc_w_bad if this.mc_tool == 'entity_write' else (this.mc_r_bad if this.mc_tool == 'entity_read' else this.mc_q_bad))
+Request.mc_bad getter: (this.mc_w_bad if this.mc_tool == 'entity_write' else (this.mc_r_bad if this.mc_tool == 'entity_read' else (this.cl_bad if this.mc_tool == 'run_cliff' else this.mc_q_bad)))
 Request.mc_text getter:
   WHEN not this.mc_known: 'unknown tool: ' + str(this.mc_tool)
   ELSE WHEN this.mc_bad != None: this.mc_bad
   ELSE WHEN this.mc_tool == 'entity_write': this.mc_w_text
   ELSE WHEN this.mc_tool == 'entity_read': this.mc_r_text
+  ELSE WHEN this.mc_tool == 'run_cliff': prop(this.cl_out, 'text')
   ELSE: this.mc_q_text
-Request.mc_is_err getter: (not this.mc_known) or this.mc_bad != None or startswith(str(this.mc_text or ''), 'refused')
+Request.mc_is_err getter: (not this.mc_known) or this.mc_bad != None or startswith(str(this.mc_text or ''), 'refused') or (this.mc_tool == 'run_cliff' and prop(this.cl_out, 'err') == True)
 Request.mc_call getter: {'content': [{'type': 'text', 'text': this.mc_text}], 'isError': this.mc_is_err} if this.mc_text != None else None
 
 -- ---- the answers ----------------------------------------------------------------------------------------------------------------------------------

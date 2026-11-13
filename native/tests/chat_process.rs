@@ -28,14 +28,15 @@ fn shipped(names: &[&str]) -> Vec<(String, String)> {
 
 /// start the binary in a fresh seat folder on the shipped packs `names`, with the extra arguments; -> the run and the door's port.
 /// The seat folder (the store's) is where a test puts its fake `claude`: the driver refuses work in other temporary folders.
-fn start(tag: &str, names: &[&str], extra: &[&str]) -> (Run, u16) {
+fn start(tag: &str, names: &[&str], extra: &[&str]) -> (Run, u16) { start_env(tag, names, extra, &[]) }
+fn start_env(tag: &str, names: &[&str], extra: &[&str], env: &[(&str, &str)]) -> (Run, u16) {
     let dir = tmp(tag);
     let pd = dir.join("packs");
     std::fs::create_dir_all(&pd).unwrap();
     for (n, t) in shipped(names) { std::fs::write(pd.join(n), t).unwrap(); }
     let mut child = Command::new(BIN).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
-        .args(extra).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+        .args(extra).envs(env.iter().copied()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
@@ -103,7 +104,7 @@ fn the_mcp_door_speaks_the_handshake_lists_the_field_tools_and_runs_them() {
     let (st, body) = http(port, "POST", "/mcp", &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string());
     assert_eq!((st, body.as_str()), (202, ""));
     let names: Vec<String> = rpc(port, 2, "tools/list", json!({}))["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-    assert_eq!(names, ["entity_query", "entity_read", "entity_write"]);
+    assert_eq!(names, ["entity_query", "entity_read", "entity_write", "run_cliff"]);
     assert_eq!(http(port, "GET", "/mcp", "").0, 405);
 
     // a Command made and run by two writes; the receipt is read back by property
@@ -717,5 +718,95 @@ fn the_return_entity_is_retired_as_soon_as_its_reply_is_delivered() {
     wait("no Return left after a waiting call", || (returns(port) == "0 entity(ies)").then_some(()));
     // the receipt is where it always lived
     assert!(call(port, "entity_read", json!({"spec": "Command:w1", "prop": "run_result"})).0.contains("\"rc\":0"));
+    assert!(terminate(&mut run));
+}
+
+// ---- run_cliff: a clifflet in one call (#1143) ------------------------------------------------------------------------------------------------
+fn cliff(port: u16, code: &str) -> (String, bool) { call(port, "run_cliff", json!({"code": code})) }
+/// the entities that are not door requests (the collector retires those; this seat has none)
+fn count_all(port: u16) -> String { call(port, "entity_query", json!({"q": "kind!:Request", "count": true})).0 }
+
+#[test]
+fn a_clifflet_reads_and_joins_several_entities_in_one_call_and_its_errors_say_why() {
+    let (mut run, port) = start("cliff1", MCP_PACKS, &[]);
+    for (n, v) in [("a", 3), ("b", 4), ("c", 5)] { put(port, &format!("Note:{n}"), "n", json!(v)); }
+    put(port, "Tag:x", "of", json!("Note:b"));
+    let (t, e) = cliff(port, "ns = [e.n for e in instances('Note')]\nbig = [e.eid for e in instances('Note') if e.n > 3]\n{'count': len(ns), 'sum_big': len(big), 'big': big, 'tagged': [prop(prop(g.of, 'eid'), 'n') for g in instances('Tag')]}");
+    assert!(!e, "{t}");
+    let v: J = serde_json::from_str(&t).unwrap_or_else(|e| panic!("{e}: {t}"));
+    assert_eq!((v["count"].clone(), v["big"].clone()), (json!(3), json!(["Note:b", "Note:c"])), "{t}");
+    // a one-line value, a plain number, a null
+    assert_eq!(cliff(port, "1 + 2"), ("3".to_string(), false));
+    assert_eq!(cliff(port, "None").0, "null");
+    // the error shapes: a block that does not load says the loader's words, a null with a reason says it, an empty block says what is needed
+    let (t, e) = cliff(port, "[x for x in");
+    assert!(e && t.contains("the block did not load") && t.contains("not an expression"), "{t}");
+    let (t, e) = cliff(port, "None('nothing here yet')");
+    assert!(e && t == "error: nothing here yet", "{t}");
+    let (t, e) = cliff(port, "1 / 0");
+    assert!(e && t.starts_with("error: "), "{t}");
+    let (t, e) = cliff(port, "  ");
+    assert!(e && t.contains("run_cliff needs code"), "{t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_clifflet_that_writes_lands_its_writes_and_returns_their_reactions() {
+    let (mut run, port) = start("cliff2", MCP_PACKS, &[]);
+    let (t, e) = cliff(port, "q = 5\nNote:w1.n = q\nNote:w2.n = q + 1");
+    assert!(!e && t.contains("ran the writes") && t.contains("reactions: ") && t.contains("read <entity>.<verb>_result"), "{t}");
+    assert_eq!(call(port, "entity_read", json!({"spec": "Note:w1", "prop": "n"})).0, "5");
+    assert_eq!(call(port, "entity_read", json!({"spec": "Note:w2", "prop": "n"})).0, "6");
+    assert!(t.contains("Note:w2"), "the reactions list the writes the block made: {t}");
+    // an effect: the verb runs, the receipt arrives in a later round on the entity
+    let (t, e) = cliff(port, "Command:cc.cmd = ['echo', 'from-cliff']\nCommand:cc.run = {'id': 'c1', 'args': []}");
+    assert!(!e, "{t}");
+    let r = wait("the receipt", || { let (r, _) = call(port, "entity_read", json!({"spec": "Command:cc", "prop": "run_result"})); r.contains("from-cliff").then_some(r) });
+    assert!(r.contains("from-cliff"), "{r}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accumulates() {
+    let (mut run, port) = start_env("cliff3", MCP_PACKS, &[], &[("MEMBRANE_EVAL_BUDGET", "300")]);
+    for i in 0..14 { put(port, &format!("Note:r{i}"), "n", json!(i)); }
+    let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
+    assert!(e && t.contains("budget exceeded"), "{t}");
+    assert_eq!(call(port, "entity_read", json!({"spec": "Note:r3", "prop": "n"})).0, "3", "the seat is up");
+    // scratch entities and packs do not accumulate: the same count after 20 calls of every shape
+    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "1 entity(ies)").then_some(()));
+    cliff(port, "Note:acc.n = 0");
+    wait("settled", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)").then_some(()));
+    let before = count_all(port);
+    for i in 0..20 {
+        match i % 4 { 0 => cliff(port, "1 + 1"), 1 => cliff(port, "[x for x in"), 2 => cliff(port, "Note:acc.n = 1"), _ => cliff(port, "None('x')") };
+    }
+    let t0 = Instant::now();
+    let (mut a, mut b, mut c) = (String::new(), String::new(), String::new());
+    while t0.elapsed() < Duration::from_secs(30) {
+        (a, b, c) = (count_all(port), call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0, call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0);
+        if a == before && b == "0 entity(ies)" && c == "1 entity(ies)" { break; }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "1 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_command_run_again_with_the_same_id_runs_but_only_a_new_id_gives_a_receipt_the_reply_recognises() {
+    let (mut run, port) = start("rerun", MCP_PACKS, &[]);
+    let log = run.dir.join("ticks");
+    put(port, "Command:tick", "cmd", json!(["sh", "-c", format!("echo x >> {}", log.display())]));
+    let n = || std::fs::read_to_string(&log).map(|t| t.lines().count()).unwrap_or(0);
+    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 20.0);
+    assert!(t.contains("receipt: "), "{t}");
+    // the same id and the same output: it runs again, but its receipt is equal to the one there, so the reply cannot tell it from the old one
+    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 2.0);
+    assert!(t.contains("pending: read Command:tick.run_result later"), "{t}");
+    wait("the second run", || (n() == 2).then_some(()));
+    // a new id: a new receipt, the reply carries it
+    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t2", "args": []}), 20.0);
+    assert!(t.contains("receipt: ") && t.contains("\"id\":\"t2\""), "{t}");
+    assert_eq!(n(), 3);
     assert!(terminate(&mut run));
 }

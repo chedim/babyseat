@@ -127,9 +127,10 @@
     "classes": [
       "Boot",
       "Chat",
-      "ChatMessage"
+      "ChatMessage",
+      "Chunk"
     ],
-    "members": 37,
+    "members": 39,
     "writes": [
       "*.retire",
       "membrane:*.calls",
@@ -372,10 +373,14 @@
       "Request",
       "Return"
     ],
-    "members": 63,
+    "members": 79,
     "writes": [
       "*.[]",
+      "*.go",
+      "*.privileged",
       "*.retire",
+      "*.seed",
+      "*.text",
       "Return:*=Return()"
     ],
     "claims": [
