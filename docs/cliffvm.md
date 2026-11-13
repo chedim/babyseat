@@ -89,7 +89,7 @@ predecessors' whole state and the sizes doubled per request (a 100-row query rea
 At start the collector retires the Request rows an earlier run left in the store (`Boot.old_requests`, setter `sweep-old-requests`).
 
 **The help** (`membrane/apps/barest.c1f/help.c1f`, `help/c1f.md`, `help/packs.md`, `help/upgrade.md`): `Help:<topic>` entities whose `text` is the topic's markdown file (a getter reading it; `Boot.started` seeds
-`Help:c1f`, `Help:packs`, `Help:upgrade` from the first of `app_dirs`). The model reads them with `entity_read` and lists them with `entity_query` `kind:Help`; the doctrine in `chat_turn.c1f` says "Use help tool for help" and `Help:c1f` tells where the topics are and how to list them. `help/banner.md` (`Help:banner`) teaches the banner.
+`Help:c1f`, `Help:packs`, `Help:upgrade` from the first of `app_dirs`). The model reads them with `entity_read` and lists them with `entity_query` `kind:Help`; the doctrine in `chat_turn.c1f` says "Use Help entities for help" and `Help:c1f` tells where the topics are and how to list them. `help/banner.md` (`Help:banner`) teaches the banner.
 `c1f` is the syntax (getters, setters, blocks, entity literals, constructors, nulls with reasons, the operators c1f has: the default is `or`, there is no `??`), `packs` is writing a pack through `Pack:<name>.text`
 (ownership, rule B, layers), `upgrade` is what changed since 0.7.53 plus a SQL / Vue / JavaScript lookup table. **Every code block is a test**: `native/tests/help_1143.rs` loads each ```c1f block through the
 loader and checks its `-- given / -- write / -- reads` lines (```c1f-error blocks must be refused with the text in `-- error:`), so the help cannot lie. Also `seat_process.rs` (the topics through the MCP door).
