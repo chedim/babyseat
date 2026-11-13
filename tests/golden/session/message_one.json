@@ -1,0 +1,109 @@
+{
+ "status": 200,
+ "body": {
+  "info": {
+   "id": "msg_6df5fad5796bc9e88435f705",
+   "sessionID": "ses_69143f4fc8088e7ec097c182",
+   "role": "assistant",
+   "parentID": "msg_51cec3a3ee171ffc71dd538d",
+   "modelID": "claude",
+   "providerID": "membrane",
+   "mode": "build",
+   "agent": "build",
+   "path": {
+    "cwd": "/srv/seat",
+    "root": "/srv/seat"
+   },
+   "cost": 0.0,
+   "tokens": {
+    "total": 8,
+    "input": 4,
+    "output": 4,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   },
+   "time": {
+    "created": 1794603477062,
+    "completed": 1794603477066
+   },
+   "madeBy": "claude-agent",
+   "finish": "stop"
+  },
+  "parts": [
+   {
+    "id": "prt_ef1fb42d60b49030b6b87bb5",
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "messageID": "msg_6df5fad5796bc9e88435f705",
+    "type": "step-start"
+   },
+   {
+    "id": "prt_af3f281a1995ba129977577a",
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "messageID": "msg_6df5fad5796bc9e88435f705",
+    "type": "text",
+    "text": "Looking now.",
+    "time": {
+     "start": 1794603477066,
+     "end": 1794603477066
+    }
+   },
+   {
+    "id": "prt_536c853cb7353b3b4eb5a077",
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "messageID": "msg_6df5fad5796bc9e88435f705",
+    "type": "tool",
+    "callID": "toolu_1",
+    "tool": "entity_read",
+    "madeBy": "claude-agent",
+    "state": {
+     "status": "completed",
+     "input": {
+      "spec": "Command:probe"
+     },
+     "title": "entity_read({\"spec\": \"Command:probe\"})",
+     "time": {
+      "start": 1794603477066,
+      "end": 1794603477066
+     },
+     "output": "the result"
+    },
+    "time": {
+     "start": 1794603477066,
+     "end": 1794603477066
+    }
+   },
+   {
+    "id": "prt_ba3ee5ea7e1225313e9546f2",
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "messageID": "msg_6df5fad5796bc9e88435f705",
+    "type": "text",
+    "text": "Done.",
+    "time": {
+     "start": 1794603477066,
+     "end": 1794603477066
+    }
+   },
+   {
+    "id": "prt_c961e78e0988f98df6a5d0fb",
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "messageID": "msg_6df5fad5796bc9e88435f705",
+    "type": "step-finish",
+    "reason": "stop",
+    "cost": 0,
+    "tokens": {
+     "total": 8,
+     "input": 4,
+     "output": 4,
+     "reasoning": 0,
+     "cache": {
+      "read": 0,
+      "write": 0
+     }
+    }
+   }
+  ]
+ }
+}

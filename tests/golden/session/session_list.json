@@ -1,0 +1,40 @@
+{
+ "status": 200,
+ "body": [
+  {
+   "id": "ses_69143f4fc8088e7ec097c182",
+   "projectID": "membrane",
+   "directory": "/srv/seat",
+   "path": "srv/seat",
+   "slug": "calm-cedar",
+   "title": "T",
+   "version": "1.0",
+   "agent": "build",
+   "model": {
+    "id": "claude",
+    "providerID": "membrane",
+    "variant": "default"
+   },
+   "cost": 0,
+   "tokens": {
+    "total": 0,
+    "input": 0,
+    "output": 0,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   },
+   "summary": {
+    "additions": 0,
+    "deletions": 0,
+    "files": 0
+   },
+   "time": {
+    "created": 1794603477007,
+    "updated": 1794603477007
+   }
+  }
+ ]
+}
