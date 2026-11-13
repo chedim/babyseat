@@ -3,16 +3,56 @@
 //! A small safe subset of Python expressions: constants, names, lists/tuples, dicts with literal
 //! string keys, `x.attr` on entities, + - * /, unary - and not, and/or, comparisons (== != < <= > >=
 //! in, not in), and calls of the built-ins. Semantics follow Python's (truthiness, int vs float, a
-//! comparison that would raise TypeError is false, and/or return an operand). Node counts follow
-//! `ast.walk` (a Name counts its Load context, a BinOp its operator), so EXPR_MAX / NODES_MAX refuse
-//! exactly what ch.py refuses.
+//! comparison that would raise TypeError is false, and/or return an operand).
+//!
+//! Blocks (operator, 2026-11-12): `parse_block` reads a getter's body, lines separated by `\n`: `name = expr` lines define
+//! LOCALS (visible to the later lines of the block only, never stored), the last line is the value; a parenthesised block
+//! `(a = 1\n a + 1)` is one arm of a folded getter. ch.py's 64-node / 400-character caps are intentionally NOT kept: an
+//! evaluation has a step budget instead (`Budget`), a reasoned null when it runs out.
 
 use std::collections::HashMap;
 use std::sync::Arc as Rc;
 
-pub const EXPR_MAX: usize = 400;
-pub const NODES_MAX: usize = 64;
 pub const VEC_MAX: usize = 8192;
+/// The parser's nesting depth and the evaluator's (stack safety, not a size cap: a chain of `a + b + c ...` is flat).
+const NEST_MAX: usize = 64;
+const EVAL_DEPTH_MAX: usize = 256;
+
+// ---- the evaluation budget -------------------------------------------------------------------------------------------
+
+/// Steps an evaluation may take before it is a reasoned null (`error: budget exceeded (N steps)`). A THRESHOLD the operator
+/// still has to approve. Overridden by the env MEMBRANE_EVAL_BUDGET. All accounting lives in `Budget`.
+pub const DEFAULT_EVAL_BUDGET: u64 = 10000;
+
+thread_local! { static BUDGET_OVERRIDE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) }; }
+
+/// Pin the budget on this thread (tests); None goes back to the env / default.
+pub fn set_eval_budget(n: Option<u64>) { BUDGET_OVERRIDE.with(|o| o.set(n)); }
+
+/// The budget an evaluation starts with: the thread's override, else MEMBRANE_EVAL_BUDGET, else the default.
+pub fn eval_budget() -> u64 {
+    if let Some(n) = BUDGET_OVERRIDE.with(|o| o.get()) { return n; }
+    static ENV: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *ENV.get_or_init(|| std::env::var("MEMBRANE_EVAL_BUDGET").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|n| *n > 0).unwrap_or(DEFAULT_EVAL_BUDGET))
+}
+
+/// The one place an evaluation's cost is counted: `charge` a step, ask if it is `exceeded`, say the `reason`. (The only thing
+/// to swap if the budget ever becomes time-based.)
+#[derive(Debug)]
+pub struct Budget { used: u64, limit: u64 }
+
+impl Budget {
+    pub fn new() -> Budget { Budget { used: 0, limit: eval_budget() } }
+    pub fn charge(&mut self, n: u64) -> Result<(), Err> {
+        self.used = self.used.saturating_add(n);
+        if self.exceeded() { Err(self.reason()) } else { Ok(()) }
+    }
+    pub fn exceeded(&self) -> bool { self.used > self.limit }
+    pub fn reason(&self) -> Err { format!("budget exceeded ({} steps)", self.limit) }
+}
+
+/// What one evaluation carries: its budget, its depth, and (when asked) the locals it bound, in order.
+struct Meter { b: Budget, depth: usize, locals: Option<Vec<(String, V)>> }
 
 #[derive(Clone, Debug)]
 pub enum V {
@@ -54,6 +94,33 @@ pub enum Node {
     Comp(Box<Node>, String, Box<Node>, Option<Box<Node>>),
     /// `a if cond else b` (then, cond, else)
     If(Box<Node>, Box<Node>, Box<Node>),
+    /// a block's local: `name = value` then the rest of the block, where `name` is bound
+    Let(String, Box<Node>, Box<Node>),
+}
+
+impl Node {
+    /// The children, taken out (what `Drop` walks with a stack, so a deep expression never overflows it).
+    fn take_children(&mut self, out: &mut Vec<Node>) {
+        let mut b = |x: &mut Box<Node>| out.push(std::mem::replace(&mut **x, Node::Const(V::None)));
+        match self {
+            Node::Const(_) | Node::Name(_) => {}
+            Node::List(v) | Node::And(v) | Node::Or(v) | Node::Call(_, v) => out.extend(v.drain(..)),
+            Node::Dict(v) => out.extend(v.drain(..).map(|(_, n)| n)),
+            Node::Attr(a, _) | Node::Neg(a) | Node::Not(a) => b(a),
+            Node::Index(a, c) | Node::Bin(_, a, c) | Node::Let(_, a, c) => { b(a); b(c); }
+            Node::Compare(a, ops) => { b(a); out.extend(ops.drain(..).map(|(_, n)| n)); }
+            Node::Comp(e, _, i, c) => { b(e); b(i); if let Some(c) = c { b(c); } }
+            Node::If(a, c, d) => { b(a); b(c); b(d); }
+        }
+    }
+}
+
+impl Drop for Node {
+    fn drop(&mut self) {
+        let mut stack: Vec<Node> = vec![];
+        self.take_children(&mut stack);
+        while let Some(mut n) = stack.pop() { n.take_children(&mut stack); }
+    }
 }
 
 pub type Err = String;
@@ -63,12 +130,13 @@ pub type Err = String;
 #[derive(Clone, Debug, PartialEq)]
 enum Tok { Int(i64), Float(f64), Str(String), Name(String), P(&'static str), End }
 
-fn lex(s: &str) -> Result<Vec<Tok>, Err> {
+fn lex(s: &str, block: bool) -> Result<Vec<Tok>, Err> {
     let c: Vec<char> = s.chars().collect();
     let mut i = 0;
     let mut out = Vec::new();
     while i < c.len() {
         let ch = c[i];
+        if ch == '\n' && block { out.push(Tok::P(";")); i += 1; continue; }
         if ch.is_whitespace() { i += 1; continue; }
         if ch.is_ascii_digit() || (ch == '.' && i + 1 < c.len() && c[i + 1].is_ascii_digit()) {
             let st = i;
@@ -139,7 +207,19 @@ fn lex(s: &str) -> Result<Vec<Tok>, Err> {
 
 // ---- parser (Python's precedence) -------------------------------------------------------------
 
-struct P { t: Vec<Tok>, i: usize, nodes: usize }
+struct P { t: Vec<Tok>, i: usize, depth: usize, block: bool }
+
+/// Names a local may not take: the builtins and host functions, `this`/`x`/`clock`, the constants and the pronouns.
+/// (keep in step with `call`: a test reads its arms)
+pub const RESERVED: &[&str] = &[
+    "Int", "Float", "Num", "Text", "Bool", "List", "Dict", "None", "True", "False", "this", "x", "clock",
+    "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words",
+    "join", "head", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
+    "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop",
+    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun",
+    "it", "that", "they", "them", "these", "those", "he", "him", "she", "her",
+    "and", "or", "not", "in", "is", "if", "else", "lambda", "for", "await", "yield",
+];
 
 const KEYWORDS: &[&str] = &["and", "or", "not", "in", "is", "if", "else", "lambda", "for", "await", "yield"];
 
@@ -151,9 +231,18 @@ impl P {
     fn expect(&mut self, p: &str) -> Result<(), Err> {
         if self.is_p(p) { self.next(); Ok(()) } else { Err(format!("not an expression: expected {:?}", p)) }
     }
-    fn n(&mut self, k: usize) { self.nodes += k; }
+    fn nest(&mut self) -> Result<(), Err> {
+        self.depth += 1;
+        if self.depth > NEST_MAX { Err(format!("not an expression: nested more than {} deep", NEST_MAX)) } else { Ok(()) }
+    }
 
     fn expr(&mut self) -> Result<Node, Err> {
+        self.nest()?;
+        let r = self.expr_inner();
+        self.depth -= 1;
+        r
+    }
+    fn expr_inner(&mut self) -> Result<Node, Err> {
         if self.is_kw("lambda") || self.is_kw("await") || self.is_kw("yield") { return Err("not allowed in an expression: Lambda".into()); }
         let e = self.or_test()?;
         if !self.is_kw("if") { return Ok(e); }
@@ -162,7 +251,6 @@ impl P {
         if !self.is_kw("else") { return Err("not an expression: `if` needs its `else`".into()); }
         self.next();
         let other = self.expr()?;
-        self.n(3);
         Ok(Node::If(Box::new(e), Box::new(cond), Box::new(other)))
     }
     fn or_test(&mut self) -> Result<Node, Err> {
@@ -170,7 +258,6 @@ impl P {
         if !self.is_kw("or") { return Ok(a); }
         let mut v = vec![a];
         while self.is_kw("or") { self.next(); v.push(self.and_test()?); }
-        self.n(2);
         Ok(Node::Or(v))
     }
     fn and_test(&mut self) -> Result<Node, Err> {
@@ -178,11 +265,10 @@ impl P {
         if !self.is_kw("and") { return Ok(a); }
         let mut v = vec![a];
         while self.is_kw("and") { self.next(); v.push(self.not_test()?); }
-        self.n(2);
         Ok(Node::And(v))
     }
     fn not_test(&mut self) -> Result<Node, Err> {
-        if self.is_kw("not") { self.next(); let o = self.not_test()?; self.n(2); return Ok(Node::Not(Box::new(o))); }
+        if self.is_kw("not") { self.next(); self.nest()?; let o = self.not_test(); self.depth -= 1; return Ok(Node::Not(Box::new(o?))); }
         self.comparison()
     }
     fn comp_op(&mut self) -> Result<Option<Cmp>, Err> {
@@ -202,9 +288,8 @@ impl P {
     fn comparison(&mut self) -> Result<Node, Err> {
         let a = self.arith()?;
         let mut ops = Vec::new();
-        while let Some(c) = self.comp_op()? { let b = self.arith()?; self.n(1); ops.push((c, b)); }
+        while let Some(c) = self.comp_op()? { let b = self.arith()?; ops.push((c, b)); }
         if ops.is_empty() { return Ok(a); }
-        self.n(1);
         Ok(Node::Compare(Box::new(a), ops))
     }
     fn arith(&mut self) -> Result<Node, Err> {
@@ -213,7 +298,6 @@ impl P {
             let op = if self.is_p("+") { Op::Add } else if self.is_p("-") { Op::Sub } else { break };
             self.next();
             let b = self.term()?;
-            self.n(2);
             a = Node::Bin(op, Box::new(a), Box::new(b));
         }
         Ok(a)
@@ -226,13 +310,12 @@ impl P {
                      else { break };
             self.next();
             let b = self.factor()?;
-            self.n(2);
             a = Node::Bin(op, Box::new(a), Box::new(b));
         }
         Ok(a)
     }
     fn factor(&mut self) -> Result<Node, Err> {
-        if self.is_p("-") { self.next(); let o = self.factor()?; self.n(2); return Ok(Node::Neg(Box::new(o))); }
+        if self.is_p("-") { self.next(); self.nest()?; let o = self.factor(); self.depth -= 1; return Ok(Node::Neg(Box::new(o?))); }
         if self.is_p("+") || self.is_p("~") { return Err("not allowed in an expression: UnaryOp".into()); }
         let a = self.primary()?;
         if self.is_p("**") { return Err("not allowed in an expression: BinOp".into()); }
@@ -244,7 +327,7 @@ impl P {
             if self.is_p(".") {
                 self.next();
                 match self.next() {
-                    Tok::Name(n) => { self.n(2); a = Node::Attr(Box::new(a), n); }
+                    Tok::Name(n) => { a = Node::Attr(Box::new(a), n); }
                     _ => return Err("not an expression: attribute".into()),
                 }
             } else if self.is_p("(") {
@@ -260,14 +343,12 @@ impl P {
                     if !self.is_p(")") { self.expect(",")?; }
                 }
                 self.next();
-                self.n(1);
                 a = Node::Call(f, args);
             } else if self.is_p("[") {
                 self.next();
                 let idx = self.expr()?;
                 if self.is_p(":") { return Err("slices are not allowed in an expression: use head / pluck".into()); }
                 self.expect("]")?;
-                self.n(1);
                 a = Node::Index(Box::new(a), Box::new(idx));
             } else {
                 break;
@@ -277,25 +358,28 @@ impl P {
     }
     fn atom(&mut self) -> Result<Node, Err> {
         match self.next() {
-            Tok::Int(v) => { self.n(1); Ok(Node::Const(V::Int(v))) }
-            Tok::Float(v) => { self.n(1); Ok(Node::Const(V::Float(v))) }
+            Tok::Int(v) => { Ok(Node::Const(V::Int(v))) }
+            Tok::Float(v) => { Ok(Node::Const(V::Float(v))) }
             Tok::Str(s) => {
                 let mut s = s;
                 while let Tok::Str(more) = self.peek().clone() { self.next(); s.push_str(&more); }
-                self.n(1);
                 Ok(Node::Const(V::Str(s)))
             }
             Tok::Name(n) => {
                 match n.as_str() {
-                    "True" => { self.n(1); Ok(Node::Const(V::Bool(true))) }
-                    "False" => { self.n(1); Ok(Node::Const(V::Bool(false))) }
-                    "None" => { self.n(1); Ok(Node::Const(V::None)) }
+                    "True" => { Ok(Node::Const(V::Bool(true))) }
+                    "False" => { Ok(Node::Const(V::Bool(false))) }
+                    "None" => { Ok(Node::Const(V::None)) }
                     k if KEYWORDS.contains(&k) => Err(format!("not an expression: {:?}", k)),
-                    _ => { self.n(2); Ok(Node::Name(n)) }
+                    _ => { Ok(Node::Name(n)) }
                 }
             }
             Tok::P("(") => {
-                if self.is_p(")") { self.next(); self.n(2); return Ok(Node::List(vec![])); }
+                if self.block {
+                    while self.is_p(";") { self.next(); }
+                    if self.at_local() { let b = self.block_body()?; self.expect(")")?; return Ok(b); }
+                }
+                if self.is_p(")") { self.next(); return Ok(Node::List(vec![])); }
                 let first = self.expr()?;
                 if self.is_p(")") { self.next(); return Ok(first); }
                 let mut v = vec![first];
@@ -305,7 +389,6 @@ impl P {
                     v.push(self.expr()?);
                 }
                 self.expect(")")?;
-                self.n(2);
                 Ok(Node::List(v))
             }
             Tok::P("[") => {
@@ -321,14 +404,12 @@ impl P {
                         let iter = self.or_test()?;
                         let cond = if self.is_kw("if") { self.next(); Some(Box::new(self.or_test()?)) } else { None };
                         self.expect("]")?;
-                        self.n(4);
                         let elt = v.pop().unwrap();
                         return Ok(Node::Comp(Box::new(elt), var, Box::new(iter), cond));
                     }
                     if !self.is_p("]") { self.expect(",")?; }
                 }
                 self.next();
-                self.n(2);
                 Ok(Node::List(v))
             }
             Tok::P("{") => {
@@ -338,12 +419,11 @@ impl P {
                     if !self.is_p(":") { return Err("not allowed in an expression: Set".into()); }
                     self.next();
                     let val = self.expr()?;
-                    let key = match k { Node::Const(V::Str(s)) => s, _ => return Err("a dict's keys are literal strings".into()) };
+                    let key = match &k { Node::Const(V::Str(s)) => s.clone(), _ => return Err("a dict's keys are literal strings".into()) };
                     v.push((key, val));
                     if !self.is_p("}") { self.expect(",")?; }
                 }
                 self.next();
-                self.n(1);
                 Ok(Node::Dict(v))
             }
             t => Err(format!("not an expression: unexpected {:?}", t)),
@@ -351,32 +431,57 @@ impl P {
     }
 }
 
-pub fn parse(src: &str) -> Result<Node, Err> { parse_scaled(src, 1) }
+/// A plain expression (a setter's value or condition, a vector read): no blocks.
+pub fn parse(src: &str) -> Result<Node, Err> { parse_with(src, false) }
 
-/// `parse` with the caps times `scale`: a getter's arms are each held to the caps, and folded into one expression
-/// (syntax.rs fold_arms) that may be that many times as long.
-pub fn parse_scaled(src: &str, scale: usize) -> Result<Node, Err> {
-    let (chars, nodes) = (EXPR_MAX * scale + 40 * (scale - 1), NODES_MAX * scale + 4 * (scale - 1));
-    let toks = lex(src)?;
-    // the character cap is for logic: a string literal's text (a SQL query, a header) is one node, not counted here
-    let quoted: usize = toks.iter().map(|t| if let Tok::Str(x) = t { x.chars().count() } else { 0 }).sum();
-    if src.chars().count().saturating_sub(quoted) > chars { return Err(format!("an expression is at most {} characters (string literals not counted): name a part of it as a getter on the entity", EXPR_MAX)); }
-    let mut p = P { t: toks, i: 0, nodes: 0 };
-    let e = p.expr()?;
+/// A getter's body: `name = expr` lines (locals), then the value; lines are separated by `\n`.
+pub fn parse_block(src: &str) -> Result<Node, Err> { parse_with(src, true) }
+
+fn parse_with(src: &str, block: bool) -> Result<Node, Err> {
+    let toks = lex(src, block)?;
+    let mut p = P { t: toks, i: 0, depth: 0, block };
+    let e = if block { p.block_body()? } else { p.expr()? };
     if *p.peek() != Tok::End { return Err("not an expression: trailing input".into()); }
-    if p.nodes > nodes { return Err(format!("an expression is at most {} nodes: name a part of it as a getter on the entity (the language has no local variables)", NODES_MAX)); }
     Ok(e)
+}
+
+impl P {
+    /// at `name =` (an assignment, not `==`): the start of a local line
+    fn at_local(&self) -> bool {
+        matches!(self.peek(), Tok::Name(_)) && matches!(self.t.get(self.i + 1), Some(Tok::P("=")))
+    }
+    /// locals, then the value: `(name = expr ;)* expr`
+    fn block_body(&mut self) -> Result<Node, Err> {
+        let mut lets: Vec<(String, Node)> = vec![];
+        loop {
+            while self.is_p(";") { self.next(); }
+            if !self.at_local() { break; }
+            let name = match self.next() { Tok::Name(n) => n, _ => unreachable!() };
+            if KEYWORDS.contains(&name.as_str()) || ["True", "False", "None"].contains(&name.as_str()) { return Err(format!("not a name for a local: {:?}", name)); }
+            self.next();
+            let e = self.expr()?;
+            if !self.is_p(";") { return Err(format!("not an expression: the local `{}` is one line, then a new line", name)); }
+            lets.push((name, e));
+        }
+        if matches!(self.peek(), Tok::End) || self.is_p(")") {
+            return Err(if lets.is_empty() { "not an expression: empty".into() } else { "a block ends with its value: its last line is not a local".into() });
+        }
+        let mut node = self.expr()?;
+        while self.is_p(";") { self.next(); }
+        while let Some((name, v)) = lets.pop() { node = Node::Let(name, Box::new(v), Box::new(node)); }
+        Ok(node)
+    }
 }
 
 pub struct Cache { m: HashMap<String, Rc<Result<Node, Err>>> }
 
 impl Cache {
     pub fn new() -> Self { Cache { m: HashMap::new() } }
-    pub fn get(&mut self, src: &str) -> Rc<Result<Node, Err>> { self.get_scaled(src, 1) }
-    pub fn get_scaled(&mut self, src: &str, scale: usize) -> Rc<Result<Node, Err>> {
+    /// Parsed as a block (a getter's body); an ordinary expression is a block of one line.
+    pub fn get(&mut self, src: &str) -> Rc<Result<Node, Err>> {
         if let Some(h) = self.m.get(src) { return h.clone(); }
         if self.m.len() > 4096 { self.m.clear(); }
-        let r = Rc::new(parse_scaled(src, scale.max(1)));
+        let r = Rc::new(parse_block(src));
         self.m.insert(src.to_string(), r.clone());
         r
     }
@@ -805,21 +910,109 @@ fn kind_of(v: &V) -> &'static str {
               V::List(_) => "list", V::Dict(_) => "dict", V::Ent(_) => "entity" }
 }
 
+/// Evaluate within the step budget (`Budget`): over it, the error is `budget exceeded (N steps)`.
 pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err> {
+    ev(n, env, w, &mut Meter { b: Budget::new(), depth: 0, locals: None })
+}
+
+/// `eval`, and the locals the block bound while it ran (in order): what `Why` prints.
+pub fn eval_locals(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> (Result<V, Err>, Vec<(String, V)>) {
+    let mut m = Meter { b: Budget::new(), depth: 0, locals: Some(vec![]) };
+    let r = ev(n, env, w, &mut m);
+    (r, m.locals.unwrap_or_default())
+}
+
+fn ev(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    m.b.charge(1)?;
+    if m.depth >= EVAL_DEPTH_MAX { return Err(format!("nested more than {} deep", EVAL_DEPTH_MAX)); }
+    m.depth += 1;
+    let r = ev_node(n, env, w, m);
+    m.depth -= 1;
+    r
+}
+
+fn ev_node(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    // each arm with real work is its own function: this frame stays small, so a deep expression costs little stack
     match n {
         Node::Const(v) => Ok(v.clone()),
         Node::Name(s) => match env.get(s) { Some(v) => Ok(v.clone()), None => pronoun(s, w) },
-        Node::List(v) => Ok(V::List(v.iter().map(|x| eval(x, env, w)).collect::<Result<_, _>>()?)),
-        Node::Dict(v) => Ok(V::Dict(v.iter().map(|(k, x)| Ok((k.clone(), eval(x, env, w)?))).collect::<Result<_, Err>>()?)),
-        Node::Attr(b, a) => match eval(b, env, w)? {
-            V::Ent(e) => { if a.starts_with('_') { return Err(format!("no attribute {:?}", a)); } Ok(w.attr(&e, a)) }
-            V::Nil(r) => Ok(V::Nil(r)),
-            V::None => Ok(V::Nil(format!("absent: .{} of an absent value", a))),
-            _ => Err("attributes are read on entities only".into()),
-        },
-        Node::Index(b, i) => {
-            let base = eval(b, env, w)?;
-            let idx = eval(i, env, w)?;
+        Node::List(_) | Node::Dict(_) | Node::And(_) | Node::Or(_) | Node::Not(_) | Node::If(..) => ev_seq(n, env, w, m),
+        Node::Attr(b, a) => ev_attr(b, a, env, w, m),
+        Node::Index(b, i) => ev_index(b, i, env, w, m),
+        Node::Bin(..) => ev_bin(n, env, w, m),
+        Node::Let(..) => ev_let(n, env, w, m),
+        Node::Neg(a) => ev_neg(a, env, w, m),
+        Node::Compare(a, ops) => ev_compare(a, ops, env, w, m),
+        Node::Comp(elt, var, iter, cond) => ev_comp(elt, var, iter, cond, env, w, m),
+        Node::Call(f, args) => ev_call(f, args, env, w, m),
+    }
+}
+
+#[inline(never)]
+fn ev_seq(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    match n {
+        Node::List(v) => Ok(V::List(v.iter().map(|x| ev(x, env, w, m)).collect::<Result<_, _>>()?)),
+        Node::Dict(v) => Ok(V::Dict(v.iter().map(|(k, x)| Ok((k.clone(), ev(x, env, w, m)?))).collect::<Result<_, Err>>()?)),
+        Node::Not(a) => Ok(V::Bool(!truthy(&ev(a, env, w, m)?))),
+        Node::And(v) => { let mut last = V::Bool(true); for x in v { last = ev(x, env, w, m)?; if !truthy(&last) { return Ok(last); } } Ok(last) }
+        Node::Or(v) => { let mut last = V::Bool(false); for x in v { last = ev(x, env, w, m)?; if truthy(&last) { return Ok(last); } } Ok(last) }
+        Node::If(a, c, b) => if truthy(&ev(c, env, w, m)?) { ev(a, env, w, m) } else { ev(b, env, w, m) },
+        _ => unreachable!(),
+    }
+}
+
+#[inline(never)]
+fn ev_attr(b: &Node, a: &String, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    match ev(b, env, w, m)? {
+        V::Ent(e) => { if a.starts_with('_') { return Err(format!("no attribute {:?}", a)); } Ok(w.attr(&e, a)) }
+        V::Nil(r) => Ok(V::Nil(r)),
+        V::None => Ok(V::Nil(format!("absent: .{} of an absent value", a))),
+        _ => Err("attributes are read on entities only".into()),
+    }
+}
+
+/// a long `a + b + c ...` is a deep left spine: walk it as a loop, not by recursion
+#[inline(never)]
+fn ev_bin(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    let mut ops: Vec<(Op, &Node)> = vec![];
+    let mut cur = n;
+    while let Node::Bin(op, a, b) = cur { ops.push((*op, &**b)); cur = &**a; }
+    let mut acc = ev(cur, env, w, m)?;
+    for (op, b) in ops.into_iter().rev() {
+        m.b.charge(1)?;
+        let y = ev(b, env, w, m)?;
+        acc = arith(op, &acc, &y)?;
+    }
+    Ok(acc)
+}
+
+#[inline(never)]
+fn ev_let(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    let mut env2 = env.clone();
+    let mut cur = n;
+    while let Node::Let(name, val, rest) = cur {
+        let v = ev(val, &env2, w, m)?;
+        if let Some(l) = m.locals.as_mut() { l.push((name.clone(), v.clone())); }
+        env2.insert(name.clone(), v);
+        cur = &**rest;
+    }
+    ev(cur, &env2, w, m)
+}
+
+#[inline(never)]
+fn ev_neg(a: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    match ev(a, env, w, m)? {
+        V::List(l) => Ok(floats(vec_of(&V::List(l))?.into_iter().map(|x| -x).collect())),
+        V::Int(i) => Ok(V::Int(-i)),
+        V::Float(f) => Ok(V::Float(-f)),
+        v => if let Some(n) = null_of(&[&v], "negation") { Ok(n) } else { Err(format!("not a number: {:?}", v)) },
+    }
+}
+
+#[inline(never)]
+fn ev_index(b: &Node, i: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+            let base = ev(b, env, w, m)?;
+            let idx = ev(i, env, w, m)?;
             match (base, idx) {
                 (V::Nil(r), _) => Ok(V::Nil(r)),
                 (_, V::Nil(r)) => Ok(V::Nil(r)),
@@ -834,20 +1027,12 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
                 (b, i) => Err(format!("cannot index a {} by a {}", kind_of(&b), kind_of(&i))),
             }
         }
-        Node::Bin(op, a, b) => { let x = eval(a, env, w)?; let y = eval(b, env, w)?; arith(*op, &x, &y) }
-        Node::Neg(a) => match eval(a, env, w)? {
-            V::List(l) => Ok(floats(vec_of(&V::List(l))?.into_iter().map(|x| -x).collect())),
-            V::Int(i) => Ok(V::Int(-i)),
-            V::Float(f) => Ok(V::Float(-f)),
-            v => if let Some(n) = null_of(&[&v], "negation") { Ok(n) } else { Err(format!("not a number: {:?}", v)) },
-        },
-        Node::Not(a) => Ok(V::Bool(!truthy(&eval(a, env, w)?))),
-        Node::And(v) => { let mut last = V::Bool(true); for x in v { last = eval(x, env, w)?; if !truthy(&last) { return Ok(last); } } Ok(last) }
-        Node::Or(v) => { let mut last = V::Bool(false); for x in v { last = eval(x, env, w)?; if truthy(&last) { return Ok(last); } } Ok(last) }
-        Node::Compare(a, ops) => {
-            let mut left = eval(a, env, w)?;
+
+#[inline(never)]
+fn ev_compare(a: &Node, ops: &[(Cmp, Node)], env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+            let mut left = ev(a, env, w, m)?;
             for (op, rn) in ops {
-                let right = eval(rn, env, w)?;
+                let right = ev(rn, env, w, m)?;
                 let ok = match op {
                     Cmp::Eq => Some(py_eq(&left, &right)),
                     Cmp::Ne => Some(!py_eq(&left, &right)),
@@ -863,20 +1048,23 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
             }
             Ok(V::Bool(true))
         }
-        Node::If(a, c, b) => if truthy(&eval(c, env, w)?) { eval(a, env, w) } else { eval(b, env, w) },
-        Node::Comp(elt, var, iter, cond) => {
-            let xs = match eval(iter, env, w)? { V::List(l) => l, V::None | V::Nil(_) => vec![], v => return Err(format!("can't iterate over {:?}", v)) };
+
+#[inline(never)]
+fn ev_comp(elt: &Node, var: &String, iter: &Node, cond: &Option<Box<Node>>, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+            let xs = match ev(iter, env, w, m)? { V::List(l) => l, V::None | V::Nil(_) => vec![], v => return Err(format!("can't iterate over {:?}", v)) };
             let mut out = Vec::new();
             let mut env2 = env.clone();
             for x in xs {
                 env2.insert(var.clone(), x);
-                if let Some(c) = cond { if !truthy(&eval(c, &env2, w)?) { continue; } }
-                out.push(eval(elt, &env2, w)?);
+                if let Some(c) = cond { if !truthy(&ev(c, &env2, w, m)?) { continue; } }
+                out.push(ev(elt, &env2, w, m)?);
             }
             Ok(V::List(out))
         }
-        Node::Call(f, args) => {
-            let a = args.iter().map(|x| eval(x, env, w)).collect::<Result<Vec<_>, _>>()?;
+
+#[inline(never)]
+fn ev_call(f: &String, args: &[Node], env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+            let a = args.iter().map(|x| ev(x, env, w, m)).collect::<Result<Vec<_>, _>>()?;
             let any_null = a.iter().any(nullish);
             let r = call(f, a.clone(), w);
             match r {
@@ -884,8 +1072,6 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
                 other => other.map_err(|e| if e.starts_with(f.as_str()) || e.contains("built-ins") { e } else { format!("{}: {}", f, e) }),
             }
         }
-    }
-}
 
 // ---- JSON <-> values -----------------------------------------------------------------------------
 
@@ -917,4 +1103,24 @@ pub fn to_json(v: &V) -> Result<serde_json::Value, Err> {
         V::Dict(d) => J::Object(d.iter().map(|(k, x)| Ok((k.clone(), to_json(x)?))).collect::<Result<_, Err>>()?),
         V::Ent(e) => J::Object(std::iter::once(("$ref".to_string(), J::String(e.clone()))).collect()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_builtin_is_reserved() {
+        let src = include_str!("expr.rs");
+        let a = src.find("fn call(f: &str").unwrap();
+        let body = &src[a..];
+        for line in body.lines().take(300) {
+            let t = line.trim_start();
+            if !t.starts_with('"') || !t.contains("=>") { continue; }
+            let head = &t[..t.find("=>").unwrap()];
+            for name in head.split('|').map(|p| p.trim().trim_matches('"')) {
+                if name.chars().all(|c| c.is_alphanumeric() || c == '_') && !name.is_empty() {
+                    assert!(super::RESERVED.contains(&name), "builtin {name:?} is missing from RESERVED");
+                }
+            }
+        }
+    }
 }

@@ -44,11 +44,39 @@ them empty (see the router pack's `router-rungs` / `router-minds`).
 | `urldecode(s)` | `%20` and `+` in a query value: no string primitive can say it |
 
 ## Conventions (the traps that bit)
-- An expression has at most 64 nodes: split into named getters, prefixed by the family (`st_`, `v_`).
+- There is no size cap on an expression (the old 64-node / 400-character caps are gone). Name a part with a LOCAL (below) when it
+  reads better; an evaluation has a step budget instead (see Blocks and locals).
 - Never name a getter or a dict key after another getter in the same class (the engine orders getters by finding names, strings
   excepted only as the last argument of a call); never name a property `this`.
 - `concat` joins lists (`+` is vector addition); there is no `int()` yet; `clock` is epoch seconds.
 - A class a shipped pack declares is owned: other packs `IMPORT` it.
+
+## Blocks and locals (getters and setters)
+A bare line `name = expr` (no dotted target; a write always has one, like `this.x = ..`) defines a LOCAL:
+- visible to the LATER lines of its own block only; never a property, never stored, never readable as `this.name`, gone when the block ends;
+- a getter's body is a block: locals first (one line each), the LAST line is the value (cached on the entity as before). Each arm is
+  its own block (`X.f getter WHEN c:` with its lines indented below, or `WHEN c:` / `ELSE:` under `X.f getter:` with the lines below);
+  one arm cannot see another arm's locals. Example:
+  ```
+  Box.total getter:
+    base = this.w * this.h
+    tax = base / 10
+    base + tax
+  ```
+- a setter's body: locals feed the writes (and FOR loops) below them, per branch; a local made inside a FOR ends with it;
+- a local that holds a reasoned null passes it on like any value; `Why(...)` (`why_chain`) lists the locals of the getter evaluation it explains
+  (`locals: {name: value}`, a null shows its reason);
+- the loader refuses a local that shadows a property of `this` (a name the class reads or writes as `this.<name>`, or a setter trigger),
+  a getter of the class, a builtin or reserved name (`len`, `recall`, `this`, `clock`, a pronoun ...), a loop name or an earlier local;
+  a local twice in one block is refused too; a block that ends in a local (no value) is refused; a local goes before the value.
+No other syntax was added (no `;`, no multi-line local).
+
+## Limits: the step budget (a dial)
+The old caps (an expression at most 64 nodes / 400 characters) are removed from the native VM; `membrane/ch.py` keeps them for its own
+triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is a reasoned null `error: budget exceeded (N steps)` (a getter's
+`Why` shows it, a receipt says where), never a hang or a panic. The default is 10000 steps (`DEFAULT_EVAL_BUDGET`), overridden by the env
+`MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
+evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
 
 ## The contracts are executable
 `native/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are
@@ -91,6 +119,7 @@ null alone, `Never` for the element of `[]`. Rules (they MODEL the null semantic
   null when the two casts together cover `x`'s kinds; `x == None` is a null test (`Bool`);
 - builtins have signatures (`len` is `Int` whatever it gets; `words` is `List(Text)`; `instances('Boot')` is `List(Entity(Boot))`;
   host functions `stat sql read ...` are `Any`); `Entity(C).p` is `C.p`'s getter type, or `Any`;
+- a block's locals are typed in order: a local has the type of its value inside the lines below it (getters and setters alike).
 - not modelled: dict value types (`Dict` is a bare `Dict`), flow-sensitivity, the host functions' results.
 
 Findings are what is certainly wrong: text added to a number, an index or attribute on something that cannot take it, a builtin

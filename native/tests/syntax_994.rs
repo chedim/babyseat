@@ -52,7 +52,7 @@ fn mistakes_are_named_with_their_line() {
     assert!(err("Task.status on-setter a:\n  WHEN this.x == 1: this.y = 1\n  WHEN this.x == 2: this.y = 2\n").contains("line 3: a second WHEN"));
     assert!(err("Task.status on-setter a:\n  ELSE: this.y = 1\n").contains("line 2: ELSE must follow a WHEN"));
     assert!(err("Task.status on-setter a:\n  WHEN this.x == 1 this.y = 1\n").contains("needs a `:`"));
-    assert!(err("Task.status on-setter a:\n  WHEN this.x == 1: status = 1\n").contains("write `this.status`"));
+    assert!(err("Task.status on-setter a:\n  WHEN this.x == 1: status = 1\n").contains("writes nothing"), "a bare `status = 1` is a local now, and a setter of locals only writes nothing");
     assert!(err("Task.status on-setter a:\n  WHEN this.x == 1: this.y == 1\n").contains("expected `<target>.<field> = <expr>`"));
     assert!(err("Task.status on-setter:\n  this.y = 1\n").contains("expected `<Class>.<field> on-setter <name>:`"));
     assert!(err("Task.status on-setter a:\n").contains("no body"));

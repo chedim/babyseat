@@ -49,7 +49,9 @@ A trigger is an entity of class `Trigger`: `WHEN <watchers> WHERE <atoms>: <targ
   those only for a call's arguments (`_writable`, `_call_envelope`).
 - **Expressions.** A small safe language: arithmetic, comparisons, and/or/not, `x.prop`,
   `dot`, `norm`, `distance`, `unit`, `abs`, `min`, `max`, `prop`. The caps are
-  `EXPR_MAX` 400 characters, `NODES_MAX` 64 AST nodes and `VEC_MAX` 8192.
+  `VEC_MAX` 8192. The old `EXPR_MAX` 400 / `NODES_MAX` 64 caps are gone from the native VM (ch.py parity for them is intentionally dropped): an
+  evaluation has a step budget (`DEFAULT_EVAL_BUDGET` 10000, env `MEMBRANE_EVAL_BUDGET`; over it: the reasoned null `error: budget exceeded (N steps)`).
+  A getter body is a block of locals (`name = expr` lines) ending in its value (docs/c1f-stdlib.md).
 - **Denied properties.** No trigger may write `command`, `owner`, `owner_sig`, `when`,
   `where`, `write`, `shadow` or `predicted`.
 - **Index.** `changed` triggers are indexed by the property they watch (#957); level

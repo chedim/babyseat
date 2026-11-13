@@ -21,6 +21,11 @@
 //!   `this` is the entity written. A target other than `this` names another entity by an expression
 //!   (`this.goal`). `membrane::llm.call = <expr>` is the LLM call effect.
 //! - Expressions are the VM's expression language (`==`, `and`/`or`/`not`, `in`, `x.prop`, `'a' + b`, `{k: v}`).
+//! - A bare `name = expr` line (no dotted target) is a LOCAL: visible to the LATER lines of its own block, never stored,
+//!   never a property. In a setter it feeds the writes below it (and its FOR loops), per branch. In a getter the lines
+//!   under `X.f getter:` are a block: locals, then the last line is the value; each WHEN arm is its own block
+//!   (`X.f getter WHEN c:` or `WHEN c:` with its lines indented below). A local may not shadow a property of `this`,
+//!   a getter of the class, a builtin, a loop name or an earlier local (the loader refuses it). A local is one line.
 //! - `--` starts a comment outside quotes.
 use crate::fields::{Getter, OnSet, LLM_CALL};
 
@@ -70,6 +75,43 @@ fn assign_eq(s: &str) -> Option<usize> {
 /// The markers of a FOR block in a setter's writes: `(FOR, var, iterable)` ... `(END, "", "")`.
 pub const FOR: &str = "FOR";
 pub const END: &str = "END";
+/// A local in a setter's writes: `(LET, name, expr)`.
+pub const LET: &str = "LET";
+
+fn is_name(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') && !s.chars().next().unwrap().is_ascii_digit()
+}
+
+/// `name = expr` (a bare name, not a dotted target): a local's line.
+fn local_line(s: &str) -> Option<(&str, &str)> {
+    let eq = assign_eq(s)?;
+    let name = s[..eq].trim();
+    if is_name(name) { Some((name, s[eq + 1..].trim())) } else { None }
+}
+
+/// A getter block's text, each line mapped (a local's value, the last line): `FOR` forms become comprehensions.
+fn map_block(expr: &str, at: usize) -> Result<String, String> {
+    let mut out: Vec<String> = vec![];
+    for line in expr.split('\n') {
+        out.push(match local_line(line) { Some((n, v)) => format!("{} = {}", n, for_expr(v, at)?), None => for_expr(line, at)? });
+    }
+    Ok(out.join("\n"))
+}
+
+/// Add a body line to a getter arm: a local before the value, or the value (continued on later lines).
+fn add_line(g: &mut Getter, t: &str, at: usize) -> Result<(), String> {
+    let value_begun = !g.expr.is_empty() && !g.expr.ends_with('\n');
+    if local_line(t).is_some() {
+        if value_begun { return Err(format!("line {}: a local goes before the value of getter {}.{}: `{}`", at, g.cls, g.prop, t)); }
+        g.expr.push_str(t);
+        g.expr.push('\n');
+    } else if g.expr.is_empty() || g.expr.ends_with('\n') {
+        g.expr.push_str(t);
+    } else {
+        g.expr = format!("{} {}", g.expr, t);
+    }
+    Ok(())
+}
 
 /// `FOR v IN it: e` is the list `[e for v in it]` (in getters and in a setter's values alike); nested FORs too.
 pub fn for_expr(s: &str, at: usize) -> Result<String, String> {
@@ -100,6 +142,7 @@ fn statement(s: &str, at: usize) -> Result<W, String> {
     let rhs = for_expr(rhs, at)?;
     let rhs = rhs.as_str();
     if lhs == LLM_CALL { return Ok((LLM_CALL.into(), String::new(), rhs.into())); }
+    if is_name(lhs) { return Ok((LET.into(), lhs.into(), rhs.into())); }    // a local
     let (tgt, field) = lhs.rsplit_once('.').ok_or(format!("line {}: `{}` needs a target: write `this.{}`", at, lhs, lhs))?;
     if tgt.is_empty() || field.is_empty() { return Err(format!("line {}: bad target `{}`", at, lhs)); }
     Ok((tgt.into(), field.into(), rhs.into()))
@@ -182,6 +225,7 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
     }
     // a getter in block form (`X.f getter:` then WHEN / ELSE WHEN / ELSE lines): 0 none yet, 1 after WHEN, 2 after ELSE
     let mut gstate = 0u8;
+    let mut arm_indent = 0usize;       // the indent of the block-form arm line being read: deeper lines are its block
     fn close(out: &mut Vec<OnSet>, branches: &mut Vec<(String, Vec<W>)>) -> Result<(), String> {
         let Some(last) = out.last_mut() else { return Ok(()) };
         if branches.is_empty() { return Err(format!("setter {} has no body", last.name)); }
@@ -226,8 +270,9 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
             continue;
         }
         if in_getter {
-            // the block form, as a setter's: WHEN c: e / ELSE WHEN c: e / ELSE: e under `X.f getter:`
+            // the block form, as a setter's: WHEN c: e / ELSE WHEN c: e / ELSE: e under `X.f getter:` (e may be the lines below)
             let b = line.trim();
+            let indent = line.len() - line.trim_start().len();
             let kw = if b.starts_with("ELSE WHEN ") { Some("ELSE WHEN") } else if b.starts_with("WHEN ") { Some("WHEN") }
                 else if b.starts_with("ELSE:") { Some("ELSE") } else { None };
             if let Some(k) = kw {
@@ -239,7 +284,7 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
                     if cond.is_empty() { return Err(format!("line {}: `{}` has no condition", at, k)); }
                     (Some(cond.to_string()), rest[c + 1..].trim().to_string())
                 };
-                if e.is_empty() { return Err(format!("line {}: `{}` has no value after its `:`", at, k)); }
+                arm_indent = indent;
                 match (k, gstate) {
                     ("WHEN", 0) => {
                         let g = getters.last_mut().unwrap();
@@ -252,9 +297,9 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
                 }
                 continue;
             }
-            if gstate != 0 { return Err(format!("line {}: after a getter's WHEN, only ELSE WHEN / ELSE lines", at)); }
-            let g = getters.last_mut().unwrap();            // a getter's expression continues on indented lines
-            g.expr = format!("{} {}", g.expr, line.trim()).trim().to_string();
+            if gstate != 0 && indent <= arm_indent { return Err(format!("line {}: after a getter's WHEN, only ELSE WHEN / ELSE lines (or the arm's own lines, indented under it)", at)); }
+            let g = getters.last_mut().unwrap();            // a getter's body: locals, then the value (continued on indented lines)
+            add_line(g, b, at)?;
             continue;
         }
         if out.is_empty() { return Err(format!("line {}: indented line before any setter header", at)); }
@@ -313,17 +358,21 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
             }
         }
     }
-    if let Some(s) = out.iter().find(|s| s.writes.is_empty() && s.els.iter().all(|(_, w)| w.is_empty())) {
+    let real = |w: &Vec<W>| w.iter().any(|x| x.0 != FOR && x.0 != END && x.0 != LET);
+    if let Some(s) = out.iter().find(|s| !real(&s.writes) && s.els.iter().all(|(_, w)| !real(w))) {
         return Err(format!("setter {} writes nothing", s.name));
     }
-    if let Some(g) = getters.iter().find(|g| g.expr.is_empty()) { return Err(format!("getter {}.{} has no expression", g.cls, g.prop)); }
-    for g in getters.iter_mut() { g.expr = for_expr(&g.expr, 0).map_err(|e| format!("getter {}.{}: {}", g.cls, g.prop, e))?; }
-    for g in &getters { crate::expr::parse(&g.expr).map_err(|e| format!("getter {}.{}: {}", g.cls, g.prop, e))?; }
-    for (g, (when, at)) in getters.iter().zip(&arms) {          // each arm's condition: the same caps, checked now
+    if let Some(g) = getters.iter().find(|g| g.expr.trim().is_empty()) { return Err(format!("getter {}.{} has no expression", g.cls, g.prop)); }
+    if let Some(g) = getters.iter().find(|g| g.expr.ends_with('\n')) { return Err(format!("getter {}.{}: a block ends with its value: its last line is a local", g.cls, g.prop)); }
+    if let Some(bad) = ['\u{1}', '\r'].iter().find(|c| src.contains(**c)) { return Err(format!("a pack's text holds no control character {:?}", bad)); }
+    for g in getters.iter_mut() { g.expr = map_block(&g.expr, 0).map_err(|e| format!("getter {}.{}: {}", g.cls, g.prop, e))?; }
+    for g in &getters { crate::expr::parse_block(&g.expr).map_err(|e| format!("getter {}.{}: {}", g.cls, g.prop, e))?; }
+    for (g, (when, at)) in getters.iter().zip(&arms) {          // each arm's condition
         if let Some(c) = when { crate::expr::parse(c).map_err(|e| format!("line {}: getter {}.{} WHEN: {}", at, g.cls, g.prop, e))?; }
     }
+    check_locals(&out, &getters)?;
     let folded = fold_arms(getters, arms)?;
-    for g in &folded { crate::expr::parse_scaled(&g.expr, g.arms.max(1)).map_err(|e| format!("getter {}.{}: {}", g.cls, g.prop, e))?; }
+    for g in &folded { crate::expr::parse_block(&g.expr).map_err(|e| format!("getter {}.{}: {}", g.cls, g.prop, e))?; }
     Ok((out, folded))
 }
 
@@ -362,6 +411,7 @@ fn print_writes(out: &mut String, ws: &[W], indent: &str) {
     for (t, p, v) in ws {
         if t == FOR { out.push_str(&format!("{}FOR {} IN {}:\n", ind, p, v)); ind.push_str("  "); }
         else if t == END { ind.truncate(ind.len().saturating_sub(2)); }
+        else if t == LET { out.push_str(&format!("{}{} = {}\n", ind, p, v)); }
         else if t == LLM_CALL { out.push_str(&format!("{}{} = {}\n", ind, LLM_CALL, v)); }
         else { out.push_str(&format!("{}{}.{} = {}\n", ind, t, p, v)); }
     }
@@ -384,4 +434,66 @@ pub fn print(sets: &[OnSet]) -> String {
         }
     }
     out
+}
+
+/// Names a local may not take: the builtins, the engine's names, pronouns, keywords.
+fn reserved(name: &str) -> Option<&'static str> {
+    if crate::expr::RESERVED.contains(&name) { Some("builtin or reserved name") } else { None }
+}
+
+/// The names read or written as `this.<name>` in a text.
+fn this_names(text: &str, out: &mut std::collections::BTreeSet<String>) {
+    for pre in ["this."] {
+        for (i, _) in text.match_indices(pre) {
+            if i > 0 && { let c = text.as_bytes()[i - 1]; c.is_ascii_alphanumeric() || c == b'_' || c == b'.' } { continue; }
+            let name: String = text[i + pre.len()..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            if !name.is_empty() { out.insert(name); }
+        }
+    }
+}
+
+/// A local may not shadow a property of `this`, a getter of the class, a builtin or an earlier local; none twice in a block.
+/// "Properties of this" are the names the class's own text reads or writes as `this.<name>` (and its setters' triggers).
+fn check_locals(setters: &[OnSet], getters: &[Getter]) -> Result<(), String> {
+    let mut props: std::collections::HashMap<String, std::collections::BTreeSet<String>> = Default::default();
+    for g in getters { let e = props.entry(g.cls.clone()).or_default(); e.insert(g.prop.clone()); this_names(&g.expr, e); }
+    for st in setters {
+        let e = props.entry(st.cls.clone()).or_default();
+        e.insert(st.prop.clone());
+        this_names(&st.when, e);
+        for (c, ws) in std::iter::once((&st.when, &st.writes)).chain(st.els.iter().map(|(c, w)| (c, w))) {
+            this_names(c, e);
+            for (t, f, v) in ws { this_names(v, e); if t == "this" || t == "x" { e.insert(f.clone()); } else if t != FOR && t != END && t != LET { this_names(t, e); } }
+        }
+    }
+    let none = std::collections::BTreeSet::new();
+    let refuse = |what: &str, name: &str, why: String| -> Result<(), String> { Err(format!("{}: the local `{}` would shadow {}", what, name, why)) };
+    let check = |what: &str, cls: &str, name: &str, earlier: &[String]| -> Result<(), String> {
+        if earlier.iter().any(|e| e == name) { return Err(format!("{}: the local `{}` is defined twice in a block (it would shadow the earlier one)", what, name)); }
+        if let Some(r) = reserved(name) { return refuse(what, name, format!("a {}", r)); }
+        let p = props.get(cls).unwrap_or(&none);
+        if getters.iter().any(|g| g.cls == cls && g.prop == name) { return refuse(what, name, format!("the getter {}.{}", cls, name)); }
+        if p.contains(name) { return refuse(what, name, format!("the property `this.{}` of {}", name, cls)); }
+        Ok(())
+    };
+    for g in getters {
+        let mut seen: Vec<String> = vec![];
+        let lines: Vec<&str> = g.expr.split('\n').collect();
+        for line in &lines[..lines.len().saturating_sub(1)] {
+            if let Some((n, _)) = local_line(line) { check(&format!("getter {}.{}", g.cls, g.prop), &g.cls, n, &seen)?; seen.push(n.to_string()); }
+        }
+    }
+    for st in setters {
+        for ws in std::iter::once(&st.writes).chain(st.els.iter().map(|(_, w)| w)) {
+            let mut scopes: Vec<Vec<String>> = vec![vec![]];
+            for (t, n, _) in ws {
+                let seen: Vec<String> = scopes.iter().flatten().cloned().collect();
+                let what = format!("{}.{} on-setter {}", st.cls, st.prop, st.name);
+                if t == FOR { scopes.push(vec![]); scopes.last_mut().unwrap().push(n.clone()); }
+                else if t == END { if scopes.len() > 1 { scopes.pop(); } }
+                else if t == LET { check(&what, &st.cls, n, &seen)?; scopes.last_mut().unwrap().push(n.clone()); }
+            }
+        }
+    }
+    Ok(())
 }
