@@ -65,6 +65,18 @@ pub fn eval_time_ms() -> u64 {
     *ENV.get_or_init(|| std::env::var("MEMBRANE_EVAL_TIME_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|n| *n > 0).unwrap_or(DEFAULT_EVAL_TIME_MS))
 }
 
+/// The browser build: std's Instant panics on wasm32-unknown-unknown, so the clock is the host's `Date.now` (milliseconds,
+/// which is all a 10 ms allowance needs; the same import works in a page, a worker and Node).
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+fn real_clock() -> u64 {
+    #[wasm_bindgen::prelude::wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = Date, js_name = now)]
+        fn date_now() -> f64;
+    }
+    (date_now() * 1_000_000.0) as u64
+}
+#[cfg(not(all(target_arch = "wasm32", feature = "wasm")))]
 fn real_clock() -> u64 {
     static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
