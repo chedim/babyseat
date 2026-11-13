@@ -885,3 +885,12 @@ fn a_big_output_comes_back_as_its_first_and_last_8_kb_with_its_size_and_the_full
     assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().len() == 16384 && !t.contains("full output"), "{}", t.len());
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn the_receipt_in_the_reply_echoes_the_run_id() {
+    let (mut run, port) = start("rid", MCP_PACKS, &[]);
+    put(port, "Command:i", "cmd", json!(["echo", "x"]));
+    let (t, _) = put_wait(port, "Command:i", "run", json!({"id": "my-run-7", "args": []}), 20.0);
+    assert_eq!(reply_part(&t, "receipt").unwrap()["id"], json!("my-run-7"), "{t}");
+    assert!(terminate(&mut run));
+}
