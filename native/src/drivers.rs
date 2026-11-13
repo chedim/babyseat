@@ -6,7 +6,7 @@
 //! - Effects are writes the engine runs itself (fields.rs `effect`), off its lock, with a receipt on the entity as
 //!   `<verb>_result` = {id, status, rc, head, ...} and `<verb>_rc` at the next round:
 //!     File:<...>.write  = {id, content, append}     File.move = {id, to}     File.delete = {id}
-//!     Command:<...>.run = {id, args}  (the entity's cmd: an argument list, or a string run by `sh -c`; cwd;
+//!     Command:<...>.run = {id, args}  (the entity's cmd, or the `cmd` in the run value (also stored on the entity): an argument list, or a string run by `sh -c`; cwd;
 //!                                     env_from {VAR: ENV_VAR}: secrets named, read here, never stored)
 //!     Command.stop      = {id}        (kills the running child; its run's receipt says so)
 //! - Reach (the operator): everything the VM's OS user can do. Entity scripts and peers never trigger an effect
@@ -147,7 +147,7 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 if killed { "stopped".into() } else { "nothing was running".into() }, Map::new())));
         }
         ("Command", "run") => {
-            let cmd = props.get("cmd").cloned().unwrap_or(J::Null);
+            let cmd = req.get("cmd").or(props.get("cmd")).cloned().unwrap_or(J::Null);        // `run = {id, cmd}` starts a command in ONE write; else the entity's cmd
             let cwd = props.get("cwd").and_then(|v| v.as_str()).map(|p| resolve(&dir, p)).unwrap_or(dir.clone());
             let env_from: Vec<(String, String)> = props.get("env_from").and_then(|v| v.as_object())
                 .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()).unwrap_or_default();

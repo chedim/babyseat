@@ -950,3 +950,21 @@ fn reactions_list_only_real_changes_not_null_to_null_rebuilds_or_the_consumed_ve
     assert!(rs.iter().any(|r| r["prop"] == "running"), "real changes stay: {t}");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn a_run_value_may_carry_the_cmd_so_one_write_starts_a_command() {
+    let (mut run, port) = start("one", MCP_PACKS, &[]);
+    // ONE write on a Command that does not exist yet: the cmd rides in the run value
+    let (t, e) = put_wait(port, "Command:solo", "run", json!({"id": "o1", "cmd": ["echo", "one", "write"]}), 20.0);
+    assert!(!e, "{t}");
+    assert_eq!(reply_part(&t, "stdout").unwrap_or_else(|| panic!("{t}"))["stdout"].as_str().unwrap().trim(), "one write", "{t}");
+    // the cmd is written on the entity too, so a later run (no cmd in the value) uses it
+    let (c, _) = call(port, "entity_read", json!({"spec": "Command:solo", "prop": "cmd"}));
+    assert_eq!(serde_json::from_str::<J>(&c).unwrap(), json!(["echo", "one", "write"]), "{c}");
+    let (t, _) = put_wait(port, "Command:solo", "run", json!({"id": "o2", "args": ["again"]}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().contains("one write again"), "{t}");
+    // a string cmd runs by sh -c, as before
+    let (t, _) = put_wait(port, "Command:sh1", "run", json!({"id": "s", "cmd": "echo $((1+2))"}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().trim() == "3", "{t}");
+    assert!(terminate(&mut run));
+}

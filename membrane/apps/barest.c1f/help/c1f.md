@@ -216,10 +216,19 @@ seconds. The reply of `entity_write` carries the first and last 8 KB of each str
 -- receipt Command:hello.run_result.stdout = "hi again\n"
 ```
 
+ONE write starts a command: the `cmd` rides in the run value (it is kept on the entity, so later runs may leave it out):
+
+```c1f-run
+-- write Command:solo.run = {"id": "s1", "cmd": ["echo", "one", "write"]}
+-- receipt Command:solo.run_result.stdout = "one write\n"
+```
+
 `File:<name>.write`, `Fetch:<name>.request` and `Store:<name>.run` follow the same shape: write, then read the receipt back.
 
-What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write that starts an effect the `receipt:` (rc, ok, stdout,
-stderr, head) when it has arrived, or `pending: read <entity>.<verb>_result later`; then the `reactions:` (every value the engine wrote in the
+What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write that starts an effect the `receipt:` JSON line (`id`, `status`, `rc`, `ok`, `started`, `finished` as epoch
+seconds, `ms`, `stdout_bytes`, `stderr_bytes`) with a `stdout:` and a `stderr:` line (the whole text as `stdout`, or, past 16 KB, `stdout_head` and `stdout_tail` = the first and last 8192 characters
+with `full output: read Command:x.output`; the whole stderr is `Command:x.errors`), or, while the run is in flight, `pending: id: <id>, status: running, started: <seconds>; read <entity>.<verb>_result later`;
+then the `reactions:` (every REAL change the engine made in the
 round of your write: a setter that fired, a getter that recomputed, each with `by` and, for a null, its `why`). The receipt always lives on the
 entity as `<verb>_result`. Add `wait` (seconds) to `entity_write` to hold the reply until the receipt arrives or that time has passed:
 `{spec: "Command:build", prop: "run", value: {id: "b1", args: []}, wait: 30}` answers with the program's stdout. Calls that wait run side by
