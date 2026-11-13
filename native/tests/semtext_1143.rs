@@ -338,3 +338,16 @@ fn the_dial_is_the_answers_length() {
     h.pump();
     assert_eq!(h.get("Doc:body:a", "related").as_array().unwrap().len(), 1);
 }
+
+// ---- item 7: the help ------------------------------------------------------------------------------------------------------------------
+#[test]
+fn the_help_teaches_semtext_and_never_the_tokenizer_builtin() {
+    let dir = repo().join("membrane/apps/barest.c1f/help");
+    for e in std::fs::read_dir(&dir).unwrap().flatten() {
+        let t = std::fs::read_to_string(e.path()).unwrap();
+        assert!(!t.contains("spans("), "{:?} teaches the internal builtin", e.path());
+    }
+    let c = std::fs::read_to_string(dir.join("c1f.md")).unwrap();
+    assert!(c.contains("`Help:semtext`"), "Help:c1f names the topic");
+    assert!(std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help.c1f")).unwrap().contains("Help:semtext.file"), "the entity is seeded");
+}
