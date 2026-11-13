@@ -495,7 +495,7 @@
       "Model",
       "Router"
     ],
-    "members": 16,
+    "members": 18,
     "writes": [
       "*.models_ready",
       "Fetch:tags.request",
@@ -517,8 +517,6 @@
     ],
     "claims": [],
     "boot_facts": [
-      "cloud_models",
-      "minds",
       "router_on",
       "seat_backend"
     ]
