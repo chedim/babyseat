@@ -1272,3 +1272,42 @@ await new Promise((r) => setTimeout(r, 3500));
 must(!calls.some((c) => c.startsWith('/membrane/chat/message/')), 'finished turns are not fetched one by one: ' + calls);
 process.exit(0);
 "#;
+
+/// a CLI that streams many partial lines, a few ms apart: the driver pushes each read as a Chunk entity
+const CHATTY: &str = r#"#!/usr/bin/env python3
+import json, sys, time
+def out(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+out({"type": "system", "subtype": "init", "session_id": "f", "tools": []})
+for i in range(150):
+    out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "w%d " % i}}})
+    time.sleep(0.02)
+out({"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "done", "num_turns": 1, "session_id": "f"})
+"#;
+
+/// The eval accounting finds the burn the live seat showed (#1143): a Chunk's birth recomputed `chunks` and `stale_chunks` of EVERY loaded message (each scanned all the
+/// chunks), so the work per chunk grew with the number of finished messages. Now a finished message does not look at the chunks, and the work per chunk is the running ones'.
+#[test]
+fn a_chunks_birth_costs_the_running_message_not_every_finished_one() {
+    let stats = shipped(&["stats.c1f"]);
+    let (mut run, port, _dir) = fake_seat_script("chunk_cost", &["--fact", "eval_stats_window_s=1"], &[("stats.c1f", stats[0].1.as_str())], CHATTY);
+    for i in 0..6 {   // six finished messages stay loaded
+        let id = send(port, &format!("old message {i}"));
+        wait("an old turn", || { let v = view(port, &id); (v["state"] == "done" || v["state"] == "error").then_some(()) });
+    }
+    let id = send(port, "the one that counts");
+    wait("the last turn", || { let v = view(port, &id); (v["state"] == "done" || v["state"] == "error").then_some(()) });
+    let rows = wait("a published window with the chunk getters", || {
+        let (t, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "top_total"}));
+        let v: J = serde_json::from_str(&t).ok()?;
+        v.as_array()?.iter().any(|r| r["prop"] == "sevs" && r["class"] == "Chunk" && r["calls"].as_u64().unwrap_or(0) >= 150).then_some(v)
+    });
+    let calls = |class: &str, prop: &str, kind: &str| rows.as_array().unwrap().iter().filter(|r| r["class"] == class && r["prop"] == prop && r["kind"] == kind).map(|r| r["calls"].as_u64().unwrap()).sum::<u64>();
+    let births = calls("Chunk", "sevs", "getter");
+    let scans = calls("ChatMessage", "chunks", "getter") + calls("ChatMessage", "stale_chunks", "getter") + calls("Chunk", "stale", "getter");
+    assert!(births >= 150, "chunks were born: {births}");
+    // the running message reads the chunks once per birth (x2 for the two getters that look at them), the finished ones not at all: a bound well under the finished count x births
+    assert!(scans <= 4 * births + 100, "{scans} chunk-getter runs for {births} chunk births: {rows}");
+    assert!(terminate(&mut run));
+}

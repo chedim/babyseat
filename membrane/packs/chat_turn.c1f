@@ -79,17 +79,19 @@ ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.mid
 Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if prop(e, 'type') == 'stream_event']
 Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
 Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
-ChatMessage.chunks getter: sort_by([{'n': c.n, 'said': c.said, 'started': c.started} for c in instances('Chunk') if c.cmd == this.cmd_eid], 'n')
+-- a message that is over (its answer is the receipt's) does not look at the chunks: it reads `over` alone, so a new chunk of ANOTHER turn does not recompute it (every chunk
+-- birth used to recompute `chunks` of every loaded message, each scanning every chunk: the work per chunk grew with the number of finished messages, #1143)
+ChatMessage.chunks getter: [] if this.over else sort_by([{'n': c.n, 'said': c.said, 'started': c.started} for c in instances('Chunk') if c.cmd == this.cmd_eid], 'n')
 ChatMessage.partial_text getter: join([prop(k, 'said') for k in this.chunks], '')
 ChatMessage.partial_tools getter: words(join([prop(k, 'started') for k in this.chunks], ' '))
 
--- once the run has its answer the chunks are retired. A getter + setter, not a line in `turn-finish`: the receipt can be heard BEFORE the last
--- chunk is born (the two come from different threads), and a late chunk marks the class's readers, so this fires again for it.
-ChatMessage.stale_chunks getter: [c.eid for c in instances('Chunk') if c.cmd == this.cmd_eid] if this.over else []
-ChatMessage.stale_chunks on-setter retire-chunks:
-  WHEN len(this.stale_chunks) > 0:
-    FOR k IN this.stale_chunks:
-      (k).retire = True
+-- once the run has its answer the chunks are retired. A getter + setter on the CHUNK, not a line in `turn-finish`: the receipt can be heard BEFORE the last
+-- chunk is born (the two come from different threads), and a late chunk is born with `stale` true, so it retires itself. A chunk reads only its own message's `over`:
+-- the work per chunk does not grow with the chunks or the messages (the message used to list its chunks, a scan of all of them per message per birth).
+Chunk.stale getter: prop('membrane::Chat:message:' + str(this.id), 'over') == True
+Chunk.stale on-setter retire-chunk:
+  WHEN this.stale:
+    this.retire = True
 
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
 ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')

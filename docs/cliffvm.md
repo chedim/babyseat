@@ -381,7 +381,7 @@ Three pieces, all writes (no host callback):
   its class (`instances('Chunk')` recalculates), which a door request did not need until now.
 - *The chat turn uses both.* The turn runs with `partial: True`; `ChatMessage.partial_text` (the `text_delta`s of the `stream_event` lines) and `partial_tools` (the
   `tool_use` blocks started) are getters over the chunks; `ChatMessage.stream_view` is the view with those while the turn runs. The finished turn retires the chunks
-  (`stale_chunks`; the receipt can be heard before the last chunk is born, so it is a getter+setter, not a line of the finish).
+  (`Chunk.stale`, a getter and a setter on the chunk itself, reading only its own message's `over`; the receipt can be heard before the last chunk is born, so it is a getter+setter, not a line of the finish).
 `GET /membrane/chat/message/<id>/events`: 404 `{error}` for an unknown message; otherwise 200, then one event `message` per change of `stream_view`, whose data
 is `{id, text, state (queued | running | done | error), response (the partial answer while running, null until a word is out; the final one when done), tools
 (names; the final list when done), turn: {state, started, ended}}`. Events are snapshots (a missed one costs nothing), the last is the one with `state` done or

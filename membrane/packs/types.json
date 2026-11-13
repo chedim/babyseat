@@ -216,7 +216,6 @@
       "ChatMessage.rr": "Any",
       "ChatMessage.spent": "Bool",
       "ChatMessage.spoken": "Text",
-      "ChatMessage.stale_chunks": "List(Any)",
       "ChatMessage.sys": "Text?",
       "ChatMessage.texts": "List(Text)",
       "ChatMessage.tokens": "Any",
@@ -225,10 +224,10 @@
       "ChatMessage.tools_names": "List(Text)",
       "Chunk.said": "Text",
       "Chunk.sevs": "List(Any)",
+      "Chunk.stale": "Bool",
       "Chunk.started": "Text"
     },
     "writes": {
-      "*.retire": "Bool",
       "Chat.calls": "Any",
       "Chat.cost": "Any",
       "Chat.duration": "Any",
@@ -240,6 +239,7 @@
       "Chat.tool_ids": "Any",
       "Chat.tools_run": "Any",
       "Chat.usage": "Any",
+      "Chunk.retire": "Bool",
       "Command.run": "Dict",
       "Command.run_result": "Dict"
     },
@@ -1102,6 +1102,14 @@
     "resident": [
       "Model",
       "Minds"
+    ]
+  },
+  "stats": {
+    "getters": {},
+    "writes": {},
+    "findings": [],
+    "resident": [
+      "Stats"
     ]
   },
   "store": {

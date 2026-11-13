@@ -140,7 +140,6 @@
     ],
     "members": 41,
     "writes": [
-      "*.retire",
       "membrane:*.calls",
       "membrane:*.cost",
       "membrane:*.duration",
@@ -682,6 +681,17 @@
     "resident": [
       "Model",
       "Minds"
+    ]
+  },
+  "stats": {
+    "imports": [],
+    "classes": [],
+    "members": 0,
+    "writes": [],
+    "claims": [],
+    "boot_facts": [],
+    "resident": [
+      "Stats"
     ]
   },
   "store": {
