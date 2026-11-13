@@ -23,7 +23,7 @@ ChatMessage.turn_eid getter: 'membrane::Chat:message:' + this.mid + ':turn'
 ChatMessage.tstate getter: prop(this.turn_eid, 'status')
 ChatMessage.resp_eid getter: this.turn_eid + ':response'
 ChatMessage.said getter: prop(this.resp_eid, 'text')
-ChatMessage.turn_view getter: {'state': this.tstate, 'started': prop(this.turn_eid, 'started'), 'ended': prop(this.turn_eid, 'ended')}
+ChatMessage.turn_view getter: {'state': this.tstate, 'started': prop(this.turn_eid, 'started'), 'ended': prop(this.turn_eid, 'ended'), 'usage': prop(this.turn_eid, 'usage'), 'cost': prop(this.turn_eid, 'cost'), 'calls': prop(this.turn_eid, 'calls'), 'duration': prop(this.turn_eid, 'duration')}
 ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view}
 -- what the event stream sends: the view, but while the turn runs `response` is the partial answer (chat_turn.c1f `partial_text`, null until a word is out)
 -- and `tools` the names of the tool blocks started so far; once the turn has finished they are the final ones

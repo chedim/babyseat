@@ -108,6 +108,12 @@ retires it: a decision for the operator). A chat call has no tool-call id in its
 (`Command.run`, `File.*`, `Fetch.request`; `Store::effect_limited`) take a WORKER SLOT: at most `effect_workers` (Boot fact, `--fact effect_workers=<n>`, default 4, operator-approved) run at once, the rest wait for a slot. The chat's turn is a `Command.run`, so it holds one slot while the model runs;
 the door's listener, a held request, an open event stream and `Command.stop` take none.
 
+**The turn's numbers** (`chat_turn.c1f`): the result line of the CLI's stream carries `usage` {input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens}, `total_cost_usd`, `num_turns` and `duration_ms`; the finish writes them on the turn
+entity (`...:turn`) as `usage`, `cost`, `calls` and `duration`, and the message view's `turn` (and so the event stream's events) carries them. A run that ended with no result line has none. Test: `chat_process.rs` `the_turn_carries_usage...`.
+**Resource hygiene** (`chat_turn.c1f` `spent`, `slim-run`): once a turn is over (done/error) the Command's receipt `run_result` is replaced by `{id, status, rc, stderr}` (the raw stdout and its twin `head` were each stored again with the getters' cached parses, hundreds of KB a turn);
+the answer, the tools and the numbers are entities. The finish (`turn-finish`) runs only while the turn is not over, so the slimming's recompute leaves the response alone. The JOURNAL still holds the raw lines: each partial `Chunk:` birth is an outside birth and is journalled (about 1.6 times the
+raw output, 324 KB for a 200 KB turn); compaction of a finished turn's chunks is proposed, not built. Test: `chat_process.rs` `a_finished_turn_keeps_its_answer...` (rows under a 16 KB bound).
+
 **The banner** (`membrane/apps/barest.c1f/default_banner.c1f`; the Python-era `banner.c1f` is not loaded here): `Banner:owner:main` (spelled `membrane::Banner:owner:main`, the chat's namespace) is the entity `chat_turn.c1f` reads into every turn, and it is
 FULLY the model's: the seat never segments, orders or joins what the model puts there, and its `text` is a getter (cached, recomputed when what it reads changes), so the banner is live by nature. The static instructions (what the banner is for,
 how to replace it) are in the system prompt (`chat_turn.c1f`) and `Help:banner`, never in the text. `Boot.started` births the instance once (`seed-banner`, guarded by `seeded`). The starting `text` is the barest cut of Memo's `RecallBanner`, assembled from

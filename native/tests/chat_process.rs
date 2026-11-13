@@ -668,3 +668,23 @@ fn the_effect_workers_fact_caps_the_commands_that_run_at_once() {
     assert_eq!(peak, 2, "five commands with the cap 2 ran at most two at once, and two did run together: {ev:?}");
     assert!(terminate(&mut run));
 }
+
+// ---- the turn carries the usage of the result event (#1143) --------------------------------------------------------------------------------------
+#[test]
+fn the_turn_carries_usage_cost_calls_and_duration_of_the_result_event_in_the_view_and_the_streams_last_event() {
+    let (mut run, port, dir) = fake_seat("usage", &[]);
+    let id = send(port, "count me");
+    let v = finish(port, &dir, &id, "count me");
+    assert_eq!(v["state"], "done", "{v}");
+    let want = json!({"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44});
+    assert_eq!(v["turn"]["usage"], want, "{v}");
+    assert_eq!((v["turn"]["cost"].clone(), v["turn"]["calls"].clone(), v["turn"]["duration"].clone()), (json!(0.0123), json!(3), json!(4321)), "{v}");
+    // the turn entity holds them as properties
+    let (u, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn"), "prop": "cost"}));
+    assert_eq!(u, "0.0123");
+    // the event stream's final event carries them too
+    let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
+    let (_, e) = sse.next().expect("the snapshot");
+    assert_eq!(e["turn"]["usage"], want, "{e}");
+    assert!(terminate(&mut run));
+}

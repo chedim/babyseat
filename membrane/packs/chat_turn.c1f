@@ -86,6 +86,11 @@ ChatMessage.answer getter:
   ELSE WHEN this.capped: this.spoken + '\n\n(stopped at the ceiling of ' + str(this.max_turns) + ' turns)'
   ELSE WHEN strip(str(prop(this.final, 'result') or '')) != '': str(prop(this.final, 'result'))
   ELSE: this.spoken
+-- the numbers of the result line, kept on the turn (the receipt is slimmed after the turn): `usage` {input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens}, `cost` (USD), `calls` (the CLI's num_turns) and `duration` (ms)
+ChatMessage.tokens getter: prop(this.final, 'usage')
+ChatMessage.cost getter: prop(this.final, 'total_cost_usd')
+ChatMessage.calls getter: prop(this.final, 'num_turns')
+ChatMessage.took getter: prop(this.final, 'duration_ms')
 ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evs if prop(e, 'type') == 'assistant'], ' '))
 -- the turn is over once its state is done or error. The finish below runs only while it is not: the answer is derived from the receipt, and the slimming
 -- below changes the receipt, so a finished turn keeps the response it wrote.
@@ -94,6 +99,10 @@ Chat.answer on-setter turn-finish:
   WHEN this.answer != None and not this.over:
     membrane::Chat:message[this.mid]:turn.state = 'error' if this.failed != None else 'done'
     membrane::Chat:message[this.mid]:turn.ended = clock
+    membrane::Chat:message[this.mid]:turn.usage = this.tokens
+    membrane::Chat:message[this.mid]:turn.cost = this.cost
+    membrane::Chat:message[this.mid]:turn.calls = this.calls
+    membrane::Chat:message[this.mid]:turn.duration = this.took
     this.tools_run = this.tools_names
     membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: this.answer, error: this.failed != None, rc: this.rc)
     FOR e IN [x for x in this.evs if prop(x, 'type') == 'assistant']:
