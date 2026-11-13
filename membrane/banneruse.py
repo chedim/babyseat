@@ -1,11 +1,8 @@
 """#934: which banner lines a turn USES, per rule -- measure only, nothing is dropped.
 
-The banner shows lines from two sources: the graph-walk rules (graphbanner, one BannerRule
-entity each) and the recall rows (one entity, RECALL_EID). When a turn's banner is built the
-lines shown are held per chat (srv._banner_shown); when the turn's reply lands (settle) each is
-counted SHOWN, and USED when the reply carries what the line is about: a word of the line that
-its template did not supply (graphbanner's "used" test -- the walk's lines were used in 70% of
-turns), for a recall line a word only that line carries among the lines shown.
+The banner's recall rows are one entity (RECALL_EID). When a turn's banner is built the lines shown
+are held per chat (srv._banner_shown); when the turn's reply lands (settle) each is counted SHOWN, and
+USED when the reply carries a word only that line carries among the lines shown.
 
 Counts sit on the rule entity in hourly buckets (properties.use_hours: hour -> {shown, used},
 like score's), so they survive a restart; the use rate is used/shown, read where rules are listed.
@@ -46,16 +43,6 @@ def _hold(srv, sid: str, rule_eid: str, line: str, template: str = "") -> None:
         held.append({"rule": rule_eid, "line": line, "template": template})
 
 
-def shown_walk(srv, sid: str, pairs) -> None:
-    """The graph-walk lines a banner carried: [(rule_eid, template, line)]. A rebuilt banner
-    replaces the held walk lines of the same turn."""
-    with _lock:
-        held = srv.__dict__.setdefault("_banner_shown", {}).setdefault(sid, [])
-        held[:] = [h for h in held if h["rule"] == RECALL_EID]
-    for rule_eid, template, line in pairs:
-        _hold(srv, sid, rule_eid, line, template)
-
-
 def shown_recall(srv, sid: str, lines) -> None:
     """The recall banner's lines for the turn."""
     with _lock:
@@ -71,10 +58,9 @@ def _entity(srv, eid: str):
         return None
     ent = est.docs.get(eid)
     if ent is None and eid == RECALL_EID:
-        from .graphbanner import CLASS_RULE
-        ent = QuantumEntity(eid=eid, cls=CLASS_RULE, properties={
+        ent = QuantumEntity(eid=eid, cls="BannerRule", properties={
             "name": "recall", "kind": "recall", "silent_birth": True,
-            "summary": "the recall rows of the banner (not a walk rule): use counts only"})
+            "summary": "the recall rows of the banner use counts only"})
         est.docs[eid] = ent
     return ent
 
@@ -103,16 +89,12 @@ def _add(srv, eid: str, shown: int, used: int, ts: float) -> None:
 
 
 def _content(held: dict, others: list[dict]) -> set[str]:
-    """The words a line is about: for a walk line, those its template did not supply; for a
-    recall line, those no other recall line shown carries."""
-    if held["rule"] == RECALL_EID:
-        mine = _words(_body(held["line"]))
-        for o in others:
-            if o is not held:
-                mine -= _words(_body(o["line"]))
-        return mine
-    mine = _words(held["line"])
-    return mine - _words(re.sub(r"\{\w+\.\w+\}", " ", held.get("template") or ""))
+    """The words a recall line is about: those no other recall line shown carries."""
+    mine = _words(_body(held["line"]))
+    for o in others:
+        if o is not held:
+            mine -= _words(_body(o["line"]))
+    return mine
 
 
 def settle(srv, sid: str, reply: str, ts: float | None = None) -> dict:

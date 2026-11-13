@@ -14,7 +14,7 @@ Source: issue #980 body + survey of origin/main (membrane/*.py). Draft; item lis
 | 7 | language.py: seed_executor | seed | MIGRATE | entity seed |
 | 8 | self_proc.py: seed | seed | MIGRATE | entity seed |
 | 9 | goalgraph.py: TRIGGERS + seed | literal | MIGRATE | field trigger definitions already run on the field |
-| 10 | graphbanner.py: SEED + seed | literal | MIGRATE | needs versioned seed pack (Q3: edited rule kept forever strands fixes) |
+| 10 | graphbanner.py: SEED + seed (deleted, #1143) | literal | GONE | needs versioned seed pack (Q3: edited rule kept forever strands fixes) |
 | 11 | entities.py: JUNK_ANCHOR_SEEDS, _seed_junk_anchors | literal | MIGRATE | anchor texts are data; embedding of them stays native |
 | 12 | autonode.py: DEFAULT/OLD_FILETREE_WATCH_SCRIPT | script text | MIGRATE (Q2 entity script) | script stored on entity; missing primitive: file-event trigger in cliffhanger. Never imported from a peer (Q5) |
 | 13 | night.py: _CONCEPT_DRIFT_GETTER | script text | MIGRATE (Q2 entity script) | getter script on entity; missing primitive: vector/numeric read op in cliffhanger |

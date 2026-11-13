@@ -1422,12 +1422,6 @@ def main() -> None:
                                  daemon=True, name="language-ensure").start()   # on by default
             except Exception as e:
                 print(f"[seat] living language skipped ({e})", file=sys.stderr)
-            # THE GRAPH-WALK LANE's seeded rules (graphbanner): made once, kept as edited
-            try:
-                from .graphbanner import seed as _seed_banner_rules
-                _seed_banner_rules(srv.entity_store)
-            except Exception as e:
-                print(f"[seat] banner rules skipped ({e})", file=sys.stderr)
             # THE RECALL DIALS (recall_policy): installed so the seat's edits steer recall
             try:
                 from .recall_policy import seed as _seed_recall_dials

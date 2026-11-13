@@ -4326,8 +4326,7 @@ def _asks_peers() -> bool:
 
 
 def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
-    """The turn's first round of a chat turn carries the graph-walk lane (graphbanner: what
-    this conversation is about now, walked off its graph) and what a pronoun in the person's
+    """The turn's first round of a chat turn carries what a pronoun in the person's
     message was resolved to (convgraph.before_turn), once."""
     sid = str(body.get("_turn_sid") or "")
     if is_tool_round and sid and (getattr(srv, "_cg_fresh", None) or {}).pop(sid, None):
@@ -4344,17 +4343,6 @@ def _with_referent(srv, body: dict, ctx, is_tool_round: bool):
                 adds.append(_ln)
         except Exception as e:
             print(f"[ctx] {sid[:16]}: {e}", file=sys.stderr)
-    if sid and sid in (getattr(srv, "_cg_turn", None) or {}):
-        try:
-            from . import graphbanner as _GB
-            _t_gb = time.monotonic()
-            blk = _GB.block(srv, sid)
-            print(f"[graph-banner] {sid[:16]}: {blk.count(chr(10)) if blk else 0} lines in "
-                  f"{(time.monotonic() - _t_gb) * 1000:.0f} ms", file=sys.stderr)
-            if blk:
-                adds.append(blk)
-        except Exception as e:
-            print(f"[graph-banner] {sid[:16]}: {e}", file=sys.stderr)
     try:
         from . import convgraph as _CG
         note = _CG.take_note(srv, sid)
