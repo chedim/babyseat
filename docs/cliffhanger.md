@@ -314,7 +314,7 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
   - Operators: `+ - * /` (Python arithmetic for scalars, numpy only for vectors; division by zero and non-finite results are refused), comparisons, `and` / `or` / `not`.
   - Reads: `x.prop`, `x.position`.
   - Built-ins: `dot`, `norm`, `distance`, `unit`, `abs`, `min`, `max`.
-  - Limits: at most 400 characters and 64 nodes in ch.py's triggers. Each expression is parsed once and cached. (The native VM's getters and setters have no such caps: a step budget instead, docs/c1f-stdlib.md; ch.py parity for the caps is intentionally dropped.)
+  - Limits: at most 400 characters and 64 nodes in ch.py's triggers. Each expression is parsed once and cached. (The native VM's getters and setters have no such caps: a step budget (100,000 steps) and a 10 ms self-time allowance per getter or setter evaluation instead, docs/c1f-stdlib.md; ch.py parity for the caps is intentionally dropped.)
 - **Validation:** an entity of class `Trigger` made any other way is validated like a definition before it runs.
 - **The VM.**
   - It hears every write (part A) and only queues it.

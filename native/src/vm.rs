@@ -234,7 +234,7 @@ impl<'a> expr::World for Traced<'a> {
             if let Some(k) = r.1 { self.reads.borrow_mut().push((SQL.to_string(), k)); }
             return Some(r.0);
         }
-        match h.call(f, &args_s)? {
+        match expr::waiting(|| h.call(f, &args_s))? {
             Ok(s) => Some(serde_json::from_str::<serde_json::Value>(&s).map(|j| expr::from_json(&j)).map_err(|e| format!("{}: {}", f, e))),
             Err(e) => Some(Err(format!("{}: {}", f, e))),
         }
