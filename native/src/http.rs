@@ -103,7 +103,7 @@ fn read_request(s: &mut TcpStream) -> Option<(Map<String, J>, Vec<u8>)> {
 /// `Http.listen`: bind and accept on threads of its own; -> the receipt. A second listen on the same entity stops the first.
 pub fn listen(st: &Store, eid: &str, req: &J) -> J {
     let id = req.get("id").cloned().unwrap_or(J::Null);
-    let host = req.get("host").and_then(|h| h.as_str()).unwrap_or("127.0.0.1").to_string();
+    let host = req.get("host").and_then(|h| h.as_str()).map(String::from).or_else(|| st.bind_default()).unwrap_or_else(|| "127.0.0.1".to_string());
     let port = req.get("port").and_then(|p| p.as_u64()).unwrap_or(0);
     let l = match TcpListener::bind((host.as_str(), port as u16)) {
         Ok(l) => l,
@@ -118,11 +118,13 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
     let cookie = secret.as_ref().map(|k| crate::jwt::cookie_name(k)).unwrap_or_default();
     let stop = Arc::new(AtomicBool::new(false));
     if let Some(old) = st.set_listener(eid, stop.clone()) { old.store(true, Ordering::SeqCst); }
+    let plain = st.plain() && secret.is_none();
     let (st2, eid2, secret, cookie2) = (st.clone_handle(), eid.to_string(), secret, cookie.clone());
     std::thread::Builder::new().name("membrane-http".into()).spawn(move || {
         while !stop.load(Ordering::SeqCst) {
             match l.accept() {
                 Ok((mut s, peer)) => {
+                    let plain = plain;
                     let (st3, eid3, secret, cookie) = (st2.clone_handle(), eid2.clone(), secret.clone(), cookie2.clone());
                     let _ = std::thread::Builder::new().name("membrane-http-conn".into()).spawn(move || {
                         let _ = s.set_nonblocking(false);
@@ -130,11 +132,11 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
                         // WHO: verified here, by the door, before any pack sees the request (a pack reads `authed` and `sub`; it cannot set them)
                         let headers = props.get("headers").and_then(|h| h.as_object()).cloned().unwrap_or_default();
-                        let verdict = match (&secret, token_of(&headers, "", &cookie)) {
+                        let verdict = if plain { Ok(json!({"sub": "owner"})) } else { match (&secret, token_of(&headers, "", &cookie)) {
                             (None, _) => Err("this door has no secret".to_string()),
                             (Some(_), None) => Err("no token".to_string()),
                             (Some(k), Some(t)) => crate::jwt::verify(&t, k, now),
-                        };
+                        } };
                         match verdict {
                             Ok(claims) => { props.insert("authed".into(), json!(true)); props.insert("sub".into(), claims["sub"].clone()); props.insert("claims".into(), claims); }
                             Err(why) => { props.insert("authed".into(), json!(false)); props.insert("auth_error".into(), json!(why)); }

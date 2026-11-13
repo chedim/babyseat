@@ -21,20 +21,24 @@ pub mod plan;
 
 #[cfg(feature = "python")]
 mod py;
-#[cfg(feature = "python")]
+#[cfg(feature = "store")]
 pub mod store;
 #[cfg(feature = "python")]
 pub mod db;
-#[cfg(feature = "python")]
+#[cfg(feature = "store")]
 pub mod sqlexec;
-#[cfg(feature = "python")]
+#[cfg(feature = "store")]
 pub mod drivers;
 #[cfg(feature = "wasm")]
 pub mod web;
+#[cfg(feature = "store")]
+pub mod host;
+#[cfg(feature = "store")]
+pub mod cli;
 pub mod http;
 pub mod jwt;
 pub mod fetch;
-#[cfg(feature = "python")]
+#[cfg(feature = "store")]
 pub mod spec;
 
 

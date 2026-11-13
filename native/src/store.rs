@@ -65,6 +65,9 @@ pub struct Shared {
     /// a running command's child process, by its entity (Command.stop kills it)
     children: HashMap<String, Arc<Mutex<Option<std::process::Child>>>>,
     done: u64,
+    /// the barest seat (operator 2026-11-12): the door verifies nothing (every request is `authed`), and a listen that names no host binds `bind`
+    plain: bool,
+    bind: Option<String>,
 }
 
 pub struct Store { pub path: String, pub dir: std::path::PathBuf, sh: Arc<(Mutex<Shared>, Condvar)> }
@@ -258,6 +261,10 @@ impl Store {
     }
 
     /// A door's secret (set at listen) and its read (the verify verb).
+    /// Configuration of the host (never a pack's decision): the plain door, and the default address of a listen.
+    pub fn set_plain(&self, plain: bool, bind: Option<String>) { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.plain = plain; g.bind = bind; }
+    pub fn plain(&self) -> bool { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).plain }
+    pub fn bind_default(&self) -> Option<String> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).bind.clone() }
     pub fn set_secret(&self, eid: &str, secret: Vec<u8>) { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).secrets.insert(eid.to_string(), secret); }
     pub fn secret_of(&self, eid: &str) -> Option<Vec<u8>> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).secrets.get(eid).cloned() }
 

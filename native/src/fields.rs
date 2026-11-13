@@ -1037,7 +1037,7 @@ impl Fields {
     /// A write of a driver verb (File.write, Command.run, ...: drivers.rs) runs its effect off the engine; the verb's
     /// slot is consumed. Entity scripts and peers never trigger one (a refusal receipt says so).
     fn driver_effect(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, now: f64, seq: &mut i64) {
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             if w.new.is_null() || w.new == json!("") { return; }
             let Some(cls) = core.docs.get(&w.eid).map(|e| e.cls.clone()) else { return };
@@ -1052,7 +1052,7 @@ impl Fields {
             }
             if let Some(st) = &core.store { crate::drivers::effect(st, &w.eid, &cls, &w.prop, &w.new, &props); }
         }
-        #[cfg(not(feature = "python"))]
+        #[cfg(not(feature = "store"))]
         { let _ = (core, work, w, now, seq); }
     }
 

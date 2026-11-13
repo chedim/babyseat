@@ -10,6 +10,12 @@ publish = false
 name = "membrane_vm"
 crate-type = ["cdylib", "rlib"]
 
+# THE ONE PLACE THE COMMAND'S NAME LIVES (docs/cliffvm.md): rename the app by changing `name` here (the tests read CARGO_BIN_EXE_<name>: one more line each)
+[[bin]]
+name = "cliffvm"
+path = "src/bin/cliffvm.rs"
+required-features = ["bin"]
+
 [dependencies]
 bytemuck = { version = "1.25.2", optional = true }
 pollster = { version = "1.0.1", optional = true }
@@ -33,7 +39,9 @@ opt-level = 3
 
 [features]
 default = ["python"]
-python = ["dep:pyo3", "dep:rusqlite", "tls"]   # the seat: Python binding + the native field store (one SQLite per process, #1111)
+store = ["dep:rusqlite", "tls"]   # the native field store + the drivers + the door (one SQLite per process, #1111); no Python
+python = ["dep:pyo3", "store"]   # the seat: Python binding on top of the store
+bin = ["store"]   # the standalone app (`[[bin]]` below): the same engine with no Python at all (build it with --no-default-features --features bin: a Python extension is not a program)
 wasm = ["dep:wasm-bindgen"]
 metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:objc2", "dep:objc2-foundation", "dep:objc2-metal"]
 tls = ["dep:rustls", "dep:webpki-roots"]   # https for the Fetch driver (rustls + webpki roots); off for wasm
