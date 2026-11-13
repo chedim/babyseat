@@ -9,7 +9,7 @@ use std::time::Duration;
 
 const BIN: &str = env!("CARGO_BIN_EXE_cliffvm");
 
-struct Run { child: Child, _lines: Receiver<String>, port: u16 }
+struct Run { child: Child, _lines: Receiver<String>, port: u16, said: Vec<String> }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
@@ -27,11 +27,13 @@ fn start(data: &std::path::Path, extra: &[&str]) -> Run {
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
     let mut port = 0u16;
+    let mut said = vec![];
     while let Ok(l) = rx.recv_timeout(Duration::from_secs(30)) {
+        said.push(l.clone());
         if l.starts_with("cliffvm: door listening on") { port = l.rsplit(':').next().unwrap().trim().parse().unwrap(); break; }
     }
     assert!(port != 0, "the door came up");
-    Run { child, _lines: rx, port }
+    Run { child, _lines: rx, port, said }
 }
 fn get(port: u16, path: &str, extra: &str) -> (String, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -84,5 +86,21 @@ fn a_fact_passes_through_and_wins_over_the_defaults() {
     let ck = cookie_of(&head);
     let (_, b) = get(run.port, "/ui/serve/ui/conf", &format!("Cookie: {ck}\r\n"));
     assert!(b.contains("\"sub\":\"ann\""), "the owner cookie is for the operator fact: {b}");
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
+fn the_script_says_where_the_owner_token_is_and_how_a_local_tool_uses_it() {
+    let data = tmp("c");
+    let run = start(&data, &[]);
+    let file = data.join("owner.token");
+    let said = run.said.join("\n");
+    assert!(said.contains(&file.display().to_string()), "the token file's path is printed: {said}");
+    assert!(said.contains("curl -H \"Authorization: Bearer $(cat ") && said.contains("/global/health"), "a ready curl example: {said}");
+    // the door: a bare caller is refused, the file's token is served
+    assert!(get(run.port, "/global/health", "").0.starts_with("HTTP/1.1 401"));
+    let tok = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    assert!(get(run.port, "/global/health", &format!("Authorization: Bearer {}\r\n", tok.trim())).0.starts_with("HTTP/1.1 200"));
     let _ = std::fs::remove_dir_all(&data);
 }

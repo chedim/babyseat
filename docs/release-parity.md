@@ -214,7 +214,7 @@ cutover switch 2-3 = **86-128**; the 94 existing node-based UI test files test t
   `MEMBRANE_JWT_SECRET[_FILE]`, `_ISSUER`, `_AUDIENCE` override; `membrane token mint --sub --name --ttl` (`jwtauth.py:612`); `MEMBRANE_JWT=0` -> the **seat token** mode
   (`~/.membrane/seat-token`, Bearer or Basic password, loopback-only writes, `seatauth.py:138-212`).
 - Credentials: Bearer, Basic (password = token; HA and `opencode attach`), the HttpOnly `membrane_jwt_<8 hex>` cookie from `POST /ui/login`
-  (`jwtauth.py:467-495`, `UIS:334`). Public: the shell, `/ui/www/*`, `/ui/login`. A bare loopback request with no token is the seat itself (`docs/auth.md`).
+  (`jwtauth.py:467-495`, `UIS:334`). Public: the shell, `/ui/www/*`, `/ui/login` (the favicon too). In JWT mode a bare loopback request with no token passes as the seat's internal identity (`docs/auth.md`, Python seat); on cliffvm that is DROPPED (w32, below).
 - Persons: the token's `sub` owns sessions (`GET /session`, `/session/status`, `/event` filter, `PY:4274-4294`); another person's session is a 404; the speaker line `[user#<sub>: <name>]` is stamped by the
   seat, client lines dropped (`jwtauth.py:580-611`, `UIS:106-175`); each person has ONE chat (#770 `readonly` mirror sessions, `PY53` `_message`); in the field the person is `person:<sub>`.
   HA does its own per-user ownership above this (`relay.py:112-125`, store `membrane.sessions`).
@@ -223,9 +223,13 @@ cutover switch 2-3 = **86-128**; the 94 existing node-based UI test files test t
 
 **What cliffvm has:** `N/src/jwt.rs` verifies HS256 (`exp`, `sub`, 30 s leeway, <= 8192 bytes, min secret 32; same rules as Python), names the cookie from the
 secret like Python (`jwt.rs:64`), reads Bearer / Basic / cookie (`N/src/http.rs:44-62`) and stamps `authed`, `sub`, `claims`, `auth_error` on the Request before a pack sees it
-(`http.rs:138-147`); `P/door.c1f:63-114` adds loopback-internal, the 401 gate and login/logout cookies. Dry run with a secret file: no token from loopback -> passes as `owner`;
-`X-Forwarded-For` -> 401; bad token -> 401; the shell stays public.
+(`http.rs:138-147`); `P/door.c1f:63-114` adds the 401 gate and login/logout cookies. Dry run (w29, before w32) with a secret file: no token from loopback passed as `owner` (no longer, below); `X-Forwarded-For` -> 401; bad token -> 401; the shell stays public.
 **Done in w30 (swap step 1, #1143)**: gap 3 (the 401 body and header are the released ones: `{"error":{"message":"missing or invalid token","type":"unauthorized"}}`, `WWW-Authenticate: Bearer realm="membrane"`, one message for a missing and a refused token), gap 4 (the owner cookie: `door_auth.c1f` + the driver verb `Request.mint`, `jwt.rs` `mint`), and the strict gate: a call through `/ui/serve/` needs a verified JWT even from loopback (the page is given one; no tokenless), while the unprefixed routes still pass a bare loopback caller. Gap 2 is closed by the operator's decision (seat-token mode and LAN guard dropped; JWT and the loopback owner cookie are the only modes). `scripts/seat-full` makes the secret (0600) on its first run. Still open: gaps 1 (no `token mint` CLI, no internal token for the seat's own calls, no rotation), 5 (persons) and 6 (owner-only writes).
+
+**Done in w32 (#1143, operator decision: a localhost peer is not the owner, #842)**: the bare-loopback pass is GONE. With a door secret EVERY route but the public shell (`/`, `/index.html`, `/membrane`, `/favicon.ico`, `/ui/www/*`, `/ui/login`, `/ui/logout`) needs a verified JWT, unprefixed routes included
+(`/global/health` and the opencode probes are not public: the released JWT mode left only the shell and the login pair open, `ui_serve.py` `public_path`). The released seat's auto-made `~/.membrane/seat-token` is replaced by a JWT: `cliffvm run` makes the secret if missing (gap 1, secret generation: DONE) and writes a fresh owner token to `<seat_data_dir>/owner.token` (0600) at every boot
+(sub = `operator`, life = the fact `owner_token_ttl_s`, default 30 days: flagged; rotation = the restart); the chat turn's CLI reaches `/mcp` with it (`headers` + `env_from`, never argv). The seat's internal token for its own other children (the TUI, peers) and `token mint` for other people stay open (gap 1). The barest seat (no secret) is unchanged: open by decision.
+Tests: `native/tests/owner_token_1143.rs`, `door_auth_1143.rs`, `chat_process.rs` (the fake CLI), `seat_full_1143.rs`, specs `door_auth.json` and `door_conf.json`. Open for the operator: the `claude` CLI expanding `${VAR}` in a `--mcp-config` string is shown for its user config (`claude mcp add-json` then `mcp list`: the header arrived as `Bearer <value>`) and not yet for `--mcp-config` (no real run was made).
 
 **Gaps for the swap:**
 1. no secret management (generation at boot, `token mint`/`seat` CLI, the internal token for the seat's own calls and the TUI/MCP children, rotation): Python-only today (`jwtauth.py`).
@@ -311,7 +315,7 @@ Time to first healthy answer 0.84 s on an empty store; RSS 13.9 MB. Failing pack
 | `--ui-dir membrane/ui` | `door.c1f` static files | `/` and every `/ui/www/*` 404 (the full pack set has no `ui/` of its own; `apps/barest.c1f` carries the barest page) |
 | `minds` | `router.c1f:67-95`, `door_models.c1f` | `/membrane/models` 503 (200 with `--fact 'minds={"loops":...}'`) |
 | `seat_backend`, `router_on`, `cloud_models` | `router.c1f:16-60` | `/v1/models` lists only `@explore` |
-| `door_secret_file` | the door's JWT verifier | every caller is "internal" on loopback; no token check at all (`N/src/http.rs:126-140`: no secret = every caller is `{"sub":"owner"}`) |
+| `door_secret_file` | the door's JWT verifier; `cliffvm run` makes the secret and the owner token file (w32) | no secret: no token check at all, every caller is `{"sub":"owner"}` (the barest seat, open by decision); with it: no token = 401, loopback included |
 | `seat_data_dir` | `door_voice.c1f:23` | `/ui/log` cannot write |
 | `seat_stt`, `seat_project`, `nerve_pause_off`, `ledger`, `agent_writes`, `chat_claude_bin` | conf, probes, pause, decisions, memory, chat | defaults: `stt browser`, project null, ... |
 | a writer of `membrane::presence` (state, events) | `door_state.c1f` | state routes answer empty (`{"seat":{}}`); controls only record |
@@ -330,7 +334,7 @@ Time to first healthy answer 0.84 s on an empty store; RSS 13.9 MB. Failing pack
 | 404 | 59 | the page (`/`, `/index.html`, `/favicon.ico`, `/ui/www/*` 18, no `--ui-dir`), `/ui/fieldvm`, `/ui/zoo`, `/__boot/shape`, `/ui/serve/*`, `/session*` (7), `/event`, `/global/event`, `/agent`, `/config*`, `/provider*`, `/experimental/*` (4), `/lsp`, `/formatter`, `/api/*` (3), `/membrane/options`, `/membrane/map/*` (7), `/membrane/field/entity`, `/membrane/ha/subscriptions` |
 
 With `--ui-dir membrane/ui`: `/`, `/index.html`, `/favicon.ico`, `/ui/www/*` serve 200 for 16 files, including `three.min.js` (603 KB) and `vosk.js` (5.8 MB); `voice-ml.mjs` and `vosk-model-en.tar.gz` 404 (not in `membrane/ui`).
-With a secret file: no token + loopback -> 200 as `owner`; `X-Forwarded-For` -> 401; a malformed token -> 401; the shell with a forwarded header -> 200 (public).
+With a secret file (w29, before w32): no token + loopback -> 200 as `owner` (now 401, see section 3); `X-Forwarded-For` -> 401; a malformed token -> 401; the shell with a forwarded header -> 200 (public).
 Read-through of one write-free POST: `POST /membrane/voice` never answers on a fresh store; `POST /ui/login` with a bad token answers 401 (`{"error":"missing or invalid token"}`).
 The seat was stopped afterwards (SIGTERM, port 4314 free). The operator's seat on :4096 and the scratchpad `real-run/seat*.sqlite*` were not touched.
 
@@ -338,7 +342,7 @@ The seat was stopped afterwards (SIGTERM, port 4314 free). The operator's seat o
 
 | answered | calls |
 |---|---|
-| 200 | `membrane/seat/pause`, `membrane/work-graph`, `global/health`, `membrane/models`, `v1/models` (and the bare `/ui/conf`, `/global/health`) |
+| 200 | `membrane/seat/pause`, `membrane/work-graph`, `global/health`, `membrane/models`, `v1/models` (and the bare `/ui/conf`, `/global/health`; with the owner token since w32) |
 | 501 (a stated "not built") | `membrane/quota` |
 | 404 (no route) | `/ui/serve/session` (row 15: w31), `/ui/serve/agent` and `/ui/serve/config` (rows 36, 37: the opencode stubs), `/ui/serve/membrane/map/field3d` and `/map/blurp` (rows 61-68: the field map), `/ui/fieldvm` (row 7), the bare `/membrane/options` (`index.html:78`, row 44) |
 | no answer (hang) | `POST /ui/serve/membrane/voice/state` (row 55: the voice tables a fresh store lacks) |

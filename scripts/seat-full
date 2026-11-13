@@ -5,8 +5,9 @@
 #   scripts/seat-full [--data-dir <dir>] [--port <n>] [--open] [--fact name=value ...]
 # --data-dir  where the seat keeps its store, its door secret and its page log (default ./.cliffvm/full); --port the door's port (default 4310)
 # --fact is repeatable: each one is passed on to `cliffvm run` as a Boot fact, AFTER the defaults below, so it wins (e.g. --fact operator=ann).
-# The door secret is <data-dir>/door.secret, generated on the first run (64 hex characters, mode 0600) and kept. A page fetched from this machine
-# is given its owner cookie; anything else needs a JWT signed with that secret.
+# The door secret is <data-dir>/door.secret: `cliffvm run` makes it on the first run (64 hex characters, mode 0600) and keeps it. A localhost peer is NOT the
+# owner: every call but the page's shell needs a JWT signed with that secret. A page fetched from this machine is given its owner cookie; a local tool reads
+# the owner token `cliffvm run` writes at every boot to <data-dir>/owner.token (mode 0600), printed below with a curl example (docs/auth.md).
 # CLIFFVM names the binary, CLAUDE_BIN the claude CLI (else the one on PATH). Run it from anywhere; it works from the repo root.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -38,12 +39,6 @@ claude=${CLAUDE_BIN:-$(command -v claude || true)}
 mkdir -p "$data"
 data=$(cd "$data" && pwd)
 secret=$data/door.secret
-if [ ! -s "$secret" ]; then
-  # first run: a random secret (32 bytes as 64 hex characters; the door wants at least 32 bytes), readable by this person only
-  ( umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$secret" )
-  chmod 600 "$secret"
-  echo "seat-full: made the door secret $secret (mode 600)"
-fi
 cd "$root"
 # the defaults: claude is the only model (a rung of the router's registry, picked for every mind), the router is off, the local backend
 # is the default Ollama address (nothing needs to run there: a refused connection is an empty tag list)
@@ -65,5 +60,7 @@ if [ -n "$facts" ]; then
 fi
 url="http://127.0.0.1:$port/"
 echo "seat-full: $url  (data $data)"
+echo "seat-full: a localhost peer is not the owner: local tools send the owner token, written (mode 600, new at every boot) to $data/owner.token"
+echo "seat-full: curl -H \"Authorization: Bearer \$(cat $data/owner.token)\" ${url}global/health"
 if [ "$open_page" = 1 ] && [ "$(uname)" = Darwin ]; then (sleep 2; open "$url") & fi
 exec "$bin" run "$@"
