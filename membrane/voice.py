@@ -9,7 +9,7 @@ child's is: by hearing words spoken while a concept state is active.
              replies, the operator's rewrites x5) feeds a weighted word
              table: (the last 1-3 words -> the next word -> weight)
   aim        the target is where the field is now plus the incoming
-             message (the massage's target, massage.target)
+             message (the field's present, _field_now)
   speak      a STEERED walk: the table proposes the next words (grammar),
              the field disposes (meaning) -- each candidate is scored by
              how much it moves the sentence's word-bag toward the target
@@ -921,6 +921,16 @@ def history_texts(runner):
 NOW_PULL = 0.25
 
 
+def _field_now(fld):
+    """The field's present: the unit mean of the sessions' 'now' states."""
+    def unit(v):
+        v = np.asarray(v, dtype=np.float64)
+        n = float(np.linalg.norm(v))
+        return v / n if n > 1e-12 else None
+    nows = [v for v in (getattr(fld, "_now", None) or {}).values() if v is not None]
+    return unit(np.sum([unit(v) for v in nows], axis=0)) if nows else None
+
+
 def aim(qv, now) -> np.ndarray:
     """The voice's target: the message first; the field's present leans in
     only where it agrees with the message (the 'now' state is a residual --
@@ -1036,11 +1046,10 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
     def go():
         try:
             from .lanes import _efield_of
-            from . import massage
             fld = _efield_of(srv)
             _ensure_pool(v, runner)
             qv = np.asarray(v.embedder.embed([clean(text) or text])[0], dtype=float)
-            tgt = v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None))
+            tgt = v.steer(sid, aim(qv, _field_now(fld) if fld is not None else None))
             rec = v.speak(tgt, message=text, sid=sid, mid=mid, message_vec=qv,
                           rules=voice_rules(getattr(srv, "entity_store", None)))
             if rec is not None:

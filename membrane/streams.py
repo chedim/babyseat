@@ -71,7 +71,7 @@ NOTICE_PREFIXES = {"[membrane seat notice]": "notice"}
 # The SEAT'S OWN PROMPTS (#949, Memo's review of #950): the planner / worker turns
 # (goalgraph), the watch lane's and watch agents' turns and the speaker lane reach
 # the field as user turns, written by the seat to itself, never by a person. Their
-# heads (outcomes._HEAD lists the watch ones); kept apart from the approved
+# heads; kept apart from the approved
 # prefixes, for the operator's approval like NOTICE_PREFIXES.
 SEAT_PREFIXES = {
     "You are the PLANNER": "seat", "You are a WORKER": "seat",

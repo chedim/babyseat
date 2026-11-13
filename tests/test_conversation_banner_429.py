@@ -485,7 +485,7 @@ class TestTheTurnPath(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MEMBRANE_INJECTION": "conversation"}):
             self.assertEqual(L._injection_mode(s), "conversation")
         with mock.patch.dict(os.environ, {"MEMBRANE_INJECTION": "massage"}):
-            self.assertEqual(L._injection_mode(s), "massage")
+            self.assertEqual(L._injection_mode(s), "conversation")   # the massage arm is gone: unknown values mean the default
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("MEMBRANE_INJECTION", None)
             self.assertEqual(L._injection_mode(s), "conversation")   # the default since the measurement (#429)

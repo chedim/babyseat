@@ -18,7 +18,7 @@ from membrane import server as MS  # noqa: E402
 class TestInjectionCard(unittest.TestCase):
     def test_the_injection_rides_as_a_tool_card(self):
         replies = [
-            {"membrane": {"injection": "[membrane] from the field: the battery sits near 92%", "massage": {"alignment": 0.91, "tokens": 12}},
+            {"membrane": {"injection": "[membrane] from the field: the battery sits near 92%"},
              "choices": [{"message": {"content": "", "tool_calls": [{"id": "c1", "type": "function",
                                                                     "function": {"name": "state", "arguments": "{}"}}]}}]},
             {"membrane": {"injection": "[membrane] from the field: the battery sits near 92%"},
@@ -36,7 +36,6 @@ class TestInjectionCard(unittest.TestCase):
         cards = [p for p in out["parts"] if p.get("type") == "tool" and p.get("tool") == "membrane"]
         self.assertEqual(len(cards), 1)                       # the same injection twice: one card
         self.assertIn("battery sits near 92%", cards[0]["state"]["output"])
-        self.assertIn("alignment 0.91", cards[0]["state"]["title"])
         self.assertEqual(cards[0]["state"]["status"], "completed")
         for msgs in seen:                                     # never in the model's own input
             self.assertFalse(any("battery sits near 92%" in str(m.get("content")) for m in msgs))

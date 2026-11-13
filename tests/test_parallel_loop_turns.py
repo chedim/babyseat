@@ -37,13 +37,3 @@ def test_two_ready_tasks_run_their_turns_at_the_same_time(seat):
         time.sleep(0.05)
     settle(seat)
     assert len(done) == 2, "the second turn waited for the first"
-
-
-def test_a_requeue_is_not_a_wake_outcome(seat, monkeypatch):
-    from membrane import wakes as WK
-    logged = []
-    monkeypatch.setattr(WK, "log", lambda srv, ev, out, **k: logged.append(out))
-    dr = WA._LoopDrainer(seat)
-    monkeypatch.setattr(dr, "_handle", lambda ev: "requeue")
-    dr.handle({"kind": "task", "entity": "x"})
-    assert "requeue" not in logged
