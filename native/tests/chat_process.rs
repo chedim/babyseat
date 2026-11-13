@@ -592,14 +592,14 @@ fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_
     let t0 = Instant::now();
     let (t, _) = put(port, "Command:slow", "run", json!({"id": "s1", "args": []}));
     assert!(t0.elapsed() < Duration::from_millis(1800), "no wait, no holding: {:?}", t0.elapsed());
-    assert!(t.contains("pending: read Command:slow.run_result later"), "{t}");
+    assert!(t.contains("status: running") && t.contains("read Command:slow.run_result later"), "{t}");
     assert!(!t.contains("Return:"), "{t}");
     let r = wait("the late receipt on the entity", || { let (r, _) = call(port, "entity_read", json!({"spec": "Command:slow", "prop": "run_result"})); r.contains("late").then_some(r) });
     assert!(r.contains("late"), "{r}");
     // a wait that is too short answers pending
     put(port, "Command:slow2", "cmd", json!(["sh", "-c", "sleep 4; echo x"]));
     let (t, _) = put_wait(port, "Command:slow2", "run", json!({"id": "s2", "args": []}), 1.0);
-    assert!(t.contains("pending: read Command:slow2.run_result later"), "{t}");
+    assert!(t.contains("status: running") && t.contains("read Command:slow2.run_result later"), "{t}");
     // a plain write has no receipt to wait for
     let (t, _) = put_wait(port, "Note:a", "n", json!(1), 30.0);
     assert!(t.starts_with("wrote Note:a.n\nreactions: ") && !t.contains("pending"), "{t}");
@@ -793,17 +793,17 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
 }
 
 #[test]
-fn a_command_run_again_with_the_same_id_runs_but_only_a_new_id_gives_a_receipt_the_reply_recognises() {
+fn a_command_run_again_with_the_same_id_runs_and_its_receipt_is_new_by_its_timestamps() {
     let (mut run, port) = start("rerun", MCP_PACKS, &[]);
     let log = run.dir.join("ticks");
     put(port, "Command:tick", "cmd", json!(["sh", "-c", format!("echo x >> {}", log.display())]));
     let n = || std::fs::read_to_string(&log).map(|t| t.lines().count()).unwrap_or(0);
     let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 20.0);
     assert!(t.contains("receipt: "), "{t}");
-    // the same id and the same output: it runs again, but its receipt is equal to the one there, so the reply cannot tell it from the old one
-    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 2.0);
-    assert!(t.contains("pending: read Command:tick.run_result later"), "{t}");
-    wait("the second run", || (n() == 2).then_some(()));
+    // the same id and the same output: it runs again, and its receipt differs by `started` (the reply recognises it)
+    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 20.0);
+    assert!(t.contains("receipt: "), "{t}");
+    assert_eq!(n(), 2);
     // a new id: a new receipt, the reply carries it
     let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t2", "args": []}), 20.0);
     assert!(t.contains("receipt: ") && t.contains("\"id\":\"t2\""), "{t}");
@@ -911,5 +911,27 @@ fn the_receipt_carries_started_finished_and_ms_so_a_rerun_with_the_same_output_i
     let (b, _) = put_wait(port, "Command:t", "run", json!({"id": "same", "args": []}), 20.0);
     let rb = reply_part(&b, "receipt").unwrap_or_else(|| panic!("a rerun with the same id and output answers its receipt: {b}"));
     assert!(rb["started"].as_f64().unwrap() > fin - 0.01, "{ra} {rb}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_running_command_reads_as_running_with_its_id_and_start_and_a_pending_reply_says_so() {
+    let (mut run, port) = start("runn", MCP_PACKS, &[]);
+    put(port, "Command:r", "cmd", json!(["sh", "-c", "sleep 2; echo late"]));
+    // never started: no status
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert!(s != "running", "a command that was never run is not running: {s}");
+    let (t, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
+    assert!(t.contains("pending: ") && t.contains("r9") && t.contains("status: running") && t.contains("started: "), "{t}");
+    assert!(t.contains("read Command:r.run_result"), "{t}");
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert_eq!(s, "running");
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "running"}));
+    assert!(s.contains("r9") && s.contains("started"), "{s}");
+    wait("the receipt", || (call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"})).0 == "ok").then_some(()));
+    // a rerun reads running again until its own receipt lands
+    let (_, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert_eq!(s, "running", "the old receipt is not the new run's");
     assert!(terminate(&mut run));
 }

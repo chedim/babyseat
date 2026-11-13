@@ -203,9 +203,10 @@ Job.go on-setter start:
 Job.report getter: Command:build.output
 ```
 
-`Command:<name>.run = {id, args}` runs the program (the `args` are added after `cmd`) and lands the receipt `run_result` (`rc`, `stdout`,
-`stderr`, `head`, `status`, `id`), `run_rc` and the getter `output`. A `run` without a `cmd` is answered with `a command needs cmd`. The same `run` value
-written again runs it again; the reply of `entity_write` recognises a receipt as new when it differs from the one there before, so give each run a NEW `id` (the same `id` with the same output reads as `pending` though it ran). This runs for real here:
+`Command:<name>.run = {id, args}` runs the program (the `args` are added after `cmd`) and lands the receipt `run_result` (`id`, `status`, `rc`, `started`, `finished`, `ms`,
+`stdout`, `stderr`, `stdout_bytes`, `stderr_bytes`), `run_rc` and the getters `output` (the whole stdout), `errors` (the whole stderr) and `status` (`running` while the run is in flight,
+then `ok` or `error`). A `run` without a `cmd` is answered with `a command needs cmd`. The same `run` value written again runs it again, and its receipt is new by its `started`/`finished`
+seconds. The reply of `entity_write` carries the first and last 8 KB of each stream with its size (the whole text when it is 16 KB or less) and says where the full text is (`Command:x.output`). This runs for real here:
 
 ```c1f-run
 -- write Command:hello.cmd = ["echo", "hi"]
