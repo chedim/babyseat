@@ -58,6 +58,22 @@ def pack_name(eid: str, d) -> str:
     e = str(eid)
     return e.rsplit("pack:", 1)[1] if "pack:" in e else e
 WRITER = "trigger:field:"
+# A time kill (`Trip:<node>`) comes from the VM host, not from a c1f setter, and it cannot be re-derived on replay (it depends on how
+# long something took): the journal must take it as an OUTSIDE write, so it is not stamped `trigger:*`.
+TRIP_WRITER = "field:driver:trip"
+TRIP_CLASS = "Trip"
+
+
+def stamp_writer(engine_writer: str) -> str:
+    """The store writer for an engine write: `trigger:field:<setter>` (derived, replay recomputes it), except a trip (outside)."""
+    if engine_writer == TRIP_WRITER:
+        return "host:" + engine_writer.removeprefix("field:")
+    return WRITER + engine_writer.removeprefix("field:")
+
+
+def stamp_born_writer(cls: str) -> str:
+    """The writer for an entity a setter (or the engine) created: a Trip is outside, anything else is the engine's own."""
+    return stamp_writer(TRIP_WRITER) if cls == TRIP_CLASS else WRITER + "create"
 LLM_EID = MEMBRANE_NS + "llm"
 
 
@@ -430,7 +446,7 @@ class Live:
             if "born" in w:                          # a setter created it (`<Class>:<key>` of its own or imported class)
                 if w["eid"] not in (self.est.docs or {}):
                     from .entities import QuantumEntity
-                    with W.as_writer(WRITER + "create"):
+                    with W.as_writer(stamp_born_writer(w["born"])):
                         self.est.upsert(QuantumEntity(eid=w["eid"], cls=w["born"], properties={"silent_birth": True}), embedder=None)
                 continue
             d = (self.est.docs or {}).get(w["eid"])
@@ -438,7 +454,7 @@ class Live:
                 continue
             if str(w.get("writer") or "").startswith("field:") and w["eid"].startswith(BANNER_NS):
                 self._engine_props.setdefault(w["eid"], set()).add(w["prop"])   # what a banner's class computed
-            with W.as_writer(WRITER + str(w.get("writer") or "").removeprefix("field:")):
+            with W.as_writer(stamp_writer(str(w.get("writer") or ""))):
                 props = {**(d.properties or {}), w["prop"]: w["new"]}
                 if w["new"] is None:                 # a write of none removes the property (as a getter's none leaves it absent)
                     props.pop(w["prop"], None)
