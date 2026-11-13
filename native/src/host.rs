@@ -128,7 +128,20 @@ pub struct Host {
     packs_dirty: AtomicBool,
     /// the store's write-ahead log file (None in memory): folded back and truncated by `tick` once it is over WAL_LIMIT_BYTES
     wal: Option<std::path::PathBuf>,
+    /// how many transactions are open (a nested `txn` joins the outer one) and how many commits the store has had (see `store_commits`)
+    depth: std::sync::atomic::AtomicUsize,
+    commits: std::sync::atomic::AtomicUsize,
+    /// the rows a transaction has read or changed (eid -> row), parsed once; written back, the changed ones, when the outermost transaction ends
+    pending: Mutex<Option<std::collections::HashMap<String, Pending>>>,
+    /// whether the open transaction has executed a statement (an empty one is rolled back, not counted)
+    wrote: AtomicBool,
 }
+
+struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool }
+
+/// An open transaction of the store: everything the host writes while it lives is ONE commit (one sync), the rows it changed written once each.
+pub struct Txn<'a> { h: &'a Host }
+impl Drop for Txn<'_> { fn drop(&mut self) { self.h.end_txn(); } }
 
 fn dbe(e: rusqlite::Error) -> String { e.to_string() }
 
@@ -157,7 +170,7 @@ impl Host {
         let mut fields = Fields::goalgraph();
         fields.inbound_by_host = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))) })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false) })
     }
 
     /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
@@ -202,6 +215,7 @@ impl Host {
 
     /// Start-up: compute every getter once and keep the values, running no setter (a rebuild runs no effects).
     pub fn rebuild(&self) {
+        let _t = self.txn();
         let now = self.now();
         { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.rebuild(core, now, seq); }
         self.drain_apply();
@@ -224,6 +238,7 @@ impl Host {
 
     /// `engine_writer` is what the engine sees (a Trip arrives as `driver:trip`, the way an effect's receipt does), `stamp` what the store keeps.
     fn inject_write(&self, ts: f64, eid: &str, prop: &str, new: J, engine_writer: &str, stamp: &str) {
+        let _t = self.txn();
         self.store_prop(eid, None, prop, &new, stamp);
         if prop == "text" { self.pack_text(eid, &new); }
         if prop == "privileged" { self.note_outside_grant(eid, &new, stamp); }
@@ -242,6 +257,7 @@ impl Host {
     }
 
     fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
+        let _t = self.txn();
         let props = crate::vm::birth_props(cls, props);   // the eid class is the birth default of the class list (the journal keeps what was said)
         self.store_born(eid, cls, &props, stamp);
         if let Some(t) = props.get("text") { self.pack_text(eid, t); }
@@ -295,10 +311,13 @@ impl Host {
 
     /// The clock input: armed waits come due.
     pub fn tick(&self) {
-        let now = self.now();
-        { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.tick(core, &NullHost, now, seq); }
-        self.drain_apply();
-        self.trim_wal();
+        {
+            let _t = self.txn();
+            let now = self.now();
+            { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.tick(core, &NullHost, now, seq); }
+            self.drain_apply();
+        }
+        self.trim_wal();       // after the round's transaction has committed: a checkpoint cannot run inside one
     }
 
     /// A log over WAL_LIMIT_BYTES is folded into the file and truncated. The attempt waits at most 50 ms for readers (the engine's thread must not stall),
@@ -327,6 +346,7 @@ impl Host {
     // ---- the engine's output -----------------------------------------------------------------------------------------
     /// Take what the engine did since the last drain and apply it to the store, stamped. -> whether there was any.
     fn drain_apply(&self) -> bool {
+        let _t = self.txn();
         let (out, _calls) = { let mut g = self.eng(); let f = &mut g.1; (std::mem::take(&mut f.out), std::mem::take(&mut f.calls)) };
         let any = !out.is_empty();
         let ts = self.now();
@@ -356,7 +376,8 @@ impl Host {
                 { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, e, ts, seq); }
             }
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = db.execute(&format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
+            if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.retain(|k, _| k != eid && !k.starts_with(&below)); }   // a retired row is not written back
+            self.exec(&db, &format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
         }
         let any = any || !retired.is_empty();
         // THE REACTIONS of a model's write (docs/cliffvm.md, "The return entity"): each door write is a Request `mc_done` by the setter `mcp-write`; the derived
@@ -495,37 +516,103 @@ impl Host {
     }
 
     // ---- the store ---------------------------------------------------------------------------------------------------
-    fn row(&self, db: &Connection, eid: &str) -> Option<(String, Map<String, J>, Map<String, J>)> {
-        let body: Option<String> = db.query_row(&format!("SELECT body FROM {ROWS} WHERE k = ?"), params![eid], |r| r.get(0)).optional().ok().flatten();
-        let j: J = serde_json::from_str(&body?).ok()?;
-        Some((j["cls"].as_str().unwrap_or("").to_string(), j["props"].as_object().cloned().unwrap_or_default(), j["writers"].as_object().cloned().unwrap_or_default()))
+    /// Every write to the store goes through here: outside a transaction a statement commits (and syncs) by itself, which is counted.
+    fn exec(&self, db: &Connection, sql: &str, p: impl rusqlite::Params) {
+        let _ = db.execute(sql, p);
+        self.wrote.store(true, Ordering::SeqCst);
+        if self.depth.load(Ordering::SeqCst) == 0 { self.commits.fetch_add(1, Ordering::SeqCst); }
     }
 
-    fn put_row(&self, db: &Connection, eid: &str, cls: &str, props: &Map<String, J>, writers: &Map<String, J>) {
+    /// How many times the host has committed to the store (a transaction counts once, a statement outside one counts itself).
+    pub fn store_commits(&self) -> usize { self.commits.load(Ordering::SeqCst) }
+
+    /// Open a transaction (a nested one joins the outer one): the host's writes of a round are ONE commit, and a row it changes is written once.
+    pub fn txn(&self) -> Txn<'_> {
+        if self.depth.fetch_add(1, Ordering::SeqCst) == 0 {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = db.execute_batch("BEGIN");
+            *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(Default::default());
+        }
+        Txn { h: self }
+    }
+
+    fn end_txn(&self) {
+        if self.depth.load(Ordering::SeqCst) != 1 { self.depth.fetch_sub(1, Ordering::SeqCst); return; }
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        self.flush(&db);   // still inside: the statements it runs are the transaction's
+        self.depth.fetch_sub(1, Ordering::SeqCst);
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        if self.wrote.swap(false, Ordering::SeqCst) { let _ = db.execute_batch("COMMIT"); self.commits.fetch_add(1, Ordering::SeqCst); }
+        else { let _ = db.execute_batch("ROLLBACK"); }
+    }
+
+    /// Write back the rows the open transaction changed.
+    fn flush(&self, db: &Connection) {
+        let dirty: Vec<(String, (String, Map<String, J>, Map<String, J>))> = {
+            let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(m) = g.as_mut() else { return };
+            m.iter_mut().filter(|(_, p)| p.dirty).filter_map(|(k, p)| { p.dirty = false; p.row.clone().map(|r| (k.clone(), r)) }).collect()
+        };
+        for (eid, (cls, p, w)) in dirty { self.write_row(db, &eid, &cls, &p, &w); }
+    }
+
+    fn write_row(&self, db: &Connection, eid: &str, cls: &str, props: &Map<String, J>, writers: &Map<String, J>) {
         let body = json!({"cls": cls, "props": props, "writers": writers}).to_string();
-        let _ = db.execute(&format!("INSERT INTO {ROWS} (k, body) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET body = excluded.body"), params![eid, body]);
+        self.exec(db, &format!("INSERT INTO {ROWS} (k, body) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET body = excluded.body"), params![eid, body]);
+    }
+
+    /// Make sure the open transaction has the row of `eid` (read from the store once, parsed once).
+    fn load(&self, db: &Connection, eid: &str) {
+        if self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(true, |m| m.contains_key(eid)) { return; }
+        let body: Option<String> = db.query_row(&format!("SELECT body FROM {ROWS} WHERE k = ?"), params![eid], |r| r.get(0)).optional().ok().flatten();
+        let row = body.and_then(|b| serde_json::from_str::<J>(&b).ok()).map(|j| (j["cls"].as_str().unwrap_or("").to_string(), j["props"].as_object().cloned().unwrap_or_default(), j["writers"].as_object().cloned().unwrap_or_default()));
+        if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.insert(eid.into(), Pending { row, dirty: false }); }
     }
 
     fn store_born(&self, eid: &str, cls: &str, props: &Map<String, J>, stamp: &str) {
+        let _t = self.txn();
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let (mut p, mut w) = self.row(&db, eid).map(|(_, p, w)| (p, w)).unwrap_or_default();
-        for (k, v) in props { p.insert(k.clone(), v.clone()); w.insert(k.clone(), json!(stamp)); }
-        self.put_row(&db, eid, cls, &p, &w);
+        self.load(&db, eid);
+        let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(slot) = g.as_mut().and_then(|m| m.get_mut(eid)) else { return };
+        let created = slot.row.is_none();
+        let (c, p, w) = slot.row.get_or_insert_with(|| (cls.to_string(), Map::new(), Map::new()));
+        let mut changed = slot.dirty || created || c != cls;
+        *c = cls.to_string();
+        for (k, v) in props {
+            if p.get(k) != Some(v) || w.get(k).and_then(|x| x.as_str()) != Some(stamp) { changed = true; p.insert(k.clone(), v.clone()); w.insert(k.clone(), json!(stamp)); }
+        }
+        slot.dirty = changed;   // nothing that differs: the row is not written
     }
 
-    /// One property of a row, with the writer that wrote it; a `null` removes it (as a getter's none leaves it absent).
+    /// One property of a row, with the writer that wrote it; a `null` removes it (as a getter's none leaves it absent). A write that changes
+    /// nothing (the same value, the same writer or another derived one) leaves the store alone.
     fn store_prop(&self, eid: &str, cls: Option<&str>, prop: &str, new: &J, stamp: &str) {
+        let _t = self.txn();
         let known = self.eng().0.docs.get(eid).map(|e| e.cls.clone());
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let Some((c, mut p, mut w)) = self.row(&db, eid).or_else(|| cls.map(String::from).or(known).map(|c| (c, Map::new(), Map::new()))) else { return };
+        self.load(&db, eid);
+        let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(slot) = g.as_mut().and_then(|m| m.get_mut(eid)) else { return };
+        if slot.row.is_none() {
+            let Some(c) = cls.map(String::from).or(known) else { return };
+            slot.row = Some((c, Map::new(), Map::new()));
+            slot.dirty = true;
+        }
+        let (_, p, w) = slot.row.as_mut().unwrap();
+        let same_value = match p.get(prop) { Some(v) => v == new, None => new.is_null() };
+        // the same value from the same writer, or from another derived writer (a getter's value stored by a rebuild or a later getter run): nothing to say
+        let same_writer = match w.get(prop).and_then(|x| x.as_str()) { Some(o) => o == stamp || (is_getter_write(o) && is_getter_write(stamp)), None => false };
+        if same_value && same_writer { return; }
         if new.is_null() { p.remove(prop); } else { p.insert(prop.into(), new.clone()); }
         w.insert(prop.into(), json!(stamp));
-        self.put_row(&db, eid, &c, &p, &w);
+        slot.dirty = true;
     }
 
     /// Every stored row: eid -> {cls, props, writers}.
     pub fn rows(&self) -> std::collections::BTreeMap<String, J> {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        self.flush(&db);   // what an open transaction changed is in the table before it is read
         let mut st = db.prepare(&format!("SELECT k, body FROM {ROWS} ORDER BY k")).expect("rows");
         st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).expect("rows").filter_map(|r| r.ok())
             .map(|(k, b)| (k, serde_json::from_str(&b).unwrap_or(J::Null))).collect()
@@ -533,9 +620,10 @@ impl Host {
 
     // ---- the journal -------------------------------------------------------------------------------------------------
     fn journal_push(&self, l: Line) {
+        let _t = self.txn();
         let mut j = self.journal.lock().unwrap_or_else(|e| e.into_inner());
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = db.execute(&format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", j.len()), l.to_json().to_string()]);
+        self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", j.len()), l.to_json().to_string()]);
         j.push(l);
     }
 
