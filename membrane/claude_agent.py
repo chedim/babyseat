@@ -708,20 +708,12 @@ _LOOP_HIDDEN = frozenset({
 def tool_names() -> list[str]:
     """allowed_tools: exactly membrane's MCP tools, as the SDK names them."""
     from . import mcp_server as _mcp
-    hide = _coproc_hidden()
+    hide: frozenset = frozenset()
     from . import diag_requests as _dr
     if _dr.current().get("lane") in ("loop", "worker"):     # a worker is a field loop too (#857)
         hide = hide | _LOOP_HIDDEN
     from . import cliffhanger_only as _CO
     return [TOOL_PREFIX + t["name"] for t in _CO.strip_tools(_mcp.TOOLS) if t["name"] not in hide]
-
-
-def _coproc_hidden() -> frozenset:
-    """MEMBRANE_COPROC=1 (#454): no tool named like a coproc call
-    (decide/remember/intend/says) is exposed -- a python-shaped `intend(...)`
-    line must stay text the proxy parses, never a tool Claude calls."""
-    from . import coproc as _cp
-    return _cp.RESERVED_TOOL_NAMES if _cp.enabled() else frozenset()
 
 
 def _footer(answer) -> str:
@@ -780,8 +772,7 @@ def build_mcp_server(sdk, port, answer=None):
     tools = [sdk.tool(t["name"], t["description"], t["inputSchema"])(
                  _tool_handler(t["name"], port, answer))
              for t in __import__("membrane.cliffhanger_only", fromlist=["x"]).strip_tools(_mcp.TOOLS)
-             if t["name"] in _mcp.TOOL_IMPLS
-             and t["name"] not in _coproc_hidden()]
+             if t["name"] in _mcp.TOOL_IMPLS]
     return sdk.create_sdk_mcp_server(name=MCP_NAME, version=_mcp.SERVER_VERSION,
                                      tools=tools)
 

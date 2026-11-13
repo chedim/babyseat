@@ -10,7 +10,7 @@ Everything is derived from records; no LLM runs anywhere:
   ABOUT       focus entities: in >= FOCUS_MIN_EVENTS of the events in that
               window, or named in the person's latest message; top FOCUS_K
   DECIDED     this chat's decisions: the operator ledger, goals fulfilled
-              here, coproc decide() records (#454)
+              here
   OPEN        open goals: those planted in this chat first, then the board's,
               each labelled with its origin (this chat / another chat / board)
   STABLE      facts seen in >= STABLE_MIN_CONVS chats over >= STABLE_MIN_DAYS
@@ -392,24 +392,6 @@ def _iso_ts(s: str) -> float | None:
         return None
 
 
-def _coproc_store(srv):
-    from . import coproc as CP
-    st = getattr(srv, "coproc_store", None)
-    if isinstance(st, CP.Store):
-        return st
-    led = getattr(srv, "user_ledger", None)
-    lp = str(getattr(led, "path", "") or "")
-    if not lp.endswith(".ledger.jsonl"):
-        return None
-    import os
-    if not os.path.exists(lp[: -len(".ledger.jsonl")] + ".coproc.jsonl"):
-        return None
-    try:
-        return CP.store_for(srv)
-    except Exception:
-        return None
-
-
 def _ledger_entries(srv) -> list[dict]:
     led = getattr(srv, "user_ledger", None)
     fn = getattr(led, "entries", None)
@@ -443,20 +425,13 @@ def _board_intents(srv) -> list:
 
 def decided(srv, conv: str) -> list[Item]:
     """This chat's decisions, newest first: the operator ledger's entries
-    said here, goals fulfilled here, coproc decide() records made here."""
+    said here, goals fulfilled here."""
     if not conv:
         return []
     out: list[Item] = []
     for e in _ledger_entries(srv):
         if e.get("conv") == conv:
             out.append(Item(e.get("text") or "", "person", _iso_ts(e.get("ts"))))
-    st = _coproc_store(srv)
-    if st is not None:
-        for r in st.decisions():
-            if r.get("conv") == conv:
-                who = str(r.get("who") or "person")
-                out.append(Item(str((r.get("args") or {}).get("text") or ""),
-                                "person" if who.startswith("person") else who, r.get("ts")))
     for i in _board_intents(srv):
         if i.status == "fulfilled" and i.fulfilled_conv == conv:
             out.append(Item("goal fulfilled: " + i.text, "goal", i.fulfilled or None))
@@ -534,23 +509,11 @@ def _about(text: str, focus_ids, fld) -> bool:
 
 def stable(srv, focus_ids, fld=None, tz=None) -> list[Item]:
     """Facts said in >= STABLE_MIN_CONVS chats over >= STABLE_MIN_DAYS days
-    and never given another value, about a focus entity. Sources: coproc
-    remember() records (a key's value) and the operator ledger (its verbatim
+    about a focus entity. Source: the operator ledger (its verbatim
     entries; a ledger line has no key, so nothing can contradict it)."""
     if not focus_ids:
         return []
     groups: dict[str, dict] = {}
-    st = _coproc_store(srv)
-    if st is not None:
-        from .coproc import fact_key
-        for r in st._actions():
-            if r.get("word") != "remember" or r.get("status") != "applied":
-                continue
-            a = r.get("args") or {}
-            g = groups.setdefault("k|" + fact_key(a.get("key", "")), {
-                "text": f"{a.get('key')}: {a.get('value')}", "values": set(), "seen": []})
-            g["values"].add(_norm(a.get("value")))
-            g["seen"].append((r.get("conv") or "", r.get("ts")))
     for e in _ledger_entries(srv):
         g = groups.setdefault("l|" + _norm(e.get("text")), {
             "text": e.get("text") or "", "values": {""}, "seen": []})

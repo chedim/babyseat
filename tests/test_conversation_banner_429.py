@@ -7,9 +7,9 @@ conversation's state, derived from records only (no LLM):
   ABOUT       focus entities: in >= 2 of this chat's events or named in the
               person's latest message; top 5
   DECIDED     this chat's decisions: the operator ledger, goals fulfilled
-              here, coproc decide() records; newest 3
+              here; newest 3
   OPEN        goals planted in this chat and still open; newest 3
-  STABLE      facts seen in >= 3 chats over >= 2 days, never contradicted,
+  STABLE      facts seen in >= 3 chats over >= 2 days,
               about a focus entity; 3
   SINCE YOUR LAST MESSAGE  focus entities moved from outside this chat;
               3 lines x 200 chars
@@ -69,7 +69,6 @@ def _goal(est, slug, name, **props):
 
 
 def _seat(tmp):
-    from membrane.coproc import Store
     from membrane.entities import EntityStore
     from membrane.ledger import UserLedger
     f = _field()
@@ -78,7 +77,6 @@ def _seat(tmp):
     srv.capturer = types.SimpleNamespace(mode="on", sessions=None)
     srv.entity_store = EntityStore(path=str(Path(tmp) / "entities.json"))
     srv.user_ledger = UserLedger(str(Path(tmp) / "field.ledger.jsonl"))
-    srv.coproc_store = Store(None)
     srv.paused = False
     srv.membrane = types.SimpleNamespace(audit_path=str(Path(tmp) / "audit.jsonl"),
                                          embedder=None, field_path=str(Path(tmp) / "field.json"))
@@ -90,19 +88,6 @@ def _ledger(srv, text, conv, ts):
     iso = datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     with open(srv.user_ledger.path, "a") as fh:
         fh.write(json.dumps({"ts": iso, "text": text, "conv": conv}) + "\n")
-
-
-def _decide(srv, text, conv, ts, who="person"):
-    srv.coproc_store.append({"kind": "action", "id": srv.coproc_store.next_id(), "ts": ts,
-                             "conv": conv, "model": "m", "word": "decide",
-                             "args": {"text": text}, "status": "applied", "who": who})
-
-
-def _remember(srv, key, value, conv, ts):
-    srv.coproc_store.append({"kind": "action", "id": srv.coproc_store.next_id(), "ts": ts,
-                             "conv": conv, "model": "m", "word": "remember",
-                             "args": {"key": key, "value": value}, "status": "applied",
-                             "who": "person"})
 
 
 class TestAges(unittest.TestCase):
@@ -339,13 +324,13 @@ class TestGather(unittest.TestCase):
     def test_decided_comes_from_this_chats_records_newest_first(self):
         _ledger(self.srv, "size limit stays 2 GB", "sid:a", NOW - 3 * H)
         _ledger(self.srv, "another chat's decision", "sid:b", NOW - 60)
-        _decide(self.srv, "keep the mxbai embedder for now", "sid:a", NOW - 2 * H)
-        _decide(self.srv, "the other chat decided this", "sid:b", NOW - 30)
+        _ledger(self.srv, "keep the mxbai embedder for now", "sid:a", NOW - 2 * H)
+        _ledger(self.srv, "the other chat decided this", "sid:b", NOW - 30)
         _goal(self.srv.entity_store, "skip", "backup skips huge files", status="fulfilled",
               fulfilled_ts=NOW - H, fulfilled_conv="sid:a", convs=["sid:a"])
         _goal(self.srv.entity_store, "other", "other chat goal", status="fulfilled",
               fulfilled_ts=NOW - 10, fulfilled_conv="sid:b")
-        _decide(self.srv, "oldest of four", "sid:a", NOW - 5 * H)
+        _ledger(self.srv, "oldest of four", "sid:a", NOW - 5 * H)
         got = CB.decided(self.srv, "sid:a")
         self.assertEqual([i.text for i in got],
                          ["goal fulfilled: backup skips huge files",
@@ -364,19 +349,15 @@ class TestGather(unittest.TestCase):
                          [("report skipped files", "goal · this chat"),
                           ("a goal from elsewhere", "goal · another chat")])
 
-    def test_stable_needs_three_chats_two_days_and_no_contradiction(self):
+    def test_stable_needs_three_chats_and_two_days(self):
         for i, c in enumerate(("sid:a", "sid:b", "sid:c")):
-            _remember(self.srv, "backup.py schedule", "02:00", c, NOW - 3 * D + i * D)
+            _ledger(self.srv, "backup.py schedule: 02:00", c, NOW - 3 * D + i * D)
         # two chats only
         for c in ("sid:a", "sid:b"):
-            _remember(self.srv, "backup.py owner", "ops", c, NOW - 2 * D)
+            _ledger(self.srv, "backup.py owner: ops", c, NOW - 2 * D)
         # three chats, one day
         for c in ("sid:a", "sid:b", "sid:c"):
-            _remember(self.srv, "backup.py format", "tar", c, NOW - 2 * H)
-        # three chats over days, then contradicted
-        for i, c in enumerate(("sid:a", "sid:b", "sid:c")):
-            _remember(self.srv, "backup.py target", "s3", c, NOW - 4 * D + i * D)
-        _remember(self.srv, "backup.py target", "nas", "sid:d", NOW - H)
+            _ledger(self.srv, "backup.py format: tar", c, NOW - 2 * H)
         got = CB.stable(self.srv, ["f:backup.py"], self.f)
         self.assertEqual([i.text for i in got], ["backup.py schedule: 02:00"])
         self.assertEqual(got[0].src, "fact · 3 chats")

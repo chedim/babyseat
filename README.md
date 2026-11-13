@@ -239,8 +239,8 @@ conversation, the code, another seat or a script.
 chat, built from records only (no model call), at most 900 chars, sent every
 turn while it has content: `NOW`, `WORKING ON` (the person's latest earlier
 ask), `ABOUT` (the chat's focus entities), `DECIDED` (the ledger, goals
-fulfilled and coproc decisions made in this chat), `OPEN` (goals planted in
-it), `STABLE` (facts seen in 3 chats over 2 days, never contradicted),
+fulfilled in this chat), `OPEN` (goals planted in
+it), `STABLE` (ledger facts seen in 3 chats over 2 days),
 `SINCE YOUR LAST MESSAGE` (focus entities moved from outside the chat),
 alerts and a pointer to `state(section=...)`. Each record line says its
 source and age, e.g. `(person · 2h ago)` ([details](docs/entity-field.md#this-conversation)).
@@ -687,7 +687,7 @@ of the top 8.
 | [doctrine.md](doctrine.md) + [membrane/help/](membrane/help/) | **What the model is told.** The doctrine is the short core every turn carries; the long forms (packs, exec, cliffhanger, goals, watches, browser, the in-page field engine, clock, voice, restarts, consequences) are help topics shipped as field entities `membrane::help:<topic>` (the `help` seed pack: a release updates them, a seat's edits are kept as overlays), read by `help(topic)` |
 | [docs/python-to-c1f.md](docs/python-to-c1f.md) | **The migration plan:** what stays Python (the package, VM initialization), what becomes native, what becomes `.c1f`, in order. |
 | [docs/cliffhanger-fields.md](docs/cliffhanger-fields.md) | **The field engine and `.c1f` packs.** Getters, setters, arms, FOR, built-ins, the store/fs/proc drivers, the banner and MCP as packs, the engine in the browser |
-| [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — the pointer to its own spec repo, and the LLM as a coprocessor (`MEMBRANE_COPROC=1`: decide / remember / intend parsed from a model's reply, person-traced or held as proposals) |
+| [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — the pointer to its own spec repo |
 | [docs/seat-first-2-tier.md](docs/seat-first-2-tier.md) | The seat-first two-tier field: local authoritative store, a published global tier on your terms |
 | [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup (publish, or the merged field with `MEMBRANE_FIELD_CLOUD=1`), the async loop, watches, operator rules, go-live checklist |
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The opt-in merged field: the origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
