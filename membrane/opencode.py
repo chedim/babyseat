@@ -709,8 +709,7 @@ def _build_ap():
                          "riding THIS seat's /v1 loopback (injection, "
                          "capture, banner, routing all real), tool "
                          "parts streamed as message.part.updated "
-                         "events. MEMBRANE_LEGACY_SERVE=1 restores the "
-                         "old opencode child lane.")
+                         "events.")
     ap.add_argument("--serve-port", type=int, default=4096,
                     help="port for the native serve surface (default "
                          "4096, walks up if taken; passed = pinned: "
@@ -817,7 +816,6 @@ def main() -> None:
     e = None
     env = None
     instr_path = None
-    legacy_serve = None
     listen = None
     mem = None
     model = None
@@ -996,7 +994,7 @@ def main() -> None:
         # #1115: the reserved port answers "loading the field... (step)" (503) until the native serve
         # adopts the socket, instead of minutes of silence
         _boot_door = None
-        if _serve_socket is not None and os.environ.get("MEMBRANE_LEGACY_SERVE") != "1":
+        if _serve_socket is not None:
             try:
                 from .bootprof import BootDoor, read_shape
                 _boot_door = BootDoor(_serve_socket, _boot_laps, shape=read_shape(args.field))
@@ -1884,40 +1882,37 @@ def main() -> None:
                     _CHB.anew(srv)                   # once per generation: Blurp starts anew
             except Exception as e:
                 print(f"[opencode] the cliffhanger VM failed to start ({e})", file=sys.stderr)
-            from .watch_agents import enabled_loops as _wa_on, start_goal_pulse
-            if _wa_on():                       # MEMBRANE_WATCH_LOOPS=0: the documented kill switch (never read before)
-                WA_start_loop_drainer(srv)
-                start_goal_pulse(srv)
-                try:                           # #738: goals as a graph -- the triggers, the worker pool
-                    from . import goalgraph as _GG
-                    _boot_laps.step('loops: goal graph seed')
-                    _n = _GG.seed(srv)
-                    _boot_laps.step('loops: script upgrade')
-                    from . import fields_live as _FL
-                    try:                       # #1044: the upgrade -- entity scripts move into .c1f once (rules, replay-gated)
-                        from . import scriptport as _SPORT
-                        _rep = _SPORT.upgrade(srv.entity_store)
-                        if any(_rep.values()):
-                            print("[upgrade] scripts: " + ", ".join(f"{k} {len(v)}" for k, v in _rep.items()), file=sys.stderr)
-                    except Exception as e:     # noqa: BLE001 -- the seat starts; scripts stay Python
-                        print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
-                    _boot_laps.step('loops: field engine')
-                    def _facts_now():          # the facts packs read (fields_live.seat_facts); the router's come late (below, after its step)
-                        from . import server as _SV, settings as _ST, ui_serve as _UI
-                        return _FL.seat_facts(os.environ, _ST.load(), srv, {"ui_dir": _UI.UI_DIR, "build_id": _UI.build_id(), "seat_version": _SV.VERSION,
-                                              "seat_cwd": os.getcwd(), "seat_home": os.path.expanduser("~"), "seat_project": _SV.PROJECT_ID})
-                    srv._facts_now = _facts_now
-                    _FL.start(srv)
-                    _FL.boot_started(srv.entity_store, ledger=getattr(getattr(srv, "user_ledger", None), "path", None), facts={"agent_writes": bool(getattr(srv, "agent_writes", True)), "nerve_pause_off": os.environ.get("MEMBRANE_NERVE_PAUSE") == "0", **_facts_now()})   # Boot:seat.started: the packs that start something answer (dev commands, the decisions' ledger file)
-                    _boot_laps.step('loops: owed tasks')             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
-                    _r = _GG.reowe(srv)
-                    _p = _GG.replan_lost(srv)
-                    print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool, "
-                          f"{_p} goal(s) planned again", file=sys.stderr)
-                except Exception as e:
-                    print(f"[opencode] goal graph seeding skipped ({e})", file=sys.stderr)
-            else:
-                print("[opencode] watch loops OFF (MEMBRANE_WATCH_LOOPS=0)", file=sys.stderr)
+            from .watch_agents import start_goal_pulse
+            WA_start_loop_drainer(srv)
+            start_goal_pulse(srv)
+            try:                           # #738: goals as a graph -- the triggers, the worker pool
+                from . import goalgraph as _GG
+                _boot_laps.step('loops: goal graph seed')
+                _n = _GG.seed(srv)
+                _boot_laps.step('loops: script upgrade')
+                from . import fields_live as _FL
+                try:                       # #1044: the upgrade -- entity scripts move into .c1f once (rules, replay-gated)
+                    from . import scriptport as _SPORT
+                    _rep = _SPORT.upgrade(srv.entity_store)
+                    if any(_rep.values()):
+                        print("[upgrade] scripts: " + ", ".join(f"{k} {len(v)}" for k, v in _rep.items()), file=sys.stderr)
+                except Exception as e:     # noqa: BLE001 -- the seat starts; scripts stay Python
+                    print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
+                _boot_laps.step('loops: field engine')
+                def _facts_now():          # the facts packs read (fields_live.seat_facts); the router's come late (below, after its step)
+                    from . import server as _SV, settings as _ST, ui_serve as _UI
+                    return _FL.seat_facts(os.environ, _ST.load(), srv, {"ui_dir": _UI.UI_DIR, "build_id": _UI.build_id(), "seat_version": _SV.VERSION,
+                                          "seat_cwd": os.getcwd(), "seat_home": os.path.expanduser("~"), "seat_project": _SV.PROJECT_ID})
+                srv._facts_now = _facts_now
+                _FL.start(srv)
+                _FL.boot_started(srv.entity_store, ledger=getattr(getattr(srv, "user_ledger", None), "path", None), facts={"agent_writes": bool(getattr(srv, "agent_writes", True)), "nerve_pause_off": os.environ.get("MEMBRANE_NERVE_PAUSE") == "0", **_facts_now()})   # Boot:seat.started: the packs that start something answer (dev commands, the decisions' ledger file)
+                _boot_laps.step('loops: owed tasks')             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
+                _r = _GG.reowe(srv)
+                _p = _GG.replan_lost(srv)
+                print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool, "
+                      f"{_p} goal(s) planned again", file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] goal graph seeding skipped ({e})", file=sys.stderr)
             print("[opencode] the loop pool is live (3 loops + the "
                   "operator's lane; the drainer consumes the watch events)",
                   file=sys.stderr)
@@ -2080,7 +2075,7 @@ def main() -> None:
         srv.cell_pool = None
     _STEPS['embedder'] = _step_embedder
     def _step_config():
-        nonlocal _NM, cfg, cfg_path, e, env, instr_path, legacy_serve, surf_host
+        nonlocal _NM, cfg, cfg_path, e, env, instr_path, surf_host
 
         # ---- the opencode config + launch ----
         # first-class cloud backends join the picker: any router record with an
@@ -2252,7 +2247,6 @@ def main() -> None:
             except Exception:
                 fld_s = type(fld.b).__name__
         serve_addr = None
-        legacy_serve = os.environ.get("MEMBRANE_LEGACY_SERVE") == "1"
         # THE SURFACE runs for every launch boot (the TUI attaches to it as a
         # client -- stage 3.5), loopback-only unless --serve exposes it to the
         # room; no auth baked in -- a proxy in front is the operator's lane.
@@ -2291,7 +2285,7 @@ def main() -> None:
         if args.serve:
             _serve_board(serve_port, args.serve_host)
         native_up = False
-        if serve_wanted and not legacy_serve:
+        if serve_wanted:
             # THE REPLACEMENT (stage 3): no opencode child -- the native
             # server (membrane/server.py) IS the serve surface:
             # opencode-compatible REST/SSE (the companion app's endpoint),
@@ -2534,36 +2528,14 @@ def main() -> None:
                 threading.Thread(target=_open_dev_viewer, name="dev-viewer-open",
                                  daemon=True).start()
             if args.launch:
-                tui_direct = os.environ.get("MEMBRANE_TUI_DIRECT") == "1"
-                if args.serve and legacy_serve:
-                    # MEMBRANE_LEGACY_SERVE=1: the OLD lane -- `opencode serve`
-                    # as a child (the generated config's provider baseURL -> the
-                    # proxy; the REST surface is opencode's own). Without the
-                    # env the native surface (above) IS the serve lane.
-                    opencode = shutil.which("opencode")
-                    if opencode is None:
-                        print("[opencode] `opencode` not on PATH; no legacy "
-                              "serve child (proxy + native surface only)",
-                              file=sys.stderr)
-                    else:
-                        cmd = [opencode, "serve", "--hostname", args.serve_host,
-                               "--port", str(serve_port or 4096)]
-                        print(f"[opencode] launching legacy serve: "
-                              f"{' '.join(cmd)}", file=sys.stderr)
-                        child = subprocess.Popen(cmd, env=env)
-                        try:
-                            pid_path = (Path(args.field).parent / "opencode.pid")
-                            pid_path.write_text(str(child.pid))
-                        except Exception:
-                            pass
-                elif serve_wanted and not native_up:
+                if serve_wanted and not native_up:
                     # the native surface failed to bind -- no child to point at
                     print("[opencode] serve surface is down; no TUI child "
                           "(proxy only -- point any client at a surface "
                           "manually)", file=sys.stderr)
                 elif args.standalone:
                     pass                       # standalone: the browser is the client, no TUI
-                elif not tui_direct and not legacy_serve:
+                else:
                     # THE CLIENT (stage 3.5): the TUI attaches to membrane's
                     # serve server -- sessions/messages in membrane's stores,
                     # turns in the TurnRunner, tool parts from the SSE hub.
@@ -2581,42 +2553,6 @@ def main() -> None:
                         child = subprocess.Popen(
                             cmd, env=_attach_env(env),
                             stderr=subprocess.DEVNULL)
-                        try:
-                            pid_path = (Path(args.field).parent
-                                        / "opencode.pid")
-                            pid_path.write_text(str(child.pid))
-                        except Exception:
-                            pass
-                else:
-                    opencode = shutil.which("opencode")
-                    if opencode is None:
-                        print("[opencode] `opencode` not on PATH; proxy-only "
-                              "(point opencode at the /v1 URL above)",
-                              file=sys.stderr)
-                    else:
-                        extra = []
-                        if model and not any(
-                                a.startswith("--model") or
-                                a.startswith("-m") for a in passthrough):
-                            extra = ["--model", f"membrane/{model}"]
-                        # resume by default: opencode -c continues the last
-                        # session. An explicit -c/-s/--session in passthrough
-                        # wins; --no-continue opts out (fresh session).
-                        if args.cont and not any(
-                                a in ("-c", "--continue") or
-                                a in ("-s", "--session") or
-                                a.startswith("--session=") for a in
-                                passthrough):
-                            extra += ["-c"]
-                        cmd = [opencode] + extra + list(passthrough)
-                        print(f"[opencode] launching: {' '.join(cmd)}",
-                              file=sys.stderr)
-                        child = subprocess.Popen(cmd, env=env)
-                        # THE LIFE-HANDSHAKE: write the child's PID --
-                        # proxy-only instances (a second terminal, a manual
-                        # relaunch) poll this file and exit when the seat
-                        # dies (the operator's rule: the proxy's life is the
-                        # seat's life)
                         try:
                             pid_path = (Path(args.field).parent
                                         / "opencode.pid")

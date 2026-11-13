@@ -143,10 +143,3 @@ def test_code_change_without_version_bump_reaches_seat_and_corrupt_version_is_su
     est.docs[SP._led_eid("banner")].properties["version"] = "junk"
     SP.load(est, pk, release=True)
     assert est.docs[eid].properties["show"] == "changed in code"
-
-
-def test_python_switch_runs_old_seed(monkeypatch):
-    monkeypatch.setenv("MEMBRANE_SEED_PYTHON", "1")
-    est = _est()
-    assert GB.seed(est) == len(GB.SEED)
-    assert SP._led_eid("banner") not in est.docs

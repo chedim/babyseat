@@ -40,9 +40,7 @@ MCP lane. This module is the always-watched lane's brain:
   background-subagents capability + the banner 'loops:' line are the
   render.
 
-Kill switch: MEMBRANE_WATCH_LOOPS=0 -- the loops never spawn (the
-fires still land: the queue + the banner report them reactively
-later); MEMBRANE_OPERATOR=0 -- the operator entity never fires.
+Kill switch: MEMBRANE_OPERATOR=0 -- the operator entity never fires.
 """
 
 from __future__ import annotations
@@ -66,10 +64,6 @@ DEFAULT_OP_Y = 0.40
 DEFAULT_OP_Z = 0.25
 COOLDOWN_S = 30.0           # a fired op's minimum silence
 EVENT_MAX = 64              # the queue's drop-oldest cap
-
-
-def enabled_loops() -> bool:
-    return os.environ.get("MEMBRANE_WATCH_LOOPS", "1") not in ("0", "false")
 
 
 def enabled_operator() -> bool:

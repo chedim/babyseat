@@ -792,32 +792,6 @@ def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: 
     return r["text"]
 
 
-def _shadow(srv, fld, conv, events, latest, now, tz, block) -> None:
-    """MEMBRANE_BANNER_SHADOW=1 (the operator, 2026-11-10: the pack reads focus from what capture stored; see the old
-    and the new side by side): today's Python WORKING ON / ABOUT / SINCE / STABLE beside the pack's block, logged
-    where they differ. Read-only; the block the model sees is the pack's."""
-    try:
-        marks = getattr(srv, "_conv_marks", None)
-        mark = marks.get(conv) if isinstance(marks, dict) and conv else None
-        about = focus(fld, events, latest)
-        w = working_on(events, latest, about, fld)
-        old = {"WORKING ON": _working_line(w, now, tz) if w is not None else "",
-               "ABOUT": ("ABOUT: " + " · ".join(about)) if about else "",
-               "SINCE": "\n".join(_item_line(i, now, tz) for i in since(fld, conv, mark, about)),
-               "STABLE": "\n".join(_item_line(i, now, tz) for i in stable(srv, about, fld, tz))}
-        new = str(block or "")
-        for k, v in old.items():
-            for ln in [x for x in v.splitlines() if x]:
-                if ln not in new:
-                    print(f"[banner-shadow] {conv} {k}: python only: {ln[:200]}", file=sys.stderr)
-        for ln in new.splitlines():
-            if ln.startswith(("WORKING ON:", "ABOUT:")) and ln not in "\n".join(old.values()):
-                print(f"[banner-shadow] {conv} pack only: {ln[:200]}", file=sys.stderr)
-        print(f"[banner-shadow] {conv} compared ({len(about)} focus)", file=sys.stderr)
-    except Exception as e:                                 # noqa: BLE001 -- a diagnostic never breaks a turn
-        print(f"[banner-shadow] {conv} failed: {e!r}"[:300], file=sys.stderr)
-
-
 def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
           on_alert=None) -> str | None:
     """The block for this turn (None when it holds nothing of this chat). NEVER in map mode: there the banner is
@@ -845,8 +819,6 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
         if _blurp_on():
             facts.update(blurp=_blurp(srv), suggest=_suggestions(srv, conv))
         block = pack_block(srv, live, fld, conv, events, latest, now, str((body or {}).get("_turn_sid") or ""), facts)
-        if os.environ.get("MEMBRANE_BANNER_SHADOW", "").strip() == "1":
-            _shadow(srv, fld, conv, events, latest, now, tz, block)
         return block
     about = focus(fld, events, latest) if fld is not None else []
     marks = getattr(srv, "_conv_marks", None)

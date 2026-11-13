@@ -23,8 +23,7 @@ once, and the predictor learns from the miss:
 THE COVENANTS: a guess is never executed (membrane has no hands: these
 are virtual actions, a ledger line and a score); it never enters the seat's
 context, the session's messages or the field. The chat's text guess is
-the voice's own line (voice.py), graded by closeness as before.
-Kill switch: MEMBRANE_PREDICT=0."""
+the voice's own line (voice.py), graded by closeness as before."""
 from __future__ import annotations
 
 import json
@@ -46,10 +45,6 @@ START = "(start)"                     # the action before a turn's first round
 SOURCES = ("named", "past", "near")
 _ENT_KEYS = ("spec", "eid", "name", "entity", "key", "id", "object", "on", "over")
 _CLASS_HEAD = re.compile(r"^[A-Z][A-Za-z]*:")
-
-
-def enabled() -> bool:
-    return os.environ.get("MEMBRANE_PREDICT", "1") != "0"
 
 
 def norm_ent(x) -> str:
@@ -313,7 +308,7 @@ class Predictor:
 
 # ---- the seat's wiring --------------------------------------------------------
 def of(srv):
-    if srv is None or not enabled():
+    if srv is None:
         return None
     p = getattr(srv, "_predictor", None)
     if p is None:

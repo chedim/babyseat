@@ -150,10 +150,6 @@ class TestTheKnobsAndTheSwitch(unittest.TestCase):
         self.assertEqual(e.properties["script_cooldown_s"], 3600.0)
         self.assertNotIn("script_disabled", e.properties)          # the rest of script_* stays untouchable
 
-    def test_the_kill_switch_is_read(self):
-        src = (ROOT / "membrane" / "opencode.py").read_text()
-        self.assertIn("enabled_loops as _wa_on", src)
-
 
 if __name__ == "__main__":
     unittest.main()

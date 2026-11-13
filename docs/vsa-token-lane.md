@@ -161,9 +161,6 @@ like any turn. The COMMON CONTEXT is the membrane memory itself (the
 recall + the entity reads + the session:now) -- each loop starts
 fresh by session, continuity lives in the field.
 
-Kill switch `MEMBRANE_WATCH_LOOPS=0`: the loops never spawn; the
-fires still land (the queue + the banner report them).
-
 ## 4. The frontend (the loops as agents)
 
 - The loop session titles CARRY THE ENTITY ID: `watch:

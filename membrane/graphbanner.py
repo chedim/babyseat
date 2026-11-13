@@ -97,16 +97,7 @@ def pack() -> dict:
 
 
 def seed(est) -> int:
-    """Boot: load the pack (content decides; edits kept). MEMBRANE_SEED_PYTHON=1 runs the old
-    made-once Python path instead (#980's switch back)."""
-    import os
-    if os.environ.get("MEMBRANE_SEED_PYTHON") == "1":
-        n = 0
-        for r in SEED:
-            if _rule_eid(r["name"]) not in (est.docs or {}):
-                define(est, r["name"], r["where"], r["show"], r["order"])
-                n += 1
-        return n
+    """Boot: load the pack (content decides; edits kept)."""
     from . import seedpack
     return seedpack.load(est, pack(), release=True)["installed"]
 
