@@ -228,3 +228,85 @@ fn an_upper_arm_that_makes_a_getter_depend_on_a_lower_setters_trigger_is_refused
     assert!(e.contains("reads the getter Light.word"), "{e}");
     assert!(!f.pack_active("up"));
 }
+
+// ---- the scoped override exception: an import of B lets a pack override what B defines, without importing the class owner ----------
+// RULE A as built: a declaration on a class owned by another pack needs `IMPORT <owner>` UNLESS EVERY declaration the pack makes on that class
+// overrides a definition (getter: class+property; setter: class+property+name) of a pack it imports (directly or through its imports).
+
+const MID: &str = "PACK mid 1\nIMPORT base 1\nLight.word getter WHEN this.level > 5: 'mid'\n";
+
+#[test]
+fn importing_only_the_overridden_pack_overrides_its_getter() {
+    let up = "PACK up 1\nIMPORT mid 1\nLight.word getter WHEN this.level > 7: 'up'\n";
+    let (mut c, mut f) = world(&[("base", BASE), ("mid", MID), ("up", up)]);
+    put(&mut c, &mut f, "Light:a", "level", json!(9));
+    assert_eq!(word(&c), json!("up"), "the upper arm answers");
+    put(&mut c, &mut f, "Light:a", "level", json!(6));
+    assert_eq!(word(&c), json!("mid"));
+}
+
+#[test]
+fn importing_only_the_overridden_pack_overrides_its_same_named_setter() {
+    let up = "PACK up 1\nIMPORT low 1\nLight.level on-setter mark:\n  ALWAYS:\n    Box:b.u = 'upper'\n";
+    let (mut c, mut f) = world(&[("base", BASE), ("low", LOW), ("up", up)]);
+    put(&mut c, &mut f, "Light:a", "level", json!(1));
+    assert_eq!(c.docs["Box:b"].props["u"], json!("upper"));
+    assert!(c.docs["Box:b"].props.get("m").is_none(), "the lower `mark` is replaced");
+}
+
+fn refused(packs: &[(&str, &str)], last: (&str, &str)) -> String {
+    let mut f = Fields::goalgraph();
+    for (n, t) in packs { f.set_pack(n, t).unwrap(); }
+    f.set_pack(last.0, last.1).unwrap_err()
+}
+
+#[test]
+fn a_new_getter_on_the_class_still_needs_the_owner_import() {
+    let up = "PACK up 1\nIMPORT mid 1\nLight.glow getter: 1\n";
+    let e = refused(&[("base", BASE), ("mid", MID)], ("up", up));
+    assert!(e.contains("belongs to pack base") && e.contains("add IMPORT base"), "{e}");
+}
+
+#[test]
+fn a_new_setter_on_the_class_still_needs_the_owner_import() {
+    let up = "PACK up 1\nIMPORT low 1\nLight.level on-setter fresh:\n  ALWAYS:\n    Box:b.u = 'x'\n";
+    let e = refused(&[("base", BASE), ("low", LOW)], ("up", up));
+    assert!(e.contains("belongs to pack base") && e.contains("add IMPORT base"), "{e}");
+}
+
+#[test]
+fn overriding_what_an_unimported_pack_defines_is_still_refused() {
+    let other = "PACK other 1\nIMPORT base 1\nLight.shine getter: 'o'\n";
+    // owner imported, `other` not: the override rule names `other`
+    let e = refused(&[("base", BASE), ("other", other)], ("rogue", "PACK rogue 1\nIMPORT base 1\nLight.shine getter: 'r'\n"));
+    assert!(e.contains("Light.shine") && e.contains("IMPORT other"), "{e}");
+    // neither imported but `mid` is: still refused
+    let e = refused(&[("base", BASE), ("mid", MID), ("other", other)], ("rogue", "PACK rogue 1\nIMPORT mid 1\nLight.shine getter: 'r'\n"));
+    assert!(e.contains("add IMPORT"), "{e}");
+}
+
+#[test]
+fn a_pack_that_overrides_and_adds_on_one_class_needs_the_owner_import() {
+    let up = "PACK up 1\nIMPORT mid 1\nLight.word getter WHEN this.level > 7: 'up'\nLight.glow getter: 3\n";
+    let e = refused(&[("base", BASE), ("mid", MID)], ("up", up));
+    assert!(e.contains("belongs to pack base") && e.contains("add IMPORT base"), "{e}");
+    // with the owner import the same pack loads
+    let ok = "PACK up 1\nIMPORT base 1\nIMPORT mid 1\nLight.word getter WHEN this.level > 7: 'up'\nLight.glow getter: 3\n";
+    let mut f = Fields::goalgraph();
+    for (n, t) in [("base", BASE), ("mid", MID), ("up", ok)] { f.set_pack(n, t).unwrap(); }
+}
+
+#[test]
+fn a_first_declaration_that_overrides_nothing_needs_the_import() {
+    let e = refused(&[("base", BASE), ("mid", MID)], ("up", "PACK up 1\nLight.word getter: 'x'\n"));
+    assert!(e.contains("belongs to pack base") && e.contains("add IMPORT base"), "no import at all: {e}");
+    let e = refused(&[("base", BASE), ("mid", MID)], ("up", "PACK up 1\nIMPORT mid 1\nLight.level on-setter first:\n  ALWAYS:\n    Box:b.u = 'x'\n"));
+    assert!(e.contains("belongs to pack base"), "{e}");
+}
+
+#[test]
+fn the_exception_is_not_transitive_what_the_owner_defines_needs_the_owner_import() {
+    // `up` imports mid, which imports base: base's own Light.glow is not mid's to hand over
+    let e = refused(&[("base", BASE), ("mid", MID)], ("up", "PACK up 1\nIMPORT mid 1\nLight.glow getter: 3\n"));
+    assert!(e.contains("belongs to pack base") && e.contains("add IMPORT base"), "{e}");
+}

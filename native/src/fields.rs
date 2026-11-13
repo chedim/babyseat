@@ -431,11 +431,18 @@ impl Fields {
                 if !ready { continue; }
                 done.insert(n.clone());
                 moved = true;
-                let foreign: Vec<String> = p.classes().into_iter().filter(|c| owner.get(c).map(|o| o != n && !p.imports.iter().any(|(i, _)| i == o)).unwrap_or(false)).collect();
+                // RULE A: a class is defined by its owner; a declaration on it needs `IMPORT <owner>`, UNLESS the declaration overrides what a pack
+                // this one imports (DIRECTLY) defines: a getter by class+property, a setter by class+property+name (docs/c1f-layers.md)
+                let direct: Vec<&String> = p.imports.iter().map(|(i, _)| i).collect();   // B must be imported DIRECTLY: not transitive trust
+                let overrides = |c: &str| -> bool {
+                    p.getters.iter().filter(|g| g.cls == c).all(|g| direct.iter().filter_map(|q| self.packs.get(*q)).any(|o| o.getters.iter().any(|h| h.cls == g.cls && h.prop == g.prop)))
+                    && p.setters.iter().filter(|s| s.cls == c).all(|s| direct.iter().filter_map(|q| self.packs.get(*q)).any(|o| o.setters.iter().any(|t| t.cls == s.cls && t.prop == s.prop && t.name == s.name)))
+                };
+                let foreign: Vec<String> = p.classes().into_iter().filter(|c| owner.get(c).map(|o| o != n && !p.imports.iter().any(|(i, _)| i == o) && !overrides(c)).unwrap_or(false)).collect();
                 if let Some(c) = foreign.first() {
                     let o = &owner[c];
                     let maj = self.packs.get(o).map(|q| q.major()).unwrap_or(1);
-                    self.pack_errors.insert(n.clone(), format!("pack {}: declares on {}, which belongs to pack {}: add IMPORT {} {}", n, c, o, o, maj));
+                    self.pack_errors.insert(n.clone(), format!("pack {}: declares on {}, which belongs to pack {}: add IMPORT {} {} (or override only what a pack you import defines there)", n, c, o, o, maj));
                     continue;
                 }
                 // THE SAFETY RULE (docs/c1f-layers.md): a layer overrides only what it imports
@@ -507,9 +514,8 @@ impl Fields {
         self.set_getters(getters);
     }
 
-    /// The safety rule: `Some(why)` when pack `n` defines a getter, or a setter by the same class, property and name, that an ACTIVE pack
-    /// defines too, and `n` does not import that pack (directly or through the packs it imports). (docs/c1f-layers.md)
-    fn override_without_import(&self, n: &str, active: &[String]) -> Option<String> {
+    /// The packs `n` imports, directly or through the packs they import.
+    fn reach(&self, n: &str) -> Vec<String> {
         let mut reach: Vec<String> = vec![];
         let mut todo: Vec<String> = self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect();
         while let Some(i) = todo.pop() {
@@ -517,6 +523,13 @@ impl Fields {
             if let Some(q) = self.packs.get(&i) { todo.extend(q.imports.iter().map(|(x, _)| x.clone())); }
             reach.push(i);
         }
+        reach
+    }
+
+    /// The safety rule: `Some(why)` when pack `n` defines a getter, or a setter by the same class, property and name, that an ACTIVE pack
+    /// defines too, and `n` does not import that pack (directly or through the packs it imports). (docs/c1f-layers.md)
+    fn override_without_import(&self, n: &str, active: &[String]) -> Option<String> {
+        let reach = self.reach(n);
         let p = &self.packs[n];
         for q in active {
             if reach.contains(q) { continue; }

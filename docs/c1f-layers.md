@@ -29,6 +29,7 @@ the LOWEST layer of data files. The FIRST app is the root of trust (see Privileg
 | setters: top first, same-name replacement, first write wins (quiet skip before the right-hand side), in-layer double write stays the error | built |
 | `Why`: `Fields::why_layer` (`layer: <pack>`, `overridden by <pack>: <pack>'s <setter> write skipped`) | built as a Rust API; no door route shows it yet |
 | safety rule (override only what you import), stale-setter check across layers | built |
+| scoped override exception: importing B alone lets a layer override exactly what B defines on a class another pack owns | built; `layers_1143.rs` |
 | a runtime `Pack:<name>` takes its layer position | by load order: a new pack is on top of everything loaded before it; a replaced pack keeps its place |
 | infer.rs types across layers | a getter defined by several packs is typed from the LOWEST pack's arms (`or_insert`); the snapshot is unchanged |
 | data files as entities of their path | not built: the door searches the folders with the fs driver; no entity per file |
@@ -40,7 +41,7 @@ the LOWEST layer of data files. The FIRST app is the root of trust (see Privileg
 |---|---|
 | getter | the arms of every layer form ONE list, the top layer's arms first; the first arm whose `WHEN` holds wins and the search falls through to lower layers; a default arm (`ELSE:`) in an upper layer ends it there. This is the getter-arms machinery (`fold_arms`) with arms ordered across packs. |
 | setter | every setter on the same property fires, TOP layer first (the original: "reverse order of layer loading"). A setter with the SAME NAME as a lower layer's replaces it: the lower one is dropped when the layers are composed and is never evaluated (explicit override). A differently named one stacks, and when two stacked setters write the same target (an entity and a property) in one round the FIRST write wins, which is the top layer's: before a write line's right-hand side is evaluated the engine checks whether its target was already written this round by a higher layer, and if so skips the line without evaluating it and without running any effect (an overridden `Command:x.run` never runs). A setter's `WHEN` is still evaluated, because the engine cannot know statically which writes it would make. Inside ONE layer a double write to a target stays the existing error ("already written this round"); across layers it is the override and a quiet skip, and `Why` says `overridden by <layer>`. |
-| class | the lowest layer that declares a class owns it. An upper layer must `IMPORT` the owner, as today; a pack that declares on a class it does not import is still refused. |
+| class | the lowest layer that declares a class owns it. An upper layer must `IMPORT` the owner, EXCEPT when every declaration it makes on that class overrides what a pack it imports DIRECTLY defines (see below); otherwise it is refused with `add IMPORT <owner>`. |
 | data file | a file at the same path in an upper layer shadows the lower one. |
 | `Why` | names the layer that supplied a value (`layer: <pack>`), so a value never comes from nowhere. |
 
@@ -53,8 +54,12 @@ the LOWEST layer of data files. The FIRST app is the root of trust (see Privileg
   getter of another pack must import THAT pack too (the safety rule, refused at load with `add IMPORT <pack> <major>`).
 - Levels and the type inference read the folded expression of the whole list; the stale-setter check runs across all packs (a setter
   in one pack against the getters of every other, both ways).
-- The importer rule is NOT transitive for class ownership: a layer declaring on a class owns by `IMPORT`ing the owner directly, and
-  imports the pack it overrides as well (two import lines).
+- The scoped override exception (operator decision 2026-11-13): a pack that imports B may override exactly what B defines on a class
+  owned by another pack A (B's getters by class+property, B's setters by class+property+name) with ONE import line, B. It is not
+  transitive trust: the rule is per class, over ALL of the pack's declarations on that class. Each must be an override of a definition of
+  a pack it imports DIRECTLY, or the pack needs `IMPORT A` (so overriding one getter of B and adding another, or overriding what A itself
+  defines through B's import, is refused with `belongs to pack A: add IMPORT A`). The safety rule (`add IMPORT <pack>` for an override of
+  a pack you do not import, transitively counted) and the write rule B are unchanged.
 
 ## Open points
 
