@@ -110,12 +110,23 @@ A call to a class name with NAMED arguments, on the right of a write whose left 
 - Outside the right of such a write a constructor is a reasoned error. Inference: it is `Entity(Class)`, and its arguments are typed.
 - Out of scope: value classes (`Std.Url(raw: x)` natives), `Import`, identity declarations.
 
-## Limits: the step budget (a dial)
+## Limits: the step budget and the time allowance (dials)
 The old caps (an expression at most 64 nodes / 400 characters) are removed from the native VM; `membrane/ch.py` keeps them for its own
 triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is a reasoned null `error: budget exceeded (N steps)` (a getter's
-`Why` shows it, a receipt says where), never a hang or a panic. The default is 10000 steps (`DEFAULT_EVAL_BUDGET`), overridden by the env
+`Why` shows it, a receipt says where), never a hang or a panic. The default is 100,000 steps (`DEFAULT_EVAL_BUDGET`), overridden by the env
 `MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
 evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
+
+**The time allowance.** Each getter or setter EVALUATION (not an AST node) also has a SELF-TIME allowance, default 10 ms
+(`DEFAULT_EVAL_TIME_MS`, env `MEMBRANE_EVAL_TIME_MS`; both approved by the operator 2026-11-12, to be tuned). Self-time is the
+elapsed time minus the time spent in host calls that wait on I/O (`expr::waiting`: the synchronous `Host::call`; `sql`, `jsonl`,
+`read`, `listdir`, `stat` and the `call_later` functions only ask and return a pending null at once, so there is nothing to
+subtract there). Over it, that node (only) becomes a reasoned null `error: timeout N ms (allowance M ms)` (N rounded up); `Why`
+prints it like the budget's reason; the rest of the engine keeps running. The clock is read twice per evaluation (start, end),
+and the step counter doubles as the in-evaluation backstop: every `TIME_CHECK_EVERY` (256) steps it reads the clock again, so a
+runaway loop inside one evaluation trips before it ends. The clock is injectable (`expr::set_clock`) for tests.
+**Replay caveat (open).** A time trip is non-deterministic, and the journal records outside writes only (not getter outcomes),
+so a replay re-evaluates getters and re-measures: a recorded trip is not yet applied from the record. See the report on #1143.
 
 ## The contracts are executable
 `native/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are

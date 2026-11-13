@@ -249,9 +249,9 @@ fn a_comprehension_over_a_long_list_spends_the_budget() {
 }
 
 #[test]
-fn the_default_budget_is_ten_thousand_steps_and_the_env_dial_overrides_it() {
-    assert_eq!(expr::DEFAULT_EVAL_BUDGET, 10000);
-    assert_eq!(expr::eval_budget(), 10000);
+fn the_default_budget_is_one_hundred_thousand_steps_and_the_env_dial_overrides_it() {
+    assert_eq!(expr::DEFAULT_EVAL_BUDGET, 100_000);
+    assert_eq!(expr::eval_budget(), 100_000);
 }
 
 #[test]

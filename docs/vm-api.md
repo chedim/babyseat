@@ -97,6 +97,11 @@ A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebu
   `trigger:*` writes, in order. The final state must match too. A native VM passes the
   same test on the same journals (`tests/test_journal_971.py`).
 
+Limits an evaluation runs under (native): a step budget (default 100,000, env `MEMBRANE_EVAL_BUDGET`) and a self-time allowance
+(default 10 ms, env `MEMBRANE_EVAL_TIME_MS`; the time spent in host calls that wait is not counted). Over either, the node is a
+reasoned null (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`). The budget is deterministic; the time trip is not,
+and replay does not yet apply a recorded trip (it re-measures): see docs/c1f-stdlib.md, Limits.
+
 ## 6. The native VM (`native/`, `membrane/ch_native.py`, #971 step 3)
 
 A Rust core (PyO3) behind `ch.VM`'s API. `ch.make_vm()` always returns it (no switch, no Python fallback; a missing extension raises at startup) (`native/build.sh` puts `membrane/membrane_vm.so` in place).
