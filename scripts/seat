@@ -1,0 +1,41 @@
+#!/bin/sh
+# Start the barest agent seat: the standalone cliffvm on the shipped packs and the barest app (a graph viewer and one chat).
+# Builds nothing: build the binary once with `cargo build --release --no-default-features --features bin` in native/.
+#   scripts/seat [--store <sqlite>] [--port <n>] [--open]
+# CLIFFVM names the binary, CLAUDE_BIN the claude CLI (else the one on PATH). Run it from anywhere; it works from the repo root.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+store=./.cliffvm/seat.sqlite
+port=4096
+open_page=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --store) store=${2:?--store needs a path}; shift 2 ;;
+    --port) port=${2:?--port needs a number}; shift 2 ;;
+    --open) open_page=1; shift ;;
+    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
+    *) echo "scripts/seat: unknown option $1 (--store <sqlite> --port <n> --open)" >&2; exit 2 ;;
+  esac
+done
+bin=${CLIFFVM:-}
+[ -n "$bin" ] || { [ -x "$root/native/target/release/cliffvm" ] && bin=$root/native/target/release/cliffvm; } || true
+[ -n "$bin" ] || bin=$(command -v cliffvm || true)
+if [ -z "$bin" ]; then
+  echo "scripts/seat: cliffvm is not built yet. Build it once:" >&2
+  echo "  (cd $root/native && cargo build --release --no-default-features --features bin)" >&2
+  echo "or point CLIFFVM at the binary." >&2
+  exit 1
+fi
+claude=${CLAUDE_BIN:-$(command -v claude || true)}
+mkdir -p "$(dirname "$store")"
+cd "$root"
+set -- membrane/packs/boot.c1f membrane/packs membrane/apps/barest.c1f --store "$store" --port "$port"
+if [ -n "$claude" ]; then
+  set -- "$@" --fact "chat_claude_bin=$claude"
+else
+  echo "scripts/seat: the chat answers through the claude CLI. Name it with CLAUDE_BIN=/path/to/claude scripts/seat (the page says the same)." >&2
+fi
+url="http://127.0.0.1:$port/"
+echo "seat: $url  (store $store)"
+if [ "$open_page" = 1 ] && [ "$(uname)" = Darwin ]; then (sleep 2; open "$url") & fi
+exec "$bin" run "$@"

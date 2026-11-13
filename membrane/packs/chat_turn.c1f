@@ -33,7 +33,7 @@ ChatMessage.argv getter:
 -- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
 ChatMessage.plan getter:
   WHEN this.queued != True or this.state != None or this.text == None: None
-  ELSE WHEN this.bin == '': {'refuse': 'chat_claude_bin is not set: start cliffvm with --fact chat_claude_bin=<path to the claude CLI>'}
+  ELSE WHEN this.bin == '': {'refuse': 'The chat answers through the claude CLI, and its path is not named yet (chat_claude_bin). Name it with CLAUDE_BIN=<path to claude> when you start scripts/seat, or start cliffvm with --fact chat_claude_bin=<path>, then send the message again.'}
   ELSE WHEN this.argv != None: {'argv': this.argv}
   ELSE: None
 Chat.plan on-setter turn-start:
