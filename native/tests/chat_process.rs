@@ -533,7 +533,10 @@ fn a_finished_turn_keeps_its_answer_tools_and_usage_but_not_the_raw_output_and_s
     std::fs::write(dir.join("pad"), "").unwrap();
     let before = store_sizes(&dir);
     let id = send(port, "big output");
+    let t0 = Instant::now();
     let v = finish(port, &dir, &id, "big output");
+    eprintln!("200 KB turn, 200 chunks: released to done in {:?}", t0.elapsed());
+    assert!(t0.elapsed() < Duration::from_secs(30), "each chunk is parsed once, not again with every later chunk: {:?}", t0.elapsed());
     assert_eq!(v["state"], "done", "{v}");
     let (cmd, msg) = (format!("membrane::Command:chat:{id}"), format!("membrane::Chat:message:{id}"));
     // the rows shrink after the turn (a later round than `done`): wait for both
