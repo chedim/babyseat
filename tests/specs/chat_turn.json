@@ -175,7 +175,7 @@
   ]
  },
  {
-  "name": "the system prompt is the tools note and the chat's banner, and the prompt is the message alone (no history)",
+  "name": "the system prompt is the barest doctrine and the chat's banner, and the prompt is the message alone (no history)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -235,6 +235,16 @@
     "eid": "membrane::Chat:message:1-1",
     "prop": "sys",
     "contains": "BANNER (placeholder)"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "sys",
+    "contains": "YOUR BANNER IS YOUR TOOL FOR CONTINUITY"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "sys",
+    "contains": "YOUR PURPOSE: make yourself less needed"
    },
    {
     "eid": "membrane::Chat:message:1-1",

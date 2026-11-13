@@ -228,6 +228,8 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert_eq!(after("--setting-sources"), "", "no settings files");
     assert_eq!(after("--max-turns"), "5", "the ceiling is the fact");
     assert!(after("--system-prompt").contains("BANNER (placeholder)"), "the system prompt carries the banner");
+    assert!(after("--system-prompt").contains("YOUR BANNER IS YOUR TOOL FOR CONTINUITY"), "the system prompt carries the doctrine");
+    assert!(!after("--system-prompt").to_lowercase().contains("history reaches"), "the prompt never says what the model lacks (it makes Claude panic)");
     assert!(after("--mcp-config").contains(&format!("127.0.0.1:{port}/mcp")));
     assert_eq!(args[args.len() - 2], "--", "the options end before the prompt");
     assert_eq!(args[args.len() - 1], "what is up", "the prompt is the message alone");
