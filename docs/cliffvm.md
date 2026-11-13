@@ -45,6 +45,7 @@ cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--
   as the dict `facts` (as `boot_started` writes it). There is no `door_secret_file`.
 - `--store`: one SQLite file (default `./cliffvm.sqlite3`), WAL: the entity rows (`c_field`: eid -> {cls, props, writers}), the
   journal (`c_journal`), and what `sql(...)` in packs reads (read-only connections of the same process).
+  The WAL is folded back and truncated by the clock tick once it is over `WAL_LIMIT_BYTES` (8 MB, `host.rs` `trim_wal`; a reader holding a snapshot stops SQLite's own reset, and SQLite never shrinks the log file by itself; the wait for readers is 50 ms, then the next tick tries again). The main file does not shrink after rows are retired (freed pages are reused, `auto_vacuum` is off); test `native/tests/wal_1143.rs`.
 - The boot plan: this host runs none of the plan's steps (they are the Python seat's), so each is `skipped` and the plan only says
   when the boot is over. Then `started`.
 

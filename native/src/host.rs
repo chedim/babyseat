@@ -19,6 +19,8 @@ use crate::fields::Fields;
 use crate::plan::Engine;
 use crate::vm::{Core, Host as EngineHost, Write};
 
+/// The size the write-ahead log may reach before a tick truncates it (a threshold, flagged for the operator: SQLite resets the log at about 4 MB but never shrinks the file, and a reader holding a snapshot stops the reset).
+pub const WAL_LIMIT_BYTES: u64 = 8 << 20;
 pub const WRITER: &str = "trigger:field:";
 pub const TRIP_WRITER: &str = "field:driver:trip";
 pub const TRIP_CLASS: &str = "Trip";
@@ -124,6 +126,8 @@ pub struct Host {
     /// the last refusal of a Pack entity's text (parse, stale setter, PACK line, import clash): name -> message
     refusals: Mutex<std::collections::BTreeMap<String, String>>,
     packs_dirty: AtomicBool,
+    /// the store's write-ahead log file (None in memory): folded back and truncated by `tick` once it is over WAL_LIMIT_BYTES
+    wal: Option<std::path::PathBuf>,
 }
 
 fn dbe(e: rusqlite::Error) -> String { e.to_string() }
@@ -153,7 +157,7 @@ impl Host {
         let mut fields = Fields::goalgraph();
         fields.inbound_by_host = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false) })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))) })
     }
 
     /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
@@ -294,6 +298,18 @@ impl Host {
         let now = self.now();
         { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.tick(core, &NullHost, now, seq); }
         self.drain_apply();
+        self.trim_wal();
+    }
+
+    /// A log over WAL_LIMIT_BYTES is folded into the file and truncated. The attempt waits at most 50 ms for readers (the engine's thread must not stall),
+    /// and a reader that is still there leaves it for the next tick.
+    fn trim_wal(&self) {
+        let Some(w) = &self.wal else { return };
+        if std::fs::metadata(w).map(|m| m.len()).unwrap_or(0) <= WAL_LIMIT_BYTES { return; }
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = db.busy_timeout(Duration::from_millis(50));
+        let _ = db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+        let _ = db.busy_timeout(Duration::from_millis(5000));
     }
 
     /// Run until `stop`: pump, tick every `tick_s`, wait for the drivers (50 ms at most). `each` runs after every turn.
