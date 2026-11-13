@@ -1342,6 +1342,35 @@ fn a_chunks_birth_costs_the_running_message_not_every_finished_one() {
     assert!(scans <= 4 * births + 100, "{scans} chunk-getter runs for {births} chunk births: {rows}");
     assert!(terminate(&mut run));
 }
+/// a CLI that streams `n` partial lines, 3 ms apart (the chunk-cost test's script)
+fn chatty(n: u32) -> String { CHATTY.replace("range(150)", &format!("range({n})")).replace("time.sleep(0.02)", "time.sleep(0.003)") }
+
+/// The work a chunk's birth causes, by the eval accounting: the steps of every getter and setter of the classes ChatMessage and Chunk, per chunk, over one whole turn.
+fn steps_per_chunk(tag: &str, n: u32) -> f64 {
+    let stats = shipped(&["stats.c1f"]);
+    let (mut run, port, _dir) = fake_seat_script(tag, &["--fact", "eval_stats_window_s=1"], &[("stats.c1f", stats[0].1.as_str())], &chatty(n));
+    let id = send(port, "count the work");
+    wait("the turn", || { let v = view(port, &id); (v["state"] == "done" || v["state"] == "error").then_some(()) });
+    let rows = wait("a published window with the chunk getters", || {
+        let (t, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "top_total"}));
+        let v: J = serde_json::from_str(&t).ok()?;
+        v.as_array()?.iter().any(|r| r["prop"] == "sevs" && r["class"] == "Chunk" && r["calls"].as_u64().unwrap_or(0) >= (n as u64 * 9 / 10)).then_some(v)
+    });
+    let births = rows.as_array().unwrap().iter().filter(|r| r["class"] == "Chunk" && r["prop"] == "sevs").map(|r| r["calls"].as_u64().unwrap()).sum::<u64>();
+    let steps: u64 = rows.as_array().unwrap().iter().filter(|r| (r["class"] == "ChatMessage" || r["class"] == "Chunk") && r["pack"] == "chat_turn").map(|r| r["steps"].as_u64().unwrap()).sum();
+    assert!(terminate(&mut run));
+    eprintln!("{tag}: {births} chunks, {steps} steps"); steps as f64 / births.max(1) as f64
+}
+
+/// The work per chunk must not grow with the chunks already there (#1143, w28): the message's `chunks` getter scanned every live chunk (and built a dict and a sort of them)
+/// at each birth, so a turn of N chunks cost O(N squared) (the burst: 80% of the CPU). The partial answer is accumulated by a setter on each chunk instead.
+#[test]
+fn the_work_per_chunk_does_not_grow_with_the_chunks_already_born() {
+    let small = steps_per_chunk("chunk_flat_a", 100);
+    let big = steps_per_chunk("chunk_flat_b", 1000);
+    assert!(big < small * 1.1, "steps per chunk: {small:.0} at 100 chunks, {big:.0} at 1000: it grows with the chunks already there");
+}
+
 // ---- a command's own time limit (#1143): the model's estimate `timeout_s`, a default, a kill of the whole process group, a reasoned null --------
 /// is a process whose command line contains `marker` alive?
 fn alive(marker: &str) -> bool { Command::new("pgrep").args(["-f", marker]).stdout(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) }

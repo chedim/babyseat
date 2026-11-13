@@ -80,16 +80,22 @@ Chat.plan on-setter turn-start:
 -- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});
 -- they are outside births of a VIRTUAL class (never stored, never journalled). The partial answer is the text deltas of the `stream_event` lines, the partial
 -- tools the tool_use blocks they start. The finished turn replaces them (the receipt below is the answer), and nothing retires the chunks: the engine collects
--- them (docs/cliffvm.md, "Garbage collection"). While the command runs its in-flight effect holds them; the message holds them by REFERENCE (`chunk: c` below is a
--- `$ref` value) until the turn is over, so a chunk born after the receipt (the two come from different threads) is held by nothing and collected at once.
+-- them (docs/cliffvm.md, "Garbage collection"): while the command runs its in-flight effect holds them, and when its receipt is taken they are held by nothing.
 ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.mid
--- each chunk parses its OWN lines once (getters cached on the chunk); the message only joins what the chunks hold, so a new chunk costs one parse, not a re-parse of everything before it
+-- each chunk parses its OWN lines once (getters cached on the chunk) and hands what it said to the accumulator below, so a new chunk costs one parse, not a re-parse of everything before it
 Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if prop(e, 'type') == 'stream_event']
 Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
 Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
-ChatMessage.chunks getter: sort_by([{'n': c.n, 'said': c.said, 'started': c.started, 'chunk': c} for c in instances('Chunk') if c.cmd == this.cmd_eid], 'n') if not this.over else []
-ChatMessage.partial_text getter: join([prop(k, 'said') for k in this.chunks], '')
-ChatMessage.partial_tools getter: words(join([prop(k, 'started') for k in this.chunks], ' '))
+ChatMessage.partial_text getter: '' if this.over else str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '')
+ChatMessage.partial_tools getter: [] if this.over else words(str(prop('Chunk:' + this.cmd_eid + ':acc', 'tools') or ''))
+-- THE PARTIAL ANSWER IS ACCUMULATED, NOT RE-JOINED (w28): the message used to list every live chunk at every birth (a scan of all the chunks, a dict and a sort per chunk, a join of all
+-- their text), so a turn of N chunks cost N squared (the burst: 80% of the CPU). Now each chunk, when it has parsed its own lines, appends what it said and the tools it started to ONE
+-- accumulator, `Chunk:<command>:acc` (a chunk of the same command, so it lives and is collected with the others: the running effect holds it); a birth costs the same however many came before.
+Chunk.part getter: {'said': this.said, 'started': this.started}
+Chunk.part on-setter partial-in:
+  WHEN this.part != None and this.n != None:
+    ('Chunk:' + this.cmd + ':acc').text = str(prop('Chunk:' + this.cmd + ':acc', 'text') or '') + str(prop(this.part, 'said') or '')
+    ('Chunk:' + this.cmd + ':acc').tools = (str(prop('Chunk:' + this.cmd + ':acc', 'tools') or '') + ' ' + str(prop(this.part, 'started') or '')) if prop(this.part, 'started') != '' else str(prop('Chunk:' + this.cmd + ':acc', 'tools') or '')
 
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
 ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')
