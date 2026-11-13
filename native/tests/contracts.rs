@@ -136,6 +136,31 @@ fn the_boot_facts_packs_read_are_registered_and_the_wired_ones_are_written_by_th
 // packs it imports, the properties it WRITES on other entities (`('Class:key').prop = ...`, `this.<ref>.prop = ...` is local), the
 // paths it claims, the Boot facts it reads. Compared to the committed `membrane/packs/surface.json`: any change is a failing test
 // until someone reviews it and regenerates the file (`SURFACE_UPDATE=1 cargo test --test contracts surface`).
+/// The unquoted entity literal a line starts with (`Goal:board`, `membrane::Chat:message[id]:response`): its surface target (a keyed
+/// one is dynamic, shown as `<first segment>:*` like a quoted `'x:' + ..`) and the text after it.
+fn entity_literal(t: &str) -> Option<(String, &str)> {
+    let b = t.as_bytes();
+    let nc = |i: usize| b.get(i).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+    if !nc(0) { return None; }
+    let (mut i, mut colon, mut keyed) = (0, false, false);
+    loop {
+        if nc(i) { i += 1; }
+        else if b.get(i) == Some(&b':') && b.get(i + 1) == Some(&b':') && nc(i + 2) && colon == false { i += 2; colon = true; }
+        else if b.get(i) == Some(&b':') && nc(i + 1) { i += 1; colon = true; }
+        else if colon && b.get(i) == Some(&b'[') {
+            let mut d = 0;
+            while i < b.len() { if b[i] == b'[' { d += 1; } if b[i] == b']' { d -= 1; if d == 0 { break; } } i += 1; }
+            if i >= b.len() { return None; }
+            i += 1; keyed = true;
+            if b.get(i) == Some(&b':') && nc(i + 1) { i += 1; }
+        } else { break; }
+    }
+    if !colon { return None; }
+    let path = &t[..i];
+    let target = if keyed { path.split(':').next().unwrap_or("").to_string() + ":*" } else { path.to_string() };
+    Some((target, &t[i..]))
+}
+
 fn surface_of(text: &str) -> serde_json::Value {
     use serde_json::json;
     let decl = declared(text);
@@ -166,6 +191,14 @@ fn surface_of(text: &str) -> serde_json::Value {
                     } else { "*".to_string() };
                     note(target, &t[e + 2..]);
                 }
+            }
+        } else if let Some((target, rest)) = entity_literal(t) {
+            // an unquoted entity: `Goal:board.status = ..`, `membrane::Chat:message[id].x = ..` (a keyed one is dynamic: `membrane:*`),
+            // and a constructor `<entity> = Class(name: value)`, listed as `<target>=Class()`
+            if let Some(p) = rest.strip_prefix('.') { note(target, p); }
+            else if let Some(r) = rest.trim_start().strip_prefix('=') {
+                let cls: String = r.trim_start().chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                if !cls.is_empty() && r.trim_start()[cls.len()..].starts_with('(') && !r.trim_start().starts_with('=') { writes.insert(format!("{target}={cls}()")); }
             }
         } else if let Some(rest) = t.strip_prefix("this.") {
             if let Some((r, after)) = rest.split_once('.') {

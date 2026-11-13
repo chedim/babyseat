@@ -313,7 +313,8 @@
       "membrane:*.device",
       "membrane:*.mode",
       "membrane:*.on",
-      "membrane:*.state_ts"
+      "membrane:*.state_ts",
+      "membrane:*=Voice()"
     ],
     "claims": [
       "/membrane/voice",

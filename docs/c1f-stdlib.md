@@ -128,7 +128,7 @@ a reserved name in `FAMILIES` and in the door's chain.
 `membrane/packs/surface.json` records, per pack, everything it touches from outside: its imports, its declared classes (and a count
 of members), the Boot facts it reads, the paths it claims, and the properties it WRITES on other entities (`Goal:*.status`, `*.answer` for
 a dynamic target, `ref(goal).replan` through a reference). `native/tests/contracts.rs` recomputes it from the pack text and fails on any
-difference. Reviewing a pack, an agent's branch or Memo's edit means reading the surface diff, not the code: a pack that starts
+difference (unquoted entity targets count like quoted ones: a keyed `membrane::Config:voice:in[slug].on = ..` is `membrane:*.on`, and a constructor is listed as `membrane:*=Voice()`). Reviewing a pack, an agent's branch or Memo's edit means reading the surface diff, not the code: a pack that starts
 writing a new property, claiming a new path or importing a new pack fails the test until the change is reviewed and recorded
 (`SURFACE_UPDATE=1 cargo test --test contracts surface`). There is no `private` keyword: the contract is the surface.
 

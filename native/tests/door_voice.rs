@@ -197,18 +197,30 @@ fn what_the_body_leaves_out_keeps_its_old_value() {
 }
 
 #[test]
-fn a_person_with_no_voice_entity_yet_is_a_404_and_nothing_is_made() {
+fn a_person_with_no_voice_entities_gets_them_on_the_first_state_write() {
     let d = dir();
-    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true}", Some("Nobody"));
-    assert_eq!((r["status"].clone(), r["body"]["error"].clone()), (json!(404), json!("no voice entity yet")), "{r}");
-    assert!(!c.docs.keys().any(|k| k.contains("nobody")), "{:?}", c.docs.keys().collect::<Vec<_>>());
+    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true, \"in_mode\": \"ptt\", \"device\": \"mic\"}", Some("Nobody"));
+    assert_eq!(r["body"], json!({"ok": true, "state": {"in": {"on": true, "mode": "ptt", "device": "mic"}, "out": {"on": false, "device": "mic"}}}), "{r}");
+    let (i, o) = ("membrane::Config:voice:in:nobody", "membrane::Config:voice:out:nobody");
+    for (e, io) in [(i, "in"), (o, "out")] {
+        assert_eq!(props(&c, e)["parents"], json!(["cls:voice"]), "{e}: the kind mirror");
+        assert_eq!((props(&c, e)["person"].clone(), props(&c, e)["voice_io"].clone()), (json!("Nobody"), json!(io)));
+        assert_eq!(c.docs[e].cls, "Config", "the class the Python seat gives it");
+        assert!(props(&c, e)["state_ts"].is_number());
+    }
+    assert_eq!((props(&c, i)["on"].clone(), props(&c, i)["mode"].clone(), props(&c, i)["device"].clone()), (json!(true), json!("ptt"), json!("mic")));
+    assert_eq!(props(&c, o)["on"], false);
 }
 
 #[test]
-fn an_entity_without_the_kind_stamp_is_not_written_the_engine_does_not_hold_it() {
+fn an_old_entity_without_the_kind_stamp_is_mirrored_and_keeps_its_values() {
     let d = dir();
-    let (r, _) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true}", Some("Old One"));
-    assert_eq!(r["status"], 404, "{r}");
+    let (r, c) = ask_in(&d, "/membrane/voice/state", "{\"in_on\": true}", Some("Old One"));
+    assert_eq!(r["status"], 200, "{r}");
+    let i = "membrane::Config:voice:in:old-one";
+    assert_eq!(props(&c, i)["parents"], json!(["cls:voice"]), "stamped now, as voice_io.entity stamps old ones");
+    assert_eq!(props(&c, i)["person"], "Old One", "the person the store has is not overwritten");
+    assert_eq!(props(&c, i)["on"], true);
 }
 
 #[test]
