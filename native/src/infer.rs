@@ -11,7 +11,7 @@
 //!
 //! Getters are resolved lazily, depth first, each once; a getter that reads itself (through any chain) is a cycle: its type is
 //! `Any` and the cycle is a finding. That is the fixpoint of an acyclic system.
-use crate::expr::{parse, parse_block, Cmp, Node, Op, V};
+use crate::expr::{parse, parse_block, Cmp, EntPart, Node, Op, V};
 use crate::syntax::{parse_full, END, FOR, LET};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -364,6 +364,14 @@ pub fn infer_expr(n: &Node, env: &Env) -> Ty {
             Ty::list(infer_expr(elt, &inner))
         }
         Node::Call(f, args) => call_ty(f, args, env),
+        Node::Ent(parts) => {
+            // the class is the first segment after a namespace; a key that may be null (or is not an int or text) makes the id null
+            let mut nullable = false;
+            for p in parts { if let EntPart::Key(k) = p { let t = infer_expr(k, env); if t.maybe_null() || t.kinds.iter().any(|x| !matches!(x, Kind::Int | Kind::Text)) { nullable = true; } } }
+            let first = match parts.first() { Some(EntPart::Lit(t)) => t.as_str(), _ => "" };
+            let cls = first.rsplit_once("::").map_or(first, |(_, r)| r).split(':').next().unwrap_or("");
+            Ty::entity(cls).null_if(nullable)
+        }
     }
 }
 

@@ -96,7 +96,14 @@ pub enum Node {
     If(Box<Node>, Box<Node>, Box<Node>),
     /// a block's local: `name = value` then the rest of the block, where `name` is bound
     Let(String, Box<Node>, Box<Node>),
+    /// an unquoted entity literal: `Goal:board`, `membrane::Chat:message[id]:response` (its text, with each `[key]` evaluated and
+    /// appended as `:<key>`)
+    Ent(Vec<EntPart>),
 }
+
+/// A piece of an entity literal: text as written (`membrane::Chat:message`, `:response`), or a `[key]` to evaluate.
+#[derive(Debug)]
+pub enum EntPart { Lit(String), Key(Node) }
 
 impl Node {
     /// The children, taken out (what `Drop` walks with a stack, so a deep expression never overflows it).
@@ -111,6 +118,7 @@ impl Node {
             Node::Compare(a, ops) => { b(a); out.extend(ops.drain(..).map(|(_, n)| n)); }
             Node::Comp(e, _, i, c) => { b(e); b(i); if let Some(c) = c { b(c); } }
             Node::If(a, c, d) => { b(a); b(c); b(d); }
+            Node::Ent(parts) => for p in parts.drain(..) { if let EntPart::Key(n) = p { out.push(n); } },
         }
     }
 }
@@ -128,7 +136,15 @@ pub type Err = String;
 // ---- tokens -------------------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
-enum Tok { Int(i64), Float(f64), Str(String), Name(String), P(&'static str), End }
+enum Tok {
+    Int(i64), Float(f64), Str(String), Name(String), P(&'static str), End,
+    /// an unquoted entity literal's text: `Goal:board`, `membrane::Config:voice:in` (a name, then `:segment`s, directly joined)
+    Ent(String),
+    /// `:name` directly after a `]`: the path of an entity literal continuing after a `[key]`
+    Seg(String),
+}
+
+fn name_char(c: Option<&char>) -> bool { c.map_or(false, |c| c.is_alphanumeric() || *c == '_') }
 
 fn lex(s: &str, block: bool) -> Result<Vec<Tok>, Err> {
     let c: Vec<char> = s.chars().collect();
@@ -183,7 +199,32 @@ fn lex(s: &str, block: bool) -> Result<Vec<Tok>, Err> {
         if ch.is_alphabetic() || ch == '_' {
             let st = i;
             while i < c.len() && (c[i].is_alphanumeric() || c[i] == '_') { i += 1; }
-            out.push(Tok::Name(c[st..i].iter().collect()));
+            let first: String = c[st..i].iter().collect();
+            // an entity literal: `name::ns...` / `name:seg:seg`, a colon DIRECTLY followed by a name character (a segment may be a word
+            // that is an operator elsewhere). Not after a dot (`this.x`), and never starting with a keyword or constant.
+            let starts = !(st > 0 && c[st - 1] == '.') && !KEYWORDS.contains(&first.as_str()) && !["True", "False", "None"].contains(&first.as_str());
+            if starts && i < c.len() && c[i] == ':' && (name_char(c.get(i + 1)) || (c.get(i + 1) == Some(&':') && name_char(c.get(i + 2)))) {
+                let mut text = first;
+                let mut single = false;
+                loop {
+                    if !single && c.get(i) == Some(&':') && c.get(i + 1) == Some(&':') && name_char(c.get(i + 2)) && !text.contains(':') { text.push_str("::"); i += 2; }
+                    else if c.get(i) == Some(&':') && name_char(c.get(i + 1)) { text.push(':'); i += 1; single = true; }
+                    else { break; }
+                    while i < c.len() && name_char(Some(&c[i])) { text.push(c[i]); i += 1; }
+                }
+                out.push(Tok::Ent(text));
+                continue;
+            }
+            out.push(Tok::Name(first));
+            continue;
+        }
+        if ch == ':' && i > 0 && c[i - 1] == ']' && name_char(c.get(i + 1)) {
+            let mut text = String::new();
+            while c.get(i) == Some(&':') && name_char(c.get(i + 1)) {
+                text.push(':'); i += 1;
+                while i < c.len() && name_char(Some(&c[i])) { text.push(c[i]); i += 1; }
+            }
+            out.push(Tok::Seg(text));
             continue;
         }
         let two: String = c[i..(i + 2).min(c.len())].iter().collect();
@@ -364,6 +405,20 @@ impl P {
                 let mut s = s;
                 while let Tok::Str(more) = self.peek().clone() { self.next(); s.push_str(&more); }
                 Ok(Node::Const(V::Str(s)))
+            }
+            Tok::Ent(text) => {
+                let mut parts = vec![EntPart::Lit(text)];
+                loop {
+                    if self.is_p("[") {
+                        self.next();
+                        let k = self.expr()?;
+                        self.expect("]")?;
+                        parts.push(EntPart::Key(k));
+                    } else if matches!(self.peek(), Tok::Seg(_)) && matches!(parts.last(), Some(EntPart::Key(_))) {
+                        if let Tok::Seg(t) = self.next() { parts.push(EntPart::Lit(t)); }
+                    } else { break; }
+                }
+                Ok(Node::Ent(parts))
             }
             Tok::Name(n) => {
                 match n.as_str() {
@@ -945,6 +1000,7 @@ fn ev_node(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> 
         Node::Compare(a, ops) => ev_compare(a, ops, env, w, m),
         Node::Comp(elt, var, iter, cond) => ev_comp(elt, var, iter, cond, env, w, m),
         Node::Call(f, args) => ev_call(f, args, env, w, m),
+        Node::Ent(parts) => ev_ent(parts, env, w, m),
     }
 }
 
@@ -997,6 +1053,27 @@ fn ev_let(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> R
         cur = &**rest;
     }
     ev(cur, &env2, w, m)
+}
+
+/// An entity literal's id: its text, each `[key]` appended as `:<key>`. A key is an integer or text; a null key is the null it was
+/// (its reason kept), any other kind is a reasoned null (`error: ...`): the entity is not named, so nothing is created.
+#[inline(never)]
+fn ev_ent(parts: &[EntPart], env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    let mut id = String::new();
+    for p in parts {
+        match p {
+            EntPart::Lit(t) => id.push_str(t),
+            EntPart::Key(n) => match ev(n, env, w, m)? {
+                V::Int(i) => { id.push(':'); id.push_str(&i.to_string()); }
+                V::Str(t) if !t.is_empty() => { id.push(':'); id.push_str(&t); }
+                V::Nil(r) => return Ok(V::Nil(r)),
+                V::None => return Ok(V::Nil(format!("error: the key of {} is null", id))),
+                V::Str(_) => return Ok(V::Nil(format!("error: the key of {} is empty text", id))),
+                v => return Ok(V::Nil(format!("error: the key of {} is an integer or text, got a {}", id, kind_of(&v)))),
+            },
+        }
+    }
+    Ok(V::Ent(id))
 }
 
 #[inline(never)]
