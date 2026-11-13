@@ -632,6 +632,9 @@
       "ChatMessage.oc_created": "Num?",
       "ChatMessage.oc_cwd": "Any",
       "ChatMessage.oc_error": "Text?",
+      "ChatMessage.oc_fin": "List(Dict)?",
+      "ChatMessage.oc_fin_ends": "List(Dict)",
+      "ChatMessage.oc_fin_parts": "List(Dict)",
       "ChatMessage.oc_idx": "List(Int)",
       "ChatMessage.oc_live_ids": "List(Text)",
       "ChatMessage.oc_live_text": "List(Dict)",
@@ -656,6 +659,16 @@
       "ChatSession.fact_version": "Any",
       "ChatSession.sid": "Text",
       "ChatSession.view": "Dict",
+      "Chunk.oc_go": "Bool",
+      "Chunk.oc_me": "Text",
+      "Chunk.oc_sid": "Any",
+      "Chunk.results": "List(Dict)",
+      "Chunk.starts": "List(Dict)",
+      "Chunk.ublocks": "List(Dict)",
+      "Chunk.uevs": "List(Any)",
+      "Request.ev_cwd": "Any",
+      "Request.ev_kind": "Text",
+      "Request.ev_on": "Bool",
       "Request.m1_id": "Text?",
       "Request.m1_mid": "Text?",
       "Request.m1_reply": "Dict?",
@@ -705,20 +718,29 @@
       "Request.ss_stat": "Any",
       "Request.ss_status_reply": "Dict?",
       "Request.ss_title": "Text",
-      "Request.ss_view": "Any"
+      "Request.ss_view": "Any",
+      "SesBus.cwd": "Any"
     },
     "writes": {
+      "*.eo": "Bool",
       "*.retire": "Bool",
+      "*.tids": "Text",
+      "*.tnames": "Text",
       "Chat.mention": "Bool",
       "Chat.queued": "Bool",
       "Chat.retire": "Bool",
       "Chat.stitle": "Text",
       "Chat.upd": "Num?",
+      "Request.send": "Dict",
       "Request.sm_id": "Text?",
       "Request.ss_deleted": "Bool",
-      "Request.ss_made": "Text?"
+      "Request.ss_made": "Text?",
+      "SesBus.out": "List(Dict)?"
     },
-    "findings": []
+    "findings": [],
+    "virtual": [
+      "SesBus"
+    ]
   },
   "door_state": {
     "getters": {

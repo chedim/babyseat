@@ -338,3 +338,154 @@ fn the_messages_page_by_rows_limit_and_before() {
     let (_, older) = api(port, "GET", &format!("/session/{sid}/message?limit=2&before={before}"), J::Null);
     assert_eq!(older.as_array().unwrap().iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>(), all[2..4].iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>());
 }
+
+// ---- the event streams -----------------------------------------------------------------------------------------------------------------------
+/// An open event stream: the head, then the frames as they arrive: (event name, json data); None at the end of the stream or after `secs` of quiet.
+struct Sse { r: BufReader<TcpStream>, head: String }
+impl Sse {
+    fn open(port: u16, path: &str) -> Sse {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        s.write_all(format!("GET {path} HTTP/1.1\r\nHost: t\r\nAccept: text/event-stream\r\n\r\n").as_bytes()).unwrap();
+        let mut r = BufReader::new(s);
+        let mut head = String::new();
+        loop { let mut l = String::new(); r.read_line(&mut l).unwrap(); head.push_str(&l); if l == "\r\n" || l.is_empty() { break; } }
+        Sse { r, head }
+    }
+    fn next(&mut self) -> Option<(String, J)> {
+        let (mut name, mut data) = (String::new(), String::new());
+        loop {
+            let mut l = String::new();
+            match self.r.read_line(&mut l) { Ok(0) | Err(_) => return None, Ok(_) => {} }
+            let l = l.trim_end_matches(['\r', '\n']);
+            if l.is_empty() { if data.is_empty() { continue; } return Some((name, serde_json::from_str(&data).unwrap_or_else(|e| panic!("{e}: {data}")))); }
+            if let Some(v) = l.strip_prefix("event: ") { name = v.to_string(); }
+            if let Some(v) = l.strip_prefix("data: ") { data.push_str(v); }
+        }
+    }
+    /// the frames up to and including the first that `stop` accepts
+    fn until(&mut self, what: &str, stop: impl Fn(&str, &J) -> bool) -> Vec<(String, J)> {
+        let mut out = vec![];
+        loop {
+            let (n, d) = self.next().unwrap_or_else(|| panic!("the stream ended before {what}; got {:?}", out.iter().map(|x: &(String, J)| x.0.clone()).collect::<Vec<_>>()));
+            let done = stop(&n, &d);
+            out.push((n, d));
+            if done { return out; }
+        }
+    }
+}
+/// the properties of a bare frame
+fn props(d: &J) -> &J { &d["properties"] }
+fn types(v: &[(String, J)]) -> Vec<String> { v.iter().map(|x| x.0.clone()).collect() }
+
+#[test]
+fn the_event_stream_carries_a_turn_in_order_as_the_python_seat_does_and_the_page_can_rebuild_the_row_from_it() {
+    let (_run, port, dir) = seat("ses-ev", STEPS);
+    let sid = new_session(port, "T");
+    let mut sse = Sse::open(port, "/event");
+    let lh = sse.head.to_ascii_lowercase();
+    assert!(sse.head.starts_with("HTTP/1.1 200") && lh.contains("content-type: text/event-stream") && !lh.contains("content-length"), "{}", sse.head);
+    let (n, hello) = sse.next().expect("server.connected");
+    assert_eq!((n.as_str(), hello["type"].as_str(), hello["properties"].clone()), ("server.connected", Some("server.connected"), json!({})));
+    assert!(hello["id"].as_str().unwrap().starts_with("evt_"));
+    let fx = golden("events_bare");
+    let check = |name: &str, d: &J| { let m = shape_misses(&fx.as_array().unwrap().iter().map(|f| f["data"].clone()).collect::<Vec<_>>().into(), &json!([d])); assert!(m.is_empty(), "{name}: {m:?} in {d}"); };
+    check("hello", &hello);
+    assert_eq!(say(port, &sid, "look at the probe"), 204);
+    // the start: the user's message and part, the session, busy; then the assistant's message and the session once the turn runs
+    let start = sse.until("the assistant's session.updated", |n, _| n == "session.updated");
+    let start2 = sse.until("busy", |n, d| n == "session.status" && d["properties"]["status"]["type"] == "busy");
+    let start3 = sse.until("the assistant message", |n, d| n == "message.updated" && d["properties"]["info"]["role"] == "assistant");
+    let all: Vec<(String, J)> = start.into_iter().chain(start2).chain(start3).collect();
+    assert_eq!(types(&all), ["message.updated", "message.part.updated", "session.updated", "session.status", "message.updated"], "{:?}", types(&all));
+    assert_eq!(props(&all[0].1)["info"]["role"], "user");
+    assert_eq!(props(&all[1].1)["part"]["text"], "look at the probe");
+    assert_eq!(props(&all[0].1)["sessionID"], json!(sid));
+    for (n, d) in &all { assert_eq!(&d["type"], n); check(n, d); }
+    let uid = props(&all[0].1)["info"]["id"].clone();
+    assert_eq!(props(&all[4].1)["info"]["parentID"], uid);
+    assert!(props(&all[4].1)["info"]["time"]["completed"].is_null());
+    // the words come as the CLI writes them: the part opens EMPTY, then one delta per piece
+    release(&dir, "look at the probe", "0");
+    let f = sse.until("the first delta", |n, _| n == "message.part.delta");
+    assert!(types(&f).contains(&"message.part.updated".to_string()), "{:?}", types(&f));
+    let open = f.iter().find(|x| x.0 == "message.part.updated").expect("the text part opens");
+    assert_eq!((props(&open.1)["part"]["type"].as_str(), props(&open.1)["part"]["text"].as_str()), (Some("text"), Some("")));
+    let text_pid = props(&open.1)["part"]["id"].clone();
+    let d0 = f.last().unwrap();
+    assert_eq!((props(&d0.1)["delta"].as_str(), props(&d0.1)["partID"].clone(), props(&d0.1)["field"].as_str()), (Some("Looking "), text_pid.clone(), Some("text")));
+    check("delta", &d0.1);
+    release(&dir, "look at the probe", "1");
+    let (_, d1) = sse.until("the second delta", |n, _| n == "message.part.delta").pop().unwrap();
+    assert_eq!(props(&d1)["delta"], "now.");
+    // the tool starts: its part is running, with the tool's name and call id
+    release(&dir, "look at the probe", "2");
+    let f = sse.until("the tool running", |n, d| n == "message.part.updated" && d["properties"]["part"]["type"] == "tool");
+    let running = &props(&f.last().unwrap().1)["part"];
+    assert_eq!((running["tool"].as_str(), running["state"]["status"].as_str(), running["callID"].as_str()), (Some("entity_read"), Some("running"), Some("tu1")), "{running}");
+    check("tool running", &f.last().unwrap().1);
+    // and completed when its result arrives, the same part
+    release(&dir, "look at the probe", "3");
+    let f = sse.until("the tool completed", |n, d| n == "message.part.updated" && d["properties"]["part"]["state"]["status"] == "completed");
+    let done_tool = &props(&f.last().unwrap().1)["part"];
+    assert_eq!((done_tool["id"].clone(), done_tool["state"]["output"].as_str()), (running["id"].clone(), Some("the result")));
+    check("tool completed", &f.last().unwrap().1);
+    release(&dir, "look at the probe", "4");
+    release(&dir, "look at the probe", "end");
+    // the end: the final parts, the message completed, idle (status and the idle event), the session
+    let f = sse.until("the session.updated after idle", |n, _| n == "session.updated");
+    assert!(types(&f).ends_with(&["message.updated", "session.status", "session.idle", "session.updated"].map(String::from)), "{:?}", types(&f));
+    let fin_text = f.iter().filter(|x| x.0 == "message.part.updated").map(|x| props(&x.1)["part"].clone()).find(|p| p["type"] == "text").expect("the text part final");
+    assert_eq!((fin_text["id"].clone(), fin_text["text"].as_str()), (text_pid, Some("Done.")));
+    assert!(fin_text["time"]["end"].is_number());
+    let fin_msg = f.iter().rev().find(|x| x.0 == "message.updated").unwrap();
+    assert!(props(&fin_msg.1)["info"]["time"]["completed"].is_number());
+    assert_eq!(props(&fin_msg.1)["info"]["finish"], "stop");
+    assert_eq!(f[f.len() - 3].1["properties"]["status"]["type"], "idle");
+    for (n, d) in &f { check(n, d); }
+}
+
+#[test]
+fn the_global_stream_wraps_each_event_and_an_error_turn_ends_with_the_error_and_idle() {
+    let (_run, port, _dir) = seat("ses-glob", STEPS);
+    let sid = new_session(port, "G");
+    let mut g = Sse::open(port, "/global/event");
+    let mut b = Sse::open(port, "/event");
+    let (_, hello) = g.next().expect("server.connected, wrapped");
+    assert_eq!(hello["payload"]["type"], "server.connected");
+    assert!(hello["directory"].is_string() && hello["project"] == "global", "{hello}");
+    b.next().unwrap();
+    assert_eq!(say(port, &sid, "this will fail"), 204);
+    let f = g.until("idle", |n, _| n == "session.idle");
+    let fx = golden("events_global");
+    for (n, d) in &f {
+        let m = shape_misses(&fx.as_array().unwrap().iter().map(|x| x["data"].clone()).collect::<Vec<_>>().into(), &json!([d]));
+        assert!(m.is_empty(), "{n}: {m:?} in {d}");
+        assert_eq!(&d["payload"]["type"], n);
+    }
+    let last_msg = f.iter().rev().find(|x| x.0 == "message.updated").unwrap();
+    let info = &last_msg.1["payload"]["properties"]["info"];
+    assert_eq!(info["role"], "assistant");
+    assert!(info["error"]["data"]["message"].as_str().unwrap().contains("not logged in"), "{info}");
+    // the bare stream saw the same events, unwrapped
+    let fb = b.until("idle", |n, _| n == "session.idle");
+    assert_eq!(types(&fb), types(&f));
+}
+
+#[test]
+fn a_stream_sees_every_session_and_events_never_cross_session_ids() {
+    let (_run, port, dir) = seat("ses-evtwo", STEPS);
+    let (a, b) = (new_session(port, "A"), new_session(port, "B"));
+    let mut sse = Sse::open(port, "/event");
+    sse.next().unwrap();
+    assert_eq!(say(port, &a, "quick a"), 204);
+    let mut fa = sse.until("a idle", |n, _| n == "session.idle");
+    fa.extend(sse.until("a's last session.updated", |n, _| n == "session.updated"));
+    assert_eq!(say(port, &b, "quick b"), 204);
+    let mut fb = sse.until("b idle", |n, _| n == "session.idle");
+    fb.extend(sse.until("b's last session.updated", |n, _| n == "session.updated"));
+    let sid_of = |d: &J| props(d)["sessionID"].as_str().map(String::from).or_else(|| props(d)["info"]["sessionID"].as_str().map(String::from)).or_else(|| props(d)["part"]["sessionID"].as_str().map(String::from)).unwrap();
+    assert!(fa.iter().all(|x| sid_of(&x.1) == a), "{:?}", fa.iter().map(|x| sid_of(&x.1)).collect::<Vec<_>>());
+    assert!(fb.iter().all(|x| sid_of(&x.1) == b));
+    let _ = dir;
+}

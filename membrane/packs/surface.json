@@ -385,13 +385,20 @@
       "semtext"
     ],
     "classes": [
+      "Chat",
       "ChatMessage",
       "ChatSession",
-      "Request"
+      "Chunk",
+      "Request",
+      "SesBus"
     ],
-    "members": 82,
+    "members": 98,
     "writes": [
+      "*.eo",
       "*.retire",
+      "*.tids",
+      "*.tnames",
+      "SesBus:main.out",
       "membrane:*.mention",
       "membrane:*.queued",
       "membrane:*.retire",
@@ -413,6 +420,9 @@
       "seat_cwd",
       "seat_project",
       "seat_version"
+    ],
+    "virtual": [
+      "SesBus"
     ]
   },
   "door_state": {
