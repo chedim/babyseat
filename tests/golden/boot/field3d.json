@@ -1,0 +1,33 @@
+{
+ "status": 200,
+ "body": {
+  "pid": "c893beb84078",
+  "axes": [],
+  "n_total": 0,
+  "kinds": [],
+  "kind_counts": {},
+  "explained": [],
+  "max_level": 0,
+  "per_level": [
+   0
+  ],
+  "tile_k": 150,
+  "edges": 0,
+  "shape": "sphere",
+  "built_s": 0.0,
+  "root": {
+   "pid": "c893beb84078",
+   "l": 0,
+   "x": 0,
+   "y": 0,
+   "z": 0,
+   "nodes": [],
+   "edges": [],
+   "more": false
+  },
+  "current": {
+   "p": null,
+   "tau_s": 180.0
+  }
+ }
+}

@@ -1,0 +1,19 @@
+{
+ "status": 200,
+ "body": {
+  "self_cpu_share": 0.5,
+  "code_runs_keep": 30,
+  "defaults": {
+   "self_cpu_share": 0.5,
+   "code_runs_keep": 30
+  },
+  "writable": [
+   "self_cpu_share",
+   "code_runs_keep"
+  ],
+  "current_tau_s": 180.0,
+  "current_tau_note": "changing it needs the operator's approval",
+  "energy": null,
+  "background": null
+ }
+}
