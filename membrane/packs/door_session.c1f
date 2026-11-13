@@ -65,7 +65,10 @@ ChatSession.view getter: {'id': this.sid, 'projectID': this.fact_project, 'direc
 
 -- the sessions are lazy (a store row, loaded when read): the list asks the store for the keys, then reads each by eid
 Request.ss_rows getter: sql('SELECT k, json_extract(body, \'$.props.born\') AS born FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ?', 'membrane::Chat:session:%', 'membrane::Chat:session:%:%') if this.ss_route == 'root' and this.method == 'GET' else []
-Request.ss_list_reply getter: {'status': 200, 'body': [prop(r['k'], 'view') for r in sort_by(this.ss_rows, 'born')]} if this.ss_rows != None else None
+Request.ss_list_reply getter:
+  WHEN this.ss_rows == None: None
+  ELSE WHEN len([r for r in this.ss_rows if prop(r['k'], 'view') == None]) > 0: None
+  ELSE: {'status': 200, 'body': [prop(r['k'], 'view') for r in sort_by(this.ss_rows, 'born')]}
 
 -- GET /session/<sid>: the session or a 404
 Request.ss_eid getter: 'membrane::Chat:session:' + this.ss_sid if this.ss_sid != None else None
@@ -195,6 +198,7 @@ Request.ml_flat getter: [x['row'] for x in sort_by(sort_by(sort_by(concat(this.m
 Request.ml_reply getter:
   WHEN this.ss_view == None: this.ss_missing
   ELSE WHEN this.ml_all == None: None
+  ELSE WHEN len([x for x in this.ml_users if x['row'] == None]) > 0: None
   ELSE WHEN this.ml_before != '' and this.ml_cut == None: {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}
   ELSE: {'status': 200, 'body': tail(this.ml_flat, this.ml_limit) if this.ml_limit > 0 else this.ml_flat}
 
@@ -280,16 +284,16 @@ Chunk.oc_go on-setter oc-chunk:
     (acc).eo = (prop(acc, 'eo') == True or this.said != '')
 
 -- ---- POST /session/<sid>/abort ----------------------------------------------------------------------------------------------------------------
--- the session's running turns (a store answer: the turn's `sid` and `state`) are marked `aborted` and their CLI is stopped (`Command.stop`, the same verb as for any command); the receipt
+-- the session's running turns (the loaded turn entities: a running turn is always loaded, and the store may lag a write) are marked `aborted` and their CLI is stopped (`Command.stop`, the same verb as for any command); the receipt
 -- that follows ends each turn as the chat always ends one, with the text below as its error (`failed`). The reply is `true` (the Python seat's) at once; a session with nothing running is `true` too.
 ChatMessage.failed getter:
   WHEN this.aborted == True and this.rr != None: 'aborted: the turn was stopped from the page'
 Request.ab_on getter: this.ss_route == 'abort' and this.method == 'POST' and this.ss_view != None
-Request.ab_rows getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND json_extract(body, \'$.props.sid\') = ? AND json_extract(body, \'$.props.state\') = \'running\'', 'membrane::Chat:message:%:turn', this.ss_sid) if this.ab_on else None
-Request.ab_rows on-setter abort-stop:
-  WHEN this.ab_rows != None:
-    FOR r IN this.ab_rows:
-      mid = replace(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), ':turn', '')
+Request.ab_turns getter: [t.message for t in instances('Chat') if t.kind == 'turn' and t.sid == this.ss_sid and t.state == 'running'] if this.ab_on else None
+Request.ab_turns on-setter abort-stop:
+  WHEN this.ab_turns != None:
+    FOR m IN this.ab_turns:
+      mid = replace(m, 'membrane::Chat:message:', '')
       membrane::Chat:message[mid].aborted = True
       membrane::Command:chat[mid].stop = {'id': 'abort'}
     this.ab_done = True

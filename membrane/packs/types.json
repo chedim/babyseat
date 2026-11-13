@@ -669,7 +669,7 @@
       "Chunk.uevs": "List(Any)",
       "Request.ab_on": "Bool",
       "Request.ab_reply": "Dict?",
-      "Request.ab_rows": "Any",
+      "Request.ab_turns": "List(Any)?",
       "Request.ev_cwd": "Any",
       "Request.ev_kind": "Text",
       "Request.ev_on": "Bool",
