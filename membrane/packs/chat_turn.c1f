@@ -59,7 +59,7 @@ ChatMessage.spoken getter: strip(join([t for t in this.texts if t != ''], '\n\n'
 ChatMessage.capped getter: str(prop(this.final, 'subtype') or '') == 'error_max_turns'
 ChatMessage.failed getter:
   WHEN this.rr == None: None
-  ELSE WHEN this.final == None and this.rc != 0: 'claude failed (rc ' + str(this.rc) + '): ' + clip(strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or '')), 400)
+  ELSE WHEN this.final == None and this.rc != 0: 'claude failed (rc ' + str(this.rc) + '): ' + strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or ''))
   ELSE WHEN prop(this.final, 'is_error') == True: 'claude reported an error: ' + str(prop(this.final, 'result'))
   ELSE: None
 ChatMessage.answer getter:

@@ -141,7 +141,7 @@ tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
 json.dump({"argv": argv, "auto_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"), "cwd": os.getcwd()}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
 errp = os.path.join(here, "err")   # a file `err`: the CLI ends with a result line that reports this text as an error
 if os.path.exists(os.path.join(here, "fail")):
-    sys.stderr.write("fake: not logged in\n"); sys.exit(3)
+    sys.stderr.write(open(os.path.join(here, "fail")).read() or "fake: not logged in\n"); sys.exit(3)
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 out({"type": "system", "subtype": "init", "session_id": "fake-1", "tools": ["mcp__membrane__entity_read"]})
@@ -291,6 +291,22 @@ fn finish(port: u16, dir: &std::path::Path, id: &str, prompt: &str) -> J {
     wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of(prompt))).exists().then_some(()));
     std::fs::write(dir.join(format!("go.{}", tag_of(prompt))), "").unwrap();
     wait("the end state", || { let v = view(port, id); if v["state"] == "done" || v["state"] == "error" { Some(v) } else { None } })
+}
+
+#[test]
+fn a_failed_runs_whole_stderr_reaches_the_response_and_the_next_banner() {
+    let (mut run, port, dir) = fake_seat("chatfaillong", &[]);
+    let long = format!("start {} end-of-the-stderr", "word ".repeat(500));   // 2500+ characters
+    std::fs::write(dir.join("fail"), &long).unwrap();
+    let id1 = send(port, "first");
+    let v = wait("the error answer", || { let v = view(port, &id1); if v["state"] == "error" { Some(v) } else { None } });
+    let want = format!("claude failed (rc 3): {}", long.trim());
+    assert_eq!(v["response"], want.as_str(), "the response carries the whole stderr");
+    std::fs::remove_file(dir.join("fail")).unwrap();
+    send(port, "second");
+    let sys = system_prompt(&dir, "second");
+    assert!(sys.contains(&want), "the banner's error line carries all of it: {sys}");
+    assert!(terminate(&mut run));
 }
 
 #[test]
