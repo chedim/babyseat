@@ -27,7 +27,8 @@ SemText.numbers getter: spans(this.text, 'number')
 -- COLLECTED (docs/cliffvm.md, "Garbage collection of virtual entities") at the end of the round nothing holds it, and what holds it is a
 -- `$ref` value: the receipt `attach_result` of the write (it holds the span of the LAST attach: the next attach lets the earlier one go)
 -- or any live entity that keeps it (`Reader.keep = <span>`); a mention edge (mentions.c1f) is one. The span's `text` is a getter that cuts the
--- parent's text by the offsets: there is no second copy of the string, and a change of the parent's text shows in it (re-attach after an
+-- parent's text by the offsets (`armed` is written right after the birth: a getter of a span that waits for it, mentions.c1f `forms`, then computes from a
+-- value that CHANGES, which is what a setter on a getter hears; a birth alone runs no setter): there is no second copy of the string, and a change of the parent's text shows in it (re-attach after an
 -- edit to be sure the offsets still name a token). The key is the START OFFSET, not a list index: c1f has no enumerate, and (layer, start)
 -- is unique, because a layer's spans never overlap.
 SemText.skey getter: replace(this.eid, '::', '/')
@@ -39,6 +40,7 @@ SemText.attach on-setter attach-span:
     start = prop(this.attach, 'start')
     FOR row IN [r for r in prop(this.eid, plural) if r['start'] == start]:
       Span:of[this.skey][letter][start] = Span(of: this, layer: layer, start: start, end: row['end'])
+      Span:of[this.skey][letter][start].armed = True
       this.attach_result = Span:of[this.skey][letter][start]
 
 Span.text getter: head(tail(prop(this.of, 'text'), len(prop(this.of, 'text')) - this.start), this.end - this.start)

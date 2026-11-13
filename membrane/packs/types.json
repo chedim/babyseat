@@ -958,22 +958,39 @@
   },
   "mentions": {
     "getters": {
+      "Identifier.texts": "Int",
+      "Path.texts": "Int",
       "SemAllCaps.form": "Text",
       "SemCapital.form": "Text",
       "SemIdentifier.form": "Text",
+      "SemIdentifier.lemma": "Any",
       "SemNumber.form": "Text",
       "SemPath.form": "Text",
+      "SemPath.lemma": "Any",
       "SemPlural.form": "Text",
       "SemPlural.lemma": "Text",
+      "SemText.mention_cap": "Int",
+      "SemText.mention_done": "List(Dict)",
+      "SemText.mention_table": "List(Dict)?",
       "Span.f_allcaps": "Text?",
       "Span.f_capital": "Text?",
       "Span.f_initial": "Bool",
       "Span.f_number": "Text?",
       "Span.f_plural": "Text?",
-      "Span.forms": "List(Text?)"
+      "Span.forms": "List(Text?)?",
+      "Span.sentence_no": "Int",
+      "Span.target": "(Entity(Identifier)|Entity(Path)|Entity(Word))?",
+      "Word.texts": "Int"
     },
     "writes": {
-      "Span.parents": "List(Text?)"
+      "Identifier.mentioned_in": "List(Any)",
+      "Path.mentioned_in": "List(Any)",
+      "SemText.mention_n": "Int",
+      "SemText.mentioned": "Bool?",
+      "Span.armed": "Bool",
+      "Span.classified": "Bool",
+      "Span.parents": "List(Text?)?",
+      "Word.mentioned_in": "List(Any)"
     },
     "findings": []
   },
@@ -1141,7 +1158,8 @@
       "Span.text": "Any"
     },
     "writes": {
-      "SemText.attach_result": "Entity(Span)?"
+      "SemText.attach_result": "Entity(Span)?",
+      "Span.armed": "Bool"
     },
     "findings": [],
     "virtual": [

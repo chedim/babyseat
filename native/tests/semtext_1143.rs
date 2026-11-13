@@ -203,3 +203,81 @@ fn a_layer_the_model_wrote_overrides_a_form_class_getter() {
     assert_eq!(h.get(&s, "lemma"), json!("PLURAL OF cats"));
     assert_eq!(h.get(&attached(&h, "word", "Rex"), "lemma"), json!("rex"), "the other classes keep theirs");
 }
+
+// ---- item 4: the mentions (mentions.c1f): words, identifiers and paths become entities, with edges ---------------------------------------
+fn entities(h: &Host, prefix: &str) -> Vec<String> { h.snapshot().keys().filter(|k| k.starts_with(prefix)).cloned().collect() }
+fn mention(h: &Host, body: &str, token: J) { h.write(body, "mention", token, "person"); h.pump(); }
+const M: &str = "See Dogs now. The dogs and cities use my_fn in ~/a.txt.";
+
+#[test]
+fn mentioning_a_body_makes_a_word_entity_per_lemma_at_its_first_mention() {
+    let h = with_body(M);
+    assert!(entities(&h, "Word:").is_empty(), "nothing is mentioned until the write");
+    mention(&h, B, json!(true));
+    let words: Vec<String> = entities(&h, "Word:lemma:");
+    assert_eq!(words, ["Word:lemma:and", "Word:lemma:city", "Word:lemma:dog", "Word:lemma:in", "Word:lemma:now", "Word:lemma:see", "Word:lemma:the", "Word:lemma:use"], "K = 1: every word, each once, under its lemma");
+    assert_eq!(h.get("Word:lemma:dog", "lemma"), json!("dog"));
+}
+
+#[test]
+fn a_word_lists_the_text_and_the_sentences_that_mention_it() {
+    let h = with_body(M);
+    mention(&h, B, json!(true));
+    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentences": [0, 1]}]));
+    assert_eq!(h.get("Word:lemma:city", "mentioned_in"), json!([{"text": B, "sentences": [1]}]));
+    assert_eq!(h.get("Word:lemma:see", "mentioned_in"), json!([{"text": B, "sentences": [0]}]));
+    // no text is copied: the entry names the text and the sentence numbers only
+    assert!(h.get("Word:lemma:dog", "mentioned_in").to_string().len() < 80);
+}
+
+#[test]
+fn identifiers_and_paths_are_entities_too_by_their_exact_text() {
+    let h = with_body(M);
+    mention(&h, B, json!(true));
+    assert_eq!(h.get("Identifier:name:my_fn", "mentioned_in"), json!([{"text": B, "sentences": [1]}]));
+    assert_eq!(h.get("Path:path:~/a.txt", "mentioned_in"), json!([{"text": B, "sentences": [1]}]));
+    assert!(entities(&h, "File:").is_empty(), "a mention makes no File (a File reads the disk)");
+}
+
+#[test]
+fn a_span_points_at_the_entity_it_mentions() {
+    let h = with_body(M);
+    h.write(B, "attach", json!({"layer": "word", "start": at(M, "Dogs")}), "person");
+    h.pump();
+    assert_eq!(h.get(&span("word", at(M, "Dogs")), "target"), json!({"$ref": "Word:lemma:dog"}));
+    h.write(B, "attach", json!({"layer": "identifier", "start": at(M, "my_fn")}), "person");
+    h.pump();
+    assert_eq!(h.get(&span("identifier", at(M, "my_fn")), "target"), json!({"$ref": "Identifier:name:my_fn"}));
+}
+
+#[test]
+fn mentioning_again_adds_no_duplicates_and_a_second_text_adds_its_own_entry() {
+    let h = with_body(M);
+    mention(&h, B, json!(true));
+    let before = entities(&h, "Word:").len() + entities(&h, "Identifier:").len() + entities(&h, "Path:").len();
+    mention(&h, B, json!(2));
+    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentences": [0, 1]}]), "re-mentioning replaces the text's own entry");
+    assert_eq!(entities(&h, "Word:").len() + entities(&h, "Identifier:").len() + entities(&h, "Path:").len(), before);
+    // a second text that holds the word
+    h.load_pack("semmaker2", "PACK semmaker2 1\nIMPORT semmaker 1\nIMPORT semtext 1\nBox.go2 on-setter make2:\n  ALWAYS:\n    Box:b:body = SemText(text: this.t)\n").unwrap();
+    h.rebuild();
+    h.born("Box:b", "Box", props(json!({"t": "A dog barks."})), "person");
+    h.pump();
+    h.write("Box:b", "go2", json!(true), "person");
+    h.pump();
+    mention(&h, "Box:b:body", json!(true));
+    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentences": [0, 1]}, {"text": "Box:b:body", "sentences": [0]}]));
+}
+
+#[test]
+fn the_work_of_one_mention_is_bounded_by_the_cap_and_the_spans_are_collected_after() {
+    // 450 distinct words: only the first MENTION_CAP (400) are mentioned
+    let words: Vec<String> = (0..450).map(|i| format!("{}{}{}", (b'a' + (i / 676) as u8) as char, (b'a' + ((i / 26) % 26) as u8) as char, (b'a' + (i % 26) as u8) as char)).collect();
+    let h = with_body(&words.join(" "));
+    mention(&h, B, json!(true));
+    let n = entities(&h, "Word:lemma:").len();
+    assert_eq!(n, 400, "the cap");
+    assert!(h.snapshot().contains_key(&format!("Word:lemma:{}", words[399])));
+    assert!(!h.snapshot().contains_key(&format!("Word:lemma:{}", words[400])));
+    assert!(entities(&h, "Span:").is_empty(), "the spans were transient: nothing holds them after the mention");
+}

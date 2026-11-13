@@ -571,16 +571,29 @@
       "semtext"
     ],
     "classes": [
+      "Identifier",
+      "Path",
       "SemAllCaps",
       "SemCapital",
       "SemIdentifier",
       "SemNumber",
       "SemPath",
       "SemPlural",
-      "Span"
+      "SemText",
+      "Span",
+      "Word"
     ],
-    "members": 13,
-    "writes": [],
+    "members": 24,
+    "writes": [
+      "Identifier:*.mentioned_in",
+      "Identifier:*=Identifier()",
+      "Path:*.mentioned_in",
+      "Path:*=Path()",
+      "Span:*.armed",
+      "Span:*=Span()",
+      "Word:*.mentioned_in",
+      "Word:*=Word()"
+    ],
     "claims": [],
     "boot_facts": []
   },
@@ -713,6 +726,7 @@
     ],
     "members": 10,
     "writes": [
+      "Span:*.armed",
       "Span:*=Span()"
     ],
     "claims": [],
