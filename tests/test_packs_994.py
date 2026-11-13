@@ -2,19 +2,13 @@
 import json
 import pathlib
 
-from membrane import graphbanner, recall_policy
+from membrane import recall_policy
 
 PACKS = pathlib.Path(__file__).resolve().parent.parent / "native" / "packs"
 
 
 def _load(name):
     return json.loads((PACKS / (name + ".json")).read_text())
-
-
-def test_banner_pack_json_matches_python_pack():
-    a, b = _load("banner"), graphbanner.pack()
-    assert (a["name"], a["version"]) == (b["name"], b["version"])
-    assert [e["properties"] for e in a["entities"]] == [e["properties"] for e in b["entities"]]
 
 
 def test_recall_pack_json_matches_python_pack():

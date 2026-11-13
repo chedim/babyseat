@@ -122,7 +122,7 @@ _sys3.path.insert(0, os.path.dirname(__file__))
 
 # the modules whose subject is the conversation graph, the serve routes or the banner, not the decisions pack: their
 # srv has no field engine of its own, so the answer door runs the real pack for the duration of each call
-DOOR_MODULES = {"test_graph_banner", "test_banner_use", "test_conversation_graph", "test_glue_two_messages",
+DOOR_MODULES = {"test_banner_use", "test_conversation_graph", "test_glue_two_messages",
                 "test_same_turn_relay_865", "test_decision_serve_470", "test_decision_map_470", "test_cache_head_450",
                 "test_conversation_banner_429"}
 

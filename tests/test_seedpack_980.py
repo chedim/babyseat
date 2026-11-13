@@ -8,7 +8,6 @@ os.environ.setdefault("MEMBRANE_RUN", "0")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import seedpack as SP  # noqa: E402
-from membrane import graphbanner as GB  # noqa: E402
 from membrane.entities import EntityStore  # noqa: E402
 
 E = "membrane::t:1"
@@ -100,46 +99,3 @@ def test_scripts_in_a_pack_are_refused_unless_packaged():
 def test_peer_import_never_carries_scripts():
     props = {"show": "x", "tick_script": "r", "getter_script": "r", "watch_script": "r"}
     assert SP.strip_scripts(props) == {"show": "x"}
-
-
-def test_banner_rules_ship_as_a_pack_and_an_edit_is_not_stranded():
-    est = _est()
-    assert GB.seed(est) == len(GB.SEED)
-    eid = GB._rule_eid("open decisions")
-    est.docs[eid].properties["show"] = "edited"
-    GB.seed(est)
-    assert est.docs[eid].properties["show"] == "edited"
-    pk = GB.pack()
-    pk["version"] += 1
-    for e in pk["entities"]:
-        if e["eid"] == eid:
-            e["properties"]["show"] = "released v2"
-    SP.load(est, pk, release=True)
-    assert est.docs[eid].properties["show"] == "released v2"
-    assert SP.overlays(est, "banner")[0]["properties"]["show"] == "edited"
-
-
-def test_first_adoption_keeps_seat_edit_and_missing_entity_comes_back(capsys):
-    est = _est()
-    GB.seed(est)
-    eid = GB._rule_eid("open decisions")
-    est.docs[eid].properties["show"] = "edited"
-    est.docs[SP._led_eid("banner")].properties["base"] = {}
-    GB.seed(est)
-    assert est.docs[eid].properties["show"] == "edited"
-    del est.docs[eid]
-    GB.seed(est)
-    assert eid in est.docs and eid in capsys.readouterr().out
-
-
-def test_code_change_without_version_bump_reaches_seat_and_corrupt_version_is_survived():
-    est = _est()
-    GB.seed(est)
-    eid = GB._rule_eid("open decisions")
-    pk = GB.pack()
-    for e in pk["entities"]:
-        if e["eid"] == eid:
-            e["properties"]["show"] = "changed in code"
-    est.docs[SP._led_eid("banner")].properties["version"] = "junk"
-    SP.load(est, pk, release=True)
-    assert est.docs[eid].properties["show"] == "changed in code"

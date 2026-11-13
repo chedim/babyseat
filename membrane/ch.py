@@ -453,7 +453,7 @@ def _sig(est, eid: str) -> str:
 
 class Binder:
     """The WHERE-atom binder (isa / is / dispatches / filter) and the trigger-ownership check that
-    ch_native.NativeVM and graphbanner share. The VM itself is native (ch_native.py); this is only its helpers."""
+    ch_native.NativeVM shares. The VM itself is native (ch_native.py); this is only its helpers."""
 
     def __init__(self, est):
         self.est = est
@@ -521,7 +521,7 @@ class Binder:
     def _bindings(self, spec: dict, memo: dict, fixed: dict | None = None,
                   atoms: dict | None = None, env: dict | None = None) -> list[dict]:
         """The WHERE atoms' bindings. `atoms`: more atom kinds, name -> fn(atom, bindings) ->
-        bindings (the banner rules' edge / recent / mine, graphbanner); `env`: plain values
+        bindings; `env`: plain values
         the filters may read besides the bound entities."""
         out = [dict(fixed or {})]
         for a in spec.get("where") or []:

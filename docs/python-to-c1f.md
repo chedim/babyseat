@@ -5,7 +5,7 @@ initialization. Everything else is `.c1f` packs on the field (getters, setters, 
 primitive the VM calls (store, network listener, model runtimes). A model living on the seat can then read, change
 and replay all of it.
 
-Measured size today: 159 modules, about 89,257 lines of Python in `membrane/`.
+Measured size today: 158 modules, about 88,976 lines of Python in `membrane/`.
 
 ## What stays Python (bare necessities)
 - the package: `pyproject`, the `membrane` entry points, `cli.py`'s argument handling;

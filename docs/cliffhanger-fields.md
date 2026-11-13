@@ -214,7 +214,7 @@ setters on a `say` field paced by freeze (decision 2).
 | - | - | - | - |
 | 1 | Parity gate | #971 journal | the checksum test (section 7) |
 | 2 | Goal-graph triggers (12) | goalgraph.py | section 5 |
-| 3 | Banner rules | graphbanner.py | computed fields |
+| 3 | Banner rules | graphbanner.py (deleted, #1143: map mode is the only mode) | - |
 | 4 | Recall policy | recall_policy.py #983 | guard setters |
 | 5 | Calls as writes | adapters.py #959/#956 | `on` setters |
 | 6 | Self learned triggers (179) | ch_learn.py | field rules |
