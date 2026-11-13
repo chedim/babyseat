@@ -1,7 +1,7 @@
 PACK door_fieldvm 1
 IMPORT boot 1
 IMPORT door 1
-VIRTUAL FieldVm
+RESIDENT FieldVm
 VIRTUAL FvDir
 VIRTUAL FvFile
 -- THE BROWSER VM'S START AS A DOOR ROUTE (#1143, swap step 3): GET /ui/fieldvm (the page's `fieldvm.js connect()`: the snapshot, then the event stream).
@@ -15,13 +15,12 @@ VIRTUAL FvFile
 -- window has nothing to draw; (2) the page's follow-up stream, `field.write` / `field.pack` / `field.remove` frames, is not on `/ui/serve/event` (it carries the
 -- session events only), so the page's field never changes after the snapshot; (3) a Pack entity written by the model (`Pack:<name>.text`) is not in `packs`
 -- (only files); (4) two folders holding the same pack name: either may win (the released seat had one folder).
--- (A VIRTUAL entity is collected when nothing holds it: `Boot:seat.fieldvm` holds `FieldVm:seat`, and its `dirs` and `files` getters hold the folders and files.)
+-- (A VIRTUAL entity is collected when nothing holds it: `FieldVm:seat` is RESIDENT, a row of its own, and its `dirs` and `files` getters hold the folders and the files.)
 -- The `packs` dict has data keys, which c1f cannot write: it is built by one `sql()` over the pairs (`json_group_object`, the way the session status is).
 
 Boot.started on-setter fv-start:
   ALWAYS:
     ('FieldVm:seat').born = clock
-    this.fieldvm = FieldVm:seat
     FOR d IN (this.app_dirs or []):
       ('FvDir:' + d).path = d
 

@@ -324,6 +324,8 @@
   "door": {
     "getters": {
       "Http.up": "Bool?",
+      "Request.ag_allow": "List(Dict)",
+      "Request.ag_body": "List(Dict)",
       "Request.allow": "List(Text)?",
       "Request.app_dirs": "Any",
       "Request.boots": "List(Entity(Boot))",
@@ -336,6 +338,12 @@
       "Request.c_stt": "Text",
       "Request.c_voice": "Bool",
       "Request.cand": "Text?",
+      "Request.cf_body": "Dict",
+      "Request.cf_model": "Text",
+      "Request.cf_models": "Any",
+      "Request.cf_port": "Any",
+      "Request.cf_provider": "Dict",
+      "Request.cf_safe": "Bool",
       "Request.conf_body": "Dict",
       "Request.conf_reply": "Dict",
       "Request.cookie_name": "Any",
@@ -489,6 +497,8 @@
       "Request.dm_spec": "Text",
       "Request.dm_spec1": "Text",
       "Request.dm_spec_raw": "Text?",
+      "Request.dm_tab_names": "List(Any)?",
+      "Request.dm_tabs": "Any",
       "Request.dm_v": "Any",
       "Request.dm_work": "Any",
       "Request.dm_write": "Bool",
@@ -537,6 +547,65 @@
       "Message"
     ]
   },
+  "door_fieldvm": {
+    "getters": {
+      "FieldVm.dirs": "List(Entity(FvDir))",
+      "FieldVm.done": "Bool",
+      "FieldVm.files": "List(Entity(FvFile))",
+      "FieldVm.listed": "Bool",
+      "FieldVm.pairs": "List(List(Any))",
+      "FieldVm.rows": "Any",
+      "FieldVm.snapshot": "Dict?",
+      "FieldVm.want": "Int",
+      "FvDir.entries": "Any",
+      "FvDir.files": "List(List(Any))?",
+      "FvFile.stem": "Text",
+      "FvFile.text": "Any",
+      "FvFile.view": "Bool",
+      "Request.fv_body": "Dict?",
+      "Request.fv_seat": "Entity(FieldVm)?",
+      "Request.m_fieldvm": "List(Text)",
+      "Request.o_fieldvm": "Bool",
+      "Request.r_fieldvm": "Dict?"
+    },
+    "writes": {
+      "FieldVm.born": "Num",
+      "FvDir.opened": "Bool",
+      "FvDir.path": "Any",
+      "FvFile.file": "Any",
+      "FvFile.path": "Any"
+    },
+    "findings": [],
+    "virtual": [
+      "FvDir",
+      "FvFile"
+    ],
+    "resident": [
+      "FieldVm"
+    ]
+  },
+  "door_map": {
+    "getters": {
+      "Request.m_map": "List(Text)",
+      "Request.mp_3d": "Dict",
+      "Request.mp_arg": "List(List(Text?))",
+      "Request.mp_eid": "Text",
+      "Request.mp_empty_pid": "Text",
+      "Request.mp_err": "Text",
+      "Request.mp_expired": "Dict",
+      "Request.mp_ints": "List(Num?)",
+      "Request.mp_ints_ok": "Bool",
+      "Request.mp_pid": "Text?",
+      "Request.mp_q": "Text",
+      "Request.mp_root": "Dict",
+      "Request.mp_tile": "Dict",
+      "Request.mp_val": "List(Text?)",
+      "Request.o_map": "Bool",
+      "Request.r_map": "Dict"
+    },
+    "writes": {},
+    "findings": []
+  },
   "door_models": {
     "getters": {
       "Request.bad_list": "List(Bool)",
@@ -559,6 +628,7 @@
       "Request.m_minds": "Bool",
       "Request.m_models": "List(Text)?",
       "Request.m_need": "Bool",
+      "Request.m_opts": "Bool",
       "Request.m_post": "Bool",
       "Request.m_router": "Bool",
       "Request.m_rungs": "List(Entity(Model))",
@@ -570,6 +640,26 @@
       "Request.n_list": "List(Text)",
       "Request.o_models": "Bool",
       "Request.ok_list": "List(Bool?)",
+      "Request.op_all": "List(Any)",
+      "Request.op_bg": "Dict",
+      "Request.op_body": "Dict",
+      "Request.op_cur": "List(Any)",
+      "Request.op_err": "Text?",
+      "Request.op_go": "Bool?",
+      "Request.op_keep": "Any",
+      "Request.op_keep_ok": "Bool",
+      "Request.op_keep_v": "Any",
+      "Request.op_keys": "List(Text)",
+      "Request.op_mind_keys": "List(Text)",
+      "Request.op_models": "List(Any)",
+      "Request.op_nonempty": "Bool",
+      "Request.op_post_go": "Bool?",
+      "Request.op_seen": "List(Text)",
+      "Request.op_set": "Entity(Settings)?",
+      "Request.op_share": "Any",
+      "Request.op_share_ok": "Bool",
+      "Request.op_share_v": "Any",
+      "Request.opts_reply": "Dict?",
       "Request.pickable": "List(Any)",
       "Request.post_go": "Bool?",
       "Request.r_list": "List(Text?)",
@@ -578,7 +668,8 @@
       "Request.skip_list": "List(Bool)",
       "Request.str_list": "List(Bool)",
       "Request.unseen": "Bool",
-      "Request.v_list": "List(Any)"
+      "Request.v_list": "List(Any)",
+      "Settings.kind": "Text"
     },
     "writes": {
       "Minds.cortex": "Any",
@@ -590,9 +681,15 @@
       "Minds.workers_auth": "Any",
       "Request.minds_applied": "Bool",
       "Request.models_asked": "Bool",
-      "Router.refresh": "Dict?"
+      "Request.opts_applied": "Bool",
+      "Router.refresh": "Dict?",
+      "Settings.code_runs_keep": "Any",
+      "Settings.self_cpu_share": "Any"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Settings"
+    ]
   },
   "door_self": {
     "getters": {
@@ -775,7 +872,9 @@
       "Request.st_paused": "Bool",
       "Request.st_post": "Bool",
       "Request.st_pull": "Any",
+      "Request.st_quota_body": "Dict",
       "Request.st_read": "Dict",
+      "Request.st_resume_model": "Text",
       "Request.st_seat": "Entity(Seat)?",
       "Request.st_seat_body": "Dict",
       "Request.st_self": "Any",

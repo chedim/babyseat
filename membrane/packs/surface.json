@@ -224,13 +224,15 @@
       "Http",
       "Request"
     ],
-    "members": 78,
+    "members": 86,
     "writes": [
       "Http:door.listen"
     ],
     "claims": [
       "/",
+      "/agent",
       "/command",
+      "/config",
       "/favicon.ico",
       "/global/health",
       "/index.html",
@@ -299,7 +301,7 @@
       "Task",
       "Wait"
     ],
-    "members": 93,
+    "members": 95,
     "writes": [
       "*.answer",
       "*.chat",
@@ -320,15 +322,70 @@
       "Message"
     ]
   },
+  "door_fieldvm": {
+    "imports": [
+      "boot",
+      "door"
+    ],
+    "classes": [
+      "Boot",
+      "FieldVm",
+      "FvDir",
+      "FvFile",
+      "Request"
+    ],
+    "members": 19,
+    "writes": [
+      "FieldVm:seat.born",
+      "FvDir:*.path",
+      "FvFile:*.file",
+      "FvFile:*.path"
+    ],
+    "claims": [
+      "/ui/fieldvm"
+    ],
+    "boot_facts": [
+      "app_dirs"
+    ],
+    "virtual": [
+      "FvDir",
+      "FvFile"
+    ],
+    "resident": [
+      "FieldVm"
+    ]
+  },
+  "door_map": {
+    "imports": [
+      "door"
+    ],
+    "classes": [
+      "Request"
+    ],
+    "members": 16,
+    "writes": [],
+    "claims": [
+      "/membrane/field/entity",
+      "/membrane/map/blurp",
+      "/membrane/map/distance",
+      "/membrane/map/field",
+      "/membrane/map/field3d",
+      "/membrane/map/locate",
+      "/membrane/map/search",
+      "/membrane/map/tile"
+    ],
+    "boot_facts": []
+  },
   "door_models": {
     "imports": [
       "door",
       "router"
     ],
     "classes": [
-      "Request"
+      "Request",
+      "Settings"
     ],
-    "members": 40,
+    "members": 62,
     "writes": [
       "Minds:seat.cortex",
       "Minds:seat.cortex_auth",
@@ -337,15 +394,21 @@
       "Minds:seat.think",
       "Minds:seat.workers",
       "Minds:seat.workers_auth",
-      "Router:seat.refresh"
+      "Router:seat.refresh",
+      "Settings:seat.code_runs_keep",
+      "Settings:seat.self_cpu_share"
     ],
     "claims": [
       "/membrane/models",
+      "/membrane/options",
       "/v1/models",
       "/v1/models/"
     ],
     "boot_facts": [
       "router_on"
+    ],
+    "resident": [
+      "Settings"
     ]
   },
   "door_self": {
@@ -437,13 +500,14 @@
       "Request",
       "Seat"
     ],
-    "members": 29,
+    "members": 31,
     "writes": [
       "membrane::presence.control"
     ],
     "claims": [
       "/membrane/minds",
       "/membrane/quota",
+      "/membrane/quota/resume",
       "/membrane/seat",
       "/membrane/seat/control",
       "/membrane/seat/pause",

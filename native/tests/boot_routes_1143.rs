@@ -22,8 +22,10 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 }
 
 /// scripts/seat-full on a fresh data folder, a free port, the fake claude `/usr/bin/true`; -> the seat and its owner token
-fn seat(tag: &str) -> Run {
-    let dir = tmp(tag);
+fn seat(tag: &str) -> Run { let dir = tmp(tag); start_in(dir) }
+/// the same on the folder `dir` (a second start on it is a restart: the store, the secret and the page's cookie are kept)
+fn start_in(dir: std::path::PathBuf) -> Run {
+    let _ = std::fs::remove_file(dir.join("d/owner.token"));
     let script = format!("{}/../scripts/seat-full", env!("CARGO_MANIFEST_DIR"));
     let mut child = Command::new("sh").arg(script).args(["--data-dir", dir.join("d").to_str().unwrap(), "--port", "0"])
         .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
@@ -339,4 +341,18 @@ fn the_history_and_item_chat_reads_answer_on_a_fresh_store_instead_of_waiting_fo
     assert_eq!((st, h), (200, json!({"ok": false, "error": "no entity matches 'Goal:none'"})));
     let (st, c) = api(&run, "GET", "/ui/serve/membrane/item-chat?spec=Goal%3Anone", J::Null);
     assert_eq!((st, c), (200, json!({"ok": true, "eid": "Goal:none", "messages": []})));
+}
+
+#[test]
+fn the_snapshot_is_the_same_after_a_restart_on_the_same_store() {
+    let first = seat("fieldvm-restart");
+    let (_, a) = api(&first, "GET", "/ui/fieldvm", J::Null);
+    let dir = first.dir.clone();
+    let mut first = first;
+    let _ = first.child.kill();
+    let _ = first.child.wait();
+    std::mem::forget(first);            // the folder stays: the second seat owns it now
+    let second = start_in(dir);
+    let (st, b) = api(&second, "GET", "/ui/fieldvm", J::Null);
+    assert_eq!((st, &b), (200, &a), "the same view packs after a restart");
 }
