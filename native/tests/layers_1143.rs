@@ -98,7 +98,7 @@ fn a_layer_overrides_only_what_it_imports() {
     assert!(e.contains("Light.word") && e.contains("upper") && e.contains("IMPORT upper"), "{e}");
     assert!(!f.pack_active("rogue"));
     // with the import it loads, and it is the top layer
-    let rogue2 = "PACK rogue 1\nIMPORT upper 1\nLight.word getter WHEN this.level > 100: 'huge'\n";
+    let rogue2 = "PACK rogue 1\nIMPORT base 1\nIMPORT upper 1\nLight.word getter WHEN this.level > 100: 'huge'\n";
     f.set_pack("rogue", rogue2).unwrap();
     assert!(f.pack_active("rogue"));
 }
@@ -129,7 +129,7 @@ fn writers(f: &Fields) -> Vec<String> { f.out.iter().filter_map(|w| w["writer"].
 
 #[test]
 fn every_setter_fires_top_layer_first() {
-    let up = "PACK up 1\nIMPORT low 1\nLight.level on-setter upv:\n  ALWAYS:\n    Box:b.w = 'upper'\n";
+    let up = "PACK up 1\nIMPORT base 1\nIMPORT low 1\nLight.level on-setter upv:\n  ALWAYS:\n    Box:b.w = 'upper'\n";
     let (mut c, mut f) = world(&[("base", BASE), ("low", LOW), ("up", up)]);
     f.out.clear();
     put(&mut c, &mut f, "Light:a", "level", json!(1));
@@ -140,7 +140,7 @@ fn every_setter_fires_top_layer_first() {
 
 #[test]
 fn a_same_name_setter_in_an_upper_layer_replaces_the_lower_one() {
-    let up = "PACK up 1\nIMPORT low 1\nLight.level on-setter mark:\n  ALWAYS:\n    Box:b.u = 'upper'\n";
+    let up = "PACK up 1\nIMPORT base 1\nIMPORT low 1\nLight.level on-setter mark:\n  ALWAYS:\n    Box:b.u = 'upper'\n";
     let (mut c, mut f) = world(&[("base", BASE), ("low", LOW), ("up", up)]);
     put(&mut c, &mut f, "Light:a", "level", json!(1));
     assert_eq!(c.docs["Box:b"].props["u"], json!("upper"));
@@ -160,7 +160,7 @@ fn a_setter_replaced_by_an_unrelated_layer_is_refused_at_load() {
 
 #[test]
 fn stacked_setters_writing_one_target_the_first_write_wins_quietly_and_why_says_who() {
-    let up = "PACK up 1\nIMPORT low 1\nLight.level on-setter upv:\n  ALWAYS:\n    Box:b.v = 'upper'\n";
+    let up = "PACK up 1\nIMPORT base 1\nIMPORT low 1\nLight.level on-setter upv:\n  ALWAYS:\n    Box:b.v = 'upper'\n";
     let (mut c, mut f) = world(&[("base", BASE), ("low", LOW), ("up", up)]);
     f.refusals.clear();
     put(&mut c, &mut f, "Light:a", "level", json!(1));
@@ -186,7 +186,7 @@ fn a_shadowed_write_runs_no_effect() {
     let d = std::env::temp_dir().join(format!("layers-fx-{}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     let low = "PACK low 1\nIMPORT base 1\nLight.level on-setter lowrun:\n  ALWAYS:\n    Command:c.run = {'id': 'lower'}\n";
-    let up = "PACK up 1\nIMPORT low 1\nLight.level on-setter uprun:\n  ALWAYS:\n    Command:c.run = {'id': 'upper'}\n";
+    let up = "PACK up 1\nIMPORT base 1\nIMPORT low 1\nLight.level on-setter uprun:\n  ALWAYS:\n    Command:c.run = {'id': 'upper'}\n";
     let mut f = Fields::goalgraph();
     for (n, t) in [("base", BASE), ("low", low), ("up", up)] { f.set_pack(n, t).unwrap(); }
     let mut c = Core::new();
@@ -202,4 +202,29 @@ fn a_shadowed_write_runs_no_effect() {
     let mut s = 40; f.settle(&mut c, &H, 3.0, &mut s);
     assert_eq!(c.docs["Command:c"].props["run_result"]["id"], json!("upper"), "only the top layer's command ran");
     let _ = std::fs::remove_dir_all(d);
+}
+
+// ---- the stale-setter check sees every layer ----------------------------------------------------------------------------------
+
+#[test]
+fn a_setter_in_one_layer_reading_a_getter_of_another_that_depends_on_its_trigger_is_refused() {
+    // the lower getter reads level; the upper setter (trigger level) reads that getter: stale, as inside one pack
+    let up = "PACK up 1\nIMPORT base 1\nLight.level on-setter s:\n  ALWAYS:\n    Box:b.w = this.word\n";
+    let mut f = Fields::goalgraph();
+    f.set_pack("base", BASE).unwrap();
+    let e = f.set_pack("up", up).unwrap_err();
+    assert!(e.contains("reads the getter Light.word") && e.contains("on-setter s"), "{e}");
+    assert!(!f.pack_active("up"));
+}
+
+#[test]
+fn an_upper_arm_that_makes_a_getter_depend_on_a_lower_setters_trigger_is_refused() {
+    // the lower setter reads word, which does not depend on level; the upper adds an arm reading level: the lower setter would read it stale
+    let base = "PACK base 1\nLight.kind getter: 'light'\nLight.word getter: 'plain'\nLight.level on-setter s:\n  ALWAYS:\n    Box:b.w = this.word\n";
+    let up = "PACK up 1\nIMPORT base 1\nLight.word getter WHEN this.level > 5: 'bright'\n";
+    let mut f = Fields::goalgraph();
+    f.set_pack("base", base).unwrap();
+    let e = f.set_pack("up", up).unwrap_err();
+    assert!(e.contains("reads the getter Light.word"), "{e}");
+    assert!(!f.pack_active("up"));
 }
