@@ -147,3 +147,13 @@ fn a_constructor_is_typed_as_its_class() {
     assert_eq!(infer_src("Voice(kind: 'in')", &[]).unwrap().0, "Entity(Voice)");
     assert_eq!(infer_src("Voice(kind: 1 + 'a')", &[]).unwrap().1.len(), 1, "its arguments are typed for findings");
 }
+
+#[test]
+fn a_foreign_prefix_entity_gets_its_kinds_getters_at_once() {
+    // the kind stamp (`parents`) is set after the birth: the kind's getters must still be computed for what was just made
+    let pack = "PACK t 1\nVoice.shown getter: 'v:' + this.eid\nVoice.twice getter: this.n * 2\nBox.go on-setter t:\n  ALWAYS:\n    Config:x = Voice(n: 4)\n";
+    let (c, _) = run_with(pack, json!({}), &[]);
+    assert_eq!(p(&c, "Config:x")["parents"], json!(["cls:voice"]));
+    assert_eq!(p(&c, "Config:x")["shown"], json!("v:Config:x"), "{:?}", p(&c, "Config:x"));
+    assert_eq!(p(&c, "Config:x")["twice"], json!(8));
+}

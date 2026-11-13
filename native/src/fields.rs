@@ -1041,11 +1041,14 @@ impl Fields {
             let own = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
             if let Err(why) = self.may_write(pack, &own) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
         }
+        let kind_stamped = args.iter().any(|(k, _)| k == "parents");
         for (prop, v) in args {
             if v.is_null() { continue; }
             if core.docs.get(&tgt).and_then(|e| e.props.get(&prop)).map_or(false, |old| !old.is_null()) { continue; }   // only what is unset
             self.emit(core, work, &tgt, &prop, v, name, seq, now);
         }
+        // the kind stamp came after the birth: the getters of the kind (ISA mirror) are computed now, for what was just made
+        if kind_stamped { self.birth(core, &tgt, now, seq); }
     }
 
     /// A write of a driver verb (File.write, Command.run, ...: drivers.rs) runs its effect off the engine; the verb's
