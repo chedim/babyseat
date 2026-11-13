@@ -1010,6 +1010,7 @@ impl Host {
         self.eng().0.docs.iter().map(|(k, e)| (k.clone(), json!({"cls": e.cls, "props": e.props}))).collect()
     }
     /// The cap on the slow drivers' workers (Command, File, Fetch), the boot fact `effect_workers`.
+    pub fn set_command_timeout(&self, s: f64) { if let Some(st) = &self.eng().0.store { st.set_command_timeout(s); } }
     pub fn set_effect_workers(&self, n: usize) { if let Some(st) = &self.eng().0.store { st.set_effect_workers(n); } }
     pub fn waiter(&self) -> Option<crate::store::Waiter> { self.waiter.clone() }
 }

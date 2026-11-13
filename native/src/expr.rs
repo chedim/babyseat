@@ -339,7 +339,7 @@ struct P { t: Vec<Tok>, i: usize, depth: usize, block: bool }
 /// (keep in step with `call`: a test reads its arms)
 pub const RESERVED: &[&str] = &[
     "Int", "Float", "Num", "Text", "Bool", "List", "Dict", "None", "True", "False", "this", "x", "clock",
-    "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words",
+    "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words", "spans",
     "join", "head", "tail", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
     "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop", "why",
     "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun",
@@ -850,6 +850,13 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "startswith" => { argn(2)?; Ok(V::Bool(text_of(&a[0])?.starts_with(&text_of(&a[1])?))) }
         "lines" => { argn(1)?; Ok(V::List(text_of(&a[0])?.lines().map(|l| V::Str(l.to_string())).collect())) }
         "words" => { argn(1)?; Ok(V::List(text_of(&a[0])?.split_whitespace().map(|w| V::Str(w.to_string())).collect())) }
+        "spans" => {      // the tokenizer (#1143): [{start, end, text}] of a layer, offsets in chars (docs/semtext-and-legs.md)
+            argn(2)?;
+            let layer = text_of(&a[1])?;
+            let l = crate::text::Layer::parse(&layer).ok_or_else(|| format!("spans(text, layer): the layer is one of {} (not {:?})", crate::text::Layer::NAMES, layer))?;
+            Ok(V::List(crate::text::surfaces(&text_of(&a[0])?, l).into_iter().map(|(s, t)| V::Dict(vec![
+                ("start".to_string(), V::Int(s.start as i64)), ("end".to_string(), V::Int(s.end as i64)), ("text".to_string(), V::Str(t))])).collect()))
+        }
         "join" => {
             argn(2)?;
             let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("join(list, sep): a list".into()) };  // #1065: a pending read (None) is empty

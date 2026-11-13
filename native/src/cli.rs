@@ -88,6 +88,7 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
         }
     }
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "effect_workers").and_then(|(_, v)| v.as_u64()) { h.set_effect_workers(n.max(1) as usize); }   // the cap on Command / File / Fetch effects running at once (default 4)
+    if let Some(n) = r.facts.iter().find(|(k, _)| k == "command_timeout_s").and_then(|(_, v)| v.as_f64()) { h.set_command_timeout(n); }   // the limit of a Command run that states no timeout_s (default 120 s)
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "warm_rows").and_then(|(_, v)| v.as_u64()) { h.set_warm_rows(n as usize); }   // how many lazy rows the warm boot loads in the background (default host::DEFAULT_WARM_ROWS; 0 = none)
     // the memory sensor (docs/cliffvm.md, "Unload"): the budget and the fractions are the operator's boot facts, none has a default; the policy pack reads `unload_batch` itself
     let fact = |n: &str| r.facts.iter().find(|(k, _)| k == n).map(|(_, v)| v);

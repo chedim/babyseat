@@ -139,7 +139,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 40,
+    "members": 41,
     "writes": [
       "membrane:*.calls",
       "membrane:*.cost",
@@ -160,6 +160,7 @@
     "boot_facts": [
       "chat_claude_bin",
       "chat_max_turns",
+      "chat_turn_timeout_s",
       "started"
     ],
     "virtual": [
@@ -631,10 +632,12 @@
     "classes": [
       "Command"
     ],
-    "members": 4,
+    "members": 10,
     "writes": [],
     "claims": [],
-    "boot_facts": [],
+    "boot_facts": [
+      "command_timeout_s"
+    ],
     "resident": [
       "Command"
     ]

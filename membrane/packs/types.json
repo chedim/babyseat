@@ -222,6 +222,7 @@
       "ChatMessage.took": "Any",
       "ChatMessage.tools_idlist": "Text",
       "ChatMessage.tools_names": "List(Text)",
+      "ChatMessage.turn_timeout_s": "Any",
       "Chunk.said": "Text",
       "Chunk.sevs": "List(Any)",
       "Chunk.started": "Text"
@@ -1051,7 +1052,13 @@
       "Command.errors": "Any",
       "Command.ok": "Bool?",
       "Command.output": "Any",
-      "Command.status": "Any"
+      "Command.partial_errors": "Any",
+      "Command.partial_output": "Any",
+      "Command.rc": "Any",
+      "Command.status": "Any",
+      "Command.timed_out": "Bool",
+      "Command.timeout_default": "Any",
+      "Command.timeout_why": "Text"
     },
     "writes": {},
     "findings": [],

@@ -13,6 +13,7 @@ VIRTUAL Chunk
 -- else the assistant's text in order. The run is the message's TURN entity (`...:turn`, packs/chat.c1f: state, started, ended); each tool the model ran and the answer are entities under the turn (ChatTool: name, input, result).
 -- Boot facts (cliffvm run ... --fact name=value):
 --   chat_claude_bin   the CLI's path. NO DEFAULT: without it a message is answered with an error that says so, and nothing is run.
+--   chat_turn_timeout_s the turn's time limit in seconds (a Command's timeout_s); default 21600 here (a threshold: flagged for the operator).
 --   chat_max_turns    the ceiling (the CLI's --max-turns); default 2048 here (a threshold: flagged for the operator).
 -- `env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is the CLI's own switch the Python rung set (no auto-memory keyed to the folder).
 -- (the two setters are on the class Chat, not on the kind ChatMessage: a setter reaches a kind only through an ISA parent ENTITY, `cls:chatmessage`,
@@ -26,6 +27,11 @@ ChatMessage.bin getter:
 ChatMessage.max_turns getter:
   WHEN this.over: None
   ELSE: ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
+-- THE TURN HAS ITS OWN LIMIT (#1143): the default of a Command run (`command_timeout_s`, 120 s) is for a model's shell commands, not for a chat turn (its ceiling is
+-- `chat_max_turns`); the turn's run states `timeout_s` = the boot fact `chat_turn_timeout_s`, default 21600 (6 h; a threshold flagged for the operator).
+ChatMessage.turn_timeout_s getter:
+  WHEN this.over: None
+  ELSE: ([b.chat_turn_timeout_s for b in instances('Boot') if b.chat_turn_timeout_s != None] or [21600])[0]
 ChatMessage.port getter:
   WHEN this.over: None
   ELSE: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
@@ -68,7 +74,7 @@ Chat.plan on-setter turn-start:
     membrane::Chat:message[this.mid]:turn.state = 'running'
     membrane::Chat:message[this.mid]:turn.started = clock
     membrane::Command:chat[this.mid] = Command(cmd: prop(this.plan, 'argv'))
-    membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': [], 'partial': True}
+    membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': [], 'partial': True, 'timeout_s': this.turn_timeout_s}
 
 -- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
 -- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});

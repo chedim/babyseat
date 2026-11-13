@@ -1303,3 +1303,127 @@ await new Promise((r) => setTimeout(r, 3500));
 must(!calls.some((c) => c.startsWith('/membrane/chat/message/')), 'finished turns are not fetched one by one: ' + calls);
 process.exit(0);
 "#;
+
+// ---- a command's own time limit (#1143): the model's estimate `timeout_s`, a default, a kill of the whole process group, a reasoned null --------
+/// is a process whose command line contains `marker` alive?
+fn alive(marker: &str) -> bool { Command::new("pgrep").args(["-f", marker]).stdout(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) }
+fn receipt_of(t: &str) -> J { let l = t.lines().find(|l| l.starts_with("receipt: ")).unwrap_or_else(|| panic!("{t}")); serde_json::from_str(&l["receipt: ".len()..]).unwrap_or_else(|e| panic!("{e}: {l}")) }
+
+#[test]
+fn a_command_past_its_timeout_s_is_killed_with_its_whole_process_group_and_keeps_its_partial_output() {
+    let (mut run, port) = start("to1", MCP_PACKS, &[]);
+    let t0 = Instant::now();
+    let (t, e) = put_wait(port, "Command:t1", "run", json!({"id": "t1", "cmd": ["sh", "-c", "echo before; sleep 61.4271 & wait"], "timeout_s": 1}), 30.0);
+    assert!(t0.elapsed() < Duration::from_secs(12), "{:?}", t0.elapsed());
+    assert!(!e, "{t}");
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["killed"].clone(), r["timeout_s"].clone(), r["ok"].clone()), (json!("timeout"), json!(true), json!(1), json!(false)), "{t}");
+    assert_eq!(r["rc"], json!(124), "{t}");
+    assert!(t.contains("timed out after 1 s (killed)") && t.contains("timeout_s"), "the reply says what happened and how to retry: {t}");
+    assert!(reply_part(&t, "stdout").is_some_and(|s| s["stdout"].as_str().unwrap().contains("before")), "the partial output is kept: {t}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!alive("sleep 61.4271"), "the whole process group is dead");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timed_out_commands_result_props_are_reasoned_nulls_that_tell_the_remedy_and_the_partial_output_stays() {
+    let (mut run, port) = start("to2", MCP_PACKS, &[]);
+    put_wait(port, "Command:t2", "run", json!({"id": "t2", "cmd": ["sh", "-c", "echo partial-line; sleep 62.5"], "timeout_s": 1}), 30.0);
+    let want = "Command:t2 timed out after 1 s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}";
+    for p in ["output", "ok", "rc"] {
+        let (t, e) = cliff(port, &format!("prop('Command:t2', '{p}')"));
+        assert!(e && t == format!("error: {want}"), "{p}: {t}");
+    }
+    // a model-style getter over it keeps the null and the reason
+    let pack = "PACK shx 1\nSh.out getter: prop('Command:t2', 'output')\nSh.len getter: this.out + '!'\n";
+    put(port, "Pack:shx", "text", json!(pack));
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:shx", "prop": "state"})).0 == "loaded").then_some(()));
+    put(port, "Sh:a", "x", json!(1));
+    let (t, e) = cliff(port, "prop('Sh:a', 'len')");
+    assert!(e && t.contains(want), "the null passes through the getters: {t}");
+    let (p, _) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "partial_output"}));
+    assert!(p.contains("partial-line"), "{p}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_command_that_finishes_in_time_is_untouched_by_its_timeout() {
+    let (mut run, port) = start("to3", MCP_PACKS, &[]);
+    let (t, e) = put_wait(port, "Command:t3", "run", json!({"id": "t3", "cmd": ["sh", "-c", "echo fine; sleep 0.2"], "timeout_s": 30}), 30.0);
+    assert!(!e, "{t}");
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["rc"].clone(), r["ok"].clone(), r["timeout_s"].clone()), (json!("ok"), json!(0), json!(true), json!(30)), "{t}");
+    assert!(r["killed"].is_null() || r["killed"] == json!(false), "{t}");
+    assert_eq!(cliff(port, "prop('Command:t3', 'output')").0.trim(), "fine");
+    assert_eq!(cliff(port, "prop('Command:t3', 'ok')").0, "True");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timeout_s_of_zero_or_less_is_refused_and_nothing_runs() {
+    let (mut run, port) = start("to4", MCP_PACKS, &[]);
+    for (i, v) in [json!(0), json!(-5)].into_iter().enumerate() {
+        let (t, _) = put_wait(port, &format!("Command:z{i}"), "run", json!({"id": "z", "cmd": ["sh", "-c", "sleep 63.11"], "timeout_s": v}), 20.0);
+        assert!(t.contains("timeout_s") && t.contains("bigger") && t.contains("refused"), "{t}");
+    }
+    assert!(!alive("sleep 63.11"));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn without_a_timeout_s_the_boot_fact_command_timeout_s_applies_and_the_two_write_form_works() {
+    let (mut run, port) = start("to5", MCP_PACKS, &["--fact", "command_timeout_s=2"]);
+    let (t, _) = put_wait(port, "Command:d1", "run", json!({"id": "d1", "cmd": ["sleep", "64.2"]}), 30.0);
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["timeout_s"].clone()), (json!("timeout"), json!(2)), "{t}");
+    // the two-write form: timeout_s on the entity, then run
+    put(port, "Command:d2", "cmd", json!(["sleep", "64.3"]));
+    put(port, "Command:d2", "timeout_s", json!(1));
+    let (t, _) = put_wait(port, "Command:d2", "run", json!({"id": "d2", "args": []}), 30.0);
+    assert_eq!(receipt_of(&t)["timeout_s"], json!(1), "{t}");
+    assert!(!alive("sleep 64."));
+    // the default itself is 120 and shows in the receipt of a plain run, and in the pending reply with the time left
+    let (mut run2, port2) = start("to5b", MCP_PACKS, &[]);
+    let (t, _) = put(port2, "Command:d3", "run", json!({"id": "d3", "cmd": ["sleep", "2"]}));
+    assert!(t.contains("pending") && t.contains("timeout_s: 120") && t.contains("left"), "{t}");
+    assert!(terminate(&mut run2));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timed_out_command_frees_its_worker_slot_and_stop_kills_the_group_at_once() {
+    let (mut run, port) = start("to6", MCP_PACKS, &["--fact", "effect_workers=1"]);
+    let a = std::thread::spawn(move || put_wait(port, "Command:s1", "run", json!({"id": "s1", "cmd": ["sh", "-c", "sleep 65.3 & wait"], "timeout_s": 1}), 40.0).0);
+    std::thread::sleep(Duration::from_millis(300));
+    let t0 = Instant::now();
+    let (t, _) = put_wait(port, "Command:s2", "run", json!({"id": "s2", "cmd": ["echo", "after"]}), 40.0);
+    assert!(t.contains("after") && t0.elapsed() < Duration::from_secs(15), "{t} {:?}", t0.elapsed());
+    assert!(a.join().unwrap().contains("\"timeout\""));
+    // stop: the whole group, now
+    let b = std::thread::spawn(move || put_wait(port, "Command:s3", "run", json!({"id": "s3", "cmd": ["sh", "-c", "sleep 66.7 & wait"], "timeout_s": 300}), 40.0).0);
+    wait("running", || alive("sleep 66.7").then_some(()));
+    put(port, "Command:s3", "stop", json!({"id": "x"}));
+    b.join().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!alive("sleep 66.7") && !alive("sleep 65.3"));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_chat_turn_is_not_killed_by_the_default_and_a_timed_out_receipt_survives_a_restart_unchanged() {
+    let (mut run, port, dir) = fake_seat("to7", &["--fact", "command_timeout_s=1"]);
+    let id = send(port, "slow turn");
+    wait("running", || (view(port, &id)["state"] == "running").then_some(()));
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(finish(port, &dir, &id, "slow turn")["state"], "done", "the turn outlived the default of 1 s");
+    put_wait(port, "Command:r1", "run", json!({"id": "r1", "cmd": ["sleep", "67.9"], "timeout_s": 1}), 30.0);
+    let before = call(port, "entity_read", json!({"spec": "Command:r1", "prop": "run_result"})).0;
+    assert!(before.contains("timeout"), "{before}");
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "command_timeout_s=1"]);
+    let after = wait("the receipt after the restart", || { let t = call(port2, "entity_read", json!({"spec": "Command:r1", "prop": "run_result"})).0; t.contains("timeout").then_some(t) });
+    assert_eq!(before, after, "the receipt is the journalled write; a replay runs nothing");
+    assert!(!alive("sleep 67.9"));
+    assert!(terminate(&mut run2));
+}

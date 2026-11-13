@@ -176,3 +176,32 @@ fn a_running_commands_chunks_are_held_while_it_runs_and_collected_when_it_is_ove
     assert!(most >= 1, "its chunks were held while it ran (most at once: {most})");
     assert_eq!(h.snapshot().keys().filter(|k| k.starts_with("Chunk:")).count(), 0, "and collected once it is over: nothing holds them");
 }
+
+#[test]
+fn a_killed_commands_chunks_are_collected_after_its_timeout_receipt_and_the_command_stays_pinned_with_its_reasoned_nulls() {
+    let file = tmpfile("timeout");
+    let h = Host::open(Options::new(Some(file))).unwrap();
+    let r = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../membrane/packs");
+    h.load_app(&r.join("proc.c1f"), true).unwrap();
+    h.load_pack("gcc", CHUNKS).unwrap();
+    h.rebuild();
+    h.born("Command:t", "Command", props(json!({})), "person");
+    h.write("Command:t", "run", json!({"id": "t1", "cmd": ["sh", "-c", "echo one; sleep 30"], "partial": true, "timeout_s": 1}), "person");
+    let t = std::time::Instant::now();
+    let mut most = 0;
+    while t.elapsed() < std::time::Duration::from_secs(20) {
+        h.pump();
+        most = most.max(h.snapshot().keys().filter(|k| k.starts_with("Chunk:")).count());
+        if h.get("Command:t", "run_result") != J::Null { h.pump(); h.pump(); break; }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+    assert_eq!(h.get("Command:t", "run_result")["status"], json!("timeout"));
+    assert!(most >= 1, "its chunk was held while it ran");
+    assert_eq!(h.snapshot().keys().filter(|k| k.starts_with("Chunk:")).count(), 0, "the killed command's chunks are collected after its receipt");
+    // a Command is resident: pinned, refused with a receipt, and its reasoned nulls still read
+    h.write("Command:t", "unload", json!(true), "person");
+    assert!(h.snapshot().contains_key("Command:t"));
+    assert!(h.get("Command:t", "unload_result")["reason"].as_str().unwrap().contains("resident"));
+    assert_eq!(h.get("Command:t", "output"), J::Null);
+    assert_eq!(h.get("Command:t", "partial_output"), json!("one\n"));
+}

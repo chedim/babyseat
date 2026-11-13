@@ -66,6 +66,9 @@ A block whose last line is a write (`<entity>.<prop> = value`) runs its lines as
 with the `reactions:` of the round (each value the engine wrote because of the block, with the setter or getter that wrote it). A write that starts an
 effect (`Command:x.run = ...`) has its receipt in a LATER round: read `<entity>.<verb>_result` afterwards (`Help:c1f`, "Effects are writes"). A Command starts with ONE write, its `cmd` in the run value:
 
+A command that outlives its `timeout_s` (default 120 s; set your own estimate in the run value, `timeout_s: 600`) is killed, and its `output`, `errors`, `ok` and `rc` read as a null whose reason tells you how to retry:
+`prop('Command:cl', 'output')` answers `error: Command:cl timed out after 120 s (killed); start it again with a bigger timeout_s ...`. What was collected is in `partial_output`.
+
 ```c1f-run
 -- write Command:cl.run = {"id": "c1", "cmd": ["echo", "from a block"]}
 -- receipt Command:cl.run_result.stdout = "from a block\n"

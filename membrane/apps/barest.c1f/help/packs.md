@@ -45,7 +45,7 @@ Command.shout getter: lower(this.cmd)
 - Rule B: a pack WRITES only entities of the classes it owns or imports (or of a class no pack owns yet). `entity_write` itself is
   privileged: your writes through it reach and create any class, including one your own pack owns. A pack you load is not privileged;
   grant it with `entity_write {spec: "Pack:lamps", prop: "privileged", value: true}` (only a privileged writer grants).
-- A pack's setter starts a command with one write, the `cmd` in the run value: `Command:x.run = {id: 'b1', cmd: ['make', 'all']}` (the write makes the Command and keeps the `cmd`); the receipt is `Command:x.run_result` (`Help:c1f`):
+- A pack's setter starts a command with one write, the `cmd` in the run value: `Command:x.run = {id: 'b1', cmd: ['make', 'all']}` (the write makes the Command and keeps the `cmd`; add `timeout_s: N`, your estimate in seconds of the longest it may run, default 120: past it the command is killed and its `output` reads as a reasoned null); the receipt is `Command:x.run_result` (`Help:c1f`):
 
 ```c1f-run
 -- write Command:pk.run = {"id": "k1", "cmd": ["echo", "from a pack"]}

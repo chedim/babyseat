@@ -106,6 +106,20 @@ always lived: `<prop>_result` on the target entity. The optional `wait` (seconds
 (`Command.run`, `File.*`, `Fetch.request`; `Store::effect_limited`) take a WORKER SLOT: at most `effect_workers` (Boot fact, `--fact effect_workers=<n>`, default 4, operator-approved) run at once, the rest wait for a slot. The chat's turn is a `Command.run`, so it holds one slot while the model runs;
 the door's listener, a held request, an open event stream and `Command.stop` take none.
 
+**A command's time limit** (`drivers.rs`, `proc.c1f`; operator request 2026-11-13, after a model-run `grep -r` over the whole projects tree ran 71 minutes and held a worker slot): `timeout_s` is the model's own estimate of the longest a command may run, in the run value
+(`Command:x.run = {id, cmd, timeout_s: 600}`) or set on the entity before the run. Without it the Boot fact `command_timeout_s` applies (default 120 s, the operator-delegated sensible default; the Python-era Mirror limited commands to 60 s).
+There is no upper bound and no unbounded command: 0 or less (or a non-number) is refused with a reasoned receipt, a long job states a big number. The child leads its own process group; at the deadline the group gets SIGTERM, after `KILL_GRACE_MS` (2 s) SIGKILL;
+the worker slot is freed when the run ends. The receipt: `status: "timeout"`, `rc: 124` (the convention of GNU `timeout`), `killed: true`, `timeout_s`, `ms`, the partial stdout/stderr (the reply's 8 KB head/tail rules apply); a run in time carries `timeout_s` too
+and no `killed`. The receipt is the journalled outside write like any driver receipt: a replay runs nothing, so there is no clock in it. `Command.stop` kills the same group at once. A timed-out run's `output`, `errors`, `ok` and `rc` are REASONED NULLS
+(`why(Command:x.output)` = `Command:x timed out after N s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}`; getters built on them pass the null and the reason on); `partial_output` / `partial_errors` hold what was read, `run_rc` stays the raw 124.
+The write reply says the same in a `timeout:` line; the pending reply shows `timeout_s` and the seconds `left`; `running` = {id, started, timeout_s}. The chat turn's own `claude` run states `timeout_s` = `chat_turn_timeout_s` (default 21600 = 6 h, a threshold flagged for the operator), so the default never kills a turn.
+Tests: `chat_process.rs` (`a_command_past_its_timeout_s...`, `a_timed_out_commands_result_props...`, `a_command_that_finishes_in_time...`, `a_timeout_s_of_zero_or_less...`, `without_a_timeout_s...`, `a_timed_out_command_frees...`, `the_chat_turn_is_not_killed...`).
+
+| Boot fact | default | meaning |
+|---|---|---|
+| `command_timeout_s` | 120 | limit of a Command run without `timeout_s` |
+| `chat_turn_timeout_s` | 21600 | limit of one chat turn's `claude` run |
+
 **The turn's numbers** (`chat_turn.c1f`): the result line of the CLI's stream carries `usage` {input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens}, `total_cost_usd`, `num_turns` and `duration_ms`; the finish writes them on the turn
 entity (`...:turn`) as `usage`, `cost`, `calls` and `duration`, and the message view's `turn` (and so the event stream's events) carries them. A run that ended with no result line has none. Test: `chat_process.rs` `the_turn_carries_usage...`.
 **Finished messages stop reading the banner** (`chat_turn.c1f`): the per-message prompt getters (`bin`, `max_turns`, `port`, `mcp_json`, `banner_text`, `banner_slot`, `sys`, `argv`, `note`) are `WHEN this.over: None`, so once the turn is done/error they hold none (derived, cleared in the store) and no longer depend on the banner: a banner change recomputes only unfinished messages. Measured on the fake seat: the reply of an `entity_write` that changes the banner was 61871 bytes with 50 finished messages (121 without), and is 121 bytes with 50 now (tests `finished_guard_1143.rs`, `chat_process.rs` `a_banner_change_returns_reactions...`).
