@@ -83,7 +83,7 @@ Request.cm_get getter: {'status': 200, 'body': this.cm_view} if this.cm_view != 
 Request.cm_stream getter: {'status': 200, 'stream': True} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
 -- the head is out (`stream_rc` 0) -> every change of the message's `stream_view` is one `message` event; the last one is followed by the close.
 -- `send` and `end` are written in this order in ONE setter, so the close never overtakes the last event.
-Request.ev_snap getter: prop('membrane::Chat:message:' + this.cm_gid, 'stream_view') if this.cm_events and this.stream_rc == 0 and this.dropped != True else None
+Request.ev_snap getter: prop('membrane::Chat:message:' + this.cm_gid, 'stream_view') if this.cm_events and this.stream_rc == 0 else None
 Request.ev_snap on-setter ev-send:
   WHEN this.ev_snap != None and prop(this.ev_snap, 'state') in ['done', 'error']:
     this.send = {'id': 'event', 'event': 'message', 'data': this.ev_snap}

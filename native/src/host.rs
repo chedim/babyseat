@@ -530,6 +530,12 @@ impl Host {
         let asked = std::mem::take(&mut self.eng().1.unload_asked);
         let any = any || !asked.is_empty();
         if !asked.is_empty() { self.unload_entities(&asked, ts); }
+        // THE COLLECTOR (docs/cliffvm.md, "Garbage collection"): the virtual entities nothing holds any more leave the engine at the end of the round. Removing them
+        // is a round of its own (what read them recalculates), which drains again.
+        let dead = { let g = self.eng(); g.0.gc_dead() };
+        let any = any || !dead.is_empty();
+        for d in &dead { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, d, ts, seq); core.note_collected(d); }
+        if !dead.is_empty() { self.drain_apply(); }
         // THE REACTIONS of a model's write (docs/cliffvm.md, "The return entity"): each door write is a Request `mc_done` by the setter `mcp-write`; the derived
         // writes of the same round are what it caused. The list goes back on that Request as `reactions` (a derived write, never journalled; a replay drains the same way).
         let any = any || !reactions.is_empty();
@@ -717,6 +723,9 @@ impl Host {
         }
         *self.warm.lock().unwrap_or_else(|e| e.into_inner()) = q;
     }
+
+    /// The host holds this entity itself (the collector never takes it): the boot's own state, `Boot:seat`, and the boot plan's steps. Call it BEFORE the entity is born.
+    pub fn hold(&self, eid: &str) { self.eng().0.host_held.insert(eid.to_string()); }
 
     /// The memory sensor's configuration (the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`; none has a default number).
     pub fn set_memory(&self, c: MemoryConfig) { *self.memory.lock().unwrap_or_else(|e| e.into_inner()) = c; }
@@ -1008,6 +1017,7 @@ impl Host {
 /// The seat tells the field it has started (fields_live.boot_started): the facts first, as properties of `Boot:seat` and then as the
 /// whole dict `facts`, the announcement last, so a setter on `started` finds them. All outside writes (`host:boot`).
 pub fn boot_started(h: &Host, facts: &Map<String, J>, announce: bool) {
+    h.hold("Boot:seat");   // the seat's own state: the boot facts live as long as the run
     if !h.snapshot().contains_key("Boot:seat") {
         let mut p = Map::new();
         p.insert("name".into(), json!("this seat's start"));

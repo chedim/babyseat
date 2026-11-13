@@ -252,35 +252,21 @@ fn the_barest_seat_loads_only_its_own_packs_and_seeds_no_command_or_ledger_file(
 }
 
 #[test]
-fn an_answered_request_drops_its_body_and_is_retired_after_request_keep_s() {
-    let (mut run, port) = seat_with("collect", true, &["request_keep_s=2"]);
+fn an_answered_request_is_collected_at_once_whatever_the_old_request_keep_s_fact_says() {
+    // the fact is ACCEPTED and does nothing: the engine collects a Request the round after its reply is delivered (docs/cliffvm.md, "Garbage collection")
+    let (mut run, port) = seat_with("collect", true, &["request_keep_s=600"]);
     call(port, "entity_query", json!({"q": "name~:membrane::", "k": 5}));
-    // the first request is answered: its heavy state is gone, the entity (and its small facts) stays for request_keep_s
-    // (a Request is VIRTUAL: a block reads the live ones through `instances`)
-    let eid = wait("request 1 answered and dropped", || {
-        let t = clifflet(port, "join([r.eid for r in instances('Request') if r.dropped == True], ' ')");
-        t.split_whitespace().next().map(String::from)
-    });
-    let (body, _) = call(port, "entity_read", json!({"spec": eid, "prop": "body"}));
-    let (headers, _) = call(port, "entity_read", json!({"spec": eid, "prop": "headers"}));
-    assert!(body.contains("has no body") && headers.contains("has no headers"), "heavy state still there: {body} {headers}");
-    let (rc, _) = call(port, "entity_read", json!({"spec": eid, "prop": "respond_result"}));
-    assert!(rc.contains("'rc': 0") || rc.contains("\"rc\":0") || rc.contains("rc: 0"), "answered once, and the connection took it: {rc}");
-    // ... then it is deleted (the engine's entity; a virtual one has no row)
-    wait("the request retired", || {
-        let t = clifflet(port, &format!("join([r.eid for r in instances('Request') if r.eid == '{eid}'], ' ')"));
-        (t == "none" || t == "null" || t.is_empty() || !t.contains(&eid)).then_some(())
-    });
-    let (read, _) = call(port, "entity_read", json!({"spec": eid}));
-    assert!(read.contains("no such") || read.contains("not found") || read.contains("none") || read.contains("{}"), "{read}");
-    // the door still serves the page and the chat after collecting
+    // the count is read through the door, itself a request: at most that one is live (a Request is VIRTUAL: a block reads the live ones through `instances`)
+    wait("no answered request left", || { let n: u32 = clifflet(port, "len(instances('Request'))").trim().parse().unwrap(); (n <= 1).then_some(()) });
+    // nothing named `dropped` or `kept_at` is left to read, and the door still serves the page after collecting
+    assert_eq!(clifflet(port, "len([r for r in instances('Request') if r.dropped == True])"), "0");
     let (st, _, html) = http(port, "GET", "/", "");
     assert_eq!(st, 200); assert!(html.contains("<html") || html.contains("<!doctype") || html.contains("<!DOCTYPE"));
     assert!(terminate(&mut run));
 }
 
 #[test]
-fn request_keep_s_zero_retires_a_request_as_soon_as_it_is_answered_and_the_door_still_serves() {
+fn a_request_is_collected_as_soon_as_it_is_answered_and_the_door_still_serves() {
     let (mut run, port) = seat_with("keep0", true, &["request_keep_s=0"]);
     let (st, _, html) = http(port, "GET", "/", "");
     assert_eq!(st, 200); assert!(html.contains("<html") || html.contains("<!doctype") || html.contains("<!DOCTYPE"));

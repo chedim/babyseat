@@ -216,7 +216,6 @@
       "ChatMessage.rr": "Any",
       "ChatMessage.spent": "Bool",
       "ChatMessage.spoken": "Text",
-      "ChatMessage.stale_chunks": "List(Any)",
       "ChatMessage.sys": "Text?",
       "ChatMessage.texts": "List(Text)",
       "ChatMessage.tokens": "Any",
@@ -228,7 +227,6 @@
       "Chunk.started": "Text"
     },
     "writes": {
-      "*.retire": "Bool",
       "Chat.calls": "Any",
       "Chat.cost": "Any",
       "Chat.duration": "Any",
@@ -712,11 +710,9 @@
       "Request.mc_w_rcpt": "List(Text)",
       "Request.mc_w_ready": "Bool",
       "Request.mc_w_rec": "Any",
-      "Request.mc_w_ret": "Text",
       "Request.mc_w_rprop": "Text",
       "Request.mc_w_se": "Text",
       "Request.mc_w_seb": "Any",
-      "Request.mc_w_sent": "Bool",
       "Request.mc_w_so": "Text",
       "Request.mc_w_sob": "Any",
       "Request.mc_w_spec": "Text",
@@ -741,7 +737,7 @@
       "Request.cl_loading": "Bool",
       "Request.mc_done": "Bool",
       "Request.mc_w_old": "Any",
-      "Request.mc_w_returned": "Bool",
+      "Request.mc_w_returned": "Entity(Return)",
       "Request.mc_w_t0": "Num"
     },
     "findings": [],

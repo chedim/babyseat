@@ -391,8 +391,6 @@ out({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hell
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Hello world", "num_turns": 1, "duration_ms": 99, "total_cost_usd": 0.5, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "output_tokens": 4}, "session_id": "p-1"})
 "#;
 
-fn collector() -> String { std::fs::read_to_string(format!("{}/../membrane/apps/barest.c1f/collector.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap() }
-
 /// An open event stream: the status line and headers, then the events as they arrive ((event name, json data)).
 struct Sse { r: BufReader<TcpStream>, head: String }
 impl Sse {
@@ -429,7 +427,7 @@ fn release(dir: &std::path::Path, prompt: &str, name: &str) { std::fs::write(dir
 
 #[test]
 fn the_event_stream_carries_the_answer_as_it_is_written_and_the_request_is_retired_after_it_closes() {
-    let (mut run, port, dir) = fake_seat_script("sse", &["--fact", "request_keep_s=0"], &[("collector.c1f", &collector())], PIECES);
+    let (mut run, port, dir) = fake_seat_script("sse", &[], &[], PIECES);
     let id = send(port, "stream me");
     let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
     let lh = sse.head.to_ascii_lowercase();
@@ -456,19 +454,17 @@ fn the_event_stream_carries_the_answer_as_it_is_written_and_the_request_is_retir
     }
     assert_eq!(texts, ["Hel", "Hello ", "Hello wor", "Hello world"]);
     assert!(tools_seen, "the tool the model started shows in the events");
-    // while the stream is open its Request is held (not retired, not dropped); request_keep_s=0 retires every other request at once
+    // while the stream is open its Request is HELD (a connection in flight); every other request is collected as soon as its reply is delivered
     let held = stream_requests(port);
     assert_eq!(held.len(), 1, "{held:?}");
-    let (b, _) = call(port, "entity_read", json!({"spec": held[0], "prop": "dropped"}));
-    assert!(!b.contains("true"), "an open stream is not dropped: {b}");
     // the end: the final event is the answer, `done`, then the connection closes
     release(&dir, "stream me", "end");
     let (n, last) = sse.next().expect("the final event");
     assert_eq!((n.as_str(), last["state"].clone(), last["response"].clone()), ("message", json!("done"), json!("Hello world")));
     assert!(sse.next().is_none(), "the stream closes after done");
     wait("the stream's Request retired", || stream_requests(port).is_empty().then_some(()));
-    // the turn's partial chunks are retired with the finish (the receipt is the answer)
-    wait("the chunks retired", || { let (n, _) = call(port, "entity_query", json!({"q": "kind:Chunk", "count": true})); (n == "0 entity(ies)").then_some(()) });
+    // the turn's partial chunks are collected once the turn is over (the receipt is the answer); a Chunk is VIRTUAL, so the live ones are listed with `instances`
+    wait("the chunks collected", || { let (n, _) = call(port, "run_cliff", json!({"code": "len(instances('Chunk'))"})); (n == "0").then_some(()) });
     // the poll route is still there
     assert_eq!(view(port, &id)["response"], "Hello world");
     assert!(terminate(&mut run));
@@ -493,7 +489,7 @@ fn an_unknown_message_has_no_stream_and_a_finished_one_streams_its_answer_and_cl
 
 #[test]
 fn a_client_that_leaves_early_leaves_nothing_stuck_and_the_turn_completes() {
-    let (mut run, port, dir) = fake_seat_script("sseleave", &["--fact", "request_keep_s=0"], &[("collector.c1f", &collector())], PIECES);
+    let (mut run, port, dir) = fake_seat_script("sseleave", &[], &[], PIECES);
     let id = send(port, "walk away");
     let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
     sse.next().expect("a first event");
@@ -730,6 +726,41 @@ fn the_return_entity_is_retired_as_soon_as_its_reply_is_delivered() {
     wait("no Return left after a waiting call", || (returns(port) == "0 entity(ies)").then_some(()));
     // the receipt is where it always lived
     assert!(call(port, "entity_read", json!({"spec": "Command:w1", "prop": "run_result"})).0.contains("\"rc\":0"));
+    assert!(terminate(&mut run));
+}
+
+// ---- garbage collection of virtual entities (#1143): nothing retires a Request, nothing holds it once its reply is delivered ---------------------------------------
+fn live_requests(port: u16) -> usize { call(port, "run_cliff", json!({"code": "len(instances('Request'))"})).0.trim().parse().unwrap() }
+
+#[test]
+fn a_request_is_collected_right_after_its_reply_is_delivered_with_no_retire_write_and_polling_does_not_leak() {
+    let (mut run, port) = start("gcpage", MCP_PACKS, &[]);
+    let baseline = wait("a baseline", || { let n = live_requests(port); (n <= 2).then_some(n) });   // the measuring call itself is one
+    for _ in 0..200 { assert_eq!(http(port, "GET", "/global/health", "").0, 200); }
+    let after = wait("the Request entities back to the baseline", || { let n = live_requests(port); (n <= baseline).then_some(n) });
+    assert_eq!(after, baseline, "200 requests left nothing behind");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_old_collector_fact_is_accepted_and_does_nothing() {
+    let (mut run, port) = start("gckeep", MCP_PACKS, &["--fact", "request_keep_s=600"]);
+    for _ in 0..20 { assert_eq!(http(port, "GET", "/global/health", "").0, 200); }
+    wait("collected whatever request_keep_s says", || (live_requests(port) <= 2).then_some(()));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_held_wait_reply_holds_its_request_and_the_request_and_its_return_go_when_it_is_delivered() {
+    let (mut run, port) = start("gcwait", MCP_PACKS, &[]);
+    let baseline = wait("a baseline", || { let n = live_requests(port); (n <= 2).then_some(n) });
+    put(port, "Command:gw", "cmd", json!(["sh", "-c", "sleep 2; echo w"]));
+    let p2 = port;
+    let h = std::thread::spawn(move || put_wait(p2, "Command:gw", "run", json!({"id": "g1", "args": []}), 20.0).0);
+    let during = wait("the held call's Request is live", || { let n = live_requests(port); (n >= baseline + 1).then_some(n) });
+    assert!(during > baseline, "the held reply holds its Request: {during} vs {baseline}");
+    assert!(h.join().unwrap().contains("receipt: "));
+    wait("Request and Return collected after the reply", || (live_requests(port) <= baseline && call(port, "run_cliff", json!({"code": "len(instances('Return'))"})).0 == "0").then_some(()));
     assert!(terminate(&mut run));
 }
 

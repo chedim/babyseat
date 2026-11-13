@@ -139,9 +139,8 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 41,
+    "members": 40,
     "writes": [
-      "*.retire",
       "membrane:*.calls",
       "membrane:*.cost",
       "membrane:*.duration",
@@ -396,7 +395,7 @@
       "Request",
       "Return"
     ],
-    "members": 86,
+    "members": 84,
     "writes": [
       "*.[]",
       "*.go",

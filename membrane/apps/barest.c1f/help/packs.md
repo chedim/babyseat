@@ -136,6 +136,16 @@ VIRTUAL Command
 Every entity also has `updated`, read-only and provided by the VM: the time of its last write (seconds since 1970), stamped with the write; reading it causes no recompute, writing it is refused:
 `Note:a.updated`.
 
+### How long a virtual entity lives
+
+A `VIRTUAL` entity is collected as soon as NOTHING HOLDS IT: at the end of the round, no write retires it. What holds it:
+
+- its PARENT: `Request:7:body` lives while `Request:7` does (a colon-path child lives with its parent entity);
+- a REFERENCE: a live entity has it as a value, which is stored as `{"$ref": "<id>"}`. Write an entity as a value (`this.keep = Req:made`, or inside a list or dict) and it holds; write the value away and it is released. A stored entity is always live; two virtual entities that only hold each other are collected together;
+- an IN-FLIGHT driver: a request's open connection (until its reply is sent, an event stream until `end`), an effect running on it, a command's chunks while the command runs.
+
+A plain read holds nothing (`prop(x, 'k')`, a getter that peeks, an entity literal). A read of a collected entity is a null with a reason, `collected: nothing held it`. Only virtual classes are collected: a stored entity keeps its `retire` write, and a stored one that is not touched for a while may leave the engine by `unload = true` (docs/cliffvm.md).
+
 ## Habits that keep packs working
 
 - Load, then read `Pack:<name>.state`; fix `error` before anything else.

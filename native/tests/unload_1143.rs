@@ -155,6 +155,7 @@ fn a_setter_reading_an_unloaded_entity_loads_it_and_instances_lists_only_what_is
 fn a_pinned_entity_is_refused_with_a_reasoned_receipt_and_stays() {
     let h = box_host(&tmpfile("pinned"));
     h.born("Keep:k", "Keep", props(json!({"n": 1})), "person");           // RESIDENT class
+    h.hold("Gone:g");                                                        // (the host holds it: a virtual entity nothing holds is collected)
     h.born("Gone:g", "Gone", props(json!({"n": 1})), "host:door");         // VIRTUAL class
     h.born("Box:run", "Box", props(json!({"n": 1, "running": {"id": "r1", "started": 1}})), "person");   // a running effect
     h.born("Box:ok", "Box", props(json!({"n": 1})), "person");
@@ -174,6 +175,7 @@ fn a_pinned_entity_is_refused_with_a_reasoned_receipt_and_stays() {
 fn an_entity_a_live_virtual_entity_holds_by_reference_is_pinned_while_it_is_held() {
     let h = box_host(&tmpfile("held"));
     h.born("Box:h", "Box", props(json!({"n": 1})), "person");
+    h.hold("Gone:g");
     h.born("Gone:g", "Gone", props(json!({"ref": {"$ref": "Box:h"}})), "host:door");
     h.write("Box:h", "unload", json!(true), "person");
     assert!(h.snapshot().contains_key("Box:h"), "held by a virtual entity's $ref");
@@ -308,4 +310,34 @@ fn a_replay_of_the_journal_ends_with_the_same_stored_state_and_the_sensor_is_not
     let (a, b) = (h.rows(), r.rows());
     for k in a.keys().filter(|k| k.starts_with("Note:")) { assert_eq!(a[k]["props"], b[k]["props"], "{k}: replay-equal"); }
     assert_eq!(b["Note:7"]["props"]["text"], json!("changed"));
+}
+
+#[test]
+fn an_entity_that_holds_a_live_virtual_one_by_reference_cannot_be_unloaded() {
+    let h = box_host(&tmpfile("holder"));
+    h.hold("Gone:g");
+    h.born("Gone:g", "Gone", props(json!({"x": 1})), "host:door");
+    h.born("Box:h", "Box", props(json!({"n": 1, "keep": {"$ref": "Gone:g"}})), "person");
+    h.write("Box:h", "unload", json!(true), "person");
+    assert!(h.snapshot().contains_key("Box:h"), "it holds a live virtual entity: unloading it would drop the reference");
+    assert!(h.get("Box:h", "unload_result")["reason"].as_str().unwrap().contains("holds a live virtual"), "{}", h.get("Box:h", "unload_result"));
+}
+
+/// The cost of the touch clock (run by hand: `cargo test --release --features bin --test unload_1143 -- --ignored --nocapture`).
+#[test]
+#[ignore]
+fn the_cost_of_the_touch_clock_per_read() {
+    use membrane_vm::vm::Core;
+    let mut core = Core::new();
+    for i in 0..1000 { core.load(format!("Box:{i}"), "Box".into(), props(json!({"n": i})), None, 0.0); }
+    let n = 50_000_000u64;
+    let t = std::time::Instant::now();
+    let e = core.docs.get("Box:7").unwrap();
+    for i in 0..n { e.touched.set(core.bump()); std::hint::black_box(i); }
+    let touch = t.elapsed().as_nanos() as f64 / n as f64;
+    let m = 1_000_000u64;
+    let t = std::time::Instant::now();
+    for _ in 0..m { std::hint::black_box(core.eval_json("this.n", &[("this", "Box:7")], &[]).unwrap()); }
+    let eval = t.elapsed().as_nanos() as f64 / m as f64;
+    eprintln!("touch clock: {touch:.2} ns per read (`Cell` load, add, store, store: the entity's lookup is the read's own); a whole evaluation of `this.n`: {eval:.0} ns");
 }

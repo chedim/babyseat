@@ -72,24 +72,18 @@ Chat.plan on-setter turn-start:
 
 -- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
 -- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});
--- they are outside births, journalled. The partial answer is the text deltas of the `stream_event` lines, the partial tools the tool_use blocks
--- they start. The finished turn replaces them (the receipt below is the answer) and retires the chunks.
+-- they are outside births of a VIRTUAL class (never stored, never journalled). The partial answer is the text deltas of the `stream_event` lines, the partial
+-- tools the tool_use blocks they start. The finished turn replaces them (the receipt below is the answer), and nothing retires the chunks: the engine collects
+-- them (docs/cliffvm.md, "Garbage collection"). While the command runs its in-flight effect holds them; the message holds them by REFERENCE (`chunk: c` below is a
+-- `$ref` value) until the turn is over, so a chunk born after the receipt (the two come from different threads) is held by nothing and collected at once.
 ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.mid
 -- each chunk parses its OWN lines once (getters cached on the chunk); the message only joins what the chunks hold, so a new chunk costs one parse, not a re-parse of everything before it
 Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if prop(e, 'type') == 'stream_event']
 Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
 Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
-ChatMessage.chunks getter: sort_by([{'n': c.n, 'said': c.said, 'started': c.started} for c in instances('Chunk') if c.cmd == this.cmd_eid], 'n')
+ChatMessage.chunks getter: sort_by([{'n': c.n, 'said': c.said, 'started': c.started, 'chunk': c} for c in instances('Chunk') if c.cmd == this.cmd_eid], 'n') if not this.over else []
 ChatMessage.partial_text getter: join([prop(k, 'said') for k in this.chunks], '')
 ChatMessage.partial_tools getter: words(join([prop(k, 'started') for k in this.chunks], ' '))
-
--- once the run has its answer the chunks are retired. A getter + setter, not a line in `turn-finish`: the receipt can be heard BEFORE the last
--- chunk is born (the two come from different threads), and a late chunk marks the class's readers, so this fires again for it.
-ChatMessage.stale_chunks getter: [c.eid for c in instances('Chunk') if c.cmd == this.cmd_eid] if this.over else []
-ChatMessage.stale_chunks on-setter retire-chunks:
-  WHEN len(this.stale_chunks) > 0:
-    FOR k IN this.stale_chunks:
-      (k).retire = True
 
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
 ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')

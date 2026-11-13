@@ -130,6 +130,7 @@ fn a_virtual_entity_is_never_stored_never_journalled_and_a_restart_does_not_brin
         let h = file_host(&file);
         h.load_pack("v", VIRT).unwrap();
         h.rebuild();
+        h.hold("Req:1");   // nothing else holds it: without the host's hold the collector takes it at the end of its birth round (docs/cliffvm.md, "Garbage collection")
         h.born("Req:1", "Req", props(serde_json::json!({"path": "/x"})), "host:door");
         h.write("Req:1", "body", serde_json::json!("hello"), "host:door");
         h.pump();
@@ -149,6 +150,7 @@ fn what_a_virtual_entitys_setter_makes_is_journalled_as_an_outside_write_and_a_r
     let h = file_host(&file);
     h.load_pack("v", VIRT).unwrap();
     h.rebuild();
+    h.hold("Req:1");   // see above: the Request is held while the test drives it
     h.born("Req:1", "Req", props(serde_json::json!({"path": "/x"})), "host:door");
     h.write("Req:1", "body", serde_json::json!("hello"), "host:door");
     h.write("Req:1", "go", serde_json::json!(true), "host:door");
