@@ -894,3 +894,22 @@ fn the_receipt_in_the_reply_echoes_the_run_id() {
     assert_eq!(reply_part(&t, "receipt").unwrap()["id"], json!("my-run-7"), "{t}");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn the_receipt_carries_started_finished_and_ms_so_a_rerun_with_the_same_output_is_new() {
+    let (mut run, port) = start("tim", MCP_PACKS, &[]);
+    put(port, "Command:t", "cmd", json!(["sh", "-c", "sleep 0.4; echo same"]));
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let t0 = now();
+    let (a, _) = put_wait(port, "Command:t", "run", json!({"id": "same", "args": []}), 20.0);
+    let t1 = now();
+    let ra = reply_part(&a, "receipt").unwrap_or_else(|| panic!("{a}"));
+    let (st, fin, ms) = (ra["started"].as_f64().unwrap_or_else(|| panic!("{a}")), ra["finished"].as_f64().unwrap(), ra["ms"].as_f64().unwrap());
+    assert!(st >= t0 - 0.01 && fin <= t1 + 0.01 && st < fin, "{st} {fin} within {t0}..{t1}");
+    assert!(ms >= 350.0 && ms < 3000.0 && ((fin - st) * 1000.0 - ms).abs() < 5.0, "ms {ms} vs {st}..{fin}");
+    // the SAME id and the same output again: still a new receipt (the timestamps differ), never `pending`
+    let (b, _) = put_wait(port, "Command:t", "run", json!({"id": "same", "args": []}), 20.0);
+    let rb = reply_part(&b, "receipt").unwrap_or_else(|| panic!("a rerun with the same id and output answers its receipt: {b}"));
+    assert!(rb["started"].as_f64().unwrap() > fin - 0.01, "{ra} {rb}");
+    assert!(terminate(&mut run));
+}

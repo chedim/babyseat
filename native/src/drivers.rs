@@ -170,6 +170,8 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 for (k, var) in &env_from {
                     match std::env::var(var) { Ok(v) => { c.env(k, v); } Err(_) => return receipt(&id, 2, format!("environment variable {} is not set (for {})", var, k), Map::new()) }
                 }
+                let epoch = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+                let (t_start, t_clock) = (epoch(), std::time::Instant::now());
                 let child = match c.spawn() { Ok(ch) => ch, Err(e) => return receipt(&id, 127, format!("{}", e), Map::new()) };
                 let slot = crate::store::child_slot(sh, eid);
                 let (mut out_r, mut err_r) = {
@@ -215,6 +217,10 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 let mut extra = Map::new();
                 extra.insert("stdout".into(), json!(out));
                 extra.insert("stderr".into(), json!(err));
+                let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
+                extra.insert("started".into(), json!(round3(t_start)));       // epoch seconds: reruns with the same output are told apart by them
+                extra.insert("finished".into(), json!(round3(epoch())));
+                extra.insert("ms".into(), json!(t_clock.elapsed().as_millis() as u64));
                 extra.insert("stdout_bytes".into(), json!(out.len()));
                 extra.insert("stderr_bytes".into(), json!(err.len()));
                 let head = if out.trim().is_empty() { err.clone() } else { out.clone() };
