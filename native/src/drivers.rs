@@ -11,7 +11,10 @@
 //!     Command.stop      = {id}        (kills the running child; its run's receipt says so)
 //! - Reach (the operator): everything the VM's OS user can do. Entity scripts and peers never trigger an effect
 //!   (fields.rs checks the writer). Per-token scopes are a later release.
-//! - As the official libraries: no time limit and no output cap (a command's whole stdout and stderr are kept;
+//! - A Command run has a time limit, `timeout_s` (the model's estimate of the longest it may run; default the boot fact `command_timeout_s`, 120 s): past it
+//!   the child's process group gets SIGTERM, after `KILL_GRACE_MS` SIGKILL, and the receipt is `status: timeout`, `rc: 124`, `killed: true`, `timeout_s`,
+//!   with the partial output. `timeout_s` of 0 or less is refused.
+//! - As the official libraries: no output cap (a command's whole stdout and stderr are kept;
 //!   `head` is the receipt's first lines for a glance).
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -19,6 +22,27 @@ use std::time::UNIX_EPOCH;
 use serde_json::{json, Map, Value as J};
 
 use crate::store::{Poll, Store};
+
+/// a Command run that states no `timeout_s` is limited to this many seconds (the boot fact `command_timeout_s` changes it): the operator-delegated
+/// sensible default (2026-11-13), the time a model-run command may take unless the model says more
+pub const DEFAULT_COMMAND_TIMEOUT_S: f64 = 120.0;
+/// after the SIGTERM of a timeout the group gets this long to end; then it is killed with SIGKILL (the operator, 2026-11-13)
+pub const KILL_GRACE_MS: u64 = 2000;
+/// the exit code of a receipt whose run was killed by its timeout (the convention of GNU `timeout`)
+pub const TIMEOUT_RC: i64 = 124;
+
+/// the limit of a run in seconds: the run value's `timeout_s`, else the entity's, else the boot fact; a number above 0, else the refusal's words
+pub fn timeout_of(st: &Store, req: &J, props: &Map<String, J>) -> Result<f64, String> {
+    match req.get("timeout_s").filter(|v| !v.is_null()).or(props.get("timeout_s").filter(|v| !v.is_null())) {
+        None => Ok(st.command_timeout()),
+        Some(v) => match v.as_f64() {
+            Some(n) if n > 0.0 && n.is_finite() => Ok(n),
+            _ => Err(format!("refused: timeout_s must be a number above 0 (it was {v}); state your estimate of the longest the command may run, in seconds, and a bigger number for a longer job, e.g. timeout_s: 600")),
+        },
+    }
+}
+/// a whole number of seconds is an integer in JSON
+pub fn num_json(n: f64) -> J { if n.fract() == 0.0 && n.abs() < 1e15 { json!(n as i64) } else { json!(n) } }
 
 pub const HEAD_CHARS: usize = 4000;     // a receipt's `head` (#956's receipt shape); the full output is kept beside it
 
@@ -161,6 +185,10 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 st.effect_limited(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new())));
                 return;
             }
+            let timeout_s = match timeout_of(st, req, props) {
+                Ok(t) => t,
+                Err(why) => { let id2 = id.clone(); st.effect_limited(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new()))); return; }
+            };
             let req2 = req.clone();
             st.effect_limited(eid, verb, Box::new(move |sh, eid| {
                 let mut c = match &cmd {
@@ -169,12 +197,24 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                     _ => return receipt(&id, 2, "a command needs `cmd` (an argument list, or a string for sh -c)".into(), Map::new()),
                 };
                 c.args(&args).current_dir(&cwd).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).stdin(std::process::Stdio::null());
+                std::os::unix::process::CommandExt::process_group(&mut c, 0);   // the child leads its own group: a timeout or a stop ends the whole tree
                 for (k, var) in &env_from {
                     match std::env::var(var) { Ok(v) => { c.env(k, v); } Err(_) => return receipt(&id, 2, format!("environment variable {} is not set (for {})", var, k), Map::new()) }
                 }
                 let epoch = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
                 let (t_start, t_clock) = (epoch(), std::time::Instant::now());
                 let child = match c.spawn() { Ok(ch) => ch, Err(e) => return receipt(&id, 127, format!("{}", e), Map::new()) };
+                let pid = child.id() as i32;
+                // THE WATCHDOG: at the deadline SIGTERM to the group, after the grace SIGKILL; it ends when the run does (the channel closes)
+                let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+                let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let watchdog = { let flag = timed_out.clone(); std::thread::spawn(move || {
+                    if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = done_rx.recv_timeout(std::time::Duration::from_secs_f64(timeout_s.min(3.0e8))) {
+                        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                        unsafe { libc::kill(-pid, libc::SIGTERM); }
+                        if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = done_rx.recv_timeout(std::time::Duration::from_millis(KILL_GRACE_MS)) { unsafe { libc::kill(-pid, libc::SIGKILL); } }
+                    }
+                }) };
                 let slot = crate::store::child_slot(sh, eid);
                 let (mut out_r, mut err_r) = {
                     let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
@@ -215,8 +255,13 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 let err = err_t.join().unwrap_or_default();
                 let status = slot.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| ch.wait());
                 crate::store::child_done(sh, eid);
-                let rc = match status { Some(Ok(s)) => s.code().map(|c| c as i64).unwrap_or(-1), _ => -1 };
+                drop(done_tx);
+                let _ = watchdog.join();
+                let killed = timed_out.load(std::sync::atomic::Ordering::SeqCst);
+                let rc = if killed { TIMEOUT_RC } else { match status { Some(Ok(s)) => s.code().map(|c| c as i64).unwrap_or(-1), _ => -1 } };
                 let mut extra = Map::new();
+                extra.insert("timeout_s".into(), num_json(timeout_s));
+                if killed { extra.insert("killed".into(), json!(true)); }
                 extra.insert("stdout".into(), json!(out));
                 extra.insert("stderr".into(), json!(err));
                 let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
@@ -226,7 +271,9 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 extra.insert("stdout_bytes".into(), json!(out.len()));
                 extra.insert("stderr_bytes".into(), json!(err.len()));
                 let head = if out.trim().is_empty() { err.clone() } else { out.clone() };
-                receipt(&id, rc, head, extra)
+                let mut rec = receipt(&id, rc, head, extra);
+                if killed { rec["status"] = json!("timeout"); }
+                rec
             }));
         }
         ("File", v) => {

@@ -109,6 +109,14 @@
    "wired": false,
    "why": "the barest seat's request collector (membrane/apps/barest.c1f/collector.c1f): seconds an ANSWERED door request is kept before it is retired (deleted); default 600 in the pack (operator-approved 2026-11-13), 0 = retired as soon as it is answered; told by `--fact request_keep_s=<n>`"
   },
+  "command_timeout_s": {
+   "wired": false,
+   "why": "the time limit in seconds of a Command run that states no `timeout_s` (native/src/drivers.rs; default 120, the operator-delegated sensible default 2026-11-13): past it the process group gets SIGTERM, 2 s later SIGKILL, and the receipt is status timeout; told by `--fact command_timeout_s=<n>`"
+  },
+  "chat_turn_timeout_s": {
+   "wired": false,
+   "why": "the time limit in seconds of one chat turn's `claude` run (chat_turn.c1f; default 21600 = 6 h in the pack, a threshold flagged for the operator): the turn is exempt from `command_timeout_s`; told by `--fact chat_turn_timeout_s=<n>`"
+  },
   "effect_workers": {
    "wired": false,
    "why": "the cap on Command / File / Fetch effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"

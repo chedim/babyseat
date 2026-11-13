@@ -60,6 +60,8 @@ pub struct Shared {
     /// the cap on the effect workers of the slow drivers (Command, File, Fetch): the boot fact `effect_workers` (0 = the default, 4), and how many run now
     workers_cap: usize,
     workers_active: usize,
+    /// the boot fact `command_timeout_s` (0 = the default, drivers::DEFAULT_COMMAND_TIMEOUT_S): the limit of a Command run that states no `timeout_s`
+    command_timeout_s: f64,
     /// the HTTP door (http.rs): requests that arrived (taken by the engine's next round as entities), the connections held
     /// open until a pack answers, and the listeners' stop flags by their entity
     inbound: Vec<(String, String, serde_json::Map<String, J>)>,
@@ -269,6 +271,10 @@ impl Store {
         }).expect("a thread for an effect");
     }
 
+    /// The limit of a Command run that states no `timeout_s` (the boot fact `command_timeout_s`); 0 = the default.
+    pub fn set_command_timeout(&self, s: f64) { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).command_timeout_s = s; }
+    pub fn command_timeout(&self) -> f64 { let t = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).command_timeout_s; if t > 0.0 { t } else { crate::drivers::DEFAULT_COMMAND_TIMEOUT_S } }
+
     /// The cap on the slow drivers' workers (the boot fact `effect_workers`).
     pub fn set_effect_workers(&self, n: usize) { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.workers_cap = n; g.done += 0; self.sh.1.notify_all(); }
 
@@ -339,7 +345,8 @@ impl Store {
     /// Stop a running command (Command.stop): its child is killed; its run's receipt says so.
     pub fn kill(&self, eid: &str) -> bool {
         let c = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).children.get(eid).cloned();
-        match c { Some(c) => c.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| ch.kill().is_ok()).unwrap_or(false), None => false }
+        // the child leads its own process group (drivers.rs): the whole tree dies at once
+        match c { Some(c) => c.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| { let r = unsafe { libc::kill(-(ch.id() as i32), libc::SIGKILL) } == 0; if !r { let _ = ch.kill(); } true }).unwrap_or(false), None => false }
     }
 
     fn finish(&self, k: &str, r: Result<Vec<J>, String>) -> Poll {

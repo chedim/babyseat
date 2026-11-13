@@ -1490,7 +1490,7 @@ impl Fields {
             if cls == "Command" && w.prop == "run" {
                 if let Some(c) = w.new.get("cmd").filter(|c| !c.is_null()) { self.emit_unchecked(core, work, &w.eid, "cmd", c.clone(), "driver:cmd", seq, now); }   // `run = {id, cmd}`: the cmd is kept on the entity
                 // a run in flight reads `running` (proc.c1f `status`) until its receipt lands
-                self.emit_unchecked(core, work, &w.eid, "running", json!({"id": w.new.get("id").cloned().unwrap_or(J::Null), "started": now}), "driver:running", seq, now);
+                self.emit_unchecked(core, work, &w.eid, "running", json!({"id": w.new.get("id").cloned().unwrap_or(J::Null), "started": now, "timeout_s": w.new.get("timeout_s").or(props.get("timeout_s")).cloned().unwrap_or(J::Null)   /* only what was STATED: a replay has no store, so the default is not read here */}), "driver:running", seq, now);
             }
             if w.writer.starts_with("script:") || w.writer.starts_with("peer") {
                 let id = w.new.get("id").cloned().unwrap_or(J::Null);

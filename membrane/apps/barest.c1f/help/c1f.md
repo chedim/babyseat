@@ -216,6 +216,17 @@ seconds. The reply of `entity_write` carries the first and last 8 KB of each str
 -- receipt Command:hello.run_result.stdout = "hi again\n"
 ```
 
+A command has a TIME LIMIT, and you set it: `timeout_s` is your estimate, in seconds, of the longest the command may run (in the run value, or `Command:x.timeout_s = N` before the run). Without it the limit is
+120 s (the boot fact `command_timeout_s`); a long job states a bigger number (`timeout_s: 3600`); 0 or less is refused. Past the limit the seat stops the command and everything it started (SIGTERM, then SIGKILL 2 s later),
+frees its slot and answers `status: timeout`, `rc: 124`, `killed: true`, with the partial output. The result props of that run (`output`, `errors`, `ok`, `rc`) are then null WITH A REASON: `why(Command:x.output)` says
+how to start it again with a bigger `timeout_s`, and the getters built on them stay null with the same reason; what was collected stays in `Command:x.partial_output`. This runs for real here (a 30 s `sleep` with a limit of 1 s):
+
+```c1f-run
+-- write Command:slow.run = {"id": "w1", "cmd": ["sleep", "30"], "timeout_s": 1}
+-- receipt Command:slow.run_result.status = "timeout"
+-- receipt Command:slow.run_result.killed = true
+```
+
 ONE write starts a command: the `cmd` rides in the run value (it is kept on the entity, so later runs may leave it out):
 
 ```c1f-run
@@ -227,7 +238,7 @@ ONE write starts a command: the `cmd` rides in the run value (it is kept on the 
 
 What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write that starts an effect the `receipt:` JSON line (`id`, `status`, `rc`, `ok`, `started`, `finished` as epoch
 seconds, `ms`, `stdout_bytes`, `stderr_bytes`) with a `stdout:` and a `stderr:` line (the whole text as `stdout`, or, past 16 KB, `stdout_head` and `stdout_tail` = the first and last 8192 characters
-with `full output: read Command:x.output`; the whole stderr is `Command:x.errors`), or, while the run is in flight, `pending: id: <id>, status: running, started: <seconds>; read <entity>.<verb>_result later`;
+with `full output: read Command:x.output`; the whole stderr is `Command:x.errors`), or, while the run is in flight, `pending: id: <id>, status: running, started: <seconds>, timeout_s: <limit>, left: <seconds>; read <entity>.<verb>_result later`;
 then the `reactions:` (every REAL change the engine made in the
 round of your write: a setter that fired, a getter that recomputed, each with `by` and, for a null, its `why`). The receipt always lives on the
 entity as `<verb>_result`. Add `wait` (seconds) to `entity_write` to hold the reply until the receipt arrives or that time has passed:
