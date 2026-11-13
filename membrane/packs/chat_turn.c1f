@@ -117,6 +117,8 @@ ChatMessage.cost getter: prop(this.final, 'total_cost_usd')
 ChatMessage.calls getter: prop(this.final, 'num_turns')
 ChatMessage.took getter: prop(this.final, 'duration_ms')
 ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evs if prop(e, 'type') == 'assistant'], ' '))
+-- the ids of the tools in the order they were called (the stream's order): the page reads each tool entity by `...:turn:tool:<id>` in this order
+ChatMessage.tools_idlist getter: join([join([str(prop(b, 'id')) for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evs if prop(e, 'type') == 'assistant'], ' ')
 -- the turn is over once its state is done or error. The finish below runs only while it is not: the answer is derived from the receipt, and the slimming
 -- below changes the receipt, so a finished turn keeps the response it wrote.
 ChatMessage.over getter: this.tstate == 'done' or this.tstate == 'error'
@@ -129,6 +131,7 @@ Chat.answer on-setter turn-finish:
     membrane::Chat:message[this.mid]:turn.calls = this.calls
     membrane::Chat:message[this.mid]:turn.duration = this.took
     this.tools_run = this.tools_names
+    this.tool_ids = this.tools_idlist
     membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: this.answer, error: this.failed != None, rc: this.rc)
     FOR e IN [x for x in this.evs if prop(x, 'type') == 'assistant']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:

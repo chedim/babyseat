@@ -112,7 +112,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 40,
+    "members": 41,
     "writes": [
       "membrane:*.queued",
       "membrane:*=ChatMessage()",
@@ -138,7 +138,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 40,
+    "members": 41,
     "writes": [
       "*.retire",
       "membrane:*.calls",

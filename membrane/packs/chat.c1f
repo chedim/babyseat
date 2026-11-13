@@ -31,15 +31,18 @@ ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.tstat
 -- and `tools` the names of the tool blocks started so far; once the turn has finished they are the final ones
 ChatMessage.stream_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said or (this.partial_text or None), 'tools': this.tools_run or this.partial_tools or [], 'turn': this.turn_view}
 -- THE HISTORY VIEW (#1143): the message view plus the tools it ran, finished (name, input, result) so a page draws the folded group from ONE
--- answer. `tools` stays the view's names; `tool_calls` are the ChatTool entities under the turn (listed with `instances('Chat')`, the eid class; none while the turn runs: they are born with
+-- answer. `tools` stays the view's names; `tool_calls` are the ChatTool entities under the turn (read by eid from `tool_keys`, so an unloaded one loads; none while the turn runs: they are born with
 -- the answer). Separate from the route: another adapter lists the same view.
-ChatMessage.tool_rows getter: [{'name': replace(str(prop(t, 'name')), 'mcp__membrane__', ''), 'input': prop(t, 'input'), 'result': prop(t, 'result')} for t in instances('Chat') if startswith(t.eid, this.turn_eid + ':tool:')]
+-- the tools in the order they were called: `tool_ids` (written when the turn finishes, chat_turn.c1f) names them; a message from before that has none, and its tools
+-- are the stored `...:turn:tool:*` rows in the order they were written (`updated`, then the id). Each tool is READ by its eid, so an unloaded one loads.
+ChatMessage.tool_keys getter:
+  WHEN this.tool_ids != None: [this.turn_eid + ':tool:' + i for i in words(this.tool_ids)]
+  ELSE WHEN this.tstate in ['done', 'error']: [prop(r, 'k') for r in (sql('SELECT k FROM c_field WHERE k LIKE ? ORDER BY updated, k', this.turn_eid + ':tool:%') or [])]
+  ELSE: []
+ChatMessage.tool_rows getter: [{'name': replace(str(prop(k, 'name')), 'mcp__membrane__', ''), 'input': prop(k, 'input'), 'result': prop(k, 'result')} for k in this.tool_keys]
 ChatMessage.history_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': this.tool_rows}
--- (`instances` lists by the eid class, Chat: a message is the Chat entity whose eid has no further colon after the prefix)
 -- THE PAGE'S VIEW: history_view with each tool as {name, input} only (the page shows no result; a result can be megabytes). The route sends this one; `history_view` keeps the whole result for other adapters.
 ChatMessage.page_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': [{'name': t['name'], 'input': t['input']} for t in this.tool_rows]}
--- the row the history sorts by: arrival time `at`, then the request number `n` inside the id `<ms>-<n>` (two messages of one clock reading)
-ChatMessage.order_row getter: {'eid': this.eid, 'id': this.mid, 'at': this.at, 'n': num(after(this.mid, '-'))}
 ChatResponse.kind getter: 'response'
 -- a response's summary is its whole text (nearer class than the root `Entity.summary`, packs/entity.c1f): the banner's error line shows it.
 ChatResponse.summary getter: str(this.text or '')
@@ -94,13 +97,17 @@ Request.ev_snap on-setter ev-send:
 Request.hs_on getter: this.path == '/membrane/chat/messages'
 Request.hs_limit getter: max(1, (num(([q[1] for q in this.qpairs if q[0] == 'limit'] or ['20'])[0]) or 20))
 Request.hs_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [None])[0]
-Request.hs_all getter: sort_by(sort_by([m.order_row for m in instances('Chat') if startswith(m.eid, 'membrane::Chat:message:') and not ':' in after(m.eid, 'membrane::Chat:message:')], 'n', True), 'at', True) if this.hs_on else []
+-- the message ids come from the STORE (a message is lazy: `instances` would list only the loaded ones); each is then read by eid, which loads it. `at` orders them, then the request number in the id.
+-- rows are None while the query runs: the reply waits for them.
+Request.hs_rows getter: sql('SELECT k, json_extract(body, \'$.props.at\') AS at FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%') if this.hs_on else []
+Request.hs_all getter: sort_by(sort_by([{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), 'membrane::Chat:message:', ''), 'at': prop(r, 'at'), 'n': num(after(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-'))} for r in this.hs_rows], 'n', True), 'at', True) if this.hs_rows != None else None
 Request.hs_cut getter: ([r for r in this.hs_all if r['id'] == this.hs_before] or [None])[0]
 Request.hs_older getter: [r for r in this.hs_all if this.hs_before == None or r['at'] < this.hs_cut['at'] or (r['at'] == this.hs_cut['at'] and r['n'] < this.hs_cut['n'])]
 Request.hs_page getter: sort_by(sort_by(head(this.hs_older, this.hs_limit), 'n'), 'at')
 Request.hs_more getter: len(this.hs_older) > this.hs_limit
 Request.hs_get getter:
-  WHEN this.hs_before != None and this.hs_cut == None: {'status': 404, 'body': {'error': 'no such message'}}
+  WHEN this.hs_all == None: None
+  ELSE WHEN this.hs_before != None and this.hs_cut == None: {'status': 404, 'body': {'error': 'no such message'}}
   ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'page_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None}}
 
 Request.r_session getter:

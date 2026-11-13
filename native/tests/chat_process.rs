@@ -1119,6 +1119,76 @@ fn a_tool_that_read_a_large_result_gives_a_small_page_while_the_shared_view_keep
     assert!(terminate(&mut run));
 }
 
+// ---- the history from the STORE, not from what is loaded; tools in call order; instances by kind (#1143, w20-storage made Chat lazy) ----------------------
+#[test]
+fn the_history_after_a_restart_with_nothing_warmed_is_still_the_full_newest_page_and_the_older_one() {
+    let (mut run, port, dir) = fake_seat_script("historycold", &["--fact", "warm_rows=0"], &[], QUICK);
+    let ids = fill(port, 25);
+    assert!(terminate(&mut run));
+    let (_run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
+    // the very first request of the new run: nothing of the chat is loaded
+    let h = history(port2, "");
+    assert_eq!(texts(&h), (5..25).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h}");
+    assert_eq!((h["more"].clone(), h["next"].clone()), (json!(true), json!(ids[5])));
+    assert_eq!(h["messages"][19]["response"], json!("Answer to m24"));
+    assert_eq!(h["messages"][19]["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:m24"}}]), "tools of an unloaded turn come with the page");
+    let h2 = history(port2, &format!("?before={}", ids[5]));
+    assert_eq!(texts(&h2), (0..5).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h2}");
+    assert_eq!((h2["more"].clone(), h2["next"].clone()), (json!(false), J::Null));
+    assert_eq!(http(port2, "GET", "/membrane/chat/messages?before=nope", "").0, 404);
+}
+
+/// the quick fake with THREE tool calls in one assistant message, ids not in alphabetical order
+fn three_tools() -> String {
+    QUICK.replace(
+        r#"out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tq1", "name": "mcp__membrane__entity_read", "input": {"spec": "Q:" + prompt}}]}})"#,
+        r#"out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tz3", "name": "mcp__membrane__entity_read", "input": {"n": 1}}, {"type": "tool_use", "id": "tz1", "name": "mcp__membrane__entity_query", "input": {"n": 2}}, {"type": "tool_use", "id": "tz2", "name": "mcp__membrane__entity_write", "input": {"n": 3}}]}})"#)
+}
+
+#[test]
+fn a_messages_tools_come_in_the_order_they_were_called_loaded_or_not() {
+    let (mut run, port, dir) = fake_seat_script("historyorder", &["--fact", "warm_rows=0"], &[], &three_tools());
+    let id = send(port, "three");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    let want = json!([{"name": "entity_read", "input": {"n": 1}}, {"name": "entity_query", "input": {"n": 2}}, {"name": "entity_write", "input": {"n": 3}}]);
+    assert_eq!(history(port, "")["messages"][0]["tool_calls"], want, "by call, not by id (tz1 < tz2 < tz3)");
+    assert!(terminate(&mut run));
+    let (_run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
+    assert_eq!(history(port2, "")["messages"][0]["tool_calls"], want, "after a cold restart");
+}
+
+#[test]
+fn a_message_from_before_the_tool_order_list_still_lists_its_stored_tools() {
+    let (mut run, port, _dir) = fake_seat_script("historyold", &["--fact", "warm_rows=0"], &[], &three_tools());
+    let id = send(port, "three");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    // an older message has no `tool_ids`: its tools are the stored rows under its turn
+    let (t, e) = call(port, "entity_write", json!({"spec": format!("membrane::Chat:message:{id}"), "prop": "tool_ids", "value": null}));
+    assert!(!e, "{t}");
+    let h = history(port, "");
+    let mut names: Vec<String> = h["messages"][0]["tool_calls"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+    names.sort();
+    assert_eq!(names, ["entity_query", "entity_read", "entity_write"], "{h}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn instances_of_a_kind_lists_the_loaded_entities_that_carry_it_in_their_parents() {
+    let (mut run, port, _dir) = fake_seat_script("kinds", &[], &[], QUICK);
+    let id = send(port, "kind me");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    // messages, turns, responses and tools are eid class Chat; their kinds are in `parents`
+    let (t, e) = cliff(port, "[m.eid for m in instances('ChatMessage')]");
+    assert!(!e, "{t}");
+    assert_eq!(serde_json::from_str::<J>(&t).unwrap(), json!([format!("membrane::Chat:message:{id}")]), "{t}");
+    let (t, _) = cliff(port, "len([m for m in instances('ChatTool')])");
+    assert_eq!(t.trim(), "1", "{t}");
+    let (t, _) = cliff(port, "len([m for m in instances('Chat')])");
+    assert!(t.trim().parse::<i64>().unwrap() >= 4, "the eid class still lists them: {t}");
+    assert!(terminate(&mut run));
+}
+
+
 // ---- the page: one request for the newest turns, a 'load older' button (ui/chat.js run under node with a fake DOM and a counted fetch) -------
 fn node_ok() -> bool { Command::new("node").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) }
 fn chat_js() -> std::path::PathBuf { std::path::PathBuf::from(format!("{}/../membrane/apps/barest.c1f/ui/chat.js", env!("CARGO_MANIFEST_DIR"))) }

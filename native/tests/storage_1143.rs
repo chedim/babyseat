@@ -430,6 +430,8 @@ fn a_class_a_pack_lists_with_instances_is_loaded_whole_or_is_virtual() {
     }
     let mut declared = std::collections::BTreeSet::new();
     for (_, t) in &all { let p = parse_full(t).unwrap(); for c in p.virtuals.iter().chain(p.residents.iter()) { declared.insert(c.clone()); } }
+    // a KIND of a lazy class (`ChatMessage`, in the `parents` of an eid-class `Chat` entity) lists only the loaded ones as well: it is not declared, so a pack that lists it is flagged
+    assert!(!declared.contains("Chat") && !declared.contains("ChatMessage"), "the chat's classes are lazy: {declared:?}");
     let mut bad = vec![];
     for (n, t) in &all {
         for l in t.lines().filter(|l| !l.trim_start().starts_with("--")) {

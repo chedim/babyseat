@@ -571,10 +571,10 @@ impl Core {
     /// The engine's own built-ins that need the Core: `sql(query, args...)` (the store driver, store.rs). None: not one.
     pub fn native_call(&self, f: &str, a: &[V]) -> Option<Result<V, String>> {
         if f == "instances" {
-            // every entity of a class (its own class, not its ancestors'), in id order, as entities; an entity with `scratch = true` (the scaffolding of
+            // every entity of a class (its eid class, or a kind in its `parents` list; not its ancestors'), in id order, as entities; an entity with `scratch = true` (the scaffolding of
             // one door call, e.g. the clifflet's own packs) is not listed: a block sees the field as it was, not its own scaffolding
             let Some(V::Str(c)) = a.first() else { return Some(Err("instances(class): a class name".into())) };
-            let mut ids: Vec<&String> = self.docs.iter().filter(|(_, e)| e.cls == *c && e.props.get("scratch") != Some(&serde_json::Value::Bool(true))).map(|(k, _)| k).collect();
+            let mut ids: Vec<&String> = self.docs.iter().filter(|(_, e)| (e.cls == *c || e.in_classes(c)) && e.props.get("scratch") != Some(&serde_json::Value::Bool(true))).map(|(k, _)| k).collect();
             ids.sort();
             return Some(Ok(V::List(ids.into_iter().map(|k| V::Ent(k.clone())).collect())));
         }
