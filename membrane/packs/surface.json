@@ -385,16 +385,23 @@
       "semtext"
     ],
     "classes": [
+      "ChatMessage",
       "ChatSession",
       "Request"
     ],
-    "members": 33,
+    "members": 82,
     "writes": [
       "*.retire",
+      "membrane:*.mention",
+      "membrane:*.queued",
       "membrane:*.retire",
       "membrane:*.stitle",
       "membrane:*.upd",
-      "membrane:*=ChatSession()"
+      "membrane:*=ChatMessage()",
+      "membrane:*=ChatSession()",
+      "membrane:*=ChatTurn()",
+      "membrane:*=SemText()",
+      "membrane::Chat:main=Chat()"
     ],
     "claims": [
       "/event",

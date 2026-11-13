@@ -47,6 +47,9 @@ Request.ss_reply getter:
   ELSE WHEN this.ss_route == 'one' and this.method == 'GET': this.ss_get_reply
   ELSE WHEN this.ss_route == 'one' and this.method == 'PATCH': this.ss_patch_reply
   ELSE WHEN this.ss_route == 'one': this.ss_delete_reply
+  ELSE WHEN this.ss_route == 'message' and this.method == 'GET': this.ml_reply
+  ELSE WHEN this.ss_route == 'message' or this.ss_route == 'prompt_async': this.sm_reply
+  ELSE WHEN this.ss_route == 'msg1': this.m1_reply
   ELSE: this.ss_missing
 
 -- ---- the session --------------------------------------------------------------------------------------------------------------------------
@@ -109,3 +112,92 @@ Request.ss_delete_reply getter:
 -- (one SQL answer: an object keyed by session id, which a pack cannot build from rows)
 Request.ss_stat getter: sql('SELECT json_group_object(replace(s.k, \'membrane::Chat:session:\', \'\'), json(CASE WHEN EXISTS (SELECT 1 FROM c_field t WHERE t.cls = \'Chat\' AND t.k LIKE \'membrane::Chat:message:%:turn\' AND json_extract(t.body, \'$.props.sid\') = replace(s.k, \'membrane::Chat:session:\', \'\') AND json_extract(t.body, \'$.props.state\') = \'running\') THEN \'{"type":"busy"}\' ELSE \'{"type":"idle"}\' END)) AS status FROM c_field s WHERE s.cls = \'Chat\' AND s.k LIKE \'membrane::Chat:session:%\' AND s.k NOT LIKE \'membrane::Chat:session:%:%\'') if this.ss_route == 'status' else None
 Request.ss_status_reply getter: {'status': 200, 'body': (json(prop(this.ss_stat[0], 'status')) if len(this.ss_stat) > 0 and prop(this.ss_stat[0], 'status') != None else {})} if this.ss_stat != None else None
+
+-- ---- the message the page sends ---------------------------------------------------------------------------------------------------------------
+-- POST /session/<sid>/prompt_async (204 at once) or /message (200 {info, parts} when the turn is over): the text parts are joined by newlines, the message is the chat's
+-- (packs/chat.c1f: ChatMessage, its body, its turn; `queued` starts the turn, chat_turn.c1f) with `sid` naming the session. The turn also carries `sid` (the status reads it).
+Request.sm_text getter: strip(join([str(prop(p, 'text') or '') for p in (prop(this.jbody, 'parts') or []) if prop(p, 'type') == 'text'], '\n'))
+Request.sm_post getter: (this.ss_route == 'prompt_async' or this.ss_route == 'message') and this.method == 'POST'
+Request.sm_go getter: this.sm_post and this.ss_view != None and this.sm_text != ''
+Request.sm_go on-setter session-message:
+  WHEN this.sm_go:
+    id = this.ms_txt + '-' + replace(this.eid, 'Request:', '')
+    membrane::Chat:main = Chat(name: 'main')
+    membrane::Chat:message[id] = ChatMessage(text: this.sm_text, at: clock, sid: this.ss_sid)
+    membrane::Chat:message[id]:body = SemText(text: this.sm_text)
+    membrane::Chat:message[id]:body.mention = True
+    membrane::Chat:message[id]:turn = ChatTurn(message: 'membrane::Chat:message:' + id, queued_at: clock, sid: this.ss_sid)
+    membrane::Chat:message[id].queued = True
+    membrane::Chat:session[this.ss_sid].upd = this.ms
+    this.sm_id = id
+Request.sm_meid getter: 'membrane::Chat:message:' + this.sm_id if this.sm_id != None else None
+Request.sm_reply getter:
+  WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.sm_text == '': {'status': 400, 'body': {'type': 'error', 'error': {'message': 'message needs a text part'}}}
+  ELSE WHEN this.sm_id == None: None
+  ELSE WHEN this.ss_route == 'prompt_async': {'status': 204}
+  ELSE WHEN prop(this.sm_meid, 'over') != True: None
+  ELSE: {'status': 200, 'body': {'info': prop(this.sm_meid, 'oc_assist_info'), 'parts': prop(this.sm_meid, 'oc_parts')}}
+
+-- ---- the rows ---------------------------------------------------------------------------------------------------------------------------------
+-- one message = a user row and (once its turn has started) an assistant row. The parts of the assistant row are the tools the model ran, in call order, then its answer text; while the turn
+-- runs they are what the stream has shown so far (the answer's words, the tools by name). The ids are derived (see the head of this pack); `oc_idx` numbers the tools (at most 100 a turn).
+ChatMessage.oc_idx getter: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
+ChatMessage.oc_ms getter: head(this.mid, 13)
+ChatMessage.oc_n getter: after(this.mid, '-')
+ChatMessage.oc_b getter: this.oc_ms + tail('00000000' + this.oc_n, 8)
+ChatMessage.oc_uid getter: 'msg_' + this.oc_b + '001'
+ChatMessage.oc_aid getter: 'msg_' + this.oc_b + '002'
+ChatMessage.oc_cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd != None] or [''])[0]
+ChatMessage.oc_created getter: num(words(replace(str(this.at * 1000), '.', ' '))[0])
+ChatMessage.oc_t0 getter: num(words(replace(str(prop(this.turn_eid, 'started') * 1000), '.', ' '))[0]) if prop(this.turn_eid, 'started') != None else this.oc_created
+ChatMessage.oc_t1 getter: num(words(replace(str(prop(this.turn_eid, 'ended') * 1000), '.', ' '))[0]) if prop(this.turn_eid, 'ended') != None else None
+ChatMessage.oc_user_info getter: {'id': this.oc_uid, 'sessionID': this.sid, 'role': 'user', 'agent': 'build', 'model': {'providerID': 'membrane', 'modelID': 'claude'}, 'time': {'created': this.oc_created}, 'summary': {'diffs': []}}
+ChatMessage.oc_user_part getter: {'id': 'prt_' + this.oc_b + '010', 'sessionID': this.sid, 'messageID': this.oc_uid, 'type': 'text', 'text': this.text}
+ChatMessage.oc_usage getter: prop(this.turn_eid, 'usage') or {}
+ChatMessage.oc_tokens getter: {'total': (prop(this.oc_usage, 'input_tokens') or 0) + (prop(this.oc_usage, 'output_tokens') or 0) + (prop(this.oc_usage, 'cache_creation_input_tokens') or 0) + (prop(this.oc_usage, 'cache_read_input_tokens') or 0), 'input': prop(this.oc_usage, 'input_tokens') or 0, 'output': prop(this.oc_usage, 'output_tokens') or 0, 'reasoning': 0, 'cache': {'read': prop(this.oc_usage, 'cache_read_input_tokens') or 0, 'write': prop(this.oc_usage, 'cache_creation_input_tokens') or 0}}
+ChatMessage.oc_error getter: str(this.said or 'the turn failed') if this.tstate == 'error' else None
+ChatMessage.oc_assist_info getter: {'id': this.oc_aid, 'sessionID': this.sid, 'role': 'assistant', 'parentID': this.oc_uid, 'modelID': 'claude', 'providerID': 'membrane', 'mode': 'build', 'agent': 'build', 'path': {'cwd': this.oc_cwd, 'root': this.oc_cwd}, 'cost': prop(this.turn_eid, 'cost') or 0.0, 'tokens': this.oc_tokens, 'time': {'created': this.oc_t0, 'completed': this.oc_t1}, 'madeBy': 'claude-agent', 'finish': 'stop' if this.tstate == 'done' else None, 'error': ({'name': 'Error', 'data': {'message': this.oc_error}} if this.oc_error != None else None)}
+ChatMessage.oc_tids getter: [replace(k, this.turn_eid + ':tool:', '') for k in this.tool_keys]
+ChatMessage.oc_tool_parts getter: [{'id': 'prt_' + this.oc_b + '2' + tail('0' + str(i), 2), 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'tool', 'callID': this.oc_tids[i], 'tool': this.tool_rows[i]['name'], 'madeBy': 'claude-agent', 'state': {'status': 'completed', 'input': this.tool_rows[i]['input'] or {}, 'title': this.tool_rows[i]['name'], 'time': {'start': this.oc_t0, 'end': this.oc_t1}, 'output': str(this.tool_rows[i]['result'] or '')}, 'time': {'start': this.oc_t0, 'end': this.oc_t1}} for i in this.oc_idx if i < len(this.tool_rows)]
+ChatMessage.oc_text_part getter: [{'id': 'prt_' + this.oc_b + '100', 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'text', 'text': t, 'time': {'start': this.oc_t0, 'end': this.oc_t1}} for t in [this.said] if t != None and t != '']
+-- while the turn runs: the accumulator (chat_turn.c1f `Chunk:<command>:acc`) holds the words, the tool names (`tools`) and, written by the stream's setter below, the tool ids (`tids`)
+ChatMessage.oc_acc getter: 'Chunk:' + this.cmd_eid + ':acc'
+ChatMessage.oc_live_text getter: [{'id': 'prt_' + this.oc_b + '100', 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'text', 'text': t, 'time': {'start': this.oc_t0}} for t in [this.partial_text] if t != None and t != '']
+ChatMessage.oc_live_ids getter: words(str(prop(this.oc_acc, 'tids') or ''))
+ChatMessage.oc_live_tools getter: [{'id': 'prt_' + this.oc_b + '2' + tail('0' + str(i), 2), 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'tool', 'callID': (this.oc_live_ids[i] if i < len(this.oc_live_ids) else ''), 'tool': this.partial_tools[i], 'madeBy': 'claude-agent', 'state': {'status': 'running', 'input': {}, 'title': this.partial_tools[i], 'time': {'start': this.oc_t0}}, 'time': {'start': this.oc_t0}} for i in this.oc_idx if i < len(this.partial_tools)]
+ChatMessage.oc_parts getter:
+  WHEN this.over: concat(this.oc_tool_parts, this.oc_text_part)
+  ELSE: concat(this.oc_live_text, this.oc_live_tools)
+ChatMessage.oc_urow getter: {'info': this.oc_user_info, 'parts': [this.oc_user_part]}
+ChatMessage.oc_arow getter: {'info': this.oc_assist_info, 'parts': this.oc_parts} if this.tstate in ['running', 'done', 'error'] else None
+ChatMessage.oc_rows getter: concat([this.oc_urow], [this.oc_arow] if this.oc_arow != None else [])
+
+-- GET /session/<sid>/message[?limit=N&before=<message id>]: the rows oldest first; `limit` the newest N rows, `before` only the messages older than the one that row belongs to
+Request.ml_on getter: this.ss_route == 'message' and this.method == 'GET' and this.ss_view != None
+Request.ml_rows getter: sql('SELECT k, json_extract(body, \'$.props.at\') AS at FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ? AND json_extract(body, \'$.props.sid\') = ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.ss_sid) if this.ml_on else []
+Request.ml_all getter: sort_by(sort_by([{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), 'membrane::Chat:message:', ''), 'at': prop(r, 'at'), 'n': num(after(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-'))} for r in this.ml_rows], 'n'), 'at') if this.ml_rows != None else None
+Request.ml_limit getter: num(([q[1] for q in this.qpairs if q[0] == 'limit'] or ['0'])[0]) or 0
+Request.ml_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [''])[0]
+-- a row id -> its message's id: `msg_` + 21 digits (13 of time, 8 of the request number) + 3
+Request.ml_cut_id getter: head(tail(this.ml_before, 24), 13) + '-' + words(replace(str(num(head(tail(tail(this.ml_before, 24), 11), 8))), '.', ' '))[0] if len(this.ml_before) == 28 else ''
+Request.ml_cut getter: ([r for r in this.ml_all if r['id'] == this.ml_cut_id] or [None])[0]
+Request.ml_older getter: [r for r in this.ml_all if this.ml_before == '' or this.ml_cut == None or r['at'] < this.ml_cut['at'] or (r['at'] == this.ml_cut['at'] and r['n'] < this.ml_cut['n'])]
+Request.ml_take getter: tail(this.ml_older, this.ml_limit) if this.ml_limit > 0 else this.ml_older
+-- (no nested comprehension: the user rows and the assistant rows are two lists, merged by (time, number, which half))
+Request.ml_users getter: [{'at': r['at'], 'n': r['n'], 'h': 0, 'row': prop(r['eid'], 'oc_urow')} for r in this.ml_take]
+Request.ml_assts getter: [{'at': r['at'], 'n': r['n'], 'h': 1, 'row': prop(r['eid'], 'oc_arow')} for r in this.ml_take if prop(r['eid'], 'oc_arow') != None]
+Request.ml_flat getter: [x['row'] for x in sort_by(sort_by(sort_by(concat(this.ml_users, this.ml_assts), 'h'), 'n'), 'at')]
+Request.ml_reply getter:
+  WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.ml_all == None: None
+  ELSE WHEN this.ml_before != '' and this.ml_cut == None: {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}
+  ELSE: {'status': 200, 'body': tail(this.ml_flat, this.ml_limit) if this.ml_limit > 0 else this.ml_flat}
+
+-- GET /session/<sid>/message/<mid>: one row, the user's or the assistant's
+Request.m1_id getter: this.ss_segs[3] if this.ss_n == 4 else ''
+Request.m1_mid getter: head(tail(this.m1_id, 24), 13) + '-' + words(replace(str(num(head(tail(tail(this.m1_id, 24), 11), 8))), '.', ' '))[0] if len(this.m1_id) == 28 else None
+Request.m1_rows getter: prop('membrane::Chat:message:' + this.m1_mid, 'oc_rows') if this.m1_mid != None and this.ss_view != None and prop('membrane::Chat:message:' + this.m1_mid, 'sid') == this.ss_sid else []
+Request.m1_reply getter:
+  WHEN this.m1_rows == None: None
+  ELSE: ({'status': 200, 'body': [r for r in this.m1_rows if r['info']['id'] == this.m1_id][0]} if len([r for r in this.m1_rows if r['info']['id'] == this.m1_id]) > 0 else this.ss_missing)
