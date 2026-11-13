@@ -221,11 +221,22 @@ fn the_boot_pack_grants_the_tools_pack_at_start_and_a_replay_ends_in_the_same_pr
     assert_eq!(h.get("Pack:door_tools", "privileged"), json!(true));
     assert_eq!(h.get("Pack:door_tools", "granted_by"), json!("pack:boot:grant-door-tools"));
     let j = h.journal();
-    assert!(!j.iter().any(|l| matches!(l, Line::Write { eid, .. } if eid.starts_with("Pack:"))), "the grant is derived from `started`: not journalled itself");
+    // Boot is VIRTUAL (not journalled), so the grant its `started` setter makes is not derivable by a replay: it is journalled as an OUTSIDE write (`host:virtual:<setter>`)
+    let grants: Vec<_> = j.iter().filter(|l| matches!(l, Line::Write { eid, .. } if eid.starts_with("Pack:"))).collect();
+    assert_eq!(grants.len(), 1, "{grants:?}");
+    assert_eq!(grants[0].writer(), "host:virtual:grant-door-tools");
+    assert!(!j.iter().any(|l| matches!(l, Line::Born { cls, .. } if cls == "Boot")) && !j.iter().any(|l| matches!(l, Line::Write { eid, .. } if eid.starts_with("Boot:"))), "nothing about Boot is journalled: {j:?}");
     let r = fresh();
     r.replay(&j);
     assert!(r.pack_privileged("door_tools"));
-    assert_eq!(state(&r), state(&h));
+    // the replay ends in the same privilege state; what differs is only what is RAM-only (the Boot entity) and who the grant is attributed to (the host's replay of it)
+    let (rs, rr) = state(&r);
+    let (hs, hr) = state(&h);
+    assert_eq!(rs.get("Pack:door_tools").map(|v| &v["props"]["privileged"]), hs.get("Pack:door_tools").map(|v| &v["props"]["privileged"]));
+    assert_eq!(rs.keys().filter(|k| !k.starts_with("Boot:")).collect::<Vec<_>>(), hs.keys().filter(|k| !k.starts_with("Boot:")).collect::<Vec<_>>());
+    assert_eq!(rr.keys().collect::<Vec<_>>(), hr.keys().collect::<Vec<_>>(), "the same rows are stored");
+    assert!(!rr.contains_key("Boot:seat"), "no Boot row");
+    assert_eq!(r.get("Pack:door_tools", "granted_by"), json!("host:virtual:grant-door-tools"));
     expr::set_clock(None);
 }
 

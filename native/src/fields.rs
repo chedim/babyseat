@@ -345,6 +345,9 @@ pub struct Fields {
     skipped: std::collections::BTreeMap<(String, String, String, String), String>,
     /// class -> its storage mode, from the active owner packs' VIRTUAL / RESIDENT header lines (`compose`)
     storage: std::collections::HashMap<String, Storage>,
+    /// set while the setters of a write on a VIRTUAL entity run: what they write to a stored entity is marked `virt` in `out`, so the host journals it as an
+    /// outside write (the virtual trigger is not in the journal, a replay could not derive it again)
+    trigger_virtual: bool,
 }
 
 /// How a class is stored (docs/cliffvm.md, "Storage modes"): its OWN class (the eid's), declared by the pack that owns it.
@@ -365,13 +368,23 @@ fn storage_conflict(n: &str, p: &crate::syntax::Pack, owner: &std::collections::
 }
 
 impl Fields {
+    /// Whether a write the running setter makes to `eid` comes from a VIRTUAL trigger and lands on a stored entity (then the host journals it as an outside write).
+    fn from_virtual(&self, core: &Core, eid: &str) -> bool {
+        self.trigger_virtual && core.docs.get(eid).map_or(false, |e| self.storage_of(&e.cls) != Storage::Virtual)
+    }
+    /// The `out` entry of a birth by a setter (the entity is in `core` already).
+    fn born_entry(&self, core: &Core, eid: &str, cls: &str) -> J {
+        let mut o = json!({"eid": eid, "born": cls});
+        if self.from_virtual(core, eid) { o["virt"] = json!(true); }
+        o
+    }
     /// The storage mode of a class (its own class, the eid's): what its OWNER pack declared; Lazy when none did.
     pub fn storage_of(&self, cls: &str) -> Storage { self.storage.get(cls).copied().unwrap_or(Storage::Lazy) }
     pub fn goalgraph() -> Self {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
-            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default() };
+            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
         f.load_order.push("goalgraph".into());
@@ -1120,7 +1133,9 @@ impl Fields {
         self.writes += 1;
         let old = core.docs.get(eid).and_then(|e| e.props.get(prop).cloned()).unwrap_or(J::Null);
         let w = Write { eid: eid.into(), prop: prop.into(), new, old, writer: format!("field:{}", writer), chain: json!({}), seq: *seq };
-        self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+        let mut o = json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer});
+        if self.from_virtual(core, eid) { o["virt"] = json!(true); }
+        self.out.push(o);
         core.hear(w.clone(), None, now);
         work.push_back(w);
     }
@@ -1234,6 +1249,7 @@ impl Fields {
             if w.writer.starts_with(DIRECT) { return; }   // rule 6: an own-name store bypasses the setters (getters above still ran)
             let hits: Vec<usize> = (0..self.setters.len())
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, &self.setters[i].cls)).collect();
+            self.trigger_virtual = core.docs.get(&w.eid).map_or(false, |e| self.storage_of(&e.cls) == Storage::Virtual);
             for i in hits {
                 let name = self.setters[i].name.clone();
                 let truthy = |v: &J| match v {
@@ -1262,6 +1278,7 @@ impl Fields {
                     self.receipt(core, &w.eid, &name, reason, J::Null, seq, now);
                 }
             }
+            self.trigger_virtual = false;
     }
 
     /// A chosen branch's writes, in order: FOR blocks run their body once per item of their list, read when the
@@ -1342,7 +1359,7 @@ impl Fields {
                 let Some((cls, _)) = tgt.split_once(':') else { continue };
                 if !self.is_privileged(pack) && (self.owner.get(cls).is_none() || self.may_write(pack, cls).is_err()) { continue; }
                 core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
-                self.out.push(json!({"eid": tgt, "born": cls}));
+                self.out.push(self.born_entry(core, &tgt, cls));
                 self.birth(core, &tgt, now, seq);
             }
             if let Err(why) = self.may_write_ent(core, pack, &tgt) {
@@ -1391,7 +1408,7 @@ impl Fields {
             // the birth default of the class list: the eid's class first, then the constructor's class when it differs (the stamp), then any `parents` argument
             if own != cls && !args.iter().any(|(k, _)| k == "parents") { args.push(("parents".into(), json!([format!("cls:{}", cls.to_lowercase())]))); }
             core.load(tgt.clone(), own.clone(), Default::default(), None, now);
-            self.out.push(json!({"eid": tgt, "born": own}));
+            self.out.push(self.born_entry(core, &tgt, &own));
             self.birth(core, &tgt, now, seq);
         } else {
             if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }

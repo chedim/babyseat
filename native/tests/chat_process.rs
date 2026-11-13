@@ -419,13 +419,10 @@ impl Sse {
     }
 }
 
-/// the Request entities of event streams the seat still holds (a query by kind, then each one's path)
+/// the Request entities of event streams the seat still holds: a Request is VIRTUAL (live in the engine, no row), so a block lists the live ones with `instances`
 fn stream_requests(port: u16) -> Vec<String> {
-    let (t, _) = call(port, "entity_query", json!({"q": "kind:Request"}));
-    t.lines().filter_map(|l| l.split_whitespace().next()).filter(|e| e.starts_with("Request:")).filter(|e| {
-        let (p, _) = call(port, "entity_read", json!({"spec": e, "prop": "path"}));
-        p.ends_with("/events")
-    }).map(String::from).collect()
+    let (t, _) = call(port, "run_cliff", json!({"code": "join([r.eid for r in instances('Request') if startswith(str(r.path), '/membrane/chat/message/') and replace(str(r.path), '/events', '') != r.path], ' ')"}));
+    t.split_whitespace().filter(|e| e.starts_with("Request:")).map(String::from).collect()
 }
 
 fn release(dir: &std::path::Path, prompt: &str, name: &str) { std::fs::write(dir.join(format!("go.{}.{}", tag_of(prompt), name)), "").unwrap(); }

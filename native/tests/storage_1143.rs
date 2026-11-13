@@ -103,3 +103,71 @@ fn a_restart_restores_no_row_of_a_virtual_class_what_the_old_per_run_list_did() 
     assert_eq!(h.load_stored_entities(), 1);
     assert!(h.snapshot().contains_key("Keep:1") && !h.snapshot().contains_key("Gone:1"));
 }
+
+// ---- VIRTUAL semantics: RAM only, never stored, never journalled, and what a virtual entity's setter makes is still re-derivable ---------------------
+const VIRT: &str = "PACK v 1
+VIRTUAL Req
+Req.go on-setter make:
+  WHEN this.go == True:
+    ('Msg:' + this.eid).text = this.body
+    ('Msg:' + this.eid).n = 1
+Msg.shout getter: str(this.text) + '!'
+Msg.n on-setter count:
+  WHEN this.n == 1:
+    ('Tally:main').seen = 1
+Tally.label getter: 'seen ' + str(this.seen)
+";
+
+fn file_host(file: &str) -> Host { let mut o = Options::new(Some(file.to_string())); o.effects = false; Host::open(o).unwrap() }
+fn count(file: &str, like: &str) -> i64 { rusqlite::Connection::open(file).unwrap().query_row("SELECT count(*) FROM c_field WHERE k LIKE ?1", [like], |r| r.get(0)).unwrap() }
+fn jcount(file: &str, like: &str) -> i64 { rusqlite::Connection::open(file).unwrap().query_row("SELECT count(*) FROM c_journal WHERE body LIKE ?1", [like], |r| r.get(0)).unwrap() }
+fn props(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> { v.as_object().unwrap().clone() }
+
+#[test]
+fn a_virtual_entity_is_never_stored_never_journalled_and_a_restart_does_not_bring_it_back() {
+    let file = tmpfile("virt");
+    {
+        let h = file_host(&file);
+        h.load_pack("v", VIRT).unwrap();
+        h.rebuild();
+        h.born("Req:1", "Req", props(serde_json::json!({"path": "/x"})), "host:door");
+        h.write("Req:1", "body", serde_json::json!("hello"), "host:door");
+        h.pump();
+        assert_eq!(h.get("Req:1", "body"), serde_json::json!("hello"), "it lives in the engine");
+    }
+    assert_eq!(count(&file, "Req:%"), 0, "no row of a virtual class");
+    assert_eq!(jcount(&file, "%Req:1%"), 0, "no journal line of a virtual class");
+    let h = file_host(&file);
+    h.load_pack("v", VIRT).unwrap();
+    assert_eq!(h.load_stored_entities(), 0);
+    assert!(!h.snapshot().contains_key("Req:1"), "a restart does not resurrect it");
+}
+
+#[test]
+fn what_a_virtual_entitys_setter_makes_is_journalled_as_an_outside_write_and_a_replay_ends_equal() {
+    let file = tmpfile("replay");
+    let h = file_host(&file);
+    h.load_pack("v", VIRT).unwrap();
+    h.rebuild();
+    h.born("Req:1", "Req", props(serde_json::json!({"path": "/x"})), "host:door");
+    h.write("Req:1", "body", serde_json::json!("hello"), "host:door");
+    h.write("Req:1", "go", serde_json::json!(true), "host:door");
+    h.pump();
+    assert_eq!(h.get("Msg:Req:1", "text"), serde_json::json!("hello"));
+    assert_eq!(h.get("Msg:Req:1", "shout"), serde_json::json!("hello!"));
+    assert_eq!(h.get("Tally:main", "label"), serde_json::json!("seen 1"));
+    let j = h.journal();
+    assert!(j.iter().all(|l| !format!("{l:?}").contains("Req:1\"") || format!("{l:?}").contains("Msg:")), "no line about the Request itself: {j:?}");
+    let made: Vec<_> = j.iter().filter(|l| format!("{l:?}").contains("Msg:Req:1")).collect();
+    assert!(made.iter().all(|l| l.writer().starts_with("host:virtual:")), "stamped as outside writes: {made:?}");
+    assert!(!made.is_empty());
+    assert!(j.iter().all(|l| !format!("{l:?}").contains("Tally:main")), "the second hop is derived again by the replay, not journalled: {j:?}");
+    // replay on a fresh engine
+    let r = mem();
+    r.load_pack("v", VIRT).unwrap();
+    r.rebuild();
+    r.replay(&h.journal_stored().unwrap());
+    assert!(!r.snapshot().contains_key("Req:1"), "the replay never saw the Request");
+    for e in ["Msg:Req:1", "Tally:main"] { assert_eq!(r.snapshot().get(e), h.snapshot().get(e), "{e}: replay-equal state"); }
+    assert_eq!(count(&file, "Msg:%"), 1, "the message is stored");
+}

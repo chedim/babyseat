@@ -43,9 +43,19 @@ pub fn stamp_writer(engine_writer: &str) -> String {
     format!("{WRITER}{}", engine_writer.trim_start_matches("field:"))
 }
 
+/// The store stamp of what a setter wrote while triggered by a VIRTUAL entity: OUTSIDE (journalled), since the trigger is not in the journal and a replay could not
+/// derive the write again (the Trip's way: `host:` stamps).
+pub fn stamp_virtual_writer(engine_writer: &str) -> String { format!("host:virtual:{}", engine_writer.trim_start_matches("field:")) }
+
 /// The writer for an entity the engine created (fields_live.stamp_born_writer): a Trip is outside.
 pub fn stamp_born_writer(cls: &str) -> String {
     if cls == TRIP_CLASS { stamp_writer(TRIP_WRITER) } else { format!("{WRITER}create") }
+}
+
+/// The class an eid names: after a `namespace::`, up to the next colon (`membrane::Chat:main` is `Chat`).
+pub fn class_of_eid(eid: &str) -> String {
+    let tail = eid.rsplit_once("::").map_or(eid, |(_, r)| r);
+    tail.split(':').next().unwrap_or("").to_string()
 }
 
 /// A store stamp of a value the engine computes again from its inputs (a getter's, a rebuild's).
@@ -352,13 +362,13 @@ impl Host {
         for w in out {
             if let Some(cls) = w.get("born").and_then(|c| c.as_str()) {
                 let eid = w["eid"].as_str().unwrap_or("").to_string();
-                let stamp = stamp_born_writer(cls);
+                let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer("create") } else { stamp_born_writer(cls) };
                 self.store_born(&eid, cls, &Map::new(), &stamp);
                 if is_outside(&stamp) { self.journal_push(Line::Born { ts, writer: stamp, eid, cls: cls.into(), props: Map::new() }); }
                 continue;
             }
             let (Some(eid), Some(prop)) = (w["eid"].as_str(), w["prop"].as_str()) else { continue };
-            let stamp = stamp_writer(w["writer"].as_str().unwrap_or(""));
+            let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer(w["writer"].as_str().unwrap_or("")) } else { stamp_writer(w["writer"].as_str().unwrap_or("")) };
             self.store_prop(eid, None, prop, &w["new"], &stamp);
             if prop == "text" { self.pack_text(eid, &w["new"]); }
             if prop == "privileged" && eid.starts_with(PACK_PREFIX) { self.packs_dirty.store(true, Ordering::SeqCst); }   // `granted_by` is mirrored
@@ -574,6 +584,7 @@ impl Host {
     }
 
     fn store_born(&self, eid: &str, cls: &str, props: &Map<String, J>, stamp: &str) {
+        if self.storage_of(cls) == crate::fields::Storage::Virtual { return; }   // RAM only: no row
         let _t = self.txn();
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         self.load(&db, eid);
@@ -594,6 +605,7 @@ impl Host {
     fn store_prop(&self, eid: &str, cls: Option<&str>, prop: &str, new: &J, stamp: &str) {
         let _t = self.txn();
         let known = self.eng().0.docs.get(eid).map(|e| e.cls.clone());
+        if self.storage_of(known.as_deref().or(cls).unwrap_or("")) == crate::fields::Storage::Virtual { return; }   // RAM only: no row
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         self.load(&db, eid);
         let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -623,7 +635,17 @@ impl Host {
     }
 
     // ---- the journal -------------------------------------------------------------------------------------------------
+    /// Whether the line is about an entity of a VIRTUAL class: not journalled (docs/cliffvm.md, "Storage modes"). A write's class is the engine's entity's, else the eid's.
+    fn is_virtual_line(&self, l: &Line) -> bool {
+        let cls = match l {
+            Line::Born { cls, .. } => cls.clone(),
+            Line::Write { eid, .. } => self.eng().0.docs.get(eid).map(|e| e.cls.clone()).unwrap_or_else(|| class_of_eid(eid)),
+        };
+        self.storage_of(&cls) == crate::fields::Storage::Virtual
+    }
+
     fn journal_push(&self, l: Line) {
+        if self.is_virtual_line(&l) { return; }
         let _t = self.txn();
         let mut j = self.journal.lock().unwrap_or_else(|e| e.into_inner());
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
