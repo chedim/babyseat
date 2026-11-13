@@ -254,6 +254,9 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
 - **Caching:** the loader asks for the wasm by its content hash (`fieldvm_version.js`), since the seat caches `.wasm`.
 - **Tests:** `tests/js/fieldvm_core.test.mjs` (the wasm engine in Node) and `tests/js/fieldvm_link.test.mjs` (the page
   link in headless Chrome over the DevTools protocol).
+  `tests/js/fieldvm_clock.test.mjs` covers the time allowance: on wasm32 std's `Instant` panics, so `expr.rs` reads `Date.now`
+  there. `native/tests/wasm_check_1143.rs` keeps `cargo check --target wasm32-unknown-unknown --no-default-features --features wasm`
+  green (it skips when the target is missing); the shipped `fieldvm_core*` files are rebuilt with `native/build-web.sh`.
 
 ## 10. The language, 2026-11-10: setters and getters support the same forms
 
