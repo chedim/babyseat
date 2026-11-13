@@ -215,6 +215,8 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 let mut extra = Map::new();
                 extra.insert("stdout".into(), json!(out));
                 extra.insert("stderr".into(), json!(err));
+                extra.insert("stdout_bytes".into(), json!(out.len()));
+                extra.insert("stderr_bytes".into(), json!(err.len()));
                 let head = if out.trim().is_empty() { err.clone() } else { out.clone() };
                 receipt(&id, rc, head, extra)
             }));

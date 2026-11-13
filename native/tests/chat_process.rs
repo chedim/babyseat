@@ -582,8 +582,8 @@ fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_
     assert!(t.starts_with("wrote Command:e1.run\nreceipt: "), "{t}");
     let line = t.lines().find(|l| l.starts_with("receipt: ")).unwrap();
     let rc: J = serde_json::from_str(&line["receipt: ".len()..]).unwrap_or_else(|e| panic!("{e}: {line}"));
-    assert_eq!((rc["rc"].clone(), rc["ok"].clone(), rc["stdout"].as_str().unwrap().trim().to_string()), (json!(0), json!(true), "hi there".to_string()), "{t}");
-    assert!(rc.get("stderr").is_some());
+    assert_eq!((rc["rc"].clone(), rc["ok"].clone(), reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().trim().to_string()), (json!(0), json!(true), "hi there".to_string()), "{t}");
+    assert_eq!(rc["stderr_bytes"], json!(0));
     assert!(!t.contains("Return:"), "the Return entity is a carrier, the reply does not name it: {t}");
     let (r, _) = call(port, "entity_read", json!({"spec": "Command:e1", "prop": "run_result"}));
     assert!(r.contains("hi there"), "the receipt stays on the entity: {r}");
@@ -851,5 +851,37 @@ fn a_clifflet_reads_eid_cls_and_parents_and_lists_the_same_packs_as_entity_query
     assert!(listed.iter().all(|p| !p.contains("cliffg") && !p.contains("cliffs")), "the clifflet's scratch packs are listed: {listed:?}");
     for p in &listed { assert!(q.contains(p.as_str()), "{p} is not in entity_query: {q}"); }
     assert_eq!(listed.len(), q.matches("Pack:").count(), "the same set: {listed:?} vs {q}");
+    assert!(terminate(&mut run));
+}
+
+// ---- the reply of a write that ran a command: size, timing, noise, one write (#1143, the model's findings) -----------------------------------------
+/// the lines of a reply: `receipt: {json}`, `stdout: {json}`, `stderr: {json}` as parsed objects by their label
+fn reply_part(t: &str, label: &str) -> Option<J> {
+    t.lines().find_map(|l| l.strip_prefix(&format!("{label}: "))).map(|j| serde_json::from_str(j).unwrap_or_else(|e| panic!("{label}: {e}: {j}")))
+}
+
+#[test]
+fn a_big_output_comes_back_as_its_first_and_last_8_kb_with_its_size_and_the_full_text_stays_on_the_entity() {
+    let (mut run, port) = start("big", MCP_PACKS, &[]);
+    put(port, "Command:big", "cmd", json!(["sh", "-c", "printf HEAD; head -c 50000 /dev/zero | tr '\\0' x; printf TAIL; printf oops >&2"]));
+    let (t, e) = put_wait(port, "Command:big", "run", json!({"id": "b1", "args": []}), 20.0);
+    assert!(!e, "{t}");
+    assert!(t.len() < 20000, "the reply is small ({} bytes): the CLI refuses a tool result over its limit", t.len());
+    let rc = reply_part(&t, "receipt").unwrap_or_else(|| panic!("{t}"));
+    assert_eq!((rc["stdout_bytes"].clone(), rc["stderr_bytes"].clone()), (json!(50008), json!(4)), "{t}");
+    assert!(rc.get("head").is_none() && rc.get("stdout").is_none(), "no duplicate of the output in the receipt line: {t}");
+    let so = reply_part(&t, "stdout").unwrap_or_else(|| panic!("{t}"));
+    let (h, tl) = (so["stdout_head"].as_str().unwrap_or_else(|| panic!("{}", &t[..600.min(t.len())])), so["stdout_tail"].as_str().unwrap_or_else(|| panic!("tail {}", &t[..600.min(t.len())])));
+    assert!(h.starts_with("HEAD") && h.chars().count() == 8192 && tl.ends_with("TAIL") && tl.chars().count() == 8192, "{} {}", h.len(), tl.len());
+    assert!(so.get("stdout").is_none(), "{so}");
+    // a short stream comes whole, under its plain name
+    assert_eq!(reply_part(&t, "stderr").unwrap()["stderr"], json!("oops"), "{t}");
+    assert!(t.contains("full output: read Command:big.output"), "{t}");
+    let (full, _) = call(port, "entity_read", json!({"spec": "Command:big", "prop": "output"}));
+    assert!(full.len() >= 50008 && full.starts_with("HEAD") && full.ends_with("TAIL"), "the full text stays on the entity: {}", full.len());
+    // an output of exactly 16 KB still comes whole
+    put(port, "Command:edge", "cmd", json!(["sh", "-c", "head -c 16384 /dev/zero | tr '\\0' y"]));
+    let (t, _) = put_wait(port, "Command:edge", "run", json!({"id": "e1", "args": []}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().len() == 16384 && !t.contains("full output"), "{}", t.len());
     assert!(terminate(&mut run));
 }

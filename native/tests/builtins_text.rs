@@ -136,3 +136,12 @@ fn json_of_text_that_is_not_json_is_none_so_a_default_can_follow() {
     assert_eq!(ev("json(body)", json!({"body": ""})), json!(null));
     assert_eq!(ev("json(body)", json!({"body": null})), json!(null));
 }
+
+#[test]
+fn tail_is_the_mirror_of_head() {
+    let e = json!({});
+    assert_eq!(ev("tail('abcdef', 3)", e.clone()), json!("def"));
+    assert_eq!(ev("tail('ab', 3)", e.clone()), json!("ab"));
+    assert_eq!(ev("tail('héllo', 2)", e.clone()), json!("lo"));
+    assert_eq!(ev("tail([1, 2, 3], 2)", e), json!([2, 3]));
+}

@@ -4,8 +4,10 @@ PACK proc 1
 -- Run it with a write; the run never blocks the field, and its receipt lands when it ends:
 --   Command.run = {id, args}  -> run_result {id, status, rc, head, stdout, stderr}, run_rc
 --   Command.stop = {id}       -> the running child is killed; stop_result
+-- `output` is the whole stdout and `errors` the whole stderr of the last run (the reply of entity_write carries only the first and last 8 KB of each).
 -- Secrets are named in env_from (read when the command starts), never stored. No time limit, no output cap.
 -- Entity scripts and peers never run an effect.
 
 Command.ok getter: this.run_rc == 0 if this.run_rc != None else None
 Command.output getter: prop(this.run_result, 'stdout') if this.run_result else None
+Command.errors getter: prop(this.run_result, 'stderr') if this.run_result else None
