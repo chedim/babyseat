@@ -57,9 +57,14 @@ pub struct Shared {
     /// effects run by the drivers (fs, proc): (entity, verb, receipt), taken by the engine's next round
     receipts: Vec<(String, String, J)>,
     effects_running: usize,
+    /// the effects started and not yet taken by the engine's round, by their entity (a receipt is taken: the entity is no longer in flight); what the engine's
+    /// garbage collector reads as "a running effect holds the entity" (`Store::holds`)
+    in_flight: HashMap<String, usize>,
     /// the cap on the effect workers of the slow drivers (Command, File, Fetch): the boot fact `effect_workers` (0 = the default, 4), and how many run now
     workers_cap: usize,
     workers_active: usize,
+    /// the boot fact `command_timeout_s` (0 = the default, drivers::DEFAULT_COMMAND_TIMEOUT_S): the limit of a Command run that states no `timeout_s`
+    command_timeout_s: f64,
     /// the HTTP door (http.rs): requests that arrived (taken by the engine's next round as entities), the connections held
     /// open until a pack answers, and the listeners' stop flags by their entity
     inbound: Vec<(String, String, serde_json::Map<String, J>)>,
@@ -236,7 +241,7 @@ impl Store {
     /// An effect (a driver's verb, written by a person, the model or a setter): run on its own thread; its receipt
     /// lands on the entity as `<verb>_result` at the engine's next round. Never under the engine's lock.
     pub fn effect(&self, eid: &str, verb: &str, job: Box<dyn FnOnce(&Arc<(Mutex<Shared>, Condvar)>, &str) -> J + Send>) {
-        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).effects_running += 1;
+        { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.effects_running += 1; *g.in_flight.entry(eid.to_string()).or_insert(0) += 1; }
         let (sh, eid, verb) = (self.sh.clone(), eid.to_string(), verb.to_string());
         std::thread::Builder::new().name("membrane-effect".into()).spawn(move || {
             let rec = job(&sh, &eid);
@@ -251,7 +256,7 @@ impl Store {
     /// An effect of a SLOW driver (Command, File, Fetch): the same as `effect`, but its job starts only when fewer than the cap of such jobs are
     /// running (the boot fact `effect_workers`, default 4): the thread waits for a slot. A held door request or an open stream is no worker.
     pub fn effect_limited(&self, eid: &str, verb: &str, job: Box<dyn FnOnce(&Arc<(Mutex<Shared>, Condvar)>, &str) -> J + Send>) {
-        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).effects_running += 1;
+        { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.effects_running += 1; *g.in_flight.entry(eid.to_string()).or_insert(0) += 1; }
         let (sh, eid, verb) = (self.sh.clone(), eid.to_string(), verb.to_string());
         std::thread::Builder::new().name("membrane-effect".into()).spawn(move || {
             {
@@ -268,6 +273,10 @@ impl Store {
             sh.1.notify_all();
         }).expect("a thread for an effect");
     }
+
+    /// The limit of a Command run that states no `timeout_s` (the boot fact `command_timeout_s`); 0 = the default.
+    pub fn set_command_timeout(&self, s: f64) { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).command_timeout_s = s; }
+    pub fn command_timeout(&self) -> f64 { let t = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).command_timeout_s; if t > 0.0 { t } else { crate::drivers::DEFAULT_COMMAND_TIMEOUT_S } }
 
     /// The cap on the slow drivers' workers (the boot fact `effect_workers`).
     pub fn set_effect_workers(&self, n: usize) { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.workers_cap = n; g.done += 0; self.sh.1.notify_all(); }
@@ -333,13 +342,29 @@ impl Store {
 
     /// The effects' receipts since the last round.
     pub fn take_receipts(&self) -> Vec<(String, String, J)> {
-        std::mem::take(&mut self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).receipts)
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        let r = std::mem::take(&mut g.receipts);
+        for (eid, _, _) in &r { if let Some(n) = g.in_flight.get_mut(eid) { *n -= 1; if *n == 0 { g.in_flight.remove(eid); } } }   // taken: no longer in flight
+        r
+    }
+
+    /// Does the driver side hold this entity (the garbage collector's in-flight rule)? An effect started on it whose receipt the engine has not taken, or the
+    /// listener the entity opened.
+    pub fn holds(&self, eid: &str) -> bool {
+        let g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.in_flight.contains_key(eid) || g.listeners.contains_key(eid)
+    }
+    /// Is the connection number held open: not answered yet, or an event stream not closed?
+    pub fn conn_held(&self, n: u64) -> bool {
+        let g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.conns.contains_key(&n) || g.streams.contains_key(&n)
     }
 
     /// Stop a running command (Command.stop): its child is killed; its run's receipt says so.
     pub fn kill(&self, eid: &str) -> bool {
         let c = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).children.get(eid).cloned();
-        match c { Some(c) => c.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| ch.kill().is_ok()).unwrap_or(false), None => false }
+        // the child leads its own process group (drivers.rs): the whole tree dies at once
+        match c { Some(c) => c.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| { let r = unsafe { libc::kill(-(ch.id() as i32), libc::SIGKILL) } == 0; if !r { let _ = ch.kill(); } true }).unwrap_or(false), None => false }
     }
 
     fn finish(&self, k: &str, r: Result<Vec<J>, String>) -> Poll {

@@ -45,7 +45,7 @@ Command.shout getter: lower(this.cmd)
 - Rule B: a pack WRITES only entities of the classes it owns or imports (or of a class no pack owns yet). `entity_write` itself is
   privileged: your writes through it reach and create any class, including one your own pack owns. A pack you load is not privileged;
   grant it with `entity_write {spec: "Pack:lamps", prop: "privileged", value: true}` (only a privileged writer grants).
-- A pack's setter starts a command with one write, the `cmd` in the run value: `Command:x.run = {id: 'b1', cmd: ['make', 'all']}` (the write makes the Command and keeps the `cmd`); the receipt is `Command:x.run_result` (`Help:c1f`):
+- A pack's setter starts a command with one write, the `cmd` in the run value: `Command:x.run = {id: 'b1', cmd: ['make', 'all']}` (the write makes the Command and keeps the `cmd`; add `timeout_s: N`, your estimate in seconds of the longest it may run, default 120: past it the command is killed and its `output` reads as a reasoned null); the receipt is `Command:x.run_result` (`Help:c1f`):
 
 ```c1f-run
 -- write Command:pk.run = {"id": "k1", "cmd": ["echo", "from a pack"]}
@@ -135,6 +135,16 @@ VIRTUAL Command
 
 Every entity also has `updated`, read-only and provided by the VM: the time of its last write (seconds since 1970), stamped with the write; reading it causes no recompute, writing it is refused:
 `Note:a.updated`.
+
+### How long a virtual entity lives
+
+A `VIRTUAL` entity is collected as soon as NOTHING HOLDS IT: at the end of the round, no write retires it. What holds it:
+
+- its PARENT: `Request:7:body` lives while `Request:7` does (a colon-path child lives with its parent entity);
+- a REFERENCE: a live entity has it as a value, which is stored as `{"$ref": "<id>"}`. Write an entity as a value (`this.keep = Req:made`, or inside a list or dict) and it holds; write the value away and it is released. A stored entity is always live; two virtual entities that only hold each other are collected together;
+- an IN-FLIGHT driver: a request's open connection (until its reply is sent, an event stream until `end`), an effect running on it, a command's chunks while the command runs.
+
+A plain read holds nothing (`prop(x, 'k')`, a getter that peeks, an entity literal). A read of a collected entity is a null with a reason, `collected: nothing held it`. Only virtual classes are collected: a stored entity keeps its `retire` write, and a stored one that is not touched for a while may leave the engine by `unload = true` (docs/cliffvm.md).
 
 ## Habits that keep packs working
 

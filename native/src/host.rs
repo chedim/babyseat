@@ -58,6 +58,13 @@ pub fn class_of_eid(eid: &str) -> String {
     tail.split(':').next().unwrap_or("").to_string()
 }
 
+/// The writer of the memory sensor's writes (`Host::sense_memory`): an outside writer by its `host:` stamp, but a reading of THIS process is not history, so
+/// the sensor's writes are not journalled (a replay never sees them, and never repeats an unload they caused).
+pub const SENSOR_WRITER: &str = "host:sensor:mem";
+pub const MEM_ENTITY: &str = "Mem:host";
+/// The sensor writes the resident size again only when it moved by this much (1 MiB), so an idle seat is not rewriting a row every second (a threshold, flagged).
+pub const MEM_STEP_BYTES: u64 = 1 << 20;
+
 /// How many lazy rows the warm boot loads in the background by default (the boot fact `warm_rows`; a threshold, flagged for the operator).
 pub const DEFAULT_WARM_ROWS: usize = 1000;
 /// One slice of the warm boot loads at most this many rows and stops after this long (flagged for the operator: the loop must answer the door between slices).
@@ -170,7 +177,16 @@ pub struct Host {
     /// the warm boot: how many lazy rows to load in the background (newest `updated` first) and the ones still waiting (docs/cliffvm.md)
     warm_rows: std::sync::atomic::AtomicUsize,
     warm: Mutex<std::collections::VecDeque<String>>,
+    /// the memory sensor (`sense_memory`): its config (the boot facts), the injected reading (tests), the last values written
+    memory: Mutex<MemoryConfig>,
+    rss_reading: Mutex<Option<RssReading>>,
 }
+
+/// The memory sensor's configuration: the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard` (none of them has a default number).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MemoryConfig { pub budget_mb: Option<u64>, pub soft: Option<f64>, pub hard: Option<f64> }
+/// A resident-size reading in bytes (None: unreadable): the real one is `process_rss`; a test injects its own.
+pub type RssReading = Box<dyn Fn() -> Option<u64> + Send + Sync>;
 
 struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool, updated: f64 }
 
@@ -183,6 +199,42 @@ pub struct Txn<'a> { h: &'a Host }
 impl Drop for Txn<'_> { fn drop(&mut self) { self.h.end_txn(); } }
 
 fn dbe(e: rusqlite::Error) -> String { e.to_string() }
+fn props_of(v: J) -> Map<String, J> { v.as_object().cloned().unwrap_or_default() }
+
+/// The ids a live VIRTUAL entity holds as `{"$ref": id}` values (anywhere in its properties).
+fn held_by_virtual(core: &Core, f: &Fields) -> std::collections::HashSet<String> {
+    fn walk(v: &J, out: &mut std::collections::HashSet<String>) {
+        match v {
+            J::Object(m) => { if let Some(J::String(r)) = m.get("$ref") { out.insert(r.clone()); } for x in m.values() { walk(x, out); } }
+            J::Array(a) => for x in a { walk(x, out); },
+            _ => {}
+        }
+    }
+    let mut out = std::collections::HashSet::new();
+    for e in core.docs.values().filter(|e| f.storage_of(&e.cls) == crate::fields::Storage::Virtual) { for v in e.props.values() { walk(v, &mut out); } }
+    out
+}
+
+/// The resident set size of this process in bytes: `/proc/self/statm` on Linux, `task_info(MACH_TASK_BASIC_INFO)` on macOS; None elsewhere or when unreadable.
+#[cfg(target_os = "linux")]
+pub fn process_rss() -> Option<u64> {
+    let t = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let pages: u64 = t.split_whitespace().nth(1)?.parse().ok()?;
+    let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    (page > 0).then(|| pages * page as u64)
+}
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+pub fn process_rss() -> Option<u64> {
+    unsafe {
+        let mut info: libc::mach_task_basic_info = std::mem::zeroed();
+        let mut count = (std::mem::size_of::<libc::mach_task_basic_info>() / std::mem::size_of::<libc::natural_t>()) as libc::mach_msg_type_number_t;
+        let rc = libc::task_info(libc::mach_task_self(), libc::MACH_TASK_BASIC_INFO as libc::task_flavor_t, &mut info as *mut _ as libc::task_info_t, &mut count);
+        (rc == 0).then(|| info.resident_size)
+    }
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn process_rss() -> Option<u64> { None }
 
 /// The shape of `c_field` (docs/cliffvm.md, "Storage modes"): next to `k` and `body`, the entity's own class (`cls`, indexed: the restore loads the RESIDENT classes by it)
 /// and `updated`, the epoch time of its last write (indexed: the warm boot loads the newest first). A store of an older shape gets the columns added; `cls` is filled
@@ -238,9 +290,10 @@ impl Host {
             core.store = Some(st);
         }
         let mut fields = Fields::goalgraph();
+        core.storage = fields.storage_handle();   // the core reads the classes' modes too (`.pinned`)
         fields.inbound_by_host = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default() })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default() })
     }
 
     /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
@@ -303,7 +356,7 @@ impl Host {
     // ---- hearing -----------------------------------------------------------------------------------------------------
     /// An outside write: journalled (the engine can not re-derive it), stored, heard by the engine, and what the engine made of it applied.
     pub fn write(&self, eid: &str, prop: &str, new: J, writer: &str) {
-        if prop == crate::vm::UPDATED { return; }   // `updated` is the VM's own, read-only: refused, not journalled
+        if prop == crate::vm::UPDATED || prop == crate::vm::PINNED { return; }   // the VM's own, read-only: refused, not journalled
         let ts = self.now();
         self.journal_push(Line::Write { ts, writer: writer.into(), eid: eid.into(), prop: prop.into(), new: new.clone() });
         self.inject_write(ts, eid, prop, new, writer, writer);
@@ -399,6 +452,7 @@ impl Host {
 
     /// The clock input: armed waits come due.
     pub fn tick(&self) {
+        self.sense_memory();
         {
             let _t = self.txn();
             let now = self.now();
@@ -473,12 +527,39 @@ impl Host {
             self.exec(&db, &format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
         }
         let any = any || !retired.is_empty();
+        // `unload = true` (any writer): the entity leaves the engine, its row kept; a pinned one is refused with a receipt. Not journalled, changes no value.
+        let asked = std::mem::take(&mut self.eng().1.unload_asked);
+        let any = any || !asked.is_empty();
+        if !asked.is_empty() { self.unload_entities(&asked, ts); }
+        // THE COLLECTOR (docs/cliffvm.md, "Garbage collection"): the virtual entities nothing holds any more leave the engine at the end of the round. Removing them
+        // is a round of its own (what read them recalculates), which drains again.
+        let dead = { let g = self.eng(); g.0.gc_dead() };
+        let any = any || !dead.is_empty();
+        for d in &dead { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, d, ts, seq); core.note_collected(d); }
+        if !dead.is_empty() { self.drain_apply(); }
         // THE REACTIONS of a model's write (docs/cliffvm.md, "The return entity"): each door write is a Request `mc_done` by the setter `mcp-write`; the derived
         // writes of the same round are what it caused. The list goes back on that Request as `reactions` (a derived write, never journalled; a replay drains the same way).
         let any = any || !reactions.is_empty();
         for (req, list) in reactions { self.inject_write(ts, &req, "reactions", list, "reactions", &stamp_writer("reactions")); }
         if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); self.load_new_residents(); return true; }
         any
+    }
+
+    /// Take the asked entities out of the engine, or answer each pinned one with `unload_result` = {status: refused, reason}. Pins: the core's (`Core::pinned_reason`:
+    /// virtual or resident class, a running effect) and what a live VIRTUAL entity holds by `$ref` (a Request that is still being answered holds what it points at). The
+    /// rows are written first: the store is written through, but a reload in this very transaction must read the row as it is.
+    fn unload_entities(&self, asked: &[String], ts: f64) {
+        { let db = self.db.lock().unwrap_or_else(|e| e.into_inner()); self.flush(&db); }
+        let held: std::collections::HashSet<String> = { let g = self.eng(); let (core, f, _) = &*g; held_by_virtual(core, f) };
+        for eid in asked {
+            let reason = { let g = self.eng(); let (core, _, _) = &*g;
+                if !core.docs.contains_key(eid) { continue; }
+                core.pinned_reason(eid).or_else(|| held.contains(eid).then(|| "pinned: held by a live virtual entity's $ref".to_string())) };
+            match reason {
+                None => { let mut g = self.eng(); let (core, f, _) = &mut *g; f.unload(core, eid); }
+                Some(r) => self.inject_write(ts, eid, "unload_result", json!({"status": "refused", "reason": r}), "unload", &stamp_writer("unload")),
+            }
+        }
     }
 
     /// For every `mc_done` the door's `mcp-write` setter wrote in this batch: (the Request, the list of what else the engine wrote in the batch: setters' and
@@ -642,6 +723,43 @@ impl Host {
             }
         }
         *self.warm.lock().unwrap_or_else(|e| e.into_inner()) = q;
+    }
+
+    /// The host holds this entity itself (the collector never takes it): the boot's own state, `Boot:seat`, and the boot plan's steps. Call it BEFORE the entity is born.
+    pub fn hold(&self, eid: &str) { self.eng().0.host_held.insert(eid.to_string()); }
+
+    /// The memory sensor's configuration (the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`; none has a default number).
+    pub fn set_memory(&self, c: MemoryConfig) { *self.memory.lock().unwrap_or_else(|e| e.into_inner()) = c; }
+    /// A test's own resident-size reading, consulted by the sensor in place of the process's (`cli.rs` reads it from the env var `MEMBRANE_TEST_RSS`).
+    pub fn set_rss_reading(&self, r: RssReading) { *self.rss_reading.lock().unwrap_or_else(|e| e.into_inner()) = Some(r); }
+
+    /// THE MEMORY SENSOR (docs/cliffvm.md, "Unload"): at every tick the resident size is read and written on `Mem:host` (born once): `rss` (bytes; written again only
+    /// when it moved by `MEM_STEP_BYTES`), `budget` (bytes, only when `memory_budget_mb` is set) and `level`. The level is `ok` with no budget; else `hard` at or over
+    /// `unload_hard` x budget (the budget itself when unset), `soft` at or over `unload_soft` x budget (no soft level when unset), else `ok`. `level` is written on a change
+    /// AND at every tick while it is not `ok`, so the policy (a setter on it, c1f) gets one pass per tick for as long as the pressure lasts. An outside write like the clock's
+    /// tick, stamped `host:sensor:mem` and never journalled. It runs only when a pack declares the class `Mem` (the barest app's `unload.c1f`).
+    pub fn sense_memory(&self) {
+        if !self.eng().1.owns_class("Mem") { return; }   // no pack declares the class: nothing listens, and a quiet host writes nothing
+        let cfg = self.memory.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let rss = match &*self.rss_reading.lock().unwrap_or_else(|e| e.into_inner()) { Some(f) => f(), None => process_rss() };
+        let Some(rss) = rss else { return };
+        let budget = cfg.budget_mb.map(|m| m << 20);
+        let level = match budget {
+            None => "ok",
+            Some(b) => {
+                let b = b as f64;
+                if rss as f64 >= b * cfg.hard.unwrap_or(1.0) { "hard" } else if cfg.soft.map_or(false, |s| rss as f64 >= b * s) { "soft" } else { "ok" }
+            }
+        };
+        let ts = self.now();
+        let known = self.eng().0.docs.contains_key(MEM_ENTITY);
+        if !known { self.inject_born(ts, MEM_ENTITY, "Mem", props_of(json!({"name": "this process's memory"})), SENSOR_WRITER, SENSOR_WRITER); }
+        let was_rss = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("rss").and_then(|v| v.as_u64()));
+        let was_level = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("level").and_then(|v| v.as_str().map(String::from)));
+        let was_budget = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("budget").and_then(|v| v.as_u64()));
+        if was_rss.map_or(true, |w| w.abs_diff(rss) >= MEM_STEP_BYTES) { self.inject_write(ts, MEM_ENTITY, "rss", json!(rss), SENSOR_WRITER, SENSOR_WRITER); }
+        if let Some(b) = budget { if was_budget != Some(b) { self.inject_write(ts, MEM_ENTITY, "budget", json!(b), SENSOR_WRITER, SENSOR_WRITER); } }
+        if was_level.as_deref() != Some(level) || level != "ok" { self.inject_write(ts, MEM_ENTITY, "level", json!(level), SENSOR_WRITER, SENSOR_WRITER); }
     }
 
     /// The boot fact `warm_rows`: how many lazy rows load in the background after start (newest `updated` first). Set before `load_stored_entities`.
@@ -817,6 +935,7 @@ impl Host {
     /// One property of a row, with the writer that wrote it; a `null` removes it (as a getter's none leaves it absent). A write that changes
     /// nothing (the same value, the same writer or another derived one) leaves the store alone.
     fn store_prop(&self, eid: &str, cls: Option<&str>, prop: &str, new: &J, stamp: &str) {
+        if prop == "unload" { return; }   // the primitive is a request, never a property: the row (and `updated`) stay as they were, so a reload is equal
         let _t = self.txn();
         let known = self.eng().0.docs.get(eid).map(|e| e.cls.clone());
         let ts = self.stamp_ts();
@@ -892,6 +1011,7 @@ impl Host {
         self.eng().0.docs.iter().map(|(k, e)| (k.clone(), json!({"cls": e.cls, "props": e.props}))).collect()
     }
     /// The cap on the slow drivers' workers (Command, File, Fetch), the boot fact `effect_workers`.
+    pub fn set_command_timeout(&self, s: f64) { if let Some(st) = &self.eng().0.store { st.set_command_timeout(s); } }
     pub fn set_effect_workers(&self, n: usize) { if let Some(st) = &self.eng().0.store { st.set_effect_workers(n); } }
     pub fn waiter(&self) -> Option<crate::store::Waiter> { self.waiter.clone() }
 }
@@ -899,6 +1019,7 @@ impl Host {
 /// The seat tells the field it has started (fields_live.boot_started): the facts first, as properties of `Boot:seat` and then as the
 /// whole dict `facts`, the announcement last, so a setter on `started` finds them. All outside writes (`host:boot`).
 pub fn boot_started(h: &Host, facts: &Map<String, J>, announce: bool) {
+    h.hold("Boot:seat");   // the seat's own state: the boot facts live as long as the run
     if !h.snapshot().contains_key("Boot:seat") {
         let mut p = Map::new();
         p.insert("name".into(), json!("this seat's start"));

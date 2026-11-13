@@ -60,7 +60,7 @@ Request.mc_write on-setter mcp-write:
 -- ---- what a write returns (docs/cliffvm.md, "The return entity") -------------------------------------------------------------------------------
 -- A write that starts an effect (a driver's verb) has a RECEIPT: the property `<prop>_result` of the same entity. The reply carries the receipt when it is
 -- there, the REACTIONS (what the engine wrote in the round of this write: `reactions`, told back by the host as a derived write on this Request), and the
--- (a transient Return entity carries the reply and is retired once it is delivered). `wait` (seconds, optional) holds the reply until the receipt or that time; with none the
+-- (a transient Return entity carries the reply and is collected once it is delivered). `wait` (seconds, optional) holds the reply until the receipt or that time; with none the
 -- reply is made at once and a receipt that is not there says where to read it.
 Request.mc_w_wait getter: num(prop(this.mc_args, 'wait')) or 0
 Request.mc_w_cls getter: (words(replace(replace(this.mc_w_id, 'membrane::', ''), ':', ' ')) or [''])[0]
@@ -76,20 +76,16 @@ Request.mc_w_ready getter:
   ELSE WHEN this.mc_w_wait <= 0: True
   ELSE: clock - this.mc_w_t0 >= this.mc_w_wait
 Request.mc_w_n getter: replace(this.eid, 'Request:', '')
-Request.mc_w_ret getter: 'Return:call:' + this.mc_w_n
 Request.mc_w_ready on-setter mcp-return:
   WHEN this.mc_w_ready == True:
     Return:call[this.mc_w_n] = Return(tool: 'entity_write', target: this.mc_w_id, written: this.mc_w_prop, result_prop: this.mc_w_rprop if this.mc_w_effect else None, reactions: this.reactions)
-    this.mc_w_returned = True
+    this.mc_w_returned = Return:call[this.mc_w_n]
 Return.kind getter: 'return'
 Return.receipt getter: prop(this.target, this.result_prop) if this.result_prop != None else None
 Return.state getter: 'pending' if this.result_prop != None and this.receipt == None else 'done'
--- THE RETURN ENTITY IS TRANSIENT (operator, 2026-11-13): it carries the reply and is retired as soon as the reply is delivered (the driver's `respond`
--- receipt landed), like a request the collector retires at once. The receipt stays where it always lived, `<prop>_result` on the target.
-Request.mc_w_sent getter: this.mc_w_returned == True and this.respond_result != None
-Request.mc_w_sent on-setter mcp-return-retire:
-  WHEN this.mc_w_sent == True:
-    (this.mc_w_ret).retire = True
+-- THE RETURN ENTITY IS TRANSIENT (operator, 2026-11-13): it carries the reply and is never retired by a write: the Request HOLDS it (`mc_w_returned` is a reference to it, a
+-- `$ref` value), and a Request is held by its open connection until the reply is delivered, so both are collected together (docs/cliffvm.md, "Garbage collection"). The
+-- receipt stays where it always lived, `<prop>_result` on the target.
 Request.mc_w_head getter: 'wrote ' + this.mc_w_id + '.' + this.mc_w_prop
 -- THE REPLY'S SIZE (operator, 2026-11-13: the Claude CLI refuses a tool result over its MCP limit and the model then gets nothing): the reply carries the first
 -- and the last `mc_w_cap` characters (8192, about 8 KB) of each stream, with its total size in bytes (`stdout_bytes`); a stream of at most twice the cap comes whole
@@ -110,13 +106,13 @@ Request.mc_w_perr getter:
   ELSE: {'stderr_head': head(this.mc_w_se, this.mc_w_cap), 'stderr_tail': tail(this.mc_w_se, this.mc_w_cap)}
 Request.mc_w_rcpt getter:
   WHEN not this.mc_w_effect: []
-  ELSE WHEN this.mc_w_new != None: concat(concat(concat(concat(concat(['receipt: ' + str({'id': prop(this.mc_w_new, 'id'), 'status': prop(this.mc_w_new, 'status'), 'rc': prop(this.mc_w_new, 'rc'), 'ok': prop(this.mc_w_id, 'ok'), 'started': prop(this.mc_w_new, 'started'), 'finished': prop(this.mc_w_new, 'finished'), 'ms': prop(this.mc_w_new, 'ms'), 'stdout_bytes': prop(this.mc_w_new, 'stdout_bytes'), 'stderr_bytes': prop(this.mc_w_new, 'stderr_bytes')})], ['stdout: ' + str(x) for x in [this.mc_w_pout] if x != None]), ['stderr: ' + str(x) for x in [this.mc_w_perr] if x != None]), ['full output: read ' + this.mc_w_id + '.output' for x in [this.mc_w_pout] if x != None and prop(x, 'stdout_head') != None]), ['full stderr: read ' + this.mc_w_id + '.errors' for x in [this.mc_w_perr] if x != None and prop(x, 'stderr_head') != None]), ['error: ' + str(prop(this.mc_w_new, 'head')) for x in [this.mc_w_new] if prop(x, 'status') == 'error' and prop(x, 'stdout_bytes') == None])
-  ELSE: ['pending: id: ' + str(prop(prop(this.mc_args, 'value'), 'id')) + ', status: running, started: ' + str(prop(prop(this.mc_w_id, 'running'), 'started') or this.mc_w_t0) + '; read ' + this.mc_w_id + '.' + this.mc_w_rprop + ' later']
+  ELSE WHEN this.mc_w_new != None: concat(concat(concat(concat(concat(concat(['receipt: ' + str({'id': prop(this.mc_w_new, 'id'), 'status': prop(this.mc_w_new, 'status'), 'rc': prop(this.mc_w_new, 'rc'), 'ok': prop(this.mc_w_new, 'status') == 'ok', 'started': prop(this.mc_w_new, 'started'), 'finished': prop(this.mc_w_new, 'finished'), 'ms': prop(this.mc_w_new, 'ms'), 'timeout_s': prop(this.mc_w_new, 'timeout_s'), 'killed': prop(this.mc_w_new, 'killed'), 'stdout_bytes': prop(this.mc_w_new, 'stdout_bytes'), 'stderr_bytes': prop(this.mc_w_new, 'stderr_bytes')})], ['stdout: ' + str(x) for x in [this.mc_w_pout] if x != None]), ['stderr: ' + str(x) for x in [this.mc_w_perr] if x != None]), ['full output: read ' + this.mc_w_id + '.output' for x in [this.mc_w_pout] if x != None and prop(x, 'stdout_head') != None]), ['full stderr: read ' + this.mc_w_id + '.errors' for x in [this.mc_w_perr] if x != None and prop(x, 'stderr_head') != None]), ['error: ' + str(prop(this.mc_w_new, 'head')) for x in [this.mc_w_new] if prop(x, 'status') == 'error' and prop(x, 'stdout_bytes') == None]), ['timeout: ' + str(this.mc_w_id) + ' timed out after ' + str(prop(x, 'timeout_s')) + ' s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}; the partial output is above and in ' + str(this.mc_w_id) + '.partial_output' for x in [this.mc_w_new] if prop(x, 'status') == 'timeout'])
+  ELSE: ['pending: id: ' + str(prop(prop(this.mc_args, 'value'), 'id')) + ', status: running, started: ' + str(prop(prop(this.mc_w_id, 'running'), 'started') or this.mc_w_t0) + ', timeout_s: ' + str(prop(prop(this.mc_w_id, 'running'), 'timeout_s') or prop(this.mc_w_id, 'timeout_default')) + ', left: ' + str((prop(prop(this.mc_w_id, 'running'), 'timeout_s') or prop(this.mc_w_id, 'timeout_default')) + prop(prop(this.mc_w_id, 'running'), 'started') - this.mc_w_t0) + ' s; read ' + this.mc_w_id + '.' + this.mc_w_rprop + ' later']
 Request.mc_w_text getter:
   WHEN this.mc_write == None: None
   ELSE WHEN this.mc_done != True: None
   ELSE WHEN this.refused != None: 'refused: ' + str(this.refused)
-  ELSE WHEN this.mc_w_returned != True: None
+  ELSE WHEN this.mc_w_returned == None: None
   ELSE: join(concat(concat([this.mc_w_head], this.mc_w_rcpt), ['reactions: ' + str(this.reactions)]), '\n')
 
 -- ---- run_cliff: a clifflet, one call (docs/cliffvm.md, "run_cliff") ------------------------------------------------------------------------------

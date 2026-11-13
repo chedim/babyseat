@@ -222,9 +222,9 @@
       "ChatMessage.took": "Any",
       "ChatMessage.tools_idlist": "Text",
       "ChatMessage.tools_names": "List(Text)",
+      "ChatMessage.turn_timeout_s": "Any",
       "Chunk.said": "Text",
       "Chunk.sevs": "List(Any)",
-      "Chunk.stale": "Bool",
       "Chunk.started": "Text"
     },
     "writes": {
@@ -239,7 +239,6 @@
       "Chat.tool_ids": "Any",
       "Chat.tools_run": "Any",
       "Chat.usage": "Any",
-      "Chunk.retire": "Bool",
       "Command.run": "Dict",
       "Command.run_result": "Dict"
     },
@@ -712,11 +711,9 @@
       "Request.mc_w_rcpt": "List(Text)",
       "Request.mc_w_ready": "Bool",
       "Request.mc_w_rec": "Any",
-      "Request.mc_w_ret": "Text",
       "Request.mc_w_rprop": "Text",
       "Request.mc_w_se": "Text",
       "Request.mc_w_seb": "Any",
-      "Request.mc_w_sent": "Bool",
       "Request.mc_w_so": "Text",
       "Request.mc_w_sob": "Any",
       "Request.mc_w_spec": "Text",
@@ -741,7 +738,7 @@
       "Request.cl_loading": "Bool",
       "Request.mc_done": "Bool",
       "Request.mc_w_old": "Any",
-      "Request.mc_w_returned": "Bool",
+      "Request.mc_w_returned": "Entity(Return)",
       "Request.mc_w_t0": "Num"
     },
     "findings": [],
@@ -1055,7 +1052,13 @@
       "Command.errors": "Any",
       "Command.ok": "Bool?",
       "Command.output": "Any",
-      "Command.status": "Any"
+      "Command.partial_errors": "Any",
+      "Command.partial_output": "Any",
+      "Command.rc": "Any",
+      "Command.status": "Any",
+      "Command.timed_out": "Bool",
+      "Command.timeout_default": "Any",
+      "Command.timeout_why": "Text"
     },
     "writes": {},
     "findings": [],

@@ -107,7 +107,31 @@
   },
   "request_keep_s": {
    "wired": false,
-   "why": "the barest seat's request collector (membrane/apps/barest.c1f/collector.c1f): seconds an ANSWERED door request is kept before it is retired (deleted); default 600 in the pack (operator-approved 2026-11-13), 0 = retired as soon as it is answered; told by `--fact request_keep_s=<n>`"
+   "why": "ACCEPTED AND IGNORED since the garbage collection of virtual entities (docs/cliffvm.md): a door request is collected by the engine as soon as nothing holds it, nothing is kept for a while; the fact stays so a launch line that passes it does not break"
+  },
+  "memory_budget_mb": {
+   "wired": false,
+   "why": "the memory budget of the seat in MB (native/src/host.rs `sense_memory`; NO default): the host's sensor writes Mem:host {rss, budget, level} at every tick; unset = the level is always ok and nothing is unloaded; told by `--fact memory_budget_mb=<n>`"
+  },
+  "unload_soft": {
+   "wired": false,
+   "why": "the soft line as a fraction of memory_budget_mb (NO default): the level is `soft` from this fraction; unset = there is no soft level (below the hard line is ok); told by `--fact unload_soft=<f>`"
+  },
+  "unload_hard": {
+   "wired": false,
+   "why": "the hard line as a fraction of memory_budget_mb (NO number of its own): the level is `hard` from this fraction; unset = the budget itself (1.0); told by `--fact unload_hard=<f>`"
+  },
+  "unload_batch": {
+   "wired": false,
+   "why": "how many of the coldest entities one unload pass asks to leave the engine (membrane/apps/barest.c1f/unload.c1f; NO default): unset = no unloading; a pass runs at every tick while the level is not ok; told by `--fact unload_batch=<n>`"
+  },
+  "command_timeout_s": {
+   "wired": false,
+   "why": "the time limit in seconds of a Command run that states no `timeout_s` (native/src/drivers.rs; default 120, the operator-delegated sensible default 2026-11-13): past it the process group gets SIGTERM, 2 s later SIGKILL, and the receipt is status timeout; told by `--fact command_timeout_s=<n>`"
+  },
+  "chat_turn_timeout_s": {
+   "wired": false,
+   "why": "the time limit in seconds of one chat turn's `claude` run (chat_turn.c1f; default 21600 = 6 h in the pack, a threshold flagged for the operator): the turn is exempt from `command_timeout_s`; told by `--fact chat_turn_timeout_s=<n>`"
   },
   "effect_workers": {
    "wired": false,

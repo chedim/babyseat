@@ -13,6 +13,7 @@ VIRTUAL Chunk
 -- else the assistant's text in order. The run is the message's TURN entity (`...:turn`, packs/chat.c1f: state, started, ended); each tool the model ran and the answer are entities under the turn (ChatTool: name, input, result).
 -- Boot facts (cliffvm run ... --fact name=value):
 --   chat_claude_bin   the CLI's path. NO DEFAULT: without it a message is answered with an error that says so, and nothing is run.
+--   chat_turn_timeout_s the turn's time limit in seconds (a Command's timeout_s); default 21600 here (a threshold: flagged for the operator).
 --   chat_max_turns    the ceiling (the CLI's --max-turns); default 2048 here (a threshold: flagged for the operator).
 -- `env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is the CLI's own switch the Python rung set (no auto-memory keyed to the folder).
 -- (the two setters are on the class Chat, not on the kind ChatMessage: a setter reaches a kind only through an ISA parent ENTITY, `cls:chatmessage`,
@@ -26,6 +27,11 @@ ChatMessage.bin getter:
 ChatMessage.max_turns getter:
   WHEN this.over: None
   ELSE: ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
+-- THE TURN HAS ITS OWN LIMIT (#1143): the default of a Command run (`command_timeout_s`, 120 s) is for a model's shell commands, not for a chat turn (its ceiling is
+-- `chat_max_turns`); the turn's run states `timeout_s` = the boot fact `chat_turn_timeout_s`, default 21600 (6 h; a threshold flagged for the operator).
+ChatMessage.turn_timeout_s getter:
+  WHEN this.over: None
+  ELSE: ([b.chat_turn_timeout_s for b in instances('Boot') if b.chat_turn_timeout_s != None] or [21600])[0]
 ChatMessage.port getter:
   WHEN this.over: None
   ELSE: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
@@ -68,30 +74,22 @@ Chat.plan on-setter turn-start:
     membrane::Chat:message[this.mid]:turn.state = 'running'
     membrane::Chat:message[this.mid]:turn.started = clock
     membrane::Command:chat[this.mid] = Command(cmd: prop(this.plan, 'argv'))
-    membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': [], 'partial': True}
+    membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': [], 'partial': True, 'timeout_s': this.turn_timeout_s}
 
 -- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
 -- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});
--- they are outside births, journalled. The partial answer is the text deltas of the `stream_event` lines, the partial tools the tool_use blocks
--- they start. The finished turn replaces them (the receipt below is the answer) and retires the chunks.
+-- they are outside births of a VIRTUAL class (never stored, never journalled). The partial answer is the text deltas of the `stream_event` lines, the partial
+-- tools the tool_use blocks they start. The finished turn replaces them (the receipt below is the answer), and nothing retires the chunks: the engine collects
+-- them (docs/cliffvm.md, "Garbage collection"). While the command runs its in-flight effect holds them; the message holds them by REFERENCE (`chunk: c` below is a
+-- `$ref` value) until the turn is over, so a chunk born after the receipt (the two come from different threads) is held by nothing and collected at once.
 ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.mid
 -- each chunk parses its OWN lines once (getters cached on the chunk); the message only joins what the chunks hold, so a new chunk costs one parse, not a re-parse of everything before it
 Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if prop(e, 'type') == 'stream_event']
 Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
 Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
--- a message that is over (its answer is the receipt's) does not look at the chunks: it reads `over` alone, so a new chunk of ANOTHER turn does not recompute it (every chunk
--- birth used to recompute `chunks` of every loaded message, each scanning every chunk: the work per chunk grew with the number of finished messages, #1143)
-ChatMessage.chunks getter: [] if this.over else sort_by([{'n': c.n, 'said': c.said, 'started': c.started} for c in instances('Chunk') if c.cmd == this.cmd_eid], 'n')
+ChatMessage.chunks getter: sort_by([{'n': c.n, 'said': c.said, 'started': c.started, 'chunk': c} for c in instances('Chunk') if c.cmd == this.cmd_eid], 'n') if not this.over else []
 ChatMessage.partial_text getter: join([prop(k, 'said') for k in this.chunks], '')
 ChatMessage.partial_tools getter: words(join([prop(k, 'started') for k in this.chunks], ' '))
-
--- once the run has its answer the chunks are retired. A getter + setter on the CHUNK, not a line in `turn-finish`: the receipt can be heard BEFORE the last
--- chunk is born (the two come from different threads), and a late chunk is born with `stale` true, so it retires itself. A chunk reads only its own message's `over`:
--- the work per chunk does not grow with the chunks or the messages (the message used to list its chunks, a scan of all of them per message per birth).
-Chunk.stale getter: prop('membrane::Chat:message:' + str(this.id), 'over') == True
-Chunk.stale on-setter retire-chunk:
-  WHEN this.stale:
-    this.retire = True
 
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
 ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')

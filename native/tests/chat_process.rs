@@ -391,8 +391,6 @@ out({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hell
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Hello world", "num_turns": 1, "duration_ms": 99, "total_cost_usd": 0.5, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "output_tokens": 4}, "session_id": "p-1"})
 "#;
 
-fn collector() -> String { std::fs::read_to_string(format!("{}/../membrane/apps/barest.c1f/collector.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap() }
-
 /// An open event stream: the status line and headers, then the events as they arrive ((event name, json data)).
 struct Sse { r: BufReader<TcpStream>, head: String }
 impl Sse {
@@ -429,7 +427,7 @@ fn release(dir: &std::path::Path, prompt: &str, name: &str) { std::fs::write(dir
 
 #[test]
 fn the_event_stream_carries_the_answer_as_it_is_written_and_the_request_is_retired_after_it_closes() {
-    let (mut run, port, dir) = fake_seat_script("sse", &["--fact", "request_keep_s=0"], &[("collector.c1f", &collector())], PIECES);
+    let (mut run, port, dir) = fake_seat_script("sse", &[], &[], PIECES);
     let id = send(port, "stream me");
     let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
     let lh = sse.head.to_ascii_lowercase();
@@ -456,19 +454,17 @@ fn the_event_stream_carries_the_answer_as_it_is_written_and_the_request_is_retir
     }
     assert_eq!(texts, ["Hel", "Hello ", "Hello wor", "Hello world"]);
     assert!(tools_seen, "the tool the model started shows in the events");
-    // while the stream is open its Request is held (not retired, not dropped); request_keep_s=0 retires every other request at once
+    // while the stream is open its Request is HELD (a connection in flight); every other request is collected as soon as its reply is delivered
     let held = stream_requests(port);
     assert_eq!(held.len(), 1, "{held:?}");
-    let (b, _) = call(port, "entity_read", json!({"spec": held[0], "prop": "dropped"}));
-    assert!(!b.contains("true"), "an open stream is not dropped: {b}");
     // the end: the final event is the answer, `done`, then the connection closes
     release(&dir, "stream me", "end");
     let (n, last) = sse.next().expect("the final event");
     assert_eq!((n.as_str(), last["state"].clone(), last["response"].clone()), ("message", json!("done"), json!("Hello world")));
     assert!(sse.next().is_none(), "the stream closes after done");
     wait("the stream's Request retired", || stream_requests(port).is_empty().then_some(()));
-    // the turn's partial chunks are retired with the finish (the receipt is the answer)
-    wait("the chunks retired", || { let (n, _) = call(port, "entity_query", json!({"q": "kind:Chunk", "count": true})); (n == "0 entity(ies)").then_some(()) });
+    // the turn's partial chunks are collected once the turn is over (the receipt is the answer); a Chunk is VIRTUAL, so the live ones are listed with `instances`
+    wait("the chunks collected", || { let (n, _) = call(port, "run_cliff", json!({"code": "len(instances('Chunk'))"})); (n == "0").then_some(()) });
     // the poll route is still there
     assert_eq!(view(port, &id)["response"], "Hello world");
     assert!(terminate(&mut run));
@@ -493,7 +489,7 @@ fn an_unknown_message_has_no_stream_and_a_finished_one_streams_its_answer_and_cl
 
 #[test]
 fn a_client_that_leaves_early_leaves_nothing_stuck_and_the_turn_completes() {
-    let (mut run, port, dir) = fake_seat_script("sseleave", &["--fact", "request_keep_s=0"], &[("collector.c1f", &collector())], PIECES);
+    let (mut run, port, dir) = fake_seat_script("sseleave", &[], &[], PIECES);
     let id = send(port, "walk away");
     let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
     sse.next().expect("a first event");
@@ -733,6 +729,41 @@ fn the_return_entity_is_retired_as_soon_as_its_reply_is_delivered() {
     assert!(terminate(&mut run));
 }
 
+// ---- garbage collection of virtual entities (#1143): nothing retires a Request, nothing holds it once its reply is delivered ---------------------------------------
+fn live_requests(port: u16) -> usize { call(port, "run_cliff", json!({"code": "len(instances('Request'))"})).0.trim().parse().unwrap() }
+
+#[test]
+fn a_request_is_collected_right_after_its_reply_is_delivered_with_no_retire_write_and_polling_does_not_leak() {
+    let (mut run, port) = start("gcpage", MCP_PACKS, &[]);
+    let baseline = wait("a baseline", || { let n = live_requests(port); (n <= 2).then_some(n) });   // the measuring call itself is one
+    for _ in 0..200 { assert_eq!(http(port, "GET", "/global/health", "").0, 200); }
+    let after = wait("the Request entities back to the baseline", || { let n = live_requests(port); (n <= baseline).then_some(n) });
+    assert_eq!(after, baseline, "200 requests left nothing behind");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_old_collector_fact_is_accepted_and_does_nothing() {
+    let (mut run, port) = start("gckeep", MCP_PACKS, &["--fact", "request_keep_s=600"]);
+    for _ in 0..20 { assert_eq!(http(port, "GET", "/global/health", "").0, 200); }
+    wait("collected whatever request_keep_s says", || (live_requests(port) <= 2).then_some(()));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_held_wait_reply_holds_its_request_and_the_request_and_its_return_go_when_it_is_delivered() {
+    let (mut run, port) = start("gcwait", MCP_PACKS, &[]);
+    let baseline = wait("a baseline", || { let n = live_requests(port); (n <= 2).then_some(n) });
+    put(port, "Command:gw", "cmd", json!(["sh", "-c", "sleep 2; echo w"]));
+    let p2 = port;
+    let h = std::thread::spawn(move || put_wait(p2, "Command:gw", "run", json!({"id": "g1", "args": []}), 20.0).0);
+    let during = wait("the held call's Request is live", || { let n = live_requests(port); (n >= baseline + 1).then_some(n) });
+    assert!(during > baseline, "the held reply holds its Request: {during} vs {baseline}");
+    assert!(h.join().unwrap().contains("receipt: "));
+    wait("Request and Return collected after the reply", || (live_requests(port) <= baseline && call(port, "run_cliff", json!({"code": "len(instances('Return'))"})).0 == "0").then_some(()));
+    assert!(terminate(&mut run));
+}
+
 // ---- run_cliff: a clifflet in one call (#1143) ------------------------------------------------------------------------------------------------
 fn cliff(port: u16, code: &str) -> (String, bool) { call(port, "run_cliff", json!({"code": code})) }
 /// the entities that are not door requests (the collector retires those; this seat has none)
@@ -785,8 +816,8 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
     assert!(e && t.contains("budget exceeded"), "{t}");
     assert_eq!(call(port, "entity_read", json!({"spec": "Note:r3", "prop": "n"})).0, "3", "the seat is up");
-    // scratch entities and packs do not accumulate: the same count after 20 calls of every shape
-    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "1 entity(ies)").then_some(()));
+    // scratch entities and packs do not accumulate (the two Pack entities are the boot's grants: door_tools and unload): the same count after 20 calls of every shape
+    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "2 entity(ies)").then_some(()));
     cliff(port, "Note:acc.n = 0");
     wait("settled", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)").then_some(()));
     let before = count_all(port);
@@ -797,10 +828,10 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     let (mut a, mut b, mut c) = (String::new(), String::new(), String::new());
     while t0.elapsed() < Duration::from_secs(30) {
         (a, b, c) = (count_all(port), call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0, call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0);
-        if a == before && b == "0 entity(ies)" && c == "1 entity(ies)" { break; }
+        if a == before && b == "0 entity(ies)" && c == "2 entity(ies)" { break; }
         std::thread::sleep(Duration::from_millis(300));
     }
-    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "1 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
+    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "2 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
     assert!(terminate(&mut run));
 }
 
@@ -1305,9 +1336,132 @@ fn a_chunks_birth_costs_the_running_message_not_every_finished_one() {
     });
     let calls = |class: &str, prop: &str, kind: &str| rows.as_array().unwrap().iter().filter(|r| r["class"] == class && r["prop"] == prop && r["kind"] == kind).map(|r| r["calls"].as_u64().unwrap()).sum::<u64>();
     let births = calls("Chunk", "sevs", "getter");
-    let scans = calls("ChatMessage", "chunks", "getter") + calls("ChatMessage", "stale_chunks", "getter") + calls("Chunk", "stale", "getter");
+    let scans = calls("ChatMessage", "chunks", "getter");
     assert!(births >= 150, "chunks were born: {births}");
     // the running message reads the chunks once per birth (x2 for the two getters that look at them), the finished ones not at all: a bound well under the finished count x births
     assert!(scans <= 4 * births + 100, "{scans} chunk-getter runs for {births} chunk births: {rows}");
     assert!(terminate(&mut run));
+}
+// ---- a command's own time limit (#1143): the model's estimate `timeout_s`, a default, a kill of the whole process group, a reasoned null --------
+/// is a process whose command line contains `marker` alive?
+fn alive(marker: &str) -> bool { Command::new("pgrep").args(["-f", marker]).stdout(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) }
+fn receipt_of(t: &str) -> J { let l = t.lines().find(|l| l.starts_with("receipt: ")).unwrap_or_else(|| panic!("{t}")); serde_json::from_str(&l["receipt: ".len()..]).unwrap_or_else(|e| panic!("{e}: {l}")) }
+
+#[test]
+fn a_command_past_its_timeout_s_is_killed_with_its_whole_process_group_and_keeps_its_partial_output() {
+    let (mut run, port) = start("to1", MCP_PACKS, &[]);
+    let t0 = Instant::now();
+    let (t, e) = put_wait(port, "Command:t1", "run", json!({"id": "t1", "cmd": ["sh", "-c", "echo before; sleep 61.4271 & wait"], "timeout_s": 1}), 30.0);
+    assert!(t0.elapsed() < Duration::from_secs(12), "{:?}", t0.elapsed());
+    assert!(!e, "{t}");
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["killed"].clone(), r["timeout_s"].clone(), r["ok"].clone()), (json!("timeout"), json!(true), json!(1), json!(false)), "{t}");
+    assert_eq!(r["rc"], json!(124), "{t}");
+    assert!(t.contains("timed out after 1 s (killed)") && t.contains("timeout_s"), "the reply says what happened and how to retry: {t}");
+    assert!(reply_part(&t, "stdout").is_some_and(|s| s["stdout"].as_str().unwrap().contains("before")), "the partial output is kept: {t}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!alive("sleep 61.4271"), "the whole process group is dead");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timed_out_commands_result_props_are_reasoned_nulls_that_tell_the_remedy_and_the_partial_output_stays() {
+    let (mut run, port) = start("to2", MCP_PACKS, &[]);
+    put_wait(port, "Command:t2", "run", json!({"id": "t2", "cmd": ["sh", "-c", "echo partial-line; sleep 62.5"], "timeout_s": 1}), 30.0);
+    let want = "Command:t2 timed out after 1 s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}";
+    for p in ["output", "ok", "rc"] {
+        let (t, e) = cliff(port, &format!("prop('Command:t2', '{p}')"));
+        assert!(e && t == format!("error: {want}"), "{p}: {t}");
+    }
+    // a model-style getter over it keeps the null and the reason
+    let pack = "PACK shx 1\nSh.out getter: prop('Command:t2', 'output')\nSh.len getter: this.out + '!'\n";
+    put(port, "Pack:shx", "text", json!(pack));
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:shx", "prop": "state"})).0 == "loaded").then_some(()));
+    put(port, "Sh:a", "x", json!(1));
+    let (t, e) = cliff(port, "prop('Sh:a', 'len')");
+    assert!(e && t.contains(want), "the null passes through the getters: {t}");
+    let (p, _) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "partial_output"}));
+    assert!(p.contains("partial-line"), "{p}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_command_that_finishes_in_time_is_untouched_by_its_timeout() {
+    let (mut run, port) = start("to3", MCP_PACKS, &[]);
+    let (t, e) = put_wait(port, "Command:t3", "run", json!({"id": "t3", "cmd": ["sh", "-c", "echo fine; sleep 0.2"], "timeout_s": 30}), 30.0);
+    assert!(!e, "{t}");
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["rc"].clone(), r["ok"].clone(), r["timeout_s"].clone()), (json!("ok"), json!(0), json!(true), json!(30)), "{t}");
+    assert!(r["killed"].is_null() || r["killed"] == json!(false), "{t}");
+    assert_eq!(cliff(port, "prop('Command:t3', 'output')").0.trim(), "fine");
+    assert_eq!(cliff(port, "prop('Command:t3', 'ok')").0, "True");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timeout_s_of_zero_or_less_is_refused_and_nothing_runs() {
+    let (mut run, port) = start("to4", MCP_PACKS, &[]);
+    for (i, v) in [json!(0), json!(-5)].into_iter().enumerate() {
+        let (t, _) = put_wait(port, &format!("Command:z{i}"), "run", json!({"id": "z", "cmd": ["sh", "-c", "sleep 63.11"], "timeout_s": v}), 20.0);
+        assert!(t.contains("timeout_s") && t.contains("bigger") && t.contains("refused"), "{t}");
+    }
+    assert!(!alive("sleep 63.11"));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn without_a_timeout_s_the_boot_fact_command_timeout_s_applies_and_the_two_write_form_works() {
+    let (mut run, port) = start("to5", MCP_PACKS, &["--fact", "command_timeout_s=2"]);
+    let (t, _) = put_wait(port, "Command:d1", "run", json!({"id": "d1", "cmd": ["sleep", "64.2"]}), 30.0);
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["timeout_s"].clone()), (json!("timeout"), json!(2)), "{t}");
+    // the two-write form: timeout_s on the entity, then run
+    put(port, "Command:d2", "cmd", json!(["sleep", "64.3"]));
+    put(port, "Command:d2", "timeout_s", json!(1));
+    let (t, _) = put_wait(port, "Command:d2", "run", json!({"id": "d2", "args": []}), 30.0);
+    assert_eq!(receipt_of(&t)["timeout_s"], json!(1), "{t}");
+    assert!(!alive("sleep 64."));
+    // the default itself is 120 and shows in the receipt of a plain run, and in the pending reply with the time left
+    let (mut run2, port2) = start("to5b", MCP_PACKS, &[]);
+    let (t, _) = put(port2, "Command:d3", "run", json!({"id": "d3", "cmd": ["sleep", "2"]}));
+    assert!(t.contains("pending") && t.contains("timeout_s: 120") && t.contains("left"), "{t}");
+    assert!(terminate(&mut run2));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timed_out_command_frees_its_worker_slot_and_stop_kills_the_group_at_once() {
+    let (mut run, port) = start("to6", MCP_PACKS, &["--fact", "effect_workers=1"]);
+    let a = std::thread::spawn(move || put_wait(port, "Command:s1", "run", json!({"id": "s1", "cmd": ["sh", "-c", "sleep 65.3 & wait"], "timeout_s": 1}), 40.0).0);
+    std::thread::sleep(Duration::from_millis(300));
+    let t0 = Instant::now();
+    let (t, _) = put_wait(port, "Command:s2", "run", json!({"id": "s2", "cmd": ["echo", "after"]}), 40.0);
+    assert!(t.contains("after") && t0.elapsed() < Duration::from_secs(15), "{t} {:?}", t0.elapsed());
+    assert!(a.join().unwrap().contains("\"timeout\""));
+    // stop: the whole group, now
+    let b = std::thread::spawn(move || put_wait(port, "Command:s3", "run", json!({"id": "s3", "cmd": ["sh", "-c", "sleep 66.7 & wait"], "timeout_s": 300}), 40.0).0);
+    wait("running", || alive("sleep 66.7").then_some(()));
+    put(port, "Command:s3", "stop", json!({"id": "x"}));
+    b.join().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!alive("sleep 66.7") && !alive("sleep 65.3"));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_chat_turn_is_not_killed_by_the_default_and_a_timed_out_receipt_survives_a_restart_unchanged() {
+    let (mut run, port, dir) = fake_seat("to7", &["--fact", "command_timeout_s=1"]);
+    let id = send(port, "slow turn");
+    wait("running", || (view(port, &id)["state"] == "running").then_some(()));
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(finish(port, &dir, &id, "slow turn")["state"], "done", "the turn outlived the default of 1 s");
+    put_wait(port, "Command:r1", "run", json!({"id": "r1", "cmd": ["sleep", "67.9"], "timeout_s": 1}), 30.0);
+    let before = call(port, "entity_read", json!({"spec": "Command:r1", "prop": "run_result"})).0;
+    assert!(before.contains("timeout"), "{before}");
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "command_timeout_s=1"]);
+    let after = wait("the receipt after the restart", || { let t = call(port2, "entity_read", json!({"spec": "Command:r1", "prop": "run_result"})).0; t.contains("timeout").then_some(t) });
+    assert_eq!(before, after, "the receipt is the journalled write; a replay runs nothing");
+    assert!(!alive("sleep 67.9"));
+    assert!(terminate(&mut run2));
 }

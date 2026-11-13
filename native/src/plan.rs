@@ -45,6 +45,7 @@ pub fn load(e: &mut Engine, host: &dyn Host, pack: &str, steps: &[Step]) -> Resu
         p.insert("essential".into(), json!(s.essential));
         p.insert("background".into(), json!(s.background));
         p.insert("blocks".into(), json!(s.blocks.iter().map(|b| eid(b)).collect::<Vec<_>>()));
+        core.host_held.insert(eid(&s.name));   // the plan holds its steps for the run
         core.load(eid(&s.name), "Step".into(), p, None, 0.0);
     }
     let mut q = *seq;

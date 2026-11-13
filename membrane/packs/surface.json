@@ -89,7 +89,8 @@
     ],
     "members": 4,
     "writes": [
-      "Pack:door_tools.privileged"
+      "Pack:door_tools.privileged",
+      "Pack:unload.privileged"
     ],
     "claims": [],
     "boot_facts": [
@@ -159,6 +160,7 @@
     "boot_facts": [
       "chat_claude_bin",
       "chat_max_turns",
+      "chat_turn_timeout_s",
       "started"
     ],
     "virtual": [
@@ -394,7 +396,7 @@
       "Request",
       "Return"
     ],
-    "members": 86,
+    "members": 84,
     "writes": [
       "*.[]",
       "*.go",
@@ -630,10 +632,12 @@
     "classes": [
       "Command"
     ],
-    "members": 4,
+    "members": 10,
     "writes": [],
     "claims": [],
-    "boot_facts": [],
+    "boot_facts": [
+      "command_timeout_s"
+    ],
     "resident": [
       "Command"
     ]
