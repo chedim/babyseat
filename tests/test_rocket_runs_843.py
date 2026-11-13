@@ -1,64 +1,18 @@
-"""#843: rocket view -- finished runs feed the work graph; flights drift back; cap 12 in flight; click opens a run."""
+"""#843: the 3-D view's rocket flights drift back; click opens a run (the page code; the feed is gone from the Python work graph)."""
 import json
 import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
 
 os.environ.setdefault("MEMBRANE_STORE", "json")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from membrane import decision_map as DM  # noqa: E402
-from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
 UI = Path(__file__).resolve().parent.parent / "membrane" / "ui"
 NODE = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
-
-
-@pytest.fixture(autouse=True)
-def _rocket_on(request, monkeypatch):
-    """#884: the rocket view is off by default; the 843 tests exercise it switched ON."""
-    if "default_off" not in request.node.name:
-        monkeypatch.setenv("MEMBRANE_ROCKET_RUNS", "1")
-
-
-def _est():
-    return EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
-
-
-def _run(est, h, ts, n=1, rc=0, children=()):
-    root, res = f"{MEMBRANE_NS}node:sh:{h}", f"{MEMBRANE_NS}result:{h}:{n}"
-    est.upsert(QuantumEntity(eid=root, cls="Component", properties={
-        "kind": "program", "lang": "sh", "text": "echo hi", "args": list(children)}))
-    for c in children:
-        est.upsert(QuantumEntity(eid=c, cls="Component", properties={"kind": "program", "args": []}))
-    est.upsert(QuantumEntity(eid=res, cls="Component", properties={
-        "root": root, "rc": rc, "outcome": "ok", "head": "hi", "tail": "", "text": "echo hi", "ts": ts, "ms": 5}))
-    return root, res
-
-
-def test_finished_run_feed_returns_tree_nodes_and_result_ref():
-    est = _est()
-    kid = MEMBRANE_NS + "node:sh:kid"
-    root, res = _run(est, "aaa", 100.0, children=[kid])
-    runs = DM.work_graph(est)["runs"]
-    assert [r["id"] for r in runs] == [res]
-    r = runs[0]
-    assert r["root"] == root and r["rc"] == 0 and r["ts"] == 100.0
-    assert {n["id"] for n in r["nodes"]} == {root, kid}
-    assert {n["id"]: n["parent"] for n in r["nodes"]}[kid] == root
-
-
-def test_in_flight_cap_12_drops_oldest():
-    est = _est()
-    for i in range(13):
-        _run(est, f"h{i:02d}", 100.0 + i)
-    runs = DM.work_graph(est)["runs"]
-    assert len(runs) == 12
-    assert runs[0]["ts"] == 112.0 and all(r["ts"] != 100.0 for r in runs), "oldest must be dropped"
 
 
 DRV = r"""
@@ -96,14 +50,6 @@ def test_click_resolves_to_work_open_with_code_rc_output():
     assert p["id"] == "r1" and p["rc"] == 3 and p["code"] == "echo hi" and p["output"] == "out"
 
 
-def test_node_cap_is_a_named_constant_default_12():
-    assert DM.ROCKET_MAX_NODES == 12
-    est = _est()
-    kids = [MEMBRANE_NS + f"node:sh:k{i}" for i in range(30)]
-    _run(est, "big", 100.0, children=kids)
-    assert len(DM.work_graph(est)["runs"][0]["nodes"]) == 12
-
-
 DRV2 = r"""
 const L = require(process.argv[1]);
 const nodes = [{id:'r',parent:null}]; for (let i=0;i<30;i++) nodes.push({id:'c'+i,parent:i%2?'c'+(i-1):'r'});
@@ -122,23 +68,6 @@ def test_miniature_graph_nodes_edges_capped_and_origin():
     assert o["n"] == 12 and o["e"] == 11 and o["ok"], "nodes+edges, capped, edges only between kept nodes"
     assert o["o"] == [5, 6, 7], "run starts at its root's position"
     assert o["o2"] == [0, 0, 0], "falls back to the centre"
-
-
-def test_default_off_runs_empty_without_scanning(monkeypatch):
-    monkeypatch.delenv("MEMBRANE_ROCKET_RUNS", raising=False)
-    est = _est()
-    _run(est, "aaa", 100.0)
-    monkeypatch.setattr(DM, "_finished_runs", lambda e: (_ for _ in ()).throw(AssertionError("scanned")))
-    g = DM.work_graph(est)
-    assert g["runs"] == [] and g.get("rocket") is False
-
-
-def test_switch_on_restores_runs(monkeypatch):
-    monkeypatch.setenv("MEMBRANE_ROCKET_RUNS", "1")
-    est = _est()
-    _, res = _run(est, "aaa", 100.0)
-    g = DM.work_graph(est)
-    assert [r["id"] for r in g["runs"]] == [res] and g["rocket"] is True
 
 
 DRV3 = r"""

@@ -1597,58 +1597,6 @@ def file_write_entity(fld, est, mem, path, content, create_dirs=True) -> dict:
             "bytes": len(body), "ms": ms}
 
 
-def file_edit_entity(fld, est, mem, path, old_string, new_string,
-                     replace_all=False) -> dict:
-    """THE EDIT HAND: exact literal replace -- one match (or
-    replace_all); zero matches and ambiguous matches are REFUSED and
-    announced with the refusal on the entity."""
-    fp = _file_resolve(path)
-    if not fp:
-        return {"ok": False, "error": "path required"}
-    old = "" if old_string is None else str(old_string)
-    new = "" if new_string is None else str(new_string)
-    if not old:
-        return {"ok": False, "error": "old_string required"}
-    t0 = time.time()
-    try:
-        with open(fp, "r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-    except OSError as e:
-        err = f"{type(e).__name__}: {e}"
-        eid, key, _c = _file_land(fld, est, mem, fp, "edit", False, "", {}, err)
-        return {"ok": False, "eid": eid, "key": key, "path": fp, "error": err[:200]}
-    n = text.count(old)
-    if n == 0:
-        err = "old_string not found"
-        eid, key, _c = _file_land(fld, est, mem, fp, "edit", False, "", {}, err)
-        return {"ok": False, "eid": eid, "key": key, "path": fp, "matches": 0,
-                "error": err}
-    if n > 1 and not replace_all:
-        err = (f"old_string matches {n} times (ambiguous); pass "
-               "replace_all=true or a longer literal")
-        eid, key, _c = _file_land(fld, est, mem, fp, "edit", False, "", {}, err)
-        return {"ok": False, "eid": eid, "key": key, "path": fp, "matches": n,
-                "error": err}
-    subs = n if replace_all else 1
-    new_text = text.replace(old, new, subs)
-    try:
-        with open(fp, "w", encoding="utf-8") as fh:
-            fh.write(new_text)
-    except OSError as e:
-        err = f"{type(e).__name__}: {e}"
-        eid, key, _c = _file_land(fld, est, mem, fp, "edit", False, "", {}, err)
-        return {"ok": False, "eid": eid, "key": key, "path": fp, "error": err[:200]}
-    ms = int((time.time() - t0) * 1000)
-    head = (f"edit {fp}: {subs} substitution" + ("s" if subs != 1 else "") +
-            f" ({len(text)} -> {len(new_text)} chars)")
-    eid, key, ent_created = _file_land(
-        fld, est, mem, fp, "edit", True, head,
-        {"last_edit_subs": subs,
-         "last_sha1": hashlib.sha1(new_text.encode()).hexdigest()[:10]})
-    return {"ok": True, "eid": eid, "key": key, "path": fp, "subs": subs,
-            "created": ent_created, "ms": ms}
-
-
 # ---- THE EXECUTOR (the edge-backed exec organ, 2026-10-06; #614) ------------
 # Code is a tree in the field (lang.py): its ROOT is linked to the seeded
 # `tool:executor` -- root -execute-> executor is owed work, -executing-> is in
@@ -2191,26 +2139,6 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
     return res
 
 
-def _parent_residue_maps(est, doc) -> dict:
-    """The per-parent residue view for the substitution: eid -> {head,
-    tail, rc, outcome} from each DIRECT parent's doc (+ the ordered
-    list for the nearest-parent form)."""
-    out: dict[str, dict] = {}
-    props = doc.properties or {}
-    for pp in MultiParentOps._parents_of(props):
-        p = (est.docs or {}).get(pp)
-        if p is None:
-            continue
-        pp_props = p.properties or {}
-        if pp_props.get("run_rc") is None and not pp_props.get("command"):
-            continue               # a composition parent: no own residue
-        out[pp] = {"head": str(pp_props.get("run_head") or "")[:400],
-                   "tail": str(pp_props.get("run_tail") or "")[:400],
-                   "rc": pp_props.get("run_rc"),
-                   "outcome": str(pp_props.get("run_outcome") or "")}
-    return out
-
-
 def _feed_value(tok: str, residues: dict, order: list[str]):
     """The output feed: {{parent.head}} / {{parent.tail}} / {{parent.rc}}
     = the NEAREST parent's residue (order[0]); {{parent:<eid>.field}} =
@@ -2312,16 +2240,6 @@ def command_params(cmd: str) -> list[str]:
     pipeline's {{parent...}} feeds)."""
     return [p for p in dict.fromkeys(_PARAM.findall(cmd or ""))
             if p != "parent" and not p.startswith(("parent", "self.", "steps.", "entities."))]
-
-
-def _action_of(cmd: str) -> str:
-    c = cmd
-    for _ in range(6):
-        m = _SETUP.match(c)
-        if not m:
-            break
-        c = c[m.end():]
-    return c.strip() or cmd
 
 
 LIBRARY_MAX = 12
@@ -2932,18 +2850,6 @@ def direct_exec_refusal(est, obj_spec: str, method: str) -> str | None:
     return f"refused: {hit} is the executor, called directly -- {PROGRAM_FIRST}"
 
 
-def direct_each_refusal(est, over: str, method: str) -> str | None:
-    """direct_exec_refusal for a fan-out: the class itself, or any member."""
-    why = direct_exec_refusal(est, over, method) if "*" not in (over or "") else None
-    if why:
-        return why
-    for m in members_of(est, over) if est is not None else []:
-        why = direct_exec_refusal(est, m.eid, method)
-        if why:
-            return why
-    return None
-
-
 def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None,
                 _depth: int = 0, method_eid: str | None = None) -> dict:
     prep = _prepare_call(est, obj_spec, method, args, _depth, method_eid=method_eid)
@@ -3272,91 +3178,6 @@ def _walk_files(root: str, cap: int = FILE_GREP_MAX_FILES):
     return out
 
 
-def file_grep_entity(fld, est, mem, pattern, path=None, glob=None,
-                     max_results=None) -> dict:
-    """THE GREP HAND: a regex over the seat's files (machinery dirs
-    skipped), matches grouped per file with sample lines; the top matched
-    files' entities get the pattern pinned (last_grep, grep_hits)."""
-    import fnmatch
-    import re
-    pat = str(pattern or "").strip()
-    if not pat:
-        return {"ok": False, "error": "pattern required"}
-    root = _file_resolve(path) or os.getcwd()
-    if not os.path.isdir(root):
-        return {"ok": False, "error": f"not a directory: {root}"}
-    gfn = str(glob or "").strip()
-    try:
-        mr = max(1, int(max_results or FILE_RESULT_FILES))
-    except (TypeError, ValueError):
-        mr = FILE_RESULT_FILES
-    mr = min(mr, 240)
-    try:
-        rx = re.compile(pat)
-    except re.error as e:
-        return {"ok": False, "error": f"bad pattern: {e}"}
-    t0 = time.time()
-    files, scanned = [], 0
-    for full in _walk_files(root):
-        scanned += 1
-        rel = os.path.relpath(full, root)
-        if gfn and not fnmatch.fnmatch(rel, gfn):
-            continue
-        hits, samples = 0, []
-        try:
-            with open(full, "r", errors="ignore") as fh:
-                for line in fh:
-                    if rx.search(line):
-                        hits += 1
-                        if len(samples) < 2:
-                            samples.append(line.strip()[:160])
-                        if hits >= 200:
-                            break
-        except OSError:
-            continue
-        if hits:
-            files.append((rel, hits, samples))
-            if len(files) >= mr:
-                break
-    files.sort(key=lambda t: (-t[1], t[0]))
-    ms = int((time.time() - t0) * 1000)
-    for rel, hits, _samples in files[:FILE_LAND_MAX]:
-        _file_land(fld, est, mem, os.path.join(root, rel), "grep", True,
-                   f"grep /{pat[:80]}/: {hits} hits",
-                   {"last_grep": pat[:120], "grep_hits": hits})
-    return {"ok": True, "pattern": pat, "root": root, "scanned": scanned,
-            "match_files": len(files), "ms": ms,
-            "files": [{"path": rel, "hits": h, "samples": s}
-                      for rel, h, s in files]}
-
-
-def file_glob_entity(fld, est, mem, pattern, path=None) -> dict:
-    """THE GLOB HAND: fnmatch on seat-relative paths over the walk, the
-    matched files listed (machinery dirs skipped) and their entities
-    touched (last_glob)."""
-    import fnmatch
-    pat = str(pattern or "").strip()
-    if not pat:
-        return {"ok": False, "error": "pattern required"}
-    root = _file_resolve(path) or os.getcwd()
-    if not os.path.isdir(root):
-        return {"ok": False, "error": f"not a directory: {root}"}
-    t0 = time.time()
-    matches = []
-    for full in _walk_files(root):
-        rel = os.path.relpath(full, root)
-        if fnmatch.fnmatch(rel, pat):
-            matches.append(rel)
-            if len(matches) >= FILE_RESULT_FILES * 3:
-                break
-    matches.sort()
-    ms = int((time.time() - t0) * 1000)
-    for rel in matches[:FILE_LAND_MAX]:
-        _file_land(fld, est, mem, os.path.join(root, rel), "glob", True,
-                   f"glob {pat[:80]}: hit", {"last_glob": pat[:120]})
-    return {"ok": True, "pattern": pat, "root": root, "count": len(matches),
-            "files": matches, "ms": ms}
-
 def run_night(srv, fld, est, now: float | None = None) -> dict:
     """The whole night, callable from the NightClock (efmind.night calls
     it, then adds births/junk/commons/activity/null of its own). Every
@@ -3525,16 +3346,6 @@ def entity_frozen(props) -> bool:
     except (TypeError, ValueError):
         bar = HEAT_FREEZE
     return entity_heat(props) > bar
-
-
-def entity_melted(props) -> bool:
-    """The melt gate: the frozen_ts sat longer than HEAT_MELT_S (the
-    cool window) AND the heat reads under the bar now."""
-    ts = float(props.get("frozen_ts") or 0.0)
-    if not ts:
-        return True
-    return time.time() - ts >= HEAT_MELT_S and \
-        not entity_frozen(props)
 
 
 # ---- THE FIELD-WATCH LANE (the model's filters over the field) --------

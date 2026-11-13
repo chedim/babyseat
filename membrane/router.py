@@ -221,10 +221,6 @@ class ModelRecord:
     # measured cost
     latency_ewma: float | None = None   # seconds
     last_used: float = 0.0
-    # THE COPROC MAP (#454): this model's action surface and examples
-    # ({'surface': python|text|words, 'examples': varied|one}); empty = the
-    # measured defaults (coproc.default_map). The operator's override.
-    coproc: dict = dfield(default_factory=dict)
 
     # ---- scoring pieces ----
     def imprint_fit(self, situ) -> float:
@@ -314,8 +310,7 @@ class ModelRecord:
                 "size_bytes": self.size_bytes, "caps": self.caps,
                 "backend": self.backend,
                 "price_override": self.price_override,
-                "context_length": self.context_length,
-                "coproc": dict(self.coproc or {})}
+                "context_length": self.context_length}
 
 
 class Registry:
@@ -1036,7 +1031,6 @@ class Registry:
             po = rd.get("price_override")
             rec.price_override = None if po is None else float(po)
             rec.context_length = int(rd.get("context_length") or 0)
-            rec.coproc = dict(rd.get("coproc") or {}) if isinstance(rd.get("coproc"), dict) else {}
             self.records[name] = rec
 
     # ---- reporting -----------------------------------------------------------

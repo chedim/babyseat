@@ -414,10 +414,6 @@ def _entity(srv):
 _SEAT = {"srv": None}
 
 
-def _seat_srv():
-    return _SEAT["srv"]
-
-
 def bind(srv) -> None:
     """Boot: presence implements `restart`; a pending restart is now loaded (cleared)."""
     _SEAT["srv"] = srv

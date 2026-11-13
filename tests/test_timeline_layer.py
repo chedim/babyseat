@@ -10,50 +10,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from membrane.fn_schema import extract_fn, extract_fn_from_exemplar
 from membrane.token_timeline import TokenTimeline, tokenize, context_key
-
-
-class TestFnExtraction(unittest.TestCase):
-    """The fn schema's extraction: the typed transition layer on
-    actuation cells."""
-
-    def test_edit_call_parsed(self):
-        fn = extract_fn_from_exemplar(
-            'tool edit for: edit the file\n'
-            'args: {"filePath": "/tmp/x.py", "oldString": "a"}',
-            "Edit applied successfully.")
-        self.assertIsNotNone(fn)
-        self.assertEqual(fn["op"], "edit")
-        self.assertEqual(fn["binds"]["filePath"], "/tmp/x.py")
-        self.assertEqual(fn["returns"], "Edit applied successfully.")
-
-    def test_bash_call_parsed(self):
-        fn = extract_fn_from_exemplar(
-            "tool bash for: run the tests\nargs: {}",
-            "3 passed, 0 failed")
-        self.assertIsNotNone(fn)
-        self.assertEqual(fn["op"], "bash")
-
-    def test_prose_returns_none(self):
-        """The degrade covenant: prose cells stay untyped (the two-axis
-        design -- the fn schema covers actuations only)."""
-        fn = extract_fn_from_exemplar(
-            "why does consensus exist? because a single vote misfired",
-            "the rationale recorded")
-        self.assertIsNone(fn)
-
-    def test_extract_fn_direct(self):
-        """The direct parse from (name, args, result) -- the receipt lane's
-        classifier shape."""
-        fn = extract_fn("edit", '{"filePath": "/tmp/x.py"}',
-                        "Edit applied successfully.")
-        self.assertEqual(fn["op"], "edit")
-        self.assertEqual(fn["binds"]["filePath"], "/tmp/x.py")
-
-    def test_unknown_tool_returns_none(self):
-        fn = extract_fn("mystery_tool", '{"x": 1}', "whatever")
-        self.assertIsNone(fn)
 
 
 class TestTokenTimeline(unittest.TestCase):

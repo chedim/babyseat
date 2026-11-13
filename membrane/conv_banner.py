@@ -10,7 +10,7 @@ Everything is derived from records; no LLM runs anywhere:
   ABOUT       focus entities: in >= FOCUS_MIN_EVENTS of the events in that
               window, or named in the person's latest message; top FOCUS_K
   DECIDED     this chat's decisions: the operator ledger, goals fulfilled
-              here, coproc decide() records (#454)
+              here
   OPEN        open goals: those planted in this chat first, then the board's,
               each labelled with its origin (this chat / another chat / board)
   STABLE      facts seen in >= STABLE_MIN_CONVS chats over >= STABLE_MIN_DAYS
@@ -392,24 +392,6 @@ def _iso_ts(s: str) -> float | None:
         return None
 
 
-def _coproc_store(srv):
-    from . import coproc as CP
-    st = getattr(srv, "coproc_store", None)
-    if isinstance(st, CP.Store):
-        return st
-    led = getattr(srv, "user_ledger", None)
-    lp = str(getattr(led, "path", "") or "")
-    if not lp.endswith(".ledger.jsonl"):
-        return None
-    import os
-    if not os.path.exists(lp[: -len(".ledger.jsonl")] + ".coproc.jsonl"):
-        return None
-    try:
-        return CP.store_for(srv)
-    except Exception:
-        return None
-
-
 def _ledger_entries(srv) -> list[dict]:
     led = getattr(srv, "user_ledger", None)
     fn = getattr(led, "entries", None)
@@ -443,20 +425,13 @@ def _board_intents(srv) -> list:
 
 def decided(srv, conv: str) -> list[Item]:
     """This chat's decisions, newest first: the operator ledger's entries
-    said here, goals fulfilled here, coproc decide() records made here."""
+    said here, goals fulfilled here."""
     if not conv:
         return []
     out: list[Item] = []
     for e in _ledger_entries(srv):
         if e.get("conv") == conv:
             out.append(Item(e.get("text") or "", "person", _iso_ts(e.get("ts"))))
-    st = _coproc_store(srv)
-    if st is not None:
-        for r in st.decisions():
-            if r.get("conv") == conv:
-                who = str(r.get("who") or "person")
-                out.append(Item(str((r.get("args") or {}).get("text") or ""),
-                                "person" if who.startswith("person") else who, r.get("ts")))
     for i in _board_intents(srv):
         if i.status == "fulfilled" and i.fulfilled_conv == conv:
             out.append(Item("goal fulfilled: " + i.text, "goal", i.fulfilled or None))
@@ -534,23 +509,11 @@ def _about(text: str, focus_ids, fld) -> bool:
 
 def stable(srv, focus_ids, fld=None, tz=None) -> list[Item]:
     """Facts said in >= STABLE_MIN_CONVS chats over >= STABLE_MIN_DAYS days
-    and never given another value, about a focus entity. Sources: coproc
-    remember() records (a key's value) and the operator ledger (its verbatim
+    about a focus entity. Source: the operator ledger (its verbatim
     entries; a ledger line has no key, so nothing can contradict it)."""
     if not focus_ids:
         return []
     groups: dict[str, dict] = {}
-    st = _coproc_store(srv)
-    if st is not None:
-        from .coproc import fact_key
-        for r in st._actions():
-            if r.get("word") != "remember" or r.get("status") != "applied":
-                continue
-            a = r.get("args") or {}
-            g = groups.setdefault("k|" + fact_key(a.get("key", "")), {
-                "text": f"{a.get('key')}: {a.get('value')}", "values": set(), "seen": []})
-            g["values"].add(_norm(a.get("value")))
-            g["seen"].append((r.get("conv") or "", r.get("ts")))
     for e in _ledger_entries(srv):
         g = groups.setdefault("l|" + _norm(e.get("text")), {
             "text": e.get("text") or "", "values": {""}, "seen": []})
@@ -792,32 +755,6 @@ def pack_block(srv, live, fld, conv: str, events, latest: str, now: float, sid: 
     return r["text"]
 
 
-def _shadow(srv, fld, conv, events, latest, now, tz, block) -> None:
-    """MEMBRANE_BANNER_SHADOW=1 (the operator, 2026-11-10: the pack reads focus from what capture stored; see the old
-    and the new side by side): today's Python WORKING ON / ABOUT / SINCE / STABLE beside the pack's block, logged
-    where they differ. Read-only; the block the model sees is the pack's."""
-    try:
-        marks = getattr(srv, "_conv_marks", None)
-        mark = marks.get(conv) if isinstance(marks, dict) and conv else None
-        about = focus(fld, events, latest)
-        w = working_on(events, latest, about, fld)
-        old = {"WORKING ON": _working_line(w, now, tz) if w is not None else "",
-               "ABOUT": ("ABOUT: " + " · ".join(about)) if about else "",
-               "SINCE": "\n".join(_item_line(i, now, tz) for i in since(fld, conv, mark, about)),
-               "STABLE": "\n".join(_item_line(i, now, tz) for i in stable(srv, about, fld, tz))}
-        new = str(block or "")
-        for k, v in old.items():
-            for ln in [x for x in v.splitlines() if x]:
-                if ln not in new:
-                    print(f"[banner-shadow] {conv} {k}: python only: {ln[:200]}", file=sys.stderr)
-        for ln in new.splitlines():
-            if ln.startswith(("WORKING ON:", "ABOUT:")) and ln not in "\n".join(old.values()):
-                print(f"[banner-shadow] {conv} pack only: {ln[:200]}", file=sys.stderr)
-        print(f"[banner-shadow] {conv} compared ({len(about)} focus)", file=sys.stderr)
-    except Exception as e:                                 # noqa: BLE001 -- a diagnostic never breaks a turn
-        print(f"[banner-shadow] {conv} failed: {e!r}"[:300], file=sys.stderr)
-
-
 def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
           on_alert=None) -> str | None:
     """The block for this turn (None when it holds nothing of this chat). NEVER in map mode: there the banner is
@@ -845,8 +782,6 @@ def build(srv, body: dict, conv: str, now: float | None = None, tz=None,
         if _blurp_on():
             facts.update(blurp=_blurp(srv), suggest=_suggestions(srv, conv))
         block = pack_block(srv, live, fld, conv, events, latest, now, str((body or {}).get("_turn_sid") or ""), facts)
-        if os.environ.get("MEMBRANE_BANNER_SHADOW", "").strip() == "1":
-            _shadow(srv, fld, conv, events, latest, now, tz, block)
         return block
     about = focus(fld, events, latest) if fld is not None else []
     marks = getattr(srv, "_conv_marks", None)

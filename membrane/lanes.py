@@ -400,8 +400,6 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
         L.append(f"- ROUTING: membrane picks the model per turn ({spend})"
                  "; you may be a different model than last turn -- do not "
                  "assume your own earlier reasoning is in your weights.")
-    if not getattr(srv, "receipts", True):
-        L.append("- RECEIPTS: off (--no-receipts).")
     return "\n".join(L) + "\n"
 
 
@@ -2616,9 +2614,7 @@ SEED_FULL_SCAN_S = 600.0
 def _field_seed_topics(srv) -> list:
     """(text, family, #n) for every discourse event carrying a canonical
     skill frame (user/model prose only -- not reasoning turns). Cached on
-    the origin's event count; empty when --no-field-seeds."""
-    if not getattr(srv, "field_seeds", True):
-        return []
+    the origin's event count."""
     fld = _efield_of(srv)
     if fld is None:
         return []
@@ -2679,7 +2675,7 @@ def _field_seed_topics(srv) -> list:
 
 def _embed_field_seed_matrix(srv) -> bool:
     """Embed + threshold-tune the field-grown layer. False leaves the layer
-    off (no seeds, embedder gone, --no-field-seeds, or inseparable)."""
+    off (no seeds, embedder gone, or inseparable)."""
     topics = _field_seed_topics(srv)
     if not topics:
         return False
@@ -4636,9 +4632,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._membrane_state(); return
         if path == "/membrane/entity-track":
             self._entity_track_list(); return
-        if path == "/membrane/coproc":                # #454: facts, decisions, proposals, maps
-            from . import coproc as _COP
-            self._json_out(_COP.state(self.server)); return
         if path == "/membrane/entity/read":
             self._entity_read(); return
         if path == "/membrane/work-graph":            # k4: goals, tasks, decisions + edges
@@ -4787,15 +4780,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                "{run: true} -- the engine applies; "
                                "or program the field first: define a "
                                "method on an entity, then call it"); return
-        if path in ("/membrane/coproc/map", "/membrane/coproc/confirm"):   # #454
-            from . import coproc as _COP
-            b = self._json_body()
-            if path.endswith("/map"):
-                self._json_out(_COP.set_map(
-                    self.server, str(b.get("model") or ""),
-                    None if b.get("surface") is None else str(b.get("surface")),
-                    None if b.get("examples") is None else str(b.get("examples")))); return
-            self._json_out(_COP.confirm(self.server, str(b.get("id") or ""))); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -5627,11 +5611,10 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # readback. Learn/forget asks are report-only, never written. Once-only
         # via the ledger marked at real delivery.
         thought_asks: list = []
-        if getattr(srv, "thought_intercept", True):
-            try:
-                thought_asks = _assistant_thought_asks(srv, body)
-            except Exception as t_e:
-                print(f"[opencode] thought-detect error: {t_e}", file=sys.stderr)
+        try:
+            thought_asks = _assistant_thought_asks(srv, body)
+        except Exception as t_e:
+            print(f"[opencode] thought-detect error: {t_e}", file=sys.stderr)
         # ---- INTERNAL interception (before the gate: these turns never touch
         # the field -- no learn, no demote, no nudge -- so introspection can't
         # feed the field back into itself). Served straight from the live store.
@@ -5639,7 +5622,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # fallback on INTENT when nothing matches: cosine to the fixed seed
         # set PLUS the field-grown seed layer (canon-frame exemplars harvested
         # from the live store -- the detector grows from the operator's own
-        # writes; --no-field-seeds is the kill switch). A stolen turn echoes
+        # writes). A stolen turn echoes
         # the exact marker to let the client force the model path next turn.
         q_early = _last_user_text(body)
         # THE THINKER'S CHAT FEED (the receipt-lane retirement's voice):
@@ -5670,7 +5653,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # command, that round would have caught it -- the semantic check
         # (its own embedding) is skipped there
         if (not any((learn_hit, forget_hit, rec_hit, state_hit))
-                and srv.sem_intercept and not model_escaped and not _tool_round(body)):
+                and not model_escaped and not _tool_round(body)):
             # the semantic fallback embeds the query itself (an outbound read,
             # never learned). 4-family: recall/state answer from the field;
             # learn/forget are operator writes routed without the incantation.
@@ -5695,8 +5678,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # it receives the chat messages (the digest feed) and speaks
         # through the speech lane's planner gate -- suggesting, noting,
         # asking -- but never overrides a model turn again. The E9
-        # experiment stays (library + audit replay, --no-receipts is a
-        # no-op flag kept for compat).
+        # experiment stays (library + audit replay).
         # ---- the watch layer (spatial triggers): operator set/list/drop,
         # handled pre-gate like every other operator write.
         if not model_escaped and _is_watch_query(q_early):
@@ -6285,13 +6267,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         routed_model = route.get("route")
         orig_model = str(up.get("model") or "membrane")
         t0 = time.monotonic()
-        # THE COPROCESSOR (#454, MEMBRANE_COPROC=1; off = nothing changes):
-        # the compiled block rides the request; the reply's actions run as
-        # cliffhanger words and the person sees the decompiled reply.
-        from . import coproc as _COP
-        _cp = _COP.begin(srv, up)
-        _cp_held: list = []
-        _cp_done = False
         # THE CLAUDE-AGENT RUNG (issue #384): Claude through the Agent SDK.
         # Its reply is shown and learned like any rung's (#389); the tools it
         # ran in its own loop (membrane's, relaying back to this proxy) ride
@@ -6485,20 +6460,12 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 for line in r:                      # SSE, tee verbatim
                     if not line:
                         continue
-                    if _cp is None:
-                        self.wfile.write(line)
-                        self.wfile.flush()
+                    self.wfile.write(line)
+                    self.wfile.flush()
                     s = line.strip()
                     if not s.startswith(b"data:"):
-                        if _cp is not None:
-                            self.wfile.write(line)
                         continue
                     payload = s[len(b"data:"):].strip()
-                    if _cp is not None and payload == b"[DONE]" and not _cp_done:
-                        _cp_done = True
-                        self._coproc_flush(_cp, parts, _cp_held, up)
-                        self.wfile.write(line)
-                        self.wfile.flush()
                     if not payload or payload == b"[DONE]":
                         # THE USAGE PASS-THROUGH (the 0-token display fix):
                         # the backend's own usage already tees through
@@ -6527,11 +6494,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                     try:
                         obj = json.loads(payload)
                     except json.JSONDecodeError:
-                        if _cp is not None:
-                            self.wfile.write(line)
                         continue
-                    if _cp is not None:
-                        self._coproc_relay(obj, _cp_held)
                     if isinstance(obj.get("usage"), dict) and obj["usage"]:
                         usage_seen = obj["usage"]     # the last wins: a claude-agent reply
                                                       # streams its usage so far per step (#472)
@@ -6553,9 +6516,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                                 tgt["name"] = (tgt.get("name") or "") + fn["name"]
                             if fn.get("arguments"):
                                 tgt["arguments"] = (tgt.get("arguments") or "") + fn["arguments"]
-            if _cp is not None and not _cp_done:
-                _cp_done = True                 # a stream that ended without [DONE]
-                self._coproc_flush(_cp, parts, _cp_held, up)
             self.wfile.flush()
             # THE STREAMING REGISTRATION (the receipt lane's missing half):
             # the tee path accumulated `calls` from deltas but never
@@ -6632,11 +6592,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
                 resp_obj = json.loads(resp_bytes or b"{}")
             except json.JSONDecodeError:
                 resp_obj = None
-            if _cp is not None and isinstance(resp_obj, dict):
-                _m0 = ((resp_obj.get("choices") or [{}])[0] or {}).get("message") or {}
-                if isinstance(_m0.get("content"), str):
-                    _m0["content"] = _cp.finish(_m0["content"])
-                    resp_bytes = json.dumps(resp_obj).encode()
             # THE USAGE PASS-THROUGH (the 0-token display fix): the
             # backend's own usage stays verbatim; when it gives none, an
             # estimate rides along so no client ever reads a hardcoded zero
@@ -6773,41 +6728,6 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         except Exception as s_e:
             print(f"[opencode] surface-log error: {s_e}", file=sys.stderr)
         self._log_turn(verdict, ctx, None)
-
-    # ---- the coprocessor's stream seam (#454) ------------------------------
-    def _coproc_relay(self, obj: dict, held: list) -> None:
-        """A streamed chunk under coproc: its content is held back (the
-        extension is decompiled at the end); everything else (reasoning,
-        tool-call deltas, usage) passes; a finish chunk waits for the reply."""
-        o = json.loads(json.dumps(obj))
-        fin = False
-        keep = bool(o.get("usage")) or not o.get("choices")   # a side chunk (a tool ran)
-        for ch in o.get("choices") or []:
-            d = ch.get("delta") or {}
-            d.pop("content", None)
-            if ch.get("finish_reason"):
-                fin = True
-            if any(v not in (None, "", [], {}) for k, v in d.items() if k != "role"):
-                keep = True
-        if fin:
-            held.append(o)
-        elif keep:
-            self.wfile.write(_sse_line(o))
-            self.wfile.flush()
-
-    def _coproc_flush(self, cp, parts: list, held: list, up: dict) -> None:
-        """The decompiled reply as content chunks, then the held finish."""
-        reply = cp.finish("".join(parts))
-        parts[:] = [reply]
-        head = {"id": "chatcmpl-membrane-coproc", "object": "chat.completion.chunk",
-                "created": 0, "model": up.get("model", "membrane")}
-        for i in range(0, len(reply), 128):
-            self.wfile.write(_sse_line({**head, "choices": [{
-                "index": 0, "delta": {"content": reply[i:i + 128]}, "finish_reason": None}]}))
-        for o in held:
-            self.wfile.write(_sse_line(o))
-        held.clear()
-        self.wfile.flush()
 
     # ---- the [membrane] monologue (thinking channel) ----------------------
     def _gate_monologue(self, verdict: dict, ctx: str | None, query: str,
@@ -7836,7 +7756,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             "n_verdicts": n_verd,
             # the NightClock's last pass (births, junk, activity, commons)
             "night": (getattr(srv, "night_stats", None) or None),
-            "state_intercept": srv.state_intercept,
+            "state_intercept": True,
             "audit_records": _audit_count(mem.audit_path),
             "frame_wait": _frame_wait_summary(srv) or None,
             # the null-recall lane: the session's all-orthogonal asks

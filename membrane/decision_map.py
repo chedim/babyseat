@@ -296,52 +296,8 @@ def work_graph(est) -> dict:
     nodes.extend(wnodes)
     nodes.sort(key=lambda n: (("goal", "task", "wait", "decision", "watch").index(n["kind"]), n["title"]))
     return {"nodes": nodes, "edges": [e for e in raw if e["from"] in ids and e["to"] in ids] + wedges,
-            "runs": _finished_runs(est) if rocket_runs_on() else [],
-            "rocket": rocket_runs_on()}
-
-
-def rocket_runs_on() -> bool:
-    """#884: the rocket view of finished runs is OFF by default; MEMBRANE_ROCKET_RUNS=1 turns it on
-    (nothing is deleted -- the run results stay in the store, only the feed and the drawing are gated)."""
-    import os
-    return os.environ.get("MEMBRANE_ROCKET_RUNS", "").strip().lower() in ("1", "true", "yes", "on")
-
-
-ROCKET_MAX_NODES = 12     # nodes kept per run's miniature graph (default until the operator answers the cap card)
-ROCKET_MAX_RUNS = 12      # the operator's cap on command graphs in flight (card: 12 for now)
-
-
-def _finished_runs(est) -> list:
-    """#843: finished code_run / method-call results (existing result entities, no new store), newest
-    ROCKET_MAX_RUNS, newest first: {id, root, rc, ts, text, head, nodes: [{id, parent}]} -- the root's
-    node tree (its ``args`` children, recursively) for the rocket view's tiny flying graph."""
-    from .entities import MEMBRANE_NS
-    docs = getattr(est, "docs", None) or {}
-    pre = MEMBRANE_NS + "result:"
-    res = []
-    for eid, ent in list(docs.items()):
-        p = ent.properties or {}
-        if str(eid).startswith(pre) and p.get("root") and p.get("ts") is not None:
-            res.append(ent)
-    res.sort(key=lambda e: -float((e.properties or {}).get("ts") or 0))
-    out = []
-    for ent in res[:ROCKET_MAX_RUNS]:
-        p = ent.properties or {}
-        nodes, seen, todo = [], set(), [(str(p["root"]), None)]
-        while todo and len(nodes) < ROCKET_MAX_NODES:
-            nid, par = todo.pop(0)
-            if nid in seen:
-                continue
-            seen.add(nid)
-            nodes.append({"id": nid, "parent": par})
-            kid = docs.get(nid)
-            for c in ((kid.properties or {}).get("args") if kid is not None else None) or []:
-                if isinstance(c, str):
-                    todo.append((c, nid))
-        out.append({"id": ent.eid, "root": str(p["root"]), "rc": p.get("rc"), "ts": float(p.get("ts") or 0),
-                    "text": str(p.get("text") or "")[:2000], "head": str(p.get("head") or "")[:2000],
-                    "tail": str(p.get("tail") or "")[:2000], "nodes": nodes})
-    return out
+            "runs": [],
+            "rocket": False}
 
 
 def entity_history(srv, spec: str) -> dict:

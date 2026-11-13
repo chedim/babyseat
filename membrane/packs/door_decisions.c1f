@@ -17,7 +17,7 @@ IMPORT intents 1
 -- A write is a person's: the door's verified token (`authed`), never a bare loopback caller. The writer is `Request.sub`. The reply
 -- waits for the card's receipt (`answer_log` / `drop_log`, carrying this request's id).
 -- THE BOUNDARY (what this pack does not hold): a card's `receipt` (the UI never reads it; a getter's dict holds 12 keys at most, the engine's
--- 64-node cap, and the card has 13); the rocket view of finished runs (off unless MEMBRANE_ROCKET_RUNS) answers `runs: []`;
+-- 64-node cap, and the card has 13); the rocket view of finished runs (gone from the seat) answers `runs: []`;
 -- watch nodes (a watch is a property of any entity, the engine mirrors only the classes packs declare) are not drawn; the active
 -- goals are what the dream loop writes to Intent:board.active (nothing does yet: unranked); an entity's `properties` and its field
 -- `changes` are not the store's (the Python engine holds them): properties answer {}, changes the store's delta rows; a spec is an

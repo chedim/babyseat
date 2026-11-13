@@ -352,8 +352,7 @@ class TestRunnerMarksTheRow(unittest.TestCase):
     def test_a_busy_round_marks_the_row_and_never_retries(self):
         import tempfile
         for stream_too in (True, False):
-            with tempfile.TemporaryDirectory() as tmp, \
-                    mock.patch.object(MS, "STREAM_ROUNDS", True):
+            with tempfile.TemporaryDirectory() as tmp:
                 r, calls = self._runner(tmp, stream_too)
                 sid = r.sessions.create(title="t")["id"]
                 r.run(sid, "what does the backup job skip?")

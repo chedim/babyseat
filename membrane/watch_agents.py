@@ -40,9 +40,7 @@ MCP lane. This module is the always-watched lane's brain:
   background-subagents capability + the banner 'loops:' line are the
   render.
 
-Kill switch: MEMBRANE_WATCH_LOOPS=0 -- the loops never spawn (the
-fires still land: the queue + the banner report them reactively
-later); MEMBRANE_OPERATOR=0 -- the operator entity never fires.
+Kill switch: MEMBRANE_OPERATOR=0 -- the operator entity never fires.
 """
 
 from __future__ import annotations
@@ -66,10 +64,6 @@ DEFAULT_OP_Y = 0.40
 DEFAULT_OP_Z = 0.25
 COOLDOWN_S = 30.0           # a fired op's minimum silence
 EVENT_MAX = 64              # the queue's drop-oldest cap
-
-
-def enabled_loops() -> bool:
-    return os.environ.get("MEMBRANE_WATCH_LOOPS", "1") not in ("0", "false")
 
 
 def enabled_operator() -> bool:
@@ -146,20 +140,6 @@ def operator_on_message(est, text: str, vec=None, embedder=None,
 
 
 # ---- the watch ops sweep ----------------------------------------------------
-def _props_of(est, eid: str) -> dict:
-    ent = est.docs.get(eid) or (est.find(eid) if hasattr(est, "find")
-                               else None)
-    if ent is None:
-        # the eid may live under the full namespace form
-        for k in list(est.docs):
-            if k.endswith(eid):
-                ent = est.docs[k]
-                break
-    if ent is None:
-        return {}
-    return ent.properties or {}
-
-
 def _entity_positions(est) -> dict:
     """eid -> unit position for every live positioned entity (one
     snapshot per sweep)."""
@@ -183,10 +163,6 @@ def _dist(a: np.ndarray, b: np.ndarray) -> float:
     if an < 1e-12 or bn < 1e-12:
         return 1.0
     return float(1.0 - float(np.dot(a, b) / (an * bn)))
-
-
-def _group_distance(entity_pos, rel_pos) -> float:
-    return _dist(entity_pos, rel_pos)
 
 
 def _rel_eid(est, rel: str, positions: dict) -> str | None:
@@ -1399,8 +1375,8 @@ def notify_intent_planted(est, pool, goal_eid: str, text: str,
 # live event), a few per beat, oldest wake first, and BACKING OFF a goal
 # its loops keep ignoring (each trailing 'ignored' landing doubles its
 # wait, capped x16) so a parked goal does not burn the cloud credits.
-GOAL_REWAKE_S = float(os.environ.get("MEMBRANE_GOAL_REWAKE_S", "1800"))
-GOAL_PULSE_S = float(os.environ.get("MEMBRANE_GOAL_PULSE_S", "300"))
+GOAL_REWAKE_S = 1800.0
+GOAL_PULSE_S = 300.0
 GOAL_REWAKE_BATCH = 3
 
 

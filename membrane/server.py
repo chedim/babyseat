@@ -1305,14 +1305,6 @@ def _lane_of(agent: str | None) -> str:
     return "listener"
 
 
-def _json_args(raw) -> dict:
-    try:
-        a = json.loads(raw or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return a if isinstance(a, dict) else {}
-
-
 def _lane_tools(lane: str) -> frozenset:
     if _lane_gate_off():
         return _mcp_names()
@@ -1463,12 +1455,9 @@ def _openai_tools_for(agent: str | None) -> list:
     if not _peers_possible():
         names = [n for n in names if not str(n).startswith("peer")]
     # THE TOOL FAMILIES (the token diet, 2026-10-09): ~10 action-tools that
-    # resolve to these same impls; MEMBRANE_TOOL_FAMILIES=0 = the legacy 24
-    if os.environ.get("MEMBRANE_TOOL_FAMILIES", "1") != "0":
-        from . import toolset as _ts
-        return _ts.advertised(names)
-    from . import cliffhanger_only as _CO
-    return [t for t in _CO.strip_tools(_mcp.TOOLS) if t["name"] in names]
+    # resolve to these same impls
+    from . import toolset as _ts
+    return _ts.advertised(names)
 
 
 def _tool_title(name: str, args: dict) -> str:
@@ -3343,7 +3332,7 @@ class TurnRunner:
                         _flush(_pid)
                     for _tid in list(_run):
                         _agent_tool_end(_tid, "no result: the reply ended before this call finished")
-            _stream = getattr(self.call_ladder, "stream", None) if STREAM_ROUNDS else None
+            _stream = getattr(self.call_ladder, "stream", None)
             try:
                 if _stream is not None:
                     try:
@@ -4145,11 +4134,6 @@ def mcp_executor(port: int):
 # presents the seat's internal token, and the caller needed its own first.
 STREAM_RETRIES = 2
 _TRUNCATED_EMPTY = object()          # a dropped stream that gave nothing usable
-
-# the serve's rounds stream from the /v1 proxy (words show as they come);
-# MEMBRANE_STREAM_ROUNDS=0 returns to the buffered call
-STREAM_ROUNDS = os.environ.get("MEMBRANE_STREAM_ROUNDS", "1") != "0"
-
 
 def turn_origin(text, user_info=None, parts=None, agent=None) -> str:
     """Who set this turn going: 'operator' (a person's message), 'auto'

@@ -15,7 +15,7 @@ Per entity (EntityState):
           that MEAN something here from filler
   mass    accreted agreeing evidence (E21: grows with mentions; it is
           importance / centrality, not entity-ness). THE METABOLISM (the
-          MEMBRANE_MASS_METABOLISM=1 env flag, default OFF): read-time on
+          MASS_METABOLISM constant, default False): read-time on
           top of the raw counter, mass_eff() -- a 14-day half-life from
           the state's last ACCRETING touch, unresolved conflicts damp it.
           Dead names sink, re-mentioned ones rise. Nothing stored changes;
@@ -57,7 +57,7 @@ from .efstore import h16, o8, pack_f16, pack_f32, unpack_f16
 # words are already caught by the BOILERPLATE frequency gate
 # (per-origin frequency >= BOILER_MIN moves nothing). Words of 1-3
 # letters are never subjects; 4+ letters live if uncommon.
-WORD_MIN_LEN = int(os.environ.get("MEMBRANE_WORD_MIN_LEN", 4))
+WORD_MIN_LEN = 4
 EF_SCHEMA = 1
 
 
@@ -225,10 +225,9 @@ ECHO_HALF_LIFE_S = 6 * 3600.0
 # every accreting mention re-inflates it, an unresolved conflict damps the
 # effective weight. Read-time only (echo's rule): nothing mutates, so a
 # rebuild replays identically. OFF by default -- deploy day stays a provable
-# no-op; the operator turns it on (env + restart, like the sibling knobs).
-MASS_METABOLISM = os.environ.get("MEMBRANE_MASS_METABOLISM", "0") == "1"
-MASS_HALF_LIFE_S = float(os.environ.get("MEMBRANE_MASS_HALF_LIFE_S")
-                         or 14 * 24 * 3600.0)
+# no-op; flipping the constant turns it on.
+MASS_METABOLISM = False
+MASS_HALF_LIFE_S = 14 * 24 * 3600.0
 MASS_CONFLICT_DAMP = 0.5          # damp = 1 / (1 + DAMP * len(conflicts))
 
 

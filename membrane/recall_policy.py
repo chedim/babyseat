@@ -63,10 +63,6 @@ def _pack() -> dict:
             "entities": [{"eid": DIALS_EID, "cls": "Other", "properties": _defaults()}]}
 
 
-class _LazyPack(dict):
-    pass
-
-
 def __getattr__(name):                                  # PACK is built on first use (the constants' modules import us)
     if name == "PACK":
         return _pack()

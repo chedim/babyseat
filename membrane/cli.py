@@ -125,10 +125,6 @@ GITIGNORE_SNIPPET = """
 """
 
 
-def _module_args(args: argparse.Namespace) -> list[str]:
-    return list(args.forwarded)
-
-
 def _autoinstall_skills(quiet: bool = False) -> bool:
     """Install the packaged skills into ./.opencode/skills/ if missing.
 
@@ -673,16 +669,14 @@ def main() -> None:
         "             default Blurp; MEMBRANE_SELF_NAME overrides)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
-        "underlying module.\n"
-        "\n"
-        "Retired (print a pointer to opencode): tui, proxy, anthropic, demo.\n")
+        "underlying module.\n")
     argv = sys.argv[1:]
     if argv and argv[0] in ("-h", "--help", "help"):
         print(__doc__)
         return
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
-    if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
-                   "demo", "reset", "install", "doctor", "connect",
+    if cmd not in ("opencode", "review",
+                   "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth", "serve", "standalone", "stop",
                    "stats", "bench", "erase-field", "token", "toybox", "self", "shadow", "store"):
@@ -767,16 +761,6 @@ def main() -> None:
         maybe_check_on_boot(args.forwarded)
     if cmd == "reset":
         raise SystemExit(_reset(args.forwarded))
-    if cmd in ("tui", "anthropic", "demo", "proxy"):
-        # THE TUI IS RETIRED (the operator's call): opencode is the only
-        # real seat -- the toy world's surfaces are cut. The commands
-        # remain as pointers, not launchers -- a silent fall-back to a
-        # dead surface teaches the wrong habit.
-        print(f"membrane {cmd} is retired -- the opencode seat is the "
-              "real surface now:\n"
-              "  membrane opencode     (field-backed opencode on :11500)",
-              file=sys.stderr)
-        raise SystemExit(2)
     if cmd == "opencode":
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.opencode", argv2, exec_=True))

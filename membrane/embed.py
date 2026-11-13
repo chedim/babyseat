@@ -11,7 +11,6 @@ Uses only stdlib (urllib) + numpy, so the project stays a single pip install (nu
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 import urllib.request
@@ -36,12 +35,11 @@ class OllamaEmbedder:
                  timeout: int = 120, token: str | None = None):
         # cold-start reality on edge hardware (the agdroid): the FIRST embed
         # after model load from flash measured ~28-30s; under proot/flash
-        # pressure it can exceed 120s. Env override exists for exactly this:
-        # MEMBRANE_EMBED_TIMEOUT=300 on the seat. Steady-state is ~50-300ms.
+        # pressure it can exceed 120s (the caller's `timeout` covers it).
+        # Steady-state is ~50-300ms.
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.timeout = int(os.environ.get("MEMBRANE_EMBED_TIMEOUT",
-                                          str(timeout)))
+        self.timeout = int(timeout)
         self.token = token        # optional bearer token; in-memory only, never persisted
         self._cache: dict[tuple[str, str], np.ndarray] = {}
         self._cache_lock = threading.Lock()
@@ -97,18 +95,15 @@ class OllamaEmbedder:
     # a big backfill arrives as ONE list -- send it in CHUNKS with a
     # breathing pause between them so the ollama core never pegs a whole
     # core for the whole batch. Single-text query embeds stay instant
-    # (one chunk, no pause). Knobs: MEMBRANE_EMBED_CHUNK (default 32),
-    # MEMBRANE_EMBED_PACE_S (default 0.25, 0 disables).
+    # (one chunk, no pause). Chunk 32, pause 0.25 s.
     _CHUNK_DEFAULT = 32
     _PACE_DEFAULT_S = 0.25
 
     def _embed_remote(self, texts: list[str]) -> list[np.ndarray]:
         if len(texts) <= self._CHUNK_DEFAULT:
             return self._embed_chunk(texts)
-        pace = float(os.environ.get("MEMBRANE_EMBED_PACE_S",
-                                    str(self._PACE_DEFAULT_S)))
-        chunk_n = max(1, int(os.environ.get("MEMBRANE_EMBED_CHUNK",
-                                            str(self._CHUNK_DEFAULT))))
+        pace = self._PACE_DEFAULT_S
+        chunk_n = self._CHUNK_DEFAULT
         out: list[np.ndarray] = []
         for i in range(0, len(texts), chunk_n):
             if out and pace > 0:

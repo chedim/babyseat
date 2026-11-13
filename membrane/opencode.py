@@ -564,11 +564,6 @@ def _build_ap():
                          "frames, W3a's lint) plants a ONE-SHOT marked "
                          "warning that rides the next model-bound request. "
                          "Never blocks live traffic")
-    ap.add_argument("--no-receipts", dest="receipts",
-                    action="store_false",
-                    help="kill switch: the receipt lane (E9 -- "
-                         "byte-deterministic edit acks served model-free) "
-                         "falls back to full model path")
     ap.add_argument("--no-dreamer", dest="no_dreamer", action="store_true",
                     help="stand down the dreamer (no timeline generation "
                          "on idle; the field stays exactly as lived)")
@@ -627,43 +622,10 @@ def _build_ap():
                          "turns the gate finds replayable (default 0: every such "
                          "turn is only logged as an A/B pair -- the replay next to "
                          "the model's own answer; `membrane review --ab` reports)")
-    ap.add_argument("--no-state-intercept", dest="state_intercept",
-                    action="store_false",
-                    help="proxy every turn to the model, even membrane math/"
-                         "state questions")
-    ap.add_argument("--no-sem-intercept", dest="sem_intercept",
-                    action="store_false",
-                    help="disable the semantic fallback for recall/state "
-                         "interception (lexical frames only)")
-    ap.add_argument("--no-field-seeds", dest="field_seeds",
-                    action="store_false",
-                    help="disable the FIELD-GROWN seed layer of the semantic "
-                         "intercept gate (fixed canonical seeds only) -- the "
-                         "kill switch if the self-grown layer ever misroutes")
     ap.add_argument("--no-gate-monologue", dest="gate_monologue",
                     action="store_false",
                     help="do not stream the [membrane] gate monologue into "
                          "opencode's thinking channel")
-    ap.add_argument("--no-doctrine-move", dest="doctrine_move",
-                    action="store_false",
-                    help="keep injecting the membrane doctrine into every "
-                         "request (the default ships it ONCE via the generated "
-                         "opencode config's instructions file -- a byte-stable "
-                         "system prefix every provider can cache -- and the "
-                         "proxy skips its per-turn copy when the stamp line "
-                         "is present)")
-    ap.add_argument("--no-seat-card", dest="seat_card", action="store_false",
-                    help="don't append the seat card (this session's live "
-                         "switches -- context mode, replay, writes, the MCP "
-                         "tool list, routing -- rendered for the model) to "
-                         "the doctrine instructions file")
-    ap.add_argument("--no-thought-intercept", dest="thought_intercept",
-                    action="store_false",
-                    help="do not answer the AGENT's own asks found in its "
-                         "assistant-turn text (default ON: a 'field state' in "
-                         "the model's prose is served as a marked context "
-                         "block next turn; learn executes as an agent-note, "
-                         "forget via index form)")
     ap.add_argument("--no-agent-writes", dest="agent_writes",
                     action="store_false",
                     help="revert agent write authority: thought-path 'membrane: "
@@ -697,10 +659,6 @@ def _build_ap():
                     help="cosine floor for commons top-up in recall")
     ap.add_argument("--no-launch", dest="launch", action="store_false",
                     help="run only the proxy (don't start opencode)")
-    ap.add_argument("--force-seat", action="store_true",
-                    help="boot past the single-instance lock (kill the "
-                         "old seat yourself; multiple-seat rigs ride "
-                         "MEMBRANE_MULTI_SEAT=1)")
     ap.add_argument("--serve", action="store_true",
                     help="THE NATIVE SERVE (opencode replaced): serve "
                          "membrane's own opencode-compatible REST/SSE "
@@ -709,8 +667,7 @@ def _build_ap():
                          "riding THIS seat's /v1 loopback (injection, "
                          "capture, banner, routing all real), tool "
                          "parts streamed as message.part.updated "
-                         "events. MEMBRANE_LEGACY_SERVE=1 restores the "
-                         "old opencode child lane.")
+                         "events.")
     ap.add_argument("--serve-port", type=int, default=4096,
                     help="port for the native serve surface (default "
                          "4096, walks up if taken; passed = pinned: "
@@ -817,7 +774,6 @@ def main() -> None:
     e = None
     env = None
     instr_path = None
-    legacy_serve = None
     listen = None
     mem = None
     model = None
@@ -901,8 +857,7 @@ def main() -> None:
         #     pointer (kill it or 'membrane reset'; --force overrides)
         #   - a DEAD pid / a non-membrane pid (recycled) = a ghost: claimed
         # MEMBRANE_MULTI_SEAT=1 opts out (multi-seat rigs keep working).
-        if not (getattr(args, "force_seat", False)
-                or os.environ.get("MEMBRANE_MULTI_SEAT") == "1"):
+        if os.environ.get("MEMBRANE_MULTI_SEAT") != "1":
             try:
                 _running = int(pid_path.read_text().strip()) \
                     if pid_path.exists() else None
@@ -996,7 +951,7 @@ def main() -> None:
         # #1115: the reserved port answers "loading the field... (step)" (503) until the native serve
         # adopts the socket, instead of minutes of silence
         _boot_door = None
-        if _serve_socket is not None and os.environ.get("MEMBRANE_LEGACY_SERVE") != "1":
+        if _serve_socket is not None:
             try:
                 from .bootprof import BootDoor, read_shape
                 _boot_door = BootDoor(_serve_socket, _boot_laps, shape=read_shape(args.field))
@@ -1046,11 +1001,6 @@ def main() -> None:
                                  or _pick_idle_cortex_model(backend, model))
         srv.default_seat_model = srv.seat_model   # the autoselect-lane pin-back
         srv.pending_embed_error = None
-        srv.state_intercept = bool(args.state_intercept)
-        srv.sem_intercept = bool(args.sem_intercept)
-        srv.field_seeds = bool(args.field_seeds)
-        srv.thought_intercept = bool(args.thought_intercept)
-        srv.receipts = bool(getattr(args, "receipts", True))   # the receipt lane
         # THE EVENT BUS: RETIRED (the operator's 2026-10-03 call: MQTT is
         # gone entirely -- the lane carried one rarely-used watch kind and
         # cost the flapping reconnect storm per boot; cross-seat transport
@@ -1311,8 +1261,6 @@ def main() -> None:
             except Exception:
                 pass
             print(f"[efield] capture off ({e})", file=sys.stderr)
-        # (srv.receipts is set above from --no-receipts; a re-assignment here
-        # to True used to silently kill the kill switch)
     _STEPS['field rows'] = _step_field_rows
     def _step_entities():
         nonlocal JUNK_CUT_DEFAULT, _origin_tag, e
@@ -1884,40 +1832,37 @@ def main() -> None:
                     _CHB.anew(srv)                   # once per generation: Blurp starts anew
             except Exception as e:
                 print(f"[opencode] the cliffhanger VM failed to start ({e})", file=sys.stderr)
-            from .watch_agents import enabled_loops as _wa_on, start_goal_pulse
-            if _wa_on():                       # MEMBRANE_WATCH_LOOPS=0: the documented kill switch (never read before)
-                WA_start_loop_drainer(srv)
-                start_goal_pulse(srv)
-                try:                           # #738: goals as a graph -- the triggers, the worker pool
-                    from . import goalgraph as _GG
-                    _boot_laps.step('loops: goal graph seed')
-                    _n = _GG.seed(srv)
-                    _boot_laps.step('loops: script upgrade')
-                    from . import fields_live as _FL
-                    try:                       # #1044: the upgrade -- entity scripts move into .c1f once (rules, replay-gated)
-                        from . import scriptport as _SPORT
-                        _rep = _SPORT.upgrade(srv.entity_store)
-                        if any(_rep.values()):
-                            print("[upgrade] scripts: " + ", ".join(f"{k} {len(v)}" for k, v in _rep.items()), file=sys.stderr)
-                    except Exception as e:     # noqa: BLE001 -- the seat starts; scripts stay Python
-                        print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
-                    _boot_laps.step('loops: field engine')
-                    def _facts_now():          # the facts packs read (fields_live.seat_facts); the router's come late (below, after its step)
-                        from . import server as _SV, settings as _ST, ui_serve as _UI
-                        return _FL.seat_facts(os.environ, _ST.load(), srv, {"ui_dir": _UI.UI_DIR, "build_id": _UI.build_id(), "seat_version": _SV.VERSION,
-                                              "seat_cwd": os.getcwd(), "seat_home": os.path.expanduser("~"), "seat_project": _SV.PROJECT_ID})
-                    srv._facts_now = _facts_now
-                    _FL.start(srv)
-                    _FL.boot_started(srv.entity_store, ledger=getattr(getattr(srv, "user_ledger", None), "path", None), facts={"agent_writes": bool(getattr(srv, "agent_writes", True)), "nerve_pause_off": os.environ.get("MEMBRANE_NERVE_PAUSE") == "0", **_facts_now()})   # Boot:seat.started: the packs that start something answer (dev commands, the decisions' ledger file)
-                    _boot_laps.step('loops: owed tasks')             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
-                    _r = _GG.reowe(srv)
-                    _p = _GG.replan_lost(srv)
-                    print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool, "
-                          f"{_p} goal(s) planned again", file=sys.stderr)
-                except Exception as e:
-                    print(f"[opencode] goal graph seeding skipped ({e})", file=sys.stderr)
-            else:
-                print("[opencode] watch loops OFF (MEMBRANE_WATCH_LOOPS=0)", file=sys.stderr)
+            from .watch_agents import start_goal_pulse
+            WA_start_loop_drainer(srv)
+            start_goal_pulse(srv)
+            try:                           # #738: goals as a graph -- the triggers, the worker pool
+                from . import goalgraph as _GG
+                _boot_laps.step('loops: goal graph seed')
+                _n = _GG.seed(srv)
+                _boot_laps.step('loops: script upgrade')
+                from . import fields_live as _FL
+                try:                       # #1044: the upgrade -- entity scripts move into .c1f once (rules, replay-gated)
+                    from . import scriptport as _SPORT
+                    _rep = _SPORT.upgrade(srv.entity_store)
+                    if any(_rep.values()):
+                        print("[upgrade] scripts: " + ", ".join(f"{k} {len(v)}" for k, v in _rep.items()), file=sys.stderr)
+                except Exception as e:     # noqa: BLE001 -- the seat starts; scripts stay Python
+                    print(f"[upgrade] scripts not moved ({e})", file=sys.stderr)
+                _boot_laps.step('loops: field engine')
+                def _facts_now():          # the facts packs read (fields_live.seat_facts); the router's come late (below, after its step)
+                    from . import server as _SV, settings as _ST, ui_serve as _UI
+                    return _FL.seat_facts(os.environ, _ST.load(), srv, {"ui_dir": _UI.UI_DIR, "build_id": _UI.build_id(), "seat_version": _SV.VERSION,
+                                          "seat_cwd": os.getcwd(), "seat_home": os.path.expanduser("~"), "seat_project": _SV.PROJECT_ID})
+                srv._facts_now = _facts_now
+                _FL.start(srv)
+                _FL.boot_started(srv.entity_store, ledger=getattr(getattr(srv, "user_ledger", None), "path", None), facts={"agent_writes": bool(getattr(srv, "agent_writes", True)), "nerve_pause_off": os.environ.get("MEMBRANE_NERVE_PAUSE") == "0", **_facts_now()})   # Boot:seat.started: the packs that start something answer (dev commands, the decisions' ledger file)
+                _boot_laps.step('loops: owed tasks')             # #994: the goal graph runs on the field engine (MEMBRANE_FIELDS=0: the triggers)
+                _r = _GG.reowe(srv)
+                _p = _GG.replan_lost(srv)
+                print(f"[opencode] goal graph: {_n} triggers, {_r} task(s) back in the worker pool, "
+                      f"{_p} goal(s) planned again", file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] goal graph seeding skipped ({e})", file=sys.stderr)
             print("[opencode] the loop pool is live (3 loops + the "
                   "operator's lane; the drainer consumes the watch events)",
                   file=sys.stderr)
@@ -2080,7 +2025,7 @@ def main() -> None:
         srv.cell_pool = None
     _STEPS['embedder'] = _step_embedder
     def _step_config():
-        nonlocal _NM, cfg, cfg_path, e, env, instr_path, legacy_serve, surf_host
+        nonlocal _NM, cfg, cfg_path, e, env, instr_path, surf_host
 
         # ---- the opencode config + launch ----
         # first-class cloud backends join the picker: any router record with an
@@ -2120,7 +2065,7 @@ def main() -> None:
         # byte-stable member of the system prefix -- every provider's prompt cache
         # holds it for the whole session) instead of riding the per-turn RAG tail.
         # The proxy recognizes the stamp line and skips its own per-turn copy
-        # (rag._DOCTRINE_STAMP). --no-doctrine-move reverts to per-turn injection.
+        # (rag._DOCTRINE_STAMP).
         # A membrama upstream (#753) never injects for this seat: every chat call
         # says capture (the seat's turn) or off (its background), so the seat
         # owns its doctrine and recall whatever the backend is.
@@ -2134,41 +2079,38 @@ def main() -> None:
         # injection (the agdroid exhibit: a static opencode.json + the blind
         # trust = a seat whose model never saw the doctrine at all).
         import membrane.rag as _rag
-        if getattr(args, "doctrine_move", True) and args.launch:
+        if args.launch:
             _rag._inject.doctrine_delivered = True
-        if getattr(args, "doctrine_move", True):
-            try:
-                # the STABLE path next to the field: an external opencode's
-                # config can list it ("instructions": [...]) and it survives
-                # seat restarts (never unlinked at shutdown)
-                instr_path = str(Path(args.field).resolve().parent
-                                 / "doctrine.md")
-                text = doctrine_instructions_text()
-                # the seat card: THIS session's switches, for the model
-                # (--no-seat-card keeps the doctrine generic)
-                if getattr(args, "seat_card", True):
-                    text += _seat_card(srv, bool(getattr(args, "mcp", True)),
-                                       serve=bool(getattr(args, "serve", False)))
-                if naming_on:                  # THE NAME CEREMONY (naming.py): its own name, in its own prompt
-                    from . import naming as _NM
-                    text += _NM.card_line() + _NM.feedback_line()
-                from . import ha_bridge as _HB                 # Home Assistant around this seat: its
-                if _HB.hass_available():                       # child env, or a token HA pushed
-                    text += _HB.card_line()                    # into ~/.config/membrane/hass.env
-                tmp = instr_path + ".tmp"
-                with open(tmp, "w") as f:
-                    f.write(text)
-                os.replace(tmp, instr_path)      # atomic: a reader never
-                cfg["instructions"] = [instr_path]   # sees half a file
-                if not args.launch:
-                    print(f"[opencode] doctrine + seat card: {instr_path} "
-                          "(an external opencode picks it up only if its "
-                          "config lists it under \"instructions\"; until "
-                          "then it rides per turn)", file=sys.stderr)
-            except Exception as e:
-                instr_path = None
-                print(f"[opencode] doctrine-move skipped ({e}); per-turn "
-                      "injection stays", file=sys.stderr)
+        try:
+            # the STABLE path next to the field: an external opencode's
+            # config can list it ("instructions": [...]) and it survives
+            # seat restarts (never unlinked at shutdown)
+            instr_path = str(Path(args.field).resolve().parent
+                             / "doctrine.md")
+            text = doctrine_instructions_text()
+            # the seat card: THIS session's switches, for the model
+            text += _seat_card(srv, bool(getattr(args, "mcp", True)),
+                               serve=bool(getattr(args, "serve", False)))
+            if naming_on:                  # THE NAME CEREMONY (naming.py): its own name, in its own prompt
+                from . import naming as _NM
+                text += _NM.card_line() + _NM.feedback_line()
+            from . import ha_bridge as _HB                 # Home Assistant around this seat: its
+            if _HB.hass_available():                       # child env, or a token HA pushed
+                text += _HB.card_line()                    # into ~/.config/membrane/hass.env
+            tmp = instr_path + ".tmp"
+            with open(tmp, "w") as f:
+                f.write(text)
+            os.replace(tmp, instr_path)      # atomic: a reader never
+            cfg["instructions"] = [instr_path]   # sees half a file
+            if not args.launch:
+                print(f"[opencode] doctrine + seat card: {instr_path} "
+                      "(an external opencode picks it up only if its "
+                      "config lists it under \"instructions\"; until "
+                      "then it rides per turn)", file=sys.stderr)
+        except Exception as e:
+            instr_path = None
+            print(f"[opencode] doctrine-move skipped ({e}); per-turn "
+                  "injection stays", file=sys.stderr)
         if model:
             cfg["model"] = f"membrane/{model}"
             cfg["small_model"] = f"membrane/{model}"
@@ -2252,7 +2194,6 @@ def main() -> None:
             except Exception:
                 fld_s = type(fld.b).__name__
         serve_addr = None
-        legacy_serve = os.environ.get("MEMBRANE_LEGACY_SERVE") == "1"
         # THE SURFACE runs for every launch boot (the TUI attaches to it as a
         # client -- stage 3.5), loopback-only unless --serve exposes it to the
         # room; no auth baked in -- a proxy in front is the operator's lane.
@@ -2268,8 +2209,8 @@ def main() -> None:
               f"  embedder: {getattr(mem.embedder, 'model', None) or 'UNRESOLVED -- chat blocked until an embed model is available'}\n"
               f"  entity field: {fld_s} (capture "
               f"{getattr(getattr(srv, 'capturer', None), 'mode', 'off')})\n"
-              f"  state/math: {'answered internally from the live field' if srv.state_intercept else 'off'}\n"
-              f"  thoughts: {'agent asks answered as marked context' if srv.thought_intercept else 'off'}\n"
+              f"  state/math: answered internally from the live field\n"
+              f"  thoughts: agent asks answered as marked context\n"
               f"  dev: {'on (one-shot frame-discipline warnings)' if srv.dev else 'off (--dev)'}\n"
               f"  peers: {'on' if getattr(srv, 'peers', None) else 'off'}\n"
               f"  user ledger: {srv.user_ledger.count() if srv.user_ledger else 0} verbatim decisions\n"
@@ -2291,7 +2232,7 @@ def main() -> None:
         if args.serve:
             _serve_board(serve_port, args.serve_host)
         native_up = False
-        if serve_wanted and not legacy_serve:
+        if serve_wanted:
             # THE REPLACEMENT (stage 3): no opencode child -- the native
             # server (membrane/server.py) IS the serve surface:
             # opencode-compatible REST/SSE (the companion app's endpoint),
@@ -2534,36 +2475,14 @@ def main() -> None:
                 threading.Thread(target=_open_dev_viewer, name="dev-viewer-open",
                                  daemon=True).start()
             if args.launch:
-                tui_direct = os.environ.get("MEMBRANE_TUI_DIRECT") == "1"
-                if args.serve and legacy_serve:
-                    # MEMBRANE_LEGACY_SERVE=1: the OLD lane -- `opencode serve`
-                    # as a child (the generated config's provider baseURL -> the
-                    # proxy; the REST surface is opencode's own). Without the
-                    # env the native surface (above) IS the serve lane.
-                    opencode = shutil.which("opencode")
-                    if opencode is None:
-                        print("[opencode] `opencode` not on PATH; no legacy "
-                              "serve child (proxy + native surface only)",
-                              file=sys.stderr)
-                    else:
-                        cmd = [opencode, "serve", "--hostname", args.serve_host,
-                               "--port", str(serve_port or 4096)]
-                        print(f"[opencode] launching legacy serve: "
-                              f"{' '.join(cmd)}", file=sys.stderr)
-                        child = subprocess.Popen(cmd, env=env)
-                        try:
-                            pid_path = (Path(args.field).parent / "opencode.pid")
-                            pid_path.write_text(str(child.pid))
-                        except Exception:
-                            pass
-                elif serve_wanted and not native_up:
+                if serve_wanted and not native_up:
                     # the native surface failed to bind -- no child to point at
                     print("[opencode] serve surface is down; no TUI child "
                           "(proxy only -- point any client at a surface "
                           "manually)", file=sys.stderr)
                 elif args.standalone:
                     pass                       # standalone: the browser is the client, no TUI
-                elif not tui_direct and not legacy_serve:
+                else:
                     # THE CLIENT (stage 3.5): the TUI attaches to membrane's
                     # serve server -- sessions/messages in membrane's stores,
                     # turns in the TurnRunner, tool parts from the SSE hub.
@@ -2581,42 +2500,6 @@ def main() -> None:
                         child = subprocess.Popen(
                             cmd, env=_attach_env(env),
                             stderr=subprocess.DEVNULL)
-                        try:
-                            pid_path = (Path(args.field).parent
-                                        / "opencode.pid")
-                            pid_path.write_text(str(child.pid))
-                        except Exception:
-                            pass
-                else:
-                    opencode = shutil.which("opencode")
-                    if opencode is None:
-                        print("[opencode] `opencode` not on PATH; proxy-only "
-                              "(point opencode at the /v1 URL above)",
-                              file=sys.stderr)
-                    else:
-                        extra = []
-                        if model and not any(
-                                a.startswith("--model") or
-                                a.startswith("-m") for a in passthrough):
-                            extra = ["--model", f"membrane/{model}"]
-                        # resume by default: opencode -c continues the last
-                        # session. An explicit -c/-s/--session in passthrough
-                        # wins; --no-continue opts out (fresh session).
-                        if args.cont and not any(
-                                a in ("-c", "--continue") or
-                                a in ("-s", "--session") or
-                                a.startswith("--session=") for a in
-                                passthrough):
-                            extra += ["-c"]
-                        cmd = [opencode] + extra + list(passthrough)
-                        print(f"[opencode] launching: {' '.join(cmd)}",
-                              file=sys.stderr)
-                        child = subprocess.Popen(cmd, env=env)
-                        # THE LIFE-HANDSHAKE: write the child's PID --
-                        # proxy-only instances (a second terminal, a manual
-                        # relaunch) poll this file and exit when the seat
-                        # dies (the operator's rule: the proxy's life is the
-                        # seat's life)
                         try:
                             pid_path = (Path(args.field).parent
                                         / "opencode.pid")
