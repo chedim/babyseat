@@ -88,6 +88,10 @@
   "minds": {
    "wired": true,
    "why": "the minds' model picks"
+  },
+  "started": {
+   "wired": true,
+   "why": "the seat says it has started (Boot:seat.started = now): the packs build their nodes in setters on it (fields_live.boot_started)"
   }
  }
 }

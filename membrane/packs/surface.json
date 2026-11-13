@@ -517,6 +517,8 @@
     ],
     "claims": [],
     "boot_facts": [
+      "cloud_models",
+      "minds",
       "router_on",
       "seat_backend"
     ]

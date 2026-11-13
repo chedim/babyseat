@@ -29,6 +29,14 @@ fn declared(t: &str) -> Vec<(String, String)> {
         if c.chars().next()?.is_ascii_uppercase() { Some((c.to_string(), p.to_string())) } else { None }
     }).collect()
 }
+/// what a pack DEFINES (a getter): a setter on a property only reacts to it, the property is still someone else's
+fn declared_own(t: &str) -> Vec<(String, String)> {
+    t.lines().filter(|l| !l.starts_with(' ') && !l.starts_with("--") && l.contains(" getter")).filter_map(|l| {
+        let (head, _) = l.split_once(' ')?;
+        let (c, p) = head.split_once('.')?;
+        if c.chars().next()?.is_ascii_uppercase() { Some((c.to_string(), p.trim_end_matches(':').to_string())) } else { None }
+    }).collect()
+}
 fn ident_after(t: &str, pat: &str) -> Vec<String> {                    // every identifier that follows `pat` where `pat` starts a name
     let b = t.as_bytes();
     let mut out = vec![];
@@ -102,7 +110,7 @@ fn a_route_family_keeps_the_door_contract() {
 #[test]
 fn the_boot_facts_packs_read_are_registered_and_the_wired_ones_are_written_by_the_launcher() {
     let all = packs();
-    let boot_declared: BTreeSet<String> = all.iter().flat_map(|p| declared(&p.1)).filter(|(c, _)| c == "Boot").map(|(_, p)| p).collect();
+    let boot_declared: BTreeSet<String> = all.iter().flat_map(|p| declared_own(&p.1)).filter(|(c, _)| c == "Boot").map(|(_, p)| p).collect();
     let mut read: BTreeSet<String> = BTreeSet::new();
     for (_, text) in &all {
         let mut cur = String::new();
@@ -188,9 +196,21 @@ fn surface_of(text: &str) -> serde_json::Value {
         if l.contains("for b in instances('Boot')") || l.contains("for b in this.boots") { for id in ident_after(l, "b.") { facts.insert(id); } }
         if cur == "Boot" { for id in ident_after(l, "this.") { facts.insert(id); } }
     }
-    let boot_decl: BTreeSet<String> = decl.iter().filter(|(c, _)| c == "Boot").map(|(_, p)| p.clone()).collect();
+    let boot_decl: BTreeSet<String> = declared_own(text).iter().filter(|(c, _)| c == "Boot").map(|(_, p)| p.clone()).collect();
     facts.retain(|f| !boot_decl.contains(f) && !["eid", "name", "summary", "cls", "state", "facts"].contains(&f.as_str()));
     json!({"imports": imports(text), "classes": classes, "members": members.len(), "writes": writes, "claims": claims, "boot_facts": facts})
+}
+
+#[test]
+fn a_boot_fact_a_pack_reacts_to_is_still_a_fact_it_reads() {
+    // a setter ON a Boot fact does not make the pack its owner: the launcher still tells it
+    let text = "PACK t 1\nBoot.cloud_models on-setter told:\n  WHEN this.cloud_models != None:\n    ('Model:a').name = 'a'\n";
+    let s = surface_of(text);
+    let facts: Vec<String> = s["boot_facts"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert!(facts.contains(&"cloud_models".to_string()), "{facts:?}");
+    // a getter the pack defines on Boot is its own, not a fact
+    let own = surface_of("PACK t 1\nBoot.shade getter: 'x'\nBoot.s on-setter n:\n  WHEN this.shade == 'x':\n    ('Model:a').name = 'a'\n");
+    assert!(own["boot_facts"].as_array().unwrap().is_empty(), "{own}");
 }
 
 #[test]
