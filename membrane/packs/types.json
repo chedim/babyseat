@@ -197,7 +197,6 @@
       "ChatMessage.bin": "Any",
       "ChatMessage.calls": "Any",
       "ChatMessage.capped": "Bool",
-      "ChatMessage.chunks": "List(Dict)",
       "ChatMessage.cmd_eid": "Text",
       "ChatMessage.cost": "Any",
       "ChatMessage.evs": "List(Any)",
@@ -223,11 +222,14 @@
       "ChatMessage.tools_idlist": "Text",
       "ChatMessage.tools_names": "List(Text)",
       "ChatMessage.turn_timeout_s": "Any",
+      "Chunk.part": "Dict",
       "Chunk.said": "Text",
       "Chunk.sevs": "List(Any)",
       "Chunk.started": "Text"
     },
     "writes": {
+      "*.text": "Text",
+      "*.tools": "Text",
       "Chat.calls": "Any",
       "Chat.cost": "Any",
       "Chat.duration": "Any",

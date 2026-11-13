@@ -141,6 +141,8 @@
     ],
     "members": 41,
     "writes": [
+      "Chunk:*.text",
+      "Chunk:*.tools",
       "membrane:*.calls",
       "membrane:*.cost",
       "membrane:*.duration",
