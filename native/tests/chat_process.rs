@@ -580,20 +580,17 @@ fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_
     let rc: J = serde_json::from_str(&line["receipt: ".len()..]).unwrap_or_else(|e| panic!("{e}: {line}"));
     assert_eq!((rc["rc"].clone(), rc["ok"].clone(), rc["stdout"].as_str().unwrap().trim().to_string()), (json!(0), json!(true), "hi there".to_string()), "{t}");
     assert!(rc.get("stderr").is_some());
-    let ret = t.lines().find_map(|l| l.strip_prefix("return: ")).unwrap().to_string();
-    assert!(ret.starts_with("Return:"), "{t}");
-    let (r, _) = call(port, "entity_read", json!({"spec": ret, "prop": "receipt"}));
-    assert!(r.contains("hi there"), "the Return entity holds the receipt: {r}");
-    assert_eq!(call(port, "entity_read", json!({"spec": ret, "prop": "state"})).0, "done");
+    assert!(!t.contains("Return:"), "the Return entity is a carrier, the reply does not name it: {t}");
+    let (r, _) = call(port, "entity_read", json!({"spec": "Command:e1", "prop": "run_result"}));
+    assert!(r.contains("hi there"), "the receipt stays on the entity: {r}");
     // no wait: a slow command answers at once, naming the receipt; the Return entity shows it when it lands
     put(port, "Command:slow", "cmd", json!(["sh", "-c", "sleep 2; echo late"]));
     let t0 = Instant::now();
     let (t, _) = put(port, "Command:slow", "run", json!({"id": "s1", "args": []}));
     assert!(t0.elapsed() < Duration::from_millis(1800), "no wait, no holding: {:?}", t0.elapsed());
     assert!(t.contains("pending: read Command:slow.run_result later"), "{t}");
-    let ret = t.lines().find_map(|l| l.strip_prefix("return: ")).unwrap().to_string();
-    assert_eq!(call(port, "entity_read", json!({"spec": ret, "prop": "state"})).0, "pending");
-    let r = wait("the late receipt on the Return entity", || { let (r, _) = call(port, "entity_read", json!({"spec": ret, "prop": "receipt"})); r.contains("late").then_some(r) });
+    assert!(!t.contains("Return:"), "{t}");
+    let r = wait("the late receipt on the entity", || { let (r, _) = call(port, "entity_read", json!({"spec": "Command:slow", "prop": "run_result"})); r.contains("late").then_some(r) });
     assert!(r.contains("late"), "{r}");
     // a wait that is too short answers pending
     put(port, "Command:slow2", "cmd", json!(["sh", "-c", "sleep 4; echo x"]));
@@ -626,9 +623,6 @@ fn a_write_returns_the_reactions_of_its_round_with_the_reason_of_a_null() {
     let rs: Vec<J> = serde_json::from_str(t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap()).unwrap();
     let g = rs.iter().find(|r| r["eid"] == "Box:2" && r["prop"] == "gone").unwrap_or_else(|| panic!("gone in {rs:?}"));
     assert_eq!(g["why"], json!("nothing there yet"), "{rs:?}");
-    // the same list is on the Return entity
-    let ret = t.lines().find_map(|l| l.strip_prefix("return: ")).unwrap();
-    assert!(call(port, "entity_read", json!({"spec": ret, "prop": "reactions"})).0.contains("Box:2"));
     assert!(terminate(&mut run));
 }
 
@@ -703,4 +697,22 @@ fn a_turn_that_was_running_when_the_seat_stopped_is_an_error_after_the_restart()
     assert_eq!(finish(port2, &dir, &id2, "after the restart")["state"], "done");
     assert_eq!(view(port2, &id)["state"], "error", "the interrupted turn stays an error");
     assert!(terminate(&mut run2));
+}
+
+fn returns(port: u16) -> String { call(port, "entity_query", json!({"q": "kind:Return", "count": true})).0 }
+
+#[test]
+fn the_return_entity_is_retired_as_soon_as_its_reply_is_delivered() {
+    let (mut run, port) = start("retret", MCP_PACKS, &[]);
+    assert_eq!(returns(port), "0 entity(ies)");
+    for i in 0..20 { let (t, e) = put(port, &format!("Note:n{i}"), "v", json!(i)); assert!(!e && t.starts_with("wrote Note:"), "{t}"); }
+    wait("no Return left after 20 writes", || (returns(port) == "0 entity(ies)").then_some(()));
+    // a held call: while it waits its carrier is not made yet; after it answers none is left
+    put(port, "Command:w1", "cmd", json!(["sh", "-c", "sleep 1; echo w"]));
+    let (t, _) = put_wait(port, "Command:w1", "run", json!({"id": "w1", "args": []}), 20.0);
+    assert!(t.contains("receipt: "), "{t}");
+    wait("no Return left after a waiting call", || (returns(port) == "0 entity(ies)").then_some(()));
+    // the receipt is where it always lived
+    assert!(call(port, "entity_read", json!({"spec": "Command:w1", "prop": "run_result"})).0.contains("\"rc\":0"));
+    assert!(terminate(&mut run));
 }

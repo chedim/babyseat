@@ -121,21 +121,27 @@
   "chat_turn": {
     "imports": [
       "chat",
-      "proc"
+      "proc",
+      "boot"
     ],
     "classes": [
+      "Boot",
       "Chat",
       "ChatMessage"
     ],
-    "members": 32,
+    "members": 37,
     "writes": [
       "*.retire",
+      "membrane:*.calls",
+      "membrane:*.cost",
+      "membrane:*.duration",
       "membrane:*.ended",
       "membrane:*.result",
       "membrane:*.run",
       "membrane:*.run_result",
       "membrane:*.started",
       "membrane:*.state",
+      "membrane:*.usage",
       "membrane:*=ChatResponse()",
       "membrane:*=ChatTool()",
       "membrane:*=Command()"
@@ -143,7 +149,8 @@
     "claims": [],
     "boot_facts": [
       "chat_claude_bin",
-      "chat_max_turns"
+      "chat_max_turns",
+      "started"
     ]
   },
   "decisions": {
@@ -365,9 +372,10 @@
       "Request",
       "Return"
     ],
-    "members": 62,
+    "members": 63,
     "writes": [
       "*.[]",
+      "*.retire",
       "Return:*=Return()"
     ],
     "claims": [
