@@ -37,6 +37,11 @@ In order, each piece deployed on its own and replacing its Python:
    reply its value); the injection, the gate and the banner already are packs.
 7. **Router, voice, peers, restarts, toybox, absorb, codegraph, predict** and the rest, one by one.
 8. **Last: the entity store and the field engine** (`entities.py`, `efield.py`, `efstore.py`, `cblstore.py`): native.
+   *Golden fixtures (the port's target):* `tests/golden/efield/` holds recorded inputs and the saved output of the Python
+   field (`EntityState` updates, NNLS fit/residual/surprise, nursery promotion at K_MAT and the boilerplate gate, mass
+   metabolism, `rebuild()` == incremental, the pure functions on edge cases); `scripts/golden_efield.py` regenerates them,
+   `tests/test_golden_efield.py` keeps them true, and its README lists the per-quantity tolerances (f16/f32 storage points
+   included). The Rust field must reproduce them before the Python is deleted.
 
 ## The UI is a cliffhanger app too (operator, 2026-11-11)
 Today `membrane/ui/` is about 16,100 lines of JavaScript (`home.js` 4,900, `panel.js` 4,100, `field3d.js` 2,600,
