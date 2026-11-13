@@ -250,3 +250,20 @@ fn a_setter_retires_an_entity_by_writing_retire_true_and_a_replay_ends_the_same(
     assert_eq!(state(&r), state(&h), "the replay ends with Box:a gone as well");
     expr::set_clock(None);
 }
+
+/// A parent owns its children by the colon path (#1143): a `retire = true` on `A:1` retires `A:1:x` and `A:1:x:y` too, never `A:10` or `A:2`.
+#[test]
+fn retiring_an_entity_retires_what_its_path_owns_and_replays() {
+    let mk = || { let mut o = Options::new(None); o.effects = false; Host::open(o).unwrap() };
+    let h = mk();
+    h.rebuild();
+    for e in ["A:1", "A:1:x", "A:1:x:y", "A:10", "A:2"] { h.born(e, "A", Map::new(), "person"); }
+    h.write("A:1", "retire", json!(true), "person");
+    let keys: Vec<String> = h.snapshot().keys().cloned().collect();
+    assert_eq!(keys, ["A:10", "A:2"], "the engine keeps the others");
+    assert_eq!(h.rows().keys().cloned().collect::<Vec<_>>(), ["A:10", "A:2"], "and so does the store");
+    let r = mk();
+    r.rebuild();
+    r.replay(&h.journal());
+    assert_eq!(r.snapshot().keys().cloned().collect::<Vec<_>>(), ["A:10", "A:2"]);
+}

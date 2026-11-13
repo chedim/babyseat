@@ -227,10 +227,14 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
     at start), so it is not held to that class rule: it writes and creates any class, including one a model's pack owns.
   The #1101 `call` tool, aliases and the enter/exit context stack are out (skipped by decision).
 - `POST /membrane/chat/message {text}` -> 202 `{id}` (`<epoch ms>-<request n>`); the message is `membrane::Chat:message:<id>` (kind
-  ChatMessage: text, at, state, tools_run), written `queued` after its birth, which starts the turn.
-  `GET /membrane/chat/message/<id>` -> `{id, text, state (queued | running | done | error), response, tools}`: poll it. The answer is
-  `membrane::Chat:message:<id>:response` (ChatResponse: text, error, rc), each tool Claude ran
-  `membrane::Chat:message:<id>:tool:<tool_use id>` (ChatTool: name, input, result).
+  ChatMessage: text, at, tools_run), written `queued` after its birth, which starts the turn.
+  `GET /membrane/chat/message/<id>` -> `{id, text, state (queued | running | done | error), response, tools, turn: {state, started, ended}}`: poll it.
+  THE TURN is the entity `membrane::Chat:message:<id>:turn` (ChatTurn: `state` written running, then done/error; `status` a getter over it, `queued` while
+  there is none: a first value written with the birth and the start's write would be two writes in one round, which the loop guard refuses; `started`, `ended` = the clock; `queued_at`; `message`).
+  It owns, by the colon path, the answer `...:turn:response` (ChatResponse: text, error, rc) and each tool Claude ran `...:turn:tool:<tool_use id>` (ChatTool: name, input, result).
+  **A parent owns its children** (`host.rs` `drain_apply`): `retire = true` on an entity also retires every entity whose eid starts with `<eid>:` (engine and store), so retiring a turn retires its
+  answer and tools, retiring a message its turn. Tests: `host_loop.rs` (`retiring_an_entity_retires_what_its_path_owns...`), `seat_process.rs` (`a_turn_is_an_entity...`).
+  The page (`ui/chat.js`) draws each turn as one group: the message, the answer, the tools folded under it, the turn's seconds.
   The UI's own message route is opencode's `POST /session/<sid>/prompt_async` (`membrane/ui/panel.js`): a richer shape (parts, agent,
   model); this door does not speak it (open question below).
 

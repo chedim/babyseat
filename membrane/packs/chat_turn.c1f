@@ -8,7 +8,7 @@ IMPORT proc 1
 -- the turn goes into the field; the banner shows it.
 -- THE RUN is a Command entity (`membrane::Command:chat:<id>`) the turn writes; the stream-json lines of its stdout are read here by
 -- `json()` (the receipt lands when the process ends: the answer is not streamed, see docs/cliffvm.md); the result line is the answer,
--- else the assistant's text in order. Each tool the model ran is an entity under the message (ChatTool: name, input, result).
+-- else the assistant's text in order. The run is the message's TURN entity (`...:turn`, packs/chat.c1f: state, started, ended); each tool the model ran and the answer are entities under the turn (ChatTool: name, input, result).
 -- Boot facts (cliffvm run ... --fact name=value):
 --   chat_claude_bin   the CLI's path. NO DEFAULT: without it a message is answered with an error that says so, and nothing is run.
 --   chat_max_turns    the ceiling (the CLI's --max-turns); default 2048 here (a threshold: flagged for the operator).
@@ -31,16 +31,18 @@ ChatMessage.argv getter:
 
 -- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
 ChatMessage.plan getter:
-  WHEN this.queued != True or this.state != None or this.text == None: None
+  WHEN this.queued != True or this.tstate != 'queued' or this.text == None: None
   ELSE WHEN this.bin == '': {'refuse': 'The chat answers through the claude CLI, and its path is not named yet (chat_claude_bin). Name it with CLAUDE_BIN=<path to claude> when you start scripts/seat, or start cliffvm with --fact chat_claude_bin=<path>, then send the message again.'}
   ELSE WHEN this.argv != None: {'argv': this.argv}
   ELSE: None
 Chat.plan on-setter turn-start:
   WHEN prop(this.plan, 'refuse') != None:
-    this.state = 'error'
-    membrane::Chat:message[this.mid]:response = ChatResponse(text: prop(this.plan, 'refuse'), error: True)
+    membrane::Chat:message[this.mid]:turn.state = 'error'
+    membrane::Chat:message[this.mid]:turn.ended = clock
+    membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: prop(this.plan, 'refuse'), error: True)
   ELSE WHEN prop(this.plan, 'argv') != None:
-    this.state = 'running'
+    membrane::Chat:message[this.mid]:turn.state = 'running'
+    membrane::Chat:message[this.mid]:turn.started = clock
     membrane::Command:chat[this.mid] = Command(cmd: prop(this.plan, 'argv'))
     membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': []}
 
@@ -67,13 +69,14 @@ ChatMessage.answer getter:
 ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evs if prop(e, 'type') == 'assistant'], ' '))
 Chat.answer on-setter turn-finish:
   WHEN this.answer != None:
-    this.state = 'error' if this.failed != None else 'done'
+    membrane::Chat:message[this.mid]:turn.state = 'error' if this.failed != None else 'done'
+    membrane::Chat:message[this.mid]:turn.ended = clock
     this.tools_run = this.tools_names
-    membrane::Chat:message[this.mid]:response = ChatResponse(text: this.answer, error: this.failed != None, rc: this.rc)
+    membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: this.answer, error: this.failed != None, rc: this.rc)
     FOR e IN [x for x in this.evs if prop(x, 'type') == 'assistant']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
-        membrane::Chat:message[this.mid]:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
+        membrane::Chat:message[this.mid]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
     FOR e IN [x for x in this.evs if prop(x, 'type') == 'user']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_result']:
         body = prop(b, 'content')
-        membrane::Chat:message[this.mid]:tool[prop(b, 'tool_use_id')].result = Text(body) or join([prop(c, 'text') for c in (List(body) or [])], '\n')
+        membrane::Chat:message[this.mid]:turn:tool[prop(b, 'tool_use_id')].result = Text(body) or join([prop(c, 'text') for c in (List(body) or [])], '\n')

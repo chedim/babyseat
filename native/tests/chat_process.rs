@@ -237,9 +237,9 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert!(!args.iter().any(|x| x == "--bare" || x == "--resume" || x == "--continue"), "{args:?}");
 
     // the tools it ran are entities under the message, and the write it made through the door is in the field
-    let (n, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:tool:tu1"), "prop": "name"}));
+    let (n, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn:tool:tu1"), "prop": "name"}));
     assert_eq!(n, "mcp__membrane__entity_write");
-    let (n, _) = wait("the tool result", || { let r = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:tool:tu2"), "prop": "result"})); if r.0.contains("echo") { Some(r) } else { None } });
+    let (n, _) = wait("the tool result", || { let r = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn:tool:tu2"), "prop": "result"})); if r.0.contains("echo") { Some(r) } else { None } });
     assert!(n.contains("echo") && n.contains("x"), "{n}");
     let (c, _) = call(port, "entity_read", json!({"spec": "Command:probe", "prop": "cmd"}));
     assert!(c.contains("echo"), "{c}");

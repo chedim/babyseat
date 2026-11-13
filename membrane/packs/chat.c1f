@@ -4,22 +4,30 @@ IMPORT door 1
 -- `session` family:
 --   POST /membrane/chat/message {text}   the person's message becomes an entity under the chat; 202 {id}
 --   GET  /membrane/chat/message/<id>     {id, text, state, response, tools}: poll it until `state` is done (or error)
--- The message is `membrane::Chat:message:<id>` (the kind ChatMessage; its eid names the class Chat, as the constructor rule says),
--- its answer `membrane::Chat:message:<id>:response` (ChatResponse {text, error}) and each tool the model ran
--- `membrane::Chat:message:<id>:tool:<tool id>` (ChatTool {name, input, result}); packs/chat_turn.c1f runs the turn. The kinds are
+-- The message is `membrane::Chat:message:<id>` (the kind ChatMessage; its eid names the class Chat, as the constructor rule says).
+-- THE TURN is the entity under it, `membrane::Chat:message:<id>:turn` (ChatTurn {status: queued/running/done/error (a getter over `state`), started, ended, queued_at, message}),
+-- the one run of the model that answers the message. It OWNS, by the colon path, its answer `...:turn:response` (ChatResponse {text, error})
+-- and each tool the model ran `...:turn:tool:<tool id>` (ChatTool {name, input, result}): retiring the turn (`retire = true`) retires them.
+-- packs/chat_turn.c1f runs the turn. The kinds are
 -- ChatMessage / ChatResponse / ChatTool, not Message / Response: a pack owns the classes it declares on, and Message was retired
 -- from messages.c1f for that reason.
 -- The chat's banner is the instance `membrane::Banner:owner:main`, born at start by the app's banner_lines pack (a banner made of
--- BannerLine entities); chat_turn.c1f reads its `text`. `queued` is written AFTER the message is born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
+-- BannerLine entities); chat_turn.c1f reads its `text`. `queued` is written AFTER the message and its turn are born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
 -- The id is the arrival time in milliseconds and the request's number: `<ms>-<n>`.
 
 Chat.title getter: 'main'
 ChatMessage.mid getter: replace(this.eid, 'membrane::Chat:message:', '')
-ChatMessage.resp_eid getter: 'membrane::Chat:message:' + this.mid + ':response'
+ChatMessage.turn_eid getter: 'membrane::Chat:message:' + this.mid + ':turn'
+ChatMessage.tstate getter: prop(this.turn_eid, 'status')
+ChatMessage.resp_eid getter: this.turn_eid + ':response'
 ChatMessage.said getter: prop(this.resp_eid, 'text')
-ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.state or 'queued', 'response': this.said, 'tools': this.tools_run or []}
+ChatMessage.turn_view getter: {'state': this.tstate, 'started': prop(this.turn_eid, 'started'), 'ended': prop(this.turn_eid, 'ended')}
+ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view}
 ChatResponse.kind getter: 'response'
 ChatTool.kind getter: 'tool'
+ChatTurn.kind getter: 'turn'
+-- `state` is written once per step (running, then done/error): a turn that has none yet is queued (a constructor's first value and the start's write would be two writes in one round, which the loop guard refuses).
+ChatTurn.status getter: this.state or 'queued'
 
 Request.o_session getter: this.path == '/membrane/chat/message' or startswith(this.path, '/membrane/chat/message/')
 Request.m_session getter: ['POST'] if this.path == '/membrane/chat/message' else ['GET']
@@ -35,6 +43,7 @@ Request.cm_at on-setter chat-message:
     id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
     membrane::Chat:main = Chat(name: 'main')
     membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
+    membrane::Chat:message[id]:turn = ChatTurn(message: 'membrane::Chat:message:' + id, queued_at: this.cm_at)
     membrane::Chat:message[id].queued = True
     this.cm_id = id
 Request.cm_post getter:

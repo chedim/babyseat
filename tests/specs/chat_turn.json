@@ -48,6 +48,16 @@
      ],
      "text": "hello"
     }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
    }
   ],
   "writes": [],
@@ -222,6 +232,16 @@
      ],
      "text": "hello"
     }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
    }
   ],
   "writes": [],
@@ -300,6 +320,16 @@
      ],
      "text": "hello"
     }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
    }
   ],
   "writes": [
@@ -311,17 +341,17 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
-    "prop": "state",
+    "eid": "membrane::Chat:message:1-1:turn",
+    "prop": "status",
     "equals": "error"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "contains": "chat_claude_bin"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "error",
     "equals": true
    }
@@ -375,6 +405,16 @@
      ],
      "text": "hello"
     }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
    }
   ],
   "writes": [
@@ -391,12 +431,12 @@
     "equals": "/nonexistent/claude-fake"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
-    "prop": "state",
+    "eid": "membrane::Chat:message:1-1:turn",
+    "prop": "status",
     "equals": "error"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "contains": "claude failed (rc 127)"
    }
@@ -448,7 +488,17 @@
      "parents": [
       "cls:chatmessage"
      ],
-     "text": "hi",
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1",
      "state": "running"
     }
    },
@@ -474,17 +524,17 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
-    "prop": "state",
+    "eid": "membrane::Chat:message:1-1:turn",
+    "prop": "status",
     "equals": "done"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "equals": "All done: Goal:a is open."
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "error",
     "equals": false
    },
@@ -497,32 +547,32 @@
     ]
    },
    {
-    "eid": "membrane::Chat:message:1-1:tool:tu1",
+    "eid": "membrane::Chat:message:1-1:turn:tool:tu1",
     "prop": "name",
     "equals": "mcp__membrane__entity_read"
    },
    {
-    "eid": "membrane::Chat:message:1-1:tool:tu1",
+    "eid": "membrane::Chat:message:1-1:turn:tool:tu1",
     "prop": "input.spec",
     "equals": "Goal:a"
    },
    {
-    "eid": "membrane::Chat:message:1-1:tool:tu1",
+    "eid": "membrane::Chat:message:1-1:turn:tool:tu1",
     "prop": "result",
     "contains": "Goal:a (Goal)"
    },
    {
-    "eid": "membrane::Chat:message:1-1:tool:tu2",
+    "eid": "membrane::Chat:message:1-1:turn:tool:tu2",
     "prop": "name",
     "equals": "mcp__membrane__entity_write"
    },
    {
-    "eid": "membrane::Chat:message:1-1:tool:tu2",
+    "eid": "membrane::Chat:message:1-1:turn:tool:tu2",
     "prop": "input.prop",
     "equals": "status"
    },
    {
-    "eid": "membrane::Chat:message:1-1:tool:tu2",
+    "eid": "membrane::Chat:message:1-1:turn:tool:tu2",
     "prop": "result",
     "equals": "wrote Goal:a.status"
    }
@@ -574,7 +624,17 @@
      "parents": [
       "cls:chatmessage"
      ],
-     "text": "hi",
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1",
      "state": "running"
     }
    },
@@ -600,12 +660,12 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
-    "prop": "state",
+    "eid": "membrane::Chat:message:1-1:turn",
+    "prop": "status",
     "equals": "done"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "equals": "Let me look.\n\nDone."
    }
@@ -657,7 +717,17 @@
      "parents": [
       "cls:chatmessage"
      ],
-     "text": "hi",
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1",
      "state": "running"
     }
    },
@@ -683,17 +753,17 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
-    "prop": "state",
+    "eid": "membrane::Chat:message:1-1:turn",
+    "prop": "status",
     "equals": "error"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "equals": "claude reported an error: Credit balance is too low"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "error",
     "equals": true
    }
@@ -746,7 +816,17 @@
      "parents": [
       "cls:chatmessage"
      ],
-     "text": "hi",
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1",
      "state": "running"
     }
    },
@@ -772,12 +852,12 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
-    "prop": "state",
+    "eid": "membrane::Chat:message:1-1:turn",
+    "prop": "status",
     "equals": "done"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "equals": "Let me look.\n\n(stopped at the ceiling of 7 turns)"
    }
@@ -829,7 +909,17 @@
      "parents": [
       "cls:chatmessage"
      ],
-     "text": "hi",
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1",
      "state": "running"
     }
    },
@@ -855,12 +945,12 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
-    "prop": "state",
+    "eid": "membrane::Chat:message:1-1:turn",
+    "prop": "status",
     "equals": "error"
    },
    {
-    "eid": "membrane::Chat:message:1-1:response",
+    "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "equals": "claude failed (rc 1): Not logged in"
    }

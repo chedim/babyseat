@@ -329,11 +329,16 @@ impl Host {
             if is_outside(&stamp) { self.journal_push(Line::Write { ts, writer: stamp, eid: eid.into(), prop: prop.into(), new: w["new"].clone() }); }
         }
         // `retire = true` (any writer): the entity leaves the engine and the store; what read it recalculates. Derived, so never journalled.
+        // A parent owns its children by the colon path: retiring `A:1` retires `A:1:x` and `A:1:x:y` (not `A:10`).
         let retired = std::mem::take(&mut self.eng().1.retired);
         for eid in &retired {
-            { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, eid, ts, seq); }
+            let below = format!("{eid}:");
+            let owned: Vec<String> = { let g = self.eng(); g.0.docs.keys().filter(|k| k.starts_with(&below)).cloned().collect() };
+            for e in std::iter::once(eid).chain(owned.iter()) {
+                { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, e, ts, seq); }
+            }
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = db.execute(&format!("DELETE FROM {ROWS} WHERE k = ?1"), params![eid]);
+            let _ = db.execute(&format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
         }
         let any = any || !retired.is_empty();
         if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); return true; }

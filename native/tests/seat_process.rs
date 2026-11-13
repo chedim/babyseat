@@ -195,7 +195,7 @@ fn a_message_posted_to_the_chat_is_answered_by_the_fake_and_found_through_the_mc
     // the viewer's reads: the message is an entity of kind ChatMessage; the query takes an offset, an exclusion and the properties
     // (the message's class is Chat, as its eid names it: the viewer finds the chat by the eid prefix, not by a ChatMessage kind)
     let (msgs, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:message:", "k": 100}));
-    assert!(msgs.contains(&format!("membrane::Chat:message:{id} (Chat)")) && msgs.contains(&format!("membrane::Chat:message:{id}:response (Chat)")), "{msgs}");
+    assert!(msgs.contains(&format!("membrane::Chat:message:{id} (Chat)")) && msgs.contains(&format!("membrane::Chat:message:{id}:turn:response (Chat)")), "{msgs}");
     let (all, _) = call(port, "entity_query", json!({"q": "name~:membrane::", "k": 100}));
     let rows: Vec<&str> = all.lines().collect();
     assert!(rows.len() >= 4, "{all}");
@@ -463,4 +463,36 @@ fn an_entity_carries_two_extra_classes_getters_setters_queries_and_a_restart() {
     wait("a setter fires after the restart", || (read(port2, "Thing:x", "did_a") == "True").then_some(()));
     for k in ["Alpha", "Beta"] { assert!(call(port2, "entity_query", json!({"q": format!("kind:{k}")})).0.contains("Thing:x"), "kind:{k} after the restart"); }
     assert!(terminate(&mut run2));
+}
+
+// ---- a turn is an entity that owns its answer and its tools (#1143) -----------------------------------------------------------------------
+#[test]
+fn a_turn_is_an_entity_that_owns_its_answer_and_tools_and_retiring_it_retires_them() {
+    let (mut run, port) = seat("turn", true);
+    let (_, _, body) = http(port, "POST", "/membrane/chat/message", &json!({"text": "hello turn"}).to_string());
+    let id = serde_json::from_str::<J>(&body).unwrap()["id"].as_str().unwrap().to_string();
+    let v = wait("the answer", || {
+        let (_, _, b) = http(port, "GET", &format!("/membrane/chat/message/{id}"), "");
+        let v: J = serde_json::from_str(&b).unwrap();
+        (v["state"] == "done").then_some(v)
+    });
+    let msg = format!("membrane::Chat:message:{id}");
+    let turn = format!("{msg}:turn");
+    assert_eq!(v["turn"]["state"], "done", "the page's view carries the turn: {v}");
+    assert!(v["turn"]["started"].is_number() && v["turn"]["ended"].as_f64() >= v["turn"]["started"].as_f64(), "{v}");
+    let (q, _) = call(port, "entity_query", json!({"q": format!("name~:{msg}"), "k": 100}));
+    for e in [msg.clone(), turn.clone(), format!("{turn}:response"), format!("{turn}:tool:tu1")] { assert!(q.lines().any(|l| l.starts_with(&format!("{e} "))), "{e} in {q}"); }
+    assert!(!q.contains(&format!("{msg}:response")) && !q.contains(&format!("{msg}:tool:")), "the answer and the tools live under the turn: {q}");
+    let (st, _) = call(port, "entity_read", json!({"spec": turn, "prop": "status"}));
+    assert_eq!(st, "done");
+    assert!(!call(port, "entity_read", json!({"spec": turn, "prop": "refused"})).0.contains("loop"), "no refused write on the turn");
+    let (m, _) = call(port, "entity_read", json!({"spec": turn, "prop": "message"}));
+    assert_eq!(m, msg);
+    // retiring the turn retires what it owns; the message stays
+    call(port, "entity_write", json!({"spec": turn, "prop": "retire", "value": true}));
+    wait("the turn and its children gone", || {
+        let (q, _) = call(port, "entity_query", json!({"q": format!("name~:{msg}"), "k": 100}));
+        (q.lines().count() == 1 && q.starts_with(&format!("{msg} "))).then_some(())
+    });
+    assert!(terminate(&mut run));
 }

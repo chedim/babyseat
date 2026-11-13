@@ -134,9 +134,14 @@
       "ChatMessage.mid": "Text",
       "ChatMessage.resp_eid": "Text",
       "ChatMessage.said": "Any",
+      "ChatMessage.tstate": "Any",
+      "ChatMessage.turn_eid": "Text",
+      "ChatMessage.turn_view": "Dict",
       "ChatMessage.view": "Dict",
       "ChatResponse.kind": "Text",
       "ChatTool.kind": "Text",
+      "ChatTurn.kind": "Text",
+      "ChatTurn.status": "Any",
       "Request.cm_get": "Dict",
       "Request.cm_gid": "Text",
       "Request.cm_go": "Bool",
@@ -178,7 +183,9 @@
       "ChatMessage.tools_names": "List(Text)"
     },
     "writes": {
+      "Chat.ended": "Num",
       "Chat.result": "Text",
+      "Chat.started": "Num",
       "Chat.state": "Text",
       "Chat.tools_run": "Any",
       "Command.run": "Dict"

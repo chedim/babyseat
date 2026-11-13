@@ -335,6 +335,16 @@
       "cls:chatmessage"
      ]
     }
+   },
+   {
+    "eid": "membrane::Chat:message:9-9:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:9-9"
+    }
    }
   ],
   "writes": [],
@@ -413,7 +423,6 @@
     "class": "Chat",
     "props": {
      "text": "q?",
-     "state": "done",
      "tools_run": [
       "entity_read"
      ],
@@ -423,7 +432,18 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:9-9:response",
+    "eid": "membrane::Chat:message:9-9:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:9-9",
+     "state": "done"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:9-9:turn:response",
     "class": "Chat",
     "props": {
      "text": "the answer",

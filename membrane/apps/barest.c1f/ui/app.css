@@ -77,6 +77,8 @@ button.link { border: 0; padding: 0; background: none; color: var(--accent); fon
 @media (prefers-reduced-motion: reduce) { .msg .who::before { animation: none !important; } }
 .tools-run { margin: 0; padding: 0; list-style: none; font: 12px var(--mono); color: var(--mute); }
 .tools-run li { padding: 1px 0; word-break: break-all; }
+.tools-run ul { margin: 2px 0 0; padding: 0; list-style: none; }
+.tools-run summary { cursor: pointer; }
 .tname { color: var(--ink); }
 
 .composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
