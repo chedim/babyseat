@@ -322,9 +322,9 @@ fn request_rows_of_an_earlier_run_are_retired_when_the_seat_starts() {
 #[test]
 fn help_topics_are_entities_the_model_lists_and_reads() {
     let (mut run, port) = seat("help", true);
-    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 5).then_some((l, e)) });
-    for t in ["c1f", "packs", "upgrade", "banner", "cliff"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
-    for t in ["c1f", "packs", "upgrade", "banner", "cliff"] {
+    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 6).then_some((l, e)) });
+    for t in ["c1f", "packs", "upgrade", "banner", "cliff", "semtext"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
+    for t in ["c1f", "packs", "upgrade", "banner", "cliff", "semtext"] {
         let disk = std::fs::read_to_string(repo().join(format!("membrane/apps/barest.c1f/help/{t}.md"))).unwrap();
         let (text, err) = wait("the topic's text", || { let (x, e) = call(port, "entity_read", json!({"spec": format!("Help:{t}"), "prop": "text"})); (x.len() > 100).then_some((x, e)) });
         assert!(!err && text == disk, "Help:{t}.text is the file's text");
@@ -498,11 +498,11 @@ fn a_turn_is_an_entity_that_owns_its_answer_and_tools_and_retiring_it_retires_th
     assert!(!call(port, "entity_read", json!({"spec": turn, "prop": "refused"})).0.contains("loop"), "no refused write on the turn");
     let (m, _) = call(port, "entity_read", json!({"spec": turn, "prop": "message"}));
     assert_eq!(m, msg);
-    // retiring the turn retires what it owns; the message stays
+    // retiring the turn retires what it owns (the answer's body too); the message and its body stay
     call(port, "entity_write", json!({"spec": turn, "prop": "retire", "value": true}));
     wait("the turn and its children gone", || {
         let (q, _) = call(port, "entity_query", json!({"q": format!("name~:{msg}"), "k": 100}));
-        (q.lines().count() == 1 && q.starts_with(&format!("{msg} "))).then_some(())
+        (q.lines().count() == 2 && q.starts_with(&format!("{msg} ")) && q.contains(&format!("{msg}:body "))).then_some(())
     });
     assert!(terminate(&mut run));
 }
