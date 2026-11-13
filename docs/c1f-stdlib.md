@@ -12,7 +12,7 @@ built on, plus a small set of builtins. Principles:
 
 ## The Request contract (`membrane/packs/door.c1f` is the library for the class `Request`)
 A request is an entity `Request:<n>`. A family pack `IMPORT door 1` and defines, for its family `<f>` (`models decisions state voice
-session self tools`):
+session self tools map fieldvm`):
 
 | getter | meaning | required |
 |---|---|---|

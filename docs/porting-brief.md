@@ -21,7 +21,7 @@ forwarding to Python. Master doc: `docs/python-to-c1f.md`; tracking issue #1143;
 ## The route hook (the door, `membrane/packs/door.c1f`)
 A route family is its own pack: `PACK door_<area> 1`, `IMPORT door 1`, and two getters on `Request`:
 `Request.o_<family>` (True when the path is yours) and `Request.r_<family>` (the reply `{status, headers?, body?|file?}`, or None
-while an effect has not landed). Reserved families: `models decisions state voice session self tools`. The door's gate (token or
+while an effect has not landed). Reserved families: `models decisions state voice session self tools map fieldvm`. The door's gate (token or
 bare loopback) runs before you. Facts the launcher knows arrive on `Boot:seat` (`seat_version`, `seat_cwd`, ...): read them with
 `[b.x for b in instances('Boot')]`. A reply the door sends is data: `body` is any JSON, `file` names a file to send.
 Per-request outbound work (a model list, a backend call) is a per-request entity: write `('Fetch:' + this.conn).request = {...}`

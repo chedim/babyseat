@@ -17,7 +17,7 @@ Everything under "dry run" was observed on `cliffvm` built from this tree, a fre
 | | |
 |---|---|
 | Used routes | **121 method+path pairs in 76 table rows** (section 1); 111 are needed (10 NOT-NEEDED) |
-| PRESENT / PARTIAL / MISSING / NOT-NEEDED | pairs **27 / 22 / 62 / 10**; rows 20 / 19 / 31 / 6 (the session API and its streams built in w31: rows 15-25, 30, 31) |
+| PRESENT / PARTIAL / MISSING / NOT-NEEDED | pairs **30 / 41 / 40 / 10**; rows 22 / 34 / 14 / 6 (the session API and its streams built in w31: rows 15-25, 30, 31; the page's boot calls and the field views' empty answers in w33: section 6) |
 | UI views | 9 (shell, chat, decisions cockpit, home, voice, 2D field, 3D field, work graph, boot animation), about 15,200 lines of own JS (section 2) |
 | Rounds: server swap | 73-110 (map through a Python bridge, model backends included 14-22); 62-91 for a first swap with the claude CLI as the only model |
 | Rounds: no-history backend behind the same routes | 8-12 |
@@ -42,8 +42,8 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 | 4 | GET `/ui/www/voice-ml.mjs`, `vosk-model-en.tar.gz` | `home.js:519,607` | `UIS:63-64` (Python looks in `<data dir>/assets/`, `DEV_WWW`) | PARTIAL | the door searches only `ui_roots` (`P/door.c1f:15-20`); files are not in `membrane/ui`; dry run 404 |
 | 5 | GET `/ui/conf` | `index.html:47`, `panel.js:2710`, HA `zoo.py:284` | `UIS:243-252, 484-494` | PARTIAL | spec `door_conf.json`; dry run 200; (the seat-token mode is DROPPED by decision, so `auth: "jwt"` is final and `owner` is not needed) `auth` is hard `"jwt"` and `owner` is missing (`P/door.c1f:75`), Python says `seat` + `owner` when JWT is off |
 | 6 | POST `/ui/login` | `host.js:66` | `UIS:334-380` | PRESENT | `P/door.c1f:100-107`; spec `door_login.json`; `N/tests/jwt_door.rs`; JWT mode only (the seat-token mode, `UIS:337-352`, `seatauth.py`, is DROPPED by the operator's decision); its 401 now has the released shape (w30) |
-| 7 | GET `/ui/fieldvm` | `fieldvm.js:274` | `UIS:495-498` (`fields_live.snapshot`) | MISSING | dry run 404; the page's field VM (About window) cannot start |
-| 8 | GET `/ui/serve/event` (SSE `field.write`/`field.pack`) | `fieldvm.js:283` | `PY` `_sse` | MISSING | dry run 404 |
+| 7 | GET `/ui/fieldvm` | `fieldvm.js:274` | `UIS:495-498` (`fields_live.snapshot`) | PARTIAL | dry run 404; the page's field VM (About window) cannot start **w33**: `P/door_fieldvm.c1f` (family `fieldvm`): `{packs, entities}` with the packs that `IMPORT dom` (read once at boot from the apps' folders); `entities` is `[]` (nothing feeds `About:seat`), tests `N/tests/boot_routes_1143.rs`, `tests/js/fieldvm_snapshot.test.mjs` |
+| 8 | GET `/ui/serve/event` (SSE `field.write`/`field.pack`) | `fieldvm.js:283` | `PY` `_sse` | PARTIAL | dry run 404 **w33/w31**: the stream exists (`P/door_session.c1f`: the session events); the `field.write` / `field.pack` / `field.remove` frames the page's field VM follows are not sent, so the page's field never changes after the snapshot |
 | 9 | the `/ui/serve/<path>` prefix itself (every row below) | `panel.js:34`, `home.js:20`, `field.js:20` | `UIS:445-463` | **PRESENT (w30)** | `P/door.c1f` `ui_served`/`ui_path`/`route`; every family reads `this.route`; test `N/tests/door_serve_prefix_1143.rs` (a route answers on both paths), `door_auth_1143.rs`; a prefixed call needs a verified JWT. A route that does not exist behind it answers 404 (`/ui/serve/session` still does: row 15) |
 | 10 | POST `/ui/log` | `host.js:10` (beacon) | `UIS:302-320` | PRESENT | `P/door_voice.c1f:92-110`; spec `door_voice.json`; fresh store OK (a file write) |
 | 11 | POST `/ui/stt` | `home.js:4242,4443,4549` | `UIS:272-300` | NOT-NEEDED (default) | `/ui/conf` says `stt: browser` unless the settings name a whisper server (`UIS:243-250`); then it is a 501 on cliffvm (`P/door_voice.c1f:21-22`: a WAV is bytes) |
@@ -68,9 +68,9 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 | 23 | POST `/session/{sid}/prompt_async` {agent, parts, voice?, stream?, final?, claudeContinue?, model?} | `panel.js:3348,3362,3380,3404` | `PY:5051`, `_message` `PY:5080+` | PARTIAL | 204 and the turn starts; `agent`, `model`, `voice`, `stream`, `final`, `claudeContinue` are ignored; the text parts are joined |
 | 24 | POST `/session/{sid}/message` (sync, returns the reply) | HA `conversation.py:114` | `PY:5051` | PARTIAL | 200 `{info, parts}` when the turn ends; the same ignored fields |
 | 25 | POST `/session/{sid}/abort` | `panel.js:3437` | `PY:5054` | PRESENT | same: the running turns of the session are stopped (`Command.stop`), they end as `MessageAbortedError` |
-| 26 | GET and POST `/session/{sid}/voice` | `panel.js:3019,3966` | `PY:4476`, `PY:5042` (the vote/rewrite teaching) | MISSING | |
-| 27 | GET `/session/{sid}/predict` | `panel.js:3020` | `PY:4472` (`predict.phantoms`) | MISSING | page tolerates a failure (`.catch`, `panel.js:3020`) |
-| 28 | GET `/session/{sid}/diff`, `/todo`, `/children` | TUI | `PY:4470-4486`, pinned `T/test_server.py:818-826` | MISSING | |
+| 26 | GET and POST `/session/{sid}/voice` | `panel.js:3019,3966` | `PY:4476`, `PY:5042` (the vote/rewrite teaching) | PARTIAL | **w33**: GET answers `[]` (no voice lines of its own, as a released seat with none); POST (the vote / rewrite teaching) is not built (405) |
+| 27 | GET `/session/{sid}/predict` | `panel.js:3020` | `PY:4472` (`predict.phantoms`) | PARTIAL | page tolerates a failure (`.catch`, `panel.js:3020`) **w33**: answers `[]` (no predictor here: the released answer with no phantoms) |
+| 28 | GET `/session/{sid}/diff`, `/todo`, `/children` | TUI | `PY:4470-4486`, pinned `T/test_server.py:818-826` | PRESENT | **w33**: `[]` for the three and `/voice`, `/predict` (the released answers), `P/door_session.c1f`, `boot_routes_1143.rs` |
 | 29 | POST `/session/{sid}/init`, `/share`, `/unshare`, `/summarize`, `/permissions` | TUI | `PY:5058-5069` (stubs returning `true`) | MISSING | |
 | 30 | GET `/event` (SSE: `server.connected`, `session.*`, `message.updated`, `message.part.updated`, ...) | `panel.js:3105`, `field3d.js:1716`, `home.js:3593`, TUI | `PY:4398`, `SSEHub` `PY:885`; frames pinned `T/test_server.py:798-815`; per-person filter `PY:4284` | PARTIAL | the events the chat view uses (below); no `session.diff`, no keep-alive ping, no step parts, no `membrane.*` events |
 | 31 | GET `/global/event` (the same, wrapped `{directory, project, payload}`) | TUI | `PY:4400`; `T/test_server.py:798` | PARTIAL | same, wrapped `{directory, project, payload}` |
@@ -79,8 +79,8 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 
 | # | method path | caller | shape pointer | cliffvm | evidence |
 |---|---|---|---|---|---|
-| 32 | GET `/agent` | `panel.js:2757`, `field.js:703`, HA `coordinator.py:46` | `PY:4692`; must carry a primary agent `T/test_server.py:855-868` | MISSING | dry run 404 |
-| 33 | GET `/config`, PATCH `/config` | `panel.js:2771`, TUI | `PY:4511`, `PY:5313` | MISSING | |
+| 32 | GET `/agent` | `panel.js:2757`, `field.js:703`, HA `coordinator.py:46` | `PY:4692`; must carry a primary agent `T/test_server.py:855-868` | PARTIAL | dry run 404 **w33**: `P/door.c1f` `ag_body`: the five released rows (`build` and `plan` primary), golden `tests/golden/boot/agent.json`; the live mind rows (loop workers, thinker, dreamer) are not there |
+| 33 | GET `/config`, PATCH `/config` | `panel.js:2771`, TUI | `PY:4511`, `PY:5313` | PARTIAL | **w33**: GET answers the opencode config (provider `membrane` on this door, `model`, `small_model`, from `Boot:seat.minds.seat_default`); PATCH is not built; the released config is written by `opencode.py` at launch, not recorded |
 | 34 | GET `/config/providers`, `/provider`, `/provider/auth` | TUI | `PY:4513-4545` | MISSING | |
 | 35 | GET `/experimental/{capabilities,console,resource,workspace,workspace/status}` | TUI | `PY:4528-4543, 4590`, pinned `T/test_server.py:831-853` | MISSING | |
 | 36 | GET `/formatter`, `/lsp` | TUI | `PY:4547-4550` | MISSING | |
@@ -98,9 +98,9 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 | 43 | GET and POST `/membrane/seat/pause` | `home.js:1273,1287` | `PY:4606`, `PY:4909` | PARTIAL | POST answers 202 and records `presence.control`; nothing consumes it (`P/door_state.c1f:6-11`) |
 | 44 | POST `/membrane/seat/control` {paused, self, accept, loops_max, self_name} | `panel.js:3850,3863,3880` | `PY:4894` | PARTIAL | same gap |
 | 45 | POST `/membrane/seat/event`, `/membrane/seat/restart-ask` | HA `ha_access.py:223,243` | `PY:4883` | MISSING | |
-| 46 | GET and POST `/membrane/options` | `index.html:78,101`, `home.js:876,892,909` | `PY:4625`, `PY:4961` (settings.json + energy + runner) | MISSING | dry run 404 |
+| 46 | GET and POST `/membrane/options` | `index.html:78,101`, `home.js:876,892,909` | `PY:4625`, `PY:4961` (settings.json + energy + runner) | PARTIAL | dry run 404 **w33**: `P/door_models.c1f`: GET in the released shape (golden `options.json`, `options_bg.json`), POST validated first (400 with the reason), `self_cpu_share` and `code_runs_keep` kept on `Settings:seat` (nothing reads them here yet), the minds' keys go to `Minds:seat`; an unknown key is refused without its name (no `keys()`) |
 | 47 | GET `/membrane/stats` | `home.js:1028` | `PY:4630` (`stats.py`, tokenomics) | MISSING | 501: a dict with data-driven keys has no c1f form (`P/door_state.c1f:12-14`) |
-| 48 | GET `/membrane/quota`, POST `/membrane/quota/resume` | `panel.js:2592,2625,2640`, `home.js:1307` | `PY:4634`, `PY:4937` (`quota.py`) | MISSING | 501 / 404; keep-list question 1 (is quota dropped?) is still open |
+| 48 | GET `/membrane/quota`, POST `/membrane/quota/resume` | `panel.js:2592,2625,2640`, `home.js:1307` | `PY:4634`, `PY:4937` (`quota.py`) | PARTIAL | 501 / 404; keep-list question 1 (is quota dropped?) is still open **w33**: `P/door_state.c1f`: GET and POST `/resume` answer the released shape of a seat with nothing paused (`paused: []`, `probe_s: 600`); no model is paused here |
 | 49 | GET `/membrane/minds` | `home.js:4840` | `SEAT_READ_PATHS` (`PY:4163`), relayed to :11500; admin only (`relay.py` `ADMIN_READ_EXACT`) | MISSING | 501 |
 | 50 | GET and POST `/membrane/models` {loops, cortex, workers, think, ...} | `panel.js:2823,2837,2859` | `PY:4592`, `PY:4971` | PARTIAL | `P/door_models.c1f`; specs `minds.json`, `N/tests/models_door.rs`; works only after the launcher tells `Boot:seat.minds` (dry run 503 without, 200 with `--fact minds=...`); applying a pick (runner.model, `minds_models.py`) stays Python |
 | 51 | GET `/v1/models` | `panel.js:2782,2824` | `PY` seat read (`SEAT_READ_PATHS`) | PARTIAL | spec `models.json`; dry run 200 but empty (`@explore` only): needs `seat_backend`, an Ollama to list |
@@ -112,8 +112,8 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 | 52 | GET `/membrane/decisions` | `decisions.js:654` | `PY53:4523` (deleted from HEAD) | PRESENT | `P/door_decisions.c1f`; spec `door_decisions.json`; dry run 200 |
 | 53 | GET `/membrane/goals` | `decisions.js:655` | `PY53:4540` | PRESENT | same |
 | 54 | GET `/membrane/work-graph` | `fieldview.js:149` | `PY:4613` | PARTIAL | dry run 200; watch nodes and the rocket runs are not drawn (`P/door_decisions.c1f:20-26`) |
-| 55 | GET `/membrane/entity-history?spec=` | `fieldview.js:161` | `PY:4613` | PARTIAL | `N/tests/door_decisions_sql.rs`; **dry run: never answers on a fresh store** (curl 20 s, no byte): the `sql()` reads `c_entities`/`c_entity_deltas`, absent in a cliffvm-made store; `properties` answer `{}` |
-| 56 | GET `/membrane/item-chat?spec=` | `fieldview.js:162` | `PY:4613` | PARTIAL | same hang on a fresh store |
+| 55 | GET `/membrane/entity-history?spec=` | `fieldview.js:161` | `PY:4613` | PARTIAL | `N/tests/door_decisions_sql.rs`; **dry run: never answers on a fresh store** (curl 20 s, no byte): the `sql()` reads `c_entities`/`c_entity_deltas`, absent in a cliffvm-made store; `properties` answer `{}` **w33**: no longer hangs: the Python tables are asked for first and a store without them has an empty history (`door_decisions.c1f` `dm_tabs`) |
+| 56 | GET `/membrane/item-chat?spec=` | `fieldview.js:162` | `PY:4613` | PARTIAL | same hang on a fresh store **w33**: same (answers `{ok: true, eid, messages: []}`) |
 | 57 | POST `/membrane/item-chat/say` {spec, text} | `fieldview.js:167` | `PY:4926` | MISSING | "no relation-write verb yet, stays Python" (`P/door_decisions.c1f:25-26`) |
 | 58 | POST `/membrane/decision/answer` | `decisions.js:1021` | `PY53:4855` | PRESENT | spec `door_decisions.json` |
 | 59 | POST `/membrane/decision/drop` | `decisions.js:1001` | `PY53:4855` | PRESENT | same |
@@ -123,21 +123,21 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 
 | # | method path | caller | shape pointer | cliffvm | evidence |
 |---|---|---|---|---|---|
-| 61 | GET `/membrane/map/field` | `field.js:512` | `LN:4642` (the :11500 proxy; `PY` relays, `PY:4163`) | MISSING | dry run 404; the engine is Python (`field3d.py` 403, `fieldmap.py` 240 lines, efield) |
-| 62 | GET `/membrane/map/field3d` | `field3d.js:1153` | `LN:4651` | MISSING | |
-| 63 | GET `/membrane/map/tile` | `field3d.js:1221` | `LN:4653` | MISSING | |
-| 64 | GET `/membrane/map/locate` | `field3d.js:1537,1622`, `home.js:3661` | `LN:4655` | MISSING | |
-| 65 | GET `/membrane/map/search` | `field3d.js:1606` | `LN:4657` | MISSING | |
-| 66 | GET `/membrane/map/distance` | `field.js:975` | `LN:4646` | MISSING | |
-| 67 | GET `/membrane/map/blurp` | `field3d.js:1092` | `LN:4648` | NOT-NEEDED | Blurp overlay, off by default (`UIS:254-260`, `cli.rs` `seat_blurp=false`) |
-| 68 | GET `/membrane/field/entity?eid=` | `field.js:673,1024` | `LN:4644` | MISSING | |
+| 61 | GET `/membrane/map/field` | `field.js:512` | `LN:4642` (the :11500 proxy; `PY` relays, `PY:4163`) | PARTIAL | dry run 404; the engine is Python (`field3d.py` 403, `fieldmap.py` 240 lines, efield) **w33, DEGRADED on purpose**: `P/door_map.c1f` answers what the released code answers for a field with no live entity: `{axes: [], nodes: [], edges: []}` (golden `tests/golden/boot`); both views read "the field is empty" (`tests/js/field_empty.test.mjs`); the engine is a read-only Python bridge later, native recall after |
+| 62 | GET `/membrane/map/field3d` | `field3d.js:1153` | `LN:4651` | PARTIAL | **w33, DEGRADED on purpose**: `P/door_map.c1f` answers what the released code answers for a field with no live entity: an empty projection (n_total 0, root tile, current) (golden `tests/golden/boot`); both views read "the field is empty" (`tests/js/field_empty.test.mjs`); the engine is a read-only Python bridge later, native recall after |
+| 63 | GET `/membrane/map/tile` | `field3d.js:1221` | `LN:4653` | PARTIAL | **w33, DEGRADED on purpose**: `P/door_map.c1f` answers what the released code answers for a field with no live entity: the empty tile of the one pid, 410 for another (golden `tests/golden/boot`); both views read "the field is empty" (`tests/js/field_empty.test.mjs`); the engine is a read-only Python bridge later, native recall after |
+| 64 | GET `/membrane/map/locate` | `field3d.js:1537,1622`, `home.js:3661` | `LN:4655` | PARTIAL | **w33, DEGRADED on purpose**: `P/door_map.c1f` answers what the released code answers for a field with no live entity: 404 "not in this projection" (golden `tests/golden/boot`); both views read "the field is empty" (`tests/js/field_empty.test.mjs`); the engine is a read-only Python bridge later, native recall after |
+| 65 | GET `/membrane/map/search` | `field3d.js:1606` | `LN:4657` | PARTIAL | **w33, DEGRADED on purpose**: `P/door_map.c1f` answers what the released code answers for a field with no live entity: `{q, hits: []}` (golden `tests/golden/boot`); both views read "the field is empty" (`tests/js/field_empty.test.mjs`); the engine is a read-only Python bridge later, native recall after |
+| 66 | GET `/membrane/map/distance` | `field.js:975` | `LN:4646` | PARTIAL | **w33, DEGRADED on purpose**: `P/door_map.c1f` answers what the released code answers for a field with no live entity: 503 "the field is not loaded" (golden `tests/golden/boot`); both views read "the field is empty" (`tests/js/field_empty.test.mjs`); the engine is a read-only Python bridge later, native recall after |
+| 67 | GET `/membrane/map/blurp` | `field3d.js:1092` | `LN:4648` | NOT-NEEDED (default) | Blurp overlay, off by default (`UIS:254-260`, `cli.rs` `seat_blurp=false`) **w33**: answers the empty overlay (`P/door_map.c1f`) |
+| 68 | GET `/membrane/field/entity?eid=` | `field.js:673,1024` | `LN:4644` | PARTIAL | **w33, DEGRADED**: 503 "the field is not loaded" (the released answer with no field); the card drawer shows its error line |
 
 ### 1.7 Voice, feedback, the seat's JS, Blurp
 
 | # | method path | caller | shape pointer | cliffvm | evidence |
 |---|---|---|---|---|---|
-| 69 | POST `/membrane/voice` (read the person's voice rows) | `panel.js:3832` | `PY:4836` | PARTIAL | spec `door_voice.json`, `N/tests/door_voice.rs`; **dry run never answers on a fresh store** (`sql()` over `c_entities`, `P/door_voice.c1f:37-38`) |
-| 70 | POST `/membrane/voice/state` | `home.js:4160` | `PY:4836` | PARTIAL | same, writes through the kind mirror; not run (a write) |
+| 69 | POST `/membrane/voice` (read the person's voice rows) | `panel.js:3832` | `PY:4836` | PARTIAL | spec `door_voice.json`, `N/tests/door_voice.rs`; **dry run never answers on a fresh store** (`sql()` over `c_entities`, `P/door_voice.c1f:37-38`) **w33**: no longer hangs: reads `c_field`, the seat's own table (the data migration brings the Python rows) |
+| 70 | POST `/membrane/voice/state` | `home.js:4160` | `PY:4836` | PARTIAL | same, writes through the kind mirror; not run (a write) **w33**: no longer hangs (the page's boot call): same table, answers `{ok, state}` in the released shape (golden `voice_state.json`) |
 | 71 | POST `/membrane/feedback` | `panel.js:3734` | `PY53:4876` | PRESENT | `P/door_self.c1f`; spec `door_self.json` |
 | 72 | POST `/membrane/jsexec/register`, `/result` | `panel.js:3779,3824` (a per-window toggle, `panel.js:3769`) | `PY:4824` | MISSING | 501 (`P/door_self.c1f:14-16`); the model tool that needs it is a Python tool |
 | 73 | GET `/membrane/self/card` | `home.js:2358`, HA `zoo.py:259` | `PY:4661` | NOT-NEEDED (default) | Blurp; the state family answers a presence stub (dry run 200) |
@@ -163,14 +163,13 @@ Rows 76 (a row may hold several method+path pairs: row 39 has 6, row 35 has 5). 
 
 | status | rows | method+path pairs |
 |---|---|---|
-| PRESENT | 20 | 27 |
-| PARTIAL | 19 | 22 |
-| MISSING | 31 | 62 |
+| PRESENT | 22 | 30 |
+| PARTIAL | 34 | 41 |
+| MISSING | 14 | 40 |
 | NOT-NEEDED | 6 | 10 |
 
-By area (rows P/PA/M/N): 1.1 shell 6/2/3/3; 1.2 session API and events 7/6/4/0; 1.3 opencode probes 1/0/8/0; 1.4 state, models, options 0/6/5/0;
-1.5 decisions 5/3/1/0; 1.6 field map 0/0/7/1; 1.7 voice, feedback, self 1/2/1/2; 1.8 HA 0/0/1/0; 1.9 :11500 0/0/1/0.
-Of the 27 PRESENT pairs, every one has a pack spec or a Rust test; only the session routes and their event streams have a contract test against the Python response (`tests/golden/session`, section 7); the rest are still to record.
+By area (rows P/PA/M/N; recounted by script after w33): 1.1 shell 7/4/0/3; 1.2 session API and events 8/8/1/0; 1.3 opencode probes 1/2/6/0; 1.4 state, models, options 0/8/3/0; 1.5 decisions 5/3/1/0; 1.6 field map 0/7/0/1; 1.7 voice, feedback, self 1/2/1/2; 1.8 HA 0/0/1/0; 1.9 :11500 0/0/1/0.
+Of the 30 PRESENT pairs, every one has a pack spec or a Rust test; the session routes and their event streams have a contract test against the Python response (`tests/golden/session`, section 7), and so do the page's boot routes since w33 (`tests/golden/boot`, `scripts/golden_boot.py`: /agent, options, quota, the empty map, the voice state); the rest are still to record.
 
 ## 2. UI inventory
 
@@ -349,6 +348,20 @@ The seat was stopped afterwards (SIGTERM, port 4314 free). The operator's seat o
 | not reached yet | `/ui/serve/session/status` and `/ui/serve/event` (the page only asks once a session exists), so the chat screen is not testable until w31 |
 
 These are the backlog; each is listed in the test (`MISSING`, `HANGS`), which fails when a call outside the list 404s or hangs and when a listed one starts to answer.
+
+**After swap step 3 (w33, `native/tests/boot_routes_1143.rs`, `tests/js/page_boot.test.mjs`, `field_empty.test.mjs`, `fieldvm_snapshot.test.mjs`).** The page's boot makes 34 `/ui/serve/` calls in 8 s and every one is answered: no hang, no 501, one 404 left. Each answer was made in c1f from the released handler (tag `v0.7.53`), with a golden fixture recorded from the released code (`scripts/golden_boot.py`, `tests/golden/boot/`; shape only):
+
+| call | now | what is missing / degraded |
+|---|---|---|
+| `POST /membrane/voice/state` (was a HANG) | 200 `{ok, state}` | the voice routes read `c_field` (the seat's own table); the Python seat's `c_entities` is for the data migration; found and fixed the same hang in `entity-history` and `item-chat` (`c_entity_deltas`, `c_relations`) |
+| `/agent`, `/config` | 200, the five released agent rows; the opencode config naming the model | no live mind rows in `/agent`; `PATCH /config` not built; `/config/providers`, `/provider*`, the other TUI probes still 404 (TUI only) |
+| `/membrane/options` | 200 GET and validated POST | `self_cpu_share` and `code_runs_keep` are kept (`Settings:seat`) and read by nothing here; an unknown key is refused without its name; `energy` is `null`; `chat_auth` is `login` (the claude CLI's own login) |
+| `/membrane/quota` (was 501) | 200 `paused: []`; `POST /resume` 200 `resumed: false` | no model is ever paused here; `/membrane/stats` and `/membrane/minds` stay 501 (tokenomics, loop sessions: Python state; the stats window shows "the seat did not answer") |
+| `/membrane/map/field3d`, `/blurp`, `/field`, `/tile`, `/search` | the released answers of a field with no live entity; both views read "the field is empty" | DEGRADED on purpose (the operator's decision): no map, no search hit; `locate` is a reasoned 404 ("not in this projection", the page's `_trackNb` catches it, so it stays on the test's `MISSING`), `distance` and `field/entity` 503 "the field is not loaded"; the engine is a read-only Python bridge later, native recall after |
+| `GET /ui/fieldvm` | 200 `{packs: {about}, entities: []}` | `entities` is empty (nothing feeds `About:seat`: the About window has nothing to draw); the `field.write`/`field.pack` frames are not on `/ui/serve/event`; a model-written Pack is not sent; read once at boot |
+| `/session/<sid>/voice`, `/predict` (tolerated 404s) | 200 `[]` (also `todo`, `children`, `diff`) | POST `/voice` (the vote / rewrite teaching) is not built |
+
+Left on the page's boot: `GET /membrane/map/locate`, 404 by design (above). Page code was not changed. Builtins the work wanted and did not get (each is a proposal in `docs/c1f-stdlib.md`): `dict(rows)` (the models row of `/config` is read from JSON text, the `packs` dict by a `json_group_object` sql), `keys(d)` (unknown option names), `urldecode` (only `+` and `%20` are decoded in the map's query).
 
 ## 7. Server-swap test plan
 
