@@ -935,3 +935,18 @@ fn a_running_command_reads_as_running_with_its_id_and_start_and_a_pending_reply_
     assert_eq!(s, "running", "the old receipt is not the new run's");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn reactions_list_only_real_changes_not_null_to_null_rebuilds_or_the_consumed_verb() {
+    let (mut run, port) = start("noise", MCP_PACKS, &[]);
+    let reactions = |t: &str| -> Vec<J> { serde_json::from_str(t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap_or_else(|| panic!("{t}"))).unwrap() };
+    // the live shape: a new Command's cmd, then its run
+    let (t, _) = put(port, "Command:q", "cmd", json!(["echo", "hi"]));
+    let rs = reactions(&t);
+    assert!(rs.iter().all(|r| !(r["new"].is_null() && r["by"] == "rebuild")), "no null-to-null rebuild reactions: {t}");
+    let (t, _) = put_wait(port, "Command:q", "run", json!({"id": "q1", "args": []}), 20.0);
+    let rs = reactions(&t);
+    assert!(rs.iter().all(|r| !r["by"].as_str().unwrap().contains("consumed")), "the consumed verb is not a reaction: {t}");
+    assert!(rs.iter().any(|r| r["prop"] == "running"), "real changes stay: {t}");
+    assert!(terminate(&mut run));
+}
