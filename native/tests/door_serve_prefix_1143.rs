@@ -86,7 +86,7 @@ fn auth(path: &str) -> String { req(path, &bearer()) }
 fn the_prefix_is_stripped_and_a_route_answers_on_both_paths() {
     let (mut c, mut f, port) = world();
     for path in ["/global/health", "/command", "/path", "/project/current", "/vcs"] {
-        let bare = get(&mut c, &mut f, port, &req(path, ""));
+        let bare = get(&mut c, &mut f, port, &req(path, &bearer()));
         let pre = get(&mut c, &mut f, port, &auth(&format!("/ui/serve{path}")));
         assert!(status(&bare).starts_with("HTTP/1.1 200"), "{path}: {}", status(&bare));
         assert_eq!(status(&pre), status(&bare), "{path}");
@@ -98,7 +98,7 @@ fn the_prefix_is_stripped_and_a_route_answers_on_both_paths() {
         assert!(status(&r).starts_with("HTTP/1.1 404"), "{path}: {}", status(&r));
     }
     // the prefix is stripped ONCE, and only at the front: a path that holds it later is its own path
-    let r = get(&mut c, &mut f, port, &req("/global/ui/serve/health", ""));
+    let r = get(&mut c, &mut f, port, &req("/global/ui/serve/health", &bearer()));
     assert!(status(&r).starts_with("HTTP/1.1 404"), "{}", status(&r));
     // a method and a body ride through (the page's POSTs): the family's own 405 answers, so the route is the family's
     let (mut c2, mut f2, port2) = world();

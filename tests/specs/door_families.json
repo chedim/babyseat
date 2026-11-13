@@ -24,9 +24,12 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
-     "path": "/v1/models"
+     "authed": true,
+     "path": "/v1/models",
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -69,9 +72,12 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
-     "path": "/global/health"
+     "authed": true,
+     "path": "/global/health",
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -109,9 +115,12 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
-     "path": "/nowhere"
+     "authed": true,
+     "path": "/nowhere",
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -150,8 +159,8 @@
      "body": "",
      "peer": "192.168.1.9:5",
      "authed": false,
-     "auth_error": "no token",
-     "path": "/v1/models"
+     "path": "/v1/models",
+     "auth_error": "no token"
     }
    }
   ],

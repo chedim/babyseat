@@ -143,7 +143,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 41,
+    "members": 44,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
@@ -169,6 +169,7 @@
       "chat_claude_bin",
       "chat_max_turns",
       "chat_turn_timeout_s",
+      "owner_token_file",
       "started"
     ],
     "virtual": [
@@ -223,7 +224,7 @@
       "Http",
       "Request"
     ],
-    "members": 79,
+    "members": 78,
     "writes": [
       "Http:door.listen"
     ],

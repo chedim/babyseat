@@ -40,11 +40,14 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
      "models_asked": true,
-     "models_ready": true
+     "models_ready": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -114,11 +117,14 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
      "models_asked": true,
-     "models_ready": true
+     "models_ready": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -216,10 +222,13 @@
      "headers": {},
      "body": "{\"loops\": \"glm-4:9b\", \"cortex\": \"claude-sonnet\", \"workers\": \"\", \"loops_auth\": \"login\", \"think\": \"on\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -338,10 +347,13 @@
      "headers": {},
      "body": "{\"cortex\": \"claude-sonnet\", \"think\": \"off\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -455,10 +467,13 @@
      "headers": {},
      "body": "{\"loops\": \"bad name\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -567,10 +582,13 @@
      "headers": {},
      "body": "{\"cortex\": \"gpt-x\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -679,10 +697,13 @@
      "headers": {},
      "body": "{\"loops\": \"glm-4:9b\", \"cortex\": \"gpt-x\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -791,10 +812,13 @@
      "headers": {},
      "body": "{\"workers_auth\": \"sudo\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -903,10 +927,13 @@
      "headers": {},
      "body": "{\"think\": \"maybe\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -966,10 +993,13 @@
      "headers": {},
      "body": "{\"loops\": \"anything:1b\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -1034,10 +1064,13 @@
      "headers": {},
      "body": "{\"loops\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -1141,11 +1174,14 @@
      "headers": {},
      "body": "{\"loops\": \"glm-4:9b\"}",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
      "models_asked": true,
-     "models_ready": null
+     "models_ready": null,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -1199,11 +1235,14 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
      "models_asked": true,
-     "models_ready": true
+     "models_ready": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -1253,11 +1292,14 @@
      "headers": {},
      "body": "",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
      "models_asked": true,
-     "models_ready": true
+     "models_ready": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
@@ -1355,10 +1397,13 @@
      "headers": {},
      "body": "not json",
      "peer": "127.0.0.1:5",
-     "authed": false,
-     "auth_error": "no token",
+     "authed": true,
      "path": "/membrane/models",
-     "models_asked": true
+     "models_asked": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],

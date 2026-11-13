@@ -1,4 +1,25 @@
-# Auth — the seat token, and JWT mode
+# Auth on the cliffvm seat: a localhost peer is not the owner
+
+*This section is the standalone `cliffvm` seat (`scripts/seat-full`, docs/cliffvm.md). The rest of this page describes the Python 0.7 seat (seat token, `MEMBRANE_JWT`), kept until the swap.*
+
+**The rule** (the operator's, #842): an address is not a credential. When the door has a secret (the fact `door_secret_file`, set by `scripts/seat-full`), every request needs a verified JWT, a request
+from this machine included. Public: the page's shell (`/`, `/index.html`, `/membrane`, `/favicon.ico`), `/ui/www/*`, `/ui/login`, `/ui/logout` (the released seat's set; `/global/health` and the opencode probes are NOT public).
+No token, a bad one, one signed by another key or one past its life: `401`, `WWW-Authenticate: Bearer realm="membrane"`, `{"error":{"message":"missing or invalid token","type":"unauthorized"}}`, the same for each.
+The only mode without a secret is the BAREST seat (`scripts/seat`, no `door_secret_file`): no security at all, by decision (docs/cliffvm.md).
+
+**The owner token file.** `cliffvm run` with `door_secret_file`:
+1. makes the secret if it is missing (64 hex characters of `/dev/urandom`, mode 0600) and keeps it afterwards;
+2. mints an owner JWT at EVERY boot (`sub` = the fact `operator`, default `owner`; life = the fact `owner_token_ttl_s`, default 2592000 s = 30 days, a threshold flagged for the operator) and writes it to `<seat_data_dir>/owner.token`
+   (mode 0600, a temp file renamed over the old one); the path is the Boot fact `owner_token_file`. Rotation is the restart: the old token stays valid until its own `exp` (only a new secret revokes it).
+3. holds the token's value nowhere else but the process's environment (`MEMBRANE_OWNER_TOKEN`): it is no property of the field, no journal row, no log line and no reply.
+
+**Local tools** read the file: `curl -H "Authorization: Bearer $(cat <seat_data_dir>/owner.token)" http://127.0.0.1:<port>/global/health` (`scripts/seat-full` prints this line with the real paths).
+**The page** needs nothing: a page fetched from this machine (a loopback peer, no `X-Forwarded-For`/`Forwarded`) is given the owner cookie `membrane_jwt_<8 hex>` (HttpOnly, SameSite=Strict, 7 days); `POST /ui/login {"token": "<jwt>"}` turns any token into the same cookie.
+**The opencode TUI** takes its token from the environment, as on the Python seat: `OPENCODE_SERVER_PASSWORD="$(cat <seat_data_dir>/owner.token)" opencode attach http://127.0.0.1:<port>` (Basic password = the token), and the generated config's `apiKey` reads `{env:MEMBRANE_JWT_TOKEN}`.
+**The chat turn**: the `claude` CLI the turn starts calls the seat's `/mcp`. Its MCP config (`chat_turn.c1f`, `mcp_json`) carries `"headers": {"Authorization": "Bearer ${MEMBRANE_OWNER_TOKEN}"}` and the run's `env_from` hands the launcher's value to the child's environment: the token is never in `argv` (a process listing shows `argv`)
+and never in a row. A turn whose CLI sends a wrong token fails visibly: the `401` is in the answer.
+
+## The Python seat: the seat token, and JWT mode
 
 A seat has two ports: the OpenAI proxy (:11500) and the serve API + UI (:4096).
 Both listen on every interface, so the phone and Home Assistant reach the seat

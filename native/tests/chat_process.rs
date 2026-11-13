@@ -46,11 +46,17 @@ fn start_env(tag: &str, names: &[&str], extra: &[&str], env: &[(&str, &str)]) ->
     (run, port)
 }
 
+thread_local! {
+    /// the bearer this test thread's requests carry (a seat with a door secret: the owner token file's); none = a bare caller
+    static BEARER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 /// one HTTP request on its own connection; -> (status, body text)
 fn http(port: u16, method: &str, path: &str, body: &str) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
-    let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    let auth = BEARER.with(|b| b.borrow().as_ref().map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default());
+    let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{auth}\r\n{body}", body.len());
     s.write_all(raw.as_bytes()).unwrap();
     let mut out = vec![];
     let _ = s.read_to_end(&mut out);
@@ -252,6 +258,7 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert!(after("--system-prompt").contains("Modify your banner to help you maintain continuity."), "the system prompt carries the doctrine");
     assert!(!after("--system-prompt").to_lowercase().contains("history reaches"), "the prompt never says what the model lacks (it makes Claude panic)");
     assert!(after("--mcp-config").contains(&format!("127.0.0.1:{port}/mcp")));
+    assert!(!after("--mcp-config").contains("headers"), "the barest seat has no secret: the MCP config names no header");
     assert_eq!(args[args.len() - 2], "--", "the options end before the prompt");
     assert_eq!(args[args.len() - 1], "what is up", "the prompt is the message alone");
     assert!(!args.iter().any(|x| x == "--bare" || x == "--resume" || x == "--continue"), "{args:?}");
@@ -1540,5 +1547,55 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     let hv: J = serde_json::from_str(&h).unwrap();
     assert_eq!(hv["messages"][0]["text"], text);
     assert_eq!(hv["messages"][0]["response"], format!("Final answer to: {text}"));
+    assert!(terminate(&mut run));
+}
+
+// ---- the chat turn on a seat with a door secret (#1143): the CLI reaches /mcp with the owner's token, never through argv ----------------------------
+/// the fake as the real CLI behaves with an MCP server's `headers`: `${VAR}` in a value is the environment's; it records the config's header text, what it sent, and its argv
+fn fake_with_headers(sent: &str) -> String {
+    FAKE.replace("url = cfg[\"mcpServers\"][\"membrane\"][\"url\"]", &format!(r#"url = cfg["mcpServers"]["membrane"]["url"]
+raw_headers = cfg["mcpServers"]["membrane"].get("headers", {{}})
+hdrs = {{k: os.path.expandvars(v) for k, v in raw_headers.items()}}
+{sent}
+json.dump({{"raw": raw_headers, "sent": hdrs, "argv": argv}}, open(os.path.join(here, "mcp_headers.json"), "w"))"#))
+        .replace("headers={\"Content-Type\": \"application/json\"}", "headers=dict({\"Content-Type\": \"application/json\"}, **hdrs)")
+}
+
+/// a seat with a door secret in its own folder (made at boot), the fake as its CLI; the test thread carries the owner's token afterwards
+fn owner_seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
+    let (run, port, dir) = fake_seat_script(tag, &["--fact", "door_secret_file=door.secret", "--fact", "seat_data_dir=."], &[], script);
+    let tok = std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string();
+    BEARER.with(|b| *b.borrow_mut() = Some(tok));
+    (run, port, dir)
+}
+
+#[test]
+fn the_turns_cli_reaches_the_mcp_door_with_the_owner_token_from_its_environment_and_never_through_argv() {
+    let (mut run, port, dir) = owner_seat("chatowner", &fake_with_headers(""));
+    let tok = std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string();
+    let id = send(port, "with a token");
+    let v = finish(port, &dir, &id, "with a token");
+    assert_eq!(v["state"], "done", "the seat accepted the token the CLI sent: {v}");
+    assert_eq!(v["tools"], json!(["entity_write", "entity_read"]));
+    let h: J = serde_json::from_str(&std::fs::read_to_string(dir.join("mcp_headers.json")).unwrap()).unwrap();
+    assert_eq!(h["raw"], json!({"Authorization": "Bearer ${MEMBRANE_OWNER_TOKEN}"}), "the config names the variable, not the token");
+    assert_eq!(h["sent"]["Authorization"], format!("Bearer {tok}"), "what the CLI sent is the owner's token");
+    assert!(!h["argv"].to_string().contains(&tok), "the token is not in argv (a process listing shows argv)");
+    assert!(!std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("with a token")))).unwrap().contains(&tok));
+    // the token is in no row of the field either: not in the message's view, not in the command entity
+    assert!(!v.to_string().contains(&tok));
+    let (c, _) = call(port, "entity_read", json!({"spec": format!("membrane::Command:chat:{id}")}));
+    assert!(!c.contains(&tok), "{c}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_turn_whose_cli_sends_a_wrong_token_fails_visibly() {
+    let (mut run, port, dir) = owner_seat("chatwrongtoken", &fake_with_headers("hdrs = {'Authorization': 'Bearer not-the-owners-token'}"));
+    let id = send(port, "wrong token");
+    let v = finish(port, &dir, &id, "wrong token");
+    assert_eq!(v["state"], "error", "{v}");
+    let r = v["response"].as_str().unwrap();
+    assert!(r.contains("claude failed") && r.contains("401"), "the 401 reaches the answer: {r}");
     assert!(terminate(&mut run));
 }

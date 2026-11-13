@@ -32,7 +32,7 @@ fn world_with(boot: J) -> (Core, Fields, u64) {
     c.load("Http:door".into(), "Http".into(), json!({}).as_object().unwrap().clone(), None, 0.0);
     c.load("Boot:seat".into(), "Boot".into(), boot.as_object().unwrap().clone(), None, 0.0);
     let mut s = 0; f.rebuild(&mut c, 1.0, &mut s);
-    std::env::set_var("DOOR_STATIC_SECRET", "0123456789abcdef0123456789abcdef");        // a door with a secret knows a bare loopback caller
+    std::env::set_var("DOOR_STATIC_SECRET", "0123456789abcdef0123456789abcdef");        // a door with a secret: only the public shell answers a caller with no token
     put(&mut c, &mut f, "Http:door", "listen", json!({"id": "l1", "port": 0, "secret_env": "DOOR_STATIC_SECRET"}));
     pump(&mut c, &mut f, |c| c.docs["Http:door"].props.get("listen_result").is_some());
     let port = c.docs["Http:door"].props["listen_result"]["port"].as_u64().unwrap();
@@ -96,8 +96,11 @@ fn a_missing_file_a_traversal_and_a_post_are_refused() {
                           ("GET /ui/www/%2e%2e/index.html HTTP/1.1\r\nHost: t\r\n\r\n", "404"),
                           ("GET /ui/www//etc/passwd HTTP/1.1\r\nHost: t\r\n\r\n", "404"),
                           ("POST /ui/www/home.js HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n", "405"),
-                          ("GET /nowhere HTTP/1.1\r\nHost: t\r\n\r\n", "404")] {
-        let (head, _) = split(&get(&mut c, &mut f, port, raw));
+                          ("GET /nowhere HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer TOKEN\r\n\r\n", "404"),
+                          ("GET /nowhere HTTP/1.1\r\nHost: t\r\n\r\n", "401")] {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+        let tok = membrane_vm::jwt::mint(b"0123456789abcdef0123456789abcdef", "owner", "owner", 3600.0, now).unwrap();
+        let (head, _) = split(&get(&mut c, &mut f, port, &raw.replace("TOKEN", &tok)));
         assert!(head.starts_with(&format!("HTTP/1.1 {status}")), "{raw}: {head}");
     }
 }

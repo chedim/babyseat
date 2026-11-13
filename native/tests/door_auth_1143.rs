@@ -171,9 +171,31 @@ fn the_prefix_is_stripped_and_a_route_answers_on_both_paths() {
 }
 
 #[test]
-fn a_bare_loopback_caller_without_a_token_still_passes_on_the_unprefixed_routes() {
-    // the opencode client's boot probes and `curl` on this machine (the door's `internal`); only the page's /ui/serve/ is token-only
+fn a_bare_loopback_caller_is_not_the_owner_when_the_door_has_a_secret() {
+    // the operator's rule (#842): a localhost peer is not the owner. Every route but the public shell needs a verified token, the unprefixed ones too
     let (mut c, mut f, port) = world();
-    let r = get(&mut c, &mut f, port, &req("/global/health", ""));
+    for path in ["/global/health", "/command", "/path", "/ui/conf", "/session", "/ui/serve/global/health"] {
+        let r = get(&mut c, &mut f, port, &req(path, ""));
+        assert!(status(&r).starts_with("HTTP/1.1 401"), "{path}: {}", status(&r));
+        assert_eq!(header(&r, "www-authenticate").as_deref(), Some("Bearer realm=\"membrane\""), "{path}");
+        assert_eq!(serde_json::from_slice::<J>(&split(&r).1).unwrap(), json!({"error": {"message": "missing or invalid token", "type": "unauthorized"}}), "{path}");
+    }
+    // the same call with a token is served
+    let auth = format!("Authorization: Bearer {}\r\n", token("owner"));
+    let r = get(&mut c, &mut f, port, &req("/global/health", &auth));
     assert!(status(&r).starts_with("HTTP/1.1 200"), "{}", status(&r));
+    // a token past its life (beyond the 30 s leeway) is the same 401
+    let old = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() - 7200.0;
+    let expired = membrane_vm::jwt::mint(SECRET.as_bytes(), "owner", "owner", 60.0, old).unwrap();
+    let r = get(&mut c, &mut f, port, &req("/global/health", &format!("Authorization: Bearer {expired}\r\n")));
+    assert!(status(&r).starts_with("HTTP/1.1 401"), "{}", status(&r));
+}
+
+#[test]
+fn the_public_shell_stays_open_to_a_caller_with_no_token() {
+    let (mut c, mut f, port) = world();
+    for path in ["/", "/index.html", "/membrane", "/ui/www/none.js", "/favicon.ico"] {
+        let r = get(&mut c, &mut f, port, &req(path, ""));
+        assert!(!status(&r).starts_with("HTTP/1.1 401"), "{path}: {}", status(&r));
+    }
 }

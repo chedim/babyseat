@@ -88,7 +88,7 @@
   ]
  },
  {
-  "name": "a loopback request on the bare route, no token, is the seat itself",
+  "name": "a loopback request on the bare route, no token, is refused: a localhost peer is not the owner (#842)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/door.c1f",
@@ -114,6 +114,53 @@
      "peer": "127.0.0.1:5000",
      "authed": false,
      "auth_error": "no token"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 401
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.www-authenticate",
+    "equals": "Bearer realm=\"membrane\""
+   }
+  ]
+ },
+ {
+  "name": "a loopback request on the bare route WITH the owner token is served",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_auth.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/global/health",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
     }
    }
   ],
