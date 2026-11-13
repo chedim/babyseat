@@ -23,7 +23,7 @@ Everything under "dry run" was observed on `cliffvm` built from this tree, a fre
 | Rounds: no-history backend behind the same routes | 8-12 |
 | Rounds: UI rebuild (VM growth + 9 views + test rewrite) | 112-169 |
 | Rounds: data migration and cutover | 14-22 |
-| The finding that changes the plan | the current page cannot be served by `cliffvm` with ANY pack set today: every page call goes through `/ui/serve/<path>` (`panel.js:34`, `home.js:20`, `field.js:20`) and the door has no such prefix (dry run: `/ui/serve/global/health` 404); the whole session/event API the chat speaks (`/session*`, `/event`) does not exist (barest chat is `/membrane/chat/*`, `P/chat.c1f:58`) |
+| The finding that changes the plan | (w30: the `/ui/serve/` prefix, the owner cookie and a full-set launch line now exist; the page boots on `cliffvm`, section 6 lists what still 404s) the current page cannot be served by `cliffvm` with ANY pack set today: every page call goes through `/ui/serve/<path>` (`panel.js:34`, `home.js:20`, `field.js:20`) and the door has no such prefix (dry run: `/ui/serve/global/health` 404); the whole session/event API the chat speaks (`/session*`, `/event`) does not exist (barest chat is `/membrane/chat/*`, `P/chat.c1f:58`) |
 
 ## 1. Route inventory (used routes)
 
@@ -36,20 +36,20 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 
 | # | method path | caller | shape pointer | cliffvm | evidence |
 |---|---|---|---|---|---|
-| 1 | GET `/`, `/index.html`, `/membrane` | browser | `UIS:467-481` (also mints an owner cookie on loopback, `UIS:468-479`) | PRESENT | `P/door.c1f:21-60`; `N/tests/seat_process.rs`, `door_static.rs`; dry run 200 only with `--ui-dir membrane/ui` (404 without) |
+| 1 | GET `/`, `/index.html`, `/membrane` | browser | `UIS:467-481` (also mints an owner cookie on loopback, `UIS:468-479`) | PRESENT | `P/door.c1f:21-60`; `N/tests/seat_process.rs`, `door_static.rs`; dry run 200 only with `--ui-dir membrane/ui` (404 without). **Owner cookie on loopback: PRESENT (w30)**: `P/door_auth.c1f`, `Request.mint`, test `N/tests/door_auth_1143.rs` `the_page_fetched_from_loopback_sets_the_owner_cookie`; a forwarded request gets the page and no cookie |
 | 2 | GET `/favicon.ico` | browser | `UIS:482` | PRESENT | `P/door.c1f:23`; dry run 200 |
 | 3 | GET `/ui/www/<file>` (the page's JS (`index.html:42-145` loads 7 by name, `home.js` imports the rest)) | browser | `UIS:506-511` | PRESENT | `P/door.c1f:24-36`; dry run 200 for 16 files (with `--ui-dir`) incl. the 933 KB wasm |
 | 4 | GET `/ui/www/voice-ml.mjs`, `vosk-model-en.tar.gz` | `home.js:519,607` | `UIS:63-64` (Python looks in `<data dir>/assets/`, `DEV_WWW`) | PARTIAL | the door searches only `ui_roots` (`P/door.c1f:15-20`); files are not in `membrane/ui`; dry run 404 |
-| 5 | GET `/ui/conf` | `index.html:47`, `panel.js:2710`, HA `zoo.py:284` | `UIS:243-252, 484-494` | PARTIAL | spec `door_conf.json`; dry run 200; `auth` is hard `"jwt"` and `owner` is missing (`P/door.c1f:75`), Python says `seat` + `owner` when JWT is off |
-| 6 | POST `/ui/login` | `host.js:66` | `UIS:334-380` | PRESENT | `P/door.c1f:100-107`; spec `door_login.json`; `N/tests/jwt_door.rs`; JWT mode only: the seat-token mode (`UIS:337-352`, `seatauth.py`) is missing |
+| 5 | GET `/ui/conf` | `index.html:47`, `panel.js:2710`, HA `zoo.py:284` | `UIS:243-252, 484-494` | PARTIAL | spec `door_conf.json`; dry run 200; (the seat-token mode is DROPPED by decision, so `auth: "jwt"` is final and `owner` is not needed) `auth` is hard `"jwt"` and `owner` is missing (`P/door.c1f:75`), Python says `seat` + `owner` when JWT is off |
+| 6 | POST `/ui/login` | `host.js:66` | `UIS:334-380` | PRESENT | `P/door.c1f:100-107`; spec `door_login.json`; `N/tests/jwt_door.rs`; JWT mode only (the seat-token mode, `UIS:337-352`, `seatauth.py`, is DROPPED by the operator's decision); its 401 now has the released shape (w30) |
 | 7 | GET `/ui/fieldvm` | `fieldvm.js:274` | `UIS:495-498` (`fields_live.snapshot`) | MISSING | dry run 404; the page's field VM (About window) cannot start |
 | 8 | GET `/ui/serve/event` (SSE `field.write`/`field.pack`) | `fieldvm.js:283` | `PY` `_sse` | MISSING | dry run 404 |
-| 9 | the `/ui/serve/<path>` prefix itself (every row below) | `panel.js:34`, `home.js:20`, `field.js:20` | `UIS:445-463` | MISSING | dry run `/ui/serve/session` 404, `/ui/serve/global/health` 404; one door getter (about 1 round) |
+| 9 | the `/ui/serve/<path>` prefix itself (every row below) | `panel.js:34`, `home.js:20`, `field.js:20` | `UIS:445-463` | **PRESENT (w30)** | `P/door.c1f` `ui_served`/`ui_path`/`route`; every family reads `this.route`; test `N/tests/door_serve_prefix_1143.rs` (a route answers on both paths), `door_auth_1143.rs`; a prefixed call needs a verified JWT. A route that does not exist behind it answers 404 (`/ui/serve/session` still does: row 15) |
 | 10 | POST `/ui/log` | `host.js:10` (beacon) | `UIS:302-320` | PRESENT | `P/door_voice.c1f:92-110`; spec `door_voice.json`; fresh store OK (a file write) |
 | 11 | POST `/ui/stt` | `home.js:4242,4443,4549` | `UIS:272-300` | NOT-NEEDED (default) | `/ui/conf` says `stt: browser` unless the settings name a whisper server (`UIS:243-250`); then it is a 501 on cliffvm (`P/door_voice.c1f:21-22`: a WAV is bytes) |
 | 12 | GET `/ui/zoo`, POST `/ui/zoo/active` | `home.js:699,3087`, `panel.js:2101,2674` | HA only (`custom_components/membrane/zoo.py`, `views.py:127-144`) | NOT-NEEDED | standalone answers 404 (`UIS:513`); the page catches it (`panel.js:2674`) |
 | 13 | GET `/__boot/shape` | `fieldanim.js:175` | `bootprof.BootDoor` (only while the Python seat loads) | NOT-NEEDED | the page ignores a failure (`.catch`, `fieldanim.js:175`); cliffvm is healthy 0.84 s after start |
-| 14 | GET `/global/health` | `fieldanim.js:152`, `panel.js:2718`, HA `config_flow.py:138`, `supervisor.py:168` | `PY:4396` | PRESENT | `P/door.c1f:125-128`; spec `door_probes.json`; dry run 200. The Python 503 `{loading}` JSON the page's SeatWatch reads (`fieldanim.js:152-160`) is not produced |
+| 14 | GET `/global/health` | `fieldanim.js:152`, `panel.js:2718`, HA `config_flow.py:138`, `supervisor.py:168` | `PY:4396` | PRESENT | `P/door.c1f:125-128`; spec `door_probes.json`; dry run 200; also on `/ui/serve/global/health` (w30). The Python 503 `{loading}` JSON the page's SeatWatch reads (`fieldanim.js:152-160`) is not produced |
 
 (`POST /ui/logout` exists in both but nothing calls it: not counted.)
 
@@ -225,6 +225,8 @@ cutover switch 2-3 = **86-128**; the 94 existing node-based UI test files test t
 secret like Python (`jwt.rs:64`), reads Bearer / Basic / cookie (`N/src/http.rs:44-62`) and stamps `authed`, `sub`, `claims`, `auth_error` on the Request before a pack sees it
 (`http.rs:138-147`); `P/door.c1f:63-114` adds loopback-internal, the 401 gate and login/logout cookies. Dry run with a secret file: no token from loopback -> passes as `owner`;
 `X-Forwarded-For` -> 401; bad token -> 401; the shell stays public.
+**Done in w30 (swap step 1, #1143)**: gap 3 (the 401 body and header are the released ones: `{"error":{"message":"missing or invalid token","type":"unauthorized"}}`, `WWW-Authenticate: Bearer realm="membrane"`, one message for a missing and a refused token), gap 4 (the owner cookie: `door_auth.c1f` + the driver verb `Request.mint`, `jwt.rs` `mint`), and the strict gate: a call through `/ui/serve/` needs a verified JWT even from loopback (the page is given one; no tokenless), while the unprefixed routes still pass a bare loopback caller. Gap 2 is closed by the operator's decision (seat-token mode and LAN guard dropped; JWT and the loopback owner cookie are the only modes). `scripts/seat-full` makes the secret (0600) on its first run. Still open: gaps 1 (no `token mint` CLI, no internal token for the seat's own calls, no rotation), 5 (persons) and 6 (owner-only writes).
+
 **Gaps for the swap:**
 1. no secret management (generation at boot, `token mint`/`seat` CLI, the internal token for the seat's own calls and the TUI/MCP children, rotation): Python-only today (`jwtauth.py`).
 2. the seat-token mode, the LAN guard and `auth: seat`/`owner` in `/ui/conf` (decide: drop, see D5).
@@ -332,6 +334,18 @@ With a secret file: no token + loopback -> 200 as `owner`; `X-Forwarded-For` -> 
 Read-through of one write-free POST: `POST /membrane/voice` never answers on a fresh store; `POST /ui/login` with a bad token answers 401 (`{"error":"missing or invalid token"}`).
 The seat was stopped afterwards (SIGTERM, port 4314 free). The operator's seat on :4096 and the scratchpad `real-run/seat*.sqlite*` were not touched.
 
+**After swap step 1 (w30, `scripts/seat-full`, `tests/js/page_boot.test.mjs`, measured in headless Chrome, 8 s after load).** The page loads all its files, runs with no script exception and makes 13 `/ui/serve/` calls on boot, none refused (the owner cookie is accepted on every one):
+
+| answered | calls |
+|---|---|
+| 200 | `membrane/seat/pause`, `membrane/work-graph`, `global/health`, `membrane/models`, `v1/models` (and the bare `/ui/conf`, `/global/health`) |
+| 501 (a stated "not built") | `membrane/quota` |
+| 404 (no route) | `/ui/serve/session` (row 15: w31), `/ui/serve/agent` and `/ui/serve/config` (rows 36, 37: the opencode stubs), `/ui/serve/membrane/map/field3d` and `/map/blurp` (rows 61-68: the field map), `/ui/fieldvm` (row 7), the bare `/membrane/options` (`index.html:78`, row 44) |
+| no answer (hang) | `POST /ui/serve/membrane/voice/state` (row 55: the voice tables a fresh store lacks) |
+| not reached yet | `/ui/serve/session/status` and `/ui/serve/event` (the page only asks once a session exists), so the chat screen is not testable until w31 |
+
+These are the backlog; each is listed in the test (`MISSING`, `HANGS`), which fails when a call outside the list 404s or hangs and when a listed one starts to answer.
+
 ## 7. Server-swap test plan
 
 What can run against cliffvm **unchanged**:
@@ -350,7 +364,7 @@ What can run against cliffvm **unchanged**:
 3. SSE fixtures: the first N frames of `/event` for a scripted turn (the stub runner's), compared frame by frame (`type`, `properties` keys).
 4. A page smoke test with the real JS: headless Chrome (the driver exists, `T/js/fieldvm_link.test.mjs`) loads `/`, logs in with a minted token, creates a session, sends a message with a fake model, expects the transcript row and no console error; the same script runs against the Python seat (oracle) and cliffvm.
 
-**Smallest first slice** (about 8 rounds, proves the architecture without a model): `cliffvm run packs + --ui-dir membrane/ui` serving the real page in headless Chrome up to the empty chat screen: (1) the `/ui/serve` prefix strip (row 9); (2) `door_opencode.c1f` with the stub rows 32-40 (+ `GET /mcp` split by method) and `/session` list/create/get/delete/status + messages as `Chat:<sid>` entities over the existing chat, no turn yet (rows 15-22, 28); (3) `/event` SSE emitting `server.connected` + `session.*` from the existing event-stream mechanism (rows 30, 31); (4) the golden fixtures for exactly those rows (about 25 requests) and the Chrome smoke "page loads, no console error, session list renders, a created session appears". The first real turn (row 23) is slice two (the existing `chat_turn` over a `claude` fake, as `N/tests/chat_process.rs` does).
+**Smallest first slice** (about 8 rounds, proves the architecture without a model): `cliffvm run packs + --ui-dir membrane/ui` serving the real page in headless Chrome up to the empty chat screen: (1) the `/ui/serve` prefix strip (row 9: PRESENT, w30); (2) `door_opencode.c1f` with the stub rows 32-40 (+ `GET /mcp` split by method) and `/session` list/create/get/delete/status + messages as `Chat:<sid>` entities over the existing chat, no turn yet (rows 15-22, 28); (3) `/event` SSE emitting `server.connected` + `session.*` from the existing event-stream mechanism (rows 30, 31); (4) the golden fixtures for exactly those rows (about 25 requests) and the Chrome smoke "page loads, no console error, session list renders, a created session appears". The first real turn (row 23) is slice two (the existing `chat_turn` over a `claude` fake, as `N/tests/chat_process.rs` does).
 
 ## 8. Prioritised plan, risks, decisions
 
