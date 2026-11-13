@@ -115,6 +115,30 @@
     ],
     "boot_facts": []
   },
+  "chat_turn": {
+    "imports": [
+      "chat",
+      "proc",
+      "banner"
+    ],
+    "classes": [
+      "Chat",
+      "ChatMessage"
+    ],
+    "members": 22,
+    "writes": [
+      "membrane:*.result",
+      "membrane:*.run",
+      "membrane:*=ChatResponse()",
+      "membrane:*=ChatTool()",
+      "membrane:*=Command()"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "chat_claude_bin",
+      "chat_max_turns"
+    ]
+  },
   "decisions": {
     "imports": [
       "goalgraph",

@@ -1,0 +1,80 @@
+PACK chat_turn 1
+IMPORT chat 1
+IMPORT proc 1
+IMPORT banner 1
+-- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
+-- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
+-- membrane MCP set (the door's `POST /mcp`, packs/door_tools.c1f), one continuous run per answer with a ceiling, the system prompt is the
+-- tools note plus the chat's banner, the prompt is the message ALONE: no chat history reaches the model (map mode). What must outlive
+-- the turn goes into the field; the banner shows it.
+-- THE RUN is a Command entity (`membrane::Command:chat:<id>`) the turn writes; the stream-json lines of its stdout are read here by
+-- `json()` (the receipt lands when the process ends: the answer is not streamed, see docs/cliffvm.md); the result line is the answer,
+-- else the assistant's text in order. Each tool the model ran is an entity under the message (ChatTool: name, input, result).
+-- Boot facts (cliffvm run ... --fact name=value):
+--   chat_claude_bin   the CLI's path. NO DEFAULT: without it a message is answered with an error that says so, and nothing is run.
+--   chat_max_turns    the ceiling (the CLI's --max-turns); default 2048 here (a threshold: flagged for the operator).
+-- `env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is the CLI's own switch the Python rung set (no auto-memory keyed to the folder).
+-- (the two setters are on the class Chat, not on the kind ChatMessage: a setter reaches a kind only through an ISA parent ENTITY, `cls:chatmessage`,
+-- and a getter only needs the `parents` stamp; only a message has `plan` and `answer`.)
+-- `--` ends the options (the CLI's --allowedTools and --mcp-config take lists: without it they would swallow the prompt).
+-- The login is the CLI's own; --bare is NOT used: it never reads the login (OAuth/keychain), only an API key.
+
+ChatMessage.bin getter: ([b.chat_claude_bin for b in instances('Boot') if b.chat_claude_bin != None] or [''])[0]
+ChatMessage.max_turns getter: ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
+ChatMessage.port getter: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
+ChatMessage.mcp_json getter: str({'mcpServers': {'membrane': {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp'}}}) if this.port != None else None
+ChatMessage.banner_text getter: prop('membrane::Banner:owner:main', 'text')
+ChatMessage.note getter: 'Your hands are the field tools, named mcp__membrane__<tool>: entity_query (find entities), entity_read, entity_write (act by writing one property: what reacts to the write runs; an effect leaves its receipt as <property>_result on the entity: read it back). Claude Code\'s own tools are off. No history reaches you between messages: whatever must outlive this turn goes into the field, and the banner below is your state.'
+ChatMessage.sys getter: join([this.note, this.banner_text], '\n\n') if this.banner_text != None else None
+ChatMessage.argv getter:
+  WHEN this.bin == '' or this.mcp_json == None or this.sys == None or this.text == None: None
+  ELSE: ['env', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence', '--max-turns', str(this.max_turns), '--system-prompt', this.sys, '--', this.text]
+
+-- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
+ChatMessage.plan getter:
+  WHEN this.state != None or this.text == None: None
+  ELSE WHEN this.bin == '': {'refuse': 'chat_claude_bin is not set: start cliffvm with --fact chat_claude_bin=<path to the claude CLI>'}
+  ELSE WHEN this.argv != None: {'argv': this.argv}
+  ELSE: None
+Chat.plan on-setter turn-start:
+  WHEN prop(this.plan, 'refuse') != None:
+    this.state = 'error'
+    membrane::Chat:message[this.mid]:response = ChatResponse(text: prop(this.plan, 'refuse'), error: True)
+  ELSE WHEN prop(this.plan, 'argv') != None:
+    this.state = 'running'
+    membrane::Command:chat[this.mid] = Command(cmd: prop(this.plan, 'argv'))
+    membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': []}
+
+-- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
+ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')
+ChatMessage.rc getter: prop(this.rr, 'rc')
+ChatMessage.evs getter: [e for e in [json(l) for l in lines(str(prop(this.rr, 'stdout') or ''))] if prop(e, 'type') != None]
+ChatMessage.finals getter: [e for e in this.evs if prop(e, 'type') == 'result']
+ChatMessage.final getter: this.finals[-1]
+ChatMessage.texts getter: [join([prop(b, 'text') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'text'], '') for e in this.evs if prop(e, 'type') == 'assistant']
+ChatMessage.spoken getter: strip(join([t for t in this.texts if t != ''], '\n\n'))
+ChatMessage.capped getter: str(prop(this.final, 'subtype') or '') == 'error_max_turns'
+ChatMessage.failed getter:
+  WHEN this.rr == None: None
+  ELSE WHEN this.final == None and this.rc != 0: 'claude failed (rc ' + str(this.rc) + '): ' + clip(strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or '')), 400)
+  ELSE WHEN prop(this.final, 'is_error') == True: 'claude reported an error: ' + str(prop(this.final, 'result'))
+  ELSE: None
+ChatMessage.answer getter:
+  WHEN this.rr == None: None
+  ELSE WHEN this.failed != None: this.failed
+  ELSE WHEN this.capped: this.spoken + '\n\n(stopped at the ceiling of ' + str(this.max_turns) + ' turns)'
+  ELSE WHEN strip(str(prop(this.final, 'result') or '')) != '': str(prop(this.final, 'result'))
+  ELSE: this.spoken
+ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evs if prop(e, 'type') == 'assistant'], ' '))
+Chat.answer on-setter turn-finish:
+  WHEN this.answer != None:
+    this.state = 'error' if this.failed != None else 'done'
+    this.tools_run = this.tools_names
+    membrane::Chat:message[this.mid]:response = ChatResponse(text: this.answer, error: this.failed != None, rc: this.rc)
+    FOR e IN [x for x in this.evs if prop(x, 'type') == 'assistant']:
+      FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
+        membrane::Chat:message[this.mid]:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
+    FOR e IN [x for x in this.evs if prop(x, 'type') == 'user']:
+      FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_result']:
+        body = prop(b, 'content')
+        membrane::Chat:message[this.mid]:tool[prop(b, 'tool_use_id')].result = Text(body) or join([prop(c, 'text') for c in (List(body) or [])], '\n')

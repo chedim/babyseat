@@ -151,6 +151,37 @@
     },
     "findings": []
   },
+  "chat_turn": {
+    "getters": {
+      "ChatMessage.answer": "Text?",
+      "ChatMessage.argv": "List(Any)?",
+      "ChatMessage.banner_text": "Any",
+      "ChatMessage.bin": "Any",
+      "ChatMessage.capped": "Bool",
+      "ChatMessage.evs": "List(Any)",
+      "ChatMessage.failed": "Text?",
+      "ChatMessage.final": "Any",
+      "ChatMessage.finals": "List(Any)",
+      "ChatMessage.max_turns": "Any",
+      "ChatMessage.mcp_json": "Text?",
+      "ChatMessage.note": "Text",
+      "ChatMessage.plan": "Dict?",
+      "ChatMessage.port": "Any",
+      "ChatMessage.rc": "Any",
+      "ChatMessage.rr": "Any",
+      "ChatMessage.spoken": "Text",
+      "ChatMessage.sys": "Text?",
+      "ChatMessage.texts": "List(Text)",
+      "ChatMessage.tools_names": "List(Text)"
+    },
+    "writes": {
+      "Chat.result": "Text",
+      "Chat.state": "Text",
+      "Chat.tools_run": "Any",
+      "Command.run": "Dict"
+    },
+    "findings": []
+  },
   "decisions": {
     "getters": {
       "Decision.ans_error": "Text?",
