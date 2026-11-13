@@ -524,3 +524,21 @@ fn the_seat_script_forwards_each_fact_to_cliffvm_run() {
     assert_eq!(args[0], "run");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn updated_is_readable_from_a_clifflet_and_entity_read_and_moves_with_a_write() {
+    let (mut run, port) = seat("updated", true);
+    w(port, "Note:u", "text", json!("one"));
+    let first: f64 = read(port, "Note:u", "updated").trim().parse().unwrap_or_else(|_| panic!("a number"));
+    assert!(first > 1.0e9, "an epoch time: {first}");
+    assert_eq!(clifflet(port, "Note:u.updated > 1000000000"), "True");
+    std::thread::sleep(Duration::from_millis(50));
+    w(port, "Note:u", "text", json!("two"));
+    let second: f64 = read(port, "Note:u", "updated").trim().parse().unwrap();
+    assert!(second > first, "a write moves it: {first} -> {second}");
+    // read-only: the door refuses a write of it
+    let (r, _) = call(port, "entity_write", json!({"spec": "Note:u", "prop": "updated", "value": 5}));
+    assert!(r.contains("refused") || r.contains("updated"), "{r}");
+    assert_eq!(read(port, "Note:u", "updated").trim().parse::<f64>().unwrap(), second);
+    assert!(terminate(&mut run));
+}

@@ -137,8 +137,13 @@ struct Cur {
     memo: Memo,
 }
 
+/// The VM-provided, read-only property of every entity: the epoch time of its last write (the host stamps it with the write, in the same row; `Core::updated`).
+pub const UPDATED: &str = "updated";
+
 pub struct Core {
     pub docs: HashMap<String, Ent>,
+    /// eid -> the time of its last write: what `<entity>.updated` reads (0 when it has none). Set by the host with each write; writing it is no write (no reaction, no recompute)
+    pub updated: HashMap<String, f64>,
     /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
     /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
     pub why: std::collections::BTreeMap<(String, String), String>,
@@ -210,6 +215,7 @@ impl<'a> expr::World for View<'a> {
             // the first class of the list (the eid class when it is the first, as written there otherwise)
             "cls" => V::Str(match e.class_names().into_iter().next() { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }),
             "position" => e.pos.as_ref().map(|p| V::List(p.iter().map(|x| V::Float(*x)).collect())).unwrap_or(V::None),
+            UPDATED => V::Float(self.core.updated.get(eid).copied().unwrap_or(0.0)),   // provided by the VM: shadows a stored property of that name
             _ => match e.props.get(attr) {
                 Some(j) if !j.is_null() => expr::from_json(j),
                 _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or(V::None),
@@ -285,7 +291,7 @@ impl Core {
     pub fn new() -> Self {
         Core {
             why: Default::default(), locals: Default::default(),
-            docs: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
+            docs: HashMap::new(), updated: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
@@ -391,6 +397,7 @@ impl Core {
 
     fn remove(&mut self, eid: &str) {
         if let Some(i) = self.at.remove(eid) { self.order[i] = None; }
+        self.updated.remove(eid);
         if let Some(e) = self.docs.remove(eid) { self.reindex_entity(eid, Some(&e.props), None); }
     }
 

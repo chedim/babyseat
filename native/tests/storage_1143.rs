@@ -171,3 +171,98 @@ fn what_a_virtual_entitys_setter_makes_is_journalled_as_an_outside_write_and_a_r
     for e in ["Msg:Req:1", "Tally:main"] { assert_eq!(r.snapshot().get(e), h.snapshot().get(e), "{e}: replay-equal state"); }
     assert_eq!(count(&file, "Msg:%"), 1, "the message is stored");
 }
+
+// ---- `.updated`: the VM-provided, read-only time of an entity's last write ---------------------------------------------------------------------------------
+fn ticking(start: f64) -> Box<dyn Fn() -> f64 + Send + Sync> {
+    let n = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    Box::new(move || start + n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as f64)
+}
+fn timed(file: Option<&str>, start: f64) -> Host { let mut o = Options::new(file.map(String::from)); o.effects = false; o.clock = ticking(start); Host::open(o).unwrap() }
+const UPD: &str = "PACK u 1\nBox.stamp getter: this.updated\nBox.double getter: this.w * 2\nBox.updated on-setter never:\n  ALWAYS:\n    this.hit = True\n";
+
+#[test]
+fn updated_is_the_time_of_the_last_write_stamped_with_it_and_it_causes_nothing() {
+    let file = tmpfile("updated");
+    let h = timed(Some(&file), 1000.0);
+    h.load_pack("u", UPD).unwrap();
+    h.rebuild();
+    h.born("Box:a", "Box", props(serde_json::json!({"w": 1})), "person");
+    let t0 = h.updated("Box:a");
+    assert!(t0 >= 1000.0, "stamped at its birth: {t0}");
+    assert_eq!(h.get("Box:a", "stamp"), serde_json::json!(t0), "a getter reads it");
+    let before = h.store_commits();
+    h.write("Box:a", "w", serde_json::json!(2), "person");
+    let t1 = h.updated("Box:a");
+    assert!(t1 > t0, "a write moves it: {t0} -> {t1}");
+    assert_eq!(h.store_commits() - before, 2, "the journal line and the round (as before `updated` existed): the stamp is in the row of the write, no extra write");
+    assert_eq!(h.get("Box:a", "double"), serde_json::json!(4), "the derived write is part of the round");
+    assert_eq!(h.get("Box:a", "stamp"), serde_json::json!(t0), "NO getter recompute: a getter that read `updated` keeps what it read until something else changes");
+    assert_eq!(h.get("Box:a", "hit"), serde_json::Value::Null, "NO reaction: a setter on `updated` never fires");
+    assert_eq!(h.stored_updated("Box:a"), Some(t1), "the same time in the row");
+    let db = rusqlite::Connection::open(&file).unwrap();
+    let ix: Vec<String> = db.prepare("SELECT name FROM pragma_index_list('c_field')").unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+    assert!(ix.iter().any(|n| n == "c_field_updated"), "an indexed column: {ix:?}");
+    // a write that changes nothing does not move it
+    h.write("Box:a", "w", serde_json::json!(2), "person");
+    assert_eq!(h.updated("Box:a"), t1);
+    // read-only: an outside write of it is refused and leaves no trace
+    let jlen = h.journal().len();
+    h.write("Box:a", "updated", serde_json::json!(5), "person");
+    assert_eq!(h.updated("Box:a"), t1);
+    assert_eq!(h.journal().len(), jlen, "not even journalled");
+}
+
+#[test]
+fn a_setter_cannot_write_updated_either() {
+    let h = timed(None, 1000.0);
+    h.load_pack("u", "PACK u 1\nBox.go on-setter s:\n  WHEN this.go == True:\n    this.updated = 1\n").unwrap();
+    h.rebuild();
+    h.born("Box:a", "Box", props(serde_json::json!({})), "person");
+    h.write("Box:a", "go", serde_json::json!(true), "person");
+    assert!(h.updated("Box:a") > 1000.0);
+    assert!(h.get("Box:a", "refused").as_str().unwrap_or("").contains("updated"), "{:?}", h.get("Box:a", "refused"));
+}
+
+#[test]
+fn a_replay_ends_with_the_same_updated_the_journals_time_not_the_replays_clock() {
+    let h = timed(None, 1000.0);
+    h.load_pack("u", UPD).unwrap();
+    h.rebuild();
+    h.born("Box:a", "Box", props(serde_json::json!({"w": 1})), "person");
+    h.born("Box:b", "Box", props(serde_json::json!({"w": 5})), "person");
+    h.write("Box:a", "w", serde_json::json!(2), "person");
+    let r = timed(None, 900000.0);
+    r.load_pack("u", UPD).unwrap();
+    r.rebuild();
+    r.replay(&h.journal());
+    for e in ["Box:a", "Box:b"] { assert_eq!(r.updated(e), h.updated(e), "{e}"); assert!(r.updated(e) > 1000.0 && r.updated(e) < 2000.0, "the journal's time, not the replay clock's"); }
+    assert_eq!(r.get("Box:a", "double"), serde_json::json!(4));
+}
+
+#[test]
+fn an_old_store_gets_the_columns_and_a_backfill_from_the_journal_once() {
+    let file = tmpfile("migrate");
+    {
+        let db = rusqlite::Connection::open(&file).unwrap();
+        db.execute_batch("CREATE TABLE c_field (k TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE c_journal (k TEXT PRIMARY KEY, body TEXT NOT NULL);").unwrap();
+        db.execute_batch("INSERT INTO c_field VALUES ('Box:a', '{\"cls\":\"Box\",\"props\":{\"w\":1}}'), ('Box:b', '{\"cls\":\"Box\",\"props\":{\"w\":2}}'), ('Note:c', '{\"cls\":\"Note\",\"props\":{}}');
+            INSERT INTO c_journal VALUES ('000000000000', '{\"op\":\"born\",\"ts\":10.0,\"writer\":\"p\",\"eid\":\"Box:a\",\"cls\":\"Box\",\"props\":{\"w\":1}}'),
+                                         ('000000000001', '{\"op\":\"write\",\"ts\":30.5,\"writer\":\"p\",\"eid\":\"Box:a\",\"prop\":\"w\",\"new\":1}'),
+                                         ('000000000002', '{\"op\":\"born\",\"ts\":20.0,\"writer\":\"p\",\"eid\":\"Box:b\",\"cls\":\"Box\",\"props\":{\"w\":2}}');").unwrap();
+    }
+    let h = timed(Some(&file), 5000.0);
+    assert_eq!(h.stored_updated("Box:a"), Some(30.5), "the last journalled write");
+    assert_eq!(h.stored_updated("Box:b"), Some(20.0));
+    assert_eq!(h.stored_updated("Note:c"), Some(0.0), "no journal line: 0");
+    let db = rusqlite::Connection::open(&file).unwrap();
+    let cls: String = db.query_row("SELECT cls FROM c_field WHERE k = 'Note:c'", [], |r| r.get(0)).unwrap();
+    assert_eq!(cls, "Note", "the class column is backfilled");
+    drop(h);
+    // idempotent: open again; what a later run changed is not backfilled over
+    db.execute("UPDATE c_field SET updated = 99 WHERE k = 'Box:a'", []).unwrap();
+    let h = timed(Some(&file), 5000.0);
+    assert_eq!(h.stored_updated("Box:a"), Some(99.0));
+    drop(h);
+    let n: i64 = db.query_row("SELECT count(*) FROM pragma_table_info('c_field') WHERE name IN ('cls', 'updated')", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 2, "each column once");
+}

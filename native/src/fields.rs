@@ -284,6 +284,7 @@ fn reads_name(expr: &str, name: &str) -> bool {
 }
 
 /// The words of the safety rule in a refusal (set_pack tells a refusal from a pack that waits for its imports by them).
+const UPDATED_PROP: &str = crate::vm::UPDATED;
 const OVERRIDE_RULE: &str = "a layer overrides only what it imports";
 
 /// How many times the start-up pass may repeat while values still change (see `rebuild`).
@@ -1344,6 +1345,10 @@ impl Fields {
                         None => claim = Some((t, prop.clone())),
                     }
                 }
+            }
+            if prop == crate::vm::UPDATED {
+                self.receipt(core, eid, name, format!("refused: `{UPDATED_PROP}` is provided by the VM (the time of the entity's last write) and is read-only: no setter writes it"), J::Null, seq, now);
+                continue;
             }
             let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
             if let Some(k) = claim { self.claimed.insert(k, (pack.to_string(), name.to_string())); }   // a write that was made: it is the first

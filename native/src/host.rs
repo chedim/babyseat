@@ -142,15 +142,49 @@ pub struct Host {
     pending: Mutex<Option<std::collections::HashMap<String, Pending>>>,
     /// whether the open transaction has executed a statement (an empty one is rolled back, not counted)
     wrote: AtomicBool,
+    /// the time of the OUTSIDE write whose round is being applied (f64 bits; 0 = none): what that round's derived writes are stamped with, so a replay (the journal's time) ends with the same `updated`
+    round_ts: std::sync::atomic::AtomicU64,
 }
 
-struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool }
+struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool, updated: f64 }
+
+/// Holds the round's time for the length of an outside write; the previous one comes back when it ends.
+struct RoundTs<'a> { h: &'a Host, prev: u64 }
+impl Drop for RoundTs<'_> { fn drop(&mut self) { self.h.round_ts.store(self.prev, Ordering::SeqCst); } }
 
 /// An open transaction of the store: everything the host writes while it lives is ONE commit (one sync), the rows it changed written once each.
 pub struct Txn<'a> { h: &'a Host }
 impl Drop for Txn<'_> { fn drop(&mut self) { self.h.end_txn(); } }
 
 fn dbe(e: rusqlite::Error) -> String { e.to_string() }
+
+/// The shape of `c_field` (docs/cliffvm.md, "Storage modes"): next to `k` and `body`, the entity's own class (`cls`, indexed: the restore loads the RESIDENT classes by it)
+/// and `updated`, the epoch time of its last write (indexed: the warm boot loads the newest first). A store of an older shape gets the columns added; `cls` is filled
+/// from the body, and `updated` from the journal's last line about each entity (0 for an entity the journal never names: only outside writes are journalled).
+/// Idempotent: the journal backfill runs only when the `updated` column is added, never over what later runs stamped.
+fn migrate(db: &Connection) -> Result<(), String> {
+    let cols: Vec<String> = db.prepare("SELECT name FROM pragma_table_info('c_field')").map_err(dbe)?.query_map([], |r| r.get(0)).map_err(dbe)?.filter_map(|r| r.ok()).collect();
+    let had_updated = cols.iter().any(|c| c == "updated");
+    if !cols.iter().any(|c| c == "cls") { db.execute_batch("ALTER TABLE c_field ADD COLUMN cls TEXT").map_err(dbe)?; }
+    if !had_updated { db.execute_batch("ALTER TABLE c_field ADD COLUMN updated REAL NOT NULL DEFAULT 0").map_err(dbe)?; }
+    db.execute_batch("CREATE INDEX IF NOT EXISTS c_field_cls ON c_field(cls); CREATE INDEX IF NOT EXISTS c_field_updated ON c_field(updated)").map_err(dbe)?;
+    db.execute_batch("UPDATE c_field SET cls = json_extract(body, '$.cls') WHERE cls IS NULL").map_err(dbe)?;
+    if !had_updated {
+        let mut last: std::collections::HashMap<String, f64> = Default::default();
+        {
+            let mut st = db.prepare(&format!("SELECT body FROM {JOURNAL} ORDER BY k")).map_err(dbe)?;
+            for b in st.query_map([], |r| r.get::<_, String>(0)).map_err(dbe)?.filter_map(|r| r.ok()) {
+                if let Ok(j) = serde_json::from_str::<J>(&b) {
+                    if let (Some(e), Some(ts)) = (j.get("eid").and_then(|e| e.as_str()), j.get("ts").and_then(|t| t.as_f64())) { let m = last.entry(e.to_string()).or_insert(ts); if ts > *m { *m = ts; } }
+                }
+            }
+        }
+        db.execute_batch("BEGIN").map_err(dbe)?;
+        for (e, ts) in last { db.execute("UPDATE c_field SET updated = ?1 WHERE k = ?2", params![ts, e]).map_err(dbe)?; }
+        db.execute_batch("COMMIT").map_err(dbe)?;
+    }
+    Ok(())
+}
 
 impl Host {
     pub fn open(o: Options) -> Result<Host, String> {
@@ -163,6 +197,7 @@ impl Host {
         for t in [ROWS, JOURNAL] {
             db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {t} (k TEXT PRIMARY KEY, body TEXT NOT NULL)")).map_err(dbe)?;
         }
+        migrate(&db)?;
         let mut core = Core::new();
         let mut waiter = None;
         if o.effects {
@@ -177,13 +212,21 @@ impl Host {
         let mut fields = Fields::goalgraph();
         fields.inbound_by_host = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false) })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default() })
     }
 
     /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
     /// privileged writer's grant.
     pub fn pack_privileged(&self, name: &str) -> bool { self.eng().1.is_privileged(name) }
     pub fn now(&self) -> f64 { (self.clock)() }
+    /// The VM-provided `updated` of an entity: the time of its last write (the engine's copy; 0 when it has none).
+    pub fn updated(&self, eid: &str) -> f64 { self.eng().0.updated.get(eid).copied().unwrap_or(0.0) }
+    /// The same as the store's `updated` column holds it (None: no row).
+    pub fn stored_updated(&self, eid: &str) -> Option<f64> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        self.flush(&db);
+        db.query_row(&format!("SELECT updated FROM {ROWS} WHERE k = ?"), params![eid], |r| r.get(0)).optional().ok().flatten()
+    }
     pub fn storage_of(&self, cls: &str) -> crate::fields::Storage { self.eng().1.storage_of(cls) }
     fn eng(&self) -> std::sync::MutexGuard<'_, Engine> { self.eng.lock().unwrap_or_else(|e| e.into_inner()) }
     /// The engine, for the boot plan's walker (plan.rs takes the lock itself, never held while a step runs).
@@ -232,6 +275,7 @@ impl Host {
     // ---- hearing -----------------------------------------------------------------------------------------------------
     /// An outside write: journalled (the engine can not re-derive it), stored, heard by the engine, and what the engine made of it applied.
     pub fn write(&self, eid: &str, prop: &str, new: J, writer: &str) {
+        if prop == crate::vm::UPDATED { return; }   // `updated` is the VM's own, read-only: refused, not journalled
         let ts = self.now();
         self.journal_push(Line::Write { ts, writer: writer.into(), eid: eid.into(), prop: prop.into(), new: new.clone() });
         self.inject_write(ts, eid, prop, new, writer, writer);
@@ -244,9 +288,14 @@ impl Host {
         self.inject_born(ts, eid, cls, props, writer, writer);
     }
 
+    fn round_at(&self, ts: f64) -> RoundTs<'_> { RoundTs { h: self, prev: self.round_ts.swap(ts.to_bits(), Ordering::SeqCst) } }
+    /// The time a write applied now is stamped with: its round's (an outside write's own time), else the clock.
+    fn stamp_ts(&self) -> f64 { match self.round_ts.load(Ordering::SeqCst) { 0 => self.now(), b => f64::from_bits(b) } }
+
     /// `engine_writer` is what the engine sees (a Trip arrives as `driver:trip`, the way an effect's receipt does), `stamp` what the store keeps.
     fn inject_write(&self, ts: f64, eid: &str, prop: &str, new: J, engine_writer: &str, stamp: &str) {
         let _t = self.txn();
+        let _r = self.round_at(ts);
         self.store_prop(eid, None, prop, &new, stamp);
         if prop == "text" { self.pack_text(eid, &new); }
         if prop == "privileged" { self.note_outside_grant(eid, &new, stamp); }
@@ -266,6 +315,7 @@ impl Host {
 
     fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
         let _t = self.txn();
+        let _r = self.round_at(ts);
         let props = crate::vm::birth_props(cls, props);   // the eid class is the birth default of the class list (the journal keeps what was said)
         self.store_born(eid, cls, &props, stamp);
         if let Some(t) = props.get("text") { self.pack_text(eid, t); }
@@ -357,7 +407,7 @@ impl Host {
         let _t = self.txn();
         let (out, _calls) = { let mut g = self.eng(); let f = &mut g.1; (std::mem::take(&mut f.out), std::mem::take(&mut f.calls)) };
         let any = !out.is_empty();
-        let ts = self.now();
+        let ts = self.stamp_ts();
         let reactions = self.reactions_of(&out);
         for w in out {
             if let Some(cls) = w.get("born").and_then(|c| c.as_str()) {
@@ -511,6 +561,11 @@ impl Host {
     pub fn load_stored_entities(&self) -> usize {
         let now = self.now();
         let mut n = 0;
+        let stamps: std::collections::HashMap<String, f64> = {
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let mut st = db.prepare(&format!("SELECT k, updated FROM {ROWS}")).expect("rows");
+            st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))).expect("rows").filter_map(|r| r.ok()).collect()
+        };
         for (eid, row) in self.rows() {
             let cls = row["cls"].as_str().unwrap_or("").to_string();
             if cls.is_empty() || cls == PACK_CLASS || self.storage_of(&cls) == crate::fields::Storage::Virtual { continue; }
@@ -518,6 +573,7 @@ impl Host {
             let props: Map<String, J> = row["props"].as_object().cloned().unwrap_or_default().into_iter()
                 .filter(|(k, _)| !writers.get(k).and_then(|w| w.as_str()).map_or(false, is_getter_write)).collect();
             let mut g = self.eng(); let (core, f, _) = &mut *g;
+            if let Some(u) = stamps.get(&eid) { core.updated.insert(eid.clone(), *u); }
             f.arrive(core, eid, cls, props, now);
             n += 1;
         }
@@ -562,29 +618,33 @@ impl Host {
 
     /// Write back the rows the open transaction changed.
     fn flush(&self, db: &Connection) {
-        let dirty: Vec<(String, (String, Map<String, J>, Map<String, J>))> = {
+        let dirty: Vec<(String, (String, Map<String, J>, Map<String, J>), f64)> = {
             let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
             let Some(m) = g.as_mut() else { return };
-            m.iter_mut().filter(|(_, p)| p.dirty).filter_map(|(k, p)| { p.dirty = false; p.row.clone().map(|r| (k.clone(), r)) }).collect()
+            m.iter_mut().filter(|(_, p)| p.dirty).filter_map(|(k, p)| { p.dirty = false; p.row.clone().map(|r| (k.clone(), r, p.updated)) }).collect()
         };
-        for (eid, (cls, p, w)) in dirty { self.write_row(db, &eid, &cls, &p, &w); }
+        for (eid, (cls, p, w), updated) in dirty { self.write_row(db, &eid, &cls, &p, &w, updated); }
     }
 
-    fn write_row(&self, db: &Connection, eid: &str, cls: &str, props: &Map<String, J>, writers: &Map<String, J>) {
+    fn write_row(&self, db: &Connection, eid: &str, cls: &str, props: &Map<String, J>, writers: &Map<String, J>, updated: f64) {
         let body = json!({"cls": cls, "props": props, "writers": writers}).to_string();
-        self.exec(db, &format!("INSERT INTO {ROWS} (k, body) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET body = excluded.body"), params![eid, body]);
+        // the row, its class and the time of the write are ONE statement of the write's own transaction
+        self.exec(db, &format!("INSERT INTO {ROWS} (k, body, cls, updated) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(k) DO UPDATE SET body = excluded.body, cls = excluded.cls, updated = excluded.updated"), params![eid, body, cls, updated]);
     }
 
     /// Make sure the open transaction has the row of `eid` (read from the store once, parsed once).
     fn load(&self, db: &Connection, eid: &str) {
         if self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(true, |m| m.contains_key(eid)) { return; }
-        let body: Option<String> = db.query_row(&format!("SELECT body FROM {ROWS} WHERE k = ?"), params![eid], |r| r.get(0)).optional().ok().flatten();
+        let got: Option<(String, f64)> = db.query_row(&format!("SELECT body, updated FROM {ROWS} WHERE k = ?"), params![eid], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
+        let updated = got.as_ref().map_or(0.0, |g| g.1);
+        let body = got.map(|g| g.0);
         let row = body.and_then(|b| serde_json::from_str::<J>(&b).ok()).map(|j| (j["cls"].as_str().unwrap_or("").to_string(), j["props"].as_object().cloned().unwrap_or_default(), j["writers"].as_object().cloned().unwrap_or_default()));
-        if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.insert(eid.into(), Pending { row, dirty: false }); }
+        if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.insert(eid.into(), Pending { row, dirty: false, updated }); }
     }
 
     fn store_born(&self, eid: &str, cls: &str, props: &Map<String, J>, stamp: &str) {
-        if self.storage_of(cls) == crate::fields::Storage::Virtual { return; }   // RAM only: no row
+        let ts = self.stamp_ts();
+        if self.storage_of(cls) == crate::fields::Storage::Virtual { self.eng().0.updated.insert(eid.to_string(), ts); return; }   // RAM only: no row, but it has its `updated`
         let _t = self.txn();
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         self.load(&db, eid);
@@ -593,11 +653,15 @@ impl Host {
         let created = slot.row.is_none();
         let (c, p, w) = slot.row.get_or_insert_with(|| (cls.to_string(), Map::new(), Map::new()));
         let mut changed = slot.dirty || created || c != cls;
+        let mut wrote = created || c != cls;
         *c = cls.to_string();
         for (k, v) in props {
-            if p.get(k) != Some(v) || w.get(k).and_then(|x| x.as_str()) != Some(stamp) { changed = true; p.insert(k.clone(), v.clone()); w.insert(k.clone(), json!(stamp)); }
+            if p.get(k) != Some(v) || w.get(k).and_then(|x| x.as_str()) != Some(stamp) { changed = true; wrote = true; p.insert(k.clone(), v.clone()); w.insert(k.clone(), json!(stamp)); }
         }
         slot.dirty = changed;   // nothing that differs: the row is not written
+        if wrote { slot.updated = ts; }
+        drop(g);
+        if wrote { self.eng().0.updated.insert(eid.to_string(), ts); }
     }
 
     /// One property of a row, with the writer that wrote it; a `null` removes it (as a getter's none leaves it absent). A write that changes
@@ -605,7 +669,8 @@ impl Host {
     fn store_prop(&self, eid: &str, cls: Option<&str>, prop: &str, new: &J, stamp: &str) {
         let _t = self.txn();
         let known = self.eng().0.docs.get(eid).map(|e| e.cls.clone());
-        if self.storage_of(known.as_deref().or(cls).unwrap_or("")) == crate::fields::Storage::Virtual { return; }   // RAM only: no row
+        let ts = self.stamp_ts();
+        if self.storage_of(known.as_deref().or(cls).unwrap_or("")) == crate::fields::Storage::Virtual { self.eng().0.updated.insert(eid.to_string(), ts); return; }   // RAM only: no row, but it has its `updated`
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         self.load(&db, eid);
         let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -623,6 +688,9 @@ impl Host {
         if new.is_null() { p.remove(prop); } else { p.insert(prop.into(), new.clone()); }
         w.insert(prop.into(), json!(stamp));
         slot.dirty = true;
+        slot.updated = ts;
+        drop(g);
+        self.eng().0.updated.insert(eid.to_string(), ts);
     }
 
     /// Every stored row: eid -> {cls, props, writers}.
