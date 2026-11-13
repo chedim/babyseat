@@ -1,0 +1,312 @@
+[
+ {
+  "name": "router: facts told AFTER Boot.started still make the rung Models and the minds",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/router.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   },
+   {
+    "eid": "Router:seat",
+    "class": "Router",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 1.0
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "cloud_models",
+    "value": [
+     {
+      "name": "kimi-k2:cloud",
+      "backend": "ollama"
+     },
+     {
+      "name": "claude-x",
+      "backend": "anthropic"
+     }
+    ]
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "minds",
+    "value": {
+     "loops": "glm-4:9b",
+     "cortex": "qwen3:8b",
+     "seat_default": "glm-4:9b",
+     "think": "low"
+    }
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "router_on",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Model:kimi-k2:cloud",
+    "prop": "rung",
+    "equals": true
+   },
+   {
+    "eid": "Model:kimi-k2:cloud",
+    "prop": "kind",
+    "equals": "cloud"
+   },
+   {
+    "eid": "Model:claude-x",
+    "prop": "backend",
+    "equals": "anthropic"
+   },
+   {
+    "eid": "Model:claude-x",
+    "prop": "listed",
+    "equals": true
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "loops",
+    "equals": "glm-4:9b"
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "think",
+    "equals": "low"
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "loops_auth",
+    "equals": "chat"
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "workers",
+    "equals": ""
+   },
+   {
+    "eid": "Router:seat",
+    "prop": "on",
+    "equals": true
+   }
+  ]
+ },
+ {
+  "name": "router: facts told BEFORE Boot.started (the launcher's usual order) still work",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/router.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "cloud_models",
+    "value": [
+     {
+      "name": "kimi-k2:cloud",
+      "backend": "ollama"
+     },
+     {
+      "name": "claude-x",
+      "backend": "anthropic"
+     }
+    ]
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "minds",
+    "value": {
+     "loops": "glm-4:9b",
+     "cortex": "qwen3:8b",
+     "seat_default": "glm-4:9b",
+     "think": "low"
+    }
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "router_on",
+    "value": true
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 1.0
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Model:kimi-k2:cloud",
+    "prop": "rung",
+    "equals": true
+   },
+   {
+    "eid": "Model:kimi-k2:cloud",
+    "prop": "kind",
+    "equals": "cloud"
+   },
+   {
+    "eid": "Model:claude-x",
+    "prop": "backend",
+    "equals": "anthropic"
+   },
+   {
+    "eid": "Model:claude-x",
+    "prop": "listed",
+    "equals": true
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "loops",
+    "equals": "glm-4:9b"
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "think",
+    "equals": "low"
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "loops_auth",
+    "equals": "chat"
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "workers",
+    "equals": ""
+   }
+  ]
+ },
+ {
+  "name": "router: facts told twice do not overwrite what the person or the backend changed since",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/router.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 1.0
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "cloud_models",
+    "value": [
+     {
+      "name": "kimi-k2:cloud",
+      "backend": "ollama"
+     },
+     {
+      "name": "claude-x",
+      "backend": "anthropic"
+     }
+    ]
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "minds",
+    "value": {
+     "loops": "glm-4:9b",
+     "cortex": "qwen3:8b",
+     "seat_default": "glm-4:9b",
+     "think": "low"
+    }
+   },
+   {
+    "eid": "Minds:seat",
+    "prop": "loops",
+    "value": "picked:1b"
+   },
+   {
+    "eid": "Model:kimi-k2:cloud",
+    "prop": "size",
+    "value": 123
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "cloud_models",
+    "value": [
+     {
+      "name": "kimi-k2:cloud",
+      "backend": "ollama"
+     },
+     {
+      "name": "claude-x",
+      "backend": "anthropic"
+     },
+     {
+      "name": "third",
+      "backend": "ollama"
+     }
+    ]
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "minds",
+    "value": {
+     "loops": "glm-4:9b",
+     "cortex": "qwen3:8b",
+     "seat_default": "glm-4:9b",
+     "think": "low"
+    }
+   },
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 2.0
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Minds:seat",
+    "prop": "loops",
+    "equals": "picked:1b"
+   },
+   {
+    "eid": "Model:kimi-k2:cloud",
+    "prop": "size",
+    "equals": 123
+   },
+   {
+    "eid": "Model:third",
+    "prop": "rung",
+    "equals": true
+   },
+   {
+    "eid": "Model:claude-x",
+    "prop": "rung",
+    "equals": true
+   }
+  ]
+ }
+]

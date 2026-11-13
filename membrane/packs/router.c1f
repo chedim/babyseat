@@ -36,10 +36,19 @@ Fetch.tags_in on-setter models-upsert:
       m.listed = False
     (prop(this.tags_in, 'ask')).models_ready = True
 
--- the launcher's rungs
+-- the launcher's rungs. The facts and `started` arrive in no fixed order, so BOTH the fact and `started` make them; a rung that
+-- already exists is left alone (told twice = no duplicate, no overwrite of what the backend or a person changed since)
 Boot.started on-setter router-rungs:
   ALWAYS:
-    FOR c IN (this.cloud_models or []):
+    FOR c IN [c for c in (this.cloud_models or []) if not (prop(c, 'name') in [m.name for m in instances('Model') if m.rung == True])]:
+      ('Model:' + prop(c, 'name')).name = prop(c, 'name')
+      ('Model:' + prop(c, 'name')).backend = prop(c, 'backend')
+      ('Model:' + prop(c, 'name')).kind = 'cloud'
+      ('Model:' + prop(c, 'name')).rung = True
+      ('Model:' + prop(c, 'name')).listed = True
+Boot.cloud_models on-setter router-rungs-told:
+  WHEN this.cloud_models != None:
+    FOR c IN [c for c in this.cloud_models if not (prop(c, 'name') in [m.name for m in instances('Model') if m.rung == True])]:
       ('Model:' + prop(c, 'name')).name = prop(c, 'name')
       ('Model:' + prop(c, 'name')).backend = prop(c, 'backend')
       ('Model:' + prop(c, 'name')).kind = 'cloud'
@@ -63,7 +72,17 @@ Model.owner getter: 'membrane->' + (this.backend or 'ollama')
 Minds.kind getter: 'minds'
 Minds.read getter: {'loops': this.loops, 'cortex': this.cortex, 'seat_default': this.seat_default, 'workers': this.workers, 'loops_auth': this.loops_auth, 'cortex_auth': this.cortex_auth, 'workers_auth': this.workers_auth, 'think': this.think}
 Boot.started on-setter router-minds:
-  WHEN this.minds != None:
+  WHEN this.minds != None and len(instances('Minds')) == 0:
+    ('Minds:seat').loops = prop(this.minds, 'loops') or ''
+    ('Minds:seat').cortex = prop(this.minds, 'cortex') or ''
+    ('Minds:seat').workers = prop(this.minds, 'workers') or ''
+    ('Minds:seat').seat_default = prop(this.minds, 'seat_default') or ''
+    ('Minds:seat').loops_auth = prop(this.minds, 'loops_auth') or 'chat'
+    ('Minds:seat').cortex_auth = prop(this.minds, 'cortex_auth') or 'chat'
+    ('Minds:seat').workers_auth = prop(this.minds, 'workers_auth') or 'chat'
+    ('Minds:seat').think = prop(this.minds, 'think') or 'auto'
+Boot.minds on-setter router-minds-told:
+  WHEN this.minds != None and len(instances('Minds')) == 0:
     ('Minds:seat').loops = prop(this.minds, 'loops') or ''
     ('Minds:seat').cortex = prop(this.minds, 'cortex') or ''
     ('Minds:seat').workers = prop(this.minds, 'workers') or ''
