@@ -77,7 +77,9 @@ def test_the_expression_language_matches_ch_py(src, env, want):
         assert type(nat) is type(py) or isinstance(py, (list, dict)), (src, py, nat)
 
 
-@pytest.mark.parametrize("src", ["x[0]", "lambda: 1", "__import__('os')", "f(x=1)",
+# `x[0]` left this list on purpose (205cb08, #1143): the native language takes a list by position, a dict by key, an entity by
+# property name (a miss is none); ch.py, the original Python parser, still refuses it. Pinned below.
+@pytest.mark.parametrize("src", ["lambda: 1", "__import__('os')", "f(x=1)",
                                  "x ** 2", "x // 2", "{1, 2}"])
 def test_what_ch_py_refuses_the_native_parser_refuses(src):
     import json
@@ -86,6 +88,12 @@ def test_what_ch_py_refuses_the_native_parser_refuses(src):
         CH._check(CH._parse(src), {"x", "a", "b", "c"})
     with pytest.raises(Exception):
         MV.evaluate(src, json.dumps({"x": [1], "a": 1, "b": 1, "c": 1}))
+
+
+def test_native_parser_takes_a_subscript_that_ch_py_refuses():
+    import json
+    assert json.loads(MV.evaluate("x[0]", json.dumps({"x": [7]}))) == 7
+    assert json.loads(MV.evaluate("x[-1]", json.dumps({"x": [7, 8]}))) == 8
 
 
 def test_native_parser_takes_a_bare_if():

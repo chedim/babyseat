@@ -16,11 +16,11 @@ Intent.intend on-setter intend-stamp:
   ALWAYS:
     this.intend_id = clock
 
-Intent.in_text getter: join(words(str(prop(this.intend, 'text') or '')), ' ')
+Intent.in_text getter: join(words(str(this.intend['text'] or '')), ' ')
 Intent.in_plain getter: plain(this.in_text)
 Intent.in_slug getter: join(words(this.in_plain), '-')
-Intent.in_by getter: clip(strip(str(prop(this.intend, 'by') or '')), 40) or 'model'
-Intent.in_match getter: [g.eid for g in this.open_goals if plain(str(g.text or g.name or '')) == this.in_plain]
+Intent.in_by getter: clip(strip(str(this.intend['by'] or '')), 40) or 'model'
+Intent.in_match getter: [g.eid for g in this.open_goals if plain(str(g['text'] or g['name'] or '')) == this.in_plain]
 
 Intent.intend_plan getter:
   WHEN this.intend == None or this.intend_id == None: None
@@ -49,9 +49,9 @@ Intent.fulfill on-setter fulfill-stamp:
   ALWAYS:
     this.fulfill_id = clock
 
-Intent.ful_spec getter: strip(str(prop(this.fulfill, 'spec') or ''))
-Intent.ful_ev getter: join(words(str(prop(this.fulfill, 'evidence') or '')), ' ')
-Intent.ful_by getter: clip(strip(str(prop(this.fulfill, 'by') or '')), 40) or 'listener'
+Intent.ful_spec getter: strip(str(this.fulfill['spec'] or ''))
+Intent.ful_ev getter: join(words(str(this.fulfill['evidence'] or '')), ' ')
+Intent.ful_by getter: clip(strip(str(this.fulfill['by'] or '')), 40) or 'listener'
 -- an eid-shaped spec (it has a ':') is an id and NEVER name-matches: a re-plant's name quoting an old eid once closed the wrong goal
 Intent.open_goals getter: [g for g in instances('Goal') if (g.status or 'open') == 'open']
 Intent.ful_exact getter: [g.eid for g in this.open_goals if g.eid == this.ful_spec]
