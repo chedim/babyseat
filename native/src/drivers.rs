@@ -83,6 +83,8 @@ fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
     m.insert("status".into(), json!(if rc == 0 { "ok" } else { "error" }));
     m.insert("rc".into(), json!(rc));
     m.insert("head".into(), json!(head.chars().take(HEAD_CHARS).collect::<String>()));
+    // when the receipt was made (epoch seconds): a Command's `status` tells an old receipt from a refusal of the run in flight by it
+    m.insert("finished".into(), json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)));
     for (k, v) in extra { m.insert(k, v); }
     J::Object(m)
 }

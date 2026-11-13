@@ -968,3 +968,14 @@ fn a_run_value_may_carry_the_cmd_so_one_write_starts_a_command() {
     assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().trim() == "3", "{t}");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn a_run_the_driver_refused_says_why_in_the_reply() {
+    let (mut run, port) = start("why", MCP_PACKS, &[]);
+    let (t, _) = put_wait(port, "Command:nocmd", "run", json!({"id": "n1", "args": []}), 20.0);
+    assert!(t.contains("error: a command needs `cmd`"), "the reason of a refusal is in the reply (the receipt line has no head): {t}");
+    // a command that ran and failed keeps its output lines, no duplicated error line
+    let (t, _) = put_wait(port, "Command:bad", "run", json!({"id": "n2", "cmd": ["sh", "-c", "echo boom >&2; exit 3"]}), 20.0);
+    assert!(t.contains("\"rc\":3") && t.contains("boom") && !t.contains("\nerror: "), "{t}");
+    assert!(terminate(&mut run));
+}
