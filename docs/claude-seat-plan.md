@@ -113,8 +113,8 @@ governed idle thought that may SPEAK as a VISIBLE chat message (a
 background speak lane via SSEHub + MessageStore after the frame grammar at
 server.py:407-476), never the hidden `[membrane-says]` block; ActTable
 stays the gate; fix the night loop's drain discarding held speech
-(opencode.py ~6173); precedent to port: progression-drip on branch
-`historic_main` (proxy.py:348-366, 643-681). The asides lesson from the
+(opencode.py ~6173); the old progression-drip is gone (git history
+keeps it). The asides lesson from the
 Claude session: an aside is CHEAP (one or two sentences, no tool calls,
 discarded if nothing comes of it) and its trigger is field-derived —
 surprise above threshold, a settling nursery specialization, a watch fire.
