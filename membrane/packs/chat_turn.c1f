@@ -1,6 +1,7 @@
 PACK chat_turn 1
 IMPORT chat 1
 IMPORT proc 1
+IMPORT boot 1
 -- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
 -- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
 -- membrane MCP set (the door's `POST /mcp`, packs/door_tools.c1f), one continuous run per answer with a ceiling, the system prompt is the
@@ -123,3 +124,14 @@ ChatMessage.spent getter: this.over and this.rr != None and prop(this.rr, 'stdou
 Chat.spent on-setter slim-run:
   WHEN this.spent == True:
     membrane::Command:chat[this.mid].run_result = {'id': prop(this.rr, 'id'), 'status': prop(this.rr, 'status'), 'rc': this.rc, 'stderr': prop(this.rr, 'stderr')}
+
+-- ---- at start: a turn the last run left running ----------------------------------------------------------------------------------------------
+-- A turn whose state is `running` and that started before this run's start (`Boot.started`) lost its CLI with the old process (its Command never got a
+-- receipt, and a restore runs no setter): it becomes an error with a response that says so. A turn of this run started after `started`, so it is never listed.
+Boot.interrupted getter: [replace(replace(t.eid, 'membrane::Chat:message:', ''), ':turn', '') for t in instances('Chat') if t.kind == 'turn' and t.state == 'running' and t.started != None and t.started < this.started] if this.started != None else []
+Boot.interrupted on-setter turn-interrupted:
+  WHEN len(this.interrupted) > 0:
+    FOR i IN this.interrupted:
+      membrane::Chat:message[i]:turn.state = 'error'
+      membrane::Chat:message[i]:turn.ended = clock
+      membrane::Chat:message[i]:turn:response = ChatResponse(text: 'interrupted: the seat stopped while this turn was running', error: True)

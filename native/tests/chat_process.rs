@@ -688,3 +688,19 @@ fn the_turn_carries_usage_cost_calls_and_duration_of_the_result_event_in_the_vie
     assert_eq!(e["turn"]["usage"], want, "{e}");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn a_turn_that_was_running_when_the_seat_stopped_is_an_error_after_the_restart() {
+    let (mut run, port, dir) = fake_seat("interrupted", &[]);
+    let id = send(port, "stopped midway");
+    wait("running", || (view(port, &id)["state"] == "running").then_some(()));
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &[]);
+    let v = wait("the turn marked error", || { let v = view(port2, &id); (v["state"] == "error").then_some(v) });
+    assert_eq!(v["response"], "interrupted: the seat stopped while this turn was running", "{v}");
+    // a new message is answered as usual
+    let id2 = send(port2, "after the restart");
+    assert_eq!(finish(port2, &dir, &id2, "after the restart")["state"], "done");
+    assert_eq!(view(port2, &id)["state"], "error", "the interrupted turn stays an error");
+    assert!(terminate(&mut run2));
+}
