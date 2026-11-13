@@ -36,6 +36,8 @@ ChatMessage.stream_view getter: {'id': this.mid, 'text': this.text, 'state': thi
 ChatMessage.tool_rows getter: [{'name': replace(str(prop(t, 'name')), 'mcp__membrane__', ''), 'input': prop(t, 'input'), 'result': prop(t, 'result')} for t in instances('Chat') if startswith(t.eid, this.turn_eid + ':tool:')]
 ChatMessage.history_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': this.tool_rows}
 -- (`instances` lists by the eid class, Chat: a message is the Chat entity whose eid has no further colon after the prefix)
+-- THE PAGE'S VIEW: history_view with each tool as {name, input} only (the page shows no result; a result can be megabytes). The route sends this one; `history_view` keeps the whole result for other adapters.
+ChatMessage.page_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': [{'name': t['name'], 'input': t['input']} for t in this.tool_rows]}
 -- the row the history sorts by: arrival time `at`, then the request number `n` inside the id `<ms>-<n>` (two messages of one clock reading)
 ChatMessage.order_row getter: {'eid': this.eid, 'id': this.mid, 'at': this.at, 'n': num(after(this.mid, '-'))}
 ChatResponse.kind getter: 'response'
@@ -99,7 +101,7 @@ Request.hs_page getter: sort_by(sort_by(head(this.hs_older, this.hs_limit), 'n')
 Request.hs_more getter: len(this.hs_older) > this.hs_limit
 Request.hs_get getter:
   WHEN this.hs_before != None and this.hs_cut == None: {'status': 404, 'body': {'error': 'no such message'}}
-  ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'history_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None}}
+  ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'page_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None}}
 
 Request.r_session getter:
   WHEN this.path == '/membrane/chat/message': this.cm_post

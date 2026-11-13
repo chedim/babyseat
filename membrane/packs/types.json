@@ -134,6 +134,7 @@
       "ChatMessage.history_view": "Dict",
       "ChatMessage.mid": "Text",
       "ChatMessage.order_row": "Dict",
+      "ChatMessage.page_view": "Dict",
       "ChatMessage.resp_eid": "Text",
       "ChatMessage.said": "Any",
       "ChatMessage.stream_view": "Dict",

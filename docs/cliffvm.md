@@ -273,12 +273,12 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
   **A parent owns its children** (`host.rs` `drain_apply`): `retire = true` on an entity also retires every entity whose eid starts with `<eid>:` (engine and store), so retiring a turn retires its
   answer and tools, retiring a message its turn. Tests: `host_loop.rs` (`retiring_an_entity_retires_what_its_path_owns...`), `seat_process.rs` (`a_turn_is_an_entity...`).
   `GET /membrane/chat/messages?limit=N&before=<message id>` is THE HISTORY, one answer `{messages, more, next}`: the newest N turns (default 20, at least 1),
-  oldest first inside the page, each the message's `history_view` (the `view` of the per-message route plus `tool_calls: [{name, input, result}]`, the finished tools
-  read from the ChatTool entities under the turn; `[]` while the turn runs, `tools` stays the names). `before` = a message id gives the turns older than it (an unknown
+  oldest first inside the page, each the message's `page_view`: the `view` of the per-message route plus `tool_calls: [{name, input}]`, the finished tools
+  read from the ChatTool entities under the turn (`[]` while the turn runs; `tools` stays the names). The RESULT is not in the page route (the page shows none, and a result can be
+  megabytes): the shared `ChatMessage.history_view` keeps `tool_calls: [{name, input, result}]` for other adapters (the opencode session-messages one). `before` = a message id gives the turns older than it (an unknown
   id is a 404; a POST is a 405); `more` says older turns exist and `next` is the oldest id of the page, the next `before` (null at the end). Order = the message's `at`, then the
   request number in its id. The view is `ChatMessage.history_view` (+ `order_row`), separate from the route (`Request.hs_*` in `packs/chat.c1f`) so another adapter can list the same view;
-  an `instances` call lists by the eid class, so the messages and tools are found as the `Chat` entities with the matching eid shape. A tool result is whole (no cap): a turn that read
-  a large result makes a large page. Tests: `chat_process.rs` (`the_history_route_...`, `the_pages_loading_path_...`, `an_empty_chat_...`, `chat_js_is_valid_...`).
+  an `instances` call lists by the eid class, so the messages and tools are found as the `Chat` entities with the matching eid shape. Tests: `chat_process.rs` (`the_history_route_...`, `a_tool_that_read_a_large_result_...`, `the_pages_loading_path_...`, `an_empty_chat_...`, `chat_js_is_valid_...`).
   The page (`ui/chat.js`) draws each turn as one group: the message, the answer, the tools folded under it, the turn's seconds. On load it makes ONE history request (20 turns);
   a 'Load older turns' button at the top fetches the next page with `before`; every 3 s (and every 700 ms while a message runs without a stream) it re-reads the newest 10 turns and draws
   the unknown or unfinished ones; a running message streams through its event stream, and its finished tools arrive with that refresh. It no longer lists entities or reads the

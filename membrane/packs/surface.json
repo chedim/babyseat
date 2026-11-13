@@ -105,7 +105,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 39,
+    "members": 40,
     "writes": [
       "membrane:*.queued",
       "membrane:*=ChatMessage()",

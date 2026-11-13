@@ -996,7 +996,7 @@ if prompt.startswith("hold"):
         if os.path.exists(os.path.join(here, "go." + tag)): break
         time.sleep(0.05)
 out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tq1", "name": "mcp__membrane__entity_read", "input": {"spec": "Q:" + prompt}}]}})
-out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tq1", "content": "read " + prompt}]}})
+out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tq1", "content": ("x" * 200000 if prompt.startswith("big") else "read " + prompt)}]}})
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Answer to " + prompt, "num_turns": 1, "duration_ms": 1, "total_cost_usd": 0.0, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1}, "session_id": "q-1"})
 "#;
 
@@ -1027,9 +1027,9 @@ fn the_history_route_pages_the_newest_turns_oldest_first_with_their_tools_and_a_
     assert_eq!(h["next"], json!(ids[40]), "the cursor is the oldest id of the page");
     let last = &h["messages"][19];
     assert_eq!((last["id"].clone(), last["state"].clone(), last["response"].clone()), (json!(ids[59]), json!("done"), json!("Answer to m59")), "{last}");
-    assert_eq!(last["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:m59"}, "result": "read m59"}]), "{last}");
+    assert_eq!(last["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:m59"}}]), "the page route carries name and input only: {last}");
     assert_eq!(last["tools"], json!(["entity_read"]), "the view's own `tools` stay the names");
-    assert_eq!(last, &view(port, &ids[59]).as_object().map(|v| { let mut v = v.clone(); v.insert("tool_calls".into(), last["tool_calls"].clone()); J::Object(v) }).unwrap(), "the per-message view plus tool_calls");
+    assert_eq!(last, &view(port, &ids[59]).as_object().map(|v| { let mut v = v.clone(); v.insert("tool_calls".into(), last["tool_calls"].clone()); J::Object(v) }).unwrap(), "the per-message view plus tool_calls (name, input)");
     // `before` pages to older turns, across the boundary, to the very first
     let h2 = history(port, &format!("?before={}", ids[40]));
     assert_eq!(texts(&h2), (20..40).map(|i| format!("m{i:02}")).collect::<Vec<_>>());
@@ -1087,7 +1087,23 @@ fn an_empty_chat_has_an_empty_history_and_a_running_message_is_in_the_newest_pag
     std::fs::write(dir.join(format!("go.{}", tag_of("hold again"))), "").unwrap();
     wait("done", || (view(port, &queued)["state"] == "done").then_some(()));
     let h = history(port, "?limit=2");
-    assert_eq!(h["messages"][1]["tool_calls"][0]["result"], json!("read hold again"));
+    assert_eq!(h["messages"][1]["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:hold again"}}]));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_tool_that_read_a_large_result_gives_a_small_page_while_the_shared_view_keeps_the_result() {
+    let (mut run, port, _dir) = fake_seat_script("historybig", &[], &[], QUICK);
+    let id = send(port, "big read");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    let (st, body) = http(port, "GET", "/membrane/chat/messages", "");
+    assert_eq!(st, 200);
+    assert!(body.len() < 5000, "the page route is small ({} bytes) though the tool result is 200 KB", body.len());
+    let h: J = serde_json::from_str(&body).unwrap();
+    assert_eq!(h["messages"][0]["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:big read"}}]));
+    // the shared view (the future opencode adapter's) still carries the result
+    let (t, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}"), "prop": "history_view"}));
+    assert!(t.len() > 200000 && t.contains("\"result\""), "history_view keeps the whole result ({} bytes)", t.len());
     assert!(terminate(&mut run));
 }
 
