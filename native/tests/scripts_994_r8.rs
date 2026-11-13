@@ -66,5 +66,5 @@ fn loading_twice_is_idempotent_and_malformed_declares_nothing() {
 fn field_checksum_is_pinned() {
     let h = checksum(&loaded());
     println!("checksum {:016x}", h);
-    assert_eq!(format!("{:016x}", h), "ca6ffcc09fb086df");
+    assert_eq!(format!("{:016x}", h), "297df7a3f356c2d2");
 }

@@ -3,7 +3,6 @@
 
 pub mod adapters;
 pub mod learn;
-pub mod banner;
 pub mod recall;
 pub mod syntax;
 #[cfg(unix)]
