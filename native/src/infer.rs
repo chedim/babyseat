@@ -636,3 +636,75 @@ pub fn infer_packs(texts: &[&str]) -> Result<Vec<(String, PackReport)>, String> 
 pub fn infer_pack(text: &str) -> Result<PackReport, String> {
     infer_packs(&[text]).map(|mut v| v.remove(0).1)
 }
+
+// ---- reads (what orders getters) -----------------------------------------------------------------------------------------
+
+/// One field read in a getter's expression: the field name and the class it is read on (None: the receiver's class is not known,
+/// so the read may land on a getter of any class).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Read { pub name: String, pub cls: Option<String> }
+
+fn read_on(base: &Ty, name: &str, out: &mut Vec<Read>) {
+    let classes: Vec<&String> = base.kinds.iter().filter_map(|k| if let Kind::Entity(c) = k { Some(c) } else { None }).collect();
+    if base.any || classes.is_empty() { out.push(Read { name: name.into(), cls: None }); return; }
+    for c in classes { out.push(Read { name: name.into(), cls: if c == "*" { None } else { Some(c.clone()) } }); }
+}
+
+fn walk_reads(n: &Node, env: &Env, out: &mut Vec<Read>) {
+    let mut each = |xs: &[Node], env: &Env, out: &mut Vec<Read>| for x in xs { walk_reads(x, env, out) };
+    match n {
+        Node::Const(_) | Node::Name(_) => {}
+        Node::List(v) | Node::And(v) | Node::Or(v) => each(v, env, out),
+        Node::Dict(v) => for (_, x) in v { walk_reads(x, env, out) },
+        Node::Attr(b, a) => { walk_reads(b, env, out); read_on(&infer_expr(b, env), a, out); }
+        Node::Index(b, i) => {
+            walk_reads(b, env, out); walk_reads(i, env, out);
+            // an entity indexed by a literal key reads that field; a dict key is data (and an unknown receiver was never a read)
+            if let Some(k) = const_str(i) {
+                let t = infer_expr(b, env);
+                if !t.any && t.kinds.iter().any(|x| matches!(x, Kind::Entity(c) if c != "*")) { read_on(&t, k, out); }
+            }
+        }
+        Node::Bin(_, a, b) => { walk_reads(a, env, out); walk_reads(b, env, out); }
+        Node::Neg(a) | Node::Not(a) => walk_reads(a, env, out),
+        Node::Compare(a, ops) => { walk_reads(a, env, out); for (_, x) in ops { walk_reads(x, env, out); } }
+        Node::Let(name, v, rest) => { walk_reads(v, env, out); let t = infer_expr(v, env); walk_reads(rest, &env.bind(name, t), out); }
+        Node::If(a, c, b) => { walk_reads(a, env, out); walk_reads(c, env, out); walk_reads(b, env, out); }
+        Node::Comp(elt, var, iter, cond) => {
+            walk_reads(iter, env, out);
+            let inner = env.bind(var, infer_expr(iter, env).elem());
+            if let Some(c) = cond { walk_reads(c, &inner, out); }
+            walk_reads(elt, &inner, out);
+        }
+        Node::Call(f, args) => {
+            each(args, env, out);
+            // a string that is the last argument of a call names a field (`prop(row, 'name')`, `pluck(rows, 'name')`)
+            if let Some(k) = args.last().and_then(const_str) {
+                if f == "prop" && args.len() == 2 { read_on(&infer_expr(&args[0], env), k, out); }
+                else { out.push(Read { name: k.into(), cls: None }); }
+            }
+        }
+        Node::Ctor(_, args) => for (_, x) in args { walk_reads(x, env, out) },
+        Node::Ent(parts) => for p in parts { if let EntPart::Key(k) = p { walk_reads(k, env, out) } },
+    }
+}
+
+/// What each getter reads, by class where the receiver's class is known (`this`, a loop variable over `instances('X')` or over a
+/// getter of known element type, a constructor, an entity literal). `getters` are `(class, prop, expr)`; the result is in the same
+/// order. None for a getter whose expression does not parse (the caller falls back to scanning its text).
+pub fn getter_reads(getters: &[(&str, &str, &str)]) -> Vec<Option<Vec<Read>>> {
+    let mut s = Session { defs: HashMap::new(), done: RefCell::new(HashMap::new()), stack: RefCell::new(vec![]), cyclic: RefCell::new(BTreeSet::new()),
+        findings: RefCell::new(BTreeMap::new()), cycles: RefCell::new(vec![]) };
+    for (c, p, e) in getters { s.defs.entry((c.to_string(), p.to_string())).or_insert((e.to_string(), 1)); }
+    for (c, p, _) in getters { s.resolve(&(c.to_string(), p.to_string())); }
+    let lookup = |c: &str, p: &str| s.done.borrow().get(&(c.to_string(), p.to_string())).cloned();
+    getters.iter().map(|(c, _, e)| {
+        let node = parse_block(e).ok()?;
+        let sink = RefCell::new(vec![]);
+        let env = Env::new(&lookup, &sink).with("this", Ty::entity(c));
+        let mut out = vec![];
+        walk_reads(&node, &env, &mut out);
+        out.sort(); out.dedup();
+        Some(out)
+    }).collect()
+}
