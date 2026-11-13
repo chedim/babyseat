@@ -63,7 +63,8 @@ SemPath.lemma getter: this.text
 --      `Path:path:<text>` (not File: a `File` entity reads the disk and is RESIDENT, a mention must not);
 --   3. when every span is classified, `mention_table` groups them by entity and ONE setter makes each entity by a constructor (K = 1: every word becomes an
 --      entity at its first mention; a stored entity stays, nothing collects Words) and writes its `mentioned_in`, the edge FROM the entity:
---      `[{text: <SemText eid>, sentences: [<sentence numbers>]}]`, one entry per text, no copy of any text. Writing again replaces the text's own entry (no duplicates).
+--      `[{text: <SemText eid>, sentence: <sentence number>}]`, one entry per (text, sentence), no copy of any text. Writing again replaces the text's own entries (no duplicates).
+--      The SemText keeps the edge the other way too: `mentions`, the list of the entities it mentions (`$ref` values).
 --   4. the spans are held by nothing (virtual): the engine collects them when the cascade ends. The durable edges are the `mentioned_in` lists and the SemTexts.
 -- COST of one mention of a text with W words, I identifiers and P paths: at most 2 x MENTION_CAP + ... spans (virtual, transient) and, for the distinct lemmas D,
 -- at most D new stored entities (D <= W) with one write of `mentioned_in` each. A 300-word message makes at most 300 transient spans and at most 300 new Word
@@ -111,18 +112,40 @@ SemText.mention_table on-setter record-mentions:
     FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'word']:
       k = g['rows'][0]['k']
       Word:lemma[k] = Word(lemma: k)
-      Word:lemma[k].mentioned_in = concat([e for e in (prop('Word:lemma:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentences': distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])}])
+      Word:lemma[k].mentioned_in = concat([e for e in (prop('Word:lemma:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
     FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'identifier']:
       k = g['rows'][0]['k']
       Identifier:name[k] = Identifier(name: k)
-      Identifier:name[k].mentioned_in = concat([e for e in (prop('Identifier:name:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentences': distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])}])
+      Identifier:name[k].mentioned_in = concat([e for e in (prop('Identifier:name:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
     FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'path']:
       k = g['rows'][0]['k']
       Path:path[k] = Path(path: k)
-      Path:path[k].mentioned_in = concat([e for e in (prop('Path:path:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentences': distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])}])
+      Path:path[k].mentioned_in = concat([e for e in (prop('Path:path:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
+    this.mentions = concat([Word:lemma[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'word'], [Identifier:name[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'identifier'], [Path:path[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'path'])
     this.mentioned = True
 
 -- how many texts mention an entity
 Word.texts getter: len(this.mentioned_in or [])
 Identifier.texts getter: len(this.mentioned_in or [])
 Path.texts getter: len(this.mentioned_in or [])
+
+-- ---- RECALL BY EDGES: `SemText.related` ----------------------------------------------------------------------------------------------
+-- Which OTHER sentences, in other texts, mention the same things? Ask by writing the dial on a text:  `<semtext>.related_n = 5`  and read  `<semtext>.related`
+-- (entity_read, or `prop(<semtext>, 'related')` in run_cliff): at most `related_n` rows `{semtext, sentence_index, text, shared}`, best first.
+--   * The edges followed are the text's `mentions` (its Word / Identifier / Path entities) and their `mentioned_in` lists: nothing is searched, nothing is embedded.
+--   * `shared` is the number of the text's entities that sentence mentions (a plain count: the rows are the sentences that hold at least one).
+--   * THE RANK is frequency-weighted: each shared entity counts 1 / (the number of entries in its `mentioned_in`), so `the`, mentioned everywhere, adds almost
+--     nothing and a word two texts have between them adds half (the old BOILERPLATE idea: a word's weight falls with how often it is said). The sum is
+--     `dot(weights, ones)` (c1f has no sum). Ties keep the order the edges came in. No threshold: the divisor is the count itself.
+--   * It is computed only while `related_n` is set (a getter is eager: with no dial nothing is read, and no row of text or entity is touched). `related_n` has NO default: the
+--     asker says how many. A text that was never mentioned (no `mentions`) answers null.
+--   * COST: it reads the `mentioned_in` of every entity of the text, so a very common word makes it linear in the number of entries of that word; one evaluation
+--     past the step budget answers a reasoned null (`budget exceeded`), never a wrong list. Flagged for the operator: whether very common entities should be skipped by a cut.
+--   * The edges are flattened through JSON text (c1f has no nested comprehension): each entity makes the text of its rows, the texts are joined and parsed once.
+SemText.related getter:
+  WHEN this.related_n == None or this.mentions == None: None
+  ELSE:
+    parts = [join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(prop(m, 'mentioned_in'))}) for e in prop(m, 'mentioned_in') if e['text'] != this.eid], ',') for m in this.mentions]
+    hits = json('[' + join([p for p in parts if p != ''], ',') + ']')
+    rows = [{'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'shared': len(g['rows']), 'score': dot([r['w'] for r in g['rows']], [1 for r in g['rows']])} for g in group_by(hits, 'key')]
+    [{'semtext': r['text'], 'sentence_index': r['sent'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'shared': r['shared']} for r in head(sort_by(rows, 'score', True), this.related_n)]

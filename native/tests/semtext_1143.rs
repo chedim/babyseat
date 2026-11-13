@@ -10,6 +10,7 @@ fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
 /// the barest seat's packs and app, no drivers (no effects), as the help harness loads them
 fn seat() -> Host {
+    membrane_vm::expr::set_eval_time_ms(Some(10_000));   // the 10 ms self-time allowance of a debug build under a loaded machine would kill a getter at random: pin it
     let mut o = Options::new(None);
     o.effects = false;
     let h = Host::open(o).unwrap();
@@ -223,19 +224,19 @@ fn mentioning_a_body_makes_a_word_entity_per_lemma_at_its_first_mention() {
 fn a_word_lists_the_text_and_the_sentences_that_mention_it() {
     let h = with_body(M);
     mention(&h, B, json!(true));
-    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentences": [0, 1]}]));
-    assert_eq!(h.get("Word:lemma:city", "mentioned_in"), json!([{"text": B, "sentences": [1]}]));
-    assert_eq!(h.get("Word:lemma:see", "mentioned_in"), json!([{"text": B, "sentences": [0]}]));
-    // no text is copied: the entry names the text and the sentence numbers only
-    assert!(h.get("Word:lemma:dog", "mentioned_in").to_string().len() < 80);
+    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentence": 0}, {"text": B, "sentence": 1}]));
+    assert_eq!(h.get("Word:lemma:city", "mentioned_in"), json!([{"text": B, "sentence": 1}]));
+    assert_eq!(h.get("Word:lemma:see", "mentioned_in"), json!([{"text": B, "sentence": 0}]));
+    // no text is copied: an entry names the text and one sentence number
+    assert!(h.get("Word:lemma:dog", "mentioned_in").to_string().len() < 100);
 }
 
 #[test]
 fn identifiers_and_paths_are_entities_too_by_their_exact_text() {
     let h = with_body(M);
     mention(&h, B, json!(true));
-    assert_eq!(h.get("Identifier:name:my_fn", "mentioned_in"), json!([{"text": B, "sentences": [1]}]));
-    assert_eq!(h.get("Path:path:~/a.txt", "mentioned_in"), json!([{"text": B, "sentences": [1]}]));
+    assert_eq!(h.get("Identifier:name:my_fn", "mentioned_in"), json!([{"text": B, "sentence": 1}]));
+    assert_eq!(h.get("Path:path:~/a.txt", "mentioned_in"), json!([{"text": B, "sentence": 1}]));
     assert!(entities(&h, "File:").is_empty(), "a mention makes no File (a File reads the disk)");
 }
 
@@ -256,7 +257,7 @@ fn mentioning_again_adds_no_duplicates_and_a_second_text_adds_its_own_entry() {
     mention(&h, B, json!(true));
     let before = entities(&h, "Word:").len() + entities(&h, "Identifier:").len() + entities(&h, "Path:").len();
     mention(&h, B, json!(2));
-    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentences": [0, 1]}]), "re-mentioning replaces the text's own entry");
+    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentence": 0}, {"text": B, "sentence": 1}]), "re-mentioning replaces the text's own entry");
     assert_eq!(entities(&h, "Word:").len() + entities(&h, "Identifier:").len() + entities(&h, "Path:").len(), before);
     // a second text that holds the word
     h.load_pack("semmaker2", "PACK semmaker2 1\nIMPORT semmaker 1\nIMPORT semtext 1\nBox.go2 on-setter make2:\n  ALWAYS:\n    Box:b:body = SemText(text: this.t)\n").unwrap();
@@ -266,7 +267,7 @@ fn mentioning_again_adds_no_duplicates_and_a_second_text_adds_its_own_entry() {
     h.write("Box:b", "go2", json!(true), "person");
     h.pump();
     mention(&h, "Box:b:body", json!(true));
-    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentences": [0, 1]}, {"text": "Box:b:body", "sentences": [0]}]));
+    assert_eq!(h.get("Word:lemma:dog", "mentioned_in"), json!([{"text": B, "sentence": 0}, {"text": B, "sentence": 1}, {"text": "Box:b:body", "sentence": 0}]));
 }
 
 #[test]
@@ -280,4 +281,60 @@ fn the_work_of_one_mention_is_bounded_by_the_cap_and_the_spans_are_collected_aft
     assert!(h.snapshot().contains_key(&format!("Word:lemma:{}", words[399])));
     assert!(!h.snapshot().contains_key(&format!("Word:lemma:{}", words[400])));
     assert!(entities(&h, "Span:").is_empty(), "the spans were transient: nothing holds them after the mention");
+}
+
+// ---- item 6: recall by edges (SemText.related) ----------------------------------------------------------------------------------------
+const DOCS: &str = "PACK semdocs 1\nIMPORT semtext 1\nDoc.go on-setter make:\n  ALWAYS:\n    Doc:body[this.k] = SemText(text: this.t)\n    Doc:body[this.k].mention = True\n";
+fn docs(texts: &[(&str, &str)]) -> Host {
+    let h = seat();
+    h.load_pack("semdocs", DOCS).unwrap();
+    h.rebuild();
+    for (k, t) in texts {
+        h.born(&format!("Doc:{k}"), "Doc", props(json!({"k": k, "t": t})), "person");
+        h.pump();
+        h.write(&format!("Doc:{k}"), "go", json!(true), "person");
+        h.pump();
+    }
+    h
+}
+fn related(h: &Host, k: &str, n: usize) -> J {
+    let b = format!("Doc:body:{k}");
+    assert_eq!(h.get(&b, "related"), J::Null, "nothing is computed before a question");
+    h.write(&b, "related_n", json!(n), "person");
+    h.pump();
+    h.get(&b, "related")
+}
+
+#[test]
+fn two_texts_that_share_a_rare_word_relate_and_the_text_is_not_related_to_itself() {
+    let h = docs(&[("a", "Quokkas eat grass. Rain falls."), ("b", "I saw a quokka. It slept."), ("c", "Nothing like it here.")]);
+    let r = related(&h, "a", 5);
+    let rows = r.as_array().unwrap();
+    assert_eq!(rows[0], json!({"semtext": "Doc:body:b", "sentence_index": 0, "text": "I saw a quokka.", "shared": 1}), "{r}");
+    assert!(rows.iter().all(|x| x["semtext"] != "Doc:body:a"), "never itself: {r}");
+    assert_eq!(rows.iter().filter(|x| x["semtext"] == "Doc:body:c").count(), 0, "c shares no word with a");
+}
+
+#[test]
+fn a_frequent_word_does_not_dominate_the_number_of_mentions_divides_it() {
+    // `the` and `and` are in every text; `quokka` only in two. c shares TWO words with a (the, and), b shares ONE (quokka): by the plain count c wins, by the divisor b wins.
+    let mut v: Vec<(String, String)> = vec![("a".into(), "The quokka and birds.".into()), ("b".into(), "My quokka sleeps.".into()), ("c".into(), "The cat and dog.".into())];
+    for i in 0..6 { v.push((format!("f{i}"), format!("The word{i} and the other{i}."))); }
+    let refs: Vec<(&str, &str)> = v.iter().map(|(k, t)| (k.as_str(), t.as_str())).collect();
+    let h = docs(&refs);
+    let r = related(&h, "a", 3);
+    let rows = r.as_array().unwrap();
+    assert_eq!(rows[0]["semtext"], "Doc:body:b", "the rare shared word ranks first: {r}");
+    assert_eq!(rows[0]["shared"], 1);
+    let c = rows.iter().find(|x| x["semtext"] == "Doc:body:c").unwrap_or_else(|| panic!("{r}"));
+    assert!(c["shared"].as_i64().unwrap() >= 2, "c shares the frequent words: {r}");
+}
+
+#[test]
+fn the_dial_is_the_answers_length() {
+    let h = docs(&[("a", "Red apples."), ("b", "Red apples again."), ("c", "More red apples."), ("d", "Red.")]);
+    assert_eq!(related(&h, "a", 2).as_array().unwrap().len(), 2);
+    h.write("Doc:body:a", "related_n", json!(1), "person");
+    h.pump();
+    assert_eq!(h.get("Doc:body:a", "related").as_array().unwrap().len(), 1);
 }

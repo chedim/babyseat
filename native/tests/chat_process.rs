@@ -1480,12 +1480,19 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     assert!(words.contains("chase"), "{words}");
     // its words are entities that name the body
     let cat = wait("Word:lemma:cat", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:cat", "prop": "mentioned_in"})).0; if t.contains(&body) { Some(t) } else { None } });
-    assert!(cat.contains("\"sentences\":[0]") || cat.contains("\"sentences\": [0]"), "{cat}");
+    assert!(cat.contains("\"sentence\":0"), "{cat}");
     wait("the identifier", || { let t = call(port, "entity_read", json!({"spec": "Identifier:name:my_fn", "prop": "mentioned_in"})).0; t.contains(&body).then_some(()) });
     // the answer is a SemText too, under the response
     let rbody = format!("membrane::Chat:message:{id}:turn:response:body");
     assert_eq!(call(port, "entity_read", json!({"spec": &rbody, "prop": "text"})).0, format!("Final answer to: {text}"));
     wait("the answer's words", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:answer", "prop": "mentioned_in"})).0; t.contains(&rbody).then_some(()) });
+    // recall by edges: ask the body for the sentences that mention the same things (the dial is the question), read them through the door
+    let (t, e) = call(port, "entity_write", json!({"spec": &body, "prop": "related_n", "value": 3}));
+    assert!(!e, "{t}");
+    let rel = wait("the related rows", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "related"})).0; if t.contains(&rbody) { Some(t) } else { None } });
+    assert!(rel.contains("\"shared\":6") && rel.contains("Final answer to"), "{rel}");
+    let (t, e) = call(port, "run_cliff", json!({"code": format!("[r['semtext'] for r in prop('{body}', 'related')]")}));
+    assert!(!e && t.contains(&rbody), "{t}");
     // a tool's result is NOT tokenized: the only SemTexts of the message are the two bodies
     let (q, _) = call(port, "entity_query", json!({"q": "kind:SemText & name~:membrane::Chat:message:"}));
     assert!(q.contains(&body) && q.contains(&rbody) && !q.contains(":tool:"), "{q}");
