@@ -103,7 +103,8 @@
   },
   "chat": {
     "imports": [
-      "door"
+      "door",
+      "semtext"
     ],
     "classes": [
       "Chat",
@@ -115,9 +116,11 @@
     ],
     "members": 41,
     "writes": [
+      "membrane:*.mention",
       "membrane:*.queued",
       "membrane:*=ChatMessage()",
       "membrane:*=ChatTurn()",
+      "membrane:*=SemText()",
       "membrane::Chat:main=Chat()"
     ],
     "claims": [
@@ -130,6 +133,7 @@
   "chat_turn": {
     "imports": [
       "chat",
+      "semtext",
       "proc",
       "boot"
     ],
@@ -145,6 +149,7 @@
       "membrane:*.cost",
       "membrane:*.duration",
       "membrane:*.ended",
+      "membrane:*.mention",
       "membrane:*.result",
       "membrane:*.run",
       "membrane:*.run_result",
@@ -154,6 +159,7 @@
       "membrane:*=ChatResponse()",
       "membrane:*=ChatTool()",
       "membrane:*=Command()",
+      "membrane:*=SemText()",
       "membrane::Chat:main.last_turn"
     ],
     "claims": [],

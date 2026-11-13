@@ -1,5 +1,6 @@
 PACK chat_turn 1
 IMPORT chat 1
+IMPORT semtext 1
 IMPORT proc 1
 IMPORT boot 1
 VIRTUAL Chunk
@@ -133,6 +134,9 @@ Chat.answer on-setter turn-finish:
     this.tools_run = this.tools_names
     this.tool_ids = this.tools_idlist
     membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: this.answer, error: this.failed != None, rc: this.rc)
+    FOR t IN ([this.answer] if this.failed == None else []):
+      membrane::Chat:message[this.mid]:turn:response:body = SemText(text: t)
+      membrane::Chat:message[this.mid]:turn:response:body.mention = True
     FOR e IN [x for x in this.evs if prop(x, 'type') == 'assistant']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
         membrane::Chat:message[this.mid]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))

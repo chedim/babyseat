@@ -179,6 +179,7 @@
       "Request.r_session": "Dict?"
     },
     "writes": {
+      "Chat.mention": "Bool",
       "Chat.queued": "Bool",
       "Request.cm_at": "Num",
       "Request.cm_id": "Text?",
@@ -233,6 +234,7 @@
       "Chat.duration": "Any",
       "Chat.ended": "Num",
       "Chat.last_turn": "Any",
+      "Chat.mention": "Bool",
       "Chat.result": "Text",
       "Chat.started": "Num",
       "Chat.state": "Text",
