@@ -134,6 +134,7 @@
       "ChatMessage.mid": "Text",
       "ChatMessage.resp_eid": "Text",
       "ChatMessage.said": "Any",
+      "ChatMessage.stream_view": "Dict",
       "ChatMessage.tstate": "Any",
       "ChatMessage.turn_eid": "Text",
       "ChatMessage.turn_view": "Dict",
@@ -143,12 +144,15 @@
       "ChatTool.kind": "Text",
       "ChatTurn.kind": "Text",
       "ChatTurn.status": "Any",
+      "Request.cm_events": "Bool",
       "Request.cm_get": "Dict",
       "Request.cm_gid": "Text",
       "Request.cm_go": "Bool",
       "Request.cm_post": "Dict?",
+      "Request.cm_stream": "Dict",
       "Request.cm_text": "Text",
       "Request.cm_view": "Any",
+      "Request.ev_snap": "Any",
       "Request.m_session": "List(Text)",
       "Request.o_session": "Bool",
       "Request.r_session": "Dict?"
@@ -156,7 +160,9 @@
     "writes": {
       "Chat.queued": "Bool",
       "Request.cm_at": "Num",
-      "Request.cm_id": "Text?"
+      "Request.cm_id": "Text?",
+      "Request.end": "Dict",
+      "Request.send": "Dict"
     },
     "findings": []
   },
@@ -168,6 +174,8 @@
       "ChatMessage.banner_text": "Any",
       "ChatMessage.bin": "Any",
       "ChatMessage.capped": "Bool",
+      "ChatMessage.chunks": "List(Dict)",
+      "ChatMessage.cmd_eid": "Text",
       "ChatMessage.evs": "List(Any)",
       "ChatMessage.failed": "Text?",
       "ChatMessage.final": "Any",
@@ -175,16 +183,21 @@
       "ChatMessage.max_turns": "Any",
       "ChatMessage.mcp_json": "Text?",
       "ChatMessage.note": "Text",
+      "ChatMessage.partial_text": "Text",
+      "ChatMessage.partial_tools": "List(Text)",
       "ChatMessage.plan": "Dict?",
       "ChatMessage.port": "Any",
       "ChatMessage.rc": "Any",
       "ChatMessage.rr": "Any",
+      "ChatMessage.sevs": "List(Any)",
       "ChatMessage.spoken": "Text",
+      "ChatMessage.stale_chunks": "List(Any)",
       "ChatMessage.sys": "Text",
       "ChatMessage.texts": "List(Text)",
       "ChatMessage.tools_names": "List(Text)"
     },
     "writes": {
+      "*.retire": "Bool",
       "Chat.ended": "Num",
       "Chat.result": "Text",
       "Chat.started": "Num",
@@ -342,6 +355,7 @@
       "Http.listen": "Dict",
       "Request.respond": "Any",
       "Request.skip": "Num?",
+      "Request.stream": "Dict",
       "Request.verify": "Dict?"
     },
     "findings": []

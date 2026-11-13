@@ -58,6 +58,9 @@ pub struct Shared {
     /// open until a pack answers, and the listeners' stop flags by their entity
     inbound: Vec<(String, String, serde_json::Map<String, J>)>,
     conns: HashMap<u64, std::net::TcpStream>,
+    /// the open event streams by their request's connection number (http.rs `Stream`): a connection moves from `conns` to here when its
+    /// request is written `stream`, and leaves when it is written `end` (or the client went away)
+    streams: HashMap<u64, Arc<Mutex<crate::http::Stream>>>,
     next_conn: u64,
     listeners: HashMap<String, Arc<std::sync::atomic::AtomicBool>>,
     /// each door's token secret by its entity (the verify verb reads it; a prop never carries it)
@@ -276,6 +279,13 @@ impl Store {
         g.conns.insert(n, s);
         n
     }
+    pub fn open_stream(&self, n: u64, s: crate::http::Stream) -> Arc<Mutex<crate::http::Stream>> {
+        let a = Arc::new(Mutex::new(s));
+        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).streams.insert(n, a.clone());
+        a
+    }
+    pub fn stream_of(&self, n: u64) -> Option<Arc<Mutex<crate::http::Stream>>> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).streams.get(&n).cloned() }
+    pub fn drop_stream(&self, n: u64) { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).streams.remove(&n); }
     pub fn take_conn(&self, n: u64) -> Option<std::net::TcpStream> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).conns.remove(&n) }
 
     /// A request arrived (an entity born in the engine's next round); wakes the waiter.

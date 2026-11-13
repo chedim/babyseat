@@ -1,6 +1,6 @@
 // The chat pane: the one chat's messages are entities (membrane::Chat:message:<id>); the run that answers one is its TURN (:turn), which owns
 // the answer (:turn:response) and the tools it ran (:turn:tool:<id>). Each turn is drawn as one group: the message, the answer, the tools
-// folded under the answer. Entities persist, so a reload brings the history back. A sent message is polled every 700 ms until it is done.
+// folded under the answer. Entities persist, so a reload brings the history back. A running message is read from its event stream (GET /membrane/chat/message/<id>/events: the partial answer as it is written); only when the stream cannot be had (no EventSource, or it errors) is it polled every 700 ms until it is done.
 import { queryAll, readEntity } from './mcp.js';
 
 const PREFIX = 'membrane::Chat:message:';
@@ -8,6 +8,7 @@ const LIST_MS = 3000, ACTIVE_MS = 700;
 const msgs = new Map();            // id -> {id, text, state, response, turn: {started, ended}, tools: [{eid, name, input}]}
 const toolEids = new Map();        // id -> [tool eids]
 const nodes = new Map();           // id -> <li>
+const streams = new Map();         // id -> the open EventSource of a running message
 let ui;
 
 const done = (m) => m.state === 'done' || m.state === 'error';
@@ -82,6 +83,25 @@ async function update(id) {
   msgs.set(id, m);
   if (done(m)) await loadTools(m);
   stick(() => draw(m));
+  if (!done(m)) watch(id);
+}
+
+// a running message: one EventSource; each `message` event is the whole state (partial answer, tool names). The end of the stream is a `done` or
+// `error` state: one poll then fetches the final view and the tools. An error of the stream drops it, and the message is polled again.
+function watch(id) {
+  if (streams.has(id) || typeof EventSource === 'undefined') return;
+  const es = new EventSource(`/membrane/chat/message/${encodeURIComponent(id)}/events`);
+  streams.set(id, es);
+  const stop = () => { es.close(); streams.delete(id); };
+  es.addEventListener('message', (ev) => {
+    let v; try { v = JSON.parse(ev.data); } catch (e) { return; }
+    const m = msgs.get(id) || { id };
+    Object.assign(m, { text: v.text, state: v.state, response: v.response, turn: v.turn });
+    if (!done(m)) m.tools = (v.tools || []).map((name) => ({ name }));
+    msgs.set(id, m);
+    if (done(m)) { stop(); m.tools = []; update(id).catch(() => {}); } else stick(() => draw(m));
+  });
+  es.onerror = stop;
 }
 
 async function list() {
@@ -105,6 +125,7 @@ async function send(text) {
   ui.log.scrollTop = ui.log.scrollHeight;
   stick(() => draw(msgs.get(j.id)));
   ui.log.scrollTop = ui.log.scrollHeight;
+  watch(j.id);
 }
 
 export function startChat(parts) {
@@ -123,7 +144,7 @@ export function startChat(parts) {
   });
   const tickList = () => { (document.hidden ? Promise.resolve() : list().catch(() => {})).then(() => setTimeout(tickList, LIST_MS)); };
   const tickActive = () => {
-    const live = [...msgs.values()].filter((m) => !done(m));
+    const live = [...msgs.values()].filter((m) => !done(m) && !streams.has(m.id));
     Promise.all(live.map((m) => update(m.id).catch(() => {}))).then(() => setTimeout(tickActive, ACTIVE_MS));
   };
   tickList(); tickActive();

@@ -267,3 +267,96 @@ fn retiring_an_entity_retires_what_its_path_owns_and_replays() {
     r.replay(&h.journal());
     assert_eq!(r.snapshot().keys().cloned().collect::<Vec<_>>(), ["A:10", "A:2"]);
 }
+
+// ---- a running command's partial output (#1143, the SSE slice) --------------------------------------------------------------------------
+const PARTIAL: &str = "PACK pc 1
+Chunk.kind getter: 'chunk'
+Command.kind getter: 'command'
+Command.seen getter: join([x['d'] for x in sort_by([{'n': c.n, 'd': c.data} for c in instances('Chunk') if c.cmd == this.eid], 'n')], '')
+";
+
+/// `run = {partial: true}`: each read's complete lines arrive as an outside birth `Chunk:<command>:<n>` ({cmd, id, n, data}) BEFORE the
+/// receipt; a run without `partial` makes none; the journal holds the births in order and a replay (no effects) reaches the same state.
+#[test]
+fn a_command_run_with_partial_delivers_its_lines_as_journalled_chunks_before_the_receipt_and_replays() {
+    use_clock(0);
+    let dir = std::env::temp_dir().join(format!("hostloop-partial-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let h = Host::open({ let mut o = Options::new(Some(dir.join("f.sqlite3").to_string_lossy().to_string())); o.clock = ticking(); o }).unwrap();
+    h.load_pack("pc", PARTIAL).unwrap();
+    h.rebuild();
+    let script = "printf 'a\\n'; sleep 0.4; printf 'b\\nc\\n'; sleep 0.4; printf 'tail-without-newline'";
+    h.born("Command:p", "Command", props(json!({"cmd": ["sh", "-c", script]})), "person");
+    h.born("Command:q", "Command", props(json!({"cmd": ["sh", "-c", "printf 'x\\n'"]})), "person");
+    h.write("Command:q", "run", json!({"id": "q", "args": []}), "person");
+    h.write("Command:p", "run", json!({"id": "p", "args": [], "partial": true}), "person");
+    // the first chunk is in while the run is still going (no receipt yet)
+    pump_until(&h, |h| h.get("Command:p", "seen") == json!("a\n"));
+    assert_eq!(h.get("Command:p", "run_result"), J::Null, "a chunk lands before the receipt");
+    assert_eq!(h.get("Command:p", "seen"), json!("a\n"));
+    pump_until(&h, |h| !h.get("Command:p", "run_result").is_null());
+    assert_eq!(h.get("Command:p", "seen"), json!("a\nb\nc\ntail-without-newline"), "every byte, once, in order, the last line without its newline too");
+    assert_eq!(h.get("Command:p", "run_result")["stdout"], json!("a\nb\nc\ntail-without-newline"), "the receipt still carries the whole output");
+    let chunks: Vec<String> = h.snapshot().keys().filter(|k| k.starts_with("Chunk:Command:p:")).cloned().collect();
+    assert_eq!(chunks.len(), 3, "one chunk per read with complete lines, the unterminated tail at the end: {chunks:?}");
+    assert!(!h.snapshot().keys().any(|k| k.starts_with("Chunk:Command:q:")), "no `partial`, no chunks");
+    // the journal: the births, in order, outside (the door's writer); the receipt is not there
+    let j = h.journal();
+    let born: Vec<(String, String)> = j.iter().filter_map(|l| match l { Line::Born { eid, cls, writer, props, .. } if cls == "Chunk" => { assert_eq!(writer, "host:door"); Some((eid.clone(), props["data"].as_str().unwrap().to_string())) } _ => None }).collect();
+    assert_eq!(born.iter().map(|(e, _)| e.as_str()).collect::<Vec<_>>(), ["Chunk:Command:p:1", "Chunk:Command:p:2", "Chunk:Command:p:3"]);
+    assert_eq!(born.iter().map(|(_, d)| d.as_str()).collect::<Vec<_>>().concat(), "a\nb\nc\ntail-without-newline");
+    let live = state(&h);
+    let r = Host::open({ let mut o = Options::new(None); o.effects = false; o }).unwrap();
+    r.load_pack("pc", PARTIAL).unwrap();
+    r.rebuild();
+    r.replay(&j);
+    assert_eq!(r.get("Command:p", "seen"), json!("a\nb\nc\ntail-without-newline"), "the replay rebuilds the partial text from the journal alone");
+    let replayed = state(&r);
+    assert_eq!(replayed.0, live.0, "the engine's entities");
+    assert_eq!(replayed.1, live.1, "the stored rows");
+    expr::set_clock(None);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+const STREAMER: &str = "PACK st 1
+Request.reply getter: {'status': 200, 'stream': True}
+Request.reply on-setter go:
+  ALWAYS:
+    this.stream = {'id': 's', 'headers': {'x-t': 'yes'}}
+Request.stream_rc on-setter hello:
+  WHEN this.stream_rc == 0:
+    this.send = {'id': 'm1', 'event': 'hello', 'data': {'n': 1}}
+";
+
+/// the stream verbs: `stream` answers with the head and keeps the connection, `send` appends `event:`/`data:` frames in write order, `end` closes
+#[test]
+fn a_request_streams_head_then_frames_in_write_order_and_end_closes() {
+    use_clock(0);
+    let h = Host::open({ let mut o = Options::new(None); o.plain = true; o.clock = ticking(); o }).unwrap();
+    h.load_pack("st", STREAMER).unwrap();
+    h.rebuild();
+    h.born("Http:door", "Http", Map::new(), host::BOOT_WRITER);
+    h.write("Http:door", "listen", json!({"id": "l1", "port": 0}), host::BOOT_WRITER);
+    pump_until(&h, |h| !h.get("Http:door", "listen_result").is_null());
+    let port = h.get("Http:door", "listen_result")["port"].as_u64().unwrap();
+    let rx = client(port, "/s");
+    pump_until(&h, |h| h.snapshot().iter().any(|(k, v)| k.starts_with("Request:") && !v["props"]["send_result"].is_null()));
+    assert!(rx.try_recv().is_err(), "the response is still open: the client has not hit end of stream");
+    let req = h.snapshot().keys().find(|k| k.starts_with("Request:")).unwrap().clone();
+    assert_eq!(h.get(&req, "stream_result")["rc"], json!(0));
+    h.write(&req, "send", json!({"id": "m2", "data": "two"}), "person");
+    h.write(&req, "send", json!({"id": "m3", "event": "bye", "data": [1, 2]}), "person");
+    h.write(&req, "end", json!({"id": "e"}), "person");
+    pump_until(&h, |h| !h.get(&req, "end_result").is_null());
+    let got = rx.recv_timeout(Duration::from_secs(10)).expect("the client reads to the end once closed");
+    let (head, body) = got.split_once("\r\n\r\n").unwrap();
+    assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+    let lh = head.to_ascii_lowercase();
+    assert!(lh.contains("content-type: text/event-stream") && lh.contains("x-t: yes") && lh.contains("cache-control: no-store") && !lh.contains("content-length"), "{head}");
+    assert_eq!(body, "event: hello\ndata: {\"n\":1}\n\ndata: \"two\"\n\nevent: bye\ndata: [1,2]\n\n");
+    // a send after the end says there is no open stream (a receipt, not a hang)
+    h.write(&req, "send", json!({"id": "late", "data": 1}), "person");
+    pump_until(&h, |h| h.get(&req, "send_result")["id"] == json!("late"));
+    assert_eq!(h.get(&req, "send_result")["rc"], json!(2));
+    expr::set_clock(None);
+}

@@ -9,7 +9,9 @@ IMPORT boot 1
 --   dropped: set with the drop; the door's `answer` setter does not answer again once it is true
 --   kept_at: the clock at the answer
 
-Request.answered getter: this.respond_result != None
+-- ANSWERED: the driver's receipt of `respond` landed, or (an event stream, packs/door.c1f) its `end` receipt landed, or the stream could not be
+-- opened. An open stream is NOT answered: it keeps its body and headers and is not retired until it closes.
+Request.answered getter: this.respond_result != None or this.end_result != None or (this.stream_rc != None and this.stream_rc != 0)
 Request.keep_s getter: ([b.request_keep_s for b in instances('Boot') if b.request_keep_s != None] or [600])[0]
 
 Request.answered on-setter collect:

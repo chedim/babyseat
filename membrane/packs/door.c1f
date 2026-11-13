@@ -174,8 +174,13 @@ Request.shipped getter: this.gate if this.gate != None else this.routed
 Request.reply getter: this.override if this.override != None else this.shipped
 
 Request.reply on-setter answer:
-  WHEN this.reply != None and this.dropped != True:
+  WHEN this.reply != None and this.dropped != True and prop(this.reply, 'stream') != True:
     this.respond = this.reply
+-- a reply with `stream: True` is not a whole answer: it opens an event stream (docs/cliffvm.md, "The event stream"), and the route's own
+-- setters then write `send` and `end` on the request. {status?, headers?} are the head.
+Request.reply on-setter answer-stream:
+  WHEN this.reply != None and this.dropped != True and prop(this.reply, 'stream') == True:
+    this.stream = {'id': 'stream', 'status': prop(this.reply, 'status') or 200, 'headers': prop(this.reply, 'headers') or {}}
 
 -- ---- the boot starts the door ------------------------------------------------------------------------------------------------
 -- The launcher tells the seat's facts (Boot:seat.door_port, .door_secret_file, .ui_dir) before it says `started`; with a

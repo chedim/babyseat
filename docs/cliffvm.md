@@ -68,7 +68,7 @@ from the app folder, no build step, no dependencies; a later piece ports it to c
   Edges are ownership (`A:b:c` hangs under `A:b`, or under its nearest listed ancestor) and references (a `{"$ref": eid}` value or a string that is another listed eid, dashed).
   It polls every 3 s keeping positions, has a substring filter, a `requests` switch (the door's own Request entities are hidden by default), a list view, and a side panel with the
   selected entity's properties (a reference is a link). Keys on the canvas: arrows pan, `+`/`-` zoom, `0` fits.
-- Right, the CHAT: the history is the chat's entities, so a reload brings it back; Enter sends, Shift+Enter adds a line; a sent message is polled every 700 ms (queued, working, answer) and
+- Right, the CHAT: the history is the chat's entities, so a reload brings it back; Enter sends, Shift+Enter adds a line; a running message is read from its event stream (see "The event stream": the answer appears as it is written; the page falls back to polling it every 700 ms only when the stream cannot be had) and
   shows the tools Claude ran with a short input. An answer that asks for something (no CLI named) is shown as a note.
 - The page reads through `POST /mcp` (`entity_query`, `entity_read`) and `/membrane/chat/message`.
 
@@ -115,7 +115,7 @@ Tests: `native/tests/multi_class_1143.rs`, `seat_process.rs` (`an_entity_carries
 apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
 so never journalled, and a replay re-derives it; an outside write of `retire` is journalled and replayed like any. Test: `native/tests/host_loop.rs` (retire + replay), `seat_process.rs`.
 
-**Not there yet**: the UI as c1f view packs; tokens and persons (no security, one superuser chat); the chat's SSE stream (it polls); a message's class is `Chat` (its eid
+**Not there yet**: the UI as c1f view packs; tokens and persons (no security, one superuser chat); the graph's own event stream (the graph still polls every 3 s, only while the tab is visible; the chat's stream is built); a message's class is `Chat` (its eid
 names it), so the viewer finds chat entities by the `membrane::Chat:message:` prefix, not by a `ChatMessage` kind; the viewer lists at most 600 entities and reads the
 properties of 6 per poll for reference edges (more as it keeps running); entity removal is the `retire` write above.
 **Tests**: `native/tests/seat_process.rs` (the page and its files, a chat turn with a fake claude, the query options, `node --check` of every script).
@@ -279,12 +279,29 @@ sees the message `running`, then prints stream-json; a second message proves no 
 - a message that starts with `/tmp/...` is refused by the Command driver as an argument under a temporary folder (the driver's rule
   looks at every argument starting with `/`).
 
-**Not built: the SSE stream** (`GET /membrane/chat/<id>/events`, the response as it grows). It needs two things this host lacks: the
-`Command` driver keeps stdout until the process ends (its receipt lands once: nothing grows), and the door answers one response per
-connection (`Request.respond` writes the whole answer and closes; there is no open-ended `text/event-stream` response nor a verb to
-append a chunk and one to close). The smallest design: `Command` writes each stdout line to a growing `run_lines` property as it
-reads it (a partial receipt), and a `Request.stream` / `Request.send` / `Request.end` triple on the door. Until then the page polls
-`GET /membrane/chat/message/<id>`.
+**The event stream** (#1143; `native/src/http.rs`, `drivers.rs`, `membrane/packs/door.c1f`, `chat.c1f`, `chat_turn.c1f`; tests `host_loop.rs`, `chat_process.rs`).
+Three pieces, all writes (no host callback):
+- *A Request can answer open-ended.* `Request.stream = {id, status?, headers?}` writes the head of a `text/event-stream` response (default `Content-Type`,
+  `Cache-Control: no-store`, no length, `Connection: close`) and keeps the connection; `Request.send = {id, event?, data}` appends one event
+  (`event: <event>` when named, `data: <data as one line of JSON>`, a blank line); `Request.end = {id}` closes. A route asks for it with a reply
+  `{status: 200, stream: True}` (the door's `answer-stream` setter writes `stream`; a reply without `stream` is still `respond`). The frames are queued on the
+  engine's thread in write order, and the effect threads write them, so two sends never swap. Receipts: `stream_result`/`send_result`/`end_result`
+  (`rc` 0, or 1 when the client went away, or 2 when there is no open stream); a failed write forgets the stream. No keep-alive comment and no write timeout
+  (thresholds, not chosen).
+- *A Command can deliver while it runs.* `Command.run = {id, args, partial: True}` pushes each read's complete lines of stdout (the unterminated tail at
+  the end) as an outside birth `Chunk:<command eid>:<n>` ({cmd, id, n, data}), in the style of `Fetch`'s chunks: journalled (`host:door`), so a replay
+  rebuilds whatever was derived from them; the receipt still carries the whole `stdout`. A run without `partial` makes none. An arriving entity now marks the readers of
+  its class (`instances('Chunk')` recalculates), which a door request did not need until now.
+- *The chat turn uses both.* The turn runs with `partial: True`; `ChatMessage.partial_text` (the `text_delta`s of the `stream_event` lines) and `partial_tools` (the
+  `tool_use` blocks started) are getters over the chunks; `ChatMessage.stream_view` is the view with those while the turn runs. The finished turn retires the chunks
+  (`stale_chunks`; the receipt can be heard before the last chunk is born, so it is a getter+setter, not a line of the finish).
+`GET /membrane/chat/message/<id>/events`: 404 `{error}` for an unknown message; otherwise 200, then one event `message` per change of `stream_view`, whose data
+is `{id, text, state (queued | running | done | error), response (the partial answer while running, null until a word is out; the final one when done), tools
+(names; the final list when done), turn: {state, started, ended}}`. Events are snapshots (a missed one costs nothing), the last is the one with `state` done or
+error, then the connection closes. The stream's `Request` is not answered while it is open: the collector (`collector.c1f`) keeps its body and headers and retires it only
+after `end_result` (or a failed `stream`); a client that leaves early makes the next send fail, and the turn's own `end` still lands. The page (`chat.js`) opens an
+`EventSource` for a running message and polls it again only if the stream errors; `graph.js`/`app.js` still poll (3 s, hidden tab skipped): the graph needs a stream of
+its own later (not built).
 
 **Open design questions**: (1) the UI's message route: DECIDED 2026-11-13: the opencode session API, simplified, for now (not built yet; this route stays until then); (2) the system prompt: DECIDED 2026-11-13: the barest
 doctrine (`docs/doctrine-barest-draft.md`, four sentences) plus the banner, for now; (3) `entity_write` writes any property of any class the door imports

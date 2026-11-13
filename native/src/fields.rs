@@ -1176,6 +1176,7 @@ impl Fields {
     /// fields dirty for the next round, which also fires the setters on its writes (a birth by `sync` runs none: that is a rebuild).
     pub fn arrive(&mut self, core: &mut Core, e: String, cls: String, props: serde_json::Map<String, J>, now: f64) {
         let keys: Vec<String> = props.keys().cloned().collect();
+        self.mark_key(&(crate::vm::CLASS_READ.to_string(), cls.clone()));      // an arrival is a birth: what lists the class (`instances`) recalculates
         core.load(e.clone(), cls, props, None, now);
         self.known.insert(e.clone());
         for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }

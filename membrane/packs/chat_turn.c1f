@@ -46,7 +46,25 @@ Chat.plan on-setter turn-start:
     membrane::Chat:message[this.mid]:turn.state = 'running'
     membrane::Chat:message[this.mid]:turn.started = clock
     membrane::Command:chat[this.mid] = Command(cmd: prop(this.plan, 'argv'))
-    membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': []}
+    membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': [], 'partial': True}
+
+-- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
+-- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});
+-- they are outside births, journalled. The partial answer is the text deltas of the `stream_event` lines, the partial tools the tool_use blocks
+-- they start. The finished turn replaces them (the receipt below is the answer) and retires the chunks.
+ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.mid
+ChatMessage.chunks getter: sort_by([{'n': c.n, 'd': c.data} for c in instances('Chunk') if c.cmd == this.cmd_eid], 'n')
+ChatMessage.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(join([prop(c, 'd') for c in this.chunks], ''))] if prop(e, 'type') == 'stream_event']
+ChatMessage.partial_text getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
+ChatMessage.partial_tools getter: [replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use']
+
+-- once the run has its answer the chunks are retired. A getter + setter, not a line in `turn-finish`: the receipt can be heard BEFORE the last
+-- chunk is born (the two come from different threads), and a late chunk marks the class's readers, so this fires again for it.
+ChatMessage.stale_chunks getter: [c.eid for c in instances('Chunk') if c.cmd == this.cmd_eid] if this.answer != None else []
+ChatMessage.stale_chunks on-setter retire-chunks:
+  WHEN len(this.stale_chunks) > 0:
+    FOR k IN this.stale_chunks:
+      (k).retire = True
 
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
 ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')
@@ -82,3 +100,4 @@ Chat.answer on-setter turn-finish:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_result']:
         body = prop(b, 'content')
         membrane::Chat:message[this.mid]:turn:tool[prop(b, 'tool_use_id')].result = Text(body) or join([prop(c, 'text') for c in (List(body) or [])], '\n')
+

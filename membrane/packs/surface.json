@@ -105,7 +105,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 23,
+    "members": 27,
     "writes": [
       "membrane:*.queued",
       "membrane:*=ChatMessage()",
@@ -127,8 +127,9 @@
       "Chat",
       "ChatMessage"
     ],
-    "members": 23,
+    "members": 29,
     "writes": [
+      "*.retire",
       "membrane:*.ended",
       "membrane:*.result",
       "membrane:*.run",

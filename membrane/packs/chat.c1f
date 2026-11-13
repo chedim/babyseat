@@ -4,6 +4,9 @@ IMPORT door 1
 -- `session` family:
 --   POST /membrane/chat/message {text}   the person's message becomes an entity under the chat; 202 {id}
 --   GET  /membrane/chat/message/<id>     {id, text, state, response, tools}: poll it until `state` is done (or error)
+--   GET  /membrane/chat/message/<id>/events   the same message as an event stream (text/event-stream): one `message` event per change of
+--                                         `stream_view` (the partial answer and the tools' names as they are written), the last one when
+--                                         `state` is done or error, then the connection closes (docs/cliffvm.md, "The event stream")
 -- The message is `membrane::Chat:message:<id>` (the kind ChatMessage; its eid names the class Chat, as the constructor rule says).
 -- THE TURN is the entity under it, `membrane::Chat:message:<id>:turn` (ChatTurn {status: queued/running/done/error (a getter over `state`), started, ended, queued_at, message}),
 -- the one run of the model that answers the message. It OWNS, by the colon path, its answer `...:turn:response` (ChatResponse {text, error})
@@ -22,6 +25,9 @@ ChatMessage.resp_eid getter: this.turn_eid + ':response'
 ChatMessage.said getter: prop(this.resp_eid, 'text')
 ChatMessage.turn_view getter: {'state': this.tstate, 'started': prop(this.turn_eid, 'started'), 'ended': prop(this.turn_eid, 'ended')}
 ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view}
+-- what the event stream sends: the view, but while the turn runs `response` is the partial answer (chat_turn.c1f `partial_text`, null until a word is out)
+-- and `tools` the names of the tool blocks started so far; once the turn has finished they are the final ones
+ChatMessage.stream_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said or (this.partial_text or None), 'tools': this.tools_run or this.partial_tools or [], 'turn': this.turn_view}
 ChatResponse.kind getter: 'response'
 -- a response's summary is its whole text (nearer class than the root `Entity.summary`, packs/entity.c1f): the banner's error line shows it.
 ChatResponse.summary getter: str(this.text or '')
@@ -53,10 +59,24 @@ Request.cm_post getter:
   ELSE: {'status': 202, 'body': {'id': this.cm_id}}
 
 -- ---- GET: one message --------------------------------------------------------------------------------------------------------------------
-Request.cm_gid getter: replace(this.path, '/membrane/chat/message/', '')
+Request.cm_gid getter: replace(replace(this.path, '/membrane/chat/message/', ''), '/events', '')
+Request.cm_events getter: startswith(this.path, '/membrane/chat/message/') and replace(this.path, '/events', '') != this.path
 Request.cm_view getter: prop('membrane::Chat:message:' + this.cm_gid, 'view')
 Request.cm_get getter: {'status': 200, 'body': this.cm_view} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
 
+-- the stream: an unknown message is a 404 like the poll route; a known one opens the stream (the door's `answer-stream` setter writes `stream`)
+Request.cm_stream getter: {'status': 200, 'stream': True} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
+-- the head is out (`stream_rc` 0) -> every change of the message's `stream_view` is one `message` event; the last one is followed by the close.
+-- `send` and `end` are written in this order in ONE setter, so the close never overtakes the last event.
+Request.ev_snap getter: prop('membrane::Chat:message:' + this.cm_gid, 'stream_view') if this.cm_events and this.stream_rc == 0 and this.dropped != True else None
+Request.ev_snap on-setter ev-send:
+  WHEN this.ev_snap != None and prop(this.ev_snap, 'state') in ['done', 'error']:
+    this.send = {'id': 'event', 'event': 'message', 'data': this.ev_snap}
+    this.end = {'id': 'end'}
+  ELSE WHEN this.ev_snap != None:
+    this.send = {'id': 'event', 'event': 'message', 'data': this.ev_snap}
+
 Request.r_session getter:
   WHEN this.path == '/membrane/chat/message': this.cm_post
+  ELSE WHEN this.cm_events: this.cm_stream
   ELSE: this.cm_get

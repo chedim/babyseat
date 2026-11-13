@@ -3,6 +3,11 @@
 //! peer, ts}) pushed into the engine like any write, so a pack DECIDES the answer; `Request:<n>.respond = {status, headers?,
 //! body}` (the request holds its connection) writes it out. std only. One request per connection (Connection: close); a request body
 //! is read by Content-Length (no chunked bodies: 411).
+//! An EVENT STREAM is the other way to answer (docs/cliffvm.md, "The event stream"): `Request.stream = {id, status?, headers?}` writes the head
+//! of a `text/event-stream` response and keeps the connection open; `Request.send = {id, event?, data}` appends one event
+//! (`event: <name>` and `data: <json>`); `Request.end = {id}` closes. The frames are queued in the order the writes were made (on the
+//! engine's thread) and written by the effect threads, so two sends never swap.
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -208,4 +213,81 @@ pub fn respond(st: &Store, req: &J, conn: Option<u64>) -> J {
     let _ = s.shutdown(std::net::Shutdown::Both);
     if ok { json!({"id": id, "status": "ok", "rc": 0, "head": format!("{} {}", status, body.len())}) }
     else { json!({"id": id, "status": "error", "rc": 1, "head": "the client went away"}) }
+}
+
+/// An open event stream: the socket and the frames not yet written, in the order the writes were made.
+pub struct Stream { sock: TcpStream, queue: VecDeque<Option<Vec<u8>>>, dead: bool, closed: bool }
+
+/// `Request.stream` (called on the engine's thread, in write order): the held connection becomes a stream whose first frame is the head.
+/// -> the stream's connection number, or the receipt that refuses.
+pub fn stream_open(st: &Store, req: &J, conn: Option<u64>) -> Result<u64, J> {
+    let id = req.get("id").cloned().unwrap_or(J::Null);
+    let refuse = |why: String| json!({"id": id, "status": "error", "rc": 2, "head": why});
+    let Some(conn) = conn else { return Err(refuse("stream is written on a Request entity (it holds its connection)".into())) };
+    let Some(sock) = st.take_conn(conn) else { return Err(refuse(format!("no open connection {} (answered already, or it went away)", conn))) };
+    let status = req.get("status").and_then(|v| v.as_i64()).unwrap_or(200);
+    let mut head = format!("HTTP/1.1 {} {}\r\n", status, reason(status));
+    let (mut ctype, mut cache) = (false, false);
+    if let Some(h) = req.get("headers").and_then(|h| h.as_object()) {
+        for (k, v) in h {
+            if k.eq_ignore_ascii_case("content-length") || k.eq_ignore_ascii_case("connection") { continue; }
+            let v = v.as_str().map(String::from).unwrap_or_else(|| v.to_string());
+            if k.contains(['\r', '\n']) || v.contains(['\r', '\n']) { continue; }          // never a header split
+            if k.eq_ignore_ascii_case("content-type") { ctype = true; }
+            if k.eq_ignore_ascii_case("cache-control") { cache = true; }
+            head.push_str(&format!("{}: {}\r\n", k, v));
+        }
+    }
+    if !ctype { head.push_str("Content-Type: text/event-stream; charset=utf-8\r\n"); }
+    if !cache { head.push_str("Cache-Control: no-store\r\n"); }
+    head.push_str("Connection: close\r\n\r\n");
+    st.open_stream(conn, Stream { sock, queue: VecDeque::from([Some(head.into_bytes())]), dead: false, closed: false });
+    Ok(conn)
+}
+
+/// `Request.send` / `Request.end` (on the engine's thread): queue the frame (`end` queues the close). -> the stream, or the receipt that refuses.
+pub fn stream_push(st: &Store, req: &J, conn: Option<u64>, end: bool) -> Result<u64, J> {
+    let id = req.get("id").cloned().unwrap_or(J::Null);
+    let refuse = |why: &str| json!({"id": id, "status": "error", "rc": 2, "head": why});
+    let Some(conn) = conn else { return Err(refuse("send and end are written on a Request entity")) };
+    let Some(s) = st.stream_of(conn) else { return Err(refuse("no open stream (not started, closed already, or the client went away)")) };
+    let mut g = s.lock().unwrap_or_else(|e| e.into_inner());
+    if g.dead || g.closed { return Err(refuse("no open stream (closed already, or the client went away)")); }
+    if end { g.closed = true; g.queue.push_back(None); return Ok(conn); }
+    let mut frame = String::new();
+    if let Some(e) = req.get("event").and_then(|e| e.as_str()) {
+        if e.contains(['\r', '\n']) { return Err(refuse("an event name is one line")); }
+        frame.push_str(&format!("event: {}\n", e));
+    }
+    frame.push_str(&format!("data: {}\n\n", req.get("data").cloned().unwrap_or(J::Null)));
+    g.queue.push_back(Some(frame.into_bytes()));
+    Ok(conn)
+}
+
+/// The effect thread's part: write what is queued, in order (whichever thread gets here first writes all of it). A close shuts the socket
+/// and forgets the stream; a failed write (the client left) forgets it too and says so. -> the receipt.
+pub fn stream_flush(st: &Store, id: &J, conn: u64) -> J {
+    let Some(s) = st.stream_of(conn) else { return json!({"id": id, "status": "error", "rc": 1, "head": "the stream is closed or the client went away"}) };
+    let mut g = s.lock().unwrap_or_else(|e| e.into_inner());
+    if g.dead { return json!({"id": id, "status": "error", "rc": 1, "head": "the client went away"}); }
+    let mut sent = 0usize;
+    while let Some(f) = g.queue.pop_front() {
+        match f {
+            Some(b) => {
+                if g.sock.write_all(&b).and_then(|_| g.sock.flush()).is_err() {
+                    g.dead = true; g.queue.clear();
+                    let _ = g.sock.shutdown(std::net::Shutdown::Both);
+                    drop(g); st.drop_stream(conn);
+                    return json!({"id": id, "status": "error", "rc": 1, "head": "the client went away"});
+                }
+                sent += b.len();
+            }
+            None => {
+                let _ = g.sock.shutdown(std::net::Shutdown::Both);
+                drop(g); st.drop_stream(conn);
+                return json!({"id": id, "status": "ok", "rc": 0, "head": "closed"});
+            }
+        }
+    }
+    json!({"id": id, "status": "ok", "rc": 0, "head": format!("{} bytes", sent)})
 }

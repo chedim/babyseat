@@ -171,10 +171,12 @@ const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "st
 /// the seat's folder holds the fake; the binary is told its path as a fact
 fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) { fake_seat_with(tag, extra, &[]) }
 /// the same, with more packs (name, text) in the seat's pack folder: a model's own banner pack, for one
-fn fake_seat_with(tag: &str, extra: &[&str], packs: &[(&str, &str)]) -> (Run, u16, std::path::PathBuf) {
+fn fake_seat_with(tag: &str, extra: &[&str], packs: &[(&str, &str)]) -> (Run, u16, std::path::PathBuf) { fake_seat_script(tag, extra, packs, FAKE) }
+/// the same, with the fake's own script text
+fn fake_seat_script(tag: &str, extra: &[&str], packs: &[(&str, &str)], script: &str) -> (Run, u16, std::path::PathBuf) {
     let dir = tmp(tag);
     let bin = dir.join("fake-claude");
-    std::fs::write(&bin, FAKE).unwrap();
+    std::fs::write(&bin, script).unwrap();
     { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     let pd = dir.join("packs");
     std::fs::create_dir_all(&pd).unwrap();
@@ -347,5 +349,154 @@ fn the_banner_shows_the_previous_errors_entity_and_its_whole_text_until_a_turn_s
     let sys = system_prompt(&dir, "third");
     assert!(!sys.contains("ENDED WITH AN ERROR"), "a later successful turn clears the line: {sys}");
     assert_eq!(finish(port, &dir, &id3, "third")["state"], "done");
+    assert!(terminate(&mut run));
+}
+
+// ---- the chat's event stream (#1143, the SSE slice) ---------------------------------------------------------------------------------------
+// A fake that talks in PIECES: it prints stream-json `stream_event` lines (a tool_use block start, then text deltas) one at a time, each
+// released by a file `go.<tag>.<i>` the test writes, then the finished assistant message and the result line after `go.<tag>.end`.
+const PIECES: &str = r#"#!/usr/bin/env python3
+import json, os, sys, time
+here = os.path.dirname(os.path.abspath(__file__))
+prompt = sys.argv[-1]
+tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
+json.dump({"argv": sys.argv[1:]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
+def out(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+def gate(name):
+    for _ in range(300):
+        if os.path.exists(os.path.join(here, "go." + tag + "." + name)): return
+        time.sleep(0.05)
+out({"type": "system", "subtype": "init", "session_id": "p-1"})
+pieces = ["Hel", "lo ", "wor", "ld"]
+for i, t in enumerate(pieces):
+    gate(str(i))
+    if i == 1:
+        out({"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "tu1", "name": "mcp__membrane__entity_read", "input": {}}}})
+    out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": t}}})
+gate("end")
+out({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello world"}, {"type": "tool_use", "id": "tu1", "name": "mcp__membrane__entity_read", "input": {}}]}})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "Hello world", "num_turns": 1, "session_id": "p-1"})
+"#;
+
+fn collector() -> String { std::fs::read_to_string(format!("{}/../membrane/apps/barest.c1f/collector.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap() }
+
+/// An open event stream: the status line and headers, then the events as they arrive ((event name, json data)).
+struct Sse { r: BufReader<TcpStream>, head: String }
+impl Sse {
+    fn open(port: u16, path: &str) -> Sse {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        s.write_all(format!("GET {path} HTTP/1.1\r\nHost: t\r\nAccept: text/event-stream\r\n\r\n").as_bytes()).unwrap();
+        let mut r = BufReader::new(s);
+        let mut head = String::new();
+        loop { let mut l = String::new(); r.read_line(&mut l).unwrap(); head.push_str(&l); if l == "\r\n" || l.is_empty() { break; } }
+        Sse { r, head }
+    }
+    /// the next event, None at the end of the stream
+    fn next(&mut self) -> Option<(String, J)> {
+        let (mut name, mut data) = (String::new(), String::new());
+        loop {
+            let mut l = String::new();
+            if self.r.read_line(&mut l).unwrap() == 0 { return None; }
+            let l = l.trim_end_matches(['\r', '\n']);
+            if l.is_empty() { if data.is_empty() { continue; } return Some((name, serde_json::from_str(&data).unwrap_or_else(|e| panic!("{e}: {data}")))); }
+            if let Some(v) = l.strip_prefix("event: ") { name = v.to_string(); }
+            if let Some(v) = l.strip_prefix("data: ") { data.push_str(v); }
+        }
+    }
+}
+
+/// the Request entities of event streams the seat still holds (a query by kind, then each one's path)
+fn stream_requests(port: u16) -> Vec<String> {
+    let (t, _) = call(port, "entity_query", json!({"q": "kind:Request"}));
+    t.lines().filter_map(|l| l.split_whitespace().next()).filter(|e| e.starts_with("Request:")).filter(|e| {
+        let (p, _) = call(port, "entity_read", json!({"spec": e, "prop": "path"}));
+        p.ends_with("/events")
+    }).map(String::from).collect()
+}
+
+fn release(dir: &std::path::Path, prompt: &str, name: &str) { std::fs::write(dir.join(format!("go.{}.{}", tag_of(prompt), name)), "").unwrap(); }
+
+#[test]
+fn the_event_stream_carries_the_answer_as_it_is_written_and_the_request_is_retired_after_it_closes() {
+    let (mut run, port, dir) = fake_seat_script("sse", &["--fact", "request_keep_s=0"], &[("collector.c1f", &collector())], PIECES);
+    let id = send(port, "stream me");
+    let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
+    let lh = sse.head.to_ascii_lowercase();
+    assert!(sse.head.starts_with("HTTP/1.1 200") && lh.contains("content-type: text/event-stream") && lh.contains("cache-control: no-store") && !lh.contains("content-length"), "{}", sse.head);
+    // the first event is the state as it is (running or still queued), the answer not yet there
+    let (name, first) = sse.next().expect("a first event");
+    assert_eq!(name, "message");
+    assert_eq!(first["id"], json!(id));
+    assert!(first["response"].is_null(), "{first}");
+    // each piece comes as an event BEFORE the turn ends: the partial answer grows, the tool name shows when its block starts
+    let mut texts: Vec<String> = vec![];
+    let mut tools_seen = false;
+    for (i, want) in ["Hel", "Hello ", "Hello wor", "Hello world"].iter().enumerate() {
+        wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of("stream me"))).exists().then_some(()));
+        release(&dir, "stream me", &i.to_string());
+        loop {
+            let (n, e) = sse.next().expect("an event before the end");
+            assert_eq!(n, "message");
+            assert_eq!(e["state"], json!("running"), "the turn is still running while pieces arrive: {e}");
+            if e["tools"] == json!(["entity_read"]) { tools_seen = true; }
+            if e["response"].as_str() == Some(want) { texts.push(want.to_string()); break; }
+        }
+        assert_eq!(view(port, &id)["state"], "running", "the event arrived before the turn ended");
+    }
+    assert_eq!(texts, ["Hel", "Hello ", "Hello wor", "Hello world"]);
+    assert!(tools_seen, "the tool the model started shows in the events");
+    // while the stream is open its Request is held (not retired, not dropped); request_keep_s=0 retires every other request at once
+    let held = stream_requests(port);
+    assert_eq!(held.len(), 1, "{held:?}");
+    let (b, _) = call(port, "entity_read", json!({"spec": held[0], "prop": "dropped"}));
+    assert!(!b.contains("true"), "an open stream is not dropped: {b}");
+    // the end: the final event is the answer, `done`, then the connection closes
+    release(&dir, "stream me", "end");
+    let (n, last) = sse.next().expect("the final event");
+    assert_eq!((n.as_str(), last["state"].clone(), last["response"].clone()), ("message", json!("done"), json!("Hello world")));
+    assert!(sse.next().is_none(), "the stream closes after done");
+    wait("the stream's Request retired", || stream_requests(port).is_empty().then_some(()));
+    // the turn's partial chunks are retired with the finish (the receipt is the answer)
+    wait("the chunks retired", || { let (n, _) = call(port, "entity_query", json!({"q": "kind:Chunk", "count": true})); (n == "0 entity(ies)").then_some(()) });
+    // the poll route is still there
+    assert_eq!(view(port, &id)["response"], "Hello world");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn an_unknown_message_has_no_stream_and_a_finished_one_streams_its_answer_and_closes() {
+    let (mut run, port, dir) = fake_seat_script("ssedone", &[], &[], PIECES);
+    let (st, body) = http(port, "GET", "/membrane/chat/message/nope/events", "");
+    assert_eq!(st, 404, "{body}");
+    let id = send(port, "already done");
+    wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of("already done"))).exists().then_some(()));
+    for i in 0..4 { release(&dir, "already done", &i.to_string()); }
+    release(&dir, "already done", "end");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
+    let (_, e) = sse.next().expect("the snapshot");
+    assert_eq!((e["state"].clone(), e["response"].clone()), (json!("done"), json!("Hello world")));
+    assert!(sse.next().is_none(), "closed at once");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_client_that_leaves_early_leaves_nothing_stuck_and_the_turn_completes() {
+    let (mut run, port, dir) = fake_seat_script("sseleave", &["--fact", "request_keep_s=0"], &[("collector.c1f", &collector())], PIECES);
+    let id = send(port, "walk away");
+    let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
+    sse.next().expect("a first event");
+    wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of("walk away"))).exists().then_some(()));
+    release(&dir, "walk away", "0");
+    let (_, e) = sse.next().expect("a piece");
+    assert_eq!(e["state"], json!("running"));
+    drop(sse);                                           // the page was closed mid-turn
+    for i in 1..4 { release(&dir, "walk away", &i.to_string()); }
+    release(&dir, "walk away", "end");
+    let v = wait("the turn's end", || { let v = view(port, &id); (v["state"] == "done").then_some(v) });
+    assert_eq!(v["response"], "Hello world", "the turn finished though nobody listened");
+    wait("no stream Request left", || stream_requests(port).is_empty().then_some(()));
     assert!(terminate(&mut run));
 }

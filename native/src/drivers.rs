@@ -88,7 +88,7 @@ fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
 }
 
 /// The driver verbs the engine runs: (class, verb).
-pub const VERBS: [(&str, &str); 10] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond"), ("Request", "verify"), ("Fetch", "request")];
+pub const VERBS: [(&str, &str); 13] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond"), ("Request", "verify"), ("Request", "stream"), ("Request", "send"), ("Request", "end"), ("Fetch", "request")];
 
 /// Run one effect (the engine calls this for a write of a driver verb). `props` are the entity's.
 pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map<String, J>) {
@@ -102,6 +102,14 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
             st.effect(eid, verb, Box::new(move |sh, eid| {
                 let h = Store::from_shared(sh);
                 if verb2 == "listen" { crate::http::listen(&h, eid, &req2) } else { crate::http::respond(&h, &req2, conn) }
+            }));
+        }
+        ("Request", "stream") | ("Request", "send") | ("Request", "end") => {   // the event stream (http.rs): the frame is queued HERE (write order), written by the thread
+            let conn = props.get("conn").and_then(|c| c.as_u64());
+            let queued = match verb { "stream" => crate::http::stream_open(st, req, conn), v => crate::http::stream_push(st, req, conn, v == "end") };
+            st.effect(eid, verb, Box::new(move |sh, _| match queued {
+                Ok(n) => crate::http::stream_flush(&Store::from_shared(sh), &id, n),
+                Err(rec) => rec,
             }));
         }
         ("Fetch", "request") => {                          // outbound http (fetch.rs): the receipt is data; a stream arrives as Chunk entities
@@ -151,6 +159,7 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 st.effect(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new())));
                 return;
             }
+            let req2 = req.clone();
             st.effect(eid, verb, Box::new(move |sh, eid| {
                 let mut c = match &cmd {
                     J::Array(a) if !a.is_empty() => { let mut c = std::process::Command::new(a[0].as_str().unwrap_or_default()); for x in &a[1..] { c.arg(x.as_str().map(|s| s.to_string()).unwrap_or_else(|| x.to_string())); } c }
@@ -170,8 +179,35 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                     (ch.stdout.take(), ch.stderr.take())
                 };
                 let err_t = std::thread::spawn(move || { let mut s = String::new(); if let Some(r) = err_r.as_mut() { let _ = std::io::Read::read_to_string(r, &mut s); } s });
-                let mut out = String::new();
-                if let Some(r) = out_r.as_mut() { let _ = std::io::Read::read_to_string(r, &mut out); }
+                // `partial: true`: what each read brings, cut at its last newline, is pushed as an outside birth `Chunk:<command>:<n>` ({cmd, id, n,
+                // data}) while the process runs; the unterminated tail goes at the end. The receipt below still carries the whole output.
+                let partial = req2.get("partial").and_then(|p| p.as_bool()).unwrap_or(false);
+                let h = Store::from_shared(sh);
+                let (mut all, mut held, mut n): (Vec<u8>, Vec<u8>, i64) = (Vec::new(), Vec::new(), 0);
+                let mut push = |bytes: &[u8], n: &mut i64| {
+                    *n += 1;
+                    let mut p = Map::new();
+                    p.insert("cmd".into(), json!(eid)); p.insert("id".into(), id.clone()); p.insert("n".into(), json!(*n));
+                    p.insert("data".into(), json!(String::from_utf8_lossy(bytes)));
+                    h.push_inbound(format!("Chunk:{eid}:{n}"), "Chunk".into(), p);
+                };
+                if let Some(r) = out_r.as_mut() {
+                    let mut buf = [0u8; 16384];
+                    loop {
+                        match std::io::Read::read(r, &mut buf) {
+                            Ok(0) | Err(_) => break,
+                            Ok(k) => {
+                                all.extend_from_slice(&buf[..k]);
+                                if partial {
+                                    held.extend_from_slice(&buf[..k]);
+                                    if let Some(i) = held.iter().rposition(|b| *b == b'\n') { let rest = held.split_off(i + 1); push(&held, &mut n); held = rest; }
+                                }
+                            }
+                        }
+                    }
+                }
+                if partial && !held.is_empty() { push(&held, &mut n); }
+                let out = String::from_utf8_lossy(&all).to_string();
                 let err = err_t.join().unwrap_or_default();
                 let status = slot.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| ch.wait());
                 crate::store::child_done(sh, eid);
