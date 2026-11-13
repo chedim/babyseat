@@ -230,3 +230,52 @@ fn the_quota_read_and_resume_answer_a_seat_with_nothing_paused_in_the_released_s
     assert_eq!((r["resumed"].clone(), r["paused"].clone()), (json!(false), json!([])), "nothing was paused: {r}");
     assert_eq!(api(&run, "DELETE", "/ui/serve/membrane/quota", J::Null).0, 405);
 }
+
+// ---- the field map (the 2D panel and the 3D window): the released answer of a seat with an EMPTY field --------------------------------------------------
+// The map engine is the Python seat's (field3d.py, fieldmap.py: numpy over the entity states); until it is native these routes answer what the released
+// code answers for a field with no live entity, which draws "the field is empty" in both views (tests/js/field_empty.test.mjs runs the page's own code on it).
+fn err_of(e: &J) -> (String, String) { (e["error"]["message"].as_str().unwrap_or("").to_string(), e["error"]["type"].as_str().unwrap_or("").to_string()) }
+
+#[test]
+fn the_field_map_routes_answer_the_empty_field_in_the_released_shapes() {
+    let run = seat("map");
+    let (st, f) = api(&run, "GET", "/ui/serve/membrane/map/field?m=1200", J::Null);
+    same_shape("map_field", st, &f);
+    assert_eq!((f["nodes"].clone(), f["edges"].clone(), f["axes"].clone()), (json!([]), json!([]), json!([])), "{f}");
+    // the whole field in 3D: an empty projection, its root tile and the current
+    let (st, p) = api(&run, "GET", "/ui/serve/membrane/map/field3d?axes=pc1%2Cpc2%2Cpc3", J::Null);
+    same_shape("field3d", st, &p);
+    assert_eq!((p["n_total"].clone(), p["root"]["nodes"].clone(), p["root"]["more"].clone(), p["current"]["p"].clone(), p["current"]["tau_s"].clone()), (json!(0), json!([]), json!(false), J::Null, json!(180.0)), "{p}");
+    assert_eq!(p["root"]["pid"], p["pid"], "{p}");
+    let pid = p["pid"].as_str().unwrap().to_string();
+    // a tile of that projection is the empty tile; the projection of another pid has expired (410), like the released seat's
+    let (st, t) = api(&run, "GET", &format!("/ui/serve/membrane/map/tile?pid={pid}&l=0&x=0&y=0&z=0"), J::Null);
+    assert_eq!(st, 200, "{t}");
+    assert_eq!(t, json!({"pid": pid, "l": 0, "x": 0, "y": 0, "z": 0, "nodes": [], "edges": [], "more": false}));
+    let (st, t) = api(&run, "GET", "/ui/serve/membrane/map/tile?pid=gone&l=0&x=0&y=0&z=0", J::Null);
+    assert_eq!((st, err_of(&t)), (410, ("projection 'gone' expired: re-fetch /membrane/map/field3d".to_string(), "membrane_error".to_string())), "{t}");
+    let (st, t) = api(&run, "GET", &format!("/ui/serve/membrane/map/tile?pid={pid}&l=a&x=0&y=0&z=0"), J::Null);
+    assert_eq!((st, err_of(&t).0), (400, "l, x, y, z must be integers".to_string()), "{t}");
+    // locate: nothing is in the empty projection
+    let (st, t) = api(&run, "GET", &format!("/ui/serve/membrane/map/locate?pid={pid}&eid=f%3Aa.py"), J::Null);
+    assert_eq!(st, 404, "{t}");
+    assert!(err_of(&t).0.ends_with(" is not in this projection") && err_of(&t).0.starts_with('\''), "{t}");
+    let (st, _) = api(&run, "GET", "/ui/serve/membrane/map/locate?pid=gone&eid=x", J::Null);
+    assert_eq!(st, 410);
+    // search: no entity, no hit; the query comes back lowercased and stripped
+    let (st, s) = api(&run, "GET", "/ui/serve/membrane/map/search?limit=40&q=%20Foo+", J::Null);
+    same_shape("map_search", st, &s);
+    assert_eq!((s["q"].clone(), s["hits"].clone()), (json!("foo"), json!([])), "{s}");
+    // the card and the entity axis need a loaded field: the released 503 with its reason
+    for path in ["/ui/serve/membrane/map/distance?eid=x", "/ui/serve/membrane/field/entity?eid=x"] {
+        let (st, e) = api(&run, "GET", path, J::Null);
+        assert_eq!((st, err_of(&e)), (503, ("the field is not loaded".to_string(), "membrane_error".to_string())), "{path}: {e}");
+    }
+    // Blurp's overlay
+    let (st, b) = api(&run, "GET", "/ui/serve/membrane/map/blurp", J::Null);
+    same_shape("blurp", st, &b);
+    assert_eq!((b["firings"].clone(), b["triggers"].clone(), b["counts"].clone()), (json!([]), json!(0), json!({"shadow": 0, "proposal": 0, "suggest": 0})), "{b}");
+    // read only
+    assert_eq!(api(&run, "POST", "/ui/serve/membrane/map/field", json!({})).0, 405);
+    assert_eq!(api(&run, "GET", "/membrane/map/field", J::Null).0, 200, "the bare path too");
+}
