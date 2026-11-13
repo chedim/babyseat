@@ -18,12 +18,12 @@ const port = 19000 + Math.floor(Math.random() * 1000), dbg = port + 1000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // THE BACKLOG, measured on the first full-set boot (docs/release-parity.md section 6). Matched on the path without the query, METHOD included for
 // the hangs. Each list is checked both ways: a call that is answered now must leave its list (the test says so), a new gap fails the test.
-//   MISSING (404): the session and event API is the second agent's (w31); /ui/fieldvm (the browser VM's start snapshot), /membrane/options and the
+//   MISSING (404): the session routes the chat view tolerates (<sid>/voice and <sid>/predict: `.catch` in panel.js), /agent and /config (opencode probes); /ui/fieldvm (the browser VM's start snapshot), /membrane/options and the
 //   map routes are used routes not built yet (docs/release-parity.md section 1, rows 4, 5, 8, 61-68).
 //   HANGS (no answer): POST /membrane/voice/state waits on the voice tables a fresh store does not have (section 6, "reads that hang").
 //   NOT_BUILT (501, a deliberate "not built" with its reason): informational, never a failure.
 const MISSING = new Set(process.env.PAGE_BOOT_MISSING ? process.env.PAGE_BOOT_MISSING.split(',') : [
-  '/ui/serve/session', '/ui/serve/session/status', '/ui/serve/event', '/ui/serve/agent', '/ui/serve/config',
+  '/ui/serve/session/<sid>/voice', '/ui/serve/session/<sid>/predict', '/ui/serve/agent', '/ui/serve/config',
   '/ui/serve/membrane/map/field3d', '/ui/serve/membrane/map/blurp', '/ui/fieldvm', '/membrane/options',
 ]);
 const HANGS = new Set(process.env.PAGE_BOOT_HANGS ? process.env.PAGE_BOOT_HANGS.split(',') : ['POST /ui/serve/membrane/voice/state']);
@@ -56,7 +56,7 @@ try {
   await send('Page.navigate', { url: `http://127.0.0.1:${port}/` });
   await sleep(Number(process.env.PAGE_BOOT_WAIT_MS || 8000));
   const rows = [...seen.values()].filter(r => r.url.startsWith(`http://127.0.0.1:${port}/`))
-    .map(r => ({ ...r, path: new URL(r.url).pathname }));
+    .map(r => ({ ...r, path: new URL(r.url).pathname.replace(/\/session\/ses_\d+/, '/session/<sid>') }));   // a session id is made at run time
   const served = rows.filter(r => r.path.startsWith('/ui/serve/'));
   if (process.env.SHOW) { for (const r of rows) console.log(r.status ?? (r.failed || 'HANG'), r.method, r.path); console.log('exceptions:', errors); }
   const calls = rows.filter(r => !r.path.startsWith('/ui/www/') && r.path !== '/');

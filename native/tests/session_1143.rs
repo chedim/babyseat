@@ -489,3 +489,31 @@ fn a_stream_sees_every_session_and_events_never_cross_session_ids() {
     assert!(fb.iter().all(|x| sid_of(&x.1) == b));
     let _ = dir;
 }
+
+// ---- abort -------------------------------------------------------------------------------------------------------------------------------------
+#[test]
+fn abort_stops_the_running_turn_which_ends_as_an_aborted_error_and_idle_on_the_stream() {
+    let (_run, port, _dir) = seat("ses-abort", STEPS);
+    let (a, b) = (new_session(port, "A"), new_session(port, "B"));
+    assert_eq!(api(port, "POST", &format!("/session/{a}/abort"), json!({})), (200, json!(true)), "an idle session: nothing to stop");
+    let mut sse = Sse::open(port, "/event");
+    sse.next().unwrap();
+    assert_eq!(say(port, &a, "hang"), 204);
+    assert_eq!(say(port, &b, "hang"), 204);
+    sse.until("a delta of a", |n, d| n == "message.part.delta" && d["properties"]["sessionID"] == json!(a));
+    assert_eq!(api(port, "POST", &format!("/session/{a}/abort"), json!({})), (200, json!(true)));
+    // a ends: error, aborted, idle; b is still running
+    let f = sse.until("a idle", |n, d| n == "session.idle" && d["properties"]["sessionID"] == json!(a));
+    let fin = f.iter().rev().find(|x| x.0 == "message.updated" && x.1["properties"]["sessionID"] == json!(a)).unwrap();
+    assert_eq!(props(&fin.1)["info"]["error"]["name"], "MessageAbortedError");
+    assert!(props(&fin.1)["info"]["time"]["completed"].is_number());
+    let r = finished(port, &a, 2);
+    assert_eq!(r[1]["info"]["error"]["name"], "MessageAbortedError");
+    assert_eq!(api(port, "GET", "/session/status", J::Null).1[&a], json!({"type": "idle"}));
+    assert_eq!(api(port, "GET", "/session/status", J::Null).1[&b], json!({"type": "busy"}), "the other session runs on");
+    // the session can speak again
+    assert_eq!(say(port, &a, "quick again"), 204);
+    wait("the next answer", || { let r = rows(port, &a); (r.len() == 4 && r[3]["info"]["time"]["completed"].is_number()).then_some(()) });
+    assert_eq!(api(port, "POST", &format!("/session/{b}/abort"), json!({})).0, 200);
+    assert_eq!(api(port, "POST", "/session/ses_000000000000000000000000/abort", json!({})).0, 404);
+}

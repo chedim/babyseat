@@ -382,7 +382,8 @@
       "door",
       "chat",
       "chat_turn",
-      "semtext"
+      "semtext",
+      "proc"
     ],
     "classes": [
       "Chat",
@@ -392,17 +393,19 @@
       "Request",
       "SesBus"
     ],
-    "members": 98,
+    "members": 102,
     "writes": [
       "*.eo",
       "*.retire",
       "*.tids",
       "*.tnames",
       "SesBus:main.out",
+      "membrane:*.aborted",
       "membrane:*.mention",
       "membrane:*.queued",
       "membrane:*.retire",
       "membrane:*.stitle",
+      "membrane:*.stop",
       "membrane:*.upd",
       "membrane:*=ChatMessage()",
       "membrane:*=ChatSession()",

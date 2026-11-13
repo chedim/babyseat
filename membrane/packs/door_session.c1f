@@ -3,6 +3,7 @@ IMPORT door 1
 IMPORT chat 1
 IMPORT chat_turn 1
 IMPORT semtext 1
+IMPORT proc 1
 VIRTUAL SesBus
 -- THE SESSION FAMILY: the opencode session API the page and the TUI speak (#1143, swap step 2; docs/cliffvm.md "The session API"). The routes:
 --   GET  /session                          the sessions, oldest first            POST /session {title?}              a new session (200, the session)
@@ -52,6 +53,7 @@ Request.ss_reply getter:
   ELSE WHEN this.ss_route == 'message' or this.ss_route == 'prompt_async': this.sm_reply
   ELSE WHEN this.ss_route == 'msg1': this.m1_reply
   ELSE WHEN this.ss_route == 'event': {'status': 200, 'stream': True}
+  ELSE WHEN this.ss_route == 'abort': this.ab_reply
   ELSE: this.ss_missing
 
 -- ---- the session --------------------------------------------------------------------------------------------------------------------------
@@ -159,7 +161,7 @@ ChatMessage.oc_user_part getter: {'id': 'prt_' + this.oc_b + '010', 'sessionID':
 ChatMessage.oc_usage getter: prop(this.turn_eid, 'usage') or {}
 ChatMessage.oc_tokens getter: {'total': (prop(this.oc_usage, 'input_tokens') or 0) + (prop(this.oc_usage, 'output_tokens') or 0) + (prop(this.oc_usage, 'cache_creation_input_tokens') or 0) + (prop(this.oc_usage, 'cache_read_input_tokens') or 0), 'input': prop(this.oc_usage, 'input_tokens') or 0, 'output': prop(this.oc_usage, 'output_tokens') or 0, 'reasoning': 0, 'cache': {'read': prop(this.oc_usage, 'cache_read_input_tokens') or 0, 'write': prop(this.oc_usage, 'cache_creation_input_tokens') or 0}}
 ChatMessage.oc_error getter: str(this.said or 'the turn failed') if this.tstate == 'error' else None
-ChatMessage.oc_assist_info getter: {'id': this.oc_aid, 'sessionID': this.sid, 'role': 'assistant', 'parentID': this.oc_uid, 'modelID': 'claude', 'providerID': 'membrane', 'mode': 'build', 'agent': 'build', 'path': {'cwd': this.oc_cwd, 'root': this.oc_cwd}, 'cost': prop(this.turn_eid, 'cost') or 0.0, 'tokens': this.oc_tokens, 'time': {'created': this.oc_t0, 'completed': this.oc_t1}, 'madeBy': 'claude-agent', 'finish': 'stop' if this.tstate == 'done' else None, 'error': ({'name': 'Error', 'data': {'message': this.oc_error}} if this.oc_error != None else None)}
+ChatMessage.oc_assist_info getter: {'id': this.oc_aid, 'sessionID': this.sid, 'role': 'assistant', 'parentID': this.oc_uid, 'modelID': 'claude', 'providerID': 'membrane', 'mode': 'build', 'agent': 'build', 'path': {'cwd': this.oc_cwd, 'root': this.oc_cwd}, 'cost': prop(this.turn_eid, 'cost') or 0.0, 'tokens': this.oc_tokens, 'time': {'created': this.oc_t0, 'completed': this.oc_t1}, 'madeBy': 'claude-agent', 'finish': 'stop' if this.tstate == 'done' else None, 'error': ({'name': ('MessageAbortedError' if this.aborted == True else 'Error'), 'data': {'message': this.oc_error}} if this.oc_error != None else None)}
 ChatMessage.oc_tids getter: [replace(k, this.turn_eid + ':tool:', '') for k in this.tool_keys]
 ChatMessage.oc_tool_parts getter: [{'id': 'prt_' + this.oc_b + '2' + tail('0' + str(i), 2), 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'tool', 'callID': this.oc_tids[i], 'tool': this.tool_rows[i]['name'], 'madeBy': 'claude-agent', 'state': {'status': 'completed', 'input': this.tool_rows[i]['input'] or {}, 'title': this.tool_rows[i]['name'], 'time': {'start': this.oc_t0, 'end': this.oc_t1}, 'output': str(this.tool_rows[i]['result'] or '')}, 'time': {'start': this.oc_t0, 'end': this.oc_t1}} for i in this.oc_idx if i < len(this.tool_rows)]
 ChatMessage.oc_text_part getter: [{'id': 'prt_' + this.oc_b + '100', 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'text', 'text': t, 'time': {'start': this.oc_t0, 'end': this.oc_t1}} for t in [this.said] if t != None and t != '']
@@ -276,3 +278,22 @@ Chunk.oc_go on-setter oc-chunk:
     (acc).tids = join(all_ids, ' ')
     (acc).tnames = join(all_names, ' ')
     (acc).eo = (prop(acc, 'eo') == True or this.said != '')
+
+-- ---- POST /session/<sid>/abort ----------------------------------------------------------------------------------------------------------------
+-- the session's running turns (a store answer: the turn's `sid` and `state`) are marked `aborted` and their CLI is stopped (`Command.stop`, the same verb as for any command); the receipt
+-- that follows ends each turn as the chat always ends one, with the text below as its error (`failed`). The reply is `true` (the Python seat's) at once; a session with nothing running is `true` too.
+ChatMessage.failed getter:
+  WHEN this.aborted == True and this.rr != None: 'aborted: the turn was stopped from the page'
+Request.ab_on getter: this.ss_route == 'abort' and this.method == 'POST' and this.ss_view != None
+Request.ab_rows getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND json_extract(body, \'$.props.sid\') = ? AND json_extract(body, \'$.props.state\') = \'running\'', 'membrane::Chat:message:%:turn', this.ss_sid) if this.ab_on else None
+Request.ab_rows on-setter abort-stop:
+  WHEN this.ab_rows != None:
+    FOR r IN this.ab_rows:
+      mid = replace(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), ':turn', '')
+      membrane::Chat:message[mid].aborted = True
+      membrane::Command:chat[mid].stop = {'id': 'abort'}
+    this.ab_done = True
+Request.ab_reply getter:
+  WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.ab_done == True: {'status': 200, 'body': True}
+  ELSE: None

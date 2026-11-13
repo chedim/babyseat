@@ -17,7 +17,7 @@ Everything under "dry run" was observed on `cliffvm` built from this tree, a fre
 | | |
 |---|---|
 | Used routes | **121 method+path pairs in 76 table rows** (section 1); 111 are needed (10 NOT-NEEDED) |
-| PRESENT / PARTIAL / MISSING / NOT-NEEDED | pairs **20 / 16 / 75 / 10**; rows 13 / 13 / 44 / 6 |
+| PRESENT / PARTIAL / MISSING / NOT-NEEDED | pairs **27 / 22 / 62 / 10**; rows 20 / 19 / 31 / 6 (the session API and its streams built in w31: rows 15-25, 30, 31) |
 | UI views | 9 (shell, chat, decisions cockpit, home, voice, 2D field, 3D field, work graph, boot animation), about 15,200 lines of own JS (section 2) |
 | Rounds: server swap | 73-110 (map through a Python bridge, model backends included 14-22); 62-91 for a first swap with the claude CLI as the only model |
 | Rounds: no-history backend behind the same routes | 8-12 |
@@ -57,23 +57,23 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 
 | # | method path | caller | shape pointer | cliffvm | evidence |
 |---|---|---|---|---|---|
-| 15 | GET `/session` (list) | `panel.js:2893` | `PY:4408`; the person's sessions only (JWT) `PY:4274` | MISSING | dry run 404 |
-| 16 | POST `/session` {title} | `panel.js:2921`, HA `conversation.py:81` | `PY:4992` | MISSING | |
-| 17 | GET `/session/{sid}` | `panel.js:2812` | `PY:4458` | MISSING | |
-| 18 | PATCH `/session/{sid}` {title, model} | `panel.js:3047,3067,3428` | `PY:5277-5312` | MISSING | |
-| 19 | DELETE `/session/{sid}` | `panel.js:3054` | `PY:5325` | MISSING | |
-| 20 | GET `/session/status` | `panel.js:3018,3318` | `PY:4442` | MISSING | |
-| 21 | GET `/session/{sid}/message[?limit&before]` | `panel.js:2984,3017,3612` | `PY:4488-4510` (rows `{info, parts}`, order healed) | MISSING | barest equivalent `GET /membrane/chat/messages` has another shape (`P/chat.c1f:43-57`) |
-| 22 | GET `/session/{sid}/message/{mid}` | TUI | `PY:4458-4468` | MISSING | |
-| 23 | POST `/session/{sid}/prompt_async` {agent, parts, voice?, stream?, final?, claudeContinue?, model?} | `panel.js:3348,3362,3380,3404` | `PY:5051`, `_message` `PY:5080+` | MISSING | nearest: `POST /membrane/chat/message` (`P/chat.c1f:4-24`, one chat, claude CLI only) |
-| 24 | POST `/session/{sid}/message` (sync, returns the reply) | HA `conversation.py:114` | `PY:5051` | MISSING | |
-| 25 | POST `/session/{sid}/abort` | `panel.js:3437` | `PY:5054` | MISSING | |
+| 15 | GET `/session` (list) | `panel.js:2893` | `PY:4408`; the person's sessions only (JWT) `PY:4274` | PRESENT | `P/door_session.c1f`; `N/tests/session_1143.rs` (shape against `T/golden/session`) |
+| 16 | POST `/session` {title} | `panel.js:2921`, HA `conversation.py:81` | `PY:4992` | PRESENT | same (a session is a chat: `membrane::Chat:session:<sid>`; no one-chat-per-person rule, no owner) |
+| 17 | GET `/session/{sid}` | `panel.js:2812` | `PY:4458` | PRESENT | same |
+| 18 | PATCH `/session/{sid}` {title, model} | `panel.js:3047,3067,3428` | `PY:5277-5312` | PARTIAL | the title only; the model and agent picks are ignored (claude is the only backend) |
+| 19 | DELETE `/session/{sid}` | `panel.js:3054` | `PY:5325` | PRESENT | same; the session and its messages are retired |
+| 20 | GET `/session/status` | `panel.js:3018,3318` | `PY:4442` | PARTIAL | `{type: idle|busy}` per session from the store; no `elapsed_ms`, no queue depth |
+| 21 | GET `/session/{sid}/message[?limit&before]` | `panel.js:2984,3017,3612` | `PY:4488-4510` (rows `{info, parts}`, order healed) | PRESENT | same, with `?limit` (newest N rows) and `?before=<message id>`; rows `{info, parts}` oldest first; the finished turn lists its tools, then its answer text |
+| 22 | GET `/session/{sid}/message/{mid}` | TUI | `PY:4458-4468` | PRESENT | same (the user row or the assistant row by id) |
+| 23 | POST `/session/{sid}/prompt_async` {agent, parts, voice?, stream?, final?, claudeContinue?, model?} | `panel.js:3348,3362,3380,3404` | `PY:5051`, `_message` `PY:5080+` | PARTIAL | 204 and the turn starts; `agent`, `model`, `voice`, `stream`, `final`, `claudeContinue` are ignored; the text parts are joined |
+| 24 | POST `/session/{sid}/message` (sync, returns the reply) | HA `conversation.py:114` | `PY:5051` | PARTIAL | 200 `{info, parts}` when the turn ends; the same ignored fields |
+| 25 | POST `/session/{sid}/abort` | `panel.js:3437` | `PY:5054` | PRESENT | same: the running turns of the session are stopped (`Command.stop`), they end as `MessageAbortedError` |
 | 26 | GET and POST `/session/{sid}/voice` | `panel.js:3019,3966` | `PY:4476`, `PY:5042` (the vote/rewrite teaching) | MISSING | |
 | 27 | GET `/session/{sid}/predict` | `panel.js:3020` | `PY:4472` (`predict.phantoms`) | MISSING | page tolerates a failure (`.catch`, `panel.js:3020`) |
 | 28 | GET `/session/{sid}/diff`, `/todo`, `/children` | TUI | `PY:4470-4486`, pinned `T/test_server.py:818-826` | MISSING | |
 | 29 | POST `/session/{sid}/init`, `/share`, `/unshare`, `/summarize`, `/permissions` | TUI | `PY:5058-5069` (stubs returning `true`) | MISSING | |
-| 30 | GET `/event` (SSE: `server.connected`, `session.*`, `message.updated`, `message.part.updated`, ...) | `panel.js:3105`, `field3d.js:1716`, `home.js:3593`, TUI | `PY:4398`, `SSEHub` `PY:885`; frames pinned `T/test_server.py:798-815`; per-person filter `PY:4284` | MISSING | cliffvm has an event stream of its own kind: `GET /membrane/chat/message/<id>/events` (`P/chat.c1f:25-42`, `docs/cliffvm.md` "The event stream") |
-| 31 | GET `/global/event` (the same, wrapped `{directory, project, payload}`) | TUI | `PY:4400`; `T/test_server.py:798` | MISSING | |
+| 30 | GET `/event` (SSE: `server.connected`, `session.*`, `message.updated`, `message.part.updated`, ...) | `panel.js:3105`, `field3d.js:1716`, `home.js:3593`, TUI | `PY:4398`, `SSEHub` `PY:885`; frames pinned `T/test_server.py:798-815`; per-person filter `PY:4284` | PARTIAL | the events the chat view uses (below); no `session.diff`, no keep-alive ping, no step parts, no `membrane.*` events |
+| 31 | GET `/global/event` (the same, wrapped `{directory, project, payload}`) | TUI | `PY:4400`; `T/test_server.py:798` | PARTIAL | same, wrapped `{directory, project, payload}` |
 
 ### 1.3 opencode boot probes and stubs (the TUI; also the Python-seat reads the HA coordinator makes)
 
@@ -163,14 +163,14 @@ Rows 76 (a row may hold several method+path pairs: row 39 has 6, row 35 has 5). 
 
 | status | rows | method+path pairs |
 |---|---|---|
-| PRESENT | 13 | 20 |
-| PARTIAL | 13 | 16 |
-| MISSING | 44 | 75 |
+| PRESENT | 20 | 27 |
+| PARTIAL | 19 | 22 |
+| MISSING | 31 | 62 |
 | NOT-NEEDED | 6 | 10 |
 
-By area (rows P/PA/M/N): 1.1 shell 6/2/3/3; 1.2 session API and events 0/0/17/0; 1.3 opencode probes 1/0/8/0; 1.4 state, models, options 0/6/5/0;
+By area (rows P/PA/M/N): 1.1 shell 6/2/3/3; 1.2 session API and events 7/6/4/0; 1.3 opencode probes 1/0/8/0; 1.4 state, models, options 0/6/5/0;
 1.5 decisions 5/3/1/0; 1.6 field map 0/0/7/1; 1.7 voice, feedback, self 1/2/1/2; 1.8 HA 0/0/1/0; 1.9 :11500 0/0/1/0.
-Of the 20 PRESENT pairs, every one has a pack spec or a Rust test, but none has a contract test against the Python response (section 7).
+Of the 27 PRESENT pairs, every one has a pack spec or a Rust test; only the session routes and their event streams have a contract test against the Python response (`tests/golden/session`, section 7); the rest are still to record.
 
 ## 2. UI inventory
 
