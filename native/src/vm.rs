@@ -45,7 +45,15 @@ pub struct Ent {
     pub cls: String,
     pub props: Map<String, J>,
     pub pos: Option<Vec<f64>>,
+    /// the touch clock: the value of `Core::clock` at the entity's last read, write or load (RAM only, never stored; `.touched`)
+    pub touched: std::cell::Cell<u64>,
 }
+
+/// How a class is stored (docs/cliffvm.md, "Storage modes"): its OWN class (the eid's), declared by the pack that owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Storage { Lazy, Virtual, Resident }
+/// class -> storage mode, ONE table: `Fields::compose` writes it, the core reads it (`.pinned`).
+pub type StorageMap = std::sync::Arc<std::sync::RwLock<HashMap<String, Storage>>>;
 
 /// The class names of a `parents` value (`cls:<name>` entries, the name after the last colon): a list, or one entry.
 pub fn parent_names(parents: &J) -> Vec<String> {
@@ -139,6 +147,12 @@ struct Cur {
 
 /// The VM-provided, read-only property of every entity: the epoch time of its last write (the host stamps it with the write, in the same row; `Core::updated`).
 pub const UPDATED: &str = "updated";
+/// The VM-provided, read-only property of every loaded entity: its place in the TOUCH CLOCK (a counter the core bumps at every read, write and load; RAM only,
+/// never stored). The smaller it is, the colder the entity. Reading it (or `updated`, `eid`, `cls`, `pinned`) is no touch. EXCEPTION: an entity that STORES a property
+/// named `touched` (the Python-era `Turn.touched`) reads its own: the clock does not shadow a stored value.
+pub const TOUCHED: &str = "touched";
+/// The VM-provided, read-only property that says why an entity cannot be unloaded: False when it can, else the reason (text, truthy).
+pub const PINNED: &str = "pinned";
 
 /// A stored row as the restore brings it back: its own class, the properties the engine takes back (a getter's value is computed again), its `updated`.
 /// How many times one evaluation is done again after it loaded stored entities it looked for (a chain of references loads one link a time).
@@ -161,6 +175,9 @@ pub struct Core {
     pub last_now: f64,
     /// eid -> the time of its last write: what `<entity>.updated` reads (0 when it has none). Set by the host with each write; writing it is no write (no reaction, no recompute)
     pub updated: HashMap<String, f64>,
+    /// the touch clock's counter (see `Ent::touched`) and the classes' storage modes (shared with `Fields`)
+    pub clock: std::cell::Cell<u64>,
+    pub storage: StorageMap,
     /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
     /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
     pub why: std::collections::BTreeMap<(String, String), String>,
@@ -236,10 +253,12 @@ impl<'a> expr::World for View<'a> {
             "cls" => V::Str(match e.class_names().into_iter().next() { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }),
             "position" => e.pos.as_ref().map(|p| V::List(p.iter().map(|x| V::Float(*x)).collect())).unwrap_or(V::None),
             UPDATED => V::Float(self.core.updated.get(eid).copied().unwrap_or(0.0)),   // provided by the VM: shadows a stored property of that name
-            _ => match e.props.get(attr) {
+            TOUCHED if !e.props.contains_key(TOUCHED) => V::Int(e.touched.get() as i64),   // likewise (reading it is no touch), unless the entity stores a property of that name (the Python-era `Turn.touched`): its own wins
+            PINNED => match self.core.pinned_reason(eid) { Some(r) => V::Str(r), None => V::Bool(false) },
+            _ => { e.touched.set(self.core.bump()); match e.props.get(attr) {
                 Some(j) if !j.is_null() => expr::from_json(j),
                 _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or(V::None),
-            },
+            } },
         }
     }
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> { self.core.refs(eid, prop) }
@@ -311,7 +330,7 @@ impl Core {
     pub fn new() -> Self {
         Core {
             why: Default::default(), locals: Default::default(),
-            docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
+            docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
@@ -360,7 +379,8 @@ impl Core {
         self.seen.insert(eid.clone(), now);
         let old = self.docs.get(&eid).map(|e| e.props.clone());
         self.reindex_entity(&eid, old.as_ref(), Some(&props));
-        self.docs.insert(eid, Ent { cls, props, pos });
+        let touched = std::cell::Cell::new(self.bump());
+        self.docs.insert(eid, Ent { cls, props, pos, touched });
     }
 
     /// The live store's content for an entity, with no write behind it (a sweep re-reads what was
@@ -375,7 +395,8 @@ impl Core {
         match (self.docs.get_mut(&eid), props) {
             (Some(e), None) => { e.cls = cls; if !keep_pos { e.pos = pos; } }   // positions only (an `around` sweep)
             (Some(e), Some(props)) if keep_pos => { e.cls = cls; e.props = props; }
-            (_, props) => { self.docs.insert(eid, Ent { cls, props: props.unwrap_or_default(), pos: if keep_pos { None } else { pos } }); }
+            (_, props) => { let touched = std::cell::Cell::new(self.bump());
+                self.docs.insert(eid, Ent { cls, props: props.unwrap_or_default(), pos: if keep_pos { None } else { pos }, touched }); }
         }
     }
 
@@ -419,6 +440,45 @@ impl Core {
         if let Some(i) = self.at.remove(eid) { self.order[i] = None; }
         self.updated.remove(eid);
         if let Some(e) = self.docs.remove(eid) { self.reindex_entity(eid, Some(&e.props), None); }
+        // the load order keeps a hole per removed entity: closed when they are more than the live ones, so load/unload cycles do not grow it (amortised O(1))
+        if self.order.len() > 64 && self.order.len() > 2 * self.at.len() {
+            self.order.retain(|o| o.is_some());
+            for (i, o) in self.order.iter().enumerate() { if let Some(e) = o { self.at.insert(e.clone(), i); } }
+        }
+    }
+
+    /// The next place in the touch clock.
+    pub fn bump(&self) -> u64 { let t = self.clock.get() + 1; self.clock.set(t); t }
+
+    /// Why this loaded entity cannot be unloaded, or None when it can: a VIRTUAL class (RAM only: no row to come back to), a RESIDENT class (always loaded: packs,
+    /// drivers, whatever a pack lists whole), a running effect (`running` is set while a Command is in flight). What a LIVE virtual entity holds by `$ref` is the host's
+    /// check (`Host::unload_entity`): it reads the virtual entities, which the core's table does not index.
+    pub fn pinned_reason(&self, eid: &str) -> Option<String> {
+        let e = self.docs.get(eid)?;
+        match self.storage.read().unwrap_or_else(|x| x.into_inner()).get(&e.cls).copied().unwrap_or(Storage::Lazy) {
+            Storage::Virtual => return Some(format!("pinned: class {} is virtual (RAM only, no stored row to load it back from)", e.cls)),
+            Storage::Resident => return Some(format!("pinned: class {} is resident (always loaded)", e.cls)),
+            Storage::Lazy => {}
+        }
+        if e.props.get("running").map_or(false, |v| !v.is_null()) { return Some("pinned: running (an effect is in flight)".into()); }
+        None
+    }
+
+    /// UNLOAD a loaded entity: it leaves the engine (its properties, its place in the load order, what the engine remembers about its last evaluations) and is noted in
+    /// `unloaded` with its class, so the next reference loads it from its stored row. No value changes and nothing is written (the host's store is written through, so
+    /// the row is already what the entity was). -> whether it was loaded.
+    pub fn unload(&mut self, eid: &str) -> bool {
+        let Some(cls) = self.docs.get(eid).map(|e| e.cls.clone()) else { return false };
+        self.remove(eid);
+        self.seen.remove(eid);
+        self.state.remove(eid);
+        let lo = (eid.to_string(), String::new());
+        let keys: Vec<(String, String)> = self.why.range(lo.clone()..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
+        for k in keys { self.why.remove(&k); }
+        let keys: Vec<(String, String)> = self.locals.range(lo..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
+        for k in keys { self.locals.remove(&k); }
+        self.unloaded.insert(eid.to_string(), cls);
+        true
     }
 
     fn eids(&self) -> Vec<String> {
@@ -437,6 +497,7 @@ impl Core {
                 self.load(w.eid.clone(), cls, props, pos, now);
             }
         } else if self.docs.contains_key(&w.eid) {
+            if let Some(e) = self.docs.get(&w.eid) { e.touched.set(self.bump()); }   // a write is a touch
             if w.prop != "position" {
                 let old = self.docs.get(&w.eid).and_then(|e| e.props.get(&w.prop).cloned());
                 self.reindex(&w.eid, &w.prop, old.as_ref(), if w.new.is_null() { None } else { Some(&w.new) });
@@ -574,7 +635,8 @@ impl Core {
             // every entity of a class (its eid class, or a kind in its `parents` list; not its ancestors'), in id order, as entities; an entity with `scratch = true` (the scaffolding of
             // one door call, e.g. the clifflet's own packs) is not listed: a block sees the field as it was, not its own scaffolding
             let Some(V::Str(c)) = a.first() else { return Some(Err("instances(class): a class name".into())) };
-            let mut ids: Vec<&String> = self.docs.iter().filter(|(_, e)| (e.cls == *c || e.in_classes(c)) && e.props.get("scratch") != Some(&serde_json::Value::Bool(true))).map(|(k, _)| k).collect();
+            // `Entity` is the root every entity has: every LOADED entity (what the unload policy picks its coldest from)
+            let mut ids: Vec<&String> = self.docs.iter().filter(|(_, e)| (c.eq_ignore_ascii_case("Entity") || e.cls == *c || e.in_classes(c)) && e.props.get("scratch") != Some(&serde_json::Value::Bool(true))).map(|(k, _)| k).collect();
             ids.sort();
             return Some(Ok(V::List(ids.into_iter().map(|k| V::Ent(k.clone())).collect())));
         }

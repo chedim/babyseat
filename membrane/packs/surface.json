@@ -89,7 +89,8 @@
     ],
     "members": 4,
     "writes": [
-      "Pack:door_tools.privileged"
+      "Pack:door_tools.privileged",
+      "Pack:unload.privileged"
     ],
     "claims": [],
     "boot_facts": [

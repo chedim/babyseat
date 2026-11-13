@@ -313,6 +313,8 @@ pub struct Fields {
     pub out: Vec<J>,
     /// entities a write of `retire = true` asked to remove (any writer): the host removes each (the engine's entity, its stored row) after it drains `out`
     pub retired: Vec<String>,
+    /// entities a write of `unload = true` asked to take out of the engine (any writer): the host checks each against its pins and unloads it (`Host::unload_entity`)
+    pub unload_asked: Vec<String>,
     /// the host takes the door's requests itself (to journal them, then `arrive`): a round leaves them in the store
     pub inbound_by_host: bool,
     /// getters declared in cliffhanger, their levels, and their inputs: (eid, field) read -> instances (eid, getter)
@@ -345,15 +347,14 @@ pub struct Fields {
     /// skipped writes (eid, prop, pack, setter) -> the pack that overrode it, as `why_layer` tells
     skipped: std::collections::BTreeMap<(String, String, String, String), String>,
     /// class -> its storage mode, from the active owner packs' VIRTUAL / RESIDENT header lines (`compose`)
-    storage: std::collections::HashMap<String, Storage>,
+    storage: crate::vm::StorageMap,
     /// set while the setters of a write on a VIRTUAL entity run: what they write to a stored entity is marked `virt` in `out`, so the host journals it as an
     /// outside write (the virtual trigger is not in the journal, a replay could not derive it again)
     trigger_virtual: bool,
 }
 
 /// How a class is stored (docs/cliffvm.md, "Storage modes"): its OWN class (the eid's), declared by the pack that owns it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Storage { Lazy, Virtual, Resident }
+pub use crate::vm::Storage;
 
 /// A storage line of pack `n` (`VIRTUAL X` / `RESIDENT X`) that the pack may not make: the class belongs to another pack, which alone declares its mode.
 /// The text says what to do, for a pack written by a model.
@@ -380,11 +381,13 @@ impl Fields {
         o
     }
     /// The classes declared with this storage mode.
-    pub fn classes_with(&self, s: Storage) -> Vec<String> { let mut v: Vec<String> = self.storage.iter().filter(|(_, m)| **m == s).map(|(c, _)| c.clone()).collect(); v.sort(); v }
+    pub fn classes_with(&self, s: Storage) -> Vec<String> { let mut v: Vec<String> = self.storage.read().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, m)| **m == s).map(|(c, _)| c.clone()).collect(); v.sort(); v }
     /// The storage mode of a class (its own class, the eid's): what its OWNER pack declared; Lazy when none did.
-    pub fn storage_of(&self, cls: &str) -> Storage { self.storage.get(cls).copied().unwrap_or(Storage::Lazy) }
+    pub fn storage_of(&self, cls: &str) -> Storage { self.storage.read().unwrap_or_else(|e| e.into_inner()).get(cls).copied().unwrap_or(Storage::Lazy) }
+    /// The class table the engine's core reads too (`Core::storage`): one shared map, written by `compose`.
+    pub fn storage_handle(&self) -> crate::vm::StorageMap { self.storage.clone() }
     pub fn goalgraph() -> Self {
-        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
+        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], unload_asked: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
@@ -428,6 +431,8 @@ impl Fields {
     /// Whether the named pack is loaded and ACTIVE (its imports are met, no composition error against it).
     pub fn pack_active(&self, name: &str) -> bool { self.packs.contains_key(name) && !self.pack_errors.contains_key(name) }
     pub fn has_pack(&self, name: &str) -> bool { self.packs.contains_key(name) }
+    /// Whether an active pack owns (declares) the class.
+    pub fn owns_class(&self, cls: &str) -> bool { self.owner.contains_key(cls) }
 
     pub fn remove_pack(&mut self, name: &str) -> bool {
         let had = self.packs.remove(name).is_some();
@@ -568,8 +573,9 @@ impl Fields {
             getters.push(g);
         }
         self.imports = active.iter().map(|n| (n.clone(), self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect())).collect();
-        self.storage = HashMap::new();
-        for n in &active { for c in &self.packs[n].virtuals { self.storage.insert(c.clone(), Storage::Virtual); } for c in &self.packs[n].residents { self.storage.insert(c.clone(), Storage::Resident); } }
+        let mut modes: HashMap<String, Storage> = HashMap::new();
+        for n in &active { for c in &self.packs[n].virtuals { modes.insert(c.clone(), Storage::Virtual); } for c in &self.packs[n].residents { modes.insert(c.clone(), Storage::Resident); } }
+        *self.storage.write().unwrap_or_else(|e| e.into_inner()) = modes;
         self.owner = owner;
         self.setters = setters;
         self.set_getters(getters);
@@ -1184,6 +1190,20 @@ impl Fields {
         self.run(core, host, VecDeque::new(), now, seq);
     }
 
+    /// Take a loaded entity out of the engine (`Core::unload`) and forget what the field remembers of it: its place among the known, its dirty getters, what its own getters
+    /// read, its layer notes. What OTHER entities' getters read of it stays: their cached values stand (an unload changes no value), and when one recomputes and reads it,
+    /// the read loads it again (`Core::fault_now`); when it loads, the readers of its fields recompute as they do for any arrival (`complete_arrivals`).
+    pub fn unload(&mut self, core: &mut Core, eid: &str) -> bool {
+        if !core.unload(eid) { return false; }
+        self.known.remove(eid);
+        self.dirty.retain(|(_, e, _)| e != eid);
+        self.trip_only.retain(|(e, _)| e != eid);
+        self.reads.retain(|(e, _), _| e != eid);
+        for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
+        self.layer_of.retain(|(e, _), _| e != eid);
+        true
+    }
+
     pub fn react(&mut self, core: &mut Core, host: &dyn Host, w: Write, now: f64, seq: &mut i64) {
         self.new_round();
         self.visited.insert((w.eid.clone(), w.prop.clone()));   // the outside write starts the chain: returning to it is a loop
@@ -1380,6 +1400,10 @@ impl Fields {
                 self.receipt(core, eid, name, format!("refused: `{UPDATED_PROP}` is provided by the VM (the time of the entity's last write) and is read-only: no setter writes it"), J::Null, seq, now);
                 continue;
             }
+            if prop == crate::vm::PINNED {
+                self.receipt(core, eid, name, format!("refused: `{prop}` is provided by the VM (the reason an entity cannot be unloaded) and is read-only: no setter writes it"), J::Null, seq, now);
+                continue;
+            }
             let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
             if let Some(k) = claim { self.claimed.insert(k, (pack.to_string(), name.to_string())); }   // a write that was made: it is the first
             if target == LLM_CALL { self.calls.push(v); continue; }
@@ -1480,6 +1504,12 @@ impl Fields {
     fn driver_effect(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, now: f64, seq: &mut i64) {
         // `retire = true` on any entity asks the host to remove it (docs/cliffvm.md, "Retiring an entity")
         if w.prop == "retire" && w.new == json!(true) && !self.retired.contains(&w.eid) { self.retired.push(w.eid.clone()); }
+        // `unload = true` on any entity asks the host to take it out of the engine, its row kept (docs/cliffvm.md, "Unload"). The slot is consumed like a verb's, and the
+        // host never stores it, so the entity is the same after a reload
+        if w.prop == "unload" && w.new == json!(true) && !self.unload_asked.contains(&w.eid) {
+            self.unload_asked.push(w.eid.clone());
+            self.emit_unchecked(core, work, &w.eid, "unload", J::Null, "direct:consumed", seq, now);
+        }
         #[cfg(feature = "store")]
         {
             if w.new.is_null() || w.new == json!("") { return; }

@@ -1,0 +1,16 @@
+PACK unload 1
+IMPORT boot 1
+RESIDENT Mem
+-- EAGER UNLOAD UNDER MEMORY PRESSURE (#1143, docs/cliffvm.md "Unload"): the POLICY. The host's sensor writes `Mem:host` (`rss`, `budget` in bytes, `level` = ok | soft | hard) at every
+-- tick (an outside write, never journalled); a level that is not `ok` runs ONE PASS: the `unload_batch` coldest loaded entities are asked to leave the engine by the one
+-- primitive, `unload = true` (their rows stay; a reference loads them back; the engine refuses a pinned one with a receipt on it). The boot facts are the operator's, none has a
+-- default: `memory_budget_mb` (unset: the level is always ok), `unload_soft` and `unload_hard` (fractions of the budget; hard is the budget itself when unset, there is
+-- no soft level when unset), `unload_batch` (unset: no unloading).
+-- Coldest = the smallest `.touched` (the engine's touch clock: every read, write and load of an entity bumps it; reading `.touched` or `.pinned` bumps nothing). `.pinned` is False
+-- for an entity of a lazy class with no running effect (else the reason, as text): the classes a pack lists whole (resident) and the virtual ones are never candidates.
+Mem.batch getter: ([b.unload_batch for b in instances('Boot') if b.unload_batch != None] or [0])[0]
+
+Mem.level on-setter unload-coldest:
+  WHEN this.level != 'ok' and this.batch > 0:
+    FOR c IN head(sort_by([{'eid': x.eid, 't': x.touched} for x in instances('Entity') if not x.pinned], 't'), this.batch):
+      (c['eid']).unload = True

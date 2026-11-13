@@ -89,6 +89,11 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
     }
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "effect_workers").and_then(|(_, v)| v.as_u64()) { h.set_effect_workers(n.max(1) as usize); }   // the cap on Command / File / Fetch effects running at once (default 4)
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "warm_rows").and_then(|(_, v)| v.as_u64()) { h.set_warm_rows(n as usize); }   // how many lazy rows the warm boot loads in the background (default host::DEFAULT_WARM_ROWS; 0 = none)
+    // the memory sensor (docs/cliffvm.md, "Unload"): the budget and the fractions are the operator's boot facts, none has a default; the policy pack reads `unload_batch` itself
+    let fact = |n: &str| r.facts.iter().find(|(k, _)| k == n).map(|(_, v)| v);
+    h.set_memory(host::MemoryConfig { budget_mb: fact("memory_budget_mb").and_then(|v| v.as_u64()), soft: fact("unload_soft").and_then(|v| v.as_f64()), hard: fact("unload_hard").and_then(|v| v.as_f64()) });
+    // TEST ONLY: MEMBRANE_TEST_RSS names a file that holds the resident size in bytes; the sensor reads it at every tick instead of the process's own (unreadable: the real one)
+    if let Ok(path) = std::env::var("MEMBRANE_TEST_RSS") { h.set_rss_reading(Box::new(move || std::fs::read_to_string(&path).ok().and_then(|t| t.trim().parse().ok()).or_else(host::process_rss))); }
     h.load_stored_packs();                       // the model's own packs, written in an earlier run (Pack:<name>.text)
     h.load_stored_entities();                    // then every other entity the model wrote (banner lines, trips, messages), minus what a getter computed
     h.rebuild();

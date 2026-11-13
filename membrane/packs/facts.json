@@ -109,6 +109,22 @@
    "wired": false,
    "why": "the barest seat's request collector (membrane/apps/barest.c1f/collector.c1f): seconds an ANSWERED door request is kept before it is retired (deleted); default 600 in the pack (operator-approved 2026-11-13), 0 = retired as soon as it is answered; told by `--fact request_keep_s=<n>`"
   },
+  "memory_budget_mb": {
+   "wired": false,
+   "why": "the memory budget of the seat in MB (native/src/host.rs `sense_memory`; NO default): the host's sensor writes Mem:host {rss, budget, level} at every tick; unset = the level is always ok and nothing is unloaded; told by `--fact memory_budget_mb=<n>`"
+  },
+  "unload_soft": {
+   "wired": false,
+   "why": "the soft line as a fraction of memory_budget_mb (NO default): the level is `soft` from this fraction; unset = there is no soft level (below the hard line is ok); told by `--fact unload_soft=<f>`"
+  },
+  "unload_hard": {
+   "wired": false,
+   "why": "the hard line as a fraction of memory_budget_mb (NO number of its own): the level is `hard` from this fraction; unset = the budget itself (1.0); told by `--fact unload_hard=<f>`"
+  },
+  "unload_batch": {
+   "wired": false,
+   "why": "how many of the coldest entities one unload pass asks to leave the engine (membrane/apps/barest.c1f/unload.c1f; NO default): unset = no unloading; a pass runs at every tick while the level is not ok; told by `--fact unload_batch=<n>`"
+  },
   "effect_workers": {
    "wired": false,
    "why": "the cap on Command / File / Fetch effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"

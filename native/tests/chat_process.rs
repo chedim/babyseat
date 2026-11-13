@@ -785,8 +785,8 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
     assert!(e && t.contains("budget exceeded"), "{t}");
     assert_eq!(call(port, "entity_read", json!({"spec": "Note:r3", "prop": "n"})).0, "3", "the seat is up");
-    // scratch entities and packs do not accumulate: the same count after 20 calls of every shape
-    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "1 entity(ies)").then_some(()));
+    // scratch entities and packs do not accumulate (the two Pack entities are the boot's grants: door_tools and unload): the same count after 20 calls of every shape
+    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "2 entity(ies)").then_some(()));
     cliff(port, "Note:acc.n = 0");
     wait("settled", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)").then_some(()));
     let before = count_all(port);
@@ -797,10 +797,10 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     let (mut a, mut b, mut c) = (String::new(), String::new(), String::new());
     while t0.elapsed() < Duration::from_secs(30) {
         (a, b, c) = (count_all(port), call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0, call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0);
-        if a == before && b == "0 entity(ies)" && c == "1 entity(ies)" { break; }
+        if a == before && b == "0 entity(ies)" && c == "2 entity(ies)" { break; }
         std::thread::sleep(Duration::from_millis(300));
     }
-    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "1 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
+    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "2 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
     assert!(terminate(&mut run));
 }
 

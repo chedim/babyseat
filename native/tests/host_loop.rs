@@ -223,8 +223,8 @@ fn the_boot_pack_grants_the_tools_pack_at_start_and_a_replay_ends_in_the_same_pr
     let j = h.journal();
     // Boot is VIRTUAL (not journalled), so the grant its `started` setter makes is not derivable by a replay: it is journalled as an OUTSIDE write (`host:virtual:<setter>`)
     let grants: Vec<_> = j.iter().filter(|l| matches!(l, Line::Write { eid, .. } if eid.starts_with("Pack:"))).collect();
-    assert_eq!(grants.len(), 1, "{grants:?}");
-    assert_eq!(grants[0].writer(), "host:virtual:grant-door-tools");
+    assert_eq!(grants.len(), 2, "the tools pack and the unload pack (the barest app's policy): {grants:?}");
+    assert!(grants.iter().all(|g| g.writer() == "host:virtual:grant-door-tools"));
     assert!(!j.iter().any(|l| matches!(l, Line::Born { cls, .. } if cls == "Boot")) && !j.iter().any(|l| matches!(l, Line::Write { eid, .. } if eid.starts_with("Boot:"))), "nothing about Boot is journalled: {j:?}");
     let r = fresh();
     r.replay(&j);
