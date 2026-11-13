@@ -253,15 +253,6 @@ def _harvest(text: str) -> dict:
     add("symbols", syms)
     return out
 
-def entities_of(ex) -> dict:
-    """A cell's harvested entity tags ({} for legacy rows / misses)."""
-    extra = getattr(ex, "extra", None)
-    if isinstance(extra, dict):
-        e = extra.get("entities")
-        if isinstance(e, dict):
-            return e
-    return {}
-
 def query_entities(text: str) -> list[str]:
     """Entity keys a QUERY mentions (same extractor, query side)."""
     return [f"{kind}:{v.lower()}"

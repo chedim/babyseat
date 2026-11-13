@@ -1305,14 +1305,6 @@ def _lane_of(agent: str | None) -> str:
     return "listener"
 
 
-def _json_args(raw) -> dict:
-    try:
-        a = json.loads(raw or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return a if isinstance(a, dict) else {}
-
-
 def _lane_tools(lane: str) -> frozenset:
     if _lane_gate_off():
         return _mcp_names()

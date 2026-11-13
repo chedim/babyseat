@@ -107,11 +107,6 @@ def event_vecs(field, items) -> dict:
     return out
 
 
-def event_vec(field, key: str, ev: dict):
-    """One event's whole vector (event_vecs for one), or None."""
-    return event_vecs(field, [(key, ev)]).get(key)
-
-
 def specifics(field, text: str) -> set:
     return {e for e, _ in E.mentions_of(text or "", field.graph_fn(), field.phrases)
             if E.is_specific(e)}

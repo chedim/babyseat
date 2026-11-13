@@ -146,20 +146,6 @@ def operator_on_message(est, text: str, vec=None, embedder=None,
 
 
 # ---- the watch ops sweep ----------------------------------------------------
-def _props_of(est, eid: str) -> dict:
-    ent = est.docs.get(eid) or (est.find(eid) if hasattr(est, "find")
-                               else None)
-    if ent is None:
-        # the eid may live under the full namespace form
-        for k in list(est.docs):
-            if k.endswith(eid):
-                ent = est.docs[k]
-                break
-    if ent is None:
-        return {}
-    return ent.properties or {}
-
-
 def _entity_positions(est) -> dict:
     """eid -> unit position for every live positioned entity (one
     snapshot per sweep)."""
@@ -183,10 +169,6 @@ def _dist(a: np.ndarray, b: np.ndarray) -> float:
     if an < 1e-12 or bn < 1e-12:
         return 1.0
     return float(1.0 - float(np.dot(a, b) / (an * bn)))
-
-
-def _group_distance(entity_pos, rel_pos) -> float:
-    return _dist(entity_pos, rel_pos)
 
 
 def _rel_eid(est, rel: str, positions: dict) -> str | None:

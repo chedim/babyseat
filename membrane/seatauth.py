@@ -188,14 +188,6 @@ def proxy_is_write(method: str, path: str) -> bool:
     return True
 
 
-def serve_is_write(method: str, path: str) -> bool:
-    """:4096 -- every non-GET/HEAD (sessions, prompts, models, the toybox,
-    the seat's controls, voice, HA's token, /tui/*) but the UI's login pair."""
-    if method in ("GET", "HEAD"):
-        return False
-    return path not in SERVE_OPEN_POSTS
-
-
 SERVE_OPEN_GETS = ("/", "/membrane", "/index.html", "/favicon.ico", "/global/health", "/ui/conf")
 
 

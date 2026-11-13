@@ -630,10 +630,6 @@ class PeerSubstrate:
         return False
 
 
-def _timedelta(s: float):
-    from datetime import timedelta
-    return timedelta(seconds=s)
-
 # ---- the LAN lane (zeroconf/mDNS, the operator's 2026-10-02 ask) ----
 SERVICE_TYPE = "_membrane-proxy._tcp.local."
 MDNS_PEER_TTL_S = 60.0      # a browse entry's staleness cap
@@ -722,10 +718,6 @@ class MdnsAnnouncer:
                 self.zc.unregister_service(self._info)
         except Exception:
             pass
-
-
-def _int_ttl() -> int:
-    return 120
 
 
 def mdns_peers(zc_impl=None, now: float | None = None) -> list[dict]:

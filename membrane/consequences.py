@@ -181,10 +181,6 @@ def _later(srv, rec: dict, hi: float, pend: list) -> int:
     return n
 
 
-def settle_line(srv, rec: dict, h: float, now: float, pend: list) -> str:
-    return settle_eval(srv, rec, h, now, pend)["line"]
-
-
 def settle_eval(srv, rec: dict, h: float, now: float, pend: list) -> dict:
     """The look-back as data (outcome learning's reward reads these) and as
     the one line the seat reads: {line, h, gone, moved, held, fulfilled,
