@@ -364,6 +364,7 @@ pub fn infer_expr(n: &Node, env: &Env) -> Ty {
             Ty::list(infer_expr(elt, &inner))
         }
         Node::Call(f, args) => call_ty(f, args, env),
+        Node::Ctor(c, args) => { for (_, a) in args { infer_expr(a, env); } Ty::entity(c) }
         Node::Ent(parts) => {
             // the class is the first segment after a namespace; a key that may be null (or is not an int or text) makes the id null
             let mut nullable = false;
@@ -613,6 +614,7 @@ pub fn infer_packs(texts: &[&str]) -> Result<Vec<(String, PackReport)>, String> 
                     }
                     let t = match parse(rhs) { Ok(n) => infer_expr(&n, &env), Err(e) => { sink.borrow_mut().push(format!("not an expression: {e}")); Ty::any() } };
                     if tgt == crate::fields::LLM_CALL { continue; }
+                    if field == crate::syntax::CTOR { continue; }   // a constructor writes no property: its arguments are typed above
                     let c = target_class(tgt, &st.cls, &env);
                     let e = writes.entry(format!("{}.{}", c, field)).or_insert_with(Ty::never);
                     *e = e.join(&t);

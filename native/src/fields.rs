@@ -822,6 +822,10 @@ impl Fields {
             }
             k += 1;
             if target == crate::syntax::END { continue; }
+            if prop == crate::syntax::CTOR {
+                self.construct(core, work, eid, name, pack, target, value, &binds, now, seq);
+                continue;
+            }
             let (vars, extra) = scope(eid, &binds, now);
             let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
             if target == LLM_CALL { self.calls.push(v); continue; }
@@ -847,6 +851,48 @@ impl Fields {
             }
         }
         Ok(())
+    }
+
+    /// `<target> = Class(name: value, ...)`: the target is the identity. Created by the creation path of a write (the class must be one
+    /// the pack owns or imports: refused as a receipt otherwise), its arguments set as its first properties; idempotent (an entity that
+    /// exists is not created again, a property that has a value keeps it). A target whose eid prefix is not the class (the class cannot
+    /// be read from the eid, e.g. `membrane::Config:...` built as `Voice(...)`) is stamped `parents: ['cls:<class>']`, the ISA
+    /// kind-mirror; the entity is the class its eid names (`Config`), as the Python seat made it.
+    fn construct(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, name: &str, pack: &str, target: &str, value: &str,
+                 binds: &[(String, crate::vm::Item)], now: f64, seq: &mut i64) {
+        let (vars, extra) = scope(eid, binds, now);
+        let tgt = match core.eval_target(target, &vars, &extra) {
+            Ok(t) => t,
+            Err(why) => { self.receipt(core, eid, name, format!("error: constructor {} = ...: {}; nothing was created", target, why.strip_prefix("error: ").unwrap_or(&why)), J::Null, seq, now); return; }
+        };
+        let (cls, args) = match core.eval_ctor(value, &vars, &extra) {
+            Ok(x) => x,
+            Err(why) => { self.receipt(core, eid, name, format!("error: constructor {}: {}; nothing was created", tgt, why), J::Null, seq, now); return; }
+        };
+        if self.owner.get(&cls).is_none() {
+            self.receipt(core, eid, name, format!("error: constructor {}({}): no pack owns the class {} (a pack owns a class it declares a getter or a setter on)", cls, tgt, cls), J::Null, seq, now);
+            return;
+        }
+        if let Err(why) = self.may_write(pack, &cls) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+        let mut args = args;
+        if !core.docs.contains_key(&tgt) {
+            // the class the eid names: after a namespace, up to the next colon
+            let tail = tgt.rsplit_once("::").map_or(tgt.as_str(), |(_, r)| r);
+            let own = tail.split(':').next().unwrap_or("").to_string();
+            if let Err(why) = self.may_write(pack, &own) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+            if own != cls && !args.iter().any(|(k, _)| k == "parents") { args.push(("parents".into(), json!([format!("cls:{}", cls.to_lowercase())]))); }
+            core.load(tgt.clone(), own.clone(), Default::default(), None, now);
+            self.out.push(json!({"eid": tgt, "born": own}));
+            self.birth(core, &tgt, now, seq);
+        } else {
+            let own = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
+            if let Err(why) = self.may_write(pack, &own) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+        }
+        for (prop, v) in args {
+            if v.is_null() { continue; }
+            if core.docs.get(&tgt).and_then(|e| e.props.get(&prop)).map_or(false, |old| !old.is_null()) { continue; }   // only what is unset
+            self.emit(core, work, &tgt, &prop, v, name, seq, now);
+        }
     }
 
     /// A write of a driver verb (File.write, Command.run, ...: drivers.rs) runs its effect off the engine; the verb's

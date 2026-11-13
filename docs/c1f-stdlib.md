@@ -92,6 +92,24 @@ read as an entity.
   `<Class>:<key>` of a class the pack owns or imports). Inference: a literal is `Entity(Class)` (the first segment after a
   namespace), nullable when a key may be null or is not an int or text.
 
+## Constructors (entity classes only)
+A call to a class name with NAMED arguments, on the right of a write whose left is an entity, makes that entity:
+`membrane::Config:voice:in[slug] = Voice(kind: 'in', person: p)`, `membrane::Chat:message[id]:response = Response(text: t)`.
+- **The identity comes from the target** (the left side). There is no `key` argument and no declared identity: the same class is
+  made at any eid the target names, and the same target is the same entity.
+- Creation is a write's creation path with a write's rules: the class must be one the pack OWNS (declares a getter or setter on) or
+  IMPORTS; otherwise nothing is created and a receipt says `error: constructor ...` (a reasoned refusal, never a crash). A null or
+  bad `[key]` creates nothing and the receipt carries its reason. The named arguments are set as the first properties (a null
+  argument sets nothing); arguments are all named (`Voice(1)` is not a constructor) and none repeats.
+- **Idempotent**: if the entity exists nothing is created again, and an argument fills only a property that has no value (an existing
+  value is never overwritten). So a setter may construct on every request.
+- **Foreign eid prefix**: when the target's first segment is not the class (`membrane::Config:...` built as `Voice(...)`; the class
+  cannot be read from the eid) the entity is created as the class its eid names (`Config`, as the Python seat made it) and stamped
+  `parents: ['cls:voice']`, the ISA kind-mirror (`voice_io.entity()` stamps the same), so the engine mirrors it by kind. A `Voice`
+  getter then runs on it.
+- Outside the right of such a write a constructor is a reasoned error. Inference: it is `Entity(Class)`, and its arguments are typed.
+- Out of scope: value classes (`Std.Url(raw: x)` natives), `Import`, identity declarations.
+
 ## Limits: the step budget (a dial)
 The old caps (an expression at most 64 nodes / 400 characters) are removed from the native VM; `membrane/ch.py` keeps them for its own
 triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is a reasoned null `error: budget exceeded (N steps)` (a getter's

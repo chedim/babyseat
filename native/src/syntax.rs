@@ -105,6 +105,9 @@ pub const FOR: &str = "FOR";
 pub const END: &str = "END";
 /// A local in a setter's writes: `(LET, name, expr)`.
 pub const LET: &str = "LET";
+/// A constructor in a setter's writes: `(<entity>, CTOR, "Class(name: value, ...)")`, written `<entity> = Class(name: value, ...)`.
+/// The entity is the identity of what is made; its text has no `.field`.
+pub const CTOR: &str = "(new)";
 
 fn is_name(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') && !s.chars().next().unwrap().is_ascii_digit()
@@ -171,7 +174,14 @@ fn statement(s: &str, at: usize) -> Result<W, String> {
     let rhs = rhs.as_str();
     if lhs == LLM_CALL { return Ok((LLM_CALL.into(), String::new(), rhs.into())); }
     if is_name(lhs) { return Ok((LET.into(), lhs.into(), rhs.into())); }    // a local
-    let d = last_top_dot(lhs).ok_or(format!("line {}: `{}` needs a target: write `this.{}`", at, lhs, lhs))?;
+    let Some(d) = last_top_dot(lhs) else {
+        // `<entity> = Class(name: value, ...)`: a constructor, the entity written is its identity
+        if top_level(lhs, name_colon).is_some() {
+            crate::expr::parse_ctor(rhs).map_err(|e| format!("line {}: `{}`: {}", at, lhs, e))?;
+            return Ok((lhs.into(), CTOR.into(), rhs.into()));
+        }
+        return Err(format!("line {}: `{}` needs a target: write `this.{}`", at, lhs, lhs));
+    };
     let (tgt, field) = (&lhs[..d], &lhs[d + 1..]);
     if tgt.is_empty() || field.is_empty() { return Err(format!("line {}: bad target `{}`", at, lhs)); }
     Ok((tgt.into(), field.into(), rhs.into()))
@@ -442,6 +452,7 @@ fn print_writes(out: &mut String, ws: &[W], indent: &str) {
         else if t == END { ind.truncate(ind.len().saturating_sub(2)); }
         else if t == LET { out.push_str(&format!("{}{} = {}\n", ind, p, v)); }
         else if t == LLM_CALL { out.push_str(&format!("{}{} = {}\n", ind, LLM_CALL, v)); }
+        else if p == CTOR { out.push_str(&format!("{}{} = {}\n", ind, t, v)); }
         else { out.push_str(&format!("{}{}.{} = {}\n", ind, t, p, v)); }
     }
 }

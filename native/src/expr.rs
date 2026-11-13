@@ -99,6 +99,9 @@ pub enum Node {
     /// an unquoted entity literal: `Goal:board`, `membrane::Chat:message[id]:response` (its text, with each `[key]` evaluated and
     /// appended as `:<key>`)
     Ent(Vec<EntPart>),
+    /// `Class(name: value, ...)`: a constructor (named arguments only). It means something only as the right of `<entity> = ...`,
+    /// where the entity on the left is its identity (fields.rs); anywhere else it is a reasoned error.
+    Ctor(String, Vec<(String, Node)>),
 }
 
 /// A piece of an entity literal: text as written (`membrane::Chat:message`, `:response`), or a `[key]` to evaluate.
@@ -119,6 +122,7 @@ impl Node {
             Node::Comp(e, _, i, c) => { b(e); b(i); if let Some(c) = c { b(c); } }
             Node::If(a, c, d) => { b(a); b(c); b(d); }
             Node::Ent(parts) => for p in parts.drain(..) { if let EntPart::Key(n) = p { out.push(n); } },
+            Node::Ctor(_, args) => out.extend(args.drain(..).map(|(_, n)| n)),
         }
     }
 }
@@ -375,16 +379,27 @@ impl P {
                 let f = match a { Node::Name(ref n) => n.clone(), Node::Const(V::None) => "None".to_string(), _ => return Err("only the built-ins may be called".into()) };
                 self.next();
                 let mut args = Vec::new();
+                let mut named: Vec<(String, Node)> = Vec::new();
                 while !self.is_p(")") {
                     if self.is_p("*") || self.is_p("**") { return Err("not allowed in an expression: Starred".into()); }
                     if matches!(self.peek(), Tok::Name(_)) && matches!(self.t.get(self.i + 1), Some(Tok::P("="))) {
                         return Err("only the built-ins may be called".into());
                     }
-                    args.push(self.expr()?);
+                    // `name: value`: a constructor's argument
+                    if let (Tok::Name(n), Some(Tok::P(":"))) = (self.peek().clone(), self.t.get(self.i + 1)) {
+                        if KEYWORDS.contains(&n.as_str()) || ["True", "False", "None"].contains(&n.as_str()) { return Err(format!("not an argument name: {:?}", n)); }
+                        self.next(); self.next();
+                        if named.iter().any(|(k, _)| *k == n) { return Err(format!("the constructor argument `{}` is given twice", n)); }
+                        named.push((n, self.expr()?));
+                    } else {
+                        args.push(self.expr()?);
+                    }
                     if !self.is_p(")") { self.expect(",")?; }
                 }
                 self.next();
-                a = Node::Call(f, args);
+                if named.is_empty() { a = Node::Call(f, args); }
+                else if !args.is_empty() { return Err(format!("a constructor's arguments are all named (name: value): {}(...)", f)); }
+                else { a = Node::Ctor(f, named); }
             } else if self.is_p("[") {
                 self.next();
                 let idx = self.expr()?;
@@ -483,6 +498,19 @@ impl P {
             }
             t => Err(format!("not an expression: unexpected {:?}", t)),
         }
+    }
+}
+
+/// A constructor's class and named arguments when `src` is exactly `Class(name: value, ...)`; the reason when it is not.
+pub fn parse_ctor(src: &str) -> Result<(String, Vec<(String, Node)>), String> {
+    let toks = lex(src, false)?;
+    let mut p = P { t: toks, i: 0, depth: 0, block: false };
+    let mut n = p.expr()?;
+    if *p.peek() != Tok::End { return Err("not an expression: trailing input".into()); }
+    match &mut n {
+        Node::Ctor(c, a) => Ok((std::mem::take(c), std::mem::take(a))),
+        Node::Call(f, _) => Err(format!("`{}(...)` takes named arguments to make an entity: `{}(name: value, ...)`", f, f)),
+        _ => Err("an entity on the left of `=` takes a constructor: `Class(name: value, ...)`".into()),
     }
 }
 
@@ -1001,6 +1029,7 @@ fn ev_node(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> 
         Node::Comp(elt, var, iter, cond) => ev_comp(elt, var, iter, cond, env, w, m),
         Node::Call(f, args) => ev_call(f, args, env, w, m),
         Node::Ent(parts) => ev_ent(parts, env, w, m),
+        Node::Ctor(c, _) => Err(format!("a constructor creates the entity on the left of a write: write `<entity> = {}(name: value)`", c)),
     }
 }
 
