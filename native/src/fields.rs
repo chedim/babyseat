@@ -758,6 +758,7 @@ impl Fields {
                 None => {}
             }
         }
+        let _count = crate::stats::scope(crate::stats::KIND_GETTER, &g.cls, &g.prop, &g.pack);   // eval accounting (stats.rs): this run, counted when it ends
         let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
         // the arms of every class that applies, the nearest class's first; the first arm whose WHEN holds wins, a default ends the search
         let chain = self.chain(core, eid, &g.prop);
@@ -1282,6 +1283,7 @@ impl Fields {
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, &self.setters[i].cls)).collect();
             self.trigger_virtual = core.docs.get(&w.eid).map_or(false, |e| self.storage_of(&e.cls) == Storage::Virtual);
             for i in hits {
+                let _count = crate::stats::scope(crate::stats::KIND_SETTER, &self.setters[i].cls, &self.setters[i].prop, &self.setters[i].pack);   // eval accounting (stats.rs)
                 let name = self.setters[i].name.clone();
                 let truthy = |v: &J| match v {
                     J::Bool(b) => *b, J::String(s) => !s.is_empty(), J::Number(n) => n.as_f64().map_or(false, |f| f != 0.0), _ => false };

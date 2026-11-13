@@ -2,6 +2,7 @@
 # The first is the root of trust. The app folder membrane/apps/barest.c1f (the page, the request collector) loads after them.
 boot
 entity
+stats
 door
 fs
 proc

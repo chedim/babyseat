@@ -83,6 +83,11 @@ fn real_clock() -> u64 {
 }
 fn now_ns() -> u64 { match CLOCK_OVERRIDE.with(|o| o.get()) { Some(c) => c(), None => real_clock() } }
 
+/// The evaluation clock in ns (the override a test installed, else the real one): `stats.rs` times with it.
+pub fn clock_ns() -> u64 { now_ns() }
+/// The ns this thread has spent waiting in host calls so far (`waiting`).
+pub fn waited_ns() -> u64 { WAITED.with(|w| w.get()) }
+
 /// Run a host call that may WAIT on I/O: the time it takes is not the evaluation's self-time.
 pub fn waiting<T>(f: impl FnOnce() -> T) -> T {
     let t0 = now_ns();
@@ -108,6 +113,7 @@ impl Budget {
         if self.used / TIME_CHECK_EVERY != before / TIME_CHECK_EVERY { self.check_time()?; }
         Ok(())
     }
+    pub fn used(&self) -> u64 { self.used }
     pub fn exceeded(&self) -> bool { self.used > self.limit }
     pub fn reason(&self) -> Err { format!("budget exceeded ({} steps)", self.limit) }
     /// Self-time so far: elapsed minus the time spent waiting in host calls.
@@ -1088,6 +1094,7 @@ fn kind_of(v: &V) -> &'static str {
 pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err> {
     let mut m = Meter { b: Budget::new(), depth: 0, locals: None };
     let r = ev(n, env, w, &mut m);
+    crate::stats::add_steps(m.b.used());
     r.and_then(|v| m.b.check_time().map(|_| v))
 }
 
@@ -1095,6 +1102,7 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
 pub fn eval_locals(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> (Result<V, Err>, Vec<(String, V)>) {
     let mut m = Meter { b: Budget::new(), depth: 0, locals: Some(vec![]) };
     let r = ev(n, env, w, &mut m);
+    crate::stats::add_steps(m.b.used());
     let r = r.and_then(|v| m.b.check_time().map(|_| v));
     (r, m.locals.unwrap_or_default())
 }

@@ -18,6 +18,7 @@ pub mod getters;
 pub mod translate;
 pub mod vm;
 pub mod plan;
+pub mod stats;
 
 #[cfg(feature = "python")]
 mod py;

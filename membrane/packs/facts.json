@@ -112,6 +112,14 @@
   "effect_workers": {
    "wired": false,
    "why": "the cap on Command / File / Fetch effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"
+  },
+  "eval_stats": {
+   "wired": false,
+   "why": "the eval accounting (native/src/stats.rs): default ON; `--fact eval_stats=false` turns it off (no counting, no `Stats:eval` entity). On, `Stats:eval` holds the top 20 getters/setters by self time of the last window and of the lifetime"
+  },
+  "eval_stats_window_s": {
+   "wired": false,
+   "why": "the seconds between two publications of `Stats:eval` (default 10, a threshold flagged for the operator); told by `--fact eval_stats_window_s=<s>`"
   }
  }
 }

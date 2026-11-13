@@ -558,3 +558,26 @@ fn updated_is_readable_from_a_clifflet_and_entity_read_and_moves_with_a_write() 
     assert_eq!(read(port, "Note:u", "updated").trim().parse::<f64>().unwrap(), second);
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn stats_eval_is_told_by_the_seat_and_readable_through_entity_read_and_a_clifflet() {
+    let (mut run, port) = seat_with("stats_on", true, &["eval_stats_window_s=1"]);
+    for i in 0..3 { w(port, "Note:s", "text", json!(format!("t{i}"))); }
+    let top = wait("a published window with calls", || { let t = read(port, "Stats:eval", "top_total"); (t.contains("\"calls\"")).then_some(t) });
+    let rows: J = serde_json::from_str(&top).unwrap();
+    for k in ["class", "prop", "pack", "kind", "calls", "ms", "steps"] { assert!(rows[0].get(k).is_some(), "{k} in {top}"); }
+    assert!(rows.as_array().unwrap().len() <= 20);
+    assert_eq!(clifflet(port, "len(Stats:eval.top) <= 20"), "True");
+    assert!(read(port, "Stats:eval", "life_calls").trim().parse::<u64>().unwrap() > 0);
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_boot_fact_eval_stats_false_turns_the_accounting_off() {
+    let (mut run, port) = seat_with("stats_off", true, &["eval_stats=false", "eval_stats_window_s=1"]);
+    w(port, "Note:s", "text", json!("x"));
+    std::thread::sleep(Duration::from_millis(2500));
+    let (r, _) = call(port, "entity_read", json!({"spec": "Stats:eval"}));
+    assert!(!r.contains("top_total"), "no Stats:eval entity: {r}");
+    assert!(terminate(&mut run));
+}

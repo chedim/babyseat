@@ -321,7 +321,7 @@ impl Host {
     fn stamp_ts(&self) -> f64 { match self.round_ts.load(Ordering::SeqCst) { 0 => self.now(), b => f64::from_bits(b) } }
 
     /// `engine_writer` is what the engine sees (a Trip arrives as `driver:trip`, the way an effect's receipt does), `stamp` what the store keeps.
-    fn inject_write(&self, ts: f64, eid: &str, prop: &str, new: J, engine_writer: &str, stamp: &str) {
+    pub(crate) fn inject_write(&self, ts: f64, eid: &str, prop: &str, new: J, engine_writer: &str, stamp: &str) {
         let _t = self.txn();
         let _r = self.round_at(ts);
         self.ensure_loaded(eid, ts);
@@ -342,7 +342,7 @@ impl Host {
         self.drain_apply();
     }
 
-    fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
+    pub(crate) fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
         let _t = self.txn();
         let _r = self.round_at(ts);
         self.ensure_loaded(eid, ts);
@@ -405,6 +405,7 @@ impl Host {
             { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.tick(core, &NullHost, now, seq); }
             self.drain_apply();
         }
+        self.stats_tick();     // the eval accounting's window (stats.rs): publishes `Stats:eval` when due
         self.trim_wal();       // after the round's transaction has committed: a checkpoint cannot run inside one
     }
 
