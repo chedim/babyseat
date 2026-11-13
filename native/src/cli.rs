@@ -128,7 +128,11 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
     }
     let mut up = false;
     let mut code = 0;
+    #[cfg(feature = "alloc-stats")]
+    let mut last_mem = std::time::Instant::now();
     h.run(stop, 1.0, &mut |h| {
+        #[cfg(feature = "alloc-stats")]
+        if last_mem.elapsed().as_secs() >= 2 { last_mem = std::time::Instant::now(); eprintln!("{}", h.mem_line()); }
         if up { return; }
         let res = h.get("Http:door", "listen_result");
         if res.is_null() { return; }

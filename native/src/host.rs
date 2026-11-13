@@ -278,6 +278,7 @@ impl Host {
         migrate(&db)?;
         let db = Arc::new(Mutex::new(db));
         let mut core = Core::new();
+        core.queue_writes = false;   // a field host runs no trigger engine: the queue would only hold every write's values (vm.rs `queue_writes`)
         if o.store.is_some() { core.loader = Some(stored_loader(db.clone())); }   // a lazy entity a setter writes loads from the store
         let mut waiter = None;
         if o.effects {
@@ -988,6 +989,15 @@ impl Host {
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", j.len()), l.to_json().to_string()]);
         j.push(l);
+    }
+
+    /// The memory breakdown (alloc-stats): (name, entries, bytes) of the engine's and the host's tables, one line.
+    #[cfg(feature = "alloc-stats")]
+    pub fn mem_line(&self) -> String {
+        let mut v = { let g = self.eng(); let mut v = g.0.mem_sizes(); v.extend(g.1.mem_sizes()); if let Some(st) = &g.0.store { v.extend(st.mem_sizes()); } v };
+        { let j = self.journal.lock().unwrap_or_else(|e| e.into_inner()); v.push(("host.journal".into(), j.len() as u64, j.iter().map(|l| crate::alloc_stats::jsize(&l.to_json())).sum())); }
+        { let p = self.pending.lock().unwrap_or_else(|e| e.into_inner()); v.push(("host.pending".into(), p.as_ref().map(|m| m.len()).unwrap_or(0) as u64, p.as_ref().map(|m| m.values().map(|x| x.row.as_ref().map(|(a, b, c)| a.len() as u64 + b.iter().chain(c.iter()).map(|(k, x)| k.len() as u64 + crate::alloc_stats::jsize(x)).sum::<u64>()).unwrap_or(0)).sum()).unwrap_or(0))); }
+        format!("mem-breakdown {}", v.iter().map(|(n, c, b)| format!("{n}={c}/{}", b / 1024)).collect::<Vec<_>>().join(" "))
     }
 
     pub fn journal(&self) -> Vec<Line> { self.journal.lock().unwrap_or_else(|e| e.into_inner()).clone() }

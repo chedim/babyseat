@@ -647,6 +647,8 @@ pub struct Cache { m: HashMap<String, Rc<Result<Node, Err>>> }
 
 impl Cache {
     pub fn new() -> Self { Cache { m: HashMap::new() } }
+    #[cfg(feature = "alloc-stats")]
+    pub fn len(&self) -> usize { self.m.len() }
     /// Parsed as a block (a getter's body); an ordinary expression is a block of one line.
     pub fn get(&mut self, src: &str) -> Rc<Result<Node, Err>> {
         if let Some(h) = self.m.get(src) { return h.clone(); }

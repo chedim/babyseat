@@ -20,6 +20,8 @@ pub mod translate;
 pub mod vm;
 pub mod plan;
 pub mod stats;
+#[cfg(feature = "alloc-stats")]
+pub mod alloc_stats;
 
 #[cfg(feature = "python")]
 mod py;

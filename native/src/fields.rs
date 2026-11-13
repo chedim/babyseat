@@ -1560,3 +1560,23 @@ impl Fields {
         }
     }
 }
+
+#[cfg(feature = "alloc-stats")]
+impl Fields {
+    /// The memory breakdown (alloc-stats): the sizes of the field's side tables.
+    pub fn mem_sizes(&self) -> Vec<crate::alloc_stats::Size> {
+        use crate::alloc_stats::{jsize, Size};
+        let mut v: Vec<Size> = vec![];
+        v.push(("fields.out".into(), self.out.len() as u64, self.out.iter().map(jsize).sum()));
+        v.push(("fields.calls+method_calls".into(), (self.calls.len() + self.method_calls.len()) as u64, self.calls.iter().chain(self.method_calls.iter()).map(jsize).sum()));
+        v.push(("fields.deps".into(), self.deps.len() as u64, self.deps.iter().map(|((a, b), s)| (a.len() + b.len() + 64) as u64 + s.iter().map(|(e, _)| e.len() as u64 + 40).sum::<u64>()).sum()));
+        v.push(("fields.reads".into(), self.reads.len() as u64, self.reads.iter().map(|((e, _), l)| e.len() as u64 + 64 + l.iter().map(|(a, b)| (a.len() + b.len() + 48) as u64).sum::<u64>()).sum()));
+        v.push(("fields.dirty".into(), self.dirty.len() as u64, self.dirty.iter().map(|(_, e, _)| e.len() as u64 + 48).sum()));
+        v.push(("fields.known".into(), self.known.len() as u64, self.known.iter().map(|e| e.len() as u64 + 40).sum()));
+        v.push(("fields.layer_of".into(), self.layer_of.len() as u64, 0));
+        v.push(("fields.visited+claimed".into(), (self.visited.len() + self.claimed.len()) as u64, 0));
+        v.push(("fields.accepted".into(), self.accepted.len() as u64, self.accepted.values().map(jsize).sum()));
+        v.push(("fields.refusals".into(), self.refusals.len() as u64, self.refusals.iter().map(jsize).sum()));
+        v
+    }
+}

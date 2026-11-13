@@ -216,6 +216,8 @@ pub fn respond(st: &Store, req: &J, conn: Option<u64>) -> J {
 }
 
 /// An open event stream: the socket and the frames not yet written, in the order the writes were made.
+#[cfg(feature = "alloc-stats")]
+impl Stream { pub fn queued(&self) -> (u64, u64) { (self.queue.len() as u64, self.queue.iter().map(|f| f.as_ref().map(|b| b.len() as u64).unwrap_or(0)).sum()) } }
 pub struct Stream { sock: TcpStream, queue: VecDeque<Option<Vec<u8>>>, dead: bool, closed: bool }
 
 /// `Request.stream` (called on the engine's thread, in write order): the held connection becomes a stream whose first frame is the head.

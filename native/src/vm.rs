@@ -207,6 +207,9 @@ pub struct Core {
     seen: HashMap<String, f64>,
     state: HashMap<String, HashMap<String, St>>,
     q: VecDeque<Write>,
+    /// whether `hear` keeps each write in `q` for the trigger engine (`step`, read by the Python binding). A field host (host.rs) never reads it: it sets this false, or the ring
+    /// would hold the last QUEUE_MAX writes with their whole `old` and `new` values for nothing (w28: ~1.6 GB live in a chunk burst).
+    pub queue_writes: bool,
     pub dropped: u64,
     pub fired: HashMap<String, u64>,
     pub refused: HashMap<String, u64>,
@@ -358,7 +361,7 @@ impl Core {
             why: Default::default(), locals: Default::default(),
             docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
-            q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
+            q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
             #[cfg(feature = "store")]
             store: None,
@@ -648,6 +651,7 @@ impl Core {
         if !(w.prop.is_empty() && w.new.is_null()) && !w.writer.starts_with("trigger:") {
             self.seen.insert(w.eid.clone(), now);
         }
+        if !self.queue_writes { return; }
         if self.q.len() >= QUEUE_MAX {
             self.q.pop_front();
             self.dropped += 1;
@@ -1311,4 +1315,33 @@ impl Core {
 
     pub fn fired_ok(&mut self, teid: &str) { *self.fired.entry(teid.to_string()).or_insert(0) += 1; }
     pub fn error(&mut self, teid: &str, msg: String) { self.errors.insert(teid.to_string(), msg); }
+}
+
+#[cfg(feature = "alloc-stats")]
+impl Core {
+    /// The memory breakdown (alloc-stats): the entities' properties in total and by class, and the sizes of the engine's side tables.
+    pub fn mem_sizes(&self) -> Vec<crate::alloc_stats::Size> {
+        use crate::alloc_stats::{jsize, Size};
+        let mut v: Vec<Size> = vec![];
+        let mut by: HashMap<String, (u64, u64)> = HashMap::new();
+        let (mut n, mut bytes) = (0u64, 0u64);
+        for e in self.docs.values() {
+            let b: u64 = e.props.iter().map(|(k, x)| k.len() as u64 + 56 + jsize(x)).sum::<u64>() + e.cls.len() as u64 + 120;
+            n += 1; bytes += b;
+            let t = by.entry(e.cls.clone()).or_default(); t.0 += 1; t.1 += b;
+        }
+        v.push(("core.docs".into(), n, bytes));
+        let mut top: Vec<_> = by.into_iter().collect();
+        top.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+        for (c, (n, b)) in top.into_iter().take(6) { v.push((format!("core.docs[{c}]"), n, b)); }
+        v.push(("core.unloaded".into(), self.unloaded.len() as u64, self.unloaded.iter().map(|(k, c)| (k.len() + c.len() + 64) as u64).sum()));
+        v.push(("core.why".into(), self.why.len() as u64, self.why.iter().map(|((a, b), r)| (a.len() + b.len() + r.len() + 96) as u64).sum()));
+        v.push(("core.locals".into(), self.locals.len() as u64, self.locals.iter().map(|((a, b), m)| (a.len() + b.len() + 96) as u64 + m.iter().map(|(k, x)| k.len() as u64 + 56 + jsize(x)).sum::<u64>()).sum()));
+        v.push(("core.ref_in".into(), self.ref_in.len() as u64, self.ref_in.iter().map(|(k, m)| k.len() as u64 + 64 + m.iter().map(|(h, _)| h.len() as u64 + 40).sum::<u64>()).sum()));
+        v.push(("core.ref_of".into(), self.ref_of.len() as u64, self.ref_of.iter().map(|((a, b), l)| (a.len() + b.len() + 64) as u64 + l.iter().map(|s| s.len() as u64 + 24).sum::<u64>()).sum()));
+        v.push(("core.ref_ix(referencing)".into(), self.ref_ix.borrow().len() as u64, self.ref_ix.borrow().values().map(|m| m.iter().map(|(k, s)| k.len() as u64 + 64 + s.iter().map(|x| x.len() as u64 + 48).sum::<u64>()).sum::<u64>()).sum()));
+        v.push(("core.virt_live".into(), self.virt_live.len() as u64, self.virt_live.iter().map(|s| s.len() as u64 + 48).sum()));
+        v.push(("core.expr_cache".into(), self.cache.len() as u64, 0));
+        v
+    }
 }

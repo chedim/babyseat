@@ -46,6 +46,7 @@ python = ["dep:pyo3", "store"]   # the seat: Python binding on top of the store
 bin = ["store"]   # the standalone app (`[[bin]]` below): the same engine with no Python at all (build it with --no-default-features --features bin: a Python extension is not a program)
 wasm = ["dep:wasm-bindgen"]
 metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:objc2", "dep:objc2-foundation", "dep:objc2-metal"]
+alloc-stats = []   # a diagnostic, OFF by default: the counting global allocator (src/alloc_stats.rs) in the standalone app, one line to stderr per second
 tls = ["dep:rustls", "dep:webpki-roots"]   # https for the Fetch driver (rustls + webpki roots); off for wasm
 
 [dev-dependencies]

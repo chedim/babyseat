@@ -84,6 +84,23 @@ pub struct Shared {
     bind: Option<String>,
 }
 
+#[cfg(feature = "alloc-stats")]
+impl Store {
+    /// The memory breakdown (alloc-stats): what the store's shared state holds.
+    pub fn mem_sizes(&self) -> Vec<crate::alloc_stats::Size> {
+        use crate::alloc_stats::{jsize, Size};
+        let g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        vec![
+            ("store.results".to_string(), g.results.len() as u64, g.results.iter().map(|(k, s)| k.len() as u64 + 48 + match s { State::Done(Ok(r)) => r.iter().map(jsize).sum::<u64>(), _ => 0 }).sum::<u64>()),
+            ("store.receipts".into(), g.receipts.len() as u64, g.receipts.iter().map(|(a, b, j)| (a.len() + b.len()) as u64 + jsize(j)).sum()),
+            ("store.inbound".into(), g.inbound.len() as u64, g.inbound.iter().map(|(a, b, m)| (a.len() + b.len()) as u64 + m.iter().map(|(k, v)| k.len() as u64 + jsize(v)).sum::<u64>()).sum()),
+            ("store.streams(frames queued)".into(), g.streams.values().map(|x| x.lock().unwrap_or_else(|e| e.into_inner()).queued().0).sum(), g.streams.values().map(|x| x.lock().unwrap_or_else(|e| e.into_inner()).queued().1).sum()),
+            ("store.conns".into(), g.conns.len() as u64, 0),
+            ("store.asked".into(), g.asked.len() as u64, g.asked.iter().map(|(a, b)| (a.len() + b.len()) as u64).sum()),
+        ]
+    }
+}
+
 pub struct Store { pub path: String, pub dir: std::path::PathBuf, sh: Arc<(Mutex<Shared>, Condvar)> }
 
 pub fn key(sql: &str, args: &[J]) -> String { format!("{}\u{0}{}", sql, J::Array(args.to_vec())) }

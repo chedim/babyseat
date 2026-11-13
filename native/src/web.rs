@@ -30,7 +30,7 @@ pub struct Field { core: vm::Core, f: fields::Fields, seq: i64 }
 impl Field {
     /// A field with the built-in goal graph pack (`PACK goalgraph 1`), so page packs can import it.
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Field { Field { core: vm::Core::new(), f: fields::Fields::goalgraph(), seq: 0 } }
+    pub fn new() -> Field { let mut core = vm::Core::new(); core.queue_writes = false; Field { core, f: fields::Fields::goalgraph(), seq: 0 } }
 
     /// An entity into the mirror (a reload of a known one counts its changed fields as written).
     pub fn load(&mut self, eid: String, cls: String, props_json: &str) -> Result<(), JsValue> {

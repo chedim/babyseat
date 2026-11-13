@@ -317,7 +317,9 @@ impl Fields {
 impl Fields {
     #[new]
     fn new(host: Py<PyAny>) -> Self {
-        Fields { c: std::sync::Mutex::new((vm::Core::new(), fields::Fields::goalgraph(), 0)), host, waiter: std::sync::Mutex::new(None), plan: std::sync::Mutex::new(Vec::new()) }
+        let mut core = vm::Core::new();
+        core.queue_writes = false;   // a field host runs no trigger engine (vm.rs `queue_writes`)
+        Fields { c: std::sync::Mutex::new((core, fields::Fields::goalgraph(), 0)), host, waiter: std::sync::Mutex::new(None), plan: std::sync::Mutex::new(Vec::new()) }
     }
     /// The store driver: `sql(...)` in getters and setters reads this SQLite file, read-only, on the process's one
     /// SQLite -- the native store's own (sqlexec.rs); Python's `sqlite3` is not used for the field (#1111).
