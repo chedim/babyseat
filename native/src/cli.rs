@@ -8,10 +8,10 @@ use serde_json::{json, Map, Value as J};
 use crate::host::{self, Host, Options};
 use crate::plan::{self, Outcome};
 
-pub const USAGE: &str = "usage: cliffvm --version | cliffvm run <packs-dir> [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>]";
+pub const USAGE: &str = "usage: cliffvm --version | cliffvm run <packs-dir> [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>] [--fact <name>=<value>]...";
 
 #[derive(Debug, PartialEq)]
-pub struct RunArgs { pub packs: String, pub store: String, pub port: Option<u16>, pub bind: Option<String>, pub ui_dir: Option<String> }
+pub struct RunArgs { pub packs: String, pub store: String, pub port: Option<u16>, pub bind: Option<String>, pub ui_dir: Option<String>, pub facts: Vec<(String, J)> }
 
 #[derive(Debug, PartialEq)]
 pub enum Cmd { Version, Help, Run(RunArgs) }
@@ -22,7 +22,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
         None | Some("--help") | Some("-h") | Some("help") => Ok(Cmd::Help),
         Some("--version") | Some("-V") | Some("version") => Ok(Cmd::Version),
         Some("run") => {
-            let mut r = RunArgs { packs: String::new(), store: "cliffvm.sqlite3".into(), port: None, bind: None, ui_dir: None };
+            let mut r = RunArgs { packs: String::new(), store: "cliffvm.sqlite3".into(), port: None, bind: None, ui_dir: None, facts: vec![] };
             while let Some(a) = it.next() {
                 let mut val = |n: &str| it.next().cloned().ok_or_else(|| format!("{n} needs a value"));
                 match a.as_str() {
@@ -30,6 +30,12 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                     "--port" => r.port = Some(val("--port")?.parse().map_err(|_| "--port: a number 0-65535 (0 = any free port)".to_string())?),
                     "--bind" => r.bind = Some(val("--bind")?),
                     "--ui-dir" => r.ui_dir = Some(val("--ui-dir")?),
+                    // any Boot fact a pack reads: JSON when the value parses as JSON, else the text (the pack decides what it means)
+                    "--fact" => {
+                        let v = val("--fact")?;
+                        let (k, x) = v.split_once('=').filter(|(k, _)| !k.is_empty()).ok_or_else(|| "--fact: name=value".to_string())?;
+                        r.facts.push((k.to_string(), serde_json::from_str(x).unwrap_or_else(|_| json!(x))));
+                    }
                     x if x.starts_with("--") => return Err(format!("unknown option {x}")),
                     x if r.packs.is_empty() => r.packs = x.to_string(),
                     x => return Err(format!("unexpected argument {x}")),
@@ -45,6 +51,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
 /// The facts the arguments tell (the names facts.json lists); a source that is missing leaves its fact out.
 pub fn facts(r: &RunArgs) -> Map<String, J> {
     let mut m = Map::new();
+    for (k, v) in &r.facts { m.insert(k.clone(), v.clone()); }   // the named facts below win
     if let Some(p) = r.port { m.insert("door_port".into(), json!(p)); }
     if let Some(u) = &r.ui_dir { m.insert("ui_dir".into(), json!(absolute(u))); }
     let ver = env!("CARGO_PKG_VERSION");
