@@ -73,7 +73,7 @@ Request.mc_r_text getter:
   ELSE WHEN len(this.mc_r_rows) == 0: 'no such entity: ' + this.mc_r_spec
   ELSE: this.mc_r_id + ' (' + str(prop(this.mc_r_rows[0], 'cls')) + ') ' + str(prop(this.mc_r_rows[0], 'props'))
 
--- ---- entity_query: the store's rows by kind and eid prefix -----------------------------------------------------------------------------------
+-- ---- entity_query: the store's rows by kind and eid prefix (a kind is the entity's own class or one of its `parents`, `cls:<kind>`) -----------------------------------------------------------------------------------
 Request.mc_q_terms getter: words(replace(str(prop(this.mc_args, 'q') or ''), '&', ' '))
 Request.mc_q_kinds getter: [after(t, 'kind:') for t in this.mc_q_terms if startswith(t, 'kind:')]
 Request.mc_q_names getter: [after(t, 'name~:') for t in this.mc_q_terms if startswith(t, 'name~:')]
@@ -86,8 +86,8 @@ Request.mc_q_off getter: max(num(prop(this.mc_args, 'offset')) or 0, 0)
 Request.mc_q_k getter: min(max(num(prop(this.mc_args, 'k')) or 20, 1), 100)
 Request.mc_q_bad getter: 'entity_query: unsupported term ' + this.mc_q_other[0] + ' (kind:<Class>, kind!:<Class> and name~:<eid prefix>, joined with &)' if len(this.mc_q_other) > 0 else None
 Request.mc_q_on getter: this.mc_tool == 'entity_query' and this.mc_q_bad == None
-Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls, CASE WHEN ? = 1 THEN json_extract(body, \'$.props\') END AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ?) AND (? = \'\' OR json_extract(body, \'$.cls\') != ?) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?', 1 if prop(this.mc_args, 'full') == True else 0, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
-Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ?) AND (? = \'\' OR json_extract(body, \'$.cls\') != ?) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name) if this.mc_q_on and prop(this.mc_args, 'count') == True else None
+Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls, CASE WHEN ? = 1 THEN json_extract(body, \'$.props\') END AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?', 1 if prop(this.mc_args, 'full') == True else 0, this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
+Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name) if this.mc_q_on and prop(this.mc_args, 'count') == True else None
 Request.mc_q_text getter:
   WHEN not this.mc_q_on: None
   ELSE WHEN prop(this.mc_args, 'count') == True: (str(prop(this.mc_q_count[0], 'n')) + ' entity(ies)') if this.mc_q_count != None and len(this.mc_q_count) > 0 else None

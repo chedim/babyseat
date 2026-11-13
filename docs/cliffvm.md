@@ -106,6 +106,10 @@ constructs the banner). Reassigning an entity's class by writing a `class` prope
 `PER_RUN_CLASSES` (`Boot`, `Http`, `Request`, `Step`) describe the process, not the model's work: they stay stored text and the new run makes them again (the collector's start-up sweep still retires the old `Request` rows, so there is no
 retention clock to carry over). No setter runs on a restore and nothing is rewritten. A message that was mid-turn when the seat stopped stays `running` (its Command had no receipt). Test: `seat_process.rs` `a_restart_restores...`.
 
+**An entity of several classes**: its classes are the list in its `parents` (`cls:<name>` ids). Getters of every listed kind apply; a kind's setter fires when the ISA parent entity `cls:<name>` exists;
+`entity_query kind:<K>` lists an entity by its own class or any `parents` kind. A `parents` write on an existing entity computes the getters of its kinds in that round (before, they bound only at birth or through a constructor).
+Tests: `native/tests/multi_class_1143.rs`, `seat_process.rs` (`an_entity_carries_two_extra_classes...`, through a restart). There is no root class: a getter on `Entity` applies only to entities that say `Entity`; two getters of one property on classes of one entity both run (no nearest-class rule).
+
 **Retiring an entity** (`native/src/fields.rs` `retired`, `host.rs` `drain_apply`): a write of `retire = true` to ANY entity, by any writer (a pack's setter: the ordinary ownership rules
 apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
 so never journalled, and a replay re-derives it; an outside write of `retire` is journalled and replayed like any. Test: `native/tests/host_loop.rs` (retire + replay), `seat_process.rs`.

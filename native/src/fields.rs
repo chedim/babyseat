@@ -1089,6 +1089,11 @@ impl Fields {
     fn step(&mut self, core: &mut Core, host: &dyn Host, work: &mut VecDeque<Write>, w: Write, now: f64, seq: &mut i64) {
         self.driver_effect(core, work, &w, now, seq);
         self.mark(&w.eid, &w.prop);
+        // a `parents` write names kinds the entity did not have at its birth: the getters of those kinds are computed in this round (a getter
+        // that gets a value then is an ordinary change: its setters fire)
+        if w.prop == "parents" && self.known.contains(&w.eid) && w.new != w.old {
+            for gi in self.getters_of(core, &w.eid) { self.dirty.insert((self.glevel[gi], w.eid.clone(), gi)); }
+        }
         if w.prop == "active" && w.eid.starts_with(TRIP_PREFIX) { self.trip_arrived(core, &w.eid); }
         self.mark_refs(&w.prop, &w.old, &w.new);
         {

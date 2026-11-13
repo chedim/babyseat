@@ -426,3 +426,41 @@ fn a_restart_restores_the_models_entities_and_still_sweeps_old_requests() {
     wait("the line changes", || { let b = banner(port2); (b.contains("second run") && !b.contains("doing the import")).then_some(()) });
     assert!(terminate(&mut run2));
 }
+
+// ---- an entity of two extra classes (#1143) -----------------------------------------------------------------------------------------------
+const TWO: &str = "PACK two 1\nAlpha.sa getter: 'alpha:' + str(this.n)\nBeta.sb getter: 'beta:' + str(this.n)\nAlpha.go_a on-setter run-a:\n  WHEN this.go_a == True:\n    this.did_a = True\nBeta.go_b on-setter run-b:\n  WHEN this.go_b == True:\n    this.did_b = True\n";
+fn read(port: u16, eid: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": eid, "prop": prop})).0 }
+fn w(port: u16, eid: &str, prop: &str, v: J) { let (r, e) = call(port, "entity_write", json!({"spec": eid, "prop": prop, "value": v})); assert!(!e, "{r}"); }
+
+#[test]
+fn an_entity_carries_two_extra_classes_getters_setters_queries_and_a_restart() {
+    let (mut run, port) = seat("twoclasses", true);
+    w(port, "Pack:two", "text", json!(TWO));
+    wait("the pack loaded", || (read(port, "Pack:two", "state") == "loaded").then_some(()));
+    w(port, "cls:alpha", "name", json!("Alpha"));          // the ISA parent entities a kind's setter needs
+    w(port, "cls:beta", "name", json!("Beta"));
+    w(port, "Thing:x", "n", json!(3));
+    w(port, "Thing:x", "parents", json!(["cls:alpha", "cls:beta"]));      // the two kinds, by the one list
+    wait("both getters apply", || (read(port, "Thing:x", "sa") == "alpha:3" && read(port, "Thing:x", "sb") == "beta:3").then_some(()));
+    w(port, "Thing:x", "go_a", json!(true));
+    w(port, "Thing:x", "go_b", json!(true));
+    wait("both setters fire", || (read(port, "Thing:x", "did_a") == "True" && read(port, "Thing:x", "did_b") == "True").then_some(()));
+    for k in ["Alpha", "Beta"] {
+        let (q, _) = call(port, "entity_query", json!({"q": format!("kind:{k}")}));
+        assert!(q.contains("Thing:x"), "kind:{k} lists the entity: {q}");
+    }
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:Thing"}));
+    assert!(q.contains("Thing:x"), "its own class still lists it: {q}");
+    // a restart: the stamp comes back with the entity, both getters and both setters work again
+    let dir = handover(&mut run);
+    let (mut run2, port2) = seat_at(dir, true, &[]);
+    wait("both getters after the restart", || (read(port2, "Thing:x", "sa") == "alpha:3" && read(port2, "Thing:x", "sb") == "beta:3").then_some(()));
+    w(port2, "Thing:x", "n", json!(4));
+    wait("both getters follow a write", || (read(port2, "Thing:x", "sa") == "alpha:4" && read(port2, "Thing:x", "sb") == "beta:4").then_some(()));
+    w(port2, "Thing:x", "go_a", json!(false));
+    w(port2, "Thing:x", "did_a", json!(false));
+    w(port2, "Thing:x", "go_a", json!(true));
+    wait("a setter fires after the restart", || (read(port2, "Thing:x", "did_a") == "True").then_some(()));
+    for k in ["Alpha", "Beta"] { assert!(call(port2, "entity_query", json!({"q": format!("kind:{k}")})).0.contains("Thing:x"), "kind:{k} after the restart"); }
+    assert!(terminate(&mut run2));
+}
