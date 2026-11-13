@@ -1595,7 +1595,7 @@
   ]
  },
  {
-  "name": "/membrane/quota reads the live Python seat: 501 until its piece is ported",
+  "name": "/membrane/quota answers a seat with nothing paused (the released empty shape)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/door.c1f",
@@ -1665,12 +1665,17 @@
    {
     "eid": "Request:1",
     "prop": "reply.status",
-    "equals": 501
+    "equals": 200
    },
    {
     "eid": "Request:1",
-    "prop": "reply.body.error",
-    "equals": "not ported yet: reads the live seat"
+    "prop": "reply.body.paused",
+    "equals": []
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.probe_s",
+    "equals": 600
    }
   ]
  },
@@ -1972,7 +1977,7 @@
      "body": "",
      "peer": "127.0.0.1:5",
      "authed": true,
-     "path": "/membrane/quota",
+     "path": "/membrane/stats",
      "sub": "alice",
      "claims": {
       "sub": "alice"
@@ -1986,6 +1991,91 @@
     "eid": "Request:1",
     "prop": "reply.status",
     "equals": 501
+   }
+  ]
+ },
+ {
+  "name": "a quota resume with no model is refused, with a model it finds nothing paused",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_state.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0"
+    }
+   },
+   {
+    "eid": "membrane::presence",
+    "class": "Seat",
+    "props": {
+     "seat": "s",
+     "state": {
+      "paused": true,
+      "loops": {
+       "running": 1,
+       "max": 4
+      },
+      "models": {
+       "chat": "m1"
+      },
+      "seat_rss_mb": 900,
+      "self": {
+       "mode": "on",
+       "born": true
+      },
+      "self_name": "Blurp",
+      "ts": 5.0
+     },
+     "events": [
+      {
+       "ts": 1.0,
+       "kind": "boot"
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{\"model\": \"claude\"}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "path": "/membrane/quota/resume",
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.resumed",
+    "equals": false
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.paused",
+    "equals": []
    }
   ]
  }

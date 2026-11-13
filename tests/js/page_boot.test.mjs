@@ -24,7 +24,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 //   NOT_BUILT (501, a deliberate "not built" with its reason): informational, never a failure.
 const MISSING = new Set(process.env.PAGE_BOOT_MISSING ? process.env.PAGE_BOOT_MISSING.split(',') : [
   '/ui/serve/session/<sid>/voice', '/ui/serve/session/<sid>/predict',
-  '/ui/serve/membrane/map/field3d', '/ui/serve/membrane/map/blurp', '/ui/fieldvm', '/membrane/options',
+  '/ui/serve/membrane/map/field3d', '/ui/serve/membrane/map/blurp', '/ui/fieldvm',
 ]);
 const HANGS = new Set(process.env.PAGE_BOOT_HANGS ? process.env.PAGE_BOOT_HANGS.split(',') : []);
 if (!existsSync(bin)) { console.log(`page boot: skipped, no cliffvm at ${bin} (build it, or set CLIFFVM)`); process.exit(0); }

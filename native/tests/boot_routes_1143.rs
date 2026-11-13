@@ -150,3 +150,83 @@ fn the_config_names_the_model_the_page_shows_and_the_provider_that_serves_it() {
         assert_eq!(c["mcp"], json!({}), "{c}");
     }
 }
+
+// ---- the seat-wide options (the page's boot reads them, the gear window writes them) --------------------------------------------------------------
+#[test]
+fn the_options_read_has_the_released_shape_and_the_background_minds_the_page_needs() {
+    let run = seat("options");
+    for path in ["/ui/serve/membrane/options", "/membrane/options"] {
+        let (st, o) = api(&run, "GET", path, J::Null);
+        same_shape("options", st, &o);
+        assert_eq!((o["self_cpu_share"].clone(), o["code_runs_keep"].clone(), o["current_tau_s"].clone()), (json!(0.5), json!(30), json!(180.0)), "{path}: {o}");
+        // the `background` object: the page asks "Which model?" at boot only when `picked` is false, and the seat has claude picked
+        let bg = &o["background"];
+        let m = shape_misses(&golden("options_bg")["body"], bg);
+        assert!(m.is_empty(), "{path}: background {m:?}: {bg}");
+        assert_eq!((bg["loops"].clone(), bg["cortex"].clone(), bg["picked"].clone()), (json!("claude"), json!("claude"), json!(true)), "{bg}");
+        assert_eq!(bg["claude"], json!(["claude"]), "{bg}");
+        assert!(bg["models"].as_array().unwrap().contains(&json!("claude")), "{bg}");
+        assert_eq!(bg["chat_auth"], json!("login"), "the chat runs on the claude CLI's own login: {bg}");
+        let w = o["writable"].as_array().unwrap();
+        for k in ["self_cpu_share", "code_runs_keep", "loops", "cortex", "loops_auth", "cortex_auth"] { assert!(w.contains(&json!(k)), "{k} is writable: {w:?}"); }
+    }
+}
+
+#[test]
+fn an_option_post_is_validated_first_then_kept_and_the_minds_follow_the_models_route() {
+    let run = seat("options-post");
+    let post = |b: J| api(&run, "POST", "/ui/serve/membrane/options", b);
+    let (st, o) = post(json!({"self_cpu_share": 0.8, "code_runs_keep": 7}));
+    assert_eq!(st, 200, "{o}");
+    same_shape("options", st, &o);
+    assert_eq!((o["self_cpu_share"].clone(), o["code_runs_keep"].clone()), (json!(0.8), json!(7)), "{o}");
+    let (_, o) = api(&run, "GET", "/ui/serve/membrane/options", J::Null);
+    assert_eq!((o["self_cpu_share"].clone(), o["code_runs_keep"].clone()), (json!(0.8), json!(7)), "kept: {o}");
+    // a refusal is a 400 with the reason, and writes nothing (even the valid key beside it)
+    for (b, why) in [
+        (json!({"self_cpu_share": 2}), "self_cpu_share must be a number in (0, 1], got 2"),
+        (json!({"code_runs_keep": 0}), "code_runs_keep must be a whole number >= 1, got 0"),
+        (json!({"current_tau_s": 1}), "current_tau_s is read-only: changing the current's fade needs the operator's approval"),
+        (json!({"energy": 1}), "energy is read-only: it is Blurp's to report (#345), not a setting"),
+        (json!({}), "expected a JSON object of options, e.g. {\"self_cpu_share\": 0.5}"),
+        (json!({"loops": "nope"}), "loops: membrane doesn't see 'nope' on its backends"),
+    ] {
+        let (st, e) = post(b.clone());
+        assert_eq!(st, 400, "{b}: {e}");
+        assert_eq!(e["error"], json!(why), "{b}");
+    }
+    // a value of the wrong kind is refused too: a text, a bool, a fraction where a whole number is wanted
+    for b in [json!({"self_cpu_share": "x"}), json!({"self_cpu_share": true}), json!({"code_runs_keep": 2.5}), json!({"code_runs_keep": "3"}), json!({"code_runs_keep": false})] {
+        let (st, e) = post(b.clone());
+        assert_eq!(st, 400, "{b}: {e}");
+        assert!(e["error"].as_str().unwrap().contains("must be a"), "{b}: {e}");
+    }
+    let (st, e) = post(json!({"bogus": 1, "self_cpu_share": 0.1}));
+    assert_eq!(st, 400, "{e}");
+    assert!(e["error"].as_str().unwrap().starts_with("unknown option"), "{e}");
+    let (_, o) = api(&run, "GET", "/ui/serve/membrane/options", J::Null);
+    assert_eq!(o["self_cpu_share"], json!(0.8), "a refused post wrote nothing: {o}");
+    // the minds' keys go where /membrane/models puts them, and the answer is the options with the new values
+    let (st, o) = post(json!({"cortex_auth": "login"}));
+    assert_eq!(st, 200, "{o}");
+    assert_eq!(o["background"]["cortex_auth"], json!("login"), "{o}");
+    let (_, m) = api(&run, "GET", "/ui/serve/membrane/models", J::Null);
+    assert_eq!(m["cortex_auth"], json!("login"), "the same state the models route reads: {m}");
+    assert_eq!(api(&run, "DELETE", "/ui/serve/membrane/options", J::Null).0, 405);
+}
+
+// ---- the out-of-tokens popup: nothing here pauses a model, the released answer of a seat with nothing paused ------------------------------------------
+#[test]
+fn the_quota_read_and_resume_answer_a_seat_with_nothing_paused_in_the_released_shape() {
+    let run = seat("quota");
+    let (st, q) = api(&run, "GET", "/ui/serve/membrane/quota", J::Null);
+    same_shape("quota", st, &q);
+    assert_eq!((q["paused"].clone(), q["probe_s"].clone()), (json!([]), json!(600)), "{q}");
+    assert!(q["now"].as_f64().unwrap() > 1.7e9, "{q}");
+    let (st, e) = api(&run, "POST", "/ui/serve/membrane/quota/resume", json!({}));
+    assert_eq!((st, e["error"].clone()), (400, json!("model required")), "{e}");
+    let (st, r) = api(&run, "POST", "/ui/serve/membrane/quota/resume", json!({"model": "claude"}));
+    same_shape("quota", st, &r);
+    assert_eq!((r["resumed"].clone(), r["paused"].clone()), (json!(false), json!([])), "nothing was paused: {r}");
+    assert_eq!(api(&run, "DELETE", "/ui/serve/membrane/quota", J::Null).0, 405);
+}
