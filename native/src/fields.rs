@@ -339,6 +339,10 @@ impl Fields {
         Ok(())
     }
 
+    /// Whether the named pack is loaded and ACTIVE (its imports are met, no composition error against it).
+    pub fn pack_active(&self, name: &str) -> bool { self.packs.contains_key(name) && !self.pack_errors.contains_key(name) }
+    pub fn has_pack(&self, name: &str) -> bool { self.packs.contains_key(name) }
+
     pub fn remove_pack(&mut self, name: &str) -> bool {
         let had = self.packs.remove(name).is_some();
         self.load_order.retain(|n| n != name);

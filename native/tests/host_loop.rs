@@ -156,3 +156,53 @@ fn a_live_run_is_journalled_outside_only_and_replays_to_the_same_state() {
     expr::set_clock(None);
     let _ = std::fs::remove_file(&file);
 }
+
+#[test]
+fn a_pack_entity_written_outside_loads_reloads_refuses_and_replays_to_the_same_packs() {
+    use_clock(0);
+    let tag = |s: &str| format!("PACK mine 1\nBox.label getter: '{s}' + str(this.w)\n");
+    let h = Host::open({ let mut o = Options::new(None); o.clock = ticking(); o }).unwrap();
+    h.rebuild();
+    h.born("Box:a", "Box", props(json!({"w": 1})), "person");
+    assert_eq!(h.get("Box:a", "label"), J::Null, "no pack yet");
+    h.born("Pack:mine", "Pack", props(json!({"text": tag("one ")})), "person");
+    assert_eq!(h.get("Box:a", "label"), json!("one 1"));
+    assert_eq!((h.get("Pack:mine", "loaded"), h.get("Pack:mine", "error")), (json!(true), J::Null));
+    h.write("Pack:mine", "text", json!(tag("two ")), "person");                   // hot reload
+    assert_eq!(h.get("Box:a", "label"), json!("two 1"));
+    h.write("Pack:mine", "text", json!("Box.label getter: ("), "person");        // does not parse: refused, the old pack stays
+    assert_eq!(h.get("Box:a", "label"), json!("two 1"));
+    assert!(h.get("Pack:mine", "error").as_str().unwrap().starts_with("pack mine"), "{:?}", h.get("Pack:mine", "error"));
+    assert_eq!(h.get("Pack:mine", "loaded"), json!(true));
+    assert_eq!(h.get("Pack:mine", "good_text"), json!(tag("two ")));
+    h.write("Box:a", "w", json!(2), "person");
+    assert_eq!(h.get("Box:a", "label"), json!("two 2"));
+    // the loaded and error mirrors are derived (never journalled); the texts are the outside writes
+    let j = h.journal();
+    assert!(j.iter().all(|l| is_outside(l.writer())), "{j:?}");
+    assert_eq!(j.iter().filter(|l| matches!(l, Line::Write { prop, .. } if prop == "text")).count(), 2);
+    assert!(!j.iter().any(|l| matches!(l, Line::Write { prop, .. } if prop == "error" || prop == "loaded" || prop == "good_text")));
+    let live = state(&h);
+    let r = Host::open({ let mut o = Options::new(None); o.effects = false; o }).unwrap();
+    r.rebuild();
+    r.replay(&j);
+    assert_eq!(r.get("Box:a", "label"), json!("two 2"));
+    let replayed = state(&r);
+    assert_eq!(replayed.0, live.0, "the engine's entities (the Pack entity's loaded/error/good_text too)");
+    assert_eq!(replayed.1, live.1, "the stored rows");
+    // an emptied text removes the pack: its getter is gone and the entity says so
+    h.write("Pack:mine", "text", json!(""), "person");
+    assert_eq!(h.get("Pack:mine", "loaded"), json!(false));
+    assert_eq!(h.get("Pack:mine", "error"), J::Null);
+    h.write("Box:a", "w", json!(3), "person");
+    assert_eq!(h.get("Box:a", "label"), json!("two 2"), "removed: the getter no longer runs (its last value stays a plain property)");
+    // a pack that imports one that arrives later waits (its error says so) and activates when the import arrives
+    h.born("Pack:late", "Pack", props(json!({"text": "PACK late 1\nIMPORT base 1\nBox.late getter: 'late'\n"})), "person");
+    assert_eq!(h.get("Pack:late", "loaded"), json!(false));
+    assert!(h.get("Pack:late", "error").as_str().unwrap().contains("base"), "{:?}", h.get("Pack:late", "error"));
+    h.born("Pack:base", "Pack", props(json!({"text": "PACK base 1\nBox.base getter: 'base'\n"})), "person");
+    assert_eq!(h.get("Pack:late", "loaded"), json!(true));
+    assert_eq!(h.get("Pack:late", "error"), J::Null);
+    assert_eq!(h.get("Box:a", "late"), json!("late"));
+    expr::set_clock(None);
+}

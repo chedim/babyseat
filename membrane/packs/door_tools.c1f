@@ -19,6 +19,11 @@ IMPORT store 1
 Request.o_tools getter: this.path == '/mcp'
 Request.m_tools getter: ['POST']
 
+-- ---- Pack entities: the model's own packs (docs/cliffvm.md, "Pack entities") ----------------------------------------------------------
+-- `entity_write {spec: 'Pack:<name>', prop: 'text', value: <c1f>}` makes the entity (this pack owns the class) and the HOST loads the text
+-- (`Fields::set_pack`), then mirrors `loaded`, `error` and `good_text` back. `state` says in one word what became of the last text.
+Pack.state getter: 'error' if this.error != None else ('loaded' if this.loaded == True else 'waiting')
+
 -- ---- the JSON-RPC request ---------------------------------------------------------------------------------------------------------------
 Request.mc_rpc getter: json(this.body or '')
 Request.mc_ok getter: prop(this.mc_rpc, 'jsonrpc') == '2.0' and prop(this.mc_rpc, 'method') != None
