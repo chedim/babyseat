@@ -16,8 +16,8 @@ IMPORT door 1
 
 Feedback.kind_of getter: this.kind
 
-Request.o_self getter: this.path in ['/membrane/self/sheet', '/membrane/self/recent', '/membrane/toybox/state', '/membrane/toybox/poke', '/membrane/jsexec/register', '/membrane/jsexec/result', '/membrane/feedback']
-Request.m_self getter: ['GET'] if this.path in ['/membrane/self/sheet', '/membrane/self/recent', '/membrane/toybox/state'] else ['POST']
+Request.o_self getter: this.route in ['/membrane/self/sheet', '/membrane/self/recent', '/membrane/toybox/state', '/membrane/toybox/poke', '/membrane/jsexec/register', '/membrane/jsexec/result', '/membrane/feedback']
+Request.m_self getter: ['GET'] if this.route in ['/membrane/self/sheet', '/membrane/self/recent', '/membrane/toybox/state'] else ['POST']
 
 -- ---- the feedback press ---------------------------------------------------------------------------------------------------------
 Request.fb_msg getter: strip(str(prop(this.jbody, 'message') or ''))
@@ -33,7 +33,7 @@ Request.fb_err getter:
   ELSE WHEN this.fb_msg == '' or len(this.fb_msg) > 200: "message (the reply's id) required"
   ELSE WHEN not (this.fb_kind in ['up', 'down', 'clear']): 'kind is one of up, down, clear'
   ELSE: None
-Request.fb_go getter: this.path == '/membrane/feedback' and this.method == 'POST' and this.fb_err == None
+Request.fb_go getter: this.route == '/membrane/feedback' and this.method == 'POST' and this.fb_err == None
 Request.fb_go on-setter feedback-write:
   WHEN this.fb_go == True:
     ('Feedback:' + this.fb_msg).name = 'feedback:' + this.fb_msg
@@ -46,9 +46,9 @@ Request.fb_go on-setter feedback-write:
     ('Feedback:' + this.fb_msg).at = clock
 
 -- ---- the 501s ---------------------------------------------------------------------------------------------------------------------
-Request.sf_why getter: {'/membrane/self/sheet': 'the sheet is computed by the Python seat (record, energy, the supervisor)', '/membrane/self/recent': "self's record is the Python seat's file", '/membrane/toybox/state': "the toys are the Python seat's files and clocks (toybox.py)", '/membrane/toybox/poke': "a poke changes the Python seat's toy files and clocks (toybox.py)", '/membrane/jsexec/register': "the tab registry is the Python seat's live memory (jsexec.py)", '/membrane/jsexec/result': "a job's answer returns to the Python seat's waiting run (jsexec.py)"}[this.path]
+Request.sf_why getter: {'/membrane/self/sheet': 'the sheet is computed by the Python seat (record, energy, the supervisor)', '/membrane/self/recent': "self's record is the Python seat's file", '/membrane/toybox/state': "the toys are the Python seat's files and clocks (toybox.py)", '/membrane/toybox/poke': "a poke changes the Python seat's toy files and clocks (toybox.py)", '/membrane/jsexec/register': "the tab registry is the Python seat's live memory (jsexec.py)", '/membrane/jsexec/result': "a job's answer returns to the Python seat's waiting run (jsexec.py)"}[this.route]
 
 Request.r_self getter:
-  WHEN this.path != '/membrane/feedback': {'status': 501, 'body': {'error': 'not ported yet: ' + this.sf_why}}
+  WHEN this.route != '/membrane/feedback': {'status': 501, 'body': {'error': 'not ported yet: ' + this.sf_why}}
   ELSE WHEN this.fb_err != None: {'status': 400, 'body': {'error': this.fb_err}}
   ELSE: {'status': 200, 'body': {'ok': True, 'eid': this.fb_eid, 'kind': this.fb_kind}}

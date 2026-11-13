@@ -219,6 +219,32 @@ names it), so the viewer finds chat entities by the `membrane::Chat:message:` pr
 properties of 6 per poll for reference edges (more as it keeps running); entity removal is the `retire` write above.
 **Tests**: `native/tests/seat_process.rs` (the page and its files, a chat turn with a fake claude, the query options, `node --check` of every script).
 
+
+### The full-set seat (`scripts/seat-full`, #1143)
+
+The step before the swap: the same binary on EVERY shipped pack (`membrane/packs`, `boot.c1f` first) serving the current page (`membrane/ui`, `--ui-dir`), with the claude CLI as the only model.
+
+```
+scripts/seat-full [--data-dir ./.cliffvm/full] [--port 4310] [--open] [--fact name=value ...]
+```
+
+It tells the facts the dry run said the full set needs (`docs/release-parity.md` section 6): `door_secret_file` (`<data-dir>/door.secret`, 64 hex characters from `/dev/urandom`, mode 0600, made on the first run and kept), `seat_data_dir` (the data dir),
+`minds` (every mind picks `claude`, auth `chat`, think `auto`), `cloud_models` (one rung, `claude`, backend `claude-agent`), `router_on=false`, `seat_backend=http://127.0.0.1:11434` (nothing needs to run there: a refused connection is an empty
+tag list), `chat_claude_bin` (`CLAUDE_BIN`, else the claude on PATH). Store: `<data-dir>/seat.sqlite`. Your `--fact` arguments come last and win (`--fact operator=ann`). `CLIFFVM` names the binary as for `scripts/seat`; the default port is not 4096.
+Nothing else is started. Tests: `native/tests/seat_full_1143.rs` (the secret, its mode, kept across runs, a fact wins), `tests/js/page_boot.test.mjs` (the page in headless Chrome, below).
+
+**The door's two ways in** (operator decision 2026-11-13: a JWT and the loopback owner cookie are the only modes; the seat-token mode and the LAN guard are dropped; `door_auth.c1f`, `door.c1f`):
+- The page fetched from this machine (`/`, `/index.html`, `/membrane` from a loopback peer with no `X-Forwarded-For`/`Forwarded` header) is given the OWNER cookie `membrane_jwt_<8 hex>` (HttpOnly, SameSite=Strict, 7 days: the released seat's number, flagged):
+  a token for `owner` (the fact `operator`, the released `MEMBRANE_OPERATOR`) signed by the door with its own secret. The pack never holds the secret: `Request:<n>.mint = {id, sub, name, ttl}` is a driver verb (`native/src/http.rs` `mint`, `jwt.rs` `mint`) whose receipt `mint_result` carries `token`.
+  A door with no secret answers `rc 2` and the page is served with no cookie.
+- Every page call goes through `/ui/serve/<path>`: `Request.ui_served`, `.ui_path` and `.route` (door.c1f) strip the prefix once; every family reads `this.route`, never `this.path` (a setter cannot rewrite `path`: a write back to the property that started the chain is refused as a loop), so a route answers on the bare path and the prefixed one.
+  A call through the prefix needs a verified JWT (Bearer, Basic password or the cookie), even from loopback; the unprefixed routes still pass a bare loopback caller (the opencode client's probes, `curl`), and nothing passes from another address or with a proxy header without a JWT.
+- The 401 is the released one (`jwtauth.py` `send_unauthorized`): `WWW-Authenticate: Bearer realm="membrane"` and `{"error": {"message": "missing or invalid token", "type": "unauthorized"}}`, the same for a missing and a refused token.
+- Not here yet: minting tokens for other people (`membrane token mint`), `Person:<sub>` entities, owner-only writes (docs/release-parity.md section 3 gaps 1, 5, 6).
+
+**Page boot check** (`node tests/js/page_boot.test.mjs`; needs Chrome, `CHROME=` names it, and the built binary): starts `scripts/seat-full` on a free port with `CLAUDE_BIN=/usr/bin/true`, loads `/` in headless Chrome and records every request the page makes in 8 s.
+It asserts the page's files all load, nothing is refused (401), nothing hangs and nothing 404s, except the calls on the two backlog lists in the test (checked both ways: a call that is answered now must leave its list).
+
 ## The host loop (`native/src/host.rs`)
 
 Ported from `membrane/fields_live.py`, the minimum the door and the boot need:

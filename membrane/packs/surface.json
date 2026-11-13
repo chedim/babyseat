@@ -223,7 +223,7 @@
       "Http",
       "Request"
     ],
-    "members": 75,
+    "members": 79,
     "writes": [
       "Http:door.listen"
     ],
@@ -266,6 +266,22 @@
       "Request",
       "Http"
     ]
+  },
+  "door_auth": {
+    "imports": [
+      "door"
+    ],
+    "classes": [
+      "Request"
+    ],
+    "members": 7,
+    "writes": [],
+    "claims": [
+      "/",
+      "/index.html",
+      "/membrane"
+    ],
+    "boot_facts": []
   },
   "door_decisions": {
     "imports": [

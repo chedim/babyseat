@@ -27,14 +27,14 @@ RESIDENT Message
 
 -- ---- which route ------------------------------------------------------------------------------------------------------------
 Request.dm_route getter:
-  WHEN this.path == '/membrane/decisions': 'board'
-  ELSE WHEN this.path == '/membrane/goals': 'goals'
-  ELSE WHEN this.path == '/membrane/work-graph': 'graph'
-  ELSE WHEN this.path == '/membrane/entity-history': 'history'
-  ELSE WHEN this.path == '/membrane/item-chat': 'chat_of'
-  ELSE WHEN this.path == '/membrane/decision/answer': 'answer'
-  ELSE WHEN this.path == '/membrane/decision/drop': 'drop'
-  ELSE WHEN this.path == '/membrane/decision/chat': 'chat'
+  WHEN this.route == '/membrane/decisions': 'board'
+  ELSE WHEN this.route == '/membrane/goals': 'goals'
+  ELSE WHEN this.route == '/membrane/work-graph': 'graph'
+  ELSE WHEN this.route == '/membrane/entity-history': 'history'
+  ELSE WHEN this.route == '/membrane/item-chat': 'chat_of'
+  ELSE WHEN this.route == '/membrane/decision/answer': 'answer'
+  ELSE WHEN this.route == '/membrane/decision/drop': 'drop'
+  ELSE WHEN this.route == '/membrane/decision/chat': 'chat'
   ELSE: None
 Request.o_decisions getter: this.dm_route != None
 Request.dm_write getter: this.dm_route in ['answer', 'drop', 'chat']
@@ -152,7 +152,7 @@ Request.dm_msg getter: str(prop(this.dm_body, 'message') or '') or None
 Request.dm_work getter: prop(this.dm_body, 'work') if str(prop(this.dm_body, 'work')) in ['True', 'False', 'true', 'false'] else None
 -- what is refused before anything is written
 Request.dm_refused getter:
-  WHEN this.dm_write and this.authed != True: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  WHEN this.dm_write and this.authed != True: this.unauthorized
   ELSE WHEN this.dm_write and not this.dm_obj: {'status': 400, 'body': {'error': 'a JSON object body is required'}}
   ELSE WHEN this.dm_write and this.dm_c == None: {'status': 400, 'body': {'error': 'no Decision card ' + "'" + this.dm_card_id + "'"}}
   ELSE WHEN this.dm_route == 'chat' and strip(str(prop(this.dm_body, 'chat') or '')) == '': {'status': 400, 'body': {'error': 'chat required'}}

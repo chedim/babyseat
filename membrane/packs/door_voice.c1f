@@ -26,14 +26,14 @@ IMPORT fs 1
 -- the kind the Python seat's voice entities are mirrored under (parents: ['cls:voice']); none leaves no property on them
 Voice.vs_kind getter: None
 
-Request.o_voice getter: this.path in ['/membrane/voice', '/membrane/voice/state', '/ui/stt', '/ui/log']
+Request.o_voice getter: this.route in ['/membrane/voice', '/membrane/voice/state', '/ui/stt', '/ui/log']
 Request.m_voice getter: ['POST']
 
 -- ---- /membrane/voice --------------------------------------------------------------------------------------------------------------
 Request.vo_person getter: str(this.person or prop(this.jbody, 'person') or '')
 -- slug: lowercase, every run of other characters one '-' (speakers.slug); nothing left = 'unknown'
 Request.vo_slug getter: join(words(plain(replace(replace(replace(replace(replace(replace(lower(this.vo_person), '_', ' '), '#', ' '), '.', ' '), '/', ' '), ':', ' '), '-', ' '))), '-') or 'unknown'
-Request.vo_go getter: this.path == '/membrane/voice' and this.method == 'POST' and this.vo_person != ''
+Request.vo_go getter: this.route == '/membrane/voice' and this.method == 'POST' and this.vo_person != ''
 Request.vo_in_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", 'membrane::Config:voice:in:' + this.vo_slug) if this.vo_go else None
 Request.vo_out_q getter: sql("SELECT json_extract(body, '$.d.data.properties') AS p FROM c_entities WHERE k = ?", 'membrane::Config:voice:out:' + this.vo_slug) if this.vo_go else None
 Request.vo_in getter: (json(prop(this.vo_in_q[0], 'p')) or {}) if len(this.vo_in_q or []) > 0 else {}
@@ -47,7 +47,7 @@ Request.vo_reply getter:
   ELSE: {'status': 200, 'body': this.vo_body}
 
 -- ---- /membrane/voice/state ----------------------------------------------------------------------------------------------------------
-Request.vs_go getter: this.path == '/membrane/voice/state' and this.method == 'POST' and this.vo_person != ''
+Request.vs_go getter: this.route == '/membrane/voice/state' and this.method == 'POST' and this.vo_person != ''
 -- the store's rows by eid (none for a person with no entities yet)
 Request.vs_in_eid getter: 'membrane::Config:voice:in:' + this.vo_slug
 Request.vs_out_eid getter: 'membrane::Config:voice:out:' + this.vo_slug
@@ -93,7 +93,7 @@ Request.stt_reply getter:
 Request.pl_dir getter: str(prop(this.facts, 'seat_data_dir') or '')
 Request.pl_path getter: this.pl_dir + '/page-voice.log'
 -- a line is kept when it is at most 4096 bytes of JSON; the body's newlines go (one record per line)
-Request.pl_ok getter: this.path == '/ui/log' and len(this.body or '') <= 4096 and json(this.body or '') != None and this.pl_dir != ''
+Request.pl_ok getter: this.route == '/ui/log' and len(this.body or '') <= 4096 and json(this.body or '') != None and this.pl_dir != ''
 Request.pl_file getter: ([f for f in instances('File') if f.eid == 'File:' + str(this.conn)] or [None])[0]
 Request.pl_info getter: this.pl_file.info if this.pl_file != None else None
 Request.pl_big getter: prop(this.pl_info, 'exists') == True and prop(this.pl_info, 'size') > 2000000
@@ -118,7 +118,7 @@ Request.pl_reply getter:
   ELSE: {'status': 204}
 
 Request.r_voice getter:
-  WHEN this.path == '/membrane/voice': this.vo_reply
-  ELSE WHEN this.path == '/membrane/voice/state': this.vs_reply
-  ELSE WHEN this.path == '/ui/stt': this.stt_reply
+  WHEN this.route == '/membrane/voice': this.vo_reply
+  ELSE WHEN this.route == '/membrane/voice/state': this.vs_reply
+  ELSE WHEN this.route == '/ui/stt': this.stt_reply
   ELSE: this.pl_reply

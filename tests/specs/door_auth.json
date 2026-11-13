@@ -1,0 +1,216 @@
+[
+ {
+  "name": "a request from another machine through the page's prefix, no token, is refused",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_auth.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/ui/serve/global/health",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": false,
+     "auth_error": "no token"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 401
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error.type",
+    "equals": "unauthorized"
+   }
+  ]
+ },
+ {
+  "name": "a loopback request through the page's prefix, no token, is refused (the page is given its token)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_auth.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/ui/serve/global/health",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5000",
+     "authed": false,
+     "auth_error": "no token"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 401
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error.type",
+    "equals": "unauthorized"
+   }
+  ]
+ },
+ {
+  "name": "a loopback request on the bare route, no token, is the seat itself",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_auth.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/global/health",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5000",
+     "authed": false,
+     "auth_error": "no token"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   }
+  ]
+ },
+ {
+  "name": "a verified person through the prefix is served",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_auth.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/ui/serve/global/health",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "auth_error": null,
+     "sub": "ann",
+     "claims": {
+      "sub": "ann"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   }
+  ]
+ },
+ {
+  "name": "a prefixed shell path is not public (the prefix is the page's call)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_auth.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/ui/serve/ui/www/home.js",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": false,
+     "auth_error": "no token"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 401
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error.type",
+    "equals": "unauthorized"
+   }
+  ]
+ }
+]

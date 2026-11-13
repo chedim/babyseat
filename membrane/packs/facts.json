@@ -144,6 +144,10 @@
   "eval_stats_window_s": {
    "wired": false,
    "why": "the seconds between two publications of `Stats:eval` (default 10, a threshold flagged for the operator); told by `--fact eval_stats_window_s=<s>`"
+  },
+  "operator": {
+   "wired": false,
+   "why": "the person the page's owner cookie is minted for (door_auth.c1f; the released MEMBRANE_OPERATOR); default `owner`; told by `--fact operator=<name>`"
   }
  }
 }

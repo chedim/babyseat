@@ -59,3 +59,18 @@ fn the_cookie_name_is_per_seat_from_a_hash_of_the_secret() {
     assert_eq!(jwt::cookie_name(SECRET), "membrane_jwt_23a8086e");
     assert_ne!(jwt::cookie_name(SECRET), jwt::cookie_name(b"another secret of at least 32 bytes!!"));
 }
+
+#[test]
+fn a_minted_token_verifies_and_carries_its_claims() {
+    // the signer is the verifier's twin (HS256, the Python seat's claims: sub, name, iat, exp)
+    let t = jwt::mint(SECRET, "owner", "Owner", 3600.0, NOW).unwrap();
+    let c = jwt::verify(&t, SECRET, NOW + 10.0).unwrap();
+    assert_eq!((c["sub"].as_str(), c["name"].as_str()), (Some("owner"), Some("Owner")));
+    assert_eq!(c["exp"].as_f64(), Some(NOW + 3600.0));
+    assert_eq!(c["iat"].as_f64(), Some(NOW));
+    assert!(jwt::verify(&t, SECRET, NOW + 3600.0 + 31.0).is_err(), "past exp (and the leeway)");
+    assert!(jwt::verify(&t, b"another secret of at least 32 bytes!!", NOW).is_err(), "another key");
+    assert!(jwt::mint(b"too short", "owner", "Owner", 60.0, NOW).is_err(), "a secret under 32 bytes signs nothing");
+    assert!(jwt::mint(SECRET, "", "Owner", 60.0, NOW).is_err(), "no subject");
+    assert!(jwt::mint(SECRET, "owner", "Owner", 0.0, NOW).is_err(), "a token that is already over");
+}

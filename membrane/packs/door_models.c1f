@@ -5,8 +5,8 @@ IMPORT router 1
 -- A route that needs the backend's live list asks for it once (`models_asked`); the reply waits for `models_ready` (the fetch landed
 -- and the tag rows are Model entities, packs/router.c1f).
 
-Request.o_models getter: this.path in ['/v1/models', '/v1/models/', '/membrane/models']
-Request.m_list getter: this.path in ['/v1/models', '/v1/models/']
+Request.o_models getter: this.route in ['/v1/models', '/v1/models/', '/membrane/models']
+Request.m_list getter: this.route in ['/v1/models', '/v1/models/']
 Request.m_post getter: this.method == 'POST'
 -- the allowed methods (the door answers 405 + allow): the list is read-only, the minds' route reads and posts; a minds route with no
 -- Minds seat answers 503 whatever the method (None: the family answers itself)
@@ -57,7 +57,7 @@ Request.e_think getter: [('think: one of on|off|auto, not: ' + this.r_list[6]) i
 Request.errs getter: [e for e in concat(concat(this.e_auth, this.e_mind), this.e_think) if e != None]
 Request.err getter: this.errs[0] if len(this.errs) > 0 else None
 Request.post_go getter: True if (this.o_models == True and this.m_minds and this.m_post and this.models_ready == True and this.mind_seat != None and this.err == None) else None
-Request.m_minds getter: this.path == '/membrane/models'
+Request.m_minds getter: this.route == '/membrane/models'
 
 Request.post_go on-setter minds-loops:
   WHEN this.post_go == True and prop(this.jbody, 'loops') != None:

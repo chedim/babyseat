@@ -19,9 +19,9 @@ Request.ui_root getter: ([b.ui_dir for b in instances('Boot') if b.ui_dir != Non
 Request.app_dirs getter: ([b.app_dirs for b in instances('Boot') if b.app_dirs != None] or [[]])[0]
 Request.ui_roots getter: concat([d + '/ui' for d in this.app_dirs], [this.ui_root] if this.ui_root != '' else [])
 Request.rel getter:
-  WHEN this.path == '/' or this.path == '/index.html' or this.path == '/membrane': 'index.html'
-  ELSE WHEN this.path == '/favicon.ico': 'favicon.svg'
-  ELSE WHEN startswith(this.path, '/ui/www/'): replace(this.path, '/ui/www/', '')
+  WHEN this.route == '/' or this.route == '/index.html' or this.route == '/membrane': 'index.html'
+  ELSE WHEN this.route == '/favicon.ico': 'favicon.svg'
+  ELSE WHEN startswith(this.route, '/ui/www/'): replace(this.route, '/ui/www/', '')
   ELSE: None
 Request.rel_climb getter: this.rel != None and ('..' in this.rel or '%' in this.rel or '\\' in this.rel or startswith(this.rel, '/') or '/ui/www/' in this.rel)
 Request.rel_ok getter: this.rel != None and this.rel != '' and not this.rel_climb and len(this.ui_roots) > 0
@@ -39,6 +39,7 @@ Request.file getter: this.cand if this.hit == True else None
 Request.parts getter: concat([''], words(replace(this.rel or '', '.', ' ')))
 Request.ext getter: this.parts[len(this.parts) - 1]
 Request.ctype getter: {'html': 'text/html; charset=utf-8', 'js': 'application/javascript; charset=utf-8', 'mjs': 'application/javascript; charset=utf-8', 'wasm': 'application/wasm', 'gz': 'application/gzip', 'json': 'application/json', 'css': 'text/css; charset=utf-8', 'png': 'image/png', 'svg': 'image/svg+xml', 'ico': 'image/x-icon', 'woff2': 'font/woff2'}[this.ext] or 'application/octet-stream'
+-- (`page_hold` and `page_cookie` are door_auth.c1f's: the page fetched from this machine is given its owner cookie; none = no cookie)
 -- none until the file's stat has come back (an asynchronous read): the reply waits for it
 Request.static getter:
   WHEN this.rel == None: 'no'
@@ -51,6 +52,8 @@ Request.static getter:
 Request.static_reply getter:
   WHEN this.static == None: None
   ELSE WHEN this.static == 'file' and not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN this.static == 'file' and this.page_hold == True: None
+  ELSE WHEN this.static == 'file' and this.page_cookie != None: {'status': 200, 'headers': {'content-type': this.ctype, 'cache-control': 'no-store, max-age=0', 'set-cookie': this.page_cookie}, 'file': this.file, 'no_body': this.method == 'HEAD'}
   ELSE WHEN this.static == 'file': {'status': 200, 'headers': {'content-type': this.ctype, 'cache-control': 'no-store, max-age=0'}, 'file': this.file, 'no_body': this.method == 'HEAD'}
   ELSE: {'status': 404, 'body': {'error': 'not found'}}
 
@@ -61,7 +64,9 @@ Request.static_reply getter:
 Request.loop getter: startswith(this.peer or '', '127.0.0.1:') or startswith(this.peer or '', '[::1]:')
 Request.fwd getter: prop(this.headers, 'x-forwarded-for') != None or prop(this.headers, 'forwarded') != None
 Request.internal getter: this.loop and not this.fwd and this.auth_error == 'no token'
-Request.entrant getter: this.authed == True or this.internal
+-- the page's own calls (`/ui/serve/...`) are the one place a tokenless loopback caller is NOT the seat: the page is given its token (door_auth.c1f),
+-- so a call through the prefix with none is refused (the operator's no-tokenless rule, #842); a bare `curl` on the unprefixed routes still passes
+Request.entrant getter: this.authed == True or (this.internal and not this.ui_served)
 Request.who getter: {'sub': this.sub, 'name': prop(this.claims, 'name') or this.sub} if this.authed == True else None
 Request.boots getter: [b for b in instances('Boot')]
 Request.c_stt getter: 'server' if startswith(str(([b.seat_stt for b in this.boots] or [''])[0] or ''), 'http') else 'browser'
@@ -87,8 +92,8 @@ Request.fwdh getter: lower(str(prop(this.headers, 'forwarded') or ''))
 Request.https getter: this.proto == 'https' or 'proto=https' in this.fwdh or 'proto="https"' in this.fwdh
 Request.cookie_name getter: ([prop(h.listen_result, 'cookie') for h in instances('Http') if prop(h.listen_result, 'cookie') != None] or ['membrane_jwt'])[0]
 Request.secure getter: '; Secure' if this.https else ''
-Request.login_token getter: prop(json(this.body or ''), 'token') if this.method == 'POST' and this.path == '/ui/login' else None
-Request.login_shape getter: this.path == '/ui/login' and this.method == 'POST' and this.ct == 'application/json' and len(this.body or '') <= 16384
+Request.login_token getter: prop(json(this.body or ''), 'token') if this.method == 'POST' and this.route == '/ui/login' else None
+Request.login_shape getter: this.route == '/ui/login' and this.method == 'POST' and this.ct == 'application/json' and len(this.body or '') <= 16384
 Request.login_has getter: this.login_token != None and len(str(this.login_token)) > 0
 Request.login_ask getter: {'id': 'login', 'token': this.login_token} if this.login_shape and this.login_has else None
 Request.login_ask on-setter login-verify:
@@ -101,17 +106,21 @@ Request.login_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE WHEN this.ct != 'application/json': {'status': 415, 'body': {'error': 'send JSON: {"token": "..."}'}}
   ELSE WHEN len(this.body or '') > 16384: {'status': 413, 'body': {'error': 'too large'}}
-  ELSE WHEN this.login_ask == None: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  ELSE WHEN this.login_ask == None: this.unauthorized
   ELSE WHEN this.verify_result == None: None
-  ELSE WHEN not this.login_ok: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  ELSE WHEN not this.login_ok: this.unauthorized
   ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.login_cookie}, 'body': {'ok': True, 'who': {'sub': prop(prop(this.verify_result, 'claims'), 'sub'), 'name': prop(prop(this.verify_result, 'claims'), 'name') or prop(prop(this.verify_result, 'claims'), 'sub')}}}
 Request.logout_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.cookie_name + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict' + this.secure}, 'body': {'ok': True}}
 
+-- THE 401, in the RELEASED shape (jwtauth.py `send_unauthorized`, the shape the TUI, Home Assistant and curl scripts read): one message for a
+-- missing and a refused token alike (a refusal never says which), under `error.message`, and `WWW-Authenticate: Bearer realm="membrane"`.
+Request.unauthorized getter: {'status': 401, 'headers': {'www-authenticate': 'Bearer realm="membrane"'}, 'body': {'error': {'message': 'missing or invalid token', 'type': 'unauthorized'}}}
+
 -- ---- the gate: every route but the public shell needs a token (or a bare loopback caller) --------------------------------------
-Request.public getter: this.path in ['/', '/index.html', '/membrane', '/favicon.ico', '/ui/login', '/ui/logout'] or startswith(this.path, '/ui/www/')
-Request.gate getter: None if this.public or this.entrant else {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'invalid token' if this.auth_error != 'no token' else 'missing or invalid token'}}
+Request.public getter: not this.ui_served and (this.route in ['/', '/index.html', '/membrane', '/favicon.ico', '/ui/login', '/ui/logout'] or startswith(this.route, '/ui/www/'))
+Request.gate getter: None if this.public or this.entrant else this.unauthorized
 
 -- ---- the opencode client's boot probes ----------------------------------------------------------------------------------------------
 -- The launcher tells Boot:seat.seat_version, .seat_cwd, .seat_home and .seat_project.
@@ -122,14 +131,14 @@ Request.f_project getter: ([b.seat_project for b in this.boots] or [''])[0]
 Request.ms getter: num(words(replace(str(clock * 1000), '.', ' '))[0])
 Request.path_body getter: {'home': this.f_home, 'state': this.f_home + '/.local/state/opencode', 'config': this.f_home + '/.config/opencode', 'worktree': this.f_cwd, 'directory': this.f_cwd}
 Request.project_body getter: {'id': this.f_project, 'worktree': this.f_cwd, 'vcs': 'git', 'time': {'created': this.ms, 'updated': this.ms}, 'sandboxes': []}
-Request.probe getter: this.path in ['/global/health', '/command', '/vcs', '/path', '/project', '/project/current'] or (startswith(this.path, '/project/') and '/directories' in this.path)
+Request.probe getter: this.route in ['/global/health', '/command', '/vcs', '/path', '/project', '/project/current'] or (startswith(this.route, '/project/') and '/directories' in this.route)
 Request.probe_reply getter:
   WHEN not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
-  ELSE WHEN this.path == '/global/health': {'status': 200, 'body': {'healthy': True, 'version': this.f_version}}
-  ELSE WHEN this.path == '/command': {'status': 200, 'body': []}
-  ELSE WHEN this.path == '/vcs': {'status': 200, 'body': {'branch': None, 'default_branch': None}}
-  ELSE WHEN this.path == '/path': {'status': 200, 'body': this.path_body}
-  ELSE WHEN this.path == '/project' or this.path == '/project/current': {'status': 200, 'body': this.project_body}
+  ELSE WHEN this.route == '/global/health': {'status': 200, 'body': {'healthy': True, 'version': this.f_version}}
+  ELSE WHEN this.route == '/command': {'status': 200, 'body': []}
+  ELSE WHEN this.route == '/vcs': {'status': 200, 'body': {'branch': None, 'default_branch': None}}
+  ELSE WHEN this.route == '/path': {'status': 200, 'body': this.path_body}
+  ELSE WHEN this.route == '/project' or this.route == '/project/current': {'status': 200, 'body': this.project_body}
   ELSE: {'status': 200, 'body': []}
 
 -- ---- route families (the porting areas): a family pack IMPORTs door 1 and defines two getters on Request --------------------------
@@ -169,9 +178,19 @@ Request.allow getter:
 Request.method_ok getter: this.allow == None or this.method in this.allow or (this.method == 'HEAD' and 'GET' in this.allow)
 Request.family_checked getter: {'status': 405, 'headers': {'allow': join(this.allow, ', ')}, 'body': {'error': 'method not allowed'}} if not this.method_ok else this.family
 
-Request.own_routes getter: this.conf_reply if this.path == '/ui/conf' else (this.login_reply if this.path == '/ui/login' else (this.logout_reply if this.path == '/ui/logout' else (this.probe_reply if this.probe else this.static_reply)))
+Request.own_routes getter: this.conf_reply if this.route == '/ui/conf' else (this.login_reply if this.route == '/ui/login' else (this.logout_reply if this.route == '/ui/logout' else (this.probe_reply if this.probe else this.static_reply)))
 Request.routed getter: this.family_checked if this.owned else this.own_routes
 Request.shipped getter: this.gate if this.gate != None else this.routed
+
+-- ---- the page's prefix: /ui/serve/<path> is <path> (the released page calls every route through it) --------------------------------
+-- The page (membrane/ui/*.js) asks `/ui/serve/session`, `/ui/serve/global/health`, ...; the released Python seat stripped the prefix and
+-- answered the route behind it. The door does the same, once and only at the front, with two getters and no rewrite: `ui_served` says
+-- the request came through the prefix (the page's own call: door_auth.c1f gives the page its token and refuses a tokenless one), `ui_path`
+-- is the path without it, and `route` is the path every route family reads: ALWAYS `this.route`, never `this.route` (the raw path stays
+-- as the client sent it; a setter cannot rewrite it: a write back to the property that started the chain is refused as a loop).
+Request.ui_served getter: startswith(this.path or '', '/ui/serve/')
+Request.ui_path getter: '/' + tail(this.path, len(this.path) - len('/ui/serve/'))
+Request.route getter: this.ui_path if this.ui_served else this.path
 
 Request.reply getter: this.override if this.override != None else this.shipped
 

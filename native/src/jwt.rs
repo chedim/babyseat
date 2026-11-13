@@ -109,6 +109,20 @@ fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
+/// Sign a token (the verifier's twin, HS256): `sub`, `name`, `iat` = now, `exp` = now + `ttl` seconds (whole seconds, as the
+/// Python seat minted them). Refuses a secret under 32 bytes, an empty or long or control-character subject, and a ttl that is not positive.
+pub fn mint(secret: &[u8], sub: &str, name: &str, ttl: f64, now: f64) -> Result<String, String> {
+    if secret.len() < MIN_SECRET { return Err("the secret is shorter than 32 bytes".into()); }
+    if sub.is_empty() || sub.chars().count() > 256 || sub.chars().any(|c| c.is_control()) { return Err("sub is required".into()); }
+    if !(ttl >= 1.0) { return Err("ttl must be at least one second".into()); }
+    let b64u = |b: &[u8]| base64_encode(b).trim_end_matches('=').replace('+', "-").replace('/', "_");
+    let head = b64u(br#"{"alg":"HS256","typ":"JWT"}"#);
+    let claims = serde_json::json!({"sub": sub, "name": name, "iat": now.floor() as i64, "exp": (now + ttl).floor() as i64});
+    let body = b64u(claims.to_string().as_bytes());
+    let sig = b64u(&hmac_sha256(secret, format!("{head}.{body}").as_bytes()));
+    Ok(format!("{head}.{body}.{sig}"))
+}
+
 /// Verify a token at `now` (unix seconds): -> its claims, or an error (log it; tell the client only `INVALID`).
 pub fn verify(token: &str, secret: &[u8], now: f64) -> Result<J, String> {
     if secret.len() < MIN_SECRET { return Err("the secret is shorter than 32 bytes".into()); }
