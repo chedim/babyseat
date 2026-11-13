@@ -22,6 +22,8 @@ pollster = { version = "1.0.1", optional = true }
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 serde_json = { version = "1", features = ["preserve_order"] }
+# the tokenizer (#1143): UAX #29 sentence and word boundaries, compiled in; no_std-capable, so wasm32 builds
+unicode-segmentation = { version = "=1.13.3", default-features = false }
 # the field store (#1111): the process's one SQLite, owned by the native engine
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 wgpu = { version = "30.0.1", optional = true }

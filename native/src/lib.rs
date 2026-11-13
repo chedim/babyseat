@@ -5,6 +5,7 @@ pub mod adapters;
 pub mod learn;
 pub mod recall;
 pub mod syntax;
+pub mod text;
 #[cfg(unix)]
 pub mod mapped;
 pub mod topk;
