@@ -956,6 +956,27 @@
       "Memory"
     ]
   },
+  "mentions": {
+    "getters": {
+      "SemAllCaps.form": "Text",
+      "SemCapital.form": "Text",
+      "SemIdentifier.form": "Text",
+      "SemNumber.form": "Text",
+      "SemPath.form": "Text",
+      "SemPlural.form": "Text",
+      "SemPlural.lemma": "Text",
+      "Span.f_allcaps": "Text?",
+      "Span.f_capital": "Text?",
+      "Span.f_initial": "Bool",
+      "Span.f_number": "Text?",
+      "Span.f_plural": "Text?",
+      "Span.forms": "List(Text?)"
+    },
+    "writes": {
+      "Span.parents": "List(Text?)"
+    },
+    "findings": []
+  },
   "messages": {
     "getters": {},
     "writes": {},
@@ -1116,6 +1137,7 @@
       "SemText.skey": "Text",
       "SemText.urls": "List(Dict)",
       "SemText.words": "List(Dict)",
+      "Span.lemma": "Text",
       "Span.text": "Any"
     },
     "writes": {

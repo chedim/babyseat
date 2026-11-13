@@ -135,3 +135,71 @@ fn attaching_a_span_the_text_has_not_makes_nothing() {
     h.pump();
     assert!(!live(&h, &span("paragraph", 0)));
 }
+
+// ---- item 3: the form classes of a span (mentions.c1f) ----------------------------------------------------------------------------------
+const FORMS: &str = "Dogs bark. See Rex, NASA and 3 cats at my_fn in ~/a.txt near boxes, cities, a bus and a class.";
+fn at(t: &str, w: &str) -> usize { let b = t.find(w).unwrap_or_else(|| panic!("{w} not in {t}")); t[..b].chars().count() }
+/// attach the span (layer, the first occurrence of `w`) of a body holding FORMS and read its class list
+fn attached(h: &Host, layer: &str, w: &str) -> String {
+    h.write(B, "attach", json!({"layer": layer, "start": at(FORMS, w)}), "person");
+    h.pump();
+    span(layer, at(FORMS, w))
+}
+/// the class list; a span with no form class has no `parents` written: its list is [its eid class]
+fn classes(h: &Host, s: &str) -> Vec<String> { h.get(s, "parents").as_array().cloned().unwrap_or(vec![json!("cls:span")]).iter().map(|c| c.as_str().unwrap().to_string()).collect() }
+
+#[test]
+fn an_attached_span_gets_its_form_classes_by_rule_and_each_class_has_its_getters() {
+    let h = with_body(FORMS);
+    let s = attached(&h, "word", "Dogs");
+    assert_eq!(classes(&h, &s), ["cls:semplural", "cls:span"], "sentence-initial: plural, not capital");
+    assert_eq!(h.get(&s, "lemma"), json!("dog"));
+    let s = attached(&h, "word", "Rex");
+    assert_eq!(classes(&h, &s), ["cls:semcapital", "cls:span"]);
+    assert_eq!(h.get(&s, "lemma"), json!("rex"), "the default lemma is the lowercased text");
+    let s = attached(&h, "word", "NASA");
+    assert_eq!(classes(&h, &s), ["cls:semallcaps", "cls:span"]);
+    let s = attached(&h, "word", "3");
+    assert_eq!(classes(&h, &s), ["cls:semnumber", "cls:span"]);
+    let s = attached(&h, "word", "cats");
+    assert_eq!(classes(&h, &s), ["cls:semplural", "cls:span"]);
+    assert_eq!(h.get(&s, "lemma"), json!("cat"));
+    assert_eq!(h.get(&attached(&h, "word", "boxes"), "lemma"), json!("box"));
+    assert_eq!(h.get(&attached(&h, "word", "cities"), "lemma"), json!("city"));
+    for w in ["bus", "class", "in", "and"] {
+        let s = attached(&h, "word", w);
+        assert_eq!(classes(&h, &s), ["cls:span"], "{w} is no plural");
+        assert_eq!(h.get(&s, "lemma"), json!(w));
+    }
+    let s = attached(&h, "identifier", "my_fn");
+    assert_eq!(classes(&h, &s), ["cls:semidentifier", "cls:span"]);
+    let s = attached(&h, "path", "~/a.txt");
+    assert_eq!(classes(&h, &s), ["cls:sempath", "cls:span"]);
+    assert_eq!(h.get(&s, "lemma"), json!("~/a.txt"));
+}
+
+#[test]
+fn a_span_with_two_classes_answers_from_the_nearest_and_writing_parents_reorders_them() {
+    let h = with_body("See Dogs now.");
+    h.write(B, "attach", json!({"layer": "word", "start": 4}), "person");
+    h.pump();
+    let s = span("word", 4);
+    assert_eq!(classes(&h, &s), ["cls:semplural", "cls:semcapital", "cls:span"], "one word, two form classes");
+    assert_eq!(h.get(&s, "form"), json!("plural"));
+    assert_eq!(h.get(&s, "lemma"), json!("dog"));
+    h.write(&s, "parents", json!(["cls:semcapital", "cls:semplural", "cls:span"]), "person");
+    h.pump();
+    assert_eq!(h.get(&s, "form"), json!("capital"), "the nearer class answers");
+    assert_eq!(h.get(&s, "lemma"), json!("dog"), "SemCapital has no lemma: the list is searched in order and SemPlural, next, answers");
+}
+
+#[test]
+fn a_layer_the_model_wrote_overrides_a_form_class_getter() {
+    let h = with_body(FORMS);
+    h.load_pack("mine", "PACK mine 1\nIMPORT mentions 1\nSemPlural.lemma getter: 'PLURAL OF ' + lower(this.text)\n").unwrap();
+    h.rebuild();
+    h.pump();
+    let s = attached(&h, "word", "cats");
+    assert_eq!(h.get(&s, "lemma"), json!("PLURAL OF cats"));
+    assert_eq!(h.get(&attached(&h, "word", "Rex"), "lemma"), json!("rex"), "the other classes keep theirs");
+}

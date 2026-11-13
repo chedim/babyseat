@@ -42,3 +42,6 @@ SemText.attach on-setter attach-span:
       this.attach_result = Span:of[this.skey][letter][start]
 
 Span.text getter: head(tail(prop(this.of, 'text'), len(prop(this.of, 'text')) - this.start), this.end - this.start)
+-- the lemma of a span: the form a word is counted under. Lowercase only, no stemming (operator decision); a CLASS of the span changes it
+-- (mentions.c1f: `SemPlural.lemma`), nearest class first.
+Span.lemma getter: lower(this.text)

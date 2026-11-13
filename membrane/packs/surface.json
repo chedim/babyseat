@@ -566,6 +566,24 @@
       "Memory"
     ]
   },
+  "mentions": {
+    "imports": [
+      "semtext"
+    ],
+    "classes": [
+      "SemAllCaps",
+      "SemCapital",
+      "SemIdentifier",
+      "SemNumber",
+      "SemPath",
+      "SemPlural",
+      "Span"
+    ],
+    "members": 13,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
   "messages": {
     "imports": [],
     "classes": [],
@@ -693,7 +711,7 @@
       "SemText",
       "Span"
     ],
-    "members": 9,
+    "members": 10,
     "writes": [
       "Span:*=Span()"
     ],

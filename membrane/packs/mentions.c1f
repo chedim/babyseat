@@ -1,0 +1,49 @@
+PACK mentions 1
+IMPORT semtext 1
+-- MENTIONS (#1143, docs/semtext-and-legs.md): the rules (in c1f, so a model can layer over them) that turn the spans of a text into
+-- classes, entities and edges. THIS PART: the FORM CLASSES of a span.
+--
+-- A span that is attached (`SemText.attach`, semtext.c1f) is classified at once: its `parents` list is written, nearest class first, the
+-- class `span` last. A word span carries SEVERAL classes; the first class whose getter answers a property wins (docs/c1f-layers.md), so
+-- `SemPlural.lemma` beats the default `Span.lemma`, and a model's pack that IMPORTs mentions and defines `SemPlural.lemma` is the
+-- upper layer and beats both.
+--   layer word:        SemNumber (the word is a `number` span: digits, 3.5, 1,000)
+--                      SemPlural (CRUDE, English only: more than 3 letters, ends in s, not ss / us / is: `cats` `boxes` `cities`; `bus` `class` are not)
+--                      SemAllCaps (two letters or more; the first two and the last two letters are upper case: `NASA`)
+--                      SemCapital (first letter upper case, not all caps, NOT the first word of a sentence: `Rex`, not `Dogs bark`'s `Dogs`)
+--   layer identifier:  SemIdentifier        layer path: SemPath        (url, number and sentence spans have no form class)
+-- `form` names the nearest form class in one word; a class's other getters are its own (`lemma`).
+-- The lemma of a plural strips the plural suffix by a crude rule: `ies` -> `y`, `ses` `xes` `zes` `ches` `shes` -> drop `es`, else drop `s`
+-- (`houses` -> `hous`: a rule, not a dictionary; the model overrides it in a layer).
+
+SemNumber.form getter: 'number'
+SemPlural.form getter: 'plural'
+SemAllCaps.form getter: 'allcaps'
+SemCapital.form getter: 'capital'
+SemIdentifier.form getter: 'identifier'
+SemPath.form getter: 'path'
+
+SemPlural.lemma getter:
+  WHEN tail(lower(this.text), 3) == 'ies': head(lower(this.text), len(this.text) - 3) + 'y'
+  ELSE WHEN tail(lower(this.text), 3) in ['ses', 'xes', 'zes'] or tail(lower(this.text), 4) in ['ches', 'shes']: head(lower(this.text), len(this.text) - 2)
+  ELSE: head(lower(this.text), len(this.text) - 1)
+
+Span.f_number getter: 'cls:semnumber' if this.layer == 'word' and len([n for n in prop(this.of, 'numbers') if n['start'] == this.start and n['end'] == this.end]) > 0 else None
+Span.f_plural getter: 'cls:semplural' if this.layer == 'word' and this.f_number == None and len(this.text) > 3 and tail(lower(this.text), 1) == 's' and tail(lower(this.text), 2) not in ['ss', 'us', 'is'] else None
+-- c1f cannot walk a text letter by letter, so the rule looks at four letters: the first two and the last two are all upper case (`NASA`, `OK`, `HTTP`; `HTTP2` is not, `McDonald` is not, `ABcD` is, a known crude edge)
+Span.f_allcaps getter: 'cls:semallcaps' if this.layer == 'word' and len(this.text) >= 2 and head(this.text, 2) != lower(head(this.text, 2)) and tail(this.text, 2) != lower(tail(this.text, 2)) and head(this.text, 1) != lower(head(this.text, 1)) and tail(this.text, 1) != lower(tail(this.text, 1)) else None
+Span.f_initial getter: len([s for s in prop(this.of, 'sentences') if s['start'] == this.start]) > 0
+Span.f_capital getter: 'cls:semcapital' if this.layer == 'word' and this.f_allcaps == None and not this.f_initial and head(this.text, 1) != lower(head(this.text, 1)) else None
+Span.forms getter:
+  WHEN this.layer == 'word': [c for c in [this.f_number, this.f_plural, this.f_allcaps, this.f_capital] if c != None]
+  ELSE WHEN this.layer == 'identifier': ['cls:semidentifier']
+  ELSE WHEN this.layer == 'path': ['cls:sempath']
+  ELSE: []
+
+-- A span is classified when its `forms` arrive: a setter on the getter's own property (the way a getter's value is heard, `Request.ev_snap` in
+-- chat.c1f) writes the class list, nearest class first, `span` last. (A birth runs no setter and the getters of an entity born in a round
+-- are computed when it ends, so a setter of the attach or of a `classify` write would read them as nothing.) A change of the text that changes
+-- the forms re-classifies the span; `forms` does not read `parents`, so the write does not come back.
+Span.forms on-setter classify-span:
+  WHEN this.forms != None:
+    this.parents = concat(this.forms, ['cls:span'])
