@@ -39,6 +39,7 @@ Request.file getter: this.cand if this.hit == True else None
 Request.parts getter: concat([''], words(replace(this.rel or '', '.', ' ')))
 Request.ext getter: this.parts[len(this.parts) - 1]
 Request.ctype getter: {'html': 'text/html; charset=utf-8', 'js': 'application/javascript; charset=utf-8', 'mjs': 'application/javascript; charset=utf-8', 'wasm': 'application/wasm', 'gz': 'application/gzip', 'json': 'application/json', 'css': 'text/css; charset=utf-8', 'png': 'image/png', 'svg': 'image/svg+xml', 'ico': 'image/x-icon', 'woff2': 'font/woff2'}[this.ext] or 'application/octet-stream'
+-- (`page_hold` and `page_cookie` are door_auth.c1f's: the page fetched from this machine is given its owner cookie; none = no cookie)
 -- none until the file's stat has come back (an asynchronous read): the reply waits for it
 Request.static getter:
   WHEN this.rel == None: 'no'
@@ -51,6 +52,8 @@ Request.static getter:
 Request.static_reply getter:
   WHEN this.static == None: None
   ELSE WHEN this.static == 'file' and not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
+  ELSE WHEN this.static == 'file' and this.page_hold == True: None
+  ELSE WHEN this.static == 'file' and this.page_cookie != None: {'status': 200, 'headers': {'content-type': this.ctype, 'cache-control': 'no-store, max-age=0', 'set-cookie': this.page_cookie}, 'file': this.file, 'no_body': this.method == 'HEAD'}
   ELSE WHEN this.static == 'file': {'status': 200, 'headers': {'content-type': this.ctype, 'cache-control': 'no-store, max-age=0'}, 'file': this.file, 'no_body': this.method == 'HEAD'}
   ELSE: {'status': 404, 'body': {'error': 'not found'}}
 
@@ -61,7 +64,9 @@ Request.static_reply getter:
 Request.loop getter: startswith(this.peer or '', '127.0.0.1:') or startswith(this.peer or '', '[::1]:')
 Request.fwd getter: prop(this.headers, 'x-forwarded-for') != None or prop(this.headers, 'forwarded') != None
 Request.internal getter: this.loop and not this.fwd and this.auth_error == 'no token'
-Request.entrant getter: this.authed == True or this.internal
+-- the page's own calls (`/ui/serve/...`) are the one place a tokenless loopback caller is NOT the seat: the page is given its token (door_auth.c1f),
+-- so a call through the prefix with none is refused (the operator's no-tokenless rule, #842); a bare `curl` on the unprefixed routes still passes
+Request.entrant getter: this.authed == True or (this.internal and not this.ui_served)
 Request.who getter: {'sub': this.sub, 'name': prop(this.claims, 'name') or this.sub} if this.authed == True else None
 Request.boots getter: [b for b in instances('Boot')]
 Request.c_stt getter: 'server' if startswith(str(([b.seat_stt for b in this.boots] or [''])[0] or ''), 'http') else 'browser'
@@ -101,17 +106,21 @@ Request.login_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE WHEN this.ct != 'application/json': {'status': 415, 'body': {'error': 'send JSON: {"token": "..."}'}}
   ELSE WHEN len(this.body or '') > 16384: {'status': 413, 'body': {'error': 'too large'}}
-  ELSE WHEN this.login_ask == None: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  ELSE WHEN this.login_ask == None: this.unauthorized
   ELSE WHEN this.verify_result == None: None
-  ELSE WHEN not this.login_ok: {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'missing or invalid token'}}
+  ELSE WHEN not this.login_ok: this.unauthorized
   ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.login_cookie}, 'body': {'ok': True, 'who': {'sub': prop(prop(this.verify_result, 'claims'), 'sub'), 'name': prop(prop(this.verify_result, 'claims'), 'name') or prop(prop(this.verify_result, 'claims'), 'sub')}}}
 Request.logout_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.cookie_name + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict' + this.secure}, 'body': {'ok': True}}
 
+-- THE 401, in the RELEASED shape (jwtauth.py `send_unauthorized`, the shape the TUI, Home Assistant and curl scripts read): one message for a
+-- missing and a refused token alike (a refusal never says which), under `error.message`, and `WWW-Authenticate: Bearer realm="membrane"`.
+Request.unauthorized getter: {'status': 401, 'headers': {'www-authenticate': 'Bearer realm="membrane"'}, 'body': {'error': {'message': 'missing or invalid token', 'type': 'unauthorized'}}}
+
 -- ---- the gate: every route but the public shell needs a token (or a bare loopback caller) --------------------------------------
-Request.public getter: this.route in ['/', '/index.html', '/membrane', '/favicon.ico', '/ui/login', '/ui/logout'] or startswith(this.route, '/ui/www/')
-Request.gate getter: None if this.public or this.entrant else {'status': 401, 'headers': {'www-authenticate': 'Bearer'}, 'body': {'error': 'invalid token' if this.auth_error != 'no token' else 'missing or invalid token'}}
+Request.public getter: not this.ui_served and (this.route in ['/', '/index.html', '/membrane', '/favicon.ico', '/ui/login', '/ui/logout'] or startswith(this.route, '/ui/www/'))
+Request.gate getter: None if this.public or this.entrant else this.unauthorized
 
 -- ---- the opencode client's boot probes ----------------------------------------------------------------------------------------------
 -- The launcher tells Boot:seat.seat_version, .seat_cwd, .seat_home and .seat_project.

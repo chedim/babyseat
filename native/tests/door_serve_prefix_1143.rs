@@ -75,20 +75,26 @@ fn split(r: &[u8]) -> (String, Vec<u8>) {
 
 fn status(r: &[u8]) -> String { split(r).0.lines().next().unwrap().to_string() }
 fn req(path: &str, extra: &str) -> String { format!("GET {path} HTTP/1.1\r\nHost: t\r\n{extra}\r\n") }
+// the page's own calls carry the token the page was given (door_auth.c1f); the bare routes need none from this machine
+fn bearer() -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    format!("Authorization: Bearer {}\r\n", membrane_vm::jwt::mint(SECRET.as_bytes(), "ann", "ann", 3600.0, now).unwrap())
+}
+fn auth(path: &str) -> String { req(path, &bearer()) }
 
 #[test]
 fn the_prefix_is_stripped_and_a_route_answers_on_both_paths() {
     let (mut c, mut f, port) = world();
     for path in ["/global/health", "/command", "/path", "/project/current", "/vcs"] {
         let bare = get(&mut c, &mut f, port, &req(path, ""));
-        let pre = get(&mut c, &mut f, port, &req(&format!("/ui/serve{path}"), ""));
+        let pre = get(&mut c, &mut f, port, &auth(&format!("/ui/serve{path}")));
         assert!(status(&bare).starts_with("HTTP/1.1 200"), "{path}: {}", status(&bare));
         assert_eq!(status(&pre), status(&bare), "{path}");
         assert_eq!(split(&pre).1, split(&bare).1, "{path}: the same body");
     }
     // a path no route owns is a 404 (not a hang), and the prefix alone is no page
     for path in ["/ui/serve/session", "/ui/serve/nothing/here"] {
-        let r = get(&mut c, &mut f, port, &req(path, ""));
+        let r = get(&mut c, &mut f, port, &auth(path));
         assert!(status(&r).starts_with("HTTP/1.1 404"), "{path}: {}", status(&r));
     }
     // the prefix is stripped ONCE, and only at the front: a path that holds it later is its own path
@@ -96,6 +102,6 @@ fn the_prefix_is_stripped_and_a_route_answers_on_both_paths() {
     assert!(status(&r).starts_with("HTTP/1.1 404"), "{}", status(&r));
     // a method and a body ride through (the page's POSTs): the family's own 405 answers, so the route is the family's
     let (mut c2, mut f2, port2) = world();
-    let r = get(&mut c2, &mut f2, port2, "POST /ui/serve/global/health HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n");
+    let r = get(&mut c2, &mut f2, port2, &format!("POST /ui/serve/global/health HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n{}\r\n", bearer()));
     assert!(status(&r).starts_with("HTTP/1.1 405"), "{}", status(&r));
 }

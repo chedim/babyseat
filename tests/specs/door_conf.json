@@ -230,13 +230,13 @@
    },
    {
     "eid": "Request:1",
-    "prop": "reply.body.error",
+    "prop": "reply.body.error.message",
     "equals": "missing or invalid token"
    },
    {
     "eid": "Request:1",
     "prop": "reply.headers.www-authenticate",
-    "equals": "Bearer"
+    "equals": "Bearer realm=\"membrane\""
    }
   ]
  },
@@ -340,8 +340,8 @@
    },
    {
     "eid": "Request:1",
-    "prop": "reply.body.error",
-    "equals": "invalid token"
+    "prop": "reply.body.error.message",
+    "equals": "missing or invalid token"
    }
   ]
  },

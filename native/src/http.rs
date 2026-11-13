@@ -175,6 +175,20 @@ pub fn verify(st: &Store, http_eid: &str, req: &J) -> J {
     }
 }
 
+/// `Request.mint = {id, sub, name?, ttl}`: sign a token with the door's own secret (the door never hands the secret to a pack).
+/// The receipt is data: rc 0 and the `token`, or rc 2 and why (no secret, a bad subject, a ttl under a second).
+pub fn mint(st: &Store, http_eid: &str, req: &J) -> J {
+    let id = req.get("id").cloned().unwrap_or(J::Null);
+    let sub = req.get("sub").and_then(|s| s.as_str()).unwrap_or("");
+    let name = req.get("name").and_then(|s| s.as_str()).unwrap_or(sub);
+    let ttl = req.get("ttl").and_then(|t| t.as_f64()).unwrap_or(0.0);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    match st.secret_of(http_eid).ok_or("this door has no secret".to_string()).and_then(|k| crate::jwt::mint(&k, sub, name, ttl, now)) {
+        Ok(token) => json!({"id": id, "status": "ok", "rc": 0, "head": "ok", "token": token}),
+        Err(why) => json!({"id": id, "status": "error", "rc": 2, "head": why}),
+    }
+}
+
 /// `Http.respond`: write the answer to the held connection and close it. body: text, or any JSON (sent as json).
 pub fn respond(st: &Store, req: &J, conn: Option<u64>) -> J {
     let id = req.get("id").cloned().unwrap_or(J::Null);

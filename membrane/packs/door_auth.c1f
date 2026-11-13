@@ -1,0 +1,24 @@
+PACK door_auth 1
+IMPORT door 1
+-- THE PAGE'S OWN TOKEN (operator decisions 2026-11-13: the released seat's two auth modes are a JWT and the loopback owner cookie; the seat-token
+-- mode and the LAN guard are dropped). docs/release-parity.md section 3; the released shape is `ui_serve.py` `intercept`.
+--   * a JWT (Bearer, Basic password or the seat's cookie) is verified by the door before any pack sees the request (`authed`, `sub`, `claims`);
+--   * the page fetched from THIS machine (a loopback peer with no forwarding header) is given the OWNER cookie: a token for the operator,
+--     signed by the door with its own secret (`Request.mint`, a driver verb: the pack never holds the secret), HttpOnly, SameSite=Strict;
+--   * the page's own calls (`/ui/serve/...`, door.c1f) and every route but the public shell need a verified token: a tokenless request through
+--     the prefix is refused even from loopback, and a request from another address (or with a proxy header) has no way in but a JWT.
+-- The 401 (`Request.unauthorized`) is in door.c1f. Minting more tokens for other people (`token mint`) is not here yet (docs/release-parity.md).
+
+-- who the owner is: the fact `operator` (the released MEMBRANE_OPERATOR), else `owner`
+Request.owner_sub getter: str(prop(this.facts, 'operator') or 'owner')
+-- how long the owner cookie lives: 7 days, as the released seat minted it (ui_serve.py) -- a threshold carried over, flagged for the operator
+Request.owner_ttl getter: 604800
+Request.page getter: this.route in ['/', '/index.html', '/membrane'] and not this.ui_served
+Request.owner_page getter: this.page and this.is_read and this.loop and not this.fwd
+Request.owner_ask getter: {'id': 'owner', 'sub': this.owner_sub, 'name': this.owner_sub, 'ttl': this.owner_ttl} if this.owner_page else None
+Request.owner_ask on-setter owner-mint:
+  WHEN this.owner_ask != None:
+    this.mint = this.owner_ask
+-- the page waits for the receipt (door.c1f `static_reply`); a door with no secret answers rc 2 and the page is served with no cookie
+Request.page_hold getter: True if this.owner_page and this.mint_result == None else None
+Request.page_cookie getter: (this.cookie_name + '=' + str(prop(this.mint_result, 'token')) + '; Path=/; Max-Age=' + str(this.owner_ttl) + '; HttpOnly; SameSite=Strict' + this.secure) if prop(this.mint_result, 'rc') == 0 else None

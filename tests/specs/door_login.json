@@ -242,7 +242,7 @@
    },
    {
     "eid": "Request:1",
-    "prop": "reply.body.error",
+    "prop": "reply.body.error.message",
     "equals": "missing or invalid token"
    }
   ]

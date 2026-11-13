@@ -9,6 +9,8 @@ use membrane_vm::fields::Fields;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+// door packs that are NOT route families: they IMPORT door 1 and define helper getters of the gate (door_auth: the page's token)
+const DOOR_HELPERS: [&str; 1] = ["auth"];
 const FAMILIES: [&str; 7] = ["models", "decisions", "state", "voice", "session", "self", "tools"];
 
 fn root() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("..") }
@@ -109,7 +111,7 @@ fn a_route_family_keeps_the_door_contract() {
     let door = all.iter().find(|p| p.0 == "door").expect("the door pack").1.clone();
     let owned: BTreeSet<String> = declared(&door).into_iter().filter(|(c, _)| c == "Request").map(|(_, p)| p).collect();
     let mut bad = vec![];
-    for (stem, text) in all.iter().filter(|p| p.0.starts_with("door_")) {
+    for (stem, text) in all.iter().filter(|p| p.0.starts_with("door_") && !DOOR_HELPERS.contains(&p.0.trim_start_matches("door_"))) {
         let fam = stem.trim_start_matches("door_");
         if !FAMILIES.contains(&fam) { bad.push(format!("{stem}: `{fam}` is not a reserved family ({FAMILIES:?})")); }
         if !imports(text).iter().any(|i| i == "door") { bad.push(format!("{stem}: must IMPORT door 1")); }
@@ -244,8 +246,8 @@ fn surface_of(text: &str) -> serde_json::Value {
                 if r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { note(format!("ref({r})"), after); }
             }
         }
-        // paths a family claims: startswith(this.path, '/x'), this.path == '/x', this.path in ['/x', ...]
-        for pat in ["this.path == '", "startswith(this.path, '", "this.path in ["] {
+        // paths a family claims (the door's `route`: the path without the page's /ui/serve prefix): startswith(this.route, '/x'), this.route == '/x', this.route in ['/x', ...]
+        for pat in ["this.route == '", "startswith(this.route, '", "this.route in ["] {
             for (i, _) in l.match_indices(pat) {
                 let rest = &l[i + pat.len()..];
                 let seg = rest.split(|c| c == ']' || c == ')').next().unwrap_or("");

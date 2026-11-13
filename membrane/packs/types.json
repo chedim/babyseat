@@ -386,13 +386,17 @@
       "Request.rel_climb": "Bool",
       "Request.rel_ok": "Bool",
       "Request.reply": "Any",
+      "Request.route": "Any",
       "Request.routed": "Dict?",
       "Request.secure": "Text",
       "Request.shipped": "Dict?",
       "Request.static": "Text?",
       "Request.static_reply": "Dict?",
+      "Request.ui_path": "Text?",
       "Request.ui_root": "Any",
       "Request.ui_roots": "List(Any)",
+      "Request.ui_served": "Bool",
+      "Request.unauthorized": "Dict",
       "Request.who": "Dict?"
     },
     "writes": {
@@ -407,6 +411,21 @@
       "Request",
       "Http"
     ]
+  },
+  "door_auth": {
+    "getters": {
+      "Request.owner_ask": "Dict?",
+      "Request.owner_page": "Bool",
+      "Request.owner_sub": "Text",
+      "Request.owner_ttl": "Int",
+      "Request.page": "Bool",
+      "Request.page_cookie": "Text?",
+      "Request.page_hold": "Bool?"
+    },
+    "writes": {
+      "Request.mint": "Dict?"
+    },
+    "findings": []
   },
   "door_decisions": {
     "getters": {
