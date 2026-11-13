@@ -72,24 +72,38 @@ fn world(d: &std::path::Path) -> (Core, Fields) {
 /// One request through the door: `who` None = a caller with no token on this machine. -> the reply.
 fn ask(d: &std::path::Path, path: &str, body: &str, who: Option<&str>) -> J { ask_in(d, path, body, who).0 }
 
-/// The same, and the field after it: the entities the request wrote.
-fn ask_in(d: &std::path::Path, path: &str, body: &str, who: Option<&str>) -> (J, Core) {
+/// The same, and the field after it: the entities the request wrote. The body is born WITH the request, as the door's `Request:<n>`
+/// entities are (http.rs pushes every prop at once).
+fn ask_in(d: &std::path::Path, path: &str, body: &str, who: Option<&str>) -> (J, Core) { ask_with(d, path, body, who, false) }
+
+/// `late`: the body arrives as a write only AFTER the store's rows have landed (the order the old harness raced into, driven
+/// explicitly here: no sleeps, the engine is settled until the rows are in, then the body is written).
+fn ask_with(d: &std::path::Path, path: &str, body: &str, who: Option<&str>, late: bool) -> (J, Core) {
     let (mut c, mut f) = world(d);
     let mut req = json!({"method": "POST", "query": "", "headers": {}, "peer": "127.0.0.1:5", "path": path, "conn": 7});
+    if !late { req["body"] = json!(body); }
     match who {
         Some(s) => { req["authed"] = json!(true); req["sub"] = json!(s); req["claims"] = json!({"sub": s}); }
         None => { req["authed"] = json!(false); req["auth_error"] = json!("no token"); }
     }
-    c.load("Request:1".into(), "Request".into(), req.as_object().unwrap().clone(), None, 0.0);
     let mut seq = 1;
     f.rebuild(&mut c, 1.0, &mut seq);
+    // born as the door's requests are: pushed into the engine with every prop at once (http.rs), so its setters fire
+    c.store.as_ref().unwrap().push_inbound("Request:1".into(), "Request".into(), req.as_object().unwrap().clone());
     f.settle(&mut c, &H, 2.0, &mut seq);
-    // the body arrives as a write, as the door's requests do (a setter fires on a change)
-    let wr = membrane_vm::vm::Write { eid: "Request:1".into(), prop: "body".into(), new: json!(body), old: J::Null, writer: "person".into(), chain: json!({}), seq: 2 };
-    c.hear(wr.clone(), None, 2.0);
-    f.react(&mut c, &H, wr, 2.0, &mut seq);
     let wt = c.store.as_ref().unwrap().waiter();
     let t = std::time::Instant::now();
+    let rows_in = |c: &Core| ["vs_in_q", "vs_out_q"].iter().all(|k| c.docs["Request:1"].props.get(*k).map_or(false, |v| !v.is_null()));
+    if late {
+        while !rows_in(&c) {
+            if t.elapsed().as_secs() >= 10 { panic!("no rows: {:?}", c.docs["Request:1"].props); }
+            wt.wait(Some(std::time::Duration::from_millis(20)));
+            f.settle(&mut c, &H, 2.5, &mut seq);
+        }
+        let wr = membrane_vm::vm::Write { eid: "Request:1".into(), prop: "body".into(), new: json!(body), old: J::Null, writer: "person".into(), chain: json!({}), seq: 2 };
+        c.hear(wr.clone(), None, 2.0);
+        f.react(&mut c, &H, wr, 2.0, &mut seq);
+    }
     loop {
         f.settle(&mut c, &H, 3.0, &mut seq);
         let r = c.docs["Request:1"].props.get("reply").cloned().unwrap_or(J::Null);
@@ -231,4 +245,13 @@ fn the_state_route_names_the_person_from_the_body_without_a_token() {
     assert_eq!(props(&c, O)["on"], false);
     let (r, _) = ask_in(&d, "/membrane/voice/state", "{\"out_on\": false}", None);
     assert_eq!(r["body"], json!({"ok": false, "error": "no person"}));
+}
+
+#[test]
+fn the_state_write_waits_for_the_body_whenever_it_arrives() {
+    // the rows land first, the body after: the write must carry the body's values (it fired once, on the rows, with an empty body)
+    let d = dir();
+    let (r, c) = ask_with(&d, "/membrane/voice/state", "{\"in_on\": true}", Some("Old One"), true);
+    assert_eq!(r["status"], 200, "{r}");
+    assert_eq!(props(&c, "membrane::Config:voice:in:old-one")["on"], true, "the write used the body that arrived after the rows");
 }

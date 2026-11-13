@@ -65,7 +65,8 @@ Request.vs_mode getter: (prop(this.jbody, 'in_mode') if prop(this.jbody, 'in_mod
 Request.vs_dev getter: str(prop(this.jbody, 'device') or '')
 Request.vs_in_dev getter: head(this.vs_dev, 80) if this.vs_dev != '' else prop(this.vs_in, 'device')
 Request.vs_out_dev getter: head(this.vs_dev, 80) if this.vs_dev != '' else prop(this.vs_out, 'device')
-Request.vs_write getter: True if this.vs_ready else None
+-- the write waits for its inputs: the rows AND the body (a setter fires once, on this getter turning True, so it must not turn True before the body is in)
+Request.vs_write getter: True if (this.vs_ready and this.body != None) else None
 Request.vs_write on-setter voice-state:
   WHEN this.vs_write == True:
     slug = this.vo_slug
