@@ -20,7 +20,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
     d
 }
 
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "pack.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f"];
 
 fn start(tag: &str, dir: Option<std::path::PathBuf>) -> (Run, u16) {
     let dir = dir.unwrap_or_else(|| tmp(tag));
@@ -75,35 +75,66 @@ fn read_until_has(port: u16, spec: &str, prop: &str, want: &str) -> String {
     wait(&format!("{spec}.{prop} has {want}"), || { let t = read(port, spec, prop); if t.contains(want) { Some(t) } else { None } })
 }
 
+/// The model's pack. It imports `door_tools` (which owns the class Pack) so its setter can hear `Pack:mine.mode`, and it makes its own
+/// entity: the door's writes are checked like any pack's, and a class a pack declares is OWNED by it (the door can not write a Lamp).
 fn lamps(glow: &str) -> String {
-    format!("PACK mine 1\nLamp.label getter: 'lamp ' + str(this.power)\nLamp.power on-setter glow:\n  ALWAYS: this.lit = '{glow}'\n")
+    format!("PACK mine 1\nIMPORT door_tools 1\nLamp.label getter: 'lamp ' + str(this.power)\nLamp.power on-setter glow:\n  ALWAYS: this.lit = '{glow}'\n\
+             Pack.mode on-setter drive:\n  ALWAYS:\n    Lamp:desk = Lamp(kind: 'desk')\n    Lamp:desk.power = this.mode\n")
 }
 
 #[test]
 fn the_model_writes_a_pack_entity_and_its_getters_and_setters_run_reload_and_refuse() {
     let (_run, port) = start("packs", None);
-    write(port, "Lamp:desk", "power", json!("off"));
     // 1. the first text loads: a getter and a setter of a class the pack declares
     write(port, "Pack:mine", "text", json!(lamps("one")));
-    read_until(port, "Pack:mine", "loaded", "true");
-    write(port, "Lamp:desk", "power", json!("on"));
+    read_until(port, "Pack:mine", "loaded", "True");
+    assert_eq!(read_until(port, "Pack:mine", "state", "loaded"), "loaded");
+    write(port, "Pack:mine", "mode", json!("on"));
     read_until(port, "Lamp:desk", "lit", "one");
     assert_eq!(read_until(port, "Lamp:desk", "label", "lamp on"), "lamp on");
     // 2. hot reload: a changed text replaces the pack
     write(port, "Pack:mine", "text", json!(lamps("two")));
-    write(port, "Lamp:desk", "power", json!("dim"));
+    write(port, "Pack:mine", "mode", json!("dim"));
     read_until(port, "Lamp:desk", "lit", "two");
+    read_until(port, "Lamp:desk", "label", "lamp dim");
     // 3. a text that does not parse: error set, the old behaviour still live
     write(port, "Pack:mine", "text", json!("Lamp.power on-setter:\n  this.lit = 1\n"));
-    read_until_has(port, "Pack:mine", "error", "pack mine");
-    write(port, "Lamp:desk", "power", json!("bright"));
+    let e = read_until_has(port, "Pack:mine", "error", "pack mine");
+    assert_eq!(read(port, "Pack:mine", "state"), "error");
+    assert!(e.contains(": "), "{e}");
+    write(port, "Pack:mine", "mode", json!("bright"));
+    read_until(port, "Lamp:desk", "label", "lamp bright");
     read_until(port, "Lamp:desk", "lit", "two");
     // 4. a text the loader refuses (a setter reading a stale getter): the message is in `error`
-    write(port, "Pack:mine", "text", json!("PACK mine 1\nLamp.label getter: 'x' + str(this.power)\nLamp.power on-setter stale:\n  ALWAYS: this.lit = this.label\n"));
-    let e = read_until_has(port, "Pack:mine", "error", "pack mine");
-    assert!(!e.contains("no such"), "{e}");
-    // 5. a good text clears the error
+    write(port, "Pack:mine", "text", json!("PACK mine 1\nIMPORT door_tools 1\nLamp.label getter: 'x' + str(this.power)\nLamp.power on-setter stale:\n  ALWAYS: this.lit = this.label\n"));
+    let e = read_until_has(port, "Pack:mine", "error", "stale");
+    assert!(e.contains("Lamp.label"), "{e}");
+    write(port, "Pack:mine", "mode", json!("off"));
+    read_until(port, "Lamp:desk", "label", "lamp off");                 // the pack that loaded last still runs
+    // 5. a PACK line that names another pack is refused with what it found
+    write(port, "Pack:mine", "text", json!("PACK other 1\nLamp.label getter: 'y'\n"));
+    read_until_has(port, "Pack:mine", "error", "its PACK line says other");
+    // 6. a good text clears the error
     write(port, "Pack:mine", "text", json!(lamps("three")));
     read_until(port, "Pack:mine", "state", "loaded");
-    assert_eq!(call(port, "entity_read", json!({"spec": "Pack:mine", "prop": "error"})).0, "Pack:mine has no error");
+    assert_eq!(read(port, "Pack:mine", "error"), "Pack:mine has no error");
+}
+
+#[test]
+fn a_restart_loads_the_stored_packs_and_a_broken_text_falls_back_to_its_last_good_one() {
+    let (mut run, port) = start("restart", None);
+    write(port, "Pack:mine", "text", json!(lamps("one")));
+    read_until(port, "Pack:mine", "state", "loaded");
+    write(port, "Pack:mine", "text", json!("Lamp.power on-setter:\n  this.lit = 1\n"));
+    read_until(port, "Pack:mine", "state", "error");
+    // the seat dies with the broken text in the store (a kill: nothing is flushed on purpose)
+    let _ = run.child.kill();
+    let _ = run.child.wait();
+    let dir = run.dir.clone();
+    std::mem::forget(run);                                              // its folder (the store) is the next run's
+    let (_run2, port2) = start("restart", Some(dir));
+    read_until_has(port2, "Pack:mine", "error", "pack mine");           // the error is still shown...
+    write(port2, "Pack:mine", "mode", json!("on"));                     // ...and the last good pack runs
+    read_until(port2, "Lamp:desk", "lit", "one");
+    read_until(port2, "Lamp:desk", "label", "lamp on");
 }

@@ -29,6 +29,10 @@ pub const JOURNAL: &str = "c_journal";
 /// the writer of what the door pushes in (a request) and of what the boot tells (facts, started)
 pub const DOOR_WRITER: &str = "host:door";
 pub const BOOT_WRITER: &str = "host:boot";
+/// A Pack entity (docs/cliffvm.md, "Pack entities"): `Pack:<name>`, its c1f in `text`; the host mirrors the outcome back as derived writes
+pub const PACK_PREFIX: &str = "Pack:";
+pub const PACK_CLASS: &str = "Pack";
+pub const PACK_WRITER: &str = "pack";
 
 /// The store writer for an engine write (fields_live.stamp_writer): derived, except a trip (outside).
 pub fn stamp_writer(engine_writer: &str) -> String {
@@ -106,6 +110,9 @@ pub struct Host {
     journal: Mutex<Vec<Line>>,
     clock: Box<dyn Fn() -> f64 + Send + Sync>,
     waiter: Option<crate::store::Waiter>,
+    /// the last refusal of a Pack entity's text (parse, stale setter, PACK line, import clash): name -> message
+    refusals: Mutex<std::collections::BTreeMap<String, String>>,
+    packs_dirty: AtomicBool,
 }
 
 fn dbe(e: rusqlite::Error) -> String { e.to_string() }
@@ -134,7 +141,7 @@ impl Host {
         }
         let mut fields = Fields::goalgraph();
         fields.inbound_by_host = true;
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false) })
     }
 
     pub fn now(&self) -> f64 { (self.clock)() }
@@ -190,6 +197,7 @@ impl Host {
     /// `engine_writer` is what the engine sees (a Trip arrives as `driver:trip`, the way an effect's receipt does), `stamp` what the store keeps.
     fn inject_write(&self, ts: f64, eid: &str, prop: &str, new: J, engine_writer: &str, stamp: &str) {
         self.store_prop(eid, None, prop, &new, stamp);
+        if prop == "text" { self.pack_text(eid, &new); }
         {
             let mut g = self.eng();
             let (core, f, seq) = &mut *g;
@@ -206,6 +214,7 @@ impl Host {
 
     fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
         self.store_born(eid, cls, &props, stamp);
+        if let Some(t) = props.get("text") { self.pack_text(eid, t); }
         {
             let mut g = self.eng();
             let (core, f, seq) = &mut *g;
@@ -289,9 +298,82 @@ impl Host {
             let (Some(eid), Some(prop)) = (w["eid"].as_str(), w["prop"].as_str()) else { continue };
             let stamp = stamp_writer(w["writer"].as_str().unwrap_or(""));
             self.store_prop(eid, None, prop, &w["new"], &stamp);
+            if prop == "text" { self.pack_text(eid, &w["new"]); }
             if is_outside(&stamp) { self.journal_push(Line::Write { ts, writer: stamp, eid: eid.into(), prop: prop.into(), new: w["new"].clone() }); }
         }
+        if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); return true; }
         any
+    }
+
+    // ---- Pack entities -----------------------------------------------------------------------------------------------
+    /// A write to `text` of `Pack:<name>` loads, replaces or (none/empty) removes the pack; the outcome is mirrored at the end of the drain.
+    fn pack_text(&self, eid: &str, text: &J) {
+        let Some(name) = eid.strip_prefix(PACK_PREFIX).filter(|n| !n.is_empty()) else { return };
+        let src = text.as_str().unwrap_or("");
+        let mut g = self.eng();
+        let f = &mut g.1;
+        let mut refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
+        if src.trim().is_empty() {
+            f.remove_pack(name);
+            refusals.remove(name);
+        } else {
+            match f.set_pack(name, src) {
+                Ok(()) => { refusals.remove(name); }
+                // a NEW pack waiting for an import stays in the engine and its reason is the engine's (it clears when the import arrives)
+                Err(_) if f.pack_errors.contains_key(name) => { refusals.remove(name); }
+                Err(e) => { refusals.insert(name.to_string(), e); }
+            }
+        }
+        self.packs_dirty.store(true, Ordering::SeqCst);
+    }
+
+    /// Mirror every Pack entity's state back as DERIVED writes (`trigger:field:pack`, not journalled: a replay loads the same texts again
+    /// and derives the same): `loaded`, `error`, `good_text` (the last text that loaded). Only what changed is written.
+    fn refresh_packs(&self) {
+        let want: Vec<(String, J, J)> = {
+            let g = self.eng();
+            let refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
+            g.0.docs.iter().filter(|(k, e)| k.starts_with(PACK_PREFIX) && e.cls == PACK_CLASS).map(|(k, e)| {
+                let name = &k[PACK_PREFIX.len()..];
+                let active = g.1.pack_active(name);
+                let err = refusals.get(name).cloned().or_else(|| g.1.pack_errors.get(name).cloned());
+                let text = e.props.get("text").cloned().unwrap_or(J::Null);
+                let good = if active && !refusals.contains_key(name) { text } else { e.props.get("good_text").cloned().unwrap_or(J::Null) };
+                (k.clone(), json!(active), json!({"error": err.map(J::from).unwrap_or(J::Null), "good_text": good}))
+            }).collect()
+        };
+        let ts = self.now();
+        for (eid, loaded, rest) in want {
+            let set = |prop: &str, v: J| {
+                let cur = self.get(&eid, prop);
+                if cur != v { self.inject_write(ts, &eid, prop, v, PACK_WRITER, &stamp_writer(PACK_WRITER)); }
+            };
+            set("loaded", loaded);
+            set("error", rest["error"].clone());
+            set("good_text", rest["good_text"].clone());
+        }
+    }
+
+    /// Start-up: every stored `Pack:*` row loads (name order) from its `text`, else from `good_text` (the error stays shown). The rows
+    /// arrive in the engine as they are (no rewrite, no journal: they were journalled when written). -> the names that loaded.
+    pub fn load_stored_packs(&self) -> Vec<String> {
+        let rows: Vec<(String, Map<String, J>)> = self.rows().into_iter()
+            .filter(|(k, v)| k.starts_with(PACK_PREFIX) && v["cls"] == json!(PACK_CLASS))
+            .map(|(k, v)| (k, v["props"].as_object().cloned().unwrap_or_default())).collect();
+        let now = self.now();
+        let mut names = vec![];
+        for (eid, props) in rows {
+            { let mut g = self.eng(); let (core, f, _) = &mut *g; f.arrive(core, eid.clone(), PACK_CLASS.into(), props.clone(), now); }
+            let name = eid[PACK_PREFIX.len()..].to_string();
+            let text = props.get("text").cloned().unwrap_or(J::Null);
+            self.pack_text(&eid, &text);
+            let refused = self.refusals.lock().unwrap_or_else(|e| e.into_inner()).get(&name).cloned();
+            if let (Some(why), Some(good)) = (refused, props.get("good_text").and_then(|g| g.as_str())) {
+                if self.eng().1.set_pack(&name, good).is_ok() { self.refusals.lock().unwrap_or_else(|e| e.into_inner()).insert(name.clone(), why); }
+            }
+            names.push(name);
+        }
+        names
     }
 
     // ---- the store ---------------------------------------------------------------------------------------------------

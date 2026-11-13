@@ -354,9 +354,10 @@
       "store"
     ],
     "classes": [
+      "Pack",
       "Request"
     ],
-    "members": 42,
+    "members": 43,
     "writes": [
       "*.[]"
     ],

@@ -75,15 +75,31 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 - Packs from the FOLDER stay files: loaded once at start, not entities, not reloaded. A Pack entity of the same name replaces the
   file's pack (it loads later).
 
+**How the model loads a pack (as built).** One `entity_write {spec: "Pack:mine", prop: "text", value: "<c1f>"}`; read `Pack:mine.state`
+(`loaded` / `error` / `waiting`) or `.error`. Rules the engine puts on what the pack can do:
+- A class a pack declares is OWNED by it. The door's writes are checked like any pack's, so `entity_write` can NOT write an entity of a
+  class the model's pack declares (the door pack does not import it), and an entity of a class no pack owns can not be created. The
+  model's pack makes its own entities (`Lamp:desk = Lamp(kind: 'desk')`) from a setter it triggers itself: it declares `IMPORT
+  door_tools 1` (the pack that owns the class `Pack`) and puts a setter on a property of its own Pack entity, e.g. `Pack.mode
+  on-setter drive:`; the model starts it with `entity_write {spec: "Pack:mine", prop: "mode", value: ...}`. The door can still write
+  every class of the shipped packs the pack imports (Command, File, ...).
+- A pack that is removed (text emptied) stops running; the values its getters last computed stay as plain properties.
+- The engine's rounds apply: a setter that writes the same property twice in one round is refused (`refused` on the entity).
+- Test: `native/tests/pack_entities.rs` (the binary, the MCP door: load, hot reload, parse refusal, stale-setter refusal, PACK-line
+  refusal, restart with a broken text falling back to `good_text`), `native/tests/host_loop.rs` (outside writes, journal, replay,
+  removal, a pack waiting for an import).
+
 ## What `fields_live.py` does that the Rust loop does NOT yet do
 
 - **Mirroring the Python entity store**: there is none here; the rows are the host's own table. No `est.docs` hear/mirror, no
   `mirrored()` by ISA kinds (`parents: ["cls:..."]`), no class-of-removal memory, no removal of entities (`f.remove`, #1054): a
   Request entity stays forever (rows and mirror grow without bound).
 - **`silent_birth`** on engine-born entities (`{"born": cls}` is stored with no props).
-- **Packs from entities**: `Pack` entities (`membrane::pack:<name>`, the `c1f` text), hot reload when edited, `good_c1f` kept as the
-  last text that parsed, the `error` shown on the entity, `pack_op` (list/show/load), the shipped-pack rule, `_view_classes`
-  (packs importing `dom` that run in pages). Pack FILES are loaded once at start: no mtime rescan, no reload.
+- **Packs from entities, the rest**: `pack_op` (list/show/load), the shipped-pack rule, `_view_classes` (packs importing `dom` that
+  run in pages), `Pack` entities with the Python name `membrane::pack:<name>` / a `c1f` property / any class holding c1f (here only
+  `Pack:<name>.text`, see "Pack entities"). Pack FILES are loaded once at start: no mtime rescan. No entity removal, so a Pack
+  entity can not be deleted (its text emptied removes the pack). Only Pack rows are restored from the store at start, not other
+  entities.
 - **Banner instances** (`Banner:<owner>:<chat>`), the dials (`recall:dials`), the class switch, facts per turn, `sql_forget`,
   the 3 s banner time limit, `mark_delivered` / `mark_seq`.
 - **LLM call plumbing**: `Fields::calls` (the planner's `membrane::llm.call`) are drained and dropped; no LLM adapter.
