@@ -9,8 +9,9 @@ Host/Origin check. The door answers every request: in this mode every request is
 opens on 127.0.0.1 unless `--bind` says another address (`--bind 0.0.0.0` opens it to the network: configuration only). The old
 JWT code is still in the tree (a later cleanup removes it); the binary neither requires nor uses it.
 
-**The app is the pack folder.** `main()` parses arguments into Boot facts and runs the boot pack from a folder; every route, tool,
-turn and view is a `.c1f` pack in it (the shipped `membrane/packs/*.c1f` are the app). The Rust side is only the host: the loop, the
+**The app is a folder of packs (or a pack file).** `main()` parses arguments into Boot facts and runs the apps given; every route, tool,
+turn and view is a `.c1f` pack in one (the shipped `membrane/packs/*.c1f` are the app). Several apps are LAYERS and the FIRST is the
+root of trust (docs/c1f-layers.md). The Rust side is only the host: the loop, the
 drivers, the store, the socket. A decision a pack could make is not made in Rust: if it shows up, it is listed below.
 
 ## Build and run
@@ -19,17 +20,27 @@ drivers, the store, the socket. A decision a pack could make is not made in Rust
 cd native
 cargo build --release --no-default-features --features bin     # target/release/cliffvm
 cliffvm --version
-cliffvm run <packs-dir> [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>]
+cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>]
 ```
 
 - Features (`native/Cargo.toml`): `store` = rusqlite + tls (the native store, the drivers, the door); `python = [pyo3, store]` (the
   seat's `membrane_vm.so`, unchanged: `sh native/build.sh`); `bin = [store]` (the app). A Python extension is not a program, so the
   app is built with `--no-default-features --features bin`. Tests of the app: the same flags.
-- `run <packs-dir>`: loads every `*.c1f` in it (name order; an `IMPORT` waits for its owner), computes the getters once (a rebuild
-  runs no setter), runs the boot plan if the folder has `boot.json` (+ `boot.c1f`), tells the facts, then `Boot.started`, then loops
+- `run <app>...`: an APP is a folder `<name>.c1f/` or one pack file (the loader tells them apart). The `.c1f` files of a folder (its
+  whole tree) are packs, loaded in dependency order (a pack after the packs of that app it imports; of those ready, the alphabetically
+  first path next); every other file is DATA at its path (the door serves an app's `ui/` files). Several apps load in the order given and
+  each is a layer above the one before it: a pack whose name is already loaded is skipped (the lower layer's stays).
+  **Trust is by position, never by name**: the packs of the FIRST argument are the root of trust (privileged: docs/c1f-layers.md,
+  "Privilege"); a later app has no privilege until a privileged pack grants it (`Pack:<name>.privileged = true`; boot.c1f grants
+  `door_tools`). A pack named `boot` in a later app is not trusted. The shipped packs are a flat folder, so the shipped line is
+  `cliffvm run membrane/packs/boot.c1f membrane/packs`: the single file is the first app (the root of trust), the folder a layer above it
+  that skips `boot` (already loaded). The boot plan (`boot.json`, `boot.c1f`) is looked for beside the first app (in its folder, or
+  the folder a pack file is in). After the packs: computes the getters once (a rebuild
+  runs no setter), runs the boot plan, tells the facts, then `Boot.started`, then loops
   until SIGTERM/SIGINT. `--port` becomes the fact `door_port` (0 = any free port); the pack `door.c1f` answers with
   `Http:door.listen`; once it is up the binary prints `cliffvm: door listening on <host>:<port>`.
-- Facts the arguments tell (names as `membrane/packs/facts.json`): `door_port`, `ui_dir`, `seat_version`, `build_id`, `seat_cwd`,
+- Facts the arguments tell (names as `membrane/packs/facts.json`): `door_port`, `ui_dir`, `app_dirs` (the folders of the apps given, the upper
+  layer first; the door serves each one's `ui/` files, an upper layer's file shadowing the lower's; `--ui-dir` stays as the LOWEST layer), `seat_version`, `build_id`, `seat_cwd`,
   `seat_home`, `seat_name` (Bob), `seat_named`, `seat_aliases`, `seat_voice_out`, `seat_language`, `seat_blurp`, and the whole set
   as the dict `facts` (as `boot_started` writes it). There is no `door_secret_file`.
 - `--store`: one SQLite file (default `./cliffvm.sqlite3`), WAL: the entity rows (`c_field`: eid -> {cls, props, writers}), the

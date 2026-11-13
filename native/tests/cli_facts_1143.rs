@@ -28,3 +28,20 @@ fn the_named_facts_are_not_overridden_and_a_bad_option_is_refused() {
     let a: Vec<String> = ["run", "p", "--fact", "=1"].iter().map(|s| s.to_string()).collect();
     assert!(parse(&a).is_err());
 }
+
+#[test]
+fn several_apps_are_layers_the_first_is_the_root_and_the_door_is_told_the_folders_top_layer_first() {
+    let d = std::env::temp_dir().join(format!("cli-apps-{}", std::process::id()));
+    let (a, b) = (d.join("a.c1f"), d.join("b.c1f"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    std::fs::write(d.join("boot.c1f"), "PACK boot 1\n").unwrap();
+    let (fb, sa, sb) = (d.join("boot.c1f"), a.to_str().unwrap().to_string(), b.to_str().unwrap().to_string());
+    let r = run(&["run", fb.to_str().unwrap(), &sa, &sb, "--ui-dir", &sa]);
+    assert_eq!(r.apps, [fb.to_str().unwrap(), sa.as_str(), sb.as_str()], "the order given: the first is the root of trust");
+    let f = facts(&r);
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap().to_string_lossy().to_string();
+    assert_eq!(f["app_dirs"], json!([canon(&b), canon(&a)]), "the folders only, the later app (the upper layer) first");
+    assert!(parse(&["run".to_string()]).is_err(), "run needs an app");
+    let _ = std::fs::remove_dir_all(d);
+}

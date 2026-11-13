@@ -1,4 +1,4 @@
-# c1f apps and layers (design, decided 2026-11-13; not built yet)
+# c1f apps and layers (decided 2026-11-13; BUILT 2026-11-13, #1143: see the status table)
 
 A c1f APP is a folder named `<name>.c1f/` (the extension is the same one a single pack file has; the loader tells a file from a
 directory). It follows the original cliffhanger modules (`~/projects/cliffhanger/README.md`: a module is a folder whose files map
@@ -13,8 +13,26 @@ chat.c1f/
   ui/chat.js
 ```
 
-`cliffvm run <app>.c1f` replaces the separate packs folder and `--ui-dir`. Several apps may be loaded, in the order given on the
-command line; each app is a LAYER and a later app is above an earlier one (within an app, a pack that imports another is above it).
+`cliffvm run <app> [<app>...]` (a folder `<name>.c1f/` or one pack file). Several apps are loaded in the order given on the command line;
+each app is a LAYER and a later app is above an earlier one (within an app, a pack that imports another is above it). `--ui-dir` stays, as
+the LOWEST layer of data files. The FIRST app is the root of trust (see Privilege).
+
+## Status (what is built, what is open)
+
+| piece | status |
+|---|---|
+| app folders, several apps, load order (dependency, then alphabetical by path), skip a pack already loaded by name | built (`apps.rs`, `Host::load_app`) |
+| trust by position (the first app's packs are privileged, nothing by name) | built; tests `apps_1143.rs` |
+| data files served by the door, upper layer shadowing (`Boot:seat.app_dirs`, `door.c1f`, one stat at a time) | built; `door_static.rs`, `cliffvm_process.rs` |
+| replacing a pack's text with one that lacks a getter clears the value | built; `apps_1143.rs` |
+| getter arms stacked across packs, top first, an upper default ends it | built; `layers_1143.rs` |
+| setters: top first, same-name replacement, first write wins (quiet skip before the right-hand side), in-layer double write stays the error | built |
+| `Why`: `Fields::why_layer` (`layer: <pack>`, `overridden by <pack>: <pack>'s <setter> write skipped`) | built as a Rust API; no door route shows it yet |
+| safety rule (override only what you import), stale-setter check across layers | built |
+| a runtime `Pack:<name>` takes its layer position | by load order: a new pack is on top of everything loaded before it; a replaced pack keeps its place |
+| infer.rs types across layers | a getter defined by several packs is typed from the LOWEST pack's arms (`or_insert`); the snapshot is unchanged |
+| data files as entities of their path | not built: the door searches the folders with the fs driver; no entity per file |
+| a layer's setter that differs in name and writes a target a lower layer also writes, without importing it | not refused (writes are computed, so it cannot be known at load); the first write wins |
 
 ## Layers: the upper layer wins (the way an overlay filesystem works)
 
@@ -28,11 +46,18 @@ command line; each app is a LAYER and a later app is above an earlier one (withi
 
 **The safety rule:** a layer can override ONLY what it imports. An unrelated pack cannot silently change another pack's behaviour.
 
-## Open points to verify when it is built
+## Checked when it was built
 
-- Whether the engine today allows a pack to add arms to a getter another pack defines (class ownership may refuse it; that rule
-  changes, only for packs that import the owner).
-- Whether getter ordering (levels) and the stale-setter check treat arms and setters from several layers correctly.
+- A pack may add arms to a getter another pack defines when it imports the class owner (class ownership allowed it); before, two packs
+  defining one getter were two getters writing one field (the later won, silently). Now they are one list, and the pack that adds to a
+  getter of another pack must import THAT pack too (the safety rule, refused at load with `add IMPORT <pack> <major>`).
+- Levels and the type inference read the folded expression of the whole list; the stale-setter check runs across all packs (a setter
+  in one pack against the getters of every other, both ways).
+- The importer rule is NOT transitive for class ownership: a layer declaring on a class owns by `IMPORT`ing the owner directly, and
+  imports the pack it overrides as well (two import lines).
+
+## Open points
+
 - How a model-loaded `Pack:<name>` entity (the pack-loading piece, `docs/cliffvm.md`) takes its layer position: a runtime pack is
   loaded last and is therefore on top.
 - The doctrine says a model "replaces the banner completely by giving its entity a class of its own"; with layers a model could
@@ -50,10 +75,12 @@ own or import (`compose` refuses it, tested).
   file of the packs folder, from `Pack:<name>.text`, before it is loaded and after it is removed. A Pack entity with no text does not
   remove a file-loaded pack (start-up skips such a row; only a written empty text removes). No header keyword, no self-declaration.
   `privileged = false` (or none) revokes.
-- **Root of trust.** The host marks the pack named `boot` (packs/boot.c1f) privileged and nothing else (`Host::open`); boot.c1f grants
-  `door_tools` at start with a setter on `Boot.started` (`Pack:door_tools.privileged = True`), so the model's `entity_write` can write the
-  class a model-written pack owns. Anything that loads a pack named `boot` gets that trust: the model's tool (privileged) can write
-  `Pack:boot.text`; consistent with "no security, the model owns its environment".
+- **Root of trust: by position, not by name** (decided 2026-11-13). The host marks the packs of the FIRST app given to `cliffvm run`
+  privileged (`Host::load_app(.., trusted = true)`), whatever they are called, and nothing else: a pack named `boot` that is not first is
+  not trusted, a later app has no privilege until a grant. The shipped line is `cliffvm run membrane/packs/boot.c1f membrane/packs`.
+  boot.c1f grants `door_tools` at start with a setter on `Boot.started` (`Pack:door_tools.privileged = True`), so the model's
+  `entity_write` can write the class a model-written pack owns. The model's tool (privileged) can write the text of the root's packs;
+  consistent with "no security, the model owns its environment".
 - **Only a privileged writer grants.** A setter's write to `Pack:<x>.privileged`, by any path (direct, a computed name, a constructor
   argument, a chain of setters: all run as the pack that declared the setter), needs a privileged pack, whether or not that pack owns or
   imports the class Pack; otherwise a receipt (`pack <p> can't grant privilege`) and nothing is written. A privileged pack grants to a
@@ -67,5 +94,5 @@ own or import (`compose` refuses it, tested).
 - **Review.** The surface snapshot lists `Pack:door_tools.privileged` among boot's writes (`surface.json`; `types.json` shows `Pack.privileged`);
   a new grant is a diff the contracts test fails on until reviewed.
 - **Removed pack cleanup.** When a pack is removed, the values its getters left on entities are cleared (derived writes of none), so stale
-  values of a pack that no longer exists do not linger (`Fields::remove_pack_clean`).
+  values of a pack that no longer exists do not linger (`Fields::remove_pack_clean`). The same when a pack's text is REPLACED by one that lacks a getter the old text had (`Fields::set_pack_clean`); a refused text changes nothing.
 - A getter named `privileged` on the class Pack computes a stored value but grants nothing: only writes grant.

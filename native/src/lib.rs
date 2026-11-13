@@ -32,6 +32,8 @@ pub mod drivers;
 #[cfg(feature = "wasm")]
 pub mod web;
 #[cfg(feature = "store")]
+pub mod apps;
+#[cfg(feature = "store")]
 pub mod host;
 #[cfg(feature = "store")]
 pub mod cli;

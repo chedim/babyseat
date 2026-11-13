@@ -190,7 +190,7 @@
       "Http",
       "Request"
     ],
-    "members": 69,
+    "members": 75,
     "writes": [
       "Http:door.listen"
     ],
@@ -212,6 +212,7 @@
       "/vcs"
     ],
     "boot_facts": [
+      "app_dirs",
       "build_id",
       "door_port",
       "door_secret_file",

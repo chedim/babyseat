@@ -95,6 +95,15 @@ pub struct Getter {
     pub cls: String, pub prop: String, pub expr: String,
     /// how many written arms were folded into `expr` (informational)
     pub arms: usize,
+    /// the arms as written, in order: (WHEN or None for the default, expression). Only a parsed pack carries them, for `compose` to stack
+    /// the arms of several layers; the composed getter has none.
+    pub parts: Vec<(Option<String>, String)>,
+    /// the pack that supplied the getter (set by `compose`)
+    pub pack: String,
+    /// a getter defined by SEVERAL layers: every arm of every layer, the top layer's first, as (pack, WHEN or None, expression). The first
+    /// arm whose WHEN holds is evaluated, so the layer that supplied the value is known (`Why`); `expr` is the same list folded into one
+    /// expression (for the levels and the type inference).
+    pub layers: Vec<(String, Option<String>, String)>,
 }
 
 /// The input key of a getter that reads `clock`.
@@ -257,6 +266,9 @@ fn reads_name(expr: &str, name: &str) -> bool {
     })
 }
 
+/// The words of the safety rule in a refusal (set_pack tells a refusal from a pack that waits for its imports by them).
+const OVERRIDE_RULE: &str = "a layer overrides only what it imports";
+
 /// How many times the start-up pass may repeat while values still change (see `rebuild`).
 const REBUILD_PASSES: usize = 16;
 
@@ -306,6 +318,12 @@ pub struct Fields {
     /// PRIVILEGE: pack -> who granted it (docs/c1f-layers.md). A privileged pack is exempt from rule B (it may write and create any class)
     /// and from nothing else: rule A (only the owner declares getters and setters on a class) is `compose`'s and stays.
     granted: std::collections::BTreeMap<String, String>,
+    /// LAYERS: (eid, prop) -> the pack whose arm supplied a layered getter's value
+    layer_of: std::collections::HashMap<(String, String), String>,
+    /// the target (eid, prop) -> the (pack, setter) that wrote it FIRST this round: a stacked setter of another pack skips its write to it
+    claimed: std::collections::HashMap<(String, String), (String, String)>,
+    /// skipped writes (eid, prop, pack, setter) -> the pack that overrode it, as `why_layer` tells
+    skipped: std::collections::BTreeMap<(String, String, String, String), String>,
 }
 
 impl Fields {
@@ -313,7 +331,7 @@ impl Fields {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
-            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default() };
+            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default() };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
         f.load_order.push("goalgraph".into());
@@ -327,6 +345,15 @@ impl Fields {
         let p = crate::syntax::parse_full(src).map_err(|e| format!("pack {}: {}", name, e))?;
         if let Some(n) = &p.name { if n != name { return Err(format!("pack {}: its PACK line says {}", name, n)); } }
         if let Some(e) = stale_setter_read(&p.setters, &p.getters) { return Err(format!("pack {}: {}", name, e)); }
+        // the same check across the layers: this pack's setters against the getters of every other pack, and the other packs' setters against
+        // this pack's getters (an arm it adds to a lower getter can make that getter depend on a lower setter's trigger)
+        {
+            let others_s = self.setters.iter().filter(|st| st.pack != name);
+            let others_g = self.getters.iter().filter(|g| g.pack != name);
+            let sets: Vec<OnSet> = others_s.cloned().chain(p.setters.iter().cloned()).collect();
+            let gets: Vec<Getter> = others_g.cloned().chain(p.getters.iter().cloned()).collect();
+            if let Some(e) = stale_setter_read(&sets, &gets) { return Err(format!("pack {}: {}", name, e)); }
+        }
         let old = self.packs.insert(name.to_string(), p);
         if !self.load_order.iter().any(|n| n == name) { self.load_order.push(name.to_string()); }
         self.compose();
@@ -334,7 +361,7 @@ impl Fields {
             // an import problem: a pack that was active stays as it was; a new one waits for its imports
             match old {
                 Some(o) => { self.packs.insert(name.to_string(), o); self.compose(); }
-                None if e.contains("belongs to pack") => { self.packs.remove(name); self.load_order.retain(|n| n != name); self.compose(); }
+                None if e.contains("belongs to pack") || e.contains(OVERRIDE_RULE) => { self.packs.remove(name); self.load_order.retain(|n| n != name); self.compose(); }
                 None => {}                           // a new pack waiting for an import stays, and activates when it arrives
             }
             return Err(e);
@@ -356,8 +383,25 @@ impl Fields {
     /// Remove a pack AND clear what its getters left on entities: a getter's value is a plain property once the getter is gone, and a stale value
     /// of a pack that no longer exists must not linger. Derived writes of none (journal-neutral); a property another pack still computes stays.
     pub fn remove_pack_clean(&mut self, core: &mut Core, host: &dyn Host, name: &str, now: f64, seq: &mut i64) -> bool {
-        let gone: Vec<(String, String)> = self.packs.get(name).map(|p| p.getters.iter().map(|g| (g.cls.clone(), g.prop.clone())).collect()).unwrap_or_default();
+        let gone = self.pack_getters(name);
         let had = self.remove_pack(name);
+        self.clear_gone(core, host, gone, now, seq);
+        had
+    }
+
+    /// Replace a pack's text AND clear what a getter of the OLD text left when the NEW text lacks it (the same cleanup as a removal).
+    pub fn set_pack_clean(&mut self, core: &mut Core, host: &dyn Host, name: &str, src: &str, now: f64, seq: &mut i64) -> Result<(), String> {
+        let before = self.pack_getters(name);
+        let r = self.set_pack(name, src);
+        self.clear_gone(core, host, before, now, seq);        // a refused text changes nothing: every getter is still there, nothing clears
+        r
+    }
+
+    fn pack_getters(&self, name: &str) -> Vec<(String, String)> {
+        self.packs.get(name).map(|p| p.getters.iter().map(|g| (g.cls.clone(), g.prop.clone())).collect()).unwrap_or_default()
+    }
+
+    fn clear_gone(&mut self, core: &mut Core, host: &dyn Host, gone: Vec<(String, String)>, now: f64, seq: &mut i64) {
         let mut work = VecDeque::new();
         for (cls, prop) in gone {
             if self.has_getter(&cls, &prop) { continue; }
@@ -365,8 +409,7 @@ impl Fields {
             eids.sort();
             for e in eids { self.emit_unchecked(core, &mut work, &e, &prop, J::Null, "pack-removed", seq, now); }
         }
-        if !work.is_empty() { self.visited.clear(); self.run(core, host, work, now, seq); }
-        had
+        if !work.is_empty() { self.new_round(); self.run(core, host, work, now, seq); }
     }
 
     /// Activate packs in import order: a pack is active once every pack it imports is active with the same major
@@ -395,6 +438,8 @@ impl Fields {
                     self.pack_errors.insert(n.clone(), format!("pack {}: declares on {}, which belongs to pack {}: add IMPORT {} {}", n, c, o, o, maj));
                     continue;
                 }
+                // THE SAFETY RULE (docs/c1f-layers.md): a layer overrides only what it imports
+                if let Some(why) = self.override_without_import(n, &active) { self.pack_errors.insert(n.clone(), why); continue; }
                 for c in p.classes() { owner.entry(c).or_insert_with(|| n.clone()); }
                 active.push(n.clone());
             }
@@ -411,17 +456,80 @@ impl Fields {
             }).unwrap_or_else(|| "its imports form a cycle".into());
             self.pack_errors.insert(n.clone(), format!("pack {}: {}", n, why));
         }
-        let mut setters = vec![];
-        let mut getters = vec![];
+        // LAYERS: a pack later in `active` is above the packs before it (an importing pack always comes after what it imports).
+        // Setters: top layer first; a setter of the same class, property and name as one in a higher layer is replaced (dropped here).
+        let mut setters: Vec<OnSet> = vec![];
+        let mut seen: HashSet<(String, String, String)> = HashSet::new();
+        for n in active.iter().rev() {
+            for st in &self.packs[n].setters {
+                if !seen.insert((st.cls.clone(), st.prop.clone(), st.name.clone())) { continue; }
+                let mut st = st.clone();
+                st.pack = n.clone();
+                setters.push(st);
+            }
+        }
+        // Getters: the arms of every layer form ONE list, the top layer's first (see `Getter::layers`).
+        let mut getters: Vec<Getter> = vec![];
+        let mut at: HashMap<(String, String), usize> = HashMap::new();
+        let mut stack: Vec<Vec<(String, Getter)>> = vec![];
         for n in &active {
-            let p = &self.packs[n];
-            setters.extend(p.setters.iter().cloned().map(|mut s| { s.pack = n.clone(); s }));
-            getters.extend(p.getters.iter().cloned());
+            for g in &self.packs[n].getters {
+                let k = (g.cls.clone(), g.prop.clone());
+                match at.get(&k) {
+                    Some(&i) => stack[i].push((n.clone(), g.clone())),
+                    None => { at.insert(k, stack.len()); stack.push(vec![(n.clone(), g.clone())]); }
+                }
+            }
+        }
+        for mut layers in stack {
+            let (lowest_pack, mut g) = layers[0].clone();
+            g.pack = lowest_pack;
+            if layers.len() > 1 {
+                layers.reverse();                                   // the top layer first
+                let mut list: Vec<(String, Option<String>, String)> = vec![];
+                'stack: for (pack, lg) in &layers {
+                    for (when, e) in &lg.parts {
+                        list.push((pack.clone(), when.clone(), e.clone()));
+                        if when.is_none() { break 'stack; }         // a default ends the search: nothing below it answers
+                    }
+                }
+                let parts: Vec<(Option<String>, String)> = list.iter().map(|(_, w, e)| (w.clone(), e.clone())).collect();
+                g.expr = crate::syntax::fold_parts(&parts);
+                g.arms = parts.len();
+                g.layers = list;
+            }
+            g.parts = vec![];
+            getters.push(g);
         }
         self.imports = active.iter().map(|n| (n.clone(), self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect())).collect();
         self.owner = owner;
         self.setters = setters;
         self.set_getters(getters);
+    }
+
+    /// The safety rule: `Some(why)` when pack `n` defines a getter, or a setter by the same class, property and name, that an ACTIVE pack
+    /// defines too, and `n` does not import that pack (directly or through the packs it imports). (docs/c1f-layers.md)
+    fn override_without_import(&self, n: &str, active: &[String]) -> Option<String> {
+        let mut reach: Vec<String> = vec![];
+        let mut todo: Vec<String> = self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect();
+        while let Some(i) = todo.pop() {
+            if reach.contains(&i) { continue; }
+            if let Some(q) = self.packs.get(&i) { todo.extend(q.imports.iter().map(|(x, _)| x.clone())); }
+            reach.push(i);
+        }
+        let p = &self.packs[n];
+        for q in active {
+            if reach.contains(q) { continue; }
+            let o = &self.packs[q];
+            let maj = o.major();
+            if let Some(g) = p.getters.iter().find(|g| o.getters.iter().any(|h| h.cls == g.cls && h.prop == g.prop)) {
+                return Some(format!("pack {n}: {}.{} getter is defined by pack {q} too: {OVERRIDE_RULE}: add IMPORT {q} {maj}", g.cls, g.prop));
+            }
+            if let Some(st) = p.setters.iter().find(|s| o.setters.iter().any(|t| t.cls == s.cls && t.prop == s.prop && t.name == s.name)) {
+                return Some(format!("pack {n}: setter {} on {}.{} replaces pack {q}'s: {OVERRIDE_RULE}: add IMPORT {q} {maj}", st.name, st.cls, st.prop));
+            }
+        }
+        None
     }
 
     /// Record a grant (`on`) or a revoke of `Pack:<name>.privileged`, with the writer that wrote it. The grant is by NAME: it holds for a pack
@@ -476,6 +584,9 @@ impl Fields {
         for e in new { self.birth(core, &e, now, seq); }
     }
 
+    /// A new round: what the field wrote so far is forgotten (the loop guard, the first-write claims of the layers).
+    fn new_round(&mut self) { self.visited.clear(); self.claimed.clear(); }
+
     fn has_getter(&self, cls: &str, prop: &str) -> bool { self.getters.iter().any(|g| g.cls == cls && g.prop == prop) }
 
     fn getters_of(&self, core: &Core, eid: &str) -> Vec<usize> {
@@ -507,8 +618,32 @@ impl Fields {
             }
         }
         let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
-        let (r, reads, nil, locals) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker);
+        let (r, reads, nil, locals, layer) = if g.layers.is_empty() {
+            let (r, reads, nil, locals) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker);
+            (r, reads, nil, locals, None)
+        } else {
+            // several layers define it: the arms in order, the top layer's first; the first WHEN that holds supplies the value
+            let (mut reads_all, mut res) = (vec![], None);
+            for (pack, when, expr) in &g.layers {
+                if let Some(c) = when {
+                    let (rc, rd, _, _) = core.eval_traced(c, &me(eid), &[("clock", json!(now))], host, &asker);
+                    reads_all.extend(rd);
+                    match rc {
+                        Ok(v) if crate::expr::truthy(&crate::expr::from_json(&v)) => {}
+                        Ok(_) => continue,
+                        Err(e) => { res = Some((Err(e), None, vec![], Some(pack.clone()))); break; }
+                    }
+                }
+                let (r, rd, nil, locals) = core.eval_traced(expr, &me(eid), &[("clock", json!(now))], host, &asker);
+                reads_all.extend(rd);
+                res = Some((r, nil, locals, Some(pack.clone())));
+                break;
+            }
+            let (r, nil, locals, layer) = res.unwrap_or((Ok(J::Null), None, vec![], None));   // no arm held: none, as a lone getter with no default
+            (r, reads_all, nil, locals, layer)
+        };
         let key2 = (eid.to_string(), g.prop.clone());
+        match layer { Some(p) => { self.layer_of.insert(key2.clone(), p); } None => { self.layer_of.remove(&key2); } }
         if locals.is_empty() { core.locals.remove(&key2); } else {
             core.locals.insert(key2.clone(), locals.iter().map(|(k, v)| (k.clone(), match v {
                 crate::expr::V::Nil(why) => J::String(format!("null ({why})")),
@@ -605,6 +740,21 @@ impl Fields {
                 core.why.get(*k) == Some(&r) && core.docs.get(&k.0).map(|e| e.props.get(&k.1).map(|v| v.is_null()).unwrap_or(true)).unwrap_or(false)
             }).cloned());
             match next { Some(n) => cur = n, None => break }
+        }
+        out
+    }
+
+    /// Which layer supplied the value of a getter, and which writes to it were overridden (docs/c1f-layers.md). (`layer_of` is set by `compute`, `skipped` by `run_writes`).
+    pub fn why_layer(&self, core: &Core, eid: &str, prop: &str) -> Vec<String> {
+        let mut out = vec![];
+        if core.docs.get(eid).map_or(false, |e| e.props.contains_key(prop)) {
+            if let Some(p) = self.layer_of.get(&(eid.to_string(), prop.to_string())) { out.push(format!("layer: {p}")); }
+            else if let Some(gi) = self.getters_of(core, eid).into_iter().find(|&i| self.getters[i].prop == prop) {
+                if !self.getters[gi].pack.is_empty() { out.push(format!("layer: {}", self.getters[gi].pack)); }
+            }
+        }
+        for ((e, p, loser, setter), by) in &self.skipped {
+            if e == eid && p == prop { out.push(format!("overridden by {by}: {loser}'s {setter} write skipped")); }
         }
         out
     }
@@ -727,7 +877,7 @@ impl Fields {
     }
     /// A round with no outside write (new entities registered, dirty getters settled).
     pub fn settle(&mut self, core: &mut Core, host: &dyn Host, now: f64, seq: &mut i64) {
-        self.visited.clear();
+        self.new_round();
         self.run(core, host, VecDeque::new(), now, seq);
     }
 
@@ -737,7 +887,7 @@ impl Fields {
         let props: Vec<String> = core.docs.get(eid).map(|e| e.props.keys().cloned().collect()).unwrap_or_default();
         for p in props { self.mark(eid, &p); }
         if eid.starts_with(TRIP_PREFIX) { self.trip_arrived(core, eid); }
-        self.visited.clear();
+        self.new_round();
         self.run(core, host, VecDeque::new(), now, seq);
     }
 
@@ -877,12 +1027,12 @@ impl Fields {
         for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
         for (p, v) in &old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); }
         self.dirty.retain(|(_, e, _)| e != eid);
-        self.visited.clear();
+        self.new_round();
         self.run(core, host, VecDeque::new(), now, seq);
     }
 
     pub fn react(&mut self, core: &mut Core, host: &dyn Host, w: Write, now: f64, seq: &mut i64) {
-        self.visited.clear();
+        self.new_round();
         self.visited.insert((w.eid.clone(), w.prop.clone()));   // the outside write starts the chain: returning to it is a loop
         self.run(core, host, VecDeque::from([w]), now, seq);
     }
@@ -1019,7 +1169,21 @@ impl Fields {
                     _ => continue,
                 }
             } else { prop };
+            // LAYERS: stacked setters writing one target in a round: the FIRST write wins (the top layer's). A later line of ANOTHER pack is
+            // skipped here, before its right-hand side is evaluated and without any effect; inside one pack a second write is the loop error.
+            let mut claim: Option<(String, String)> = None;
+            if target != LLM_CALL && !pack.is_empty() {
+                let t = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
+                if let Some(t) = t {
+                    match self.claimed.get(&(t.clone(), prop.clone())).cloned() {
+                        Some((by, _)) if by != pack => { self.skipped.insert((t, prop.clone(), pack.to_string(), name.to_string()), by); continue; }
+                        Some(_) => {}
+                        None => claim = Some((t, prop.clone())),
+                    }
+                }
+            }
             let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
+            if let Some(k) = claim { self.claimed.insert(k, (pack.to_string(), name.to_string())); }   // a write that was made: it is the first
             if target == LLM_CALL { self.calls.push(v); continue; }
             let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
             let Some(tgt) = tgt else { continue };
@@ -1131,7 +1295,7 @@ impl Fields {
         if self.has_getter("Wait", "due") {
             self.sync(core, now, seq);
             self.mark(CLOCK, "");
-            self.visited.clear();
+            self.new_round();
             self.run(core, host, VecDeque::new(), now, seq);
             return;
         }

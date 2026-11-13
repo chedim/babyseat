@@ -34,7 +34,7 @@ fn start(tag: &str, names: &[&str], extra: &[&str]) -> (Run, u16) {
     std::fs::create_dir_all(&pd).unwrap();
     for (n, t) in shipped(names) { std::fs::write(pd.join(n), t).unwrap(); }
     let mut child = Command::new(BIN).current_dir(&dir)
-        .args(["run", pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
         .args(extra).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
@@ -176,7 +176,7 @@ fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) {
     for (n, t) in shipped(CHAT_PACKS) { std::fs::write(pd.join(n), t).unwrap(); }
     let fact = format!("chat_claude_bin={}", bin.display());
     let mut child = Command::new(BIN).current_dir(&dir)
-        .args(["run", pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
         .args(extra).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();

@@ -291,7 +291,7 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
                 if let Some(g) = getters.last() { if g.expr.trim().is_empty() { return Err(format!("getter {}.{} has no expression", g.cls, g.prop)); } }
                 let (cls, prop) = path.trim().split_once('.').ok_or(format!("line {}: expected `<Class>.<field> getter:`", at))?;
                 if when == Some("") { return Err(format!("line {}: the getter arm `WHEN` has no condition (or no `:` after it)", at)); }
-                getters.push(Getter { cls: cls.into(), prop: prop.into(), expr: expr.trim().into(), arms: 1 });
+                getters.push(Getter { cls: cls.into(), prop: prop.into(), expr: expr.trim().into(), arms: 1, ..Default::default() });
                 arms.push((when.map(|w| w.to_string()), at));
                 in_getter = true;
                 gstate = 0;
@@ -331,7 +331,7 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
                         g.expr = e; *arms.last_mut().unwrap() = (when, at); gstate = 1;
                     }
                     ("WHEN", _) => return Err(format!("line {}: a second WHEN in one getter: use ELSE WHEN", at)),
-                    (_, 1) => { getters.push(Getter { cls, prop, expr: e, arms: 1 }); arms.push((when, at)); if k == "ELSE" { gstate = 2; } }
+                    (_, 1) => { getters.push(Getter { cls, prop, expr: e, arms: 1, ..Default::default() }); arms.push((when, at)); if k == "ELSE" { gstate = 2; } }
                     _ => return Err(format!("line {}: {} must follow a WHEN", at, k)),
                 }
                 continue;
@@ -435,14 +435,18 @@ fn fold_arms(getters: Vec<Getter>, arms: Vec<(Option<String>, usize)>) -> Result
     }
     Ok(order.into_iter().map(|k| {
         let v = by.remove(&k).unwrap();
-        let expr = if v.len() == 1 && v[0].0.is_none() { v[0].2.clone() } else {
-            v.iter().rev().fold(String::from("None"), |rest, (when, _, e)| match when {
-                Some(c) => format!("({}) if ({}) else ({})", e, c, rest),
-                None => e.clone(),
-            })
-        };
-        Getter { cls: k.0, prop: k.1, expr, arms: v.len() }
+        let parts: Vec<(Option<String>, String)> = v.iter().map(|(w, _, e)| (w.clone(), e.clone())).collect();
+        Getter { cls: k.0, prop: k.1, expr: fold_parts(&parts), arms: v.len(), parts, ..Default::default() }
     }).collect())
+}
+
+/// Getter arms as one expression: `(e1) if (c1) else ((e2) if (c2) else default)`; no default arm: None. (A default ends the list.)
+pub fn fold_parts(v: &[(Option<String>, String)]) -> String {
+    if v.len() == 1 && v[0].0.is_none() { return v[0].1.clone(); }
+    v.iter().rev().fold(String::from("None"), |rest, (when, e)| match when {
+        Some(c) => format!("({}) if ({}) else ({})", e, c, rest),
+        None => e.clone(),
+    })
 }
 
 fn print_writes(out: &mut String, ws: &[W], indent: &str) {

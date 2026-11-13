@@ -9,18 +9,31 @@ IMPORT boot 1
 Request.is_read getter: this.method == 'GET' or this.method == 'HEAD'
 
 -- ---- the page and its files ------------------------------------------------------------------------------------------------
--- Boot:seat.ui_dir is the UI's folder (the launcher tells it at boot). The files are /, /index.html, /membrane (the page),
+-- THE FILES OF AN APP are data at their path (docs/c1f-layers.md): Boot:seat.app_dirs is the apps' folders, the UPPER layer first, and an
+-- app's files are under its `ui/`; Boot:seat.ui_dir (--ui-dir) is the lowest layer. The first folder that holds the file wins, so an
+-- upper layer's file shadows the lower one's. The files are /, /index.html, /membrane (the page),
 -- /favicon.ico and /ui/www/<file>; a path with '..', a percent, a backslash, a leading '/' or a second /ui/www/ is refused.
 Request.ui_root getter: ([b.ui_dir for b in instances('Boot') if b.ui_dir != None] or [''])[0]
+Request.app_dirs getter: ([b.app_dirs for b in instances('Boot') if b.app_dirs != None] or [[]])[0]
+Request.ui_roots getter: concat([d + '/ui' for d in this.app_dirs], [this.ui_root] if this.ui_root != '' else [])
 Request.rel getter:
   WHEN this.path == '/' or this.path == '/index.html' or this.path == '/membrane': 'index.html'
   ELSE WHEN this.path == '/favicon.ico': 'favicon.svg'
   ELSE WHEN startswith(this.path, '/ui/www/'): replace(this.path, '/ui/www/', '')
   ELSE: None
 Request.rel_climb getter: this.rel != None and ('..' in this.rel or '%' in this.rel or '\\' in this.rel or startswith(this.rel, '/') or '/ui/www/' in this.rel)
-Request.rel_ok getter: this.rel != None and this.rel != '' and not this.rel_climb and this.ui_root != ''
-Request.file getter: (this.ui_root + '/' + this.rel) if this.rel_ok else None
-Request.found getter: stat(this.file) if this.file != None else None
+Request.rel_ok getter: this.rel != None and this.rel != '' and not this.rel_climb and len(this.ui_roots) > 0
+Request.layer_files getter: [r + '/' + this.rel for r in this.ui_roots] if this.rel_ok else []
+-- THE SEARCH, one file at a time (a getter asks the fs driver for one answer at a time): `skip` counts the layers found without the file, the
+-- candidate is the next layer's path, and a miss writes `skip` one further until the file is found or the layers run out.
+Request.cand getter: this.layer_files[(this.skip or 0)] if (this.skip or 0) < len(this.layer_files) else None
+Request.found getter: stat(this.cand) if this.cand != None else None
+Request.found on-setter next-layer:
+  WHEN this.found != None and not (prop(this.found, 'exists') == True and prop(this.found, 'kind') == 'file') and (this.skip or 0) + 1 < len(this.layer_files):
+    this.skip = (this.skip or 0) + 1
+Request.hit getter: prop(this.found, 'exists') == True and prop(this.found, 'kind') == 'file'
+Request.last getter: (this.skip or 0) + 1 >= len(this.layer_files)
+Request.file getter: this.cand if this.hit == True else None
 Request.parts getter: concat([''], words(replace(this.rel or '', '.', ' ')))
 Request.ext getter: this.parts[len(this.parts) - 1]
 Request.ctype getter: {'html': 'text/html; charset=utf-8', 'js': 'application/javascript; charset=utf-8', 'mjs': 'application/javascript; charset=utf-8', 'wasm': 'application/wasm', 'gz': 'application/gzip', 'json': 'application/json', 'css': 'text/css; charset=utf-8', 'png': 'image/png', 'svg': 'image/svg+xml', 'ico': 'image/x-icon', 'woff2': 'font/woff2'}[this.ext] or 'application/octet-stream'
@@ -29,8 +42,9 @@ Request.static getter:
   WHEN this.rel == None: 'no'
   ELSE WHEN not this.rel_ok: 'bad'
   ELSE WHEN this.found == None: None
-  ELSE WHEN prop(this.found, 'exists') == True and prop(this.found, 'kind') == 'file': 'file'
-  ELSE: 'missing'
+  ELSE WHEN this.hit: 'file'
+  ELSE WHEN this.last: 'missing'
+  ELSE: None
 
 Request.static_reply getter:
   WHEN this.static == None: None
