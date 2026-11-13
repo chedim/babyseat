@@ -99,3 +99,39 @@ fn the_door_binds_loopback_when_told_so() {
     let (_run, port) = start("bind", &[("boot", BOOT), ("door", DOOR)], &[("index.html", "x")], &["--bind", "127.0.0.1"]);
     assert!(get(port, "GET / HTTP/1.1\r\nHost: t\r\n\r\n").0.starts_with("HTTP/1.1 200"));
 }
+
+/// the shipped packs the decisions route and the not-ported routes need (tests/specs/door_decisions.json, door_self.json), and the boot plan
+fn shipped(names: &[&str]) -> Vec<(String, String)> {
+    let d = format!("{}/../membrane/packs", env!("CARGO_MANIFEST_DIR"));
+    names.iter().map(|n| (n.to_string(), std::fs::read_to_string(format!("{d}/{n}")).unwrap())).collect()
+}
+
+#[test]
+fn the_binary_boots_through_the_plan_and_answers_the_shipped_routes() {
+    let files = shipped(&["boot.c1f", "boot.json", "fs.c1f", "banner.c1f", "intents.c1f", "decisions.c1f", "door.c1f", "door_decisions.c1f", "door_self.c1f"]);
+    let dir = tmp("plan");
+    let pd = dir.join("packs");
+    std::fs::create_dir_all(&pd).unwrap();
+    for (n, t) in &files { std::fs::write(pd.join(n), t).unwrap(); }
+    let mut child = Command::new(BIN).current_dir(&dir)
+        .args(["run", pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
+        .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let out = child.stdout.take().unwrap();
+    let (tx, rx) = channel();
+    std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
+    let mut run = Run { child, _lines: rx, dir: dir.clone() };
+    let line = run._lines.recv_timeout(Duration::from_secs(30)).expect("the door came up through Boot.started");
+    let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap();
+    // a decisions route: the board of an empty field is a JSON answer
+    let (head, body) = get(port, "GET /membrane/decisions HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+    assert!(serde_json::from_slice::<serde_json::Value>(&body).is_ok(), "{}", String::from_utf8_lossy(&body));
+    // a not-ported route says so (door_self.c1f)
+    let (head, body) = get(port, "GET /membrane/self/sheet HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(head.starts_with("HTTP/1.1 501"), "{head}");
+    assert!(String::from_utf8_lossy(&body).contains("not ported yet"), "{}", String::from_utf8_lossy(&body));
+    // the write route is a person's; the barest seat has no persons: the door answers it, and a GET of it is a 405
+    let (head, _) = get(port, "GET /membrane/decision/answer HTTP/1.1\r\nHost: t\r\n\r\n");
+    assert!(head.starts_with("HTTP/1.1 405"), "{head}");
+    assert!(terminate(&mut run).expect("exits on SIGTERM").success());
+}

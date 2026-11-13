@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 use serde_json::{json, Map, Value as J};
 
 use crate::host::{self, Host, Options};
+use crate::plan::{self, Outcome};
 
 pub const USAGE: &str = "usage: cliffvm --version | cliffvm run <packs-dir> [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>]";
 
@@ -76,7 +77,28 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
         Err(e) => { eprintln!("cliffvm: {e}"); return 2; }
     }
     h.rebuild();
+    // THE BOOT PLAN (plan.rs): boot.json's steps in the order boot.c1f says. This host runs none of them itself (they are the Python
+    // seat's steps: nothing here to run), so each is `skipped`; what the plan decides is when the boot is over. Then `started`.
+    let dir = std::path::Path::new(&r.packs);
+    let plan_src = std::fs::read_to_string(dir.join("boot.json")).ok();
+    let steps = match &plan_src {
+        Some(src) => match (plan::parse(src), std::fs::read_to_string(dir.join("boot.c1f"))) {
+            (Ok(steps), Ok(pack)) => {
+                if let Err(e) = plan::load(&mut h.engine().lock().unwrap_or_else(|e| e.into_inner()), &host::NullHost, &pack, &steps) { eprintln!("cliffvm: boot plan: {e}"); return 2; }
+                Some(steps)
+            }
+            (Err(e), _) => { eprintln!("cliffvm: {e}"); return 2; }
+            (_, Err(e)) => { eprintln!("cliffvm: boot plan: boot.c1f: {e}"); return 2; }
+        },
+        None => None,
+    };
+    if let Some(steps) = &steps {
+        if let Err(e) = plan::run(h.engine(), &host::NullHost, steps, false, &mut |_| Outcome::Skipped) { eprintln!("cliffvm: boot stopped: {e}"); return 2; }
+    }
     host::boot_started(&h, &facts(r), true);
+    if let Some(steps) = &steps {
+        let _ = plan::run(h.engine(), &host::NullHost, steps, true, &mut |_| Outcome::Skipped);   // the UI is up: the background steps
+    }
     let mut up = false;
     let mut code = 0;
     h.run(stop, 1.0, &mut |h| {

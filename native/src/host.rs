@@ -132,7 +132,9 @@ impl Host {
             waiter = Some(st.waiter());
             core.store = Some(st);
         }
-        Ok(Host { eng: Mutex::new((core, Fields::goalgraph(), 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter })
+        let mut fields = Fields::goalgraph();
+        fields.inbound_by_host = true;
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db: Mutex::new(db), journal: Mutex::new(vec![]), clock: o.clock, waiter })
     }
 
     pub fn now(&self) -> f64 { (self.clock)() }
@@ -207,8 +209,13 @@ impl Host {
         {
             let mut g = self.eng();
             let (core, f, seq) = &mut *g;
-            core.load(eid.into(), cls.into(), props, None, ts);
-            f.born(core, &NullHost, eid, ts, seq);
+            if cls == TRIP_CLASS {
+                core.load(eid.into(), cls.into(), props, None, ts);
+                f.born(core, &NullHost, eid, ts, seq);        // a kill arrives like an effect's receipt: its node is dirty, as "the kill, nothing else"
+            } else {
+                f.arrive(core, eid.into(), cls.into(), props, ts);
+                f.settle(core, &NullHost, ts, seq);
+            }
         }
         self.drain_apply();
     }

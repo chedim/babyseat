@@ -281,6 +281,8 @@ pub struct Fields {
     /// every write the field made (getters, setters, receipts), in order, until the host drains it:
     /// {eid, prop, new, writer}. The host applies them to its store (fields_live.py).
     pub out: Vec<J>,
+    /// the host takes the door's requests itself (to journal them, then `arrive`): a round leaves them in the store
+    pub inbound_by_host: bool,
     /// getters declared in cliffhanger, their levels, and their inputs: (eid, field) read -> instances (eid, getter)
     pub getters: Vec<Getter>,
     glevel: Vec<usize>,
@@ -305,7 +307,7 @@ pub struct Fields {
 
 impl Fields {
     pub fn goalgraph() -> Self {
-        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![],
+        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![] };
@@ -851,13 +853,7 @@ impl Fields {
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
         self.sync(core, now, seq);
         for k in core.sql_ready() { self.mark_key(&(crate::vm::SQL.to_string(), k)); }   // a query's rows are in
-        for (e, cls, props) in core.inbound() {                                              // the door pushed an entity (a request): born
-            let keys: Vec<String> = props.keys().cloned().collect();
-            core.load(e.clone(), cls, props, None, now);
-            self.known.insert(e.clone());
-            for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
-            for p in keys { self.mark(&e, &p); }
-        }
+        if !self.inbound_by_host { for (e, cls, props) in core.inbound() { self.arrive(core, e, cls, props, now); } }   // the door pushed an entity (a request): born
         for (e, verb, rec) in core.effect_receipts() {                                       // a driver effect finished
             if !core.docs.contains_key(&e) { continue; }
             let rc = rec.get("rc").cloned().unwrap_or(J::Null);
@@ -874,6 +870,16 @@ impl Fields {
             let prop = self.getters[gi].prop.clone();
             self.emit_unchecked(core, &mut work, &e, &prop, v, &format!("getter:{}", prop), seq, now);
         }
+    }
+
+    /// An entity arrives from outside (the door's request, the host's birth): loaded and known, its getters and what read its
+    /// fields dirty for the next round, which also fires the setters on its writes (a birth by `sync` runs none: that is a rebuild).
+    pub fn arrive(&mut self, core: &mut Core, e: String, cls: String, props: serde_json::Map<String, J>, now: f64) {
+        let keys: Vec<String> = props.keys().cloned().collect();
+        core.load(e.clone(), cls, props, None, now);
+        self.known.insert(e.clone());
+        for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
+        for p in keys { self.mark(&e, &p); }
     }
 
     fn step(&mut self, core: &mut Core, host: &dyn Host, work: &mut VecDeque<Write>, w: Write, now: f64, seq: &mut i64) {
