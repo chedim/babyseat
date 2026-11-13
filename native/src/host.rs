@@ -314,6 +314,7 @@ impl Host {
         let (out, _calls) = { let mut g = self.eng(); let f = &mut g.1; (std::mem::take(&mut f.out), std::mem::take(&mut f.calls)) };
         let any = !out.is_empty();
         let ts = self.now();
+        let reactions = self.reactions_of(&out);
         for w in out {
             if let Some(cls) = w.get("born").and_then(|c| c.as_str()) {
                 let eid = w["eid"].as_str().unwrap_or("").to_string();
@@ -342,8 +343,31 @@ impl Host {
             let _ = db.execute(&format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
         }
         let any = any || !retired.is_empty();
+        // THE REACTIONS of a model's write (docs/cliffvm.md, "The return entity"): each door write is a Request `mc_done` by the setter `mcp-write`; the derived
+        // writes of the same round are what it caused. The list goes back on that Request as `reactions` (a derived write, never journalled; a replay drains the same way).
+        let any = any || !reactions.is_empty();
+        for (req, list) in reactions { self.inject_write(ts, &req, "reactions", list, "reactions", &stamp_writer("reactions")); }
         if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); return true; }
         any
+    }
+
+    /// For every `mc_done` the door's `mcp-write` setter wrote in this batch: (the Request, the list of what else the engine wrote in the batch: setters' and
+    /// getters' writes, each `{eid, prop, new, by, why}`; `why` is the reason of a null). The door's own bookkeeping (Request, Return, Pack entities) and the
+    /// write itself are left out.
+    fn reactions_of(&self, out: &[J]) -> Vec<(String, J)> {
+        let asked: Vec<String> = out.iter().filter(|w| w["prop"] == "mc_done" && w["writer"] == "field:mcp-write").filter_map(|w| w["eid"].as_str().map(String::from)).collect();
+        if asked.is_empty() { return vec![]; }
+        let g = self.eng();
+        let derived = |w: &J| w["writer"].as_str().map_or(false, |x| x.starts_with("field:") && x != "field:mcp-write");
+        let list: Vec<J> = out.iter().enumerate()
+            .filter(|(_, w)| derived(w) && w.get("prop").is_some() && w["eid"].as_str().map_or(false, |e| !e.starts_with("Request:") && !e.starts_with("Return:") && !e.starts_with(PACK_PREFIX)))
+            .filter(|(i, w)| !out[i + 1..].iter().any(|x| derived(x) && x["eid"] == w["eid"] && x["prop"] == w["prop"]))   // the last value of each property in the round
+            .map(|(_, w)| {
+                let (eid, prop) = (w["eid"].as_str().unwrap_or(""), w["prop"].as_str().unwrap_or(""));
+                let why = if w["new"].is_null() { g.1.why_chain(&g.0, eid, prop).first().and_then(|c| c.get("reason").cloned()).unwrap_or(J::Null) } else { J::Null };
+                json!({"eid": eid, "prop": prop, "new": w["new"], "by": w["writer"].as_str().unwrap_or("").trim_start_matches("field:"), "why": why})
+            }).collect();
+        asked.into_iter().map(|r| (r, J::Array(list.clone()))).collect()
     }
 
     // ---- Pack entities -----------------------------------------------------------------------------------------------
@@ -515,6 +539,8 @@ impl Host {
     pub fn snapshot(&self) -> std::collections::BTreeMap<String, J> {
         self.eng().0.docs.iter().map(|(k, e)| (k.clone(), json!({"cls": e.cls, "props": e.props}))).collect()
     }
+    /// The cap on the slow drivers' workers (Command, File, Fetch), the boot fact `effect_workers`.
+    pub fn set_effect_workers(&self, n: usize) { if let Some(st) = &self.eng().0.store { st.set_effect_workers(n); } }
     pub fn waiter(&self) -> Option<crate::store::Waiter> { self.waiter.clone() }
 }
 

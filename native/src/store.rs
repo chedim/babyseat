@@ -42,6 +42,9 @@ pub enum Poll { Ready(Result<Vec<J>, String>), Pending }
 
 enum State { Pending, Done(Result<Vec<J>, String>) }
 
+/// the number of Command / File / Fetch effects that run at once (operator-approved 2026-11-13; the boot fact `effect_workers` changes it)
+pub const DEFAULT_EFFECT_WORKERS: usize = 4;
+
 #[derive(Default)]
 pub struct Shared {
     results: HashMap<String, State>,
@@ -54,6 +57,9 @@ pub struct Shared {
     /// effects run by the drivers (fs, proc): (entity, verb, receipt), taken by the engine's next round
     receipts: Vec<(String, String, J)>,
     effects_running: usize,
+    /// the cap on the effect workers of the slow drivers (Command, File, Fetch): the boot fact `effect_workers` (0 = the default, 4), and how many run now
+    workers_cap: usize,
+    workers_active: usize,
     /// the HTTP door (http.rs): requests that arrived (taken by the engine's next round as entities), the connections held
     /// open until a pack answers, and the listeners' stop flags by their entity
     inbound: Vec<(String, String, serde_json::Map<String, J>)>,
@@ -241,6 +247,30 @@ impl Store {
             sh.1.notify_all();
         }).expect("a thread for an effect");
     }
+
+    /// An effect of a SLOW driver (Command, File, Fetch): the same as `effect`, but its job starts only when fewer than the cap of such jobs are
+    /// running (the boot fact `effect_workers`, default 4): the thread waits for a slot. A held door request or an open stream is no worker.
+    pub fn effect_limited(&self, eid: &str, verb: &str, job: Box<dyn FnOnce(&Arc<(Mutex<Shared>, Condvar)>, &str) -> J + Send>) {
+        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).effects_running += 1;
+        let (sh, eid, verb) = (self.sh.clone(), eid.to_string(), verb.to_string());
+        std::thread::Builder::new().name("membrane-effect".into()).spawn(move || {
+            {
+                let mut g = sh.0.lock().unwrap_or_else(|e| e.into_inner());
+                while g.workers_active >= (if g.workers_cap == 0 { DEFAULT_EFFECT_WORKERS } else { g.workers_cap }) { g = sh.1.wait(g).unwrap_or_else(|e| e.into_inner()); }
+                g.workers_active += 1;
+            }
+            let rec = job(&sh, &eid);
+            let mut g = sh.0.lock().unwrap_or_else(|e| e.into_inner());
+            g.workers_active -= 1;
+            g.effects_running -= 1;
+            g.receipts.push((eid, verb, rec));
+            g.done += 1;
+            sh.1.notify_all();
+        }).expect("a thread for an effect");
+    }
+
+    /// The cap on the slow drivers' workers (the boot fact `effect_workers`).
+    pub fn set_effect_workers(&self, n: usize) { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.workers_cap = n; g.done += 0; self.sh.1.notify_all(); }
 
     /// Drop the kept answers of every asker whose name starts with `prefix` (a banner build starts fresh); a job
     /// still running finishes and its answer is dropped.

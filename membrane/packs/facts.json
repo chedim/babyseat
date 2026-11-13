@@ -108,6 +108,10 @@
   "request_keep_s": {
    "wired": false,
    "why": "the barest seat's request collector (membrane/apps/barest.c1f/collector.c1f): seconds an ANSWERED door request is kept before it is retired (deleted); default 600 in the pack (operator-approved 2026-11-13), 0 = retired as soon as it is answered; told by `--fact request_keep_s=<n>`"
+  },
+  "effect_workers": {
+   "wired": false,
+   "why": "the cap on Command / File / Fetch effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"
   }
  }
 }

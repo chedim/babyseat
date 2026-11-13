@@ -127,12 +127,13 @@
       "Chat",
       "ChatMessage"
     ],
-    "members": 29,
+    "members": 32,
     "writes": [
       "*.retire",
       "membrane:*.ended",
       "membrane:*.result",
       "membrane:*.run",
+      "membrane:*.run_result",
       "membrane:*.started",
       "membrane:*.state",
       "membrane:*=ChatResponse()",
@@ -361,11 +362,13 @@
     ],
     "classes": [
       "Pack",
-      "Request"
+      "Request",
+      "Return"
     ],
-    "members": 48,
+    "members": 62,
     "writes": [
-      "*.[]"
+      "*.[]",
+      "Return:*=Return()"
     ],
     "claims": [
       "/mcp"

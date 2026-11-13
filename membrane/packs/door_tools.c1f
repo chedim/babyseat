@@ -37,7 +37,7 @@ Request.mc_tool getter: prop(this.mc_params, 'name')
 Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write']
 
 -- ---- the tools' list -----------------------------------------------------------------------------------------------------------------------
-Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate entities. q: kind:<Class>, kind!:<Class> (all but that class) and name~:<eid prefix>, joined with & (empty = all). k = the row cap (default 20, at most 100), offset = rows to skip (paging), full=true adds the properties of each row, count=true gives only the number.', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'the query line, e.g. kind:Command & name~:Command:b'}, 'k': {'type': 'integer', 'description': 'the row cap (default 20, at most 100)'}, 'offset': {'type': 'integer', 'description': 'rows to skip, for paging'}, 'full': {'type': 'boolean', 'description': 'add the stored properties of each row'}, 'count': {'type': 'boolean', 'description': 'only the count'}}}}, {'name': 'entity_read', 'description': 'read an entity: its stored properties, or with prop one property in full (a getter value too).', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'one property'}}, 'required': ['spec']}}, {'name': 'entity_write', 'description': 'act by writing: set one property. What reacts to the write runs (pack setters, driver verbs such as Command run or File write). An effect receipt lands as <prop>_result on the entity: read it back.', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'the property'}, 'value': {'description': 'the value (any JSON)'}}, 'required': ['spec', 'prop']}}]
+Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate entities. q: kind:<Class>, kind!:<Class> (all but that class) and name~:<eid prefix>, joined with & (empty = all). k = the row cap (default 20, at most 100), offset = rows to skip (paging), full=true adds the properties of each row, count=true gives only the number.', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'the query line, e.g. kind:Command & name~:Command:b'}, 'k': {'type': 'integer', 'description': 'the row cap (default 20, at most 100)'}, 'offset': {'type': 'integer', 'description': 'rows to skip, for paging'}, 'full': {'type': 'boolean', 'description': 'add the stored properties of each row'}, 'count': {'type': 'boolean', 'description': 'only the count'}}}}, {'name': 'entity_read', 'description': 'read an entity: its stored properties, or with prop one property in full (a getter value too).', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'one property'}}, 'required': ['spec']}}, {'name': 'entity_write', 'description': 'act by writing: set one property. What reacts to the write runs (pack setters, driver verbs such as Command run or File write). The reply carries the receipt of an effect the write started (stdout, stderr, rc), the reactions (what the engine wrote because of this write, each with its reason) and Return:<n>, an entity that holds them for a later read. wait (seconds) holds the reply until the receipt arrives; with no wait a receipt that is not there yet is named, to read as <prop>_result.', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'the property'}, 'value': {'description': 'the value (any JSON)'}, 'wait': {'type': 'number', 'description': 'seconds to hold the reply for the receipt of an effect (optional)'}}, 'required': ['spec', 'prop']}}]
 
 -- ---- entity_write: a write by name (a computed property name) -------------------------------------------------------------------------------
 Request.mc_w_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
@@ -50,13 +50,49 @@ Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop' i
 Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None else None
 Request.mc_write on-setter mcp-write:
   WHEN this.mc_write != None:
+    this.mc_w_t0 = clock
+    this.mc_w_old = prop(prop(this.mc_write, 'spec'), prop(this.mc_write, 'prop') + '_result')
     (prop(this.mc_write, 'spec')).[prop(this.mc_write, 'prop')] = prop(this.mc_write, 'value')
     this.mc_done = True
+
+-- ---- what a write returns (docs/cliffvm.md, "The return entity") -------------------------------------------------------------------------------
+-- A write that starts an effect (a driver's verb) has a RECEIPT: the property `<prop>_result` of the same entity. The reply carries the receipt when it is
+-- there, the REACTIONS (what the engine wrote in the round of this write: `reactions`, told back by the host as a derived write on this Request), and the
+-- name of a Return entity that holds the same for a later read. `wait` (seconds, optional) holds the reply until the receipt or that time; with none the
+-- reply is made at once and a receipt that is not there says where to read it.
+Request.mc_w_wait getter: num(prop(this.mc_args, 'wait')) or 0
+Request.mc_w_cls getter: (words(replace(replace(this.mc_w_id, 'membrane::', ''), ':', ' ')) or [''])[0]
+Request.mc_w_effect getter: (this.mc_w_cls + '.' + this.mc_w_prop) in ['File.write', 'File.move', 'File.delete', 'Command.run', 'Command.stop', 'Store.run', 'Fetch.request']
+Request.mc_w_rprop getter: this.mc_w_prop + '_result'
+Request.mc_w_rec getter: prop(this.mc_w_id, this.mc_w_rprop) if this.mc_done == True and this.mc_w_effect else None
+-- the receipt of THIS write: what is there now, unless it is what was there before the write
+Request.mc_w_new getter: this.mc_w_rec if this.mc_w_rec != None and this.mc_w_rec != this.mc_w_old else None
+Request.mc_w_ready getter:
+  WHEN this.mc_done != True or this.reactions == None: False
+  ELSE WHEN not this.mc_w_effect: True
+  ELSE WHEN this.mc_w_new != None: True
+  ELSE WHEN this.mc_w_wait <= 0: True
+  ELSE: clock - this.mc_w_t0 >= this.mc_w_wait
+Request.mc_w_n getter: replace(this.eid, 'Request:', '')
+Request.mc_w_ret getter: 'Return:call:' + this.mc_w_n
+Request.mc_w_ready on-setter mcp-return:
+  WHEN this.mc_w_ready == True:
+    Return:call[this.mc_w_n] = Return(tool: 'entity_write', target: this.mc_w_id, written: this.mc_w_prop, result_prop: this.mc_w_rprop if this.mc_w_effect else None, reactions: this.reactions)
+    this.mc_w_returned = True
+Return.kind getter: 'return'
+Return.receipt getter: prop(this.target, this.result_prop) if this.result_prop != None else None
+Return.state getter: 'pending' if this.result_prop != None and this.receipt == None else 'done'
+Request.mc_w_head getter: 'wrote ' + this.mc_w_id + '.' + this.mc_w_prop
+Request.mc_w_rcpt getter:
+  WHEN not this.mc_w_effect: []
+  ELSE WHEN this.mc_w_new != None: ['receipt: ' + str({'rc': prop(this.mc_w_new, 'rc'), 'ok': prop(this.mc_w_id, 'ok'), 'stdout': prop(this.mc_w_new, 'stdout'), 'stderr': prop(this.mc_w_new, 'stderr'), 'head': prop(this.mc_w_new, 'head'), 'status': prop(this.mc_w_new, 'status'), 'id': prop(this.mc_w_new, 'id')})]
+  ELSE: ['pending: read ' + this.mc_w_id + '.' + this.mc_w_rprop + ' later (it is also the receipt of ' + this.mc_w_ret + ')']
 Request.mc_w_text getter:
   WHEN this.mc_write == None: None
   ELSE WHEN this.mc_done != True: None
   ELSE WHEN this.refused != None: 'refused: ' + str(this.refused)
-  ELSE: 'wrote ' + this.mc_w_id + '.' + this.mc_w_prop
+  ELSE WHEN this.mc_w_returned != True: None
+  ELSE: join(concat(concat([this.mc_w_head], this.mc_w_rcpt), ['reactions: ' + str(this.reactions), 'return: ' + this.mc_w_ret]), '\n')
 
 -- ---- entity_read: the store's row (stored properties) or one property through the field ---------------------------------------------------
 Request.mc_r_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))

@@ -183,6 +183,7 @@
       "ChatMessage.max_turns": "Any",
       "ChatMessage.mcp_json": "Text?",
       "ChatMessage.note": "Text",
+      "ChatMessage.over": "Bool",
       "ChatMessage.partial_text": "Text",
       "ChatMessage.partial_tools": "List(Text)",
       "ChatMessage.plan": "Dict?",
@@ -190,6 +191,7 @@
       "ChatMessage.rc": "Any",
       "ChatMessage.rr": "Any",
       "ChatMessage.sevs": "List(Any)",
+      "ChatMessage.spent": "Bool",
       "ChatMessage.spoken": "Text",
       "ChatMessage.stale_chunks": "List(Any)",
       "ChatMessage.sys": "Text",
@@ -203,7 +205,8 @@
       "Chat.started": "Num",
       "Chat.state": "Text",
       "Chat.tools_run": "Any",
-      "Command.run": "Dict"
+      "Command.run": "Dict",
+      "Command.run_result": "Dict"
     },
     "findings": []
   },
@@ -632,17 +635,34 @@
       "Request.mc_tool": "Any",
       "Request.mc_tools": "List(Dict)",
       "Request.mc_w_bad": "Text?",
+      "Request.mc_w_cls": "Text?",
+      "Request.mc_w_effect": "Bool",
+      "Request.mc_w_head": "Text",
       "Request.mc_w_id": "Text",
+      "Request.mc_w_n": "Text",
+      "Request.mc_w_new": "Any",
       "Request.mc_w_prop": "Text",
+      "Request.mc_w_rcpt": "List(Text)",
+      "Request.mc_w_ready": "Bool",
+      "Request.mc_w_rec": "Any",
+      "Request.mc_w_ret": "Text",
+      "Request.mc_w_rprop": "Text",
       "Request.mc_w_spec": "Text",
       "Request.mc_w_text": "Text?",
+      "Request.mc_w_wait": "Num",
       "Request.mc_write": "Dict?",
       "Request.o_tools": "Bool",
-      "Request.r_tools": "Dict?"
+      "Request.r_tools": "Dict?",
+      "Return.kind": "Text",
+      "Return.receipt": "Any",
+      "Return.state": "Text"
     },
     "writes": {
       "*.[prop(this.mc_write, 'prop')]": "Any",
-      "Request.mc_done": "Bool"
+      "Request.mc_done": "Bool",
+      "Request.mc_w_old": "Any",
+      "Request.mc_w_returned": "Bool",
+      "Request.mc_w_t0": "Num"
     },
     "findings": []
   },

@@ -87,6 +87,7 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
             Err(e) => { eprintln!("cliffvm: {e}"); return 2; }
         }
     }
+    if let Some(n) = r.facts.iter().find(|(k, _)| k == "effect_workers").and_then(|(_, v)| v.as_u64()) { h.set_effect_workers(n.max(1) as usize); }   // the cap on Command / File / Fetch effects running at once (default 4)
     h.load_stored_packs();                       // the model's own packs, written in an earlier run (Pack:<name>.text)
     h.load_stored_entities();                    // then every other entity the model wrote (banner lines, trips, messages), minus what a getter computed
     h.rebuild();

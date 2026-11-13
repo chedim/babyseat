@@ -677,6 +677,11 @@
     "eid": "Request:1",
     "prop": "body",
     "value": "{\"jsonrpc\": \"2.0\", \"id\": 5, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_write\", \"arguments\": {\"spec\": \"Scratch:a\", \"prop\": \"color\", \"value\": {\"r\": [1, 2]}}}}"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reactions",
+    "value": []
    }
   ],
   "expect": [
@@ -755,6 +760,11 @@
     "eid": "Request:1",
     "prop": "body",
     "value": "{\"jsonrpc\": \"2.0\", \"id\": 6, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_write\", \"arguments\": {\"spec\": \"Command:hello\", \"prop\": \"cmd\", \"value\": [\"echo\", \"hi\"]}}}"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reactions",
+    "value": []
    }
   ],
   "expect": [
@@ -826,6 +836,11 @@
     "eid": "Request:1",
     "prop": "body",
     "value": "{\"jsonrpc\": \"2.0\", \"id\": 8, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_write\", \"arguments\": {\"spec\": \"Scratch:a\"}}}"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reactions",
+    "value": []
    }
   ],
   "expect": [

@@ -563,3 +563,108 @@ fn a_finished_turn_keeps_its_answer_tools_and_usage_but_not_the_raw_output_and_s
     assert!(row_text(port2, &cmd).len() < ROW_BOUND && row_text(port2, &msg).len() < ROW_BOUND, "small after the restart too");
     assert!(terminate(&mut run2));
 }
+
+// ---- the return entity and parallel effects (#1143) -------------------------------------------------------------------------------------------
+fn put(port: u16, spec: &str, prop: &str, v: J) -> (String, bool) { call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v})) }
+fn put_wait(port: u16, spec: &str, prop: &str, v: J, wait: f64) -> (String, bool) { call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v, "wait": wait})) }
+
+#[test]
+fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_when_it_does_not() {
+    let (mut run, port) = start("ret", MCP_PACKS, &[]);
+    put(port, "Command:e1", "cmd", json!(["echo", "hi"]));
+    // wait: the reply holds until the receipt: stdout, stderr, rc, ok, and the Return entity that keeps them
+    let (t, e) = put_wait(port, "Command:e1", "run", json!({"id": "r1", "args": ["there"]}), 20.0);
+    assert!(!e, "{t}");
+    assert!(t.starts_with("wrote Command:e1.run\nreceipt: "), "{t}");
+    let line = t.lines().find(|l| l.starts_with("receipt: ")).unwrap();
+    let rc: J = serde_json::from_str(&line["receipt: ".len()..]).unwrap_or_else(|e| panic!("{e}: {line}"));
+    assert_eq!((rc["rc"].clone(), rc["ok"].clone(), rc["stdout"].as_str().unwrap().trim().to_string()), (json!(0), json!(true), "hi there".to_string()), "{t}");
+    assert!(rc.get("stderr").is_some());
+    let ret = t.lines().find_map(|l| l.strip_prefix("return: ")).unwrap().to_string();
+    assert!(ret.starts_with("Return:"), "{t}");
+    let (r, _) = call(port, "entity_read", json!({"spec": ret, "prop": "receipt"}));
+    assert!(r.contains("hi there"), "the Return entity holds the receipt: {r}");
+    assert_eq!(call(port, "entity_read", json!({"spec": ret, "prop": "state"})).0, "done");
+    // no wait: a slow command answers at once, naming the receipt; the Return entity shows it when it lands
+    put(port, "Command:slow", "cmd", json!(["sh", "-c", "sleep 2; echo late"]));
+    let t0 = Instant::now();
+    let (t, _) = put(port, "Command:slow", "run", json!({"id": "s1", "args": []}));
+    assert!(t0.elapsed() < Duration::from_millis(1800), "no wait, no holding: {:?}", t0.elapsed());
+    assert!(t.contains("pending: read Command:slow.run_result later"), "{t}");
+    let ret = t.lines().find_map(|l| l.strip_prefix("return: ")).unwrap().to_string();
+    assert_eq!(call(port, "entity_read", json!({"spec": ret, "prop": "state"})).0, "pending");
+    let r = wait("the late receipt on the Return entity", || { let (r, _) = call(port, "entity_read", json!({"spec": ret, "prop": "receipt"})); r.contains("late").then_some(r) });
+    assert!(r.contains("late"), "{r}");
+    // a wait that is too short answers pending
+    put(port, "Command:slow2", "cmd", json!(["sh", "-c", "sleep 4; echo x"]));
+    let (t, _) = put_wait(port, "Command:slow2", "run", json!({"id": "s2", "args": []}), 1.0);
+    assert!(t.contains("pending: read Command:slow2.run_result later"), "{t}");
+    // a plain write has no receipt to wait for
+    let (t, _) = put_wait(port, "Note:a", "n", json!(1), 30.0);
+    assert!(t.starts_with("wrote Note:a.n\nreactions: ") && !t.contains("pending"), "{t}");
+    assert!(terminate(&mut run));
+}
+
+const BOXES: &str = "PACK boxes 1\nBox.double getter: this.n * 2\nBox.n on-setter mirror:\n  ALWAYS:\n    this.last = this.n\nBox.gone getter: None('nothing there yet') if this.n == None else this.n\n";
+
+#[test]
+fn a_write_returns_the_reactions_of_its_round_with_the_reason_of_a_null() {
+    let (mut run, port) = start("react", MCP_PACKS, &[]);
+    let (r, e) = put(port, "Pack:boxes", "text", json!(BOXES));
+    assert!(!e, "{r}");
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:boxes", "prop": "state"})).0 == "loaded").then_some(()));
+    let (t, e) = put(port, "Box:1", "n", json!(4));
+    assert!(!e, "{t}");
+    let line = t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap_or_else(|| panic!("{t}"));
+    let rs: Vec<J> = serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: {line}"));
+    let find = |p: &str| rs.iter().find(|r| r["eid"] == "Box:1" && r["prop"] == p).cloned().unwrap_or_else(|| panic!("{p} in {rs:?}"));
+    assert_eq!(find("double")["new"], json!(8), "a getter that recomputed");
+    assert_eq!(find("last")["new"], json!(4), "a setter that fired");
+    assert!(find("last")["by"].as_str().unwrap().contains("mirror"), "{rs:?}");
+    // a null carries its reason
+    let (t, _) = put(port, "Box:2", "other", json!(1));
+    let rs: Vec<J> = serde_json::from_str(t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap()).unwrap();
+    let g = rs.iter().find(|r| r["eid"] == "Box:2" && r["prop"] == "gone").unwrap_or_else(|| panic!("gone in {rs:?}"));
+    assert_eq!(g["why"], json!("nothing there yet"), "{rs:?}");
+    // the same list is on the Return entity
+    let ret = t.lines().find_map(|l| l.strip_prefix("return: ")).unwrap();
+    assert!(call(port, "entity_read", json!({"spec": ret, "prop": "reactions"})).0.contains("Box:2"));
+    assert!(terminate(&mut run));
+}
+
+/// start `n` slow commands (each marks `+` when it starts and `-` when it ends in the file `ev`), in parallel tool calls
+fn slow_commands(port: u16, ev: &std::path::Path, n: usize, secs: u32, wait: f64) -> Vec<std::thread::JoinHandle<String>> {
+    for i in 0..n { put(port, &format!("Command:p{i}"), "cmd", json!(["sh", "-c", format!("echo + >> {p}; sleep {secs}; echo - >> {p}; echo done{i}", p = ev.display())])); }
+    (0..n).map(|i| std::thread::spawn(move || put_wait(port, &format!("Command:p{i}"), "run", json!({"id": format!("p{i}"), "args": []}), wait).0)).collect()
+}
+
+#[test]
+fn two_slow_commands_from_parallel_tool_calls_take_the_time_of_one_and_a_held_call_blocks_nothing() {
+    let (mut run, port) = start("par", MCP_PACKS, &[]);
+    let t0 = Instant::now();
+    let hs = slow_commands(port, &run.dir.join("ev"), 2, 3, 30.0);
+    std::thread::sleep(Duration::from_millis(700));
+    // while both are held: the door answers other calls at once, and the page's files
+    let q = Instant::now();
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:Command", "count": true}));
+    assert!(n.contains("entity(ies)") && q.elapsed() < Duration::from_millis(2500), "a held call blocks nothing: {:?}", q.elapsed());
+    for h in hs { let t = h.join().unwrap(); assert!(t.contains("receipt: ") && t.contains("done"), "{t}"); }
+    let took = t0.elapsed();
+    assert!(took < Duration::from_millis(5500), "two 3 s commands in parallel took {took:?} (serial is 6 s or more)");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_effect_workers_fact_caps_the_commands_that_run_at_once() {
+    let (mut run, port) = start("cap", MCP_PACKS, &["--fact", "effect_workers=2"]);
+    let dir = run.dir.clone();
+    let hs = slow_commands(port, &dir.join("ev"), 5, 1, 60.0);
+    for h in hs { let t = h.join().unwrap(); assert!(t.contains("receipt: "), "{t}"); }
+    let ev = std::fs::read_to_string(dir.join("ev")).unwrap_or_else(|e| panic!("{e}: {:?}", std::fs::read_dir(&dir).unwrap().filter_map(Result::ok).map(|f| f.file_name()).collect::<Vec<_>>()));
+    let _ev0 = std::fs::read_to_string(dir.join("ev")).unwrap();
+    let (mut now, mut peak) = (0i32, 0i32);
+    for c in ev.lines() { now += if c == "+" { 1 } else { -1 }; peak = peak.max(now); }
+    assert_eq!(ev.lines().count(), 10, "{ev}");
+    assert_eq!(peak, 2, "five commands with the cap 2 ran at most two at once, and two did run together: {ev:?}");
+    assert!(terminate(&mut run));
+}

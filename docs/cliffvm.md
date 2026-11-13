@@ -93,6 +93,20 @@ At start the collector retires the Request rows an earlier run left in the store
 (ownership, rule B, layers), `upgrade` is what changed since 0.7.53 plus a SQL / Vue / JavaScript lookup table. **Every code block is a test**: `native/tests/help_1143.rs` loads each ```c1f block through the
 loader and checks its `-- given / -- write / -- reads` lines (```c1f-error blocks must be refused with the text in `-- error:`), so the help cannot lie. Also `seat_process.rs` (the topics through the MCP door).
 
+**The return entity** (#1143, operator-approved 2026-11-13; `door_tools.c1f` `mc_w_*`, `host.rs` `reactions_of`): `entity_write` answers in ONE call with
+what the write caused. The reply is `wrote <id>.<prop>`, then (a) for a write that starts an effect (`File.write/move/delete`, `Command.run/stop`, `Store.run`, `Fetch.request`: an explicit list in the pack) the RECEIPT, the
+`<prop>_result` of the entity (`rc`, `ok`, `stdout`, `stderr`, `head`, `status`, `id`), or `pending: read <id>.<prop>_result later` when it is not there (a receipt equal to the one there before the write is not this write's);
+(b) the REACTIONS: the host (`Host::reactions_of`, `drain_apply`) takes the batch the engine wrote in the round of the door's `mcp-write` setter and tells it back on that Request as `reactions` (a derived write, never journalled, a replay drains the same
+way): every derived write of the batch except the door's own bookkeeping (Request, Return, Pack), the last value per property, each `{eid, prop, new, by, why}` (`by` = the setter or getter that wrote it, `why` = the reason of a null). The round is the batch of
+that write; what a setter's effect does later arrives as a receipt, not as a reaction. A parallel call's batch may carry the other call's reactions: the engine is one thread and a batch is a batch; (c) `return: Return:call:<n>`, the entity
+`Return:call:<request number>` (class `Return`, declared by `door_tools.c1f`: `tool`, `target`, `written`, `result_prop`, `reactions`, and getters `receipt` (the property's value now) and `state` (`pending`/`done`)). It stays (the model may read it again; nothing
+retires it: a decision for the operator). A chat call has no tool-call id in its MCP request, so the Return entity is not under the tool's chat path. The optional `wait` (seconds) holds the reply until the receipt or that many seconds
+(a `clock` getter, one tick of resolution) and then answers `pending`; with no `wait` the reply is made at once. The reply is held by the existing pattern (`mc_w_text` stays null until `mc_w_returned`). Tests: `chat_process.rs`
+(`a_write_that_starts_an_effect...`, `a_write_returns_the_reactions...`, `two_slow_commands...`, `the_effect_workers_fact...`).
+**Parallel effects and `effect_workers`**: an effect runs on its own driver thread and a held request blocks nothing (the door's threads and the engine go on), so two slow commands started by two parallel tool calls finish in about the time of one. The slow drivers
+(`Command.run`, `File.*`, `Fetch.request`; `Store::effect_limited`) take a WORKER SLOT: at most `effect_workers` (Boot fact, `--fact effect_workers=<n>`, default 4, operator-approved) run at once, the rest wait for a slot. The chat's turn is a `Command.run`, so it holds one slot while the model runs;
+the door's listener, a held request, an open event stream and `Command.stop` take none.
+
 **The banner** (`membrane/apps/barest.c1f/default_banner.c1f`; the Python-era `banner.c1f` is not loaded here): `Banner:owner:main` (spelled `membrane::Banner:owner:main`, the chat's namespace) is the entity `chat_turn.c1f` reads into every turn, and it is
 FULLY the model's: the seat never segments, orders or joins what the model puts there, and its `text` is a getter (cached, recomputed when what it reads changes), so the banner is live by nature. The static instructions (what the banner is for,
 how to replace it) are in the system prompt (`chat_turn.c1f`) and `Help:banner`, never in the text. `Boot.started` births the instance once (`seed-banner`, guarded by `seeded`). The starting `text` is the barest cut of Memo's `RecallBanner`, assembled from

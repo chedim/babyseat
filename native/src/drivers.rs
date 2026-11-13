@@ -114,7 +114,7 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
         }
         ("Fetch", "request") => {                          // outbound http (fetch.rs): the receipt is data; a stream arrives as Chunk entities
             let req2 = req.clone();
-            st.effect(eid, verb, Box::new(move |sh, eid| crate::fetch::request(&Store::from_shared(sh), eid, &req2)));
+            st.effect_limited(eid, verb, Box::new(move |sh, eid| crate::fetch::request(&Store::from_shared(sh), eid, &req2)));
         }
         ("Request", "verify") => {                         // a token the request carries: checked with its door's secret
             let (req2, http) = (req.clone(), props.get("http").and_then(|h| h.as_str()).unwrap_or("").to_string());
@@ -156,11 +156,11 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 .find(|p| ephemeral(p, &dir));
             if let Some(bad) = strange {
                 let (id2, why) = (id.clone(), ephemeral_why(&bad));
-                st.effect(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new())));
+                st.effect_limited(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new())));
                 return;
             }
             let req2 = req.clone();
-            st.effect(eid, verb, Box::new(move |sh, eid| {
+            st.effect_limited(eid, verb, Box::new(move |sh, eid| {
                 let mut c = match &cmd {
                     J::Array(a) if !a.is_empty() => { let mut c = std::process::Command::new(a[0].as_str().unwrap_or_default()); for x in &a[1..] { c.arg(x.as_str().map(|s| s.to_string()).unwrap_or_else(|| x.to_string())); } c }
                     J::String(s) if !s.trim().is_empty() => { let mut c = std::process::Command::new("sh"); c.arg("-c").arg(s).arg("sh"); c }
@@ -222,18 +222,18 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
         ("File", v) => {
             let Some(path) = path else {
                 let id2 = id.clone();
-                st.effect(eid, verb, Box::new(move |_, _| receipt(&id2, 2, "a File needs `path`".into(), Map::new())));
+                st.effect_limited(eid, verb, Box::new(move |_, _| receipt(&id2, 2, "a File needs `path`".into(), Map::new())));
                 return;
             };
             let to = req.get("to").and_then(|t| t.as_str()).map(|t| resolve(&dir, t));
             if let Some(bad) = [Some(path.clone()), to].into_iter().flatten().find(|p| ephemeral(p, &dir)) {
                 let (id2, why) = (id.clone(), ephemeral_why(&bad));
-                st.effect(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new())));
+                st.effect_limited(eid, verb, Box::new(move |_, _| receipt(&id2, 2, why.clone(), Map::new())));
                 return;
             }
             let req = req.clone();
             let v = v.to_string();
-            st.effect(eid, verb, Box::new(move |_, _| {
+            st.effect_limited(eid, verb, Box::new(move |_, _| {
                 let r: Result<String, String> = match v.as_str() {
                     "write" => {
                         let content = req.get("content").map(|c| c.as_str().map(|s| s.to_string()).unwrap_or_else(|| c.to_string())).unwrap_or_default();

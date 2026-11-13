@@ -204,6 +204,13 @@ Job.report getter: Command:build.output
 `Command:<name>.run = {id, args}` runs a program (receipt `run_result`, `run_rc`, getter `output`). `File:<name>.write`,
 `Fetch:<name>.request` and `Store:<name>.run` follow the same shape: write, then read the receipt back.
 
+What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write that starts an effect the `receipt:` (rc, ok, stdout,
+stderr, head) when it has arrived, or `pending: read <entity>.<verb>_result later`; the `reactions:` (every value the engine wrote in the
+round of your write: a setter that fired, a getter that recomputed, each with `by` and, for a null, its `why`); and `return: Return:call:<n>`,
+an entity that keeps the same for a later `entity_read` (`receipt` shows the receipt as soon as it lands, `reactions` the list). Add
+`wait` (seconds) to `entity_write` to hold the reply until the receipt arrives or that time has passed: `{spec: "Command:build", prop:
+"run", value: {id: "b1", args: []}, wait: 30}` answers with the program's stdout. Calls that wait run side by side with your other calls.
+
 ## Where things live
 
 - A pack text: `Help:packs`. What changed lately and a SQL / Vue / JS lookup table: `Help:upgrade`.

@@ -27,7 +27,9 @@ Lamp.power on-setter log:
     this.last = this.power
 ```
 
-After loading it, `entity_write {spec: "Lamp:desk", prop: "power", value: "on"}` creates `Lamp:desk` and its getters and setters run.
+After loading it, `entity_write {spec: "Lamp:desk", prop: "power", value: "on"}` creates `Lamp:desk` and its getters and setters run;
+the reply lists the `reactions:` (each value your write made the engine write, with the setter or getter that wrote it) and names the
+`Return:call:<n>` entity that keeps them (Help:c1f, "Effects are writes", says what a write that starts an effect returns, and `wait`).
 
 ## Who owns a class
 
