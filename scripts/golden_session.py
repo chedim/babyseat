@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import tempfile
+from typing import Any
 import threading
 import time
 import urllib.request
@@ -43,7 +44,7 @@ def shape(v):
 INTERNAL = ("owner", "_announced", "readonly")
 
 
-def scrub(v, cwd: str):
+def scrub(v: Any, cwd: str) -> Any:
     """drop the internal keys and name the working folder `/srv/seat` (no machine's path goes into a fixture)"""
     if isinstance(v, dict):
         return {k: scrub(x, cwd) for k, x in v.items() if k not in INTERNAL}
@@ -76,10 +77,10 @@ def main() -> int:
                                      "options": {"baseURL": "http://127.0.0.1:9/v1"}, "models": {"claude": {"name": "claude"}}}}}
     script: dict = {"kind": "ok"}
 
-    def ladder(body):
+    def ladder(_body):
         raise AssertionError("buffered call not used")
 
-    def stream(body, on_event):
+    def stream(_body, on_event):
         if script["kind"] == "error":
             raise RuntimeError("claude failed (rc 3): not logged in")
         on_event("text", "Looking ")
@@ -91,14 +92,14 @@ def main() -> int:
         return {CA.RESP_KEY: CA.PROVIDER, CA.TOOLS_KEY: [{"id": "toolu_1", "name": "entity_read", "input": {"spec": "Command:probe"}, "output": "the result", "is_error": False}],
                 "choices": [{"message": {"content": "Looking now.Done."}}], "usage": {}}
     ladder.stream = stream
-    runner = NS.TurnRunner(hub, sessions, msgs, ladder, lambda *x: "ok", system="", model="claude", tools=[])
+    runner = NS.TurnRunner(hub, sessions, msgs, ladder, lambda *_x: "ok", system="", model="claude", tools=[])
     handler = NS.make_handler(hub=hub, sessions=sessions, messages=msgs, config=cfg, runner=runner)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     token = seatauth.ensure()
 
-    def req(path, method="GET", body=None):
+    def req(path, method="GET", body=None) -> tuple[int, Any]:
         r = urllib.request.Request(f"http://127.0.0.1:{port}{path}", method=method, data=json.dumps(body).encode() if body is not None else None,
                                    headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
         try:
@@ -127,6 +128,8 @@ def main() -> int:
     time.sleep(0.5)
 
     out: dict = {}
+    s: Any
+    rows: Any
     st, s = req("/session", "POST", {"title": "T"})
     out["session_create"] = {"status": st, "body": s}
     sid = s["id"]
@@ -165,7 +168,7 @@ def main() -> int:
     out["events_bare"] = frames["/event"]
     out["events_global"] = frames["/global/event"]
     httpd.shutdown()
-    out = scrub(out, str(work))
+    out = dict(scrub(out, str(work)))
 
     OUT.mkdir(parents=True, exist_ok=True)
     bad = 0

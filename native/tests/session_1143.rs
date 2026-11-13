@@ -273,7 +273,7 @@ fn the_synchronous_message_route_answers_when_the_turn_ends_with_info_and_parts(
     assert_eq!(b["info"]["role"], "assistant");
     assert!(b["info"]["time"]["completed"].is_number(), "{b}");
     assert_eq!(b["parts"].as_array().unwrap().iter().find(|p| p["type"] == "text").unwrap()["text"], "Done: quick one");
-    assert_eq!(rows(&port, &sid).len(), 2);
+    assert_eq!(rows(port, &sid).len(), 2);
     // bad requests: no text part, no such session, a wrong method
     assert_eq!(api(port, "POST", &format!("/session/{sid}/prompt_async"), json!({"parts": [{"type": "text", "text": "  "}]})).0, 400);
     assert_eq!(api(port, "POST", &format!("/session/{sid}/prompt_async"), json!({})).0, 400);

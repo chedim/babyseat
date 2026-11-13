@@ -20,13 +20,13 @@ IMPORT semtext 1
 -- No security (the barest seat): one operator, no `owner`, no per-person chat. What is not here is listed in docs/release-parity.md section 1.2.
 
 -- ---- which route ----------------------------------------------------------------------------------------------------------------------------
-Request.ss_on getter: this.path == '/session' or startswith(this.path, '/session/') or this.path == '/event' or this.path == '/global/event'
-Request.ss_segs getter: words(replace(this.path, '/', ' '))
+Request.ss_on getter: this.route == '/session' or startswith(this.route, '/session/') or this.route == '/event' or this.route == '/global/event'
+Request.ss_segs getter: words(replace(this.route, '/', ' '))
 Request.ss_n getter: len(this.ss_segs)
 Request.ss_sid getter: this.ss_segs[1] if this.ss_n >= 2 and this.ss_segs[0] == 'session' else None
 Request.ss_route getter:
-  WHEN this.path == '/event' or this.path == '/global/event': 'event'
-  ELSE WHEN this.path == '/session': 'root'
+  WHEN this.route == '/event' or this.route == '/global/event': 'event'
+  ELSE WHEN this.route == '/session': 'root'
   ELSE WHEN this.ss_n == 2 and this.ss_segs[1] == 'status': 'status'
   ELSE WHEN this.ss_n == 2: 'one'
   ELSE WHEN this.ss_n == 3 and this.ss_segs[2] in ['message', 'prompt_async', 'abort']: this.ss_segs[2]
