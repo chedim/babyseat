@@ -972,6 +972,14 @@ impl Fields {
                 continue;
             }
             let (vars, extra) = scope(eid, &binds, now);
+            // `<target>.[<expr>] = v`: the property's name is computed (non-empty text; anything else writes nothing)
+            let dynamic: String;
+            let prop: &String = if let Some(inner) = prop.strip_prefix('[').and_then(|p| p.strip_suffix(']')) {
+                match core.eval_json(inner, &vars, &extra) {
+                    Ok(J::String(s)) if !s.is_empty() => { dynamic = s; &dynamic }
+                    _ => continue,
+                }
+            } else { prop };
             let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
             if target == LLM_CALL { self.calls.push(v); continue; }
             let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
