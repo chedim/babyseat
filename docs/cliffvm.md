@@ -77,17 +77,22 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 
 **How the model loads a pack (as built).** One `entity_write {spec: "Pack:mine", prop: "text", value: "<c1f>"}`; read `Pack:mine.state`
 (`loaded` / `error` / `waiting`) or `.error`. Rules the engine puts on what the pack can do:
-- A class a pack declares is OWNED by it. The door's writes are checked like any pack's, so `entity_write` can NOT write an entity of a
-  class the model's pack declares (the door pack does not import it), and an entity of a class no pack owns can not be created. The
-  model's pack makes its own entities (`Lamp:desk = Lamp(kind: 'desk')`) from a setter it triggers itself: it declares `IMPORT
-  door_tools 1` (the pack that owns the class `Pack`) and puts a setter on a property of its own Pack entity, e.g. `Pack.mode
-  on-setter drive:`; the model starts it with `entity_write {spec: "Pack:mine", prop: "mode", value: ...}`. The door can still write
-  every class of the shipped packs the pack imports (Command, File, ...).
-- A pack that is removed (text emptied) stops running; the values its getters last computed stay as plain properties.
+- A class a pack declares is OWNED by it (rule A: only the owner defines its getters and setters; others IMPORT). A pack may WRITE only
+  classes it owns or imports (rule B), unless it is PRIVILEGED (docs/c1f-layers.md, "Privilege"). `door_tools`, the pack behind the
+  model's `entity_write`, is privileged: boot.c1f grants it at start (`Pack:door_tools.privileged = True`, `granted_by` records the boot
+  setter). So the model's tool writes AND creates an entity of any class, including one a model-written pack owns:
+  `entity_write {spec: "Lamp:desk", prop: "power", value: "on"}` makes `Lamp:desk` and its setters and getters run. No roundabout needed
+  (the old way, a setter on the pack's own `Pack.mode` that makes the Lamp, still works). An UNPRIVILEGED pack (the model's packs are
+  not, unless a privileged writer grants it with `entity_write {spec: "Pack:mine", prop: "privileged", value: true}`) is still held to
+  rule B, and cannot write `privileged` at all (a setter, constructor, computed name or chain of setters: refused with a receipt).
+- A pack that is removed (text emptied, or the Pack entity's text none) stops running and the values its getters left on entities are
+  CLEARED (derived writes of none, journal-neutral; a property another pack still computes stays). A Pack entity with NO text (a grant
+  for a pack loaded from a FILE) never removes that pack; only a written empty text does.
 - The engine's rounds apply: a setter that writes the same property twice in one round is refused (`refused` on the entity).
 - Test: `native/tests/pack_entities.rs` (the binary, the MCP door: load, hot reload, parse refusal, stale-setter refusal, PACK-line
   refusal, restart with a broken text falling back to `good_text`), `native/tests/host_loop.rs` (outside writes, journal, replay,
-  removal, a pack waiting for an import).
+  removal, a pack waiting for an import), `native/tests/privilege_1143.rs` (rule B, grant, revoke, granted_by, cleanup, replay) and the two
+  direct-write tests in `pack_entities.rs`.
 
 ## What `fields_live.py` does that the Rust loop does NOT yet do
 
@@ -97,7 +102,7 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 - **`silent_birth`** on engine-born entities (`{"born": cls}` is stored with no props).
 - **Packs from entities, the rest**: `pack_op` (list/show/load), the shipped-pack rule, `_view_classes` (packs importing `dom` that
   run in pages), `Pack` entities with the Python name `membrane::pack:<name>` / a `c1f` property / any class holding c1f (here only
-  `Pack:<name>.text`, see "Pack entities"). Pack FILES are loaded once at start: no mtime rescan. No entity removal, so a Pack
+  `Pack:<name>.text`, see "Pack entities"; the privilege grant is the one other Pack property the host reads, `privileged`). Pack FILES are loaded once at start: no mtime rescan. No entity removal, so a Pack
   entity can not be deleted (its text emptied removes the pack). Only Pack rows are restored from the store at start, not other
   entities.
 - **Banner instances** (`Banner:<owner>:<chat>`), the dials (`recall:dials`), the class switch, facts per turn, `sql_forget`,
@@ -137,7 +142,8 @@ shipped packs (`boot fs proc fetch store banner door door_tools chat chat_turn`)
   - `entity_write {spec, prop, value}`: one property, by a computed-name write; what reacts runs (a setter, a driver verb such as
     `Command:x.run = {id, args}`); the receipt is read back as `<verb>_result`. The class must be one `door_tools` owns or imports
     (door, fs, proc, fetch, store) or one no pack owns yet; a refusal is in the reply. A write to an entity that does not exist and whose
-    class no pack owns is dropped by the engine (the reply cannot tell: read it back).
+    class no pack owns is dropped by the engine (the reply cannot tell: read it back). `door_tools` is PRIVILEGED (granted by boot.c1f
+    at start), so it is not held to that class rule: it writes and creates any class, including one a model's pack owns.
   The #1101 `call` tool, aliases and the enter/exit context stack are out (skipped by decision).
 - `POST /membrane/chat/message {text}` -> 202 `{id}` (`<epoch ms>-<request n>`); the message is `membrane::Chat:message:<id>` (kind
   ChatMessage: text, at, state, tools_run), written `queued` after its birth, which starts the turn.

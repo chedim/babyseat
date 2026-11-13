@@ -12,7 +12,8 @@ IMPORT store 1
 --   entity_read  {spec, prop}         an entity's stored properties, or one property in full (a getter's value too)
 --   entity_write {spec, prop, value}  set one property; what reacts to the write runs (a setter, a driver verb: `Command:x.run = {id, args}`)
 -- `spec` is an entity id as the field spells it (`Command:build`, `membrane::Chat:main`). A write is a write like any pack's: the class
--- must be one this pack owns or imports (door, fs, proc, fetch, store) or one no pack owns yet; a refusal is in the reply. An effect's
+-- must be one this pack owns or imports (door, fs, proc, fetch, store), or one no pack owns yet, UNLESS this pack is privileged: boot.c1f
+-- grants it at start (docs/c1f-layers.md, "Privilege"), so a write here may also reach, and create, a class a model's pack owns. A refusal is in the reply. An effect's
 -- receipt lands as `<verb>_result` on the entity: read it back.
 -- Methods: initialize, notifications/* (a request without an id: 202, no body), ping, tools/list, tools/call.
 
