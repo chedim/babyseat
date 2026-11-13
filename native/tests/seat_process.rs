@@ -387,3 +387,42 @@ fn a_bare_entity_id_names_the_membrane_one_when_only_that_exists() {
     assert_eq!(q, "0 entity(ies)", "no second Banner:owner:main was made: {q}");
     assert!(terminate(&mut run));
 }
+
+// ---- a restart keeps what the model wrote (#1143) -----------------------------------------------------------------------------------------
+/// stop a seat and give its store to a new folder (the old folder is removed with the run)
+fn handover(run: &mut Run) -> std::path::PathBuf {
+    assert!(terminate(run));
+    let next = tmp("restart");
+    for f in std::fs::read_dir(&run.dir).unwrap().filter_map(Result::ok) {
+        if f.file_name().to_string_lossy().starts_with("seat.sqlite") { std::fs::copy(f.path(), next.join(f.file_name())).unwrap(); }
+    }
+    next
+}
+
+#[test]
+fn a_restart_restores_the_models_entities_and_still_sweeps_old_requests() {
+    let (mut run, port) = seat("restart1", true);
+    wait("the howto", || banner(port).contains("BannerLine:howto").then_some(()));
+    call(port, "entity_write", json!({"spec": "BannerLine:plan", "prop": "text", "value": "doing the import"}));
+    call(port, "entity_write", json!({"spec": "BannerLine:plan", "prop": "order", "value": 5}));
+    call(port, "entity_write", json!({"spec": "Note:keep", "prop": "a", "value": 7}));
+    wait("the banner line", || banner(port).contains("doing the import").then_some(()));
+    wait("the note", || call(port, "entity_query", json!({"q": "kind:Note"})).0.contains("Note:keep").then_some(()));
+    let dir = handover(&mut run);
+    {   // an old Request row an earlier run left
+        let db = rusqlite::Connection::open(dir.join("seat.sqlite")).unwrap();
+        db.execute("INSERT INTO c_field (k, body) VALUES ('Request:900001', '{\"cls\":\"Request\",\"props\":{\"path\":\"/old\"}}')", []).unwrap();
+    }
+    let (mut run2, port2) = seat_at(dir, true, &["request_keep_s=100000"]);
+    let b = wait("the banner is back", || { let b = banner(port2); b.contains("doing the import").then_some(b) });
+    assert_eq!(b.matches("BannerLine:howto").count(), 1, "the howto is the stored line, not a second one: {b}");
+    let (n, _) = call(port2, "entity_read", json!({"spec": "Note:keep", "prop": "a"}));
+    assert_eq!(n, "7", "the note is back");
+    let (q, _) = call(port2, "entity_query", json!({"q": "kind:BannerLine"}));
+    assert_eq!(q.lines().filter(|l| l.contains("(BannerLine)")).count(), 2, "{q}");
+    wait("the old Request row swept", || (!call(port2, "entity_query", json!({"q": "kind:Request", "k": 100})).0.contains("Request:900001")).then_some(()));
+    // the restored banner still follows its lines
+    call(port2, "entity_write", json!({"spec": "BannerLine:plan", "prop": "text", "value": "second run"}));
+    wait("the line changes", || { let b = banner(port2); (b.contains("second run") && !b.contains("doing the import")).then_some(()) });
+    assert!(terminate(&mut run2));
+}

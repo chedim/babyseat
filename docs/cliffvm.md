@@ -98,9 +98,13 @@ Its `text` is the text of every `BannerLine` entity, ordered by `order` (number,
 (`BannerLine.live getter WHEN this.eid == '...'`, ending `ELSE: None`), else its stored `text` (a getter named `text` would stand over every line's stored `text`: a getter hides the stored property of the same name, it does not fall back to it). The model
 adds, replaces and removes lines with `entity_write` (`text`, `order`, `retire = true`); the first line, `BannerLine:howto`, explains this. Boot seeds the banner and the howto line (`Boot.started`, `seed-banner`; the chat no longer
 constructs the banner). Reassigning an entity's class by writing a `class` property does not work in the VM, so there is no class switch: the banner is lines. Tests: `seat_process.rs` (`a_fresh_seats_banner...`,
-`writing_banner_lines...`, `a_pack_with_a_banner_line_getter...`), `help_1143.rs` (every `Help:banner` example). **Known limit:** the engine restores only `Pack` rows at start, so a restart loses the banner's lines (the howto returns); until entities are restored the model's lines
-live as long as the process.
+`writing_banner_lines...`, `a_pack_with_a_banner_line_getter...`), `help_1143.rs` (every `Help:banner` example). A restart restores the lines (see "Restart restores the entities").
 **Bare ids** (`door_tools.c1f`): `entity_read` and `entity_write` take `Banner:owner:main` for `membrane::Banner:owner:main` when only the `membrane::` row exists (an id with its own row, or no twin, is used as written); `entity_query name~:` stays a literal prefix.
+
+**Restart restores the entities** (`host.rs` `load_stored_entities`, called by `cli.rs` after `load_stored_packs` and before the rebuild): every stored row arrives in the engine with its class and props
+(the `parents` stamp is a prop), packs first, then the rest. A prop a getter wrote (`trigger:field:getter:*`, `rebuild`) is not read back: the rebuild computes it again, so a changed getter shows its new value. The classes in
+`PER_RUN_CLASSES` (`Boot`, `Http`, `Request`, `Step`) describe the process, not the model's work: they stay stored text and the new run makes them again (the collector's start-up sweep still retires the old `Request` rows, so there is no
+retention clock to carry over). No setter runs on a restore and nothing is rewritten. A message that was mid-turn when the seat stopped stays `running` (its Command had no receipt). Test: `seat_process.rs` `a_restart_restores...`.
 
 **Retiring an entity** (`native/src/fields.rs` `retired`, `host.rs` `drain_apply`): a write of `retire = true` to ANY entity, by any writer (a pack's setter: the ordinary ownership rules
 apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
@@ -177,8 +181,7 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 - **Packs from entities, the rest**: `pack_op` (list/show/load), the shipped-pack rule, `_view_classes` (packs importing `dom` that
   run in pages), `Pack` entities with the Python name `membrane::pack:<name>` / a `c1f` property / any class holding c1f (here only
   `Pack:<name>.text`, see "Pack entities"; the privilege grant is the one other Pack property the host reads, `privileged`). Pack FILES are loaded once at start: no mtime rescan. A Pack
-  entity can not be deleted (its text emptied removes the pack). Only Pack rows are restored from the store at start, not other
-  entities.
+  entity can not be deleted (its text emptied removes the pack). Entities other than Packs are restored by `load_stored_entities` (see "Restart restores the entities").
 - **Banner instances per owner and chat** (the barest seat has the one `Banner:owner:main`, made of lines: see "The banner"), the dials (`recall:dials`), the class switch (writing `class` does not reassign an instance), facts per turn, `sql_forget`,
   the 3 s banner time limit, `mark_delivered` / `mark_seq`.
 - **LLM call plumbing**: `Fields::calls` (the planner's `membrane::llm.call`) are drained and dropped; no LLM adapter.

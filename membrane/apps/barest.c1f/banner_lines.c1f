@@ -5,8 +5,8 @@ IMPORT boot 1
 -- eid, joined with newlines. A line whose `text` is missing or empty adds nothing. The model grows its banner by writing `BannerLine:<name>`
 -- entities (`order`, `text`), shows live state by loading a pack with a getter on `BannerLine.live`, and removes a line with `retire = true`.
 -- Help:banner (help/banner.md) teaches this with examples; BannerLine:howto is the first line.
--- Seeding: `Banner:owner:main` is born with `seeded` and the first line at start. (The engine restores only Pack rows at start, not other
--- entities: docs/cliffvm.md, "What fields_live.py does that the Rust loop does NOT yet do"; the seed runs again until that lands.)
+-- Seeding: `Banner:owner:main` is born with `seeded` and the first line the first time the seat starts. The host restores stored entities at
+-- start (docs/cliffvm.md, "Restart restores the entities"), so a later start finds `seeded` and the model's lines as they were.
 
 BannerLine.order_key getter: num(this.order) or 0
 -- `live` is where a pack's getter gives a line its text (a getter named `text` would stand over the stored `text` of every line, so a live line

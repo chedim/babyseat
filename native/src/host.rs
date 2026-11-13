@@ -46,6 +46,12 @@ pub fn stamp_born_writer(cls: &str) -> String {
     if cls == TRIP_CLASS { stamp_writer(TRIP_WRITER) } else { format!("{WRITER}create") }
 }
 
+/// Classes a restart does not restore: they describe the process that ran (the door's listener and its requests, the boot's facts and plan).
+pub const PER_RUN_CLASSES: [&str; 4] = ["Boot", "Http", "Request", "Step"];
+
+/// A store stamp of a value the engine computes again from its inputs (a getter's, a rebuild's).
+pub fn is_getter_write(stamp: &str) -> bool { stamp.starts_with("trigger:field:getter:") || stamp == "trigger:field:rebuild" }
+
 /// An outside write is anything the engine can not re-derive.
 pub fn is_outside(stamp: &str) -> bool { !stamp.starts_with(WRITER) }
 
@@ -418,6 +424,28 @@ impl Host {
             names.push(name);
         }
         names
+    }
+
+    /// Start-up, after the packs: every other stored entity row arrives in the engine (its class, its props, the `parents` stamp among them),
+    /// so what the model wrote (a banner line, a trip, a message) outlives the process. The rows come back as they are, with two exceptions:
+    ///   - a prop a GETTER wrote (`trigger:field:getter:*`, `trigger:field:rebuild`) is not read back: the rebuild that follows computes it
+    ///     again from the restored inputs, so a getter that changed since the row was stored shows its new value;
+    ///   - the classes in `PER_RUN_CLASSES` are about THIS process and stay stored text: the new run makes them again (or sweeps them).
+    /// No setter runs and nothing is journalled or rewritten (a restore runs no effects). -> how many entities arrived.
+    pub fn load_stored_entities(&self) -> usize {
+        let now = self.now();
+        let mut n = 0;
+        for (eid, row) in self.rows() {
+            let cls = row["cls"].as_str().unwrap_or("").to_string();
+            if cls.is_empty() || cls == PACK_CLASS || PER_RUN_CLASSES.contains(&cls.as_str()) { continue; }
+            let writers = row["writers"].as_object().cloned().unwrap_or_default();
+            let props: Map<String, J> = row["props"].as_object().cloned().unwrap_or_default().into_iter()
+                .filter(|(k, _)| !writers.get(k).and_then(|w| w.as_str()).map_or(false, is_getter_write)).collect();
+            let mut g = self.eng(); let (core, f, _) = &mut *g;
+            f.arrive(core, eid, cls, props, now);
+            n += 1;
+        }
+        n
     }
 
     // ---- the store ---------------------------------------------------------------------------------------------------

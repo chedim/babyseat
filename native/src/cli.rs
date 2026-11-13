@@ -88,6 +88,7 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
         }
     }
     h.load_stored_packs();                       // the model's own packs, written in an earlier run (Pack:<name>.text)
+    h.load_stored_entities();                    // then every other entity the model wrote (banner lines, trips, messages), minus what a getter computed
     h.rebuild();
     // THE BOOT PLAN (plan.rs): boot.json's steps in the order boot.c1f says. This host runs none of them itself (they are the Python
     // seat's steps: nothing here to run), so each is `skipped`; what the plan decides is when the boot is over. Then `started`.
