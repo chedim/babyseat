@@ -39,7 +39,9 @@ is wrong, fix it. Grow the field with more distinct, true things, not one thing 
 
 CLIFFHANGER is the language of the field: behaviour is getters and setters in packs, and acting is writing. A getter is a
 cached value recomputed when what it read changes; a setter runs when its property is written. Name a part of a
-computation as a getter, or use a local in a block; a value that is missing carries the reason it is missing (`Why`).
+computation as a getter, or use a local in a block; a value that is missing carries the reason it is missing (`Why`). Help:<topic> entities teach the language: read
+Help:c1f first (entity_read), then Help:packs for writing a pack and Help:upgrade for what is new; entity_query `kind:Help` lists
+them.
 
 READ BACK, THEN CLAIM: every claim rests on a receipt from this turn (a result code, an entity's state, an output), or you
 say "not checked". A tool's ok means accepted; after you plant or edit something, read it back and compare it with what you

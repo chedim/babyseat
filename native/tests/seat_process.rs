@@ -302,3 +302,18 @@ fn request_rows_of_an_earlier_run_are_retired_when_the_seat_starts() {
     assert!(notes.contains("Note:keep"), "only Request rows are swept: {notes}");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn help_topics_are_entities_the_model_lists_and_reads() {
+    let (mut run, port) = seat("help", true);
+    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 3).then_some((l, e)) });
+    for t in ["c1f", "packs", "upgrade"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
+    for t in ["c1f", "packs", "upgrade"] {
+        let disk = std::fs::read_to_string(repo().join(format!("membrane/apps/barest.c1f/help/{t}.md"))).unwrap();
+        let (text, err) = wait("the topic's text", || { let (x, e) = call(port, "entity_read", json!({"spec": format!("Help:{t}"), "prop": "text"})); (x.len() > 100).then_some((x, e)) });
+        assert!(!err && text == disk, "Help:{t}.text is the file's text");
+    }
+    let (whole, _) = call(port, "entity_read", json!({"spec": "Help:c1f"}));
+    assert!(whole.contains("the language of the field"), "a plain read shows the text: {}", &whole[..whole.len().min(200)]);
+    assert!(terminate(&mut run));
+}
