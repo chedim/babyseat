@@ -91,6 +91,55 @@
       "started"
     ]
   },
+  "chat": {
+    "imports": [
+      "door",
+      "banner"
+    ],
+    "classes": [
+      "Chat",
+      "ChatMessage",
+      "ChatResponse",
+      "ChatTool",
+      "Request"
+    ],
+    "members": 17,
+    "writes": [
+      "membrane:*.queued",
+      "membrane:*=ChatMessage()",
+      "membrane::Banner:owner:main=Banner()",
+      "membrane::Chat:main=Chat()"
+    ],
+    "claims": [
+      "/membrane/chat/message",
+      "/membrane/chat/message/"
+    ],
+    "boot_facts": []
+  },
+  "chat_turn": {
+    "imports": [
+      "chat",
+      "proc",
+      "banner"
+    ],
+    "classes": [
+      "Chat",
+      "ChatMessage"
+    ],
+    "members": 22,
+    "writes": [
+      "membrane:*.result",
+      "membrane:*.run",
+      "membrane:*=ChatResponse()",
+      "membrane:*=ChatTool()",
+      "membrane:*=Command()"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "chat_claude_bin",
+      "chat_max_turns"
+    ]
+  },
   "decisions": {
     "imports": [
       "goalgraph",
@@ -295,6 +344,26 @@
     "boot_facts": [
       "nerve_pause_off"
     ]
+  },
+  "door_tools": {
+    "imports": [
+      "door",
+      "fs",
+      "proc",
+      "fetch",
+      "store"
+    ],
+    "classes": [
+      "Request"
+    ],
+    "members": 42,
+    "writes": [
+      "*.[]"
+    ],
+    "claims": [
+      "/mcp"
+    ],
+    "boot_facts": []
   },
   "door_voice": {
     "imports": [

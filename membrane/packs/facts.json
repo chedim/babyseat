@@ -92,6 +92,14 @@
   "started": {
    "wired": true,
    "why": "the seat says it has started (Boot:seat.started = now): the packs build their nodes in setters on it (fields_live.boot_started)"
+  },
+  "chat_claude_bin": {
+   "wired": false,
+   "why": "the claude CLI's path for the bare chat's turn (packs/chat_turn.c1f); told by `cliffvm run ... --fact chat_claude_bin=<path>`; no default: unset = the message is answered with an error and nothing runs"
+  },
+  "chat_max_turns": {
+   "wired": false,
+   "why": "the bare chat's ceiling: the CLI's --max-turns for one answer (chat_turn.c1f; default 2048 in the pack, a threshold the operator approves); told by `--fact chat_max_turns=<n>`"
   }
  }
 }

@@ -972,6 +972,14 @@ impl Fields {
                 continue;
             }
             let (vars, extra) = scope(eid, &binds, now);
+            // `<target>.[<expr>] = v`: the property's name is computed (non-empty text; anything else writes nothing)
+            let dynamic: String;
+            let prop: &String = if let Some(inner) = prop.strip_prefix('[').and_then(|p| p.strip_suffix(']')) {
+                match core.eval_json(inner, &vars, &extra) {
+                    Ok(J::String(s)) if !s.is_empty() => { dynamic = s; &dynamic }
+                    _ => continue,
+                }
+            } else { prop };
             let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
             if target == LLM_CALL { self.calls.push(v); continue; }
             let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
@@ -1033,11 +1041,14 @@ impl Fields {
             let own = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
             if let Err(why) = self.may_write(pack, &own) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
         }
+        let kind_stamped = args.iter().any(|(k, _)| k == "parents");
         for (prop, v) in args {
             if v.is_null() { continue; }
             if core.docs.get(&tgt).and_then(|e| e.props.get(&prop)).map_or(false, |old| !old.is_null()) { continue; }   // only what is unset
             self.emit(core, work, &tgt, &prop, v, name, seq, now);
         }
+        // the kind stamp came after the birth: the getters of the kind (ISA mirror) are computed now, for what was just made
+        if kind_stamped { self.birth(core, &tgt, now, seq); }
     }
 
     /// A write of a driver verb (File.write, Command.run, ...: drivers.rs) runs its effect off the engine; the verb's

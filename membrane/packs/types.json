@@ -126,6 +126,63 @@
     "writes": {},
     "findings": []
   },
+  "chat": {
+    "getters": {
+      "Chat.title": "Text",
+      "ChatMessage.mid": "Text",
+      "ChatMessage.resp_eid": "Text",
+      "ChatMessage.said": "Any",
+      "ChatMessage.view": "Dict",
+      "ChatResponse.kind": "Text",
+      "ChatTool.kind": "Text",
+      "Request.cm_get": "Dict",
+      "Request.cm_gid": "Text",
+      "Request.cm_go": "Bool",
+      "Request.cm_post": "Dict?",
+      "Request.cm_text": "Text",
+      "Request.cm_view": "Any",
+      "Request.m_session": "List(Text)",
+      "Request.o_session": "Bool",
+      "Request.r_session": "Dict?"
+    },
+    "writes": {
+      "Chat.queued": "Bool",
+      "Request.cm_at": "Num",
+      "Request.cm_id": "Text?"
+    },
+    "findings": []
+  },
+  "chat_turn": {
+    "getters": {
+      "ChatMessage.answer": "Text?",
+      "ChatMessage.argv": "List(Any)?",
+      "ChatMessage.banner_text": "Any",
+      "ChatMessage.bin": "Any",
+      "ChatMessage.capped": "Bool",
+      "ChatMessage.evs": "List(Any)",
+      "ChatMessage.failed": "Text?",
+      "ChatMessage.final": "Any",
+      "ChatMessage.finals": "List(Any)",
+      "ChatMessage.max_turns": "Any",
+      "ChatMessage.mcp_json": "Text?",
+      "ChatMessage.note": "Text",
+      "ChatMessage.plan": "Dict?",
+      "ChatMessage.port": "Any",
+      "ChatMessage.rc": "Any",
+      "ChatMessage.rr": "Any",
+      "ChatMessage.spoken": "Text",
+      "ChatMessage.sys": "Text?",
+      "ChatMessage.texts": "List(Text)",
+      "ChatMessage.tools_names": "List(Text)"
+    },
+    "writes": {
+      "Chat.result": "Text",
+      "Chat.state": "Text",
+      "Chat.tools_run": "Any",
+      "Command.run": "Dict"
+    },
+    "findings": []
+  },
   "decisions": {
     "getters": {
       "Decision.ans_error": "Text?",
@@ -196,7 +253,7 @@
   "door": {
     "getters": {
       "Http.up": "Bool?",
-      "Request.allow": "Any",
+      "Request.allow": "List(Text)?",
       "Request.boots": "List(Entity(Boot))",
       "Request.c_aliases": "Any",
       "Request.c_blurp": "Bool",
@@ -218,8 +275,8 @@
       "Request.f_project": "Any",
       "Request.f_version": "Any",
       "Request.facts": "Any",
-      "Request.family": "Any",
-      "Request.family_checked": "Any",
+      "Request.family": "Dict?",
+      "Request.family_checked": "Dict?",
       "Request.file": "Text?",
       "Request.found": "Any",
       "Request.fwd": "Bool",
@@ -256,9 +313,9 @@
       "Request.rel_climb": "Bool",
       "Request.rel_ok": "Bool",
       "Request.reply": "Any",
-      "Request.routed": "Any",
+      "Request.routed": "Dict?",
       "Request.secure": "Text",
-      "Request.shipped": "Any",
+      "Request.shipped": "Dict?",
       "Request.static": "Text?",
       "Request.static_reply": "Dict?",
       "Request.ui_root": "Any",
@@ -497,6 +554,57 @@
     },
     "writes": {
       "membrane.control": "Dict?"
+    },
+    "findings": []
+  },
+  "door_tools": {
+    "getters": {
+      "Request.m_tools": "List(Text)",
+      "Request.mc_args": "Any",
+      "Request.mc_bad": "Text?",
+      "Request.mc_call": "Dict?",
+      "Request.mc_id": "Any",
+      "Request.mc_init": "Dict",
+      "Request.mc_is_err": "Bool",
+      "Request.mc_known": "Bool",
+      "Request.mc_known_method": "Bool",
+      "Request.mc_method": "Text",
+      "Request.mc_ok": "Bool",
+      "Request.mc_params": "Any",
+      "Request.mc_q_bad": "Text?",
+      "Request.mc_q_count": "Any",
+      "Request.mc_q_k": "Num",
+      "Request.mc_q_kind": "Text?",
+      "Request.mc_q_kinds": "List(Text)",
+      "Request.mc_q_name": "Text?",
+      "Request.mc_q_names": "List(Text)",
+      "Request.mc_q_on": "Bool",
+      "Request.mc_q_other": "List(Text)",
+      "Request.mc_q_rows": "Any",
+      "Request.mc_q_terms": "List(Text)",
+      "Request.mc_q_text": "Text?",
+      "Request.mc_r_bad": "Text?",
+      "Request.mc_r_prop": "Any",
+      "Request.mc_r_rows": "Any",
+      "Request.mc_r_spec": "Text",
+      "Request.mc_r_text": "Text?",
+      "Request.mc_r_val": "Any",
+      "Request.mc_result": "Dict?",
+      "Request.mc_rpc": "Any",
+      "Request.mc_text": "Text?",
+      "Request.mc_tool": "Any",
+      "Request.mc_tools": "List(Dict)",
+      "Request.mc_w_bad": "Text?",
+      "Request.mc_w_prop": "Text",
+      "Request.mc_w_spec": "Text",
+      "Request.mc_w_text": "Text?",
+      "Request.mc_write": "Dict?",
+      "Request.o_tools": "Bool",
+      "Request.r_tools": "Dict?"
+    },
+    "writes": {
+      "*.[prop(this.mc_write, 'prop')]": "Any",
+      "Request.mc_done": "Bool"
     },
     "findings": []
   },

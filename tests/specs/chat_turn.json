@@ -1,0 +1,859 @@
+[
+ {
+  "name": "the argv is the print-mode run of the CLI: built-in tools off, only the door's MCP server, only its tools, one run with a ceiling, the message last",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "chat_max_turns": 7
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.0",
+    "equals": "env"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.1",
+    "equals": "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.2",
+    "equals": "/opt/fake/claude"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.3",
+    "equals": "-p"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.4",
+    "equals": "--output-format"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.5",
+    "equals": "stream-json"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.6",
+    "equals": "--verbose"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.7",
+    "equals": "--include-partial-messages"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.8",
+    "equals": "--tools"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.9",
+    "equals": ""
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.10",
+    "equals": "--strict-mcp-config"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.11",
+    "equals": "--mcp-config"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.12",
+    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\"}}}"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.13",
+    "equals": "--allowedTools"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.14",
+    "equals": "mcp__membrane__*"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.15",
+    "equals": "--setting-sources"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.16",
+    "equals": ""
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.17",
+    "equals": "--no-session-persistence"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.18",
+    "equals": "--max-turns"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.19",
+    "equals": "7"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.20",
+    "equals": "--system-prompt"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.22",
+    "equals": "--"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.23",
+    "equals": "hello"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.24",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "the system prompt is the tools note and the chat's banner, and the prompt is the message alone (no history)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "sys",
+    "contains": "entity_write"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "sys",
+    "contains": "BANNER (placeholder)"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.19",
+    "equals": "2048"
+   }
+  ]
+ },
+ {
+  "name": "with no Claude binary named the message is answered with an error that says how to name it, and nothing is run",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "queued",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "state",
+    "equals": "error"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "text",
+    "contains": "chat_claude_bin"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "error",
+    "equals": true
+   }
+  ]
+ },
+ {
+  "name": "a binary that cannot start is an error answer with its return code (the turn starts a Command and reads its receipt)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/nonexistent/claude-fake"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "queued",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "prop": "cmd.2",
+    "equals": "/nonexistent/claude-fake"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "state",
+    "equals": "error"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "text",
+    "contains": "claude failed (rc 127)"
+   }
+  ]
+ },
+ {
+  "name": "the stream's result line is the answer; each tool the model ran is an entity under the message with its result; the chat's tools list names them",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hi",
+     "state": "running"
+    }
+   },
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "class": "Command",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "prop": "run_result",
+    "value": {
+     "id": "1-1",
+     "status": "ok",
+     "rc": 0,
+     "head": "",
+     "stdout": "{\"type\": \"system\", \"subtype\": \"init\", \"session_id\": \"s1\", \"tools\": [\"mcp__membrane__entity_read\"]}\n{\"type\": \"stream_event\", \"event\": {\"type\": \"content_block_delta\", \"delta\": {\"type\": \"text_delta\", \"text\": \"Hel\"}}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"Let me look.\"}, {\"type\": \"tool_use\", \"id\": \"tu1\", \"name\": \"mcp__membrane__entity_read\", \"input\": {\"spec\": \"Goal:a\"}}]}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"tool_result\", \"tool_use_id\": \"tu1\", \"content\": [{\"type\": \"text\", \"text\": \"Goal:a (Goal) {}\"}]}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"tu2\", \"name\": \"mcp__membrane__entity_write\", \"input\": {\"spec\": \"Goal:a\", \"prop\": \"status\", \"value\": \"open\"}}, {\"type\": \"text\", \"text\": \"Done.\"}]}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"tool_result\", \"tool_use_id\": \"tu2\", \"content\": \"wrote Goal:a.status\", \"is_error\": false}]}}\n{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": false, \"result\": \"All done: Goal:a is open.\", \"num_turns\": 3, \"session_id\": \"s1\"}\n",
+     "stderr": ""
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "state",
+    "equals": "done"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "text",
+    "equals": "All done: Goal:a is open."
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "error",
+    "equals": false
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "tools_run",
+    "equals": [
+     "entity_read",
+     "entity_write"
+    ]
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:tool:tu1",
+    "prop": "name",
+    "equals": "mcp__membrane__entity_read"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:tool:tu1",
+    "prop": "input.spec",
+    "equals": "Goal:a"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:tool:tu1",
+    "prop": "result",
+    "contains": "Goal:a (Goal)"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:tool:tu2",
+    "prop": "name",
+    "equals": "mcp__membrane__entity_write"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:tool:tu2",
+    "prop": "input.prop",
+    "equals": "status"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:tool:tu2",
+    "prop": "result",
+    "equals": "wrote Goal:a.status"
+   }
+  ]
+ },
+ {
+  "name": "with no result line the answer is the assistant's text, in order",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hi",
+     "state": "running"
+    }
+   },
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "class": "Command",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "prop": "run_result",
+    "value": {
+     "id": "1-1",
+     "status": "ok",
+     "rc": 0,
+     "head": "",
+     "stdout": "{\"type\": \"system\", \"subtype\": \"init\", \"session_id\": \"s1\", \"tools\": [\"mcp__membrane__entity_read\"]}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"Let me look.\"}, {\"type\": \"tool_use\", \"id\": \"tu1\", \"name\": \"mcp__membrane__entity_read\", \"input\": {\"spec\": \"Goal:a\"}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"tu2\", \"name\": \"mcp__membrane__entity_write\", \"input\": {\"spec\": \"Goal:a\", \"prop\": \"status\", \"value\": \"open\"}}, {\"type\": \"text\", \"text\": \"Done.\"}]}}\n",
+     "stderr": ""
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "state",
+    "equals": "done"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "text",
+    "equals": "Let me look.\n\nDone."
+   }
+  ]
+ },
+ {
+  "name": "a result the CLI marks as an error is an error answer carrying its text",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hi",
+     "state": "running"
+    }
+   },
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "class": "Command",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "prop": "run_result",
+    "value": {
+     "id": "1-1",
+     "status": "ok",
+     "rc": 0,
+     "head": "",
+     "stdout": "{\"type\": \"system\", \"subtype\": \"init\", \"session_id\": \"s1\", \"tools\": [\"mcp__membrane__entity_read\"]}\n{\"type\": \"result\", \"subtype\": \"success\", \"is_error\": true, \"result\": \"Credit balance is too low\"}\n",
+     "stderr": ""
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "state",
+    "equals": "error"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "text",
+    "equals": "claude reported an error: Credit balance is too low"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "error",
+    "equals": true
+   }
+  ]
+ },
+ {
+  "name": "a run that stops at the ceiling keeps what was said and says it stopped there",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "chat_max_turns": 7
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hi",
+     "state": "running"
+    }
+   },
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "class": "Command",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "prop": "run_result",
+    "value": {
+     "id": "1-1",
+     "status": "ok",
+     "rc": 0,
+     "head": "",
+     "stdout": "{\"type\": \"system\", \"subtype\": \"init\", \"session_id\": \"s1\", \"tools\": [\"mcp__membrane__entity_read\"]}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"Let me look.\"}, {\"type\": \"tool_use\", \"id\": \"tu1\", \"name\": \"mcp__membrane__entity_read\", \"input\": {\"spec\": \"Goal:a\"}}]}}\n{\"type\": \"result\", \"subtype\": \"error_max_turns\", \"is_error\": false, \"num_turns\": 7}\n",
+     "stderr": ""
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "state",
+    "equals": "done"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "text",
+    "equals": "Let me look.\n\n(stopped at the ceiling of 7 turns)"
+   }
+  ]
+ },
+ {
+  "name": "a failing exit with no result line is an error that carries stderr",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chatmessage"
+     ],
+     "text": "hi",
+     "state": "running"
+    }
+   },
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "class": "Command",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "prop": "run_result",
+    "value": {
+     "id": "1-1",
+     "status": "error",
+     "rc": 1,
+     "head": "",
+     "stdout": "not json\n",
+     "stderr": "Not logged in"
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "state",
+    "equals": "error"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:response",
+    "prop": "text",
+    "equals": "claude failed (rc 1): Not logged in"
+   }
+  ]
+ }
+]
