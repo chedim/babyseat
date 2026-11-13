@@ -625,6 +625,9 @@ impl Fields {
         out
     }
 
+    /// Which layer supplied the value of a getter, and which writes to it were overridden (docs/c1f-layers.md). (not built yet)
+    pub fn why_layer(&self, _core: &Core, _eid: &str, _prop: &str) -> Vec<String> { vec![] }
+
     /// A write changed (eid, prop): every getter instance that read it, or that asked `referencing(_, prop)`, is dirty.
     fn mark(&mut self, eid: &str, prop: &str) {
         self.mark_key(&(eid.to_string(), prop.to_string()));
