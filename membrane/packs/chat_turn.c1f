@@ -36,16 +36,30 @@ ChatMessage.turn_timeout_s getter:
 ChatMessage.port getter:
   WHEN this.over: None
   ELSE: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
+-- THE OWNER'S TOKEN (docs/auth.md): a seat with a door secret refuses a caller with no token, loopback too, so the turn's CLI carries the owner's token
+-- (the file `Boot:seat.owner_token_file` names, written by the launcher at every boot). The token is NOT here: the config names the variable
+-- `${MEMBRANE_OWNER_TOKEN}` as the CLI's MCP `headers` take it, and the run's `env_from` hands the launcher's own value to the child's environment,
+-- so the value is in no property, no argv and no row. The barest seat has no such file: no header, no variable.
+ChatMessage.owner_file getter:
+  WHEN this.over: None
+  ELSE: ([b.owner_token_file for b in instances('Boot') if b.owner_token_file != None] or [None])[0]
+ChatMessage.mcp_server getter:
+  WHEN this.over or this.port == None: None
+  ELSE WHEN this.owner_file != None: {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'headers': {'Authorization': 'Bearer ${MEMBRANE_OWNER_TOKEN}'}}
+  ELSE: {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp'}
+ChatMessage.owner_env getter:
+  WHEN this.over or this.owner_file == None: None
+  ELSE: {'MEMBRANE_OWNER_TOKEN': 'MEMBRANE_OWNER_TOKEN'}
 ChatMessage.mcp_json getter:
   WHEN this.over: None
-  ELSE: str({'mcpServers': {'membrane': {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp'}}}) if this.port != None else None
+  ELSE: str({'mcpServers': {'membrane': this.mcp_server}}) if this.mcp_server != None else None
 ChatMessage.banner_text getter:
   WHEN this.over: None
   ELSE: prop('membrane::Banner:owner:main', 'text')
 ChatMessage.note getter:
   WHEN this.over: None
   ELSE: 'Modify your banner to help you maintain continuity. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.'
--- THE PROMPT PROPS END WITH THE TURN (#1143): bin, max_turns, port, mcp_json, banner_text, banner_slot, sys, argv and note are none once the turn is over (done/error): a finished message
+-- THE PROMPT PROPS END WITH THE TURN (#1143): bin, max_turns, port, owner_file, mcp_server, owner_env, mcp_json, banner_text, banner_slot, sys, argv and note are none once the turn is over (done/error): a finished message
 -- no longer reads the banner, so a banner change recomputes only unfinished messages (not every message ever sent), the reply of a write carries none of them and the
 -- stored rows hold no copy of the system prompt. The view, the text, the response and the tools are not among them.
 -- A banner with no `text` (the model's pack left it null) is SHOWN, not skipped: the turn runs with the banner error in the banner's slot, so the model can repair it (Help:banner).
@@ -74,7 +88,7 @@ Chat.plan on-setter turn-start:
   ELSE WHEN prop(this.plan, 'argv') != None:
     membrane::Chat:message[this.mid]:turn.state = 'running'
     membrane::Chat:message[this.mid]:turn.started = clock
-    membrane::Command:chat[this.mid] = Command(cmd: prop(this.plan, 'argv'))
+    membrane::Command:chat[this.mid] = Command(cmd: prop(this.plan, 'argv'), env_from: this.owner_env)
     membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': [], 'partial': True, 'timeout_s': this.turn_timeout_s}
 
 -- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
