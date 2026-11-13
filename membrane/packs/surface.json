@@ -7,7 +7,7 @@
       "About",
       "DomNode"
     ],
-    "members": 8,
+    "members": 7,
     "writes": [
       "DomNode:*.parent",
       "DomNode:*.tag",
