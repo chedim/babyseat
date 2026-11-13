@@ -361,6 +361,37 @@
     ],
     "boot_facts": []
   },
+  "door_session": {
+    "imports": [
+      "door",
+      "chat",
+      "chat_turn",
+      "semtext"
+    ],
+    "classes": [
+      "ChatSession",
+      "Request"
+    ],
+    "members": 33,
+    "writes": [
+      "*.retire",
+      "membrane:*.retire",
+      "membrane:*.stitle",
+      "membrane:*.upd",
+      "membrane:*=ChatSession()"
+    ],
+    "claims": [
+      "/event",
+      "/global/event",
+      "/session",
+      "/session/"
+    ],
+    "boot_facts": [
+      "seat_cwd",
+      "seat_project",
+      "seat_version"
+    ]
+  },
   "door_state": {
     "imports": [
       "door"

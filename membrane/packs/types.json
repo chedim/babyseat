@@ -603,6 +603,52 @@
     },
     "findings": []
   },
+  "door_session": {
+    "getters": {
+      "ChatSession.fact_cwd": "Any",
+      "ChatSession.fact_project": "Any",
+      "ChatSession.fact_version": "Any",
+      "ChatSession.sid": "Text",
+      "ChatSession.view": "Dict",
+      "Request.m_session": "List(Text)",
+      "Request.ms_txt": "Text?",
+      "Request.o_session": "Bool",
+      "Request.r_session": "Dict?",
+      "Request.ss_allowed": "Any",
+      "Request.ss_create_reply": "Dict?",
+      "Request.ss_delete_reply": "Dict?",
+      "Request.ss_eid": "Text?",
+      "Request.ss_get_reply": "Dict",
+      "Request.ss_gone": "Bool",
+      "Request.ss_gone_rows": "Any",
+      "Request.ss_list_reply": "Dict?",
+      "Request.ss_make": "Bool",
+      "Request.ss_missing": "Dict",
+      "Request.ss_n": "Int",
+      "Request.ss_new_title": "Text",
+      "Request.ss_on": "Bool",
+      "Request.ss_patch_reply": "Dict?",
+      "Request.ss_rename": "Bool",
+      "Request.ss_reply": "Dict?",
+      "Request.ss_route": "Text?",
+      "Request.ss_rows": "Any",
+      "Request.ss_segs": "List(Text)",
+      "Request.ss_sid": "Text?",
+      "Request.ss_stat": "Any",
+      "Request.ss_status_reply": "Dict?",
+      "Request.ss_title": "Text",
+      "Request.ss_view": "Any"
+    },
+    "writes": {
+      "*.retire": "Bool",
+      "Chat.retire": "Bool",
+      "Chat.stitle": "Text",
+      "Chat.upd": "Num?",
+      "Request.ss_deleted": "Bool",
+      "Request.ss_made": "Text?"
+    },
+    "findings": []
+  },
   "door_state": {
     "getters": {
       "Request.m_state": "List(Text)?",

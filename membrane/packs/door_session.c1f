@@ -1,0 +1,111 @@
+PACK door_session 1
+IMPORT door 1
+IMPORT chat 1
+IMPORT chat_turn 1
+IMPORT semtext 1
+-- THE SESSION FAMILY: the opencode session API the page and the TUI speak (#1143, swap step 2; docs/cliffvm.md "The session API"). The routes:
+--   GET  /session                          the sessions, oldest first            POST /session {title?}              a new session (200, the session)
+--   GET  /session/status                   {<session id>: {type: idle|busy}}
+--   GET  /session/<sid>                    the session                           PATCH /session/<sid> {title}        rename          DELETE /session/<sid>
+--   GET  /session/<sid>/message[?limit&before]   the rows [{info, parts}], oldest first
+--   GET  /session/<sid>/message/<mid>      one row
+--   POST /session/<sid>/prompt_async {parts}  start a turn (204)                 POST /session/<sid>/message {parts}   the same, answered when the turn ends
+--   POST /session/<sid>/abort              stop the turn (true)
+--   GET  /event, GET /global/event         the event streams (text/event-stream)
+-- A SESSION IS A CHAT: `membrane::Chat:session:<sid>` (the kind ChatSession: stitle, born, upd = epoch ms). A MESSAGE of the page is a ChatMessage (packs/chat.c1f) with
+-- `sid` naming its session, and the model's answer to it is its turn (chat_turn.c1f). One message = TWO rows of the opencode API: the user row (the text) and the assistant row
+-- (the turn's text and tool parts). The ids follow the Python seat's: `<prefix>_` and 24 digits, derived from the message (its milliseconds, its request number padded to 8 digits,
+-- three digits for what it is): a session `ses_<ms><n>000`; a message's user row `msg_<ms><n>001`, its assistant row `...002`, the user's text part `prt_...010`, text part k of the answer
+-- `prt_...1kk`, tool part j `prt_...2jj` (k, j < 100). The id of a message is its entity's: `membrane::Chat:message:<ms>-<n>`, so the reverse needs no table.
+-- No security (the barest seat): one operator, no `owner`, no per-person chat. What is not here is listed in docs/release-parity.md section 1.2.
+
+-- ---- which route ----------------------------------------------------------------------------------------------------------------------------
+Request.ss_on getter: this.path == '/session' or startswith(this.path, '/session/') or this.path == '/event' or this.path == '/global/event'
+Request.ss_segs getter: words(replace(this.path, '/', ' '))
+Request.ss_n getter: len(this.ss_segs)
+Request.ss_sid getter: this.ss_segs[1] if this.ss_n >= 2 and this.ss_segs[0] == 'session' else None
+Request.ss_route getter:
+  WHEN this.path == '/event' or this.path == '/global/event': 'event'
+  ELSE WHEN this.path == '/session': 'root'
+  ELSE WHEN this.ss_n == 2 and this.ss_segs[1] == 'status': 'status'
+  ELSE WHEN this.ss_n == 2: 'one'
+  ELSE WHEN this.ss_n == 3 and this.ss_segs[2] in ['message', 'prompt_async', 'abort']: this.ss_segs[2]
+  ELSE WHEN this.ss_n == 4 and this.ss_segs[2] == 'message': 'msg1'
+  ELSE: 'other'
+Request.ss_allowed getter: {'event': ['GET'], 'root': ['GET', 'POST'], 'status': ['GET'], 'one': ['GET', 'PATCH', 'DELETE'], 'message': ['GET', 'POST'], 'prompt_async': ['POST'], 'abort': ['POST'], 'msg1': ['GET']}[this.ss_route]
+Request.o_session getter:
+  WHEN this.ss_on: True
+Request.m_session getter:
+  WHEN this.ss_on: this.ss_allowed
+Request.r_session getter:
+  WHEN this.ss_on: this.ss_reply
+Request.ss_missing getter: {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}
+Request.ss_reply getter:
+  WHEN this.ss_route == 'root' and this.method == 'GET': this.ss_list_reply
+  ELSE WHEN this.ss_route == 'root': this.ss_create_reply
+  ELSE WHEN this.ss_route == 'status': this.ss_status_reply
+  ELSE WHEN this.ss_route == 'one' and this.method == 'GET': this.ss_get_reply
+  ELSE WHEN this.ss_route == 'one' and this.method == 'PATCH': this.ss_patch_reply
+  ELSE WHEN this.ss_route == 'one': this.ss_delete_reply
+  ELSE: this.ss_missing
+
+-- ---- the session --------------------------------------------------------------------------------------------------------------------------
+ChatSession.sid getter: replace(this.eid, 'membrane::Chat:session:', '')
+ChatSession.fact_cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd != None] or [''])[0]
+ChatSession.fact_project getter: ([b.seat_project for b in instances('Boot') if b.seat_project != None] or [''])[0]
+ChatSession.fact_version getter: ([b.seat_version for b in instances('Boot') if b.seat_version != None] or [''])[0]
+ChatSession.view getter: {'id': this.sid, 'projectID': this.fact_project, 'directory': this.fact_cwd, 'path': tail(this.fact_cwd, max(0, len(this.fact_cwd) - 1)), 'slug': 'session', 'title': this.stitle, 'version': this.fact_version, 'agent': 'build', 'model': {'id': 'claude', 'providerID': 'membrane', 'variant': 'default'}, 'cost': 0, 'tokens': {'total': 0, 'input': 0, 'output': 0, 'reasoning': 0, 'cache': {'read': 0, 'write': 0}}, 'summary': {'additions': 0, 'deletions': 0, 'files': 0}, 'time': {'created': this.born, 'updated': this.upd}}
+
+-- the sessions are lazy (a store row, loaded when read): the list asks the store for the keys, then reads each by eid
+Request.ss_rows getter: sql('SELECT k, json_extract(body, \'$.props.born\') AS born FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ?', 'membrane::Chat:session:%', 'membrane::Chat:session:%:%') if this.ss_route == 'root' and this.method == 'GET' else []
+Request.ss_list_reply getter: {'status': 200, 'body': [prop(r['k'], 'view') for r in sort_by(this.ss_rows, 'born')]} if this.ss_rows != None else None
+
+-- GET /session/<sid>: the session or a 404
+Request.ss_eid getter: 'membrane::Chat:session:' + this.ss_sid if this.ss_sid != None else None
+Request.ss_view getter: prop(this.ss_eid, 'view') if this.ss_eid != None else None
+Request.ss_get_reply getter: {'status': 200, 'body': this.ss_view} if this.ss_view != None else this.ss_missing
+
+-- POST /session {title?}: the id is the time and the request's number (the clock is read in the setter, so it is the moment of the write)
+Request.ss_make getter: this.ss_route == 'root' and this.method == 'POST'
+Request.ms_txt getter: words(replace(str(clock * 1000), '.', ' '))[0]
+Request.ss_title getter: strip(str(prop(this.jbody, 'title') or '')) or 'New session'
+Request.ss_make on-setter session-make:
+  WHEN this.ss_make:
+    sid = 'ses_' + this.ms_txt + tail('00000000' + replace(this.eid, 'Request:', ''), 8) + '000'
+    membrane::Chat:session[sid] = ChatSession(stitle: this.ss_title, born: this.ms, upd: this.ms)
+    this.ss_made = sid
+Request.ss_create_reply getter:
+  WHEN this.ss_made == None: None
+  ELSE WHEN prop('membrane::Chat:session:' + this.ss_made, 'view') == None: None
+  ELSE: {'status': 200, 'body': prop('membrane::Chat:session:' + this.ss_made, 'view')}
+
+-- PATCH /session/<sid> {title}: the reply is the session once the new title is in it
+Request.ss_new_title getter: strip(str(prop(this.jbody, 'title') or '')) if this.ss_route == 'one' and this.method == 'PATCH' else ''
+Request.ss_rename getter: this.ss_new_title != '' and this.ss_view != None and prop(this.ss_view, 'title') != this.ss_new_title
+Request.ss_rename on-setter session-rename:
+  WHEN this.ss_rename:
+    membrane::Chat:session[this.ss_sid].stitle = this.ss_new_title
+    membrane::Chat:session[this.ss_sid].upd = this.ms
+Request.ss_patch_reply getter:
+  WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.ss_new_title != '' and prop(this.ss_view, 'title') != this.ss_new_title: None
+  ELSE: {'status': 200, 'body': this.ss_view}
+
+-- DELETE /session/<sid>: the session and its messages (with their turns, answers and tools, which their paths own) are retired
+Request.ss_gone getter: this.ss_route == 'one' and this.method == 'DELETE' and this.ss_view != None
+Request.ss_gone_rows getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ? AND json_extract(body, \'$.props.sid\') = ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.ss_sid) if this.ss_gone else None
+Request.ss_gone_rows on-setter session-delete:
+  WHEN this.ss_gone_rows != None:
+    FOR r IN this.ss_gone_rows:
+      (prop(r, 'k')).retire = True
+    membrane::Chat:session[this.ss_sid].retire = True
+    this.ss_deleted = True
+Request.ss_delete_reply getter:
+  WHEN this.ss_view == None and this.ss_deleted != True: this.ss_missing
+  ELSE WHEN this.ss_deleted == True: {'status': 200, 'body': True}
+  ELSE: None
+
+-- ---- GET /session/status: the truth per session, from the store: a session is busy while one of its turns runs ----------------------------------------
+-- (one SQL answer: an object keyed by session id, which a pack cannot build from rows)
+Request.ss_stat getter: sql('SELECT json_group_object(replace(s.k, \'membrane::Chat:session:\', \'\'), json(CASE WHEN EXISTS (SELECT 1 FROM c_field t WHERE t.cls = \'Chat\' AND t.k LIKE \'membrane::Chat:message:%:turn\' AND json_extract(t.body, \'$.props.sid\') = replace(s.k, \'membrane::Chat:session:\', \'\') AND json_extract(t.body, \'$.props.state\') = \'running\') THEN \'{"type":"busy"}\' ELSE \'{"type":"idle"}\' END)) AS status FROM c_field s WHERE s.cls = \'Chat\' AND s.k LIKE \'membrane::Chat:session:%\' AND s.k NOT LIKE \'membrane::Chat:session:%:%\'') if this.ss_route == 'status' else None
+Request.ss_status_reply getter: {'status': 200, 'body': (json(prop(this.ss_stat[0], 'status')) if len(this.ss_stat) > 0 and prop(this.ss_stat[0], 'status') != None else {})} if this.ss_stat != None else None
