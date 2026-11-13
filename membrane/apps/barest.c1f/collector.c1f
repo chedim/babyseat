@@ -1,5 +1,6 @@
 PACK collector 1
 IMPORT door 1
+IMPORT boot 1
 -- THE REQUEST COLLECTOR (#1143, operator 2026-11-13). A door request is the entity `Request:<n>`; a seat that polls makes one every few
 -- hundred ms, and each holds its headers and body and the whole derived state of its answer (an entity_query reply can be megabytes). Once
 -- the request is ANSWERED (the driver's receipt `respond_result` has landed) it drops what it holds, and `request_keep_s` seconds after the
@@ -23,3 +24,13 @@ Request.expired getter: this.kept_at != None and clock - this.kept_at >= this.ke
 Request.expired on-setter retire:
   WHEN this.expired == True:
     this.retire = True
+
+-- THE START-UP SWEEP: a Request row an earlier run left in the store is retired when the seat starts (the engine restores no Request, so
+-- the row is only stored text). `Boot.started` is written once, after the engine is up.
+Boot.old_requests getter: sql('SELECT k FROM c_field WHERE json_extract(body, \'$.cls\') = \'Request\'') if this.started != None else None
+
+Boot.old_requests on-setter sweep-old-requests:
+  WHEN this.old_requests != None and this.swept != True:
+    this.swept = True
+    FOR r IN this.old_requests:
+      (prop(r, 'k')).retire = True

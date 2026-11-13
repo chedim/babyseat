@@ -48,8 +48,10 @@ fn barest_packs() -> Vec<String> {
         .lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect()
 }
 
-fn seat_with(tag: &str, with_fake: bool, facts: &[&str]) -> (Run, u16) {
-    let dir = tmp(tag);
+fn seat_with(tag: &str, with_fake: bool, facts: &[&str]) -> (Run, u16) { seat_at(tmp(tag), with_fake, facts) }
+
+/// the same, in a folder the caller made (its `seat.sqlite` may hold rows of an earlier run)
+fn seat_at(dir: std::path::PathBuf, with_fake: bool, facts: &[&str]) -> (Run, u16) {
     let bin = dir.join("fake-claude");
     std::fs::write(&bin, FAKE).unwrap();
     { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap(); }
@@ -267,5 +269,36 @@ fn an_answered_request_drops_its_body_and_is_retired_after_request_keep_s() {
     // the door still serves the page and the chat after collecting
     let (st, _, html) = http(port, "GET", "/", "");
     assert_eq!(st, 200); assert!(html.contains("<html") || html.contains("<!doctype") || html.contains("<!DOCTYPE"));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn an_entity_query_without_full_returns_a_small_reply_for_an_entity_with_large_state() {
+    let (mut run, port) = seat("small", true);
+    let big = "x".repeat(200_000);
+    call(port, "entity_write", json!({"spec": "Heavy:one", "prop": "blob", "value": big}));
+    let (r, _) = wait("the entity stored", || { let (r, e) = call(port, "entity_query", json!({"q": "kind:Heavy"})); r.contains("Heavy:one").then_some((r, e)) });
+    assert!(r.len() < 200, "a query without full lists the entity only: {} bytes", r.len());
+    let (full, _) = call(port, "entity_query", json!({"q": "kind:Heavy", "full": true}));
+    assert!(full.len() > 200_000, "full adds the stored properties: {} bytes", full.len());
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn request_rows_of_an_earlier_run_are_retired_when_the_seat_starts() {
+    let dir = tmp("sweep");
+    {
+        let db = rusqlite::Connection::open(dir.join("seat.sqlite")).unwrap();
+        db.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS c_field (k TEXT PRIMARY KEY, body TEXT NOT NULL);").unwrap();
+        for n in [900001, 900002] { db.execute("INSERT INTO c_field (k, body) VALUES (?1, ?2)", rusqlite::params![format!("Request:{n}"), r#"{"cls":"Request","props":{"path":"/old"}}"#]).unwrap(); }
+        db.execute("INSERT INTO c_field (k, body) VALUES ('Note:keep', '{\"cls\":\"Note\",\"props\":{\"a\":1}}')", []).unwrap();
+    }
+    let (mut run, port) = seat_at(dir, true, &["request_keep_s=100000"]);
+    wait("the old Request rows gone", || {
+        let (rows, _) = call(port, "entity_query", json!({"q": "kind:Request", "k": 100}));
+        (!rows.contains("Request:900001") && !rows.contains("Request:900002")).then_some(())
+    });
+    let (notes, _) = call(port, "entity_query", json!({"q": "kind:Note"}));
+    assert!(notes.contains("Note:keep"), "only Request rows are swept: {notes}");
     assert!(terminate(&mut run));
 }

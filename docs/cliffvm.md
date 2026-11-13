@@ -85,7 +85,7 @@ each a single-file app (the first, `boot`, is the root of trust), then the app f
 setter does not answer again once `dropped`); `request_keep_s` seconds after the answer (Boot fact, `--fact request_keep_s=<n>`, default 600: operator-approved) it writes `retire = True`
 and the request is deleted. Also `entity_query` now selects the stored properties only when `full` is asked: they used to be in every query's rows, so each request held its
 predecessors' whole state and the sizes doubled per request (a 100-row query reached megabytes and the engine stopped answering).
-A request row of an earlier run stays in the store (only the engine's entities are retired; no sweep at start).
+At start the collector retires the Request rows an earlier run left in the store (`Boot.old_requests`, setter `sweep-old-requests`).
 
 **Retiring an entity** (`native/src/fields.rs` `retired`, `host.rs` `drain_apply`): a write of `retire = true` to ANY entity, by any writer (a pack's setter: the ordinary ownership rules
 apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
