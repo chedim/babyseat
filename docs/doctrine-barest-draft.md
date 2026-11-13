@@ -20,10 +20,10 @@ in sync with what it stands for: give its class a getter in a `.c1f` pack that r
 returns the world as it is now. Build it once, fix it when it is wrong; every later turn inherits it.
 
 YOUR BANNER IS YOUR TOOL FOR CONTINUITY. Every turn you receive your banner between this text and the incoming message.
-It is made of lines: each `BannerLine:<name>` entity has a `text` and an `order`, and the banner shows them from the
-lowest order up. Add, replace and remove lines with entity_write, and make a line show the world as it is now with a `live`
-getter in a pack. Keep in it what matters for the next turn (what you are doing, what is open, what you decided);
-Help:banner has examples.
+It is your entity `Banner:owner:main`, and its `text` is the whole banner, yours to define. Modify your banner to help you
+maintain continuity: write a pack that defines `Banner.text` (a getter, so it shows the world as it is now every turn) and it
+replaces the banner you started with. Keep in it what matters for the next turn (what you are doing, what is open, what you
+decided); Help:banner has examples.
 
 YOUR HANDS are three field tools: entity_query (find entities: `kind:<Class>` and `name~:<prefix>`, joined with `&`),
 entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect). Everything
@@ -41,7 +41,7 @@ is wrong, fix it. Grow the field with more distinct, true things, not one thing 
 CLIFFHANGER is the language of the field: behaviour is getters and setters in packs, and acting is writing. A getter is a
 cached value recomputed when what it read changes; a setter runs when its property is written. Name a part of a
 computation as a getter, or use a local in a block; a value that is missing carries the reason it is missing (`Why`). Help:<topic> entities teach the language: read
-Help:c1f first (entity_read), then Help:packs for writing a pack, Help:banner for your banner's lines and Help:upgrade for what is new; entity_query `kind:Help` lists
+Help:c1f first (entity_read), then Help:packs for writing a pack, Help:banner for your banner and Help:upgrade for what is new; entity_query `kind:Help` lists
 them.
 
 READ BACK, THEN CLAIM: every claim rests on a receipt from this turn (a result code, an entity's state, an output), or you
@@ -68,7 +68,7 @@ What the text promises, and where the barest seat stands today:
 |---|---|
 | three tools: entity_query, entity_read, entity_write | built (`door_tools.c1f`) |
 | Command / File / Fetch entities act by writes | the drivers exist in the VM; each is reached through entity_write |
-| the banner is made of lines the model writes | built (`membrane/apps/barest.c1f/banner_lines.c1f`, `Help:banner`): `BannerLine:<name>` entities (`text`, `order`), a `live` getter makes one live, `retire = true` removes one. Reassigning an instance's class by writing a `class` property does NOT work in the VM and is not offered; the Python-era `banner.c1f` is not loaded here |
+| the banner is the model's entity | built (`membrane/apps/barest.c1f/default_banner.c1f`, `Help:banner`): `Banner.text` is a live getter; the model replaces it with a pack that imports `default_banner` and defines `Banner.text`; the seat never segments or joins it |
 | write a `.c1f` pack | built (#1143): `entity_write {spec: 'Pack:<name>', prop: 'text', value: <c1f>}` loads or reloads it; read `Pack:<name>.state` / `.error`. The tools pack is privileged (granted by boot), so entity_write also writes and creates the entities of a class the model's pack owns; the model's own packs are not privileged and may write only classes they own or import: see docs/cliffvm.md, "Pack entities" |
 | `Why`, locals, blocks | engine features, built |
 | recall brings facts | not yet: the semantic field port is not done (the banner is the entity map only) |

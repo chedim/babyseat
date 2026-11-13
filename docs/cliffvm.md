@@ -88,17 +88,18 @@ predecessors' whole state and the sizes doubled per request (a 100-row query rea
 At start the collector retires the Request rows an earlier run left in the store (`Boot.old_requests`, setter `sweep-old-requests`).
 
 **The help** (`membrane/apps/barest.c1f/help.c1f`, `help/c1f.md`, `help/packs.md`, `help/upgrade.md`): `Help:<topic>` entities whose `text` is the topic's markdown file (a getter reading it; `Boot.started` seeds
-`Help:c1f`, `Help:packs`, `Help:upgrade` from the first of `app_dirs`). The model reads them with `entity_read` and lists them with `entity_query` `kind:Help`; the doctrine in `chat_turn.c1f` points at `Help:c1f` first. `help/banner.md` (`Help:banner`) teaches the banner's lines.
+`Help:c1f`, `Help:packs`, `Help:upgrade` from the first of `app_dirs`). The model reads them with `entity_read` and lists them with `entity_query` `kind:Help`; the doctrine in `chat_turn.c1f` points at `Help:c1f` first. `help/banner.md` (`Help:banner`) teaches the banner.
 `c1f` is the syntax (getters, setters, blocks, entity literals, constructors, nulls with reasons, the operators c1f has: the default is `or`, there is no `??`), `packs` is writing a pack through `Pack:<name>.text`
 (ownership, rule B, layers), `upgrade` is what changed since 0.7.53 plus a SQL / Vue / JavaScript lookup table. **Every code block is a test**: `native/tests/help_1143.rs` loads each ```c1f block through the
 loader and checks its `-- given / -- write / -- reads` lines (```c1f-error blocks must be refused with the text in `-- error:`), so the help cannot lie. Also `seat_process.rs` (the topics through the MCP door).
 
-**The banner** (`membrane/apps/barest.c1f/banner_lines.c1f`, the Python-era `banner.c1f` is not loaded here): `Banner:owner:main` (spelled `membrane::Banner:owner:main`, the chat's namespace) is the entity `chat_turn.c1f` reads into every turn.
-Its `text` is the text of every `BannerLine` entity, ordered by `order` (number, default 0) then eid, joined with newlines; a line whose text is empty adds nothing. A line shows its `live` when a pack gives it one
-(`BannerLine.live getter WHEN this.eid == '...'`, ending `ELSE: None`), else its stored `text` (a getter named `text` would stand over every line's stored `text`: a getter hides the stored property of the same name, it does not fall back to it). The model
-adds, replaces and removes lines with `entity_write` (`text`, `order`, `retire = true`); the first line, `BannerLine:howto`, explains this. Boot seeds the banner and the howto line (`Boot.started`, `seed-banner`; the chat no longer
-constructs the banner). Reassigning an entity's class by writing a `class` property does not work in the VM, so there is no class switch: the banner is lines. Tests: `seat_process.rs` (`a_fresh_seats_banner...`,
-`writing_banner_lines...`, `a_pack_with_a_banner_line_getter...`), `help_1143.rs` (every `Help:banner` example). A restart restores the lines (see "Restart restores the entities").
+**The banner** (`membrane/apps/barest.c1f/default_banner.c1f`; the Python-era `banner.c1f` is not loaded here): `Banner:owner:main` (spelled `membrane::Banner:owner:main`, the chat's namespace) is the entity `chat_turn.c1f` reads into every turn, and it is
+FULLY the model's: the seat never segments, orders or joins what the model puts there, and its `text` is a getter (cached, recomputed when what it reads changes), so the banner is live by nature. The static instructions (what the banner is for,
+how to replace it) are in the system prompt (`chat_turn.c1f`) and `Help:banner`, never in the text. `Boot.started` births the instance once (`seed-banner`, guarded by `seeded`). The starting `text` is the barest cut of Memo's `RecallBanner`, assembled from
+getters with dials as properties on the instance: KEPT the header (NOW, `CONVERSATION: main`) and the previous turn's error (read from the `ChatTurn` and `ChatResponse` entities); DROPPED recall, goals (OPEN), the ledger (DECIDED, STABLE), ABOUT / WORKING ON /
+SINCE and the layout budget (no source of them on this seat; no marking convention for open/decided exists here). The model REPLACES it with a pack that imports `default_banner` and defines `Banner.text` (a runtime pack is the upper layer, its arm wins:
+`docs/c1f-layers.md`). Writing `parents` on the banner to a class with its own `text` getter does NOT replace it: both getters bind and the `Banner` one keeps the value (no nearest-class rule in the VM; `banner_1143.rs` records it).
+Tests: `banner_1143.rs`, `seat_process.rs` (`a_fresh_seats_banner...`, `a_pack_the_model_loads...`, the restart test: a model pack survives a restart and the banner is born once), `help_1143.rs` (every `Help:banner` example).
 **Bare ids** (`door_tools.c1f`): `entity_read` and `entity_write` take `Banner:owner:main` for `membrane::Banner:owner:main` when only the `membrane::` row exists (an id with its own row, or no twin, is used as written); `entity_query name~:` stays a literal prefix.
 
 **Restart restores the entities** (`host.rs` `load_stored_entities`, called by `cli.rs` after `load_stored_packs` and before the rebuild): every stored row arrives in the engine with its class and props
@@ -186,7 +187,7 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
   run in pages), `Pack` entities with the Python name `membrane::pack:<name>` / a `c1f` property / any class holding c1f (here only
   `Pack:<name>.text`, see "Pack entities"; the privilege grant is the one other Pack property the host reads, `privileged`). Pack FILES are loaded once at start: no mtime rescan. A Pack
   entity can not be deleted (its text emptied removes the pack). Entities other than Packs are restored by `load_stored_entities` (see "Restart restores the entities").
-- **Banner instances per owner and chat** (the barest seat has the one `Banner:owner:main`, made of lines: see "The banner"), the dials (`recall:dials`), the class switch (writing `class` does not reassign an instance), facts per turn, `sql_forget`,
+- **Banner instances per owner and chat** (the barest seat has the one `Banner:owner:main`: see "The banner"), the dials (`recall:dials`), the class switch (writing `class` does not reassign an instance), facts per turn, `sql_forget`,
   the 3 s banner time limit, `mark_delivered` / `mark_seq`.
 - **LLM call plumbing**: `Fields::calls` (the planner's `membrane::llm.call`) are drained and dropped; no LLM adapter.
 - **Host callbacks** (`_Host.call`: `pronoun`, `recall`, `rerank`, the banner's built-ins): `NullHost` knows none; `resolve`,
@@ -210,7 +211,7 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 The app is packs only: `door_tools.c1f` (the model's tools), `chat.c1f` (the one chat), `chat_turn.c1f` (the turn). Rust added
 only three small things: a write with a computed property name (`<target>.[expr] = v`, `fields.rs`), the kind getters of a constructed
 entity (a kind stamp came after the birth), and `cliffvm run ... --fact name=value` (any Boot fact, JSON or text). Run it with the
-shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus the barest app folder (its `banner_lines.c1f` births the banner) and
+shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus the barest app folder (its `default_banner.c1f` births the banner) and
 `--fact chat_claude_bin=<path to the claude CLI>` (no default: without it a message is answered with an error and nothing runs).
 
 **Routes** (no persons, no auth, one chat `membrane::Chat:main`):
@@ -249,7 +250,7 @@ env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 <chat_claude_bin> -p --output-format strea
 
 Built-in tools off, no user MCP config (the config is an inline JSON string, generated by a getter from `Http:door`'s real port), no
 settings files, allowed tools exactly the membrane server's, one continuous run, the system prompt is the barest doctrine
-(`docs/doctrine-barest-draft.md`, the operator chose it for now) plus `Banner:owner:main`'s text (the banner's lines, see "The banner"), the prompt is the message ALONE: no history. `--` ends the options (the
+(`docs/doctrine-barest-draft.md`, the operator chose it for now) plus `Banner:owner:main`'s text (the banner, see "The banner"), the prompt is the message ALONE: no history. `--` ends the options (the
 list-valued `--allowedTools` / `--mcp-config` would swallow a prompt). `--bare` is NOT used: per `claude --help` (2.1.323) it never
 reads OAuth or the keychain, only an API key, so it cannot use the operator's CLI login. The stream-json stdout is read by c1f
 (`json()` per line): the `result` line's text is the answer, else the assistant's text in order; `is_error` or a failing exit with no

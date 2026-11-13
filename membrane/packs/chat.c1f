@@ -11,8 +11,7 @@ IMPORT door 1
 -- packs/chat_turn.c1f runs the turn. The kinds are
 -- ChatMessage / ChatResponse / ChatTool, not Message / Response: a pack owns the classes it declares on, and Message was retired
 -- from messages.c1f for that reason.
--- The chat's banner is the instance `membrane::Banner:owner:main`, born at start by the app's banner_lines pack (a banner made of
--- BannerLine entities); chat_turn.c1f reads its `text`. `queued` is written AFTER the message and its turn are born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
+-- The chat's banner is the instance `membrane::Banner:owner:main`, born at start by the app's default_banner pack (the model replaces its `text`); chat_turn.c1f reads its `text`. `queued` is written AFTER the message and its turn are born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
 -- The id is the arrival time in milliseconds and the request's number: `<ms>-<n>`.
 
 Chat.title getter: 'main'

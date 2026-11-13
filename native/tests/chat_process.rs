@@ -174,7 +174,7 @@ fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) {
     let pd = dir.join("packs");
     std::fs::create_dir_all(&pd).unwrap();
     for (n, t) in shipped(CHAT_PACKS) { std::fs::write(pd.join(n), t).unwrap(); }
-    std::fs::copy(format!("{}/../membrane/apps/barest.c1f/banner_lines.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("banner_lines.c1f")).unwrap();   // the barest app's banner pack
+    std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();   // the barest app's default banner pack
     let fact = format!("chat_claude_bin={}", bin.display());
     let mut child = Command::new(BIN).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
@@ -228,7 +228,7 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert_eq!(after("--allowedTools"), "mcp__membrane__*");
     assert_eq!(after("--setting-sources"), "", "no settings files");
     assert_eq!(after("--max-turns"), "5", "the ceiling is the fact");
-    assert!(after("--system-prompt").contains("BannerLine:howto"), "the system prompt carries the banner");
+    assert!(after("--system-prompt").contains("CONVERSATION: main") && !after("--system-prompt").contains("BannerLine"), "the system prompt carries the default banner");
     assert!(after("--system-prompt").contains("YOUR BANNER IS YOUR TOOL FOR CONTINUITY"), "the system prompt carries the doctrine");
     assert!(!after("--system-prompt").to_lowercase().contains("history reaches"), "the prompt never says what the model lacks (it makes Claude panic)");
     assert!(after("--mcp-config").contains(&format!("127.0.0.1:{port}/mcp")));

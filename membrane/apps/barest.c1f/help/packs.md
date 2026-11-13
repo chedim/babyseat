@@ -44,7 +44,7 @@ Command.shout getter: lower(this.cmd)
   privileged: your writes through it reach and create any class, including one your own pack owns. A pack you load is not privileged;
   grant it with `entity_write {spec: "Pack:lamps", prop: "privileged", value: true}` (only a privileged writer grants).
 - The shipped packs of this seat, which you may import: `boot` (Boot facts), `door` (Request), `fs` (File, Dir), `proc` (Command),
-  `fetch` (Fetch), `store` (Store), `banner_lines` (BannerLine, Banner), `door_tools`, `chat`, `chat_turn`.
+  `fetch` (Fetch), `store` (Store), `default_banner` (Banner), `door_tools`, `chat`, `chat_turn`.
 
 ## Layers
 
@@ -54,7 +54,7 @@ Packs stack in the order they were loaded; a pack loaded later is above the ones
   upper layer ends the search there;
 - setters: every setter on a property fires, the top layer first; a setter with the SAME NAME as a lower one replaces it;
 - a layer overrides only what it imports (`IMPORT` the pack whose getter or setter you replace);
-- the banner: its lines are `BannerLine` entities and a `live` getter gives one its text (`Help:banner`).
+- the banner: a pack that imports `default_banner` and defines `Banner.text` replaces the banner you start with (`Help:banner`).
 
 ```c1f
 -- given Note:a {"title": "x"}

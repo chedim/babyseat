@@ -318,67 +318,44 @@ fn help_topics_are_entities_the_model_lists_and_reads() {
     assert!(terminate(&mut run));
 }
 
-// ---- the banner is lines (#1143) ----------------------------------------------------------------------------------------------------------
+// ---- the banner is the model's (#1143) ---------------------------------------------------------------------------------------------------
 fn banner(port: u16) -> String { call(port, "entity_read", json!({"spec": "membrane::Banner:owner:main", "prop": "text"})).0 }
+const MINE: &str = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'stops done: ' + str(len([s for s in instances('Stop') if s.done == True]))\n";
 
 #[test]
-fn a_fresh_seats_banner_is_the_howto_line_in_positive_words() {
+fn a_fresh_seats_banner_is_the_default_banner_with_no_lines_and_no_instructions() {
     let (mut run, port) = seat("bannerfresh", true);
-    let b = wait("the banner", || { let b = banner(port); (b.contains("BannerLine:howto")).then_some(b) });
-    for need in ["continuity", "BannerLine:<name>", "text", "order", "retire", "getter", "Help:banner"] { assert!(b.contains(need), "the howto says {need}: {b}"); }
+    let b = wait("the banner", || { let b = banner(port); (b.contains("CONVERSATION: main")).then_some(b) });
+    assert!(b.contains("NOW (for reference, not an event):"), "{b}");
     let low = b.to_lowercase();
-    for bad in ["placeholder", "no history", "cannot", "does not", "not yet", "class=MyBanner"] { assert!(!low.contains(&bad.to_lowercase()), "the howto says {bad:?}: {b}"); }
-    let (line, _) = call(port, "entity_read", json!({"spec": "BannerLine:howto"}));
-    assert!(line.contains("(BannerLine)"), "{line}");
-    assert!(terminate(&mut run));
-}
-
-#[test]
-fn writing_banner_lines_changes_the_banner_in_order_and_retiring_a_line_removes_it() {
-    let (mut run, port) = seat("bannerlines", true);
-    wait("the howto", || banner(port).contains("BannerLine:howto").then_some(()));
-    for (n, o, t) in [("b", 2, "second line"), ("a", 1, "first line")] {
-        call(port, "entity_write", json!({"spec": format!("BannerLine:{n}"), "prop": "text", "value": t}));
-        call(port, "entity_write", json!({"spec": format!("BannerLine:{n}"), "prop": "order", "value": o}));
-    }
-    let b = wait("both lines", || { let b = banner(port); (b.contains("second line") && b.contains("first line")).then_some(b) });
-    assert!(b.find("first line").unwrap() < b.find("second line").unwrap() && b.find("BannerLine:howto").unwrap() < b.find("first line").unwrap(), "{b}");
-    // an empty text adds nothing; a text write replaces the line
-    call(port, "entity_write", json!({"spec": "BannerLine:a", "prop": "text", "value": ""}));
-    wait("line a gone", || { let b = banner(port); (!b.contains("first line") && b.contains("second line")).then_some(()) });
-    // retire removes the line and its entity
-    call(port, "entity_write", json!({"spec": "BannerLine:howto", "prop": "retire", "value": true}));
-    let b = wait("howto retired", || { let b = banner(port); (!b.contains("BannerLine:howto")).then_some(b) });
-    assert_eq!(b, "second line");
+    for bad in ["placeholder", "no history", "cannot", "does not", "not yet", "bannerline", "howto"] { assert!(!low.contains(bad), "the default banner says {bad:?}: {b}"); }
     let (q, _) = call(port, "entity_query", json!({"q": "kind:BannerLine"}));
-    assert!(!q.contains("BannerLine:howto"), "{q}");
-    // the chat's next turn carries the lines: the banner's text is what chat_turn reads
+    assert_eq!(q, "0 entity(ies)", "{q}");
     assert!(terminate(&mut run));
 }
 
 #[test]
-fn a_pack_with_a_banner_line_getter_shows_live_state() {
-    let (mut run, port) = seat("bannerlive", true);
-    wait("the howto", || banner(port).contains("BannerLine:howto").then_some(()));
-    let pack = "PACK tripban 1\nIMPORT banner_lines 1\nBannerLine.live getter:\n  WHEN this.eid == 'BannerLine:trip': 'stops done: ' + str(len([s for s in instances('Stop') if s.done == True]))\n  ELSE: None\n";
-    call(port, "entity_write", json!({"spec": "BannerLine:trip", "prop": "order", "value": 5}));
-    let (r, e) = call(port, "entity_write", json!({"spec": "Pack:tripban", "prop": "text", "value": pack.replace("\\n", "\n")}));
+fn a_pack_the_model_loads_through_entity_write_replaces_the_banner_completely_and_stays_live() {
+    let (mut run, port) = seat("bannerpack", true);
+    wait("the banner", || banner(port).contains("CONVERSATION: main").then_some(()));
+    call(port, "entity_write", json!({"spec": "Stop:a", "prop": "done", "value": false}));
+    let (r, e) = call(port, "entity_write", json!({"spec": "Pack:mine", "prop": "text", "value": MINE}));
     assert!(!e, "{r}");
-    let (st, _) = wait("the pack state", || { let (s, _) = call(port, "entity_read", json!({"spec": "Pack:tripban", "prop": "state"})); (s != "waiting").then_some((s, ())) });
+    let (st, _) = wait("the pack state", || { let (s, _) = call(port, "entity_read", json!({"spec": "Pack:mine", "prop": "state"})); (s != "waiting").then_some((s, ())) });
     assert_eq!(st, "loaded");
-    let b = wait("0 done", || { let b = banner(port); b.contains("stops done: 0").then_some(b) });
-    assert!(b.contains("BannerLine:howto") && b.find("BannerLine:howto").unwrap() < b.find("stops done").unwrap(), "the other lines keep their text: {b}");
+    let b = wait("the model's text", || { let b = banner(port); b.contains("stops done: 0").then_some(b) });
+    assert_eq!(b, "stops done: 0", "the whole banner is the model's: nothing of the default is left, nothing is added");
     call(port, "entity_write", json!({"spec": "Stop:a", "prop": "done", "value": true}));
-    wait("1 done", || banner(port).contains("stops done: 1").then_some(()));
+    wait("1 done", || (banner(port) == "stops done: 1").then_some(()));
     assert!(terminate(&mut run));
 }
 
 #[test]
 fn a_bare_entity_id_names_the_membrane_one_when_only_that_exists() {
     let (mut run, port) = seat("bareid", true);
-    wait("the banner", || banner(port).contains("BannerLine:howto").then_some(()));
+    wait("the banner", || banner(port).contains("CONVERSATION: main").then_some(()));
     let (t, _) = call(port, "entity_read", json!({"spec": "Banner:owner:main", "prop": "text"}));
-    assert!(t.contains("BannerLine:howto"), "{t}");
+    assert!(t.contains("CONVERSATION: main"), "{t}");
     let (w, e) = call(port, "entity_write", json!({"spec": "Banner:owner:main", "prop": "note", "value": "x"}));
     assert!(!e, "{w}");
     let (n, _) = call(port, "entity_read", json!({"spec": "membrane::Banner:owner:main", "prop": "note"}));
@@ -402,11 +379,12 @@ fn handover(run: &mut Run) -> std::path::PathBuf {
 #[test]
 fn a_restart_restores_the_models_entities_and_still_sweeps_old_requests() {
     let (mut run, port) = seat("restart1", true);
-    wait("the howto", || banner(port).contains("BannerLine:howto").then_some(()));
-    call(port, "entity_write", json!({"spec": "BannerLine:plan", "prop": "text", "value": "doing the import"}));
-    call(port, "entity_write", json!({"spec": "BannerLine:plan", "prop": "order", "value": 5}));
+    wait("the banner", || banner(port).contains("CONVERSATION: main").then_some(()));
+    call(port, "entity_write", json!({"spec": "Stop:a", "prop": "done", "value": true}));
+    let (r, e) = call(port, "entity_write", json!({"spec": "Pack:mine", "prop": "text", "value": MINE}));
+    assert!(!e, "{r}");
     call(port, "entity_write", json!({"spec": "Note:keep", "prop": "a", "value": 7}));
-    wait("the banner line", || banner(port).contains("doing the import").then_some(()));
+    wait("the model's banner", || (banner(port) == "stops done: 1").then_some(()));
     wait("the note", || call(port, "entity_query", json!({"q": "kind:Note"})).0.contains("Note:keep").then_some(()));
     let dir = handover(&mut run);
     {   // an old Request row an earlier run left
@@ -414,16 +392,16 @@ fn a_restart_restores_the_models_entities_and_still_sweeps_old_requests() {
         db.execute("INSERT INTO c_field (k, body) VALUES ('Request:900001', '{\"cls\":\"Request\",\"props\":{\"path\":\"/old\"}}')", []).unwrap();
     }
     let (mut run2, port2) = seat_at(dir, true, &["request_keep_s=100000"]);
-    let b = wait("the banner is back", || { let b = banner(port2); b.contains("doing the import").then_some(b) });
-    assert_eq!(b.matches("BannerLine:howto").count(), 1, "the howto is the stored line, not a second one: {b}");
+    let b = wait("the model's banner is back", || { let b = banner(port2); b.contains("stops done").then_some(b) });
+    assert_eq!(b, "stops done: 1", "the model's pack survived the restart and still replaces the default");
     let (n, _) = call(port2, "entity_read", json!({"spec": "Note:keep", "prop": "a"}));
     assert_eq!(n, "7", "the note is back");
-    let (q, _) = call(port2, "entity_query", json!({"q": "kind:BannerLine"}));
-    assert_eq!(q.lines().filter(|l| l.contains("(BannerLine)")).count(), 2, "{q}");
+    let (q, _) = call(port2, "entity_query", json!({"q": "kind:Banner"}));
+    assert_eq!(q.lines().filter(|l| l.contains("(Banner)")).count(), 1, "the default banner entity was born once: {q}");
     wait("the old Request row swept", || (!call(port2, "entity_query", json!({"q": "kind:Request", "k": 100})).0.contains("Request:900001")).then_some(()));
-    // the restored banner still follows its lines
-    call(port2, "entity_write", json!({"spec": "BannerLine:plan", "prop": "text", "value": "second run"}));
-    wait("the line changes", || { let b = banner(port2); (b.contains("second run") && !b.contains("doing the import")).then_some(()) });
+    // the restored banner stays live
+    call(port2, "entity_write", json!({"spec": "Stop:b", "prop": "done", "value": true}));
+    wait("the banner follows", || (banner(port2) == "stops done: 2").then_some(()));
     assert!(terminate(&mut run2));
 }
 
