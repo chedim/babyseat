@@ -174,7 +174,7 @@ Request.shipped getter: this.gate if this.gate != None else this.routed
 Request.reply getter: this.override if this.override != None else this.shipped
 
 Request.reply on-setter answer:
-  WHEN this.reply != None:
+  WHEN this.reply != None and this.dropped != True:
     this.respond = this.reply
 
 -- ---- the boot starts the door ------------------------------------------------------------------------------------------------

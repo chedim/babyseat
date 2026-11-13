@@ -39,15 +39,25 @@ out({"type": "result", "subtype": "success", "is_error": False, "result": "Seat 
 
 /// the operator's command line (boot, the packs folder, the barest app), against a temp store, an ephemeral port and the fake claude
 /// (`with_fake` false: no `chat_claude_bin` fact, as when no CLI is found)
-fn seat(tag: &str, with_fake: bool) -> (Run, u16) {
+fn seat(tag: &str, with_fake: bool) -> (Run, u16) { seat_with(tag, with_fake, &[]) }
+
+/// the packs the barest seat loads: `membrane/apps/barest.packs`, one shipped pack name per line (what scripts/seat passes too), as single-file apps
+fn barest_packs() -> Vec<String> {
+    let r = repo();
+    std::fs::read_to_string(r.join("membrane/apps/barest.packs")).expect("membrane/apps/barest.packs lists the packs of the barest seat")
+        .lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect()
+}
+
+fn seat_with(tag: &str, with_fake: bool, facts: &[&str]) -> (Run, u16) {
     let dir = tmp(tag);
     let bin = dir.join("fake-claude");
     std::fs::write(&bin, FAKE).unwrap();
     { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     let r = repo();
     let mut cmd = Command::new(BIN);
-    cmd.current_dir(&dir).args(["run", r.join("membrane/packs/boot.c1f").to_str().unwrap(), r.join("membrane/packs").to_str().unwrap(), r.join("membrane/apps/barest.c1f").to_str().unwrap(),
-        "--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
+    cmd.current_dir(&dir).arg("run").args(barest_packs()).arg(r.join("membrane/apps/barest.c1f"))
+        .args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
+    for f in facts { cmd.arg("--fact").arg(f); }
     if with_fake { cmd.arg("--fact").arg(format!("chat_claude_bin={}", bin.display())); }
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
@@ -214,5 +224,48 @@ fn with_no_claude_named_the_answer_is_a_plain_instruction() {
     });
     let t = v["response"].as_str().unwrap();
     assert!(t.contains("chat_claude_bin") && t.contains("CLAUDE_BIN"), "the answer says how to name the CLI: {t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_barest_seat_loads_only_its_own_packs_and_seeds_no_command_or_ledger_file() {
+    let names = barest_packs();
+    for gone in ["decisions", "dev", "door_self", "door_models", "door_voice", "router", "door_state", "door_decisions"] {
+        assert!(!names.iter().any(|n| n.ends_with(&format!("/{gone}.c1f"))), "{gone} is not a barest pack");
+    }
+    let (mut run, port) = seat("fresh", true);
+    let (none, _) = call(port, "entity_query", json!({"q": "name~:Command:", "k": 100}));
+    assert!(!none.contains("Command:git") && !none.contains("Command:gh"), "no seeded commands: {none}");
+    let (led, _) = call(port, "entity_query", json!({"q": "name~:File:", "k": 100}));
+    assert!(!led.contains("operator-ledger"), "no seeded ledger file: {led}");
+    // the door's requests carry none of the not-ported families' getters
+    let (reqs, _) = call(port, "entity_query", json!({"q": "kind:Request", "k": 100, "full": true}));
+    for g in ["minds_reply", "r_models", "r_self", "stt_reply"] { assert!(!reqs.contains(g), "{g} on a Request: {reqs}"); }
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn an_answered_request_drops_its_body_and_is_retired_after_request_keep_s() {
+    let (mut run, port) = seat_with("collect", true, &["request_keep_s=2"]);
+    call(port, "entity_query", json!({"q": "name~:membrane::", "k": 5}));
+    // the first request is answered: its heavy state is gone, the entity (and its small facts) stays for request_keep_s
+    let first = wait("request 1 answered and dropped", || {
+        let (rows, _) = call(port, "entity_query", json!({"q": "kind:Request", "k": 100, "full": true}));
+        rows.lines().find(|l| l.contains("\"dropped\":true")).map(String::from)
+    });
+    let props: J = serde_json::from_str(first.split_once(" (Request) ").unwrap().1).unwrap();
+    assert!(props.get("body").is_none() && props.get("headers").is_none(), "heavy state still there: {first}");
+    assert!(props["respond_result"]["rc"] == 0, "answered once, and the connection took it: {}", props["respond_result"]);
+    let eid = first.split_whitespace().next().unwrap().to_string();
+    // ... then it is deleted (the engine's entity and the stored row)
+    wait("the request retired", || {
+        let (rows, _) = call(port, "entity_query", json!({"q": "kind:Request", "k": 100}));
+        (!rows.lines().any(|l| l.starts_with(&format!("{eid} ")))).then_some(())
+    });
+    let (read, _) = call(port, "entity_read", json!({"spec": eid}));
+    assert!(read.contains("no such") || read.contains("not found") || read.contains("none") || read.contains("{}"), "{read}");
+    // the door still serves the page and the chat after collecting
+    let (st, _, html) = http(port, "GET", "/", "");
+    assert_eq!(st, 200); assert!(html.contains("<html") || html.contains("<!doctype") || html.contains("<!DOCTYPE"));
     assert!(terminate(&mut run));
 }

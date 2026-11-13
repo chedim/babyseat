@@ -228,3 +228,25 @@ fn the_boot_pack_grants_the_tools_pack_at_start_and_a_replay_ends_in_the_same_pr
     assert_eq!(state(&r), state(&h));
     expr::set_clock(None);
 }
+
+#[test]
+fn a_setter_retires_an_entity_by_writing_retire_true_and_a_replay_ends_the_same() {
+    use_clock(0);
+    let pack = "PACK keep 1\nBox.done on-setter bye:\n  WHEN this.done == True:\n    this.retire = True\n";
+    let fresh = |store: Option<String>| { let h = Host::open({ let mut o = Options::new(store); o.clock = ticking(); o.effects = false; o }).unwrap(); h.load_pack("keep", pack).unwrap(); h.rebuild(); h };
+    let h = fresh(None);
+    h.born("Box:a", "Box", props(json!({"w": 1})), "person");
+    h.born("Box:b", "Box", props(json!({"w": 2})), "person");
+    h.write("Box:a", "done", json!(false), "person");
+    assert_eq!(h.get("Box:a", "w"), json!(1), "a false does not retire");
+    h.write("Box:a", "done", json!(true), "person");
+    assert_eq!(h.get("Box:a", "w"), J::Null, "the engine no longer holds Box:a");
+    assert!(!h.snapshot().contains_key("Box:a") && h.snapshot().contains_key("Box:b"));
+    assert!(!h.rows().contains_key("Box:a") && h.rows().contains_key("Box:b"), "the stored row is deleted too: {:?}", h.rows().keys().collect::<Vec<_>>());
+    let j = h.journal();
+    assert!(!j.iter().any(|l| matches!(l, Line::Write { prop, .. } if prop == "retire")), "the retirement is derived, never journalled");
+    let r = fresh(None);
+    r.replay(&j);
+    assert_eq!(state(&r), state(&h), "the replay ends with Box:a gone as well");
+    expr::set_clock(None);
+}

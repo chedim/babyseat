@@ -322,6 +322,14 @@ impl Host {
             if prop == "privileged" && eid.starts_with(PACK_PREFIX) { self.packs_dirty.store(true, Ordering::SeqCst); }   // `granted_by` is mirrored
             if is_outside(&stamp) { self.journal_push(Line::Write { ts, writer: stamp, eid: eid.into(), prop: prop.into(), new: w["new"].clone() }); }
         }
+        // `retire = true` (any writer): the entity leaves the engine and the store; what read it recalculates. Derived, so never journalled.
+        let retired = std::mem::take(&mut self.eng().1.retired);
+        for eid in &retired {
+            { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, eid, ts, seq); }
+            let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = db.execute(&format!("DELETE FROM {ROWS} WHERE k = ?1"), params![eid]);
+        }
+        let any = any || !retired.is_empty();
         if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); return true; }
         any
     }

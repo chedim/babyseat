@@ -57,7 +57,7 @@ The barest usable agent seat: one command starts `cliffvm` on the shipped packs 
 scripts/seat [--store ./.cliffvm/seat.sqlite] [--port 4096] [--open]
 ```
 
-It runs `cliffvm run membrane/packs/boot.c1f membrane/packs membrane/apps/barest.c1f --store <sqlite> --port <n> --fact chat_claude_bin=<claude>`
+It runs `cliffvm run <the packs of membrane/apps/barest.packs, one file each> membrane/apps/barest.c1f --store <sqlite> --port <n> --fact chat_claude_bin=<claude>`
 from the repo root and prints the URL. `CLIFFVM` names the binary (else `native/target/release/cliffvm`, else PATH); `CLAUDE_BIN` names the claude CLI
 (else the one on PATH; with none, the seat starts and the chat answers with how to name it). `--open` opens the page on macOS. The launcher starts nothing else
 (no Ollama, nothing under `~/.membrane`) and uses no port but `--port`.
@@ -75,9 +75,25 @@ from the app folder, no build step, no dependencies; a later piece ports it to c
 **`entity_query` additions for the viewer**: `offset` (paging), `kind!:<Class>` (all but a class) and `full` (rows carry the stored properties).
 **Data** is the `--store` file (default `./.cliffvm/seat.sqlite`).
 
+**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `scripts/seat` and `seat_process.rs` read it): `boot door fs proc fetch store banner door_tools chat chat_turn`,
+each a single-file app (the first, `boot`, is the root of trust), then the app folder. The Python-era packs (`door_self`, `door_models`, `door_voice`, `door_state`, `door_decisions`,
+`router`, `decisions`, `dev`, ...) stay in `membrane/packs/` for the Python seat and are NOT loaded here: a request carries none of their getters, and the seat seeds no
+`Command:git`, `Command:gh` (dev.c1f) or `File:operator-ledger` (decisions.c1f).
+
+**The request collector** (`membrane/apps/barest.c1f/collector.c1f`, an app pack: the Python seat does not load it). A door request is an entity `Request:<n>`; once it is ANSWERED (the
+`respond` receipt has landed) it sets `dropped`, `kept_at` (the clock) and clears `body` and `headers`, so everything derived from them recomputes to something small (the door's `answer`
+setter does not answer again once `dropped`); `request_keep_s` seconds after the answer (Boot fact, `--fact request_keep_s=<n>`, default 600: operator-approved) it writes `retire = True`
+and the request is deleted. Also `entity_query` now selects the stored properties only when `full` is asked: they used to be in every query's rows, so each request held its
+predecessors' whole state and the sizes doubled per request (a 100-row query reached megabytes and the engine stopped answering).
+A request row of an earlier run stays in the store (only the engine's entities are retired; no sweep at start).
+
+**Retiring an entity** (`native/src/fields.rs` `retired`, `host.rs` `drain_apply`): a write of `retire = true` to ANY entity, by any writer (a pack's setter: the ordinary ownership rules
+apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
+so never journalled, and a replay re-derives it; an outside write of `retire` is journalled and replayed like any. Test: `native/tests/host_loop.rs` (retire + replay), `seat_process.rs`.
+
 **Not there yet**: the UI as c1f view packs; tokens and persons (no security, one superuser chat); the chat's SSE stream (it polls); a message's class is `Chat` (its eid
 names it), so the viewer finds chat entities by the `membrane::Chat:message:` prefix, not by a `ChatMessage` kind; the viewer lists at most 600 entities and reads the
-properties of 6 per poll for reference edges (more as it keeps running); no entity removal.
+properties of 6 per poll for reference edges (more as it keeps running); entity removal is the `retire` write above.
 **Tests**: `native/tests/seat_process.rs` (the page and its files, a chat turn with a fake claude, the query options, `node --check` of every script).
 
 ## The host loop (`native/src/host.rs`)
@@ -104,7 +120,7 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 - A **Pack** is an entity `Pack:<name>` whose `text` property holds c1f. The model writes it with the tool it already has:
   `entity_write {spec: 'Pack:mine', prop: 'text', value: '<c1f>'}`. No new tool, no new syntax. The name is what follows `Pack:`.
 - Writing `text` loads (or replaces) the pack at once through `Fields::set_pack(name, text)`: its classes, getters and setters are live
-  for the next write. Writing `text` to none or empty removes it (`remove_pack`; the host has no entity removal yet).
+  for the next write. Writing `text` to none or empty removes it (`remove_pack`; an entity is removed by the `retire` write).
 - The host mirrors the outcome back as DERIVED writes (`trigger:field:pack`, never journalled): `loaded` (true when the pack is active),
   `error` (the loader's message, absent when fine) and `good_text` (the last text that loaded). The text write itself is the model's
   write (a Request's setter in the MCP door) and is replayed, so a replay loads the same packs in the same order.
@@ -140,12 +156,12 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
 ## What `fields_live.py` does that the Rust loop does NOT yet do
 
 - **Mirroring the Python entity store**: there is none here; the rows are the host's own table. No `est.docs` hear/mirror, no
-  `mirrored()` by ISA kinds (`parents: ["cls:..."]`), no class-of-removal memory, no removal of entities (`f.remove`, #1054): a
-  Request entity stays forever (rows and mirror grow without bound).
+  `mirrored()` by ISA kinds (`parents: ["cls:..."]`), no class-of-removal memory, no mirrored removal of entities (`f.remove`, #1054; the `retire` write, see the barest seat, does it for the engine and the store): on the barest seat the collector retires answered Requests; elsewhere a
+  Request entity stays forever.
 - **`silent_birth`** on engine-born entities (`{"born": cls}` is stored with no props).
 - **Packs from entities, the rest**: `pack_op` (list/show/load), the shipped-pack rule, `_view_classes` (packs importing `dom` that
   run in pages), `Pack` entities with the Python name `membrane::pack:<name>` / a `c1f` property / any class holding c1f (here only
-  `Pack:<name>.text`, see "Pack entities"; the privilege grant is the one other Pack property the host reads, `privileged`). Pack FILES are loaded once at start: no mtime rescan. No entity removal, so a Pack
+  `Pack:<name>.text`, see "Pack entities"; the privilege grant is the one other Pack property the host reads, `privileged`). Pack FILES are loaded once at start: no mtime rescan. A Pack
   entity can not be deleted (its text emptied removes the pack). Only Pack rows are restored from the store at start, not other
   entities.
 - **Banner instances** (`Banner:<owner>:<chat>`), the dials (`recall:dials`), the class switch, facts per turn, `sql_forget`,
@@ -256,7 +272,7 @@ tool spec is an eid, not a name fragment as in the Python tool; (5) a kind's SET
    be journalled (outside), or should replay run the effects again?
 2. **Who owns the entity rows.** The Python seat's store is the `EntityStore` over `db.rs` (a pyclass); the host has its own table.
    Converging needs `db.rs`'s core split from its Python binding (a refactor, not done).
-3. **Request entities** are never removed. A pack should retire them (a `Request` lifetime), or the host removes answered ones.
+3. **Request entities**: the barest seat's collector retires them (`retire`); a seat without the collector keeps them.
 4. **Threading**: one engine behind one lock, the loop on the main thread, the door's accept and connection threads in `http.rs`.
    Enough for the door; a heavier app may want the loop and the engine's rounds separated.
 5. **The command name** (`cliffvm` is working; `CARGO_BIN_EXE_cliffvm` in the tests and the `cliffvm-<version>` build id are the

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start the barest agent seat: the standalone cliffvm on the shipped packs and the barest app (a graph viewer and one chat).
+# Start the barest agent seat: the standalone cliffvm on the barest packs (membrane/apps/barest.packs) and the barest app (a graph viewer and one chat).
 # Builds nothing: build the binary once with `cargo build --release --no-default-features --features bin` in native/.
 #   scripts/seat [--store <sqlite>] [--port <n>] [--open]
 # CLIFFVM names the binary, CLAUDE_BIN the claude CLI (else the one on PATH). Run it from anywhere; it works from the repo root.
@@ -29,7 +29,13 @@ fi
 claude=${CLAUDE_BIN:-$(command -v claude || true)}
 mkdir -p "$(dirname "$store")"
 cd "$root"
-set -- membrane/packs/boot.c1f membrane/packs membrane/apps/barest.c1f --store "$store" --port "$port"
+# the packs are the barest seat's own, named one per line in membrane/apps/barest.packs (in load order; the first is the root of trust), then the app folder
+set --
+while read -r name; do
+  case "$name" in ''|'#'*) continue ;; esac
+  set -- "$@" "membrane/packs/$name.c1f"
+done < membrane/apps/barest.packs
+set -- "$@" membrane/apps/barest.c1f --store "$store" --port "$port"
 if [ -n "$claude" ]; then
   set -- "$@" --fact "chat_claude_bin=$claude"
 else

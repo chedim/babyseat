@@ -1,0 +1,12 @@
+# The packs of the barest seat, in load order (one shipped pack name per line, membrane/packs/<name>.c1f). scripts/seat and the seat tests read this.
+# The first is the root of trust. The app folder membrane/apps/barest.c1f (the page, the request collector) loads after them.
+boot
+door
+fs
+proc
+fetch
+store
+banner
+door_tools
+chat
+chat_turn

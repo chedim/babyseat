@@ -104,6 +104,10 @@
   "chat_max_turns": {
    "wired": false,
    "why": "the bare chat's ceiling: the CLI's --max-turns for one answer (chat_turn.c1f; default 2048 in the pack, a threshold the operator approves); told by `--fact chat_max_turns=<n>`"
+  },
+  "request_keep_s": {
+   "wired": false,
+   "why": "the barest seat's request collector (membrane/apps/barest.c1f/collector.c1f): seconds an ANSWERED door request is kept before it is retired (deleted); default 600 in the pack (operator-approved 2026-11-13); told by `--fact request_keep_s=<n>`"
   }
  }
 }

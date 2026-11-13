@@ -293,6 +293,8 @@ pub struct Fields {
     /// every write the field made (getters, setters, receipts), in order, until the host drains it:
     /// {eid, prop, new, writer}. The host applies them to its store (fields_live.py).
     pub out: Vec<J>,
+    /// entities a write of `retire = true` asked to remove (any writer): the host removes each (the engine's entity, its stored row) after it drains `out`
+    pub retired: Vec<String>,
     /// the host takes the door's requests itself (to journal them, then `arrive`): a round leaves them in the store
     pub inbound_by_host: bool,
     /// getters declared in cliffhanger, their levels, and their inputs: (eid, field) read -> instances (eid, getter)
@@ -328,7 +330,7 @@ pub struct Fields {
 
 impl Fields {
     pub fn goalgraph() -> Self {
-        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], inbound_by_host: false,
+        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default() };
@@ -1284,6 +1286,8 @@ impl Fields {
     /// A write of a driver verb (File.write, Command.run, ...: drivers.rs) runs its effect off the engine; the verb's
     /// slot is consumed. Entity scripts and peers never trigger one (a refusal receipt says so).
     fn driver_effect(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, now: f64, seq: &mut i64) {
+        // `retire = true` on any entity asks the host to remove it (docs/cliffvm.md, "Retiring an entity")
+        if w.prop == "retire" && w.new == json!(true) && !self.retired.contains(&w.eid) { self.retired.push(w.eid.clone()); }
         #[cfg(feature = "store")]
         {
             if w.new.is_null() || w.new == json!("") { return; }
