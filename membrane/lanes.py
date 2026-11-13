@@ -400,8 +400,6 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
         L.append(f"- ROUTING: membrane picks the model per turn ({spend})"
                  "; you may be a different model than last turn -- do not "
                  "assume your own earlier reasoning is in your weights.")
-    if not getattr(srv, "receipts", True):
-        L.append("- RECEIPTS: off (--no-receipts).")
     return "\n".join(L) + "\n"
 
 
@@ -2616,9 +2614,7 @@ SEED_FULL_SCAN_S = 600.0
 def _field_seed_topics(srv) -> list:
     """(text, family, #n) for every discourse event carrying a canonical
     skill frame (user/model prose only -- not reasoning turns). Cached on
-    the origin's event count; empty when --no-field-seeds."""
-    if not getattr(srv, "field_seeds", True):
-        return []
+    the origin's event count."""
     fld = _efield_of(srv)
     if fld is None:
         return []
@@ -2679,7 +2675,7 @@ def _field_seed_topics(srv) -> list:
 
 def _embed_field_seed_matrix(srv) -> bool:
     """Embed + threshold-tune the field-grown layer. False leaves the layer
-    off (no seeds, embedder gone, --no-field-seeds, or inseparable)."""
+    off (no seeds, embedder gone, or inseparable)."""
     topics = _field_seed_topics(srv)
     if not topics:
         return False
@@ -5627,11 +5623,10 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # readback. Learn/forget asks are report-only, never written. Once-only
         # via the ledger marked at real delivery.
         thought_asks: list = []
-        if getattr(srv, "thought_intercept", True):
-            try:
-                thought_asks = _assistant_thought_asks(srv, body)
-            except Exception as t_e:
-                print(f"[opencode] thought-detect error: {t_e}", file=sys.stderr)
+        try:
+            thought_asks = _assistant_thought_asks(srv, body)
+        except Exception as t_e:
+            print(f"[opencode] thought-detect error: {t_e}", file=sys.stderr)
         # ---- INTERNAL interception (before the gate: these turns never touch
         # the field -- no learn, no demote, no nudge -- so introspection can't
         # feed the field back into itself). Served straight from the live store.
@@ -5639,7 +5634,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # fallback on INTENT when nothing matches: cosine to the fixed seed
         # set PLUS the field-grown seed layer (canon-frame exemplars harvested
         # from the live store -- the detector grows from the operator's own
-        # writes; --no-field-seeds is the kill switch). A stolen turn echoes
+        # writes). A stolen turn echoes
         # the exact marker to let the client force the model path next turn.
         q_early = _last_user_text(body)
         # THE THINKER'S CHAT FEED (the receipt-lane retirement's voice):
@@ -5670,7 +5665,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # command, that round would have caught it -- the semantic check
         # (its own embedding) is skipped there
         if (not any((learn_hit, forget_hit, rec_hit, state_hit))
-                and srv.sem_intercept and not model_escaped and not _tool_round(body)):
+                and not model_escaped and not _tool_round(body)):
             # the semantic fallback embeds the query itself (an outbound read,
             # never learned). 4-family: recall/state answer from the field;
             # learn/forget are operator writes routed without the incantation.
@@ -5695,8 +5690,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         # it receives the chat messages (the digest feed) and speaks
         # through the speech lane's planner gate -- suggesting, noting,
         # asking -- but never overrides a model turn again. The E9
-        # experiment stays (library + audit replay, --no-receipts is a
-        # no-op flag kept for compat).
+        # experiment stays (library + audit replay).
         # ---- the watch layer (spatial triggers): operator set/list/drop,
         # handled pre-gate like every other operator write.
         if not model_escaped and _is_watch_query(q_early):
@@ -7836,7 +7830,7 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             "n_verdicts": n_verd,
             # the NightClock's last pass (births, junk, activity, commons)
             "night": (getattr(srv, "night_stats", None) or None),
-            "state_intercept": srv.state_intercept,
+            "state_intercept": True,
             "audit_records": _audit_count(mem.audit_path),
             "frame_wait": _frame_wait_summary(srv) or None,
             # the null-recall lane: the session's all-orthogonal asks
