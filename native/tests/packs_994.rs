@@ -2,8 +2,7 @@
 //! shipped JSON packs equals the checksum after the old hand-coded loads (kept here as the oracle); a malformed pack
 //! declares nothing; loading twice is idempotent.
 use membrane_vm::vm::Core;
-use membrane_vm::{banner, packs, recall};
-use serde_json::{json, Map};
+use membrane_vm::{packs, recall};
 
 /// canonical JSON text: object keys sorted at every depth (a parsed pack and a json! literal order keys differently)
 fn canon(v: &serde_json::Value) -> String {
@@ -28,12 +27,6 @@ fn checksum(c: &Core) -> u64 {
 
 /// the old path, verbatim: Rust literals loaded by hand
 fn legacy(c: &mut Core) {
-    for (name, order, wh, show) in banner::seed_rules() {
-        let mut p = Map::new();
-        p.insert("name".into(), json!(name)); p.insert("order".into(), json!(order));
-        p.insert("where".into(), wh); p.insert("show".into(), json!(show));
-        c.load(format!("rule:{}", name.replace(' ', "-")), banner::CLASS_RULE.into(), p, None, 0.0);
-    }
     c.load(recall::DIALS.into(), recall::CLASS_DIALS.into(), recall::defaults(), None, 0.0);
 }
 
@@ -42,7 +35,7 @@ fn pack_load_matches_the_hand_coded_load() {
     let (mut a, mut b) = (Core::new(), Core::new());
     legacy(&mut a);
     let n: usize = packs::shipped().iter().map(|t| packs::load_pack(&mut b, t).unwrap()).sum();
-    assert_eq!(n, 5);
+    assert_eq!(n, 1);
     assert_eq!(checksum(&a), checksum(&b));
     println!("checksum {:016x}", checksum(&b));
 }
@@ -51,7 +44,7 @@ fn pack_load_matches_the_hand_coded_load() {
 fn seed_functions_now_read_the_packs() {
     let (mut a, mut b) = (Core::new(), Core::new());
     legacy(&mut a);
-    banner::load_seed(&mut b); recall::load_seed(&mut b);
+    recall::load_seed(&mut b);
     assert_eq!(checksum(&a), checksum(&b));
 }
 

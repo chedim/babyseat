@@ -190,8 +190,6 @@ pub struct Fields {
     /// the llm calls the plan fields asked for (the effect that is not a prop write)
     pub calls: Vec<J>,
     pub writes: u64,
-    /// row 3: the Chat entities' `banner` getter (banner.rs) is on
-    pub banner: bool,
     /// row 4: the recall policy's guard setters and RecallAsk getters (recall.rs) are on
     pub recall: bool,
     /// row 5: written calls (adapters.rs) are on; the calls they asked the host to run
@@ -232,7 +230,7 @@ pub struct Fields {
 
 impl Fields {
     pub fn goalgraph() -> Self {
-        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![],
+        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![],
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(), trip_only: Default::default(),
             known: Default::default(), primed: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![] };
@@ -627,17 +625,6 @@ impl Fields {
         self.run(core, host, VecDeque::new(), now, seq);
     }
 
-    /// Row 3: a banner input (Message/Register/Edge/BannerRule) was written: recompute each Chat's `banner`.
-    fn banner_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
-        let mut chats: Vec<(String, String)> = core.docs.iter().filter(|(_, e)| e.cls == crate::banner::CLASS_CHAT)
-            .map(|(k, e)| (k.clone(), e.props.get("sid").and_then(|s| s.as_str()).unwrap_or(k).to_string())).collect();
-        chats.sort();
-        for (eid, sid) in chats {
-            let lines = crate::banner::walk(core, &sid);
-            self.emit_unchecked(core, work, &eid, "banner", json!(lines), "banner", seq, now);
-        }
-    }
-
     /// Row 4: a dial was written -> its guard setter (a bad value goes back to the last accepted one); a dial or an ask
     /// moved -> recompute every RecallAsk's getters.
     fn recall_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, seq: &mut i64, now: f64) {
@@ -825,9 +812,6 @@ impl Fields {
                 self.recount(core, work, &w.eid, seq, now);
             }
         }
-            if self.banner && w.prop != "banner" {   // any write can move a line (a card's status, a name): the getter reads the whole field
-                self.banner_on(core, work, seq, now);
-            }
             if self.learn.is_some() { self.learn_on(core, host, work, &w, seq, now); }
             if self.adapters { self.adapters_on(core, work, &w, seq, now); }
             if self.recall { self.recall_on(core, work, &w, seq, now); }
