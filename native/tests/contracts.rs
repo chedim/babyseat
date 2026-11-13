@@ -49,6 +49,30 @@ fn ident_after(t: &str, pat: &str) -> Vec<String> {                    // every 
     out
 }
 
+/// Every pack the repo ships, view packs (they import `dom`) and the packs under native/packs included, passes the loader's own
+/// checks (parse, stale-setter, shadowing...). Only a pack that waits for an import it cannot have here may be refused, and only for that.
+#[test]
+fn no_shipped_pack_is_refused_by_the_loader_for_anything_but_a_missing_import() {
+    let mut all = packs();
+    let dir = root().join("native/packs");
+    for e in std::fs::read_dir(&dir).unwrap().flatten() {
+        let p = e.path();
+        if p.extension().map(|x| x == "c1f").unwrap_or(false) {
+            all.push((p.file_stem().unwrap().to_string_lossy().to_string(), std::fs::read_to_string(&p).unwrap()));
+        }
+    }
+    let mut bad = vec![];
+    for (stem, text) in &all {
+        let name = pack_name(text);
+        let mut f = Fields::goalgraph();
+        if let Err(e) = f.set_pack(&name, text) {
+            let waits = e.contains("imports") || e.contains("belongs to pack") || e.contains("is not loaded") || e.contains("waits");
+            if !waits { bad.push(format!("{stem}: {e}")); }
+        }
+    }
+    assert!(bad.is_empty(), "the loader refuses shipped packs: {bad:?}");
+}
+
 #[test]
 fn every_shipped_pack_loads_together() {
     let mut f = Fields::goalgraph();
