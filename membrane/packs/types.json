@@ -126,6 +126,31 @@
     "writes": {},
     "findings": []
   },
+  "chat": {
+    "getters": {
+      "Chat.title": "Text",
+      "ChatMessage.mid": "Text",
+      "ChatMessage.resp_eid": "Text",
+      "ChatMessage.said": "Any",
+      "ChatMessage.view": "Dict",
+      "ChatResponse.kind": "Text",
+      "ChatTool.kind": "Text",
+      "Request.cm_get": "Dict",
+      "Request.cm_gid": "Text",
+      "Request.cm_go": "Bool",
+      "Request.cm_post": "Dict?",
+      "Request.cm_text": "Text",
+      "Request.cm_view": "Any",
+      "Request.m_session": "List(Text)",
+      "Request.o_session": "Bool",
+      "Request.r_session": "Dict?"
+    },
+    "writes": {
+      "Request.cm_at": "Num",
+      "Request.cm_id": "Text?"
+    },
+    "findings": []
+  },
   "decisions": {
     "getters": {
       "Decision.ans_error": "Text?",
@@ -196,7 +221,7 @@
   "door": {
     "getters": {
       "Http.up": "Bool?",
-      "Request.allow": "Any",
+      "Request.allow": "List(Text)?",
       "Request.boots": "List(Entity(Boot))",
       "Request.c_aliases": "Any",
       "Request.c_blurp": "Bool",
@@ -218,8 +243,8 @@
       "Request.f_project": "Any",
       "Request.f_version": "Any",
       "Request.facts": "Any",
-      "Request.family": "Any",
-      "Request.family_checked": "Any",
+      "Request.family": "Dict?",
+      "Request.family_checked": "Dict?",
       "Request.file": "Text?",
       "Request.found": "Any",
       "Request.fwd": "Bool",
@@ -256,9 +281,9 @@
       "Request.rel_climb": "Bool",
       "Request.rel_ok": "Bool",
       "Request.reply": "Any",
-      "Request.routed": "Any",
+      "Request.routed": "Dict?",
       "Request.secure": "Text",
-      "Request.shipped": "Any",
+      "Request.shipped": "Dict?",
       "Request.static": "Text?",
       "Request.static_reply": "Dict?",
       "Request.ui_root": "Any",

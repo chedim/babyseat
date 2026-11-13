@@ -1,0 +1,504 @@
+[
+ {
+  "name": "POST a message is a 202 with its id, and the message is an entity under Chat:main with its text",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/chat/message",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"text\": \"hello there\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 202
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.id",
+    "equals": "2000-1"
+   },
+   {
+    "eid": "membrane::Chat:message:2000-1",
+    "prop": "text",
+    "equals": "hello there"
+   },
+   {
+    "eid": "membrane::Chat:message:2000-1",
+    "prop": "parents",
+    "equals": [
+     "cls:chatmessage"
+    ]
+   },
+   {
+    "eid": "membrane::Chat:main",
+    "prop": "name",
+    "equals": "main"
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "prop": "chat",
+    "equals": "main"
+   }
+  ]
+ },
+ {
+  "name": "a message with no text is a 400 and makes nothing",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/chat/message",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"text\": \"   \"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   }
+  ]
+ },
+ {
+  "name": "a body that is not JSON is a 400",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/chat/message",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{no"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   }
+  ]
+ },
+ {
+  "name": "GET on the collection is a 405 that allows POST",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/chat/message",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "POST on one message is a 405 that allows GET",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/chat/message/9-9",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "{}",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET"
+   }
+  ]
+ },
+ {
+  "name": "GET a message that is waiting says queued, with its text and no response",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/chat/message/9-9",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:9-9",
+    "class": "Chat",
+    "props": {
+     "text": "q?",
+     "parents": [
+      "cls:chatmessage"
+     ]
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.id",
+    "equals": "9-9"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.text",
+    "equals": "q?"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.state",
+    "equals": "queued"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.response",
+    "none": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.tools",
+    "equals": []
+   }
+  ]
+ },
+ {
+  "name": "GET a message that was answered gives the response text, the state and the tools it ran",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/chat/message/9-9",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:9-9",
+    "class": "Chat",
+    "props": {
+     "text": "q?",
+     "state": "done",
+     "tools_run": [
+      "entity_read"
+     ],
+     "parents": [
+      "cls:chatmessage"
+     ]
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:9-9:response",
+    "class": "Chat",
+    "props": {
+     "text": "the answer",
+     "parents": [
+      "cls:chatresponse"
+     ]
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.state",
+    "equals": "done"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.response",
+    "equals": "the answer"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.tools",
+    "equals": [
+     "entity_read"
+    ]
+   }
+  ]
+ },
+ {
+  "name": "GET a message that does not exist is a 404",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/chat/message/none",
+     "query": "",
+     "headers": {
+      "content-type": "application/json"
+     },
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 404
+   }
+  ]
+ }
+]

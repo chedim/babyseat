@@ -1,0 +1,52 @@
+PACK chat 1
+IMPORT door 1
+IMPORT banner 1
+-- THE BARE CHAT (#1143, operator 2026-11-12): ONE chat, `membrane::Chat:main`, no persons, no security. The route is the door's
+-- `session` family:
+--   POST /membrane/chat/message {text}   the person's message becomes an entity under the chat; 202 {id}
+--   GET  /membrane/chat/message/<id>     {id, text, state, response, tools}: poll it until `state` is done (or error)
+-- The message is `membrane::Chat:message:<id>` (the kind ChatMessage; its eid names the class Chat, as the constructor rule says),
+-- its answer `membrane::Chat:message:<id>:response` (ChatResponse {text, error}) and each tool the model ran
+-- `membrane::Chat:message:<id>:tool:<tool id>` (ChatTool {name, input, result}); packs/chat_turn.c1f runs the turn. The kinds are
+-- ChatMessage / ChatResponse / ChatTool, not Message / Response: a pack owns the classes it declares on, and Message was retired
+-- from messages.c1f for that reason.
+-- The chat's banner is the class `Banner` instance `membrane::Banner:owner:main` (the map-mode placeholder that tells the model how to
+-- build its own). The id is the arrival time in milliseconds and the request's number: `<ms>-<n>`.
+
+Chat.title getter: 'main'
+ChatMessage.mid getter: replace(this.eid, 'membrane::Chat:message:', '')
+ChatMessage.resp_eid getter: 'membrane::Chat:message:' + this.mid + ':response'
+ChatMessage.said getter: prop(this.resp_eid, 'text')
+ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.state or 'queued', 'response': this.said, 'tools': this.tools_run or []}
+ChatResponse.kind getter: 'response'
+ChatTool.kind getter: 'tool'
+
+Request.o_session getter: this.path == '/membrane/chat/message' or startswith(this.path, '/membrane/chat/message/')
+Request.m_session getter: ['POST'] if this.path == '/membrane/chat/message' else ['GET']
+
+-- ---- POST: the message --------------------------------------------------------------------------------------------------------------
+Request.cm_text getter: strip(str(prop(this.jbody, 'text') or ''))
+Request.cm_go getter: this.method == 'POST' and this.path == '/membrane/chat/message' and this.cm_text != ''
+Request.cm_go on-setter chat-stamp:
+  WHEN this.cm_go:
+    this.cm_at = clock
+Request.cm_at on-setter chat-message:
+  WHEN this.cm_at != None:
+    id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
+    membrane::Chat:main = Chat(name: 'main')
+    membrane::Banner:owner:main = Banner(chat: 'main', owner: 'owner')
+    membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
+    this.cm_id = id
+Request.cm_post getter:
+  WHEN this.cm_text == '': {'status': 400, 'body': {'error': 'text required: {"text": "..."}'}}
+  ELSE WHEN this.cm_id == None: None
+  ELSE: {'status': 202, 'body': {'id': this.cm_id}}
+
+-- ---- GET: one message --------------------------------------------------------------------------------------------------------------------
+Request.cm_gid getter: replace(this.path, '/membrane/chat/message/', '')
+Request.cm_view getter: prop('membrane::Chat:message:' + this.cm_gid, 'view')
+Request.cm_get getter: {'status': 200, 'body': this.cm_view} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
+
+Request.r_session getter:
+  WHEN this.path == '/membrane/chat/message': this.cm_post
+  ELSE: this.cm_get

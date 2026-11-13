@@ -91,6 +91,30 @@
       "started"
     ]
   },
+  "chat": {
+    "imports": [
+      "door",
+      "banner"
+    ],
+    "classes": [
+      "Chat",
+      "ChatMessage",
+      "ChatResponse",
+      "ChatTool",
+      "Request"
+    ],
+    "members": 17,
+    "writes": [
+      "membrane:*=ChatMessage()",
+      "membrane::Banner:owner:main=Banner()",
+      "membrane::Chat:main=Chat()"
+    ],
+    "claims": [
+      "/membrane/chat/message",
+      "/membrane/chat/message/"
+    ],
+    "boot_facts": []
+  },
   "decisions": {
     "imports": [
       "goalgraph",
