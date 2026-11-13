@@ -1,0 +1,98 @@
+# cliffvm: the field VM as a standalone app
+
+`cliffvm` is the cliffhanger field VM as a process of its own: no Python, no pyo3. The command name is working and
+PINNED/undecided; it lives in ONE place, the `[[bin]] name` in `native/Cargo.toml` (the tests read
+`CARGO_BIN_EXE_cliffvm`: one more line in `native/tests/cliffvm_process.rs`, and a literal in `cli.rs`'s `build_id` fact).
+
+**The barest seat has no security, by operator decision (2026-11-12).** No JWT, no shared secret, no login, no persons, no
+Host/Origin check. The door answers every request: in this mode every request is `authed` with the subject `owner`. The door
+opens on 127.0.0.1 unless `--bind` says another address (`--bind 0.0.0.0` opens it to the network: configuration only). The old
+JWT code is still in the tree (a later cleanup removes it); the binary neither requires nor uses it.
+
+**The app is the pack folder.** `main()` parses arguments into Boot facts and runs the boot pack from a folder; every route, tool,
+turn and view is a `.c1f` pack in it (the shipped `membrane/packs/*.c1f` are the app). The Rust side is only the host: the loop, the
+drivers, the store, the socket. A decision a pack could make is not made in Rust: if it shows up, it is listed below.
+
+## Build and run
+
+```
+cd native
+cargo build --release --no-default-features --features bin     # target/release/cliffvm
+cliffvm --version
+cliffvm run <packs-dir> [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>]
+```
+
+- Features (`native/Cargo.toml`): `store` = rusqlite + tls (the native store, the drivers, the door); `python = [pyo3, store]` (the
+  seat's `membrane_vm.so`, unchanged: `sh native/build.sh`); `bin = [store]` (the app). A Python extension is not a program, so the
+  app is built with `--no-default-features --features bin`. Tests of the app: the same flags.
+- `run <packs-dir>`: loads every `*.c1f` in it (name order; an `IMPORT` waits for its owner), computes the getters once (a rebuild
+  runs no setter), runs the boot plan if the folder has `boot.json` (+ `boot.c1f`), tells the facts, then `Boot.started`, then loops
+  until SIGTERM/SIGINT. `--port` becomes the fact `door_port` (0 = any free port); the pack `door.c1f` answers with
+  `Http:door.listen`; once it is up the binary prints `cliffvm: door listening on <host>:<port>`.
+- Facts the arguments tell (names as `membrane/packs/facts.json`): `door_port`, `ui_dir`, `seat_version`, `build_id`, `seat_cwd`,
+  `seat_home`, `seat_name` (Bob), `seat_named`, `seat_aliases`, `seat_voice_out`, `seat_language`, `seat_blurp`, and the whole set
+  as the dict `facts` (as `boot_started` writes it). There is no `door_secret_file`.
+- `--store`: one SQLite file (default `./cliffvm.sqlite3`), WAL: the entity rows (`c_field`: eid -> {cls, props, writers}), the
+  journal (`c_journal`), and what `sql(...)` in packs reads (read-only connections of the same process).
+- The boot plan: this host runs none of the plan's steps (they are the Python seat's), so each is `skipped` and the plan only says
+  when the boot is over. Then `started`.
+
+## The host loop (`native/src/host.rs`)
+
+Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
+
+- OUTSIDE writes (a door request born as `Request:<n>`, the boot's facts, a person's write) are heard, journalled, stored and given
+  to the engine. A birth from outside goes in as an arrival (`Fields::arrive`: loaded, known, its getters dirty), so a setter on its
+  writes fires, as the door always did; the host takes the door's requests itself (`Fields.inbound_by_host`), to journal them.
+- The engine's output (`Fields::out`) is drained and applied to the rows with the writer stamped as `fields_live.stamp_writer` /
+  `stamp_born_writer`: `trigger:field:<setter>` for the engine's own writes, `host:driver:trip` for a Trip and its birth (the
+  python rule makes it `host:` + `driver:trip`, not `host:trip`), `host:door` for a request, `host:boot` for the boot.
+- The clock: `Fields::tick` every second; the loop wakes at once when a driver thread finishes (query, file, command, request).
+- The JOURNAL holds the outside writes only. Derived writes are never in it: replay re-derives them
+  (`Host::replay`). The journal is kept in memory and in `c_journal`.
+- Test (`native/tests/host_loop.rs`): a live run (door requests, a Trip with an injected clock) is replayed into a fresh engine and
+  store and gives the same entities and rows (values and writers), and the same journal. A driver's receipt (`*_result`, `*_rc`) is
+  an effect's answer and is not re-derived: a replay runs no effects, so the comparison leaves those props out.
+- Process tests (`native/tests/cliffvm_process.rs`): the built binary on an ephemeral port serves a static file, boots through the
+  real plan and answers a decisions route and a 501 route, stops on SIGTERM (hard timeouts, the child is always killed).
+
+## What `fields_live.py` does that the Rust loop does NOT yet do
+
+- **Mirroring the Python entity store**: there is none here; the rows are the host's own table. No `est.docs` hear/mirror, no
+  `mirrored()` by ISA kinds (`parents: ["cls:..."]`), no class-of-removal memory, no removal of entities (`f.remove`, #1054): a
+  Request entity stays forever (rows and mirror grow without bound).
+- **`silent_birth`** on engine-born entities (`{"born": cls}` is stored with no props).
+- **Packs from entities**: `Pack` entities (`membrane::pack:<name>`, the `c1f` text), hot reload when edited, `good_c1f` kept as the
+  last text that parsed, the `error` shown on the entity, `pack_op` (list/show/load), the shipped-pack rule, `_view_classes`
+  (packs importing `dom` that run in pages). Pack FILES are loaded once at start: no mtime rescan, no reload.
+- **Banner instances** (`Banner:<owner>:<chat>`), the dials (`recall:dials`), the class switch, facts per turn, `sql_forget`,
+  the 3 s banner time limit, `mark_delivered` / `mark_seq`.
+- **LLM call plumbing**: `Fields::calls` (the planner's `membrane::llm.call`) are drained and dropped; no LLM adapter.
+- **Host callbacks** (`_Host.call`: `pronoun`, `recall`, `rerank`, the banner's built-ins): `NullHost` knows none; `resolve`,
+  `dispatch`, `vel`, `align`, `live` answer nothing.
+- **Adapters**, the worker pool, wait checks, replan, Blurp's learner and the store's write listeners that watch writes.
+- **Presence**, peers, the `/event` hub (`publish` of `field.write` / `field.pack` / `field.remove` to pages), the browser VM's
+  snapshot (`snapshot()`), the page feed.
+- **Seat facts**: `seat_facts` reads the person's settings file, the router, the minds, the backend, cloud models,
+  `agent_writes`, `nerve_pause_off`, `ledger`, `router_on`, `minds`, `seat_stt`, `seat_project`; the binary tells only the list above.
+  `answer_card` (the board's own door) is a pack's now, but nothing calls it here.
+- **The store as the seat's**: no `Store:field` seed entity, no `SQL_ARRIVED` queue item (the loop's waiter does that job), no
+  `set_store` of a seat file other than its own; the seat's collections (`c_<coll>` of the Python entity store) are not the host's
+  table (`c_field`): the two do not read each other.
+- **Plan state is not journalled**: `plan::set` writes engine-side (writer `boot`); a boot re-runs the plan each start.
+- **Error handling**: a failing write does not count `errors`, nothing is logged per write; a pack that fails to load is printed
+  once on stderr and the last good one is not kept.
+- **Shutdown**: SIGTERM stops the loop and interrupts running queries; there is no flush beyond SQLite's own, no `stop(srv)`.
+
+## Open design questions
+
+1. **Effects on replay.** A driver receipt is outside in nature (a connection answered, a file read) but stamped derived
+   (`trigger:field:driver:*`) by the python rule. Replay here runs no effects and the comparison ignores receipts. Should receipts
+   be journalled (outside), or should replay run the effects again?
+2. **Who owns the entity rows.** The Python seat's store is the `EntityStore` over `db.rs` (a pyclass); the host has its own table.
+   Converging needs `db.rs`'s core split from its Python binding (a refactor, not done).
+3. **Request entities** are never removed. A pack should retire them (a `Request` lifetime), or the host removes answered ones.
+4. **Threading**: one engine behind one lock, the loop on the main thread, the door's accept and connection threads in `http.rs`.
+   Enough for the door; a heavier app may want the loop and the engine's rounds separated.
+5. **The command name** (`cliffvm` is working; `CARGO_BIN_EXE_cliffvm` in the tests and the `cliffvm-<version>` build id are the
+   other places it appears).

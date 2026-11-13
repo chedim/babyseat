@@ -126,7 +126,7 @@ pub struct Core {
     pub fired: HashMap<String, u64>,
     pub refused: HashMap<String, u64>,
     /// the store driver (`sql(...)`): the seat's SQLite store, read-only, this engine's own connection
-    #[cfg(feature = "python")]
+    #[cfg(feature = "store")]
     pub store: Option<crate::store::Store>,
     pub errors: HashMap<String, String>,
     /// `referencing(x, prop)`'s reverse index: prop -> target eid -> the entities whose prop holds it. Built per prop
@@ -258,7 +258,7 @@ impl Core {
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
-            #[cfg(feature = "python")]
+            #[cfg(feature = "store")]
             store: None,
         }
     }
@@ -530,7 +530,7 @@ impl Core {
     pub fn sql_request(&self, asker: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
         let Some(V::Str(q)) = a.first() else { return (Err("sql(query, args...): the query is a string".into()), None) };
         let args = match a[1..].iter().map(expr::to_json).collect::<Result<Vec<_>, _>>() { Ok(v) => v, Err(e) => return (Err(e), None) };
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             let Some(st) = &self.store else { return (Err("sql: no store attached to this field".into()), None) };
             let k = crate::store::scoped(asker, &crate::store::key(q, &args));
@@ -539,7 +539,7 @@ impl Core {
                 crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: sql({})", q.chars().take(48).collect::<String>()))), Some(k)),
             }
         }
-        #[cfg(not(feature = "python"))]
+        #[cfg(not(feature = "store"))]
         { let _ = (asker, q, args); (Err("sql: this build has no store driver".into()), None) }
     }
 
@@ -549,7 +549,7 @@ impl Core {
     pub fn host_request(&self, asker: &str, f: &str, args_json: &str, job: HostJob) -> (Result<V, String>, Option<String>) {
         let fname = f.to_string();
         let parse = move |s: String| serde_json::from_str::<J>(&s).map_err(|e| format!("{}: {}", fname, e));
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             if let Some(st) = &self.store {
                 let slot = format!("{}\u{0}{}", asker, f);
@@ -572,7 +572,7 @@ impl Core {
     /// A getter's `jsonl(name)`: the seat's JSON-lines file, asked like a query.
     pub fn jsonl_request(&self, asker: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
         let Some(V::Str(name)) = a.first() else { return (Err("jsonl(name): a file name".into()), None) };
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             let Some(st) = &self.store else { return (Err("jsonl: no store attached to this field".into()), None) };
             let k = crate::store::scoped(asker, &crate::store::jsonl_key(name));
@@ -581,7 +581,7 @@ impl Core {
                 crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: jsonl({name})"))), Some(k)),
             }
         }
-        #[cfg(not(feature = "python"))]
+        #[cfg(not(feature = "store"))]
         { let _ = (asker, name); (Err("jsonl: this build has no store driver".into()), None) }
     }
 
@@ -589,7 +589,7 @@ impl Core {
     /// read.
     pub fn fs_request(&self, asker: &str, f: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
         let Some(V::Str(path)) = a.first() else { return (Err(format!("{}(path): a path", f)), None) };
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             let Some(st) = &self.store else { return (Err(format!("{}: no drivers attached to this field", f)), None) };
             let k = crate::store::scoped(asker, &crate::drivers::key(st, f, path));
@@ -598,27 +598,27 @@ impl Core {
                 crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: {}({})", f, path))), Some(k)),
             }
         }
-        #[cfg(not(feature = "python"))]
+        #[cfg(not(feature = "store"))]
         { let _ = (asker, path); (Err(format!("{}: this build has no drivers", f)), None) }
     }
 
     /// The drivers' effects' receipts since the last round: (entity, verb, receipt).
     pub fn effect_receipts(&self) -> Vec<(String, String, J)> {
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         { if let Some(st) = &self.store { return st.take_receipts(); } }
         vec![]
     }
 
     /// The entities the HTTP door pushed since the last round: (eid, class, properties).
     pub fn inbound(&self) -> Vec<(String, String, Map<String, J>)> {
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         { if let Some(st) = &self.store { return st.take_inbound(); } }
         vec![]
     }
 
     /// The queries whose rows arrived since the last round (their getters are dirty).
     pub fn sql_ready(&self) -> Vec<String> {
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         { if let Some(st) = &self.store { return st.take_ready(); } }
         vec![]
     }
