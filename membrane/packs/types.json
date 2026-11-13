@@ -1107,6 +1107,18 @@
       "Minds"
     ]
   },
+  "semtext": {
+    "getters": {
+      "SemText.identifiers": "List(Dict)",
+      "SemText.numbers": "List(Dict)",
+      "SemText.paths": "List(Dict)",
+      "SemText.sentences": "List(Dict)",
+      "SemText.urls": "List(Dict)",
+      "SemText.words": "List(Dict)"
+    },
+    "writes": {},
+    "findings": []
+  },
   "stats": {
     "getters": {},
     "writes": {},

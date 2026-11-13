@@ -687,6 +687,16 @@
       "Minds"
     ]
   },
+  "semtext": {
+    "imports": [],
+    "classes": [
+      "SemText"
+    ],
+    "members": 6,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
   "stats": {
     "imports": [],
     "classes": [],

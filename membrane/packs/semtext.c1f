@@ -1,0 +1,19 @@
+PACK semtext 1
+-- SEMTEXT (#1143, docs/semtext-and-legs.md): TEXT IS A FLAT STRING WITH LABELS ON TOP. `SemText` is a CLASS: an entity of any eid is one
+-- when a write makes it, explicitly, with a constructor: `membrane::Chat:message[id]:body = SemText(text: ...)` (the chat's message body),
+-- `Command:tests:output = SemText(text: ...)` (a model's pack: a sensor's leg).
+--   text         the ONE stored string (a write of it recomputes every layer below)
+--   sentences words identifiers paths urls numbers
+--                the layers: `[{start, end, text}]`, offsets in chars, each recomputed when `text` changes. They are getters over the
+--                native tokenizer (`spans`, docs/c1f-stdlib.md): the tokenizer is INTERNAL to this pack: a model reads these properties
+--                and never calls `spans` itself (Help:semtext does not teach it).
+-- STORAGE: the default, lazy. A body is stored and loaded when it is first referenced, like the message it belongs to; making it RESIDENT would load
+-- every text ever said at start.
+-- The span ENTITIES (virtual children of the text) are in the same pack, below.
+
+SemText.sentences getter: spans(this.text, 'sentence')
+SemText.words getter: spans(this.text, 'word')
+SemText.identifiers getter: spans(this.text, 'identifier')
+SemText.paths getter: spans(this.text, 'path')
+SemText.urls getter: spans(this.text, 'url')
+SemText.numbers getter: spans(this.text, 'number')
