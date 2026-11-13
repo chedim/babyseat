@@ -329,3 +329,14 @@ fn the_sessions_voice_and_predict_reads_are_the_empty_lists_of_a_seat_with_neith
     assert_eq!(api(&run, "POST", &format!("/ui/serve/session/{sid}/predict"), json!({})).0, 405);
     assert_eq!(api(&run, "GET", &format!("/ui/serve/session/{sid}/nonsense"), J::Null).0, 404);
 }
+
+// ---- the work graph's drawer: history and item chat on a store with no Python tables -------------------------------------------------------------------------
+#[test]
+fn the_history_and_item_chat_reads_answer_on_a_fresh_store_instead_of_waiting_for_python_tables() {
+    let run = seat("history");
+    // the store this seat made has no `c_entity_deltas` / `c_relations` (the Python seat's tables): the reads used to wait for ever
+    let (st, h) = api(&run, "GET", "/ui/serve/membrane/entity-history?spec=Goal%3Anone", J::Null);
+    assert_eq!((st, h), (200, json!({"ok": false, "error": "no entity matches 'Goal:none'"})));
+    let (st, c) = api(&run, "GET", "/ui/serve/membrane/item-chat?spec=Goal%3Anone", J::Null);
+    assert_eq!((st, c), (200, json!({"ok": true, "eid": "Goal:none", "messages": []})));
+}

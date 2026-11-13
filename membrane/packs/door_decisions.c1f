@@ -121,11 +121,19 @@ Request.dm_spec getter: strip(replace(replace(replace(replace(replace(replace(th
 Request.dm_found getter: [e for e in concat(instances('Decision'), instances('Goal'), instances('Task'), instances('Wait')) if e.eid == this.dm_spec]
 
 -- an entity's history: the store's delta rows and relation rows (no field-engine changes; see the boundary above)
+-- the two tables are the Python seat's (a store made by cliffvm has neither): the query of a missing table fails and the request would wait for ever, so the
+-- tables are asked for first and a store without them has an empty history (the data migration brings the Python rows, docs/release-parity.md section 8)
+Request.dm_tabs getter: sql("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('c_entity_deltas', 'c_relations')") if this.dm_route in ['history', 'chat_of'] and this.dm_spec != '' else None
+Request.dm_tab_names getter: [prop(r, 'name') for r in this.dm_tabs] if this.dm_tabs != None else None
 Request.dm_hist_q getter:
   WHEN this.dm_route != 'history' or this.dm_spec == '': None
+  ELSE WHEN this.dm_tab_names == None: None
+  ELSE WHEN 'c_entity_deltas' not in this.dm_tab_names: []
   ELSE: sql("SELECT json_extract(body, '$.d') AS d FROM c_entity_deltas WHERE json_extract(body, '$.d.eid') = ? ORDER BY json_extract(body, '$.d.seq'), json_extract(body, '$.d.sidx')", this.dm_spec)
 Request.dm_rel_q getter:
   WHEN this.dm_route not in ['history', 'chat_of'] or this.dm_spec == '': None
+  ELSE WHEN this.dm_tab_names == None: None
+  ELSE WHEN 'c_relations' not in this.dm_tab_names: []
   ELSE: sql("SELECT json_extract(body, '$.d') AS d FROM c_relations WHERE json_extract(body, '$.d.subj') = ? OR json_extract(body, '$.d.obj') = ? ORDER BY json_extract(body, '$.o')", this.dm_spec, this.dm_spec)
 Request.dm_hist getter:
   WHEN this.dm_spec == '': {'ok': False, 'error': 'no entity matches ' + "''"}
