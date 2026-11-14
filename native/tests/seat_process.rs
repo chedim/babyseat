@@ -351,7 +351,7 @@ fn help_topics_are_entities_the_model_lists_and_reads() {
 }
 
 // ---- the banner is the model's (#1143) ---------------------------------------------------------------------------------------------------
-fn banner(port: u16) -> String { call(port, "entity_read", json!({"spec": "membrane::Banner:owner:main", "prop": "text"})).0 }
+fn banner(port: u16) -> String { call(port, "entity_read", json!({"spec": "membrane::Banner:admin:main", "prop": "text"})).0 }
 const MINE: &str = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'stops done: ' + str(len([s for s in instances('Stop') if s.done == True]))\n";
 
 #[test]
@@ -386,14 +386,14 @@ fn a_pack_the_model_loads_through_entity_write_replaces_the_banner_completely_an
 fn a_bare_entity_id_names_the_membrane_one_when_only_that_exists() {
     let (mut run, port) = seat("bareid", true);
     wait("the banner", || banner(port).contains("CONVERSATION: main").then_some(()));
-    let (t, _) = call(port, "entity_read", json!({"spec": "Banner:owner:main", "prop": "text"}));
+    let (t, _) = call(port, "entity_read", json!({"spec": "Banner:admin:main", "prop": "text"}));
     assert!(t.contains("CONVERSATION: main"), "{t}");
-    let (w, e) = call(port, "entity_write", json!({"spec": "Banner:owner:main", "prop": "note", "value": "x"}));
+    let (w, e) = call(port, "entity_write", json!({"spec": "Banner:admin:main", "prop": "note", "value": "x"}));
     assert!(!e, "{w}");
-    let (n, _) = call(port, "entity_read", json!({"spec": "membrane::Banner:owner:main", "prop": "note"}));
+    let (n, _) = call(port, "entity_read", json!({"spec": "membrane::Banner:admin:main", "prop": "note"}));
     assert_eq!(n, "x", "the write landed on the membrane:: entity");
-    let (q, _) = call(port, "entity_query", json!({"q": "name~:Banner:owner"}));
-    assert_eq!(q, "0 entity(ies)", "no second Banner:owner:main was made: {q}");
+    let (q, _) = call(port, "entity_query", json!({"q": "name~:Banner:admin"}));
+    assert_eq!(q, "0 entity(ies)", "no second Banner:admin:main was made: {q}");
     assert!(terminate(&mut run));
 }
 

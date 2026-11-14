@@ -9,8 +9,8 @@ Design only, no code. Tree `memo-hotfix-0753` (`af7e506c`). Every number or defa
 
 ## Rules (operator, 2026-11-14)
 
-- Everyone who has access is the owner. The window is the same for everyone: no owner-only variant, no per-person or per-device setting (no personal theme, no per-person voice).
-- The server's own owner check stays as it is (`door.c1f:71-73` `owner` / `forbidden`; `door_tools.c1f:42-44` `mc_deny`). A write the seat refuses is shown as text, with its reason, in place; nothing is hidden.
+- Everyone who has access is the admin (no users in this release). The window is the same for everyone: no admin-only variant, no per-person or per-device setting (no personal theme, no per-person voice).
+- There is no owner check any more (the `owner` / `forbidden` getters and the 403 `for the owner` are gone; `door_tools.c1f` `mc_anon` only stops a write with no verified token). A write the seat refuses for its VALUE is shown as text, with its reason, in place; nothing is hidden.
 - Quota is OUT of the first release (`/membrane/quota`, `quota_probe_s`, `door_state.c1f:19-24, 79`): no row.
 - No secret is ever shown. A key or token appears only by the NAME of its environment variable (`ANTHROPIC_API_KEY`, `api_key_env` names), or as yes/no (`anthropic_key_set`).
 
@@ -26,7 +26,7 @@ Design only, no code. Tree `memo-hotfix-0753` (`af7e506c`). Every number or defa
 | per-person voice (`Config:voice:in|out:<slug>`: on, mode, device) | `POST /membrane/voice/state` (`door_voice.c1f`) | per-person: excluded by the operator's rule |
 | the page's name prompt, `membrane.chat.sid`, `membrane.home.left`, `dockedSidebar`, `sidebarPanelOrder`, `sidebarHiddenPanels` | browser `localStorage` (old `host.js:20`, `panel.js:2674`, `home.js:3105`) | per-device; no storage effect in the browser VM yet (W6, `ui-rebuild-plan.md`) |
 | a chat's own model pick | `Chat:session:<sid>.smodel`, `door_session.c1f:149-164` | an act in the chat, not a setting |
-| the banner `text`, the doctrine/system prompt | `Banner:owner:main.text` is the model's (`default_banner.c1f`, `Help:banner`); the prompt is pack code (`chat_turn.c1f:90`) | replaced by writing a pack, not by a value |
+| the banner `text`, the doctrine/system prompt | `Banner:admin:main.text` is the model's (`default_banner.c1f`, `Help:banner`); the prompt is pack code (`chat_turn.c1f:90`) | replaced by writing a pack, not by a value |
 | session titles | `PATCH /session/<sid>` | a chat action |
 
 ## Groups and order
@@ -38,7 +38,7 @@ Order is by how often a person reaches for it. Names are one plain word.
 3. **Map** - what the field view shows.
 4. **Home** - what the model may do in the house (allow-list).
 5. **Import** - old history and second databases.
-6. **Access** - who the owner is, how tokens work (read-only).
+6. **Access** - how tokens work (read-only).
 7. **Limits** - machine limits set at launch (read-only, "restart needed").
 
 Reasons: Model/Chat first, they are the daily questions. Map/Home are the other things the operator tunes at runtime. Import is rare. Access and Limits are information plus the launch line that changes them, so they go last and carry no edit control.
@@ -46,13 +46,13 @@ Help text below is domain-neutral (no product names; `help_1143`).
 
 ## The inventory
 
-Columns: **key**; **lives**; **type / values**; **default**; **change today**; **live?**; **journalled**; **secret**. Who may change it is the same for all rows: everyone with access; the server's owner check answers 403 with the reason, shown as text.
+Columns: **key**; **lives**; **type / values**; **default**; **change today**; **live?**; **journalled**; **secret**. Who may change it is the same for all rows: everyone with access; a write the seat refuses for its value says why, shown as text.
 
 ### Model
 
 | key (label) | lives | type / values | default | change today | live | journalled | secret |
 |---|---|---|---|---|---|---|---|
-| `model.chat` ("Model": "The model that answers your messages") | `Minds:seat.loops` (RESIDENT, `router.c1f:6, 76-96`); read by `Chat.seat_model` (`chat.c1f:30`) and the HA select (`ha.c1f:115`) | one name of `pickable` (the local tags that pass `chat_ok`, plus listed claude-agent rungs, `door_models.c1f:41`), a model name of 1..120 chars from `[a-z0-9_.:/@~+-]` (`door_models.c1f:48-55`); `''` = not picked | `''`, then the launcher's `seat_default`, then `claude` (`chat.c1f:27-30`) | `POST /membrane/options {"loops": ..}` or `/membrane/models` (owner, `door_models.c1f:64-68, 181`); or `entity_write Minds:seat.loops` (owner) | yes: the next message reads it | yes (outside write; the journal does not say who) | no |
+| `model.chat` ("Model": "The model that answers your messages") | `Minds:seat.loops` (RESIDENT, `router.c1f:6, 76-96`); read by `Chat.seat_model` (`chat.c1f:30`) and the HA select (`ha.c1f:115`) | one name of `pickable` (the local tags that pass `chat_ok`, plus listed claude-agent rungs, `door_models.c1f:41`), a model name of 1..120 chars from `[a-z0-9_.:/@~+-]` (`door_models.c1f:48-55`); `''` = not picked | `''`, then the launcher's `seat_default`, then `claude` (`chat.c1f:27-30`) | `POST /membrane/options {"loops": ..}` or `/membrane/models` (a verified token, `door_models.c1f`); or `entity_write Minds:seat.loops` (owner) | yes: the next message reads it | yes (outside write; the journal does not say who) | no |
 | `model.default` ("Fallback model") | `Minds:seat.seat_default` | model name | `claude` | only the launcher's `minds` fact seeds it (`router.c1f:77-96`, once, while no `Minds` entity exists); no route writes it | no route | - | no |
 | `model.list` (read-only list "Available models") | `Model:*` (`router.c1f:60-70`), `GET /v1/models` | rows | - | the backend's tag list and `cloud_models` | live read | - | no |
 | `model.cloud` ("Other providers") | fact `cloud_models`: list of `{name, backend, base_url, api_key_env, chat_path?}` (`chat_oai.c1f:10, 35, 44`) | list | none | launch only (`--fact cloud_models=..`) | LAUNCH-ONLY, restart needed | no | the key is read from the env var NAMED by `api_key_env`: show only that name |
@@ -71,8 +71,8 @@ Columns: **key**; **lives**; **type / values**; **default**; **change today**; *
 | `chat.poll_busy_ms` ("Check for news every", ms, while answering) | `chat_active_poll_ms` | number | 700 | launch only | page load | - | no |
 | `chat.stick_px` ("Stay at the bottom within", px) | `chat_stick_px` | number | 80 | launch only | page load | - | no |
 | `chat.tool_chars` ("Tool input shown up to", characters) | `chat_tool_chars` | whole number | 90 | launch only | page load | - | no |
-| `chat.header_label` ("Header word of the context note") | `Banner:owner:main.header_dial` (`default_banner.c1f:14`) | text | `CONVERSATION` | `entity_write` | yes (banner getter recomputes) | yes | no |
-| `chat.error_label` ("Words before a failed turn's note") | `Banner:owner:main.error_dial` (`default_banner.c1f:15`) | text | `THE PREVIOUS TURN ENDED WITH AN ERROR` | `entity_write` | yes | yes | no |
+| `chat.header_label` ("Header word of the context note") | `Banner:admin:main.header_dial` (`default_banner.c1f:14`) | text | `CONVERSATION` | `entity_write` | yes (banner getter recomputes) | yes | no |
+| `chat.error_label` ("Words before a failed turn's note") | `Banner:admin:main.error_dial` (`default_banner.c1f:15`) | text | `THE PREVIOUS TURN ENDED WITH AN ERROR` | `entity_write` | yes | yes | no |
 
 The six `chat_*` rows are the old page's constants (`ui-rebuild-plan.md` decision 6). In a c1f UI they are values the view pack reads; I recommend they become real settings (item B) or are dropped as constants (decision 3). The two labels are only worth a row if the operator wants them; they are the banner's, and the model may replace the whole banner (decision 4).
 
@@ -91,7 +91,7 @@ The six `chat_*` rows are the old page's constants (`ui-rebuild-plan.md` decisio
 
 | key | lives | type / values | default | change today | live | journalled | secret |
 |---|---|---|---|---|---|---|---|
-| `home.allow:<name>` ("Allowed actions"): one entry per name, `services` (list: `light.turn_on`, `light.*`, `states.read`) and `entities` (list: `light.kitchen`, `light.*`) | `HaAllow:<name>` (`ha.c1f:103`, RESIDENT) | two lists of text | none: DEFAULT DENY (no entry = every call is an error) | `entity_write HaAllow:<name>.services / .entities` (owner), delete = `retire = true` | yes, read at the moment a call is claimed (`ha.c1f:21-23`) | yes | no |
+| `home.allow:<name>` ("Allowed actions"): one entry per name, `services` (list: `light.turn_on`, `light.*`, `states.read`) and `entities` (list: `light.kitchen`, `light.*`) | `HaAllow:<name>` (`ha.c1f:103`, RESIDENT) | two lists of text | none: DEFAULT DENY (no entry = every call is an error) | `entity_write HaAllow:<name>.services / .entities` (a verified token), delete = `retire = true` | yes, read at the moment a call is claimed (`ha.c1f:21-23`) | yes | no |
 
 The Home Assistant token is the component's own; the seat holds no Home Assistant secret (`docs/home-assistant.md`). No row for it.
 
@@ -99,7 +99,7 @@ The Home Assistant token is the component's own; the seat holds no Home Assistan
 
 | key | lives | type / values | default | change today | live | journalled | secret |
 |---|---|---|---|---|---|---|---|
-| `import.sources` ("Other databases": rows `name`, `path`, `access`) | `SqlSource:<name>` {path, mode} (`sql.c1f:25-27`, RESIDENT) | `mode` `ro` or `rw`; the seat's own store is refused with a reason | none; mode `ro` | `entity_write SqlSource:<name>.path / .mode` (owner); seeded by the fact `sql_sources` (a source with a path is left alone) | yes; the next run opens it again | yes | no |
+| `import.sources` ("Other databases": rows `name`, `path`, `access`) | `SqlSource:<name>` {path, mode} (`sql.c1f:25-27`, RESIDENT) | `mode` `ro` or `rw`; the seat's own store is refused with a reason | none; mode `ro` | `entity_write SqlSource:<name>.path / .mode` (a verified token); seeded by the fact `sql_sources` (a source with a path is left alone) | yes; the next run opens it again | yes | no |
 | `import.page` ("Old turns read per query") | fact `legacy_page` (`door_session.c1f`, `legacy_import.c1f`) | whole number >= 1 | none: unset = an open imports nothing | launch only | LAUNCH-ONLY | - | no |
 | "Import old history" (a button, not a value) | `Legacy:seat.list = {id}` / `.import = {id, sessions, page}` (`legacy_import.c1f:47, 69`; ledger entity) | action | - | `entity_write` | yes | yes | no |
 
@@ -109,11 +109,9 @@ The Home Assistant token is the component's own; the seat holds no Home Assistan
 
 | key | lives | shows | change |
 |---|---|---|---|
-| `access.owner` ("Owner") | fact `operator`, default `owner` (`door.c1f:70`) | the name; the owner is the person whose token `sub` equals it | launch only |
-| `access.token_life` ("Owner key lasts", seconds) | `owner_token_ttl_s`, default 2592000 (30 days; `native/src/owner.rs:55`) | number | launch only; a new key is minted at every start |
-| `access.token_file` ("Owner key file") | `owner_token_file` | the PATH only, never the token | - |
+| `access.token_life` ("Admin key lasts", seconds) | `admin_token_ttl_s`, default 2592000 (30 days; `native/src/admin.rs`) | number | launch only; a new key is minted at every start |
+| `access.token_file` ("Admin key file") | `admin_token_file` | the PATH only, never the token | - |
 | `access.mode` | `door_secret_file` present = tokens required; none = open (the barest seat) | text | launch only |
-| `access.people` ("People") | `Person:<sub>` {sub, name, first_seen, last_seen} (`door_auth.c1f`) | list, read-only | made by the first request of a token |
 | `access.port` | `door_port` | number | launch only |
 
 Minting a token for another person is the command `cliffvm token mint` (`docs/auth.md`); there is no route, so no control in the window (a new route would be new plumbing, item F).
@@ -126,28 +124,28 @@ Never in the window: `request_keep_s` (accepted and ignored), `app_dirs`, `ledge
 
 ## How the window reads and writes (c1f only)
 
-### Recommendation: one `Setting:<group>.<key>` entity per setting, owners stay the source of truth
+### Recommendation: one `Setting:<group>.<key>` entity per setting, sources stay the source of truth
 
 Shape (a pack `settings.c1f`, class `Setting`, RESIDENT so it is in the page's snapshot and listed whole):
 
-- Data, written once by the pack at `Boot.started` (the descriptor): `group`, `key`, `label`, `help`, `kind` (`choice` / `number` / `text` / `list` / `readonly`), `allowed` or `min`/`max`, `default`, `order`, `live` (`true` / `restart`), and `owner` + `owner_prop` (where the value lives, e.g. `Minds:seat`.`loops`).
-- Getters: `current` reads the owner (`prop(this.owner, this.owner_prop)`, or the Boot fact, or the default), `err` validates a candidate, `shown` = label + current + help. No copy of the value is kept, so nothing drifts from the owner.
-- ONE write door: `Setting:<g>.<k>.set = <value>`. The on-setter checks `err`; when `None` it writes the owner and records `applied = clock`; otherwise it records `refused = <reason>` and writes nothing. The window reads `refused` and shows it as text next to the row.
-- The page writes it with ONE `Fetch` to `POST /mcp` `entity_write` (`door_tools.c1f:17, 58-64`): that route is already owner-checked (`mc_deny`, 403 shown as text), journalled (an outside write), and the reply carries the reactions (`refused` in them).
+- Data, written once by the pack at `Boot.started` (the descriptor): `group`, `key`, `label`, `help`, `kind` (`choice` / `number` / `text` / `list` / `readonly`), `allowed` or `min`/`max`, `default`, `order`, `live` (`true` / `restart`), and `source` + `source_prop` (where the value lives, e.g. `Minds:seat`.`loops`).
+- Getters: `current` reads the source (`prop(this.source, this.source_prop)`, or the Boot fact, or the default), `err` validates a candidate, `shown` = label + current + help. No copy of the value is kept, so nothing drifts from the source.
+- ONE write door: `Setting:<g>.<k>.set = <value>`. The on-setter checks `err`; when `None` it writes the source and records `applied = clock`; otherwise it records `refused = <reason>` and writes nothing. The window reads `refused` and shows it as text next to the row.
+- The page writes it with ONE `Fetch` to `POST /mcp` `entity_write` (`door_tools.c1f:17, 58-64`): that route needs a verified token (`mc_anon`), journalled (an outside write), and the reply carries the reactions (`refused` in them).
 
-Why this and not "read the owners directly": (1) the window becomes ONE generic list (`FOR s IN instances('Setting')`, grouped by `group`, sorted by `order`): the labels, help, limits and defaults are data, so a new setting is a new row, not new view code; (2) validation lives next to the value, once, with the reason as text (today it is two copies: `op_err` and `errs`, `door_models.c1f:48-61, 131-141`); (3) launch-only and live rows are one shape (`live = restart`: shown read-only with the launch line, no edit); (4) the old routes keep working (`/membrane/options`, `/membrane/models` for the Home Assistant select) because they write the same owners. Direct reading would make the view know every owner's prop name and every validation.
+Why this and not "read the sources directly": (1) the window becomes ONE generic list (`FOR s IN instances('Setting')`, grouped by `group`, sorted by `order`): the labels, help, limits and defaults are data, so a new setting is a new row, not new view code; (2) validation lives next to the value, once, with the reason as text (today it is two copies: `op_err` and `errs`, `door_models.c1f:48-61, 131-141`); (3) launch-only and live rows are one shape (`live = restart`: shown read-only with the launch line, no edit); (4) the old routes keep working (`/membrane/options`, `/membrane/models` for the Home Assistant select) because they write the same sources. Direct reading would make the view know every source's prop name and every validation.
 
-Cost of the alternative the other way (a separate settings route): a new Request family of about 200 lines like `door_models.c1f`, one more owner check to keep in step with `door.c1f:71`; not recommended.
+Cost of the alternative the other way (a separate settings route): a new Request family of about 200 lines like `door_models.c1f`, one more check to keep in step with `door.c1f:71`; not recommended.
 
-Things to prove before building (engine, not assumed): whether a setter can write a computed property name (`(this.owner).[this.owner_prop] = v`; `door_tools.c1f:63` does it for the MCP write, so I expect yes); if not, one explicit on-setter per setting, as `door_models.c1f:84-111` does.
+Things to prove before building (engine, not assumed): whether a setter can write a computed property name (`(this.source).[this.source_prop] = v`; `door_tools.c1f:63` does it for the MCP write, so I expect yes); if not, one explicit on-setter per setting, as `door_models.c1f:84-111` does.
 
 ### What the write path guarantees
 
 | need | how |
 |---|---|
-| one owner-checked route | `POST /mcp` `entity_write` (`door_tools.c1f:44`); the 403 text `for the owner` (`door.c1f:73`) is shown as it is |
-| live where possible | the owner's value is read by getters on the next use (`Chat.seat_model`, `HaCall.allow_by`, `SqlSource`); rows marked `restart` have no edit control |
-| journalled | the write of the owner and of `applied`/`refused` are outside writes of RESIDENT entities |
+| one route for a verified token | `POST /mcp` `entity_write` (`door_tools.c1f`); there is no 403 for who asks |
+| live where possible | the source's value is read by getters on the next use (`Chat.seat_model`, `HaCall.allow_by`, `SqlSource`); rows marked `restart` have no edit control |
+| journalled | the write of the source and of `applied`/`refused` are outside writes of RESIDENT entities |
 | the reason when refused | `Setting.refused` (validation) or the 403 body (access); both text in the row |
 | who wrote it | NOT recorded today: the MCP write does not stamp the caller (item E) |
 
@@ -184,9 +182,9 @@ Stays launch-only (no edit control, "restart needed", shown with the launch line
 
 Operator answers of 2026-11-14 applied: the dead settings and the six `chat_*` view constants are not rows; no author is recorded and no token is minted by the window; Access and Limits are shown read-only; the window cannot set a SQL source to `rw`; a number outside its range is refused with the reason.
 
-**Contract for the view** (the c1f view is built separately): the window lists `instances('Setting')`, groups by `group`, sorts by `order`. A row holds `label`, `help`, `kind` (`text` | `number` | `list` | `allowlist` | `readonly`), `live` (`live` | `restart`), `default`, `min`, `max`, `whole`, `unit`, `how`, and the getter `current`. A change is ONE write, `Setting:<group>.<key>.set = <value>`, as `POST /mcp` `entity_write` (owner-checked: a person who is not the owner gets the door's 403 text `for the owner`, shown as it is). Read back `refused` (the reason as text, empty after a good write) and `applied` (when). A refused write writes nothing else. `readonly` rows have no edit control and say in `how` what changes them.
+**Contract for the view** (the c1f view is built separately): the window lists `instances('Setting')`, groups by `group`, sorts by `order`. A row holds `label`, `help`, `kind` (`text` | `number` | `list` | `allowlist` | `readonly`), `live` (`live` | `restart`), `default`, `min`, `max`, `whole`, `unit`, `how`, and the getter `current`. A change is ONE write, `Setting:<group>.<key>.set = <value>`, as `POST /mcp` `entity_write` (source-checked: a person who is not the source gets the door's 403 text `for the source`, shown as it is). Read back `refused` (the reason as text, empty after a good write) and `applied` (when). A refused write writes nothing else. `readonly` rows have no edit control and say in `how` what changes them.
 
-**Owners.** `model.chat` writes `Minds:seat.loops` (what the chat already reads); `home.allow` writes `HaAllow:<name>` (an entry the new list leaves out is retired); `chat.max_steps`, `chat.timeout`, `map.hidden`, `map.hidden_prefix`, `map.window` and `map.poll_ms` are owned by the row itself (`value`, journalled, so they survive a restart): the readers (`chat_turn.c1f`, `door_fieldvm.c1f`) read `Setting:*.current` first, then the launch fact, then the pack's own default (which a seat without this pack still uses). `GET /ui/fieldvm/active` with no `m` uses `map.window`, whose default is 150 (operator, 2026-11-14), so it answers 200; an `m` that is named but is not a number of at least 1 is still a 400; `map.poll_ms` defaults to 2000 ms; the snapshot's `field_window` / `field_poll_ms` read the same rows.
+**Sources.** `model.chat` writes `Minds:seat.loops` (what the chat already reads); `home.allow` writes `HaAllow:<name>` (an entry the new list leaves out is retired); `chat.max_steps`, `chat.timeout`, `map.hidden`, `map.hidden_prefix`, `map.window` and `map.poll_ms` are owned by the row itself (`value`, journalled, so they survive a restart): the readers (`chat_turn.c1f`, `door_fieldvm.c1f`) read `Setting:*.current` first, then the launch fact, then the pack's own default (which a seat without this pack still uses). `GET /ui/fieldvm/active` with no `m` uses `map.window`, whose default is 150 (operator, 2026-11-14), so it answers 200; an `m` that is named but is not a number of at least 1 is still a 400; `map.poll_ms` defaults to 2000 ms; the snapshot's `field_window` / `field_poll_ms` read the same rows.
 
 **Hidden by default.** `Setting` joins the default hidden classes (`map.hidden` and the `door_fieldvm.c1f` fallback): Message, SemText, Span, Request, DomNode, View, Fetch, Setting. Operator answers kept: `home.allow` stays one row; the banner labels and the seat-identity facts are not rows; number limits as listed (chat.max_steps 1..100000, chat.timeout 1..604800 s, map.window 1..10000, map.poll_ms 200..600000).
 
@@ -196,8 +194,8 @@ Operator answers of 2026-11-14 applied: the dead settings and the six `chat_*` v
 
 **Operator 2026-11-14: "settings panel is empty? build it as c1f".** The Settings tab of the page is a c1f view pack (no JavaScript logic) that fills the shell's Settings slot through the view-pack contract (`docs/ui-rebuild-plan.md`): it registers `Nav:settings`, draws when the tab is first shown and reads the rows again each time the tab is shown again.
 
-- **Read feed.** The browser VM cannot read entities, so `settings.c1f` answers `GET /ui/settings` (a new route family `settings` in `door.c1f`, getters only, no builtin): `{settings: [row, ...]}`, every row in the window's order (`order` runs through the groups), each row `id, group, key, label, help, kind, live, order, default, min, max, whole, unit, how, hidden` and what is true now `current, refused` (text, empty after a good write), `applied` (a time); the chat model row also carries `choices` (the seat's model list: empty on the barest seat, which loads no router). Hidden rows are sent flagged; the view leaves them out. Nothing in it is a secret (tested with a key, a url password, the door secret and the owner key on the seat). Everyone who is authenticated reads it; the write door stays the owner's. Tests: `native/tests/settings_1143.rs` (`the_view_feed_...`).
+- **Read feed.** The browser VM cannot read entities, so `settings.c1f` answers `GET /ui/settings` (a new route family `settings` in `door.c1f`, getters only, no builtin): `{settings: [row, ...]}`, every row in the window's order (`order` runs through the groups), each row `id, group, key, label, help, kind, live, order, default, min, max, whole, unit, how, hidden` and what is true now `current, refused` (text, empty after a good write), `applied` (a time); the chat model row also carries `choices` (the seat's model list: empty on the barest seat, which loads no router). Hidden rows are sent flagged; the view leaves them out. Nothing in it is a secret (tested with a key, a url password, the door secret and the admin key on the seat). Everyone who is authenticated reads it; the write door stays the source's. Tests: `native/tests/settings_1143.rs` (`the_view_feed_...`).
 - **View.** One section per group (Model, Chat, Home, Import, Access, Limits: the order the feed carries), one row per setting: label, a badge (`Applies now` / `Needs a restart`), the help line, what is in force, the control, the result of the last Save. text and number: a text input (a select when the feed gives a model list) and Save; list: one input per line with Remove, Add a line, Save; allowlist: one card per entry (name, services, entities as comma-separated text, Remove), Add an entry, Save; readonly: the value, and the launch line from `how` in plain text, no control of any kind. Enter in a box is the form's submit.
-- **Write.** ONE `POST /mcp` `tools/call` `entity_write` of `Setting:<id>.set` per Save (one at a time per row). The call is answered 2xx when the seat took it: the rows are then read back, and the row says `Applied.` or `Refused: <the seat's own reason>` next to it (the value in force unchanged, what was typed stays in the box). A refusal of the call itself (403 `for the owner`, a failure, a timeout) is `Not saved: the seat answered: <reason>`. Nothing is clamped by the page; a text that is no number goes as typed, so the seat's reason names it.
+- **Write.** ONE `POST /mcp` `tools/call` `entity_write` of `Setting:<id>.set` per Save (one at a time per row). The call is answered 2xx when the seat took it: the rows are then read back, and the row says `Applied.` or `Refused: <the seat's own reason>` next to it (the value in force unchanged, what was typed stays in the box). A refusal of the call itself (403 `for the source`, a failure, a timeout) is `Not saved: the seat answered: <reason>`. Nothing is clamped by the page; a text that is no number goes as typed, so the seat's reason names it.
 - **Not in the view:** the six Map rows (`hidden`), the dead settings, any secret (only environment-variable NAMES and file PATHS), who changed a value, token minting, `rw` for a SQL source.
 - **Tests:** `tests/js/settings_view.test.mjs` (wasm engine: rows per group in order, hidden absent, live write, refusal with reason, 403 text, restart rows without a control, both editors round trip, select, failed read and Try again, a stale answer dropped, no secret, idle), `tests/js/settings_page.test.mjs` (a real private seat and headless Chrome: change the chat step limit and see it applied, 0 refused with the seat's reason, the model row, the allow-list editor, no secret on the page, dark/light/phone screenshots).

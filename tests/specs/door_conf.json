@@ -116,12 +116,12 @@
    {
     "eid": "Request:1",
     "prop": "reply.body.who.sub",
-    "equals": "owner"
+    "equals": "admin"
    },
    {
     "eid": "Request:1",
     "prop": "reply.body.who.name",
-    "equals": "Owner"
+    "equals": "admin"
    }
   ]
  },
@@ -241,12 +241,12 @@
    {
     "eid": "Request:1",
     "prop": "reply.body.who.sub",
-    "equals": "owner"
+    "equals": "admin"
    },
    {
     "eid": "Request:1",
     "prop": "reply.body.who.name",
-    "equals": "Owner"
+    "equals": "admin"
    }
   ]
  },

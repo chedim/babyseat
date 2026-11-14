@@ -87,23 +87,23 @@ class RealSeat:
         assert r.returncode == 0, r.stderr
         return r.stdout.strip()
 
-    def owner_token(self) -> str:
-        """The owner's token, the file the seat writes at boot (docs/auth.md): the model's own tools carry it."""
+    def admin_token(self) -> str:
+        """The admin's token, the file the seat writes at boot (docs/auth.md): the model's own tools carry it."""
         t = time.time()
         while True:
             try:
-                tok = (self.dir / "owner.token").read_text().strip()
+                tok = (self.dir / "admin.token").read_text().strip()
                 if tok:
                     return tok
             except OSError:
                 pass
-            assert time.time() - t < 30, "the seat made no owner token"
+            assert time.time() - t < 30, "the seat made no admin token"
             time.sleep(0.05)
 
     def tool(self, name: str, **args):
-        """One call of the model's tool on /mcp (the owner's token): -> the reply text. `tool("entity_write", spec=..., prop=..., value=...)` is the model writing."""
+        """One call of the model's tool on /mcp (the admin's token): -> the reply text. `tool("entity_write", spec=..., prop=..., value=...)` is the model writing."""
         import json, urllib.request
-        req = urllib.request.Request(self.url + "/mcp", method="POST", headers={"Authorization": "Bearer " + self.owner_token(), "Content-Type": "application/json"},
+        req = urllib.request.Request(self.url + "/mcp", method="POST", headers={"Authorization": "Bearer " + self.admin_token(), "Content-Type": "application/json"},
                                      data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}).encode())
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read())["result"]["content"][0]["text"]
@@ -127,7 +127,7 @@ class RealSeat:
 
 class ReleaseSeat(RealSeat):
     """The same seat, started by the RELEASE LAUNCHER (`scripts/seat`: the shipped barest packs and app, the strict door, its own data folder, a free port): what a user runs.
-    Only the way it is started differs; the token helpers (`mint`, `owner_token`, `tool`) are the parent's. The launcher listens on 127.0.0.1 (it has no --bind)."""
+    Only the way it is started differs; the token helpers (`mint`, `admin_token`, `tool`) are the parent's. The launcher listens on 127.0.0.1 (it has no --bind)."""
 
     def start(self) -> "ReleaseSeat":
         d = self.dir

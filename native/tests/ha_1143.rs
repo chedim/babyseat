@@ -1,7 +1,7 @@
 //! The seat's use of Home Assistant (#1143, slice 2, pack `membrane/packs/ha.c1f`): the model writes `HaCall:<id>.request`, the COMPONENT inside Home Assistant (which holds no
 //! secret of the seat's and the seat holds none of Home Assistant's) pulls the pending calls over `GET /membrane/ha/calls`, claims one and finishes it with `POST /membrane/ha/calls`;
 //! the receipt is read on the entity like any driver's. `HaCatalog:ha` is the seat's copy of what Home Assistant exposes (`POST /membrane/ha/catalog`), `HaAllow:<name>` is the
-//! allow-list (default deny). Every route is the OWNER's. Real seat process, real door, real tokens; nothing outside loopback. Every wait has a timeout; the child is always reaped.
+//! allow-list (default deny). Every route is a verified token's. Real seat process, real door, real tokens; nothing outside loopback. Every wait has a timeout; the child is always reaped.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -95,14 +95,14 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
         std::thread::sleep(Duration::from_millis(50));
     }
 }
-fn owner_token(dir: &Dir) -> String { wait("the owner token", || std::fs::read_to_string(dir.0.join("owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())) }
+fn admin_token(dir: &Dir) -> String { wait("the admin token", || std::fs::read_to_string(dir.0.join("admin.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())) }
 fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() }
 fn person_token(dir: &Dir, sub: &str) -> String {
     let secret = std::fs::read_to_string(dir.0.join("door.secret")).unwrap().trim().as_bytes().to_vec();
     membrane_vm::jwt::mint(&secret, sub, sub, 3600.0, now()).unwrap()
 }
 
-/// the model's tool: one entity_write on /mcp (the owner's token, as the turn's CLI carries it) -> the reply text
+/// the model's tool: one entity_write on /mcp (the admin's token, as the turn's CLI carries it) -> the reply text
 fn write(port: u16, tok: &str, spec: &str, prop: &str, value: J) -> String {
     let (st, b) = j(port, "POST", "/mcp", tok, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": spec, "prop": prop, "value": value}}}));
     assert_eq!(st, 200, "{b}");
@@ -130,7 +130,7 @@ fn calls(port: u16, tok: &str) -> J { let (st, b) = j(port, "GET", "/membrane/ha
 fn a_call_is_pending_then_running_then_done_and_the_model_reads_the_receipt_on_the_entity() {
     let dir = setup("ha-life");
     let (_run, port) = launch(&dir);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     allow(port, &own);
     assert_eq!(calls(port, &own), json!([]), "nothing asked yet");
     light_call(port, &own, "k1");
@@ -161,7 +161,7 @@ fn a_call_is_pending_then_running_then_done_and_the_model_reads_the_receipt_on_t
 fn a_failed_call_reads_as_an_error_with_the_reason_and_the_entity_is_of_the_class_error() {
     let dir = setup("ha-fail");
     let (_run, port) = launch(&dir);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     allow(port, &own);
     light_call(port, &own, "f1");
     assert_eq!(j(port, "POST", "/membrane/ha/calls", &own, json!({"id": "f1", "claim": true})).0, 200);
@@ -180,7 +180,7 @@ fn a_failed_call_reads_as_an_error_with_the_reason_and_the_entity_is_of_the_clas
 fn a_result_for_a_call_nobody_claimed_or_that_does_not_exist_changes_nothing() {
     let dir = setup("ha-order");
     let (_run, port) = launch(&dir);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     allow(port, &own);
     light_call(port, &own, "o1");
     let (st, _) = j(port, "POST", "/membrane/ha/calls", &own, json!({"id": "o1", "result": {"ok": true, "response": 1}}));
@@ -193,25 +193,34 @@ fn a_result_for_a_call_nobody_claimed_or_that_does_not_exist_changes_nothing() {
     assert_eq!(state(port, &own, "o1"), "pending");
 }
 
-// ---- the owner's door -----------------------------------------------------------------------------------------------------------------------
+// ---- the door: a verified token (any sub is the admin) -----------------------------------------------------------------------------------------------------------------------
 
 #[test]
-fn every_ha_route_is_the_owners_a_person_gets_a_403_and_no_token_a_401_and_nothing_changes() {
+fn every_ha_route_needs_a_verified_token_no_token_is_a_401_and_any_sub_is_the_admin() {
     let dir = setup("ha-gate");
     let (_run, port) = launch(&dir);
-    let (own, bob) = (owner_token(&dir), person_token(&dir, "bob"));
+    let own = admin_token(&dir);
     allow(port, &own);
     light_call(port, &own, "g1");
     for (m, p, body) in [("GET", "/membrane/ha/calls", J::Null), ("POST", "/membrane/ha/calls", json!({"id": "g1", "claim": true})),
                          ("POST", "/membrane/ha/calls", json!({"id": "g1", "result": {"ok": true}})),
                          ("POST", "/membrane/ha/catalog", json!({"entities": [{"entity_id": "light.a"}], "services": []})), ("GET", "/membrane/ha/metrics", J::Null)] {
-        let (st, b) = j(port, m, p, &bob, body.clone());
-        assert_eq!((st, &b), (403, &json!({"type": "error", "error": {"message": "for the owner"}})), "{m} {p}");
         let (st, _) = http(port, m, p, None, &body.to_string());
         assert_eq!(st, 401, "{m} {p}: no token");
+        let (st, b) = j(port, m, p, "forged.token.value", body.clone());
+        assert_eq!(st, 401, "{m} {p}: a bad token: {b}");
     }
     assert_eq!(state(port, &own, "g1"), "pending", "a refused claim claimed nothing");
     assert!(read(port, &own, "HaCatalog:ha", "entities").contains("has no"), "a refused catalog wrote nothing");
+    // a token with sub `bob` (or `ha`) is the admin: the same routes answer it as they answer the boot's token
+    for sub in ["bob", "ha"] {
+        let t = person_token(&dir, sub);
+        assert_eq!(j(port, "GET", "/membrane/ha/calls", &t, J::Null).0, 200, "sub {sub}");
+        assert_eq!(j(port, "GET", "/membrane/ha/metrics", &t, J::Null).0, 200, "sub {sub}");
+        assert_eq!(j(port, "POST", "/membrane/ha/catalog", &t, json!({"entities": [{"entity_id": "light.a"}], "services": []})).0, 200, "sub {sub}");
+    }
+    assert_eq!(j(port, "POST", "/membrane/ha/calls", &person_token(&dir, "bob"), json!({"id": "g1", "claim": true})).0, 200);
+    assert_eq!(state(port, &own, "g1"), "running", "bob's claim claimed it: bob is the admin");
     // wrong methods answer 405 with the allowed ones
     assert_eq!(j(port, "PUT", "/membrane/ha/calls", &own, json!({})).0, 405);
     assert_eq!(j(port, "POST", "/membrane/ha/metrics", &own, json!({})).0, 405);
@@ -223,7 +232,7 @@ fn every_ha_route_is_the_owners_a_person_gets_a_403_and_no_token_a_401_and_nothi
 fn with_no_allow_entry_every_call_is_an_error_at_once_and_is_never_offered_to_the_component() {
     let dir = setup("ha-deny");
     let (_run, port) = launch(&dir);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     light_call(port, &own, "d1");
     assert_eq!(state(port, &own, "d1"), "error");
     let t = read(port, &own, "HaCall:d1", "response");
@@ -237,7 +246,7 @@ fn with_no_allow_entry_every_call_is_an_error_at_once_and_is_never_offered_to_th
 fn the_allow_list_matches_service_and_every_entity_by_exact_name_or_domain_star_inside_one_entry() {
     let dir = setup("ha-matrix");
     let (_run, port) = launch(&dir);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     allow(port, &own);
     let call = |id: &str, req: J| { write(port, &own, &format!("HaCall:{id}"), "request", req); state(port, &own, id) };
     assert_eq!(call("a1", json!({"domain": "light", "service": "turn_off", "target": {"entity_id": ["light.a", "light.b"]}})), "pending", "domain star on both sides, a list of entities");
@@ -263,7 +272,7 @@ fn the_allow_list_matches_service_and_every_entity_by_exact_name_or_domain_star_
 fn a_call_that_is_running_or_done_is_not_re_gated_when_the_allow_entry_goes_away() {
     let dir = setup("ha-regate");
     let (_run, port) = launch(&dir);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     allow(port, &own);
     light_call(port, &own, "x1");
     assert_eq!(j(port, "POST", "/membrane/ha/calls", &own, json!({"id": "x1", "claim": true})).0, 200);
@@ -279,7 +288,7 @@ fn a_call_that_is_running_or_done_is_not_re_gated_when_the_allow_entry_goes_away
 fn the_component_pushes_the_catalog_and_the_model_reads_entities_domains_and_services_on_one_entity() {
     let dir = setup("ha-catalog");
     let (_run, port) = launch(&dir);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     let entities: Vec<J> = (0..300).map(|i| json!({"entity_id": format!("light.l{i}"), "name": format!("Lamp {i}")})).chain([json!({"entity_id": "sensor.temp", "name": "Temp"})]).collect();
     let services: Vec<J> = (0..400).map(|i| json!({"id": format!("light.s{i}"), "target": true, "fields": ["brightness_pct", "color_name"]})).chain([json!({"id": "notify.mobile", "target": false, "fields": ["message"]})]).collect();
     let (st, b) = j(port, "POST", "/membrane/ha/catalog", &own, json!({"entities": entities, "services": services}));
@@ -304,7 +313,7 @@ fn a_restart_replays_the_calls_as_they_were_nothing_runs_again_and_a_pending_cal
     let own;
     {
         let (_run, port) = launch(&dir);
-        own = owner_token(&dir);
+        own = admin_token(&dir);
         allow(port, &own);
         light_call(port, &own, "p1");                // stays pending
         light_call(port, &own, "p2");                // runs and stays running
@@ -318,7 +327,7 @@ fn a_restart_replays_the_calls_as_they_were_nothing_runs_again_and_a_pending_cal
         stop(_run);
     }
     let (_run, port) = launch(&dir);
-    let own = { let _ = own; owner_token(&dir) };
+    let own = { let _ = own; admin_token(&dir) };
     assert_eq!(state(port, &own, "p1"), "pending");
     assert_eq!(state(port, &own, "p2"), "running", "a call the component took is never offered again: it may have run");
     assert_eq!(state(port, &own, "p3"), "done");
@@ -344,7 +353,7 @@ fn turn(port: u16, tok: &str, sid: &str, text: &str) {
 fn the_metrics_rows_say_what_the_seat_really_knows_the_model_the_turns_the_last_answer_and_the_last_error() {
     let dir = setup("ha-metrics");
     let (_run, port) = launch(&dir);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     let rows = |port: u16| { let (st, b) = j(port, "GET", "/membrane/ha/metrics", &own, J::Null); assert_eq!(st, 200, "{b}"); b["rows"].clone() };
     let r = rows(port);
     assert_eq!(r.as_array().unwrap().iter().map(|x| x["key"].as_str().unwrap()).collect::<Vec<_>>(), ["busy", "model", "turns_today", "last_answer", "last_error"], "the whole honest set, in this order");

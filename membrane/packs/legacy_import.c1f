@@ -20,7 +20,7 @@ RESIDENT Legacy
 -- `page` has NO default (a request without it is refused with the reason in `refused`). A `done` session is never imported twice; an `error` or `importing` one resumes from its ledger `cursor` when named
 -- again (or in an `all`). One session at a time, one page per round: a page's entities and its ledger write are ONE cascade (one commit), so a stop between two pages loses nothing and repeats nothing.
 -- THE MAPPING (old row -> new entities). A session `{s: {id, title, owner, time: {created, updated}, ...}}` is `Chat:session:<sid>` (the id is kept) with `stitle`, `born`, `upd` (epoch ms, as they were),
--- `owner` (`Person:<slug>`: a session with no owner is the operator's, the fact `operator` else `owner`; a named owner is `slug(owner)`: lowercase, words joined by `-`, `.` `_` `,` read as spaces; its Person entity is made by packs/legacy_persons.c1f where the seat has persons) and `legacy_src`.
+-- `owner` (`Person:<slug>`: a session with no owner is the admin's, `Person:admin`; a named owner is `slug(owner)`: lowercase, words joined by `-`, `.` `_` `,` read as spaces; its Person entity is made by packs/legacy_persons.c1f where the seat has persons) and `legacy_src`.
 -- A user row and the assistant rows that answer it (`info.parentID` = the user row's id, in order of `n`) are ONE `ChatMessage` `Chat:session:<sid>:message:<ms>-<n>` (the user row's `time.created` and `n` padded to 8 digits: derived, no table; the session id is IN the key; a time row `Chat:main:time:<id>:session:<sid>` too (docs/chat-keys.md); a session whose old id holds a `:` is not imported (none in the previous stores seen); `at`, `pick` =
 -- `info.model.modelID`), its SemText body, its `ChatTurn` (state done, or error when the last answering row has an error; `ended`, `usage`, `cost`), its `ChatResponse` (the answer's text parts joined by blank lines)
 -- and one `ChatTool` per tool part (`name`, `input`, `result` = the part's `state.output`, else its `state.error`). `legacy_src` on the message, the turn and the session holds the old ids and times.
@@ -35,7 +35,7 @@ LegacySeat.converter getter: 1
 -- into the old field); `background` = every other agent (worker, watch, planner, worker-loops, field-call...). Only chats enter the thread; the others keep their header in the ledger as `skipped` (kind named) and the
 -- old store stays readable through `SqlSource:legacy`.
 LegacySeat.chat_agents getter: ['build', 'speaker']
-LegacySeat.opsub getter: str(prop(([b.facts for b in instances('Boot') if b.facts != None] or [{}])[0], 'operator') or 'owner')
+LegacySeat.opsub getter: 'admin'
 
 -- ---- start: the pack's own queries, the seat, and an import the last run left running is over (the ledger says where it was) ----------------------------------------
 Boot.started on-setter legacy-seed:

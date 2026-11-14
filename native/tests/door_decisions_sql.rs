@@ -54,7 +54,7 @@ fn world(p: &std::path::Path) -> (Core, Fields) {
     let o = |v: J| v.as_object().unwrap().clone();
     c.load("Boot:seat".into(), "Boot".into(), o(json!({"ui_dir": "/x"})), None, 0.0);
     c.load("Goal:g".into(), "Goal".into(), o(json!({"name": "g", "status": "open"})), None, 0.0);
-    c.load("Message:m1".into(), "Message".into(), o(json!({"speaker": "owner", "text": "hello", "ts": 20.0})), None, 0.0);
+    c.load("Message:m1".into(), "Message".into(), o(json!({"speaker": "admin", "text": "hello", "ts": 20.0})), None, 0.0);
     c.load("Message:m2".into(), "Message".into(), o(json!({"speaker": "model", "text": "later", "ts": 30.0})), None, 0.0);
     c.load("Message:w".into(), "Message".into(), o(json!({"text": "mentions only", "ts": 5.0})), None, 0.0);
     c.load("Message:old".into(), "Message".into(), o(json!({"text": "superseded", "ts": 1.0})), None, 0.0);
@@ -64,7 +64,7 @@ fn world(p: &std::path::Path) -> (Core, Fields) {
 fn ask(path: &str, query: &str) -> J {
     let p = db();
     let (mut c, mut f) = world(&p);
-    let req = json!({"method": "GET", "query": query, "headers": {}, "peer": "127.0.0.1:5", "authed": true, "sub": "owner", "auth_error": null, "path": path});
+    let req = json!({"method": "GET", "query": query, "headers": {}, "peer": "127.0.0.1:5", "authed": true, "sub": "admin", "auth_error": null, "path": path});
     c.load("Request:1".into(), "Request".into(), req.as_object().unwrap().clone(), None, 0.0);
     let mut seq = 1;
     f.rebuild(&mut c, 1.0, &mut seq);
@@ -108,14 +108,14 @@ fn an_items_chat_is_the_messages_that_refer_to_it_oldest_first_live_ones_only() 
     let b = &r["body"];
     assert_eq!(b["ok"], true);
     assert_eq!(b["eid"], "Goal:g");
-    assert_eq!(b["messages"], json!([{"id": "Message:m1", "who": "owner", "text": "hello", "ts": 20.0}, {"id": "Message:m2", "who": "model", "text": "later", "ts": 30.0}]));
+    assert_eq!(b["messages"], json!([{"id": "Message:m1", "who": "admin", "text": "hello", "ts": 20.0}, {"id": "Message:m2", "who": "model", "text": "later", "ts": 30.0}]));
 }
 
 #[test]
 fn a_post_to_a_read_route_is_a_405() {
     let p = db();
     let (mut c, mut f) = world(&p);
-    let req = json!({"method": "POST", "query": "", "headers": {}, "peer": "127.0.0.1:5", "authed": true, "sub": "owner", "auth_error": null, "path": "/membrane/item-chat"});
+    let req = json!({"method": "POST", "query": "", "headers": {}, "peer": "127.0.0.1:5", "authed": true, "sub": "admin", "auth_error": null, "path": "/membrane/item-chat"});
     c.load("Request:1".into(), "Request".into(), req.as_object().unwrap().clone(), None, 0.0);
     let mut seq = 1;
     f.rebuild(&mut c, 1.0, &mut seq);

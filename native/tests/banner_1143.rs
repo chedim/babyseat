@@ -1,4 +1,4 @@
-//! The barest seat's banner (#1143, operator 2026-11-13): the banner is FULLY the model's. `Banner:owner:main` is born once by the app's
+//! The barest seat's banner (#1143, operator 2026-11-13): the banner is FULLY the model's. `Banner:admin:main` is born once by the app's
 //! `default_banner` pack, whose `text` is a live getter (header, the previous turn's error); the model REPLACES it by loading a pack that
 //! imports `default_banner` and defines `Banner.text` (the upper layer's arm wins). The seat never segments, orders or joins what the model puts there.
 use membrane_vm::host::{self, Host, Options};
@@ -23,7 +23,7 @@ fn seat_with(before: impl Fn(&Host)) -> Host {
     h.pump();
     h
 }
-const B: &str = "membrane::Banner:owner:main";
+const B: &str = "membrane::Banner:admin:main";
 fn text(h: &Host) -> String { h.get(B, "text").as_str().unwrap_or_else(|| panic!("the banner text is a string: {}", h.get(B, "text"))).to_string() }
 
 #[test]

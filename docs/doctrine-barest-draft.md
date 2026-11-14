@@ -35,7 +35,7 @@ in sync with what it stands for: give its class a getter in a `.c1f` pack that r
 returns the world as it is now. Build it once, fix it when it is wrong; every later turn inherits it.
 
 YOUR BANNER IS YOUR TOOL FOR CONTINUITY. Every turn you receive your banner between this text and the incoming message.
-It is your entity `Banner:owner:main`, and its `text` is the whole banner, yours to define. Modify your banner to help you
+It is your entity `Banner:admin:main`, and its `text` is the whole banner, yours to define. Modify your banner to help you
 maintain continuity: write a pack that defines `Banner.text` (a getter, so it shows the world as it is now every turn) and it
 replaces the banner you started with. Keep in it what matters for the next turn (what you are doing, what is open, what you
 decided); Help:banner has examples.
@@ -74,7 +74,7 @@ Good luck.
 
 What the draft deliberately dropped from `doctrine.md`: persons, the editor and remote clients, phone calls, Blurp, voice,
 Home Assistant, the lanes and the triage loop, goals, planner and workers (loops come later), watches and wakes, decisions
-cards, the owner and security section (the barest seat has none), the improve-babyseat pull-request paragraph, the
+cards, the admin and security section (the barest seat has none), the improve-babyseat pull-request paragraph, the
 development-workflow paragraph, and every help-topic list.
 
 What the text promises, and where the barest seat stands today:

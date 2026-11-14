@@ -1,6 +1,6 @@
 PACK banner 1
 IMPORT goalgraph 1
--- The recall section of a chat's banner (#994). One Banner:<owner>:<chat> per person per chat, internal chats too.
+-- The recall section of a chat's banner (#994). One Banner:<admin>:<chat> per person per chat, internal chats too.
 -- Each turn writes the person's message to `ask`; `lines` is what the turn shows under RECALL. A message with no
 -- topic ("ok", "1. yes", "thanks!") recalls nothing: the lines stay as they were (the default arm reads itself).
 -- Dials on the instance (start as a copy of recall:dials): pool (candidates), n (rows shown), weights (the scorer's;

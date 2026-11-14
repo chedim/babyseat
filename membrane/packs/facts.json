@@ -177,17 +177,17 @@
    "wired": false,
    "why": "the seconds between two publications of `Stats:eval` (default 10, a threshold flagged for the operator); told by `--fact eval_stats_window_s=<s>`"
   },
-  "operator": {
+  "host_names": {
    "wired": false,
-   "why": "the person the page's owner cookie is minted for (door_auth.c1f; the released MEMBRANE_OPERATOR); default `owner`; told by `--fact operator=<name>`"
+   "why": "the Host names (besides localhost, 127.0.0.1 and [::1]) for which a loopback request is given the page's admin cookie (door_auth.c1f, the DNS-rebinding check); a JSON list or comma text, no default list; told by `--fact host_names=<a,b>`"
   },
-  "owner_token_file": {
+  "admin_token_file": {
    "wired": false,
-   "why": "where `cliffvm run` wrote the owner's token (<seat_data_dir>/owner.token, mode 0600) when the seat has a door secret; chat_turn.c1f adds the Authorization header and the run's env_from only when it is set; absent on the barest seat"
+   "why": "where `cliffvm run` wrote the admin's token (<seat_data_dir>/admin.token, mode 0600) when the seat has a door secret; chat_turn.c1f adds the Authorization header and the run's env_from only when it is set; absent on the barest seat"
   },
-  "owner_token_ttl_s": {
+  "admin_token_ttl_s": {
    "wired": false,
-   "why": "how long the owner token minted at every boot lives, in seconds (native/src/owner.rs); default 2592000 (30 days), a threshold flagged for the operator; told by `--fact owner_token_ttl_s=<n>`"
+   "why": "how long the admin token minted at every boot lives, in seconds (native/src/admin.rs); default 2592000 (30 days), a threshold flagged for the operator; told by `--fact admin_token_ttl_s=<n>`"
   },
   "quota_probe_s": {
    "wired": false,

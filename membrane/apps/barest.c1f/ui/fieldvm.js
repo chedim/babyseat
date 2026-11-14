@@ -310,14 +310,14 @@ class Host {
     }
   }
 
-  /** The clipboard, for a pack's `copy` write: the text only (a string, at most 1 MB), by the async clipboard where the page may use it, else a hidden textarea and execCommand. A failure is not silent: it is written as `Conn:page.copy_error`. */
-  copy(v) {
+  /** The clipboard, for a pack's `copy` write {text, at}: the text only (a string, at most 1 MB), by the async clipboard where the page may use it, else a hidden textarea and execCommand. The answer is written back on the same node as `copy_result` {ok, why?, at}: a failure is text a pack can show, never silent. */
+  copy(eid, v) {
     const text = v && typeof v === 'object' && typeof v.text === 'string' ? v.text.slice(0, 1_000_000) : null;
     if (text === null) return;
+    const done = (ok, why) => { this.f.write(eid, 'copy_result', JSON.stringify(ok ? { ok: true, at: this.now() } : { ok: false, why, at: this.now() }), this.now()); this.flush(); };
     const fallback = () => { const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch {} t.remove(); return ok; };
-    const fail = (why) => { if (this.f.get('Conn:page') === 'null') this.f.load('Conn:page', 'Conn', '{}'); this.f.write('Conn:page', 'copy_error', JSON.stringify(String(why)), this.now()); };
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => { if (!fallback()) fail('the browser refused the clipboard'); });
-    else if (!fallback()) fail('the browser has no clipboard');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => { if (fallback()) done(true); else done(false, 'the browser refused the clipboard'); });
+    else if (fallback()) done(true); else done(false, 'the browser has no clipboard');
   }
 
   /** A name or tag the allow-list refuses: the reason is written on the DomNode and marked on the element. */
@@ -333,7 +333,7 @@ class Host {
     if (prop === 'text') el.textContent = v == null ? '' : String(v);
     else if (prop === 'parent') this.attach(el, v, (this.get(eid) || {}).before);
     else if (prop === 'before') { if (!(this.made && this.made.has(eid))) this.attach(el, (this.get(eid) || {}).parent, v, true); }   // a node made this round is already in place
-    else if (prop === 'copy') this.copy(v);                       // a pack's `copy` {text, at}: the text goes to the clipboard (the Copy button of a code block); `at` makes a second click a new value
+    else if (prop === 'copy') this.copy(eid, v);                       // a pack's `copy` {text, at}: the text goes to the clipboard (the Copy button of a code block); `at` makes a second click a new value
     else if (prop === 'focused') {                                // a pack's focus(): the event that follows is no write (same value)
       if (v && document.activeElement !== el) el.focus(); else if (!v && document.activeElement === el) el.blur();
     }
@@ -363,7 +363,7 @@ class Host {
   // ---- W2: the page's `Fetch` entity (#1143). A pack writes `Fetch:<x>.request = {id, url, method?, headers?, body?, timeout_s?}`; this
   // makes ONE fetch() and writes `request_result` back in the seat's shape (native/src/drivers.rs + fetch.rs: {id, status, rc, head,
   // http_status, headers, body, started, finished, ms}; a failure is {id, status:'error', rc, head: the reason, started, finished, ms}).
-  // Same origin only, credentials same-origin (the owner cookie), never authorization or cookie. `abort = true` aborts the one in flight.
+  // Same origin only, credentials same-origin (the admin cookie), never authorization or cookie. `abort = true` aborts the one in flight.
   // No timeout unless the request carries `timeout_s`. W3: with `stream: true` the body is read as SSE; each frame's `data` is a page-local
   // entity `Chunk:<fetch eid>:<n>` ({fetch, id, n, data, done}, the seat's Fetch Chunk), n from 1, a last `done: true` Chunk (n+1, `error` on
   // a failure or abort), then the receipt without a body. Chunks are fed as mirrors: never fetched, never sent anywhere.

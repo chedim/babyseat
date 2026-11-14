@@ -22,7 +22,7 @@ docs/release-parity.md (`RP`), docs/migration-design.md (`MD`). "Round" = one ag
 |---|---|---|
 | install | `pip install babyseat` (a compiled abi3 wheel: macOS arm64+x86_64, Linux glibc+musl x86_64+aarch64; sdist elsewhere), or `curl ... install.sh \| bash` (uv tool, else `~/.membrane/venv`, links `~/.local/bin/{membrane,babyseat}`), or HACS, or `docker run chedim/babyseat` | `~/.membrane/` (venv, `auth.json` cloud keys, `selfupdate.log`), per-project `<cwd>/.membrane/` (field store, `jwt.secret`, `settings.json`) |
 | start | `babyseat` (= `membrane standalone`) or `membrane serve` / `membrane opencode` | serve + UI `:4096`, OpenAI/Ollama proxy `:11500`; both walk up to the next free port unless `--serve-port` / `--listen` is passed (pinned); listen on all interfaces (docs/auth.md) |
-| auth | JWT on by default: `<cwd>/.membrane/jwt.secret` (made, 0600); the page served to this machine gets an owner cookie; `membrane token mint --sub ID`; `MEMBRANE_JWT=0` = seat-token mode | `MEMBRANE_JWT`, `MEMBRANE_JWT_SECRET[_FILE]`, `MEMBRANE_OPERATOR` |
+| auth | JWT on by default: `<cwd>/.membrane/jwt.secret` (made, 0600); the page served to this machine gets an admin cookie; `membrane token mint --sub ID`; `MEMBRANE_JWT=0` = seat-token mode | `MEMBRANE_JWT`, `MEMBRANE_JWT_SECRET[_FILE]`, `MEMBRANE_OPERATOR` |
 | upgrade | `pip install -U babyseat` / `uv tool upgrade` / `membrane update` (a git pull, re-exec) / the operator's own autolatest wrapper (`~/.local/bin/membrane` runs `seat-self-update` first: a checkout ff, not a user feature); Docker: pull the tag | boot update check (`MEMBRANE_NO_UPDATE_CHECK`) |
 | stop | ctrl+c, `membrane stop` (INT, bounded TERM, KILL on the serve ports' listeners + the pidfile), `docker stop --stop-timeout 60` (teardown lease up to 90 s) | |
 | Docker | entrypoint maps `MEMBRANE_BACKEND`, `MEMBRANE_MODEL`, `MEMBRANE_EMBED_MODEL` to `--backend/--model/--embed-model`, pins `--listen 11500 --serve-port 4096 --serve-host 0.0.0.0`, volume `/data` = HOME, user 10001, healthcheck `:11500/membrane/state` | `docs/docker.md` |
@@ -70,8 +70,8 @@ Mapping table (old option -> new fact or flag; a fact name marked * is from `scr
 | `<cwd>/.membrane/field.sqlite`, `MEMBRANE_DATA_DIR` | `--store <data>/cliffvm.sqlite3` + `--fact seat_data_dir=<data>*` (+ legacy `sql_sources` for the history import, MD section 6) |
 | `.membrane/jwt.secret`, `MEMBRANE_JWT_SECRET[_FILE]` | `--fact door_secret_file=<path>*` (made 0600 if missing; MD decision 12: reuse the old file) |
 | `MEMBRANE_JWT=0` | dropped (RP D5) |
-| `MEMBRANE_OPERATOR` | `--fact operator=<sub>` (default `owner`) |
-| owner token for local tools | written at every boot to `<data>/owner.token` (0600), the fact `owner_token_file`; was: the seat token / `membrane token seat` |
+| `MEMBRANE_OPERATOR` | dropped: no users, every valid token is the admin (docs/auth.md) |
+| admin token for local tools | written at every boot to `<data>/admin.token` (0600), the fact `admin_token_file`; was: the seat token / `membrane token seat` |
 | `membrane token mint` | `cliffvm token mint --sub --ttl --secret-file [--name]` (exists) |
 | claude: `membrane auth claude-agent`, Agent SDK | `ANTHROPIC_API_KEY` in the env (default), `CLAUDE_AUTH=login` -> `--fact chat_auth=login`, `CLAUDE_BIN`/PATH -> `--fact chat_claude_bin=<path>`; no key and no login: the chat answers with how to set it |
 | `--open` / browser launch, `MEMBRANE_NO_BROWSER` | `--open` in the launcher (`open`/`xdg-open`), off in Docker |
@@ -116,7 +116,7 @@ Out of the first release (operator: "rebuild hass later"), but it must not break
 | spawn `python -m membrane.opencode --serve ...` on free ports 18096/18500, `MEMBRANE_LOOPS_MAX`, `HASS_URL`/`HASS_TOKEN` in env | `supervisor.py` | N/A: this is the Python seat. No equivalent child in cliffvm |
 | header: HA sends no JWT (open surface assumed) | `supervisor.py:150` | breaks against a door with a secret; needs a token in the integration |
 
-So **against cliffvm it would not work today**: the five `ha/*` routes are missing, it has no token, and "connect mode" (`serve_url`) would need the owner token. **Pin or disable, recommendation:** freeze `custom_components/membrane` and `integrations/homeassistant/custom_components/membrane_ai` in the release tree with `requirements: ["babyseat==0.7.53"]` and `version` of the integration unchanged, so HACS users get the same behaviour; document in the release notes that the HA integration runs its own pinned 0.7.53 seat until the rebuild; the Python 0.7 code stays in a `release-0.7` branch and the integration's package guard (`package_found`) is untouched. Alternative (disable): the integration refuses to start with a clear log line; worse for users. Check before the release (HACS, UNVERIFIED): that a release whose tag carries the frozen integration keeps HACS from offering an update that installs an incompatible seat; and `hacs.json` / `manifest.json` still pass the HACS validate job (`validate.yml`). The ThinkPhone/agDroid seats (Termux, aarch64, Bionic) are Python seats and stay on 0.7.5x (no wheel for them; the binary for Bionic is not built and not planned here).
+So **against cliffvm it would not work today**: the five `ha/*` routes are missing, it has no token, and "connect mode" (`serve_url`) would need the admin token. **Pin or disable, recommendation:** freeze `custom_components/membrane` and `integrations/homeassistant/custom_components/membrane_ai` in the release tree with `requirements: ["babyseat==0.7.53"]` and `version` of the integration unchanged, so HACS users get the same behaviour; document in the release notes that the HA integration runs its own pinned 0.7.53 seat until the rebuild; the Python 0.7 code stays in a `release-0.7` branch and the integration's package guard (`package_found`) is untouched. Alternative (disable): the integration refuses to start with a clear log line; worse for users. Check before the release (HACS, UNVERIFIED): that a release whose tag carries the frozen integration keeps HACS from offering an update that installs an incompatible seat; and `hacs.json` / `manifest.json` still pass the HACS validate job (`validate.yml`). The ThinkPhone/agDroid seats (Termux, aarch64, Bionic) are Python seats and stay on 0.7.5x (no wheel for them; the binary for Bionic is not built and not planned here).
 
 ## (f) The upgrade path for an existing Python user
 
@@ -173,7 +173,7 @@ What is lost at step 3 for users of the dropped items (Ollama, cloud keys, peers
 |---|---|---|
 | P1 | CI proof of the build: `cargo build --no-default-features --features bin` per platform (musl, aarch64, Intel) + `cliffvm --version`; a throwaway wheel via `Binding.Exec`, tags checked | 2 |
 | P2 | wheel layout: `dist/{bin,packs,apps,ui,help}` in the wheel; a test installs it clean and runs `cliffvm run` from the packaged paths; the `packs_dir` fact | 1-2 |
-| P3 | `cliffvm serve` (defaults, secret made 0600 and kept, owner token file, claude discovery, `--open`, pid, `stop`, bind default); port `seat_full_1143.rs` | 3-4 |
+| P3 | `cliffvm serve` (defaults, secret made 0600 and kept, admin token file, claude discovery, `--open`, pid, `stop`, bind default); port `seat_full_1143.rs` | 3-4 |
 | P4 | Python shims `membrane`/`babyseat`: exec the binary; dead subcommands print "not in this release"; test the argv mapping table | 1 |
 | P5 | CI: `wheels.yml`/`publish.yml` for the binary, the wasm check job, `cargo test` job, the clean-env smoke; the shim and sdist | 2-3 |
 | P6 | Docker: new image, entrypoint folded into `serve`, health check, privacy check; the `chedim/membrane` mirror | 1-2 |
@@ -192,7 +192,7 @@ What is lost at step 3 for users of the dropped items (Ollama, cloud keys, peers
 5. Default port `4096` [yes]; `:11500` served [no, RP D3].
 6. Default bind: `127.0.0.1` [yes] vs all interfaces as before (a security change either way); Docker passes `--bind 0.0.0.0`.
 7. Data dir: `<cwd>/.membrane/` as today [yes] vs one home dir; store file name; secret file name `jwt.secret` reused [yes].
-8. Owner token life 30 days and cookie life 7 days (already in the code, still flagged); the disk-free margin for the snapshot (a number).
+8. Admin token life 30 days and cookie life 7 days (already in the code, still flagged); the disk-free margin for the snapshot (a number).
 9. Version: `0.8.0` [yes] vs `0.7.60`; the HA integration's version.
 10. The HA integration: frozen on `babyseat==0.7.53` [yes] vs disabled; the `membrane_ai` copy likewise.
 11. The old subcommands that die with a message [list above] vs ones that must be kept (`doctor`, `token`, `store`, `erase-field`?).

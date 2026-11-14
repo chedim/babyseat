@@ -105,6 +105,13 @@ fn read_request(s: &mut TcpStream) -> Option<(Map<String, J>, Vec<u8>)> {
     Some((p, body))
 }
 
+/// NO USERS in this release (operator 2026-11-14): a token that passed every check (signature, exp, nbf, ...) is THE ADMIN, whatever its `sub` says; the packs see
+/// `sub` and `name` as `admin`. (The checks are `jwt::verify`'s and are untouched; only the identity is replaced, after them.)
+fn admin_claims(mut claims: J) -> J {
+    if let Some(m) = claims.as_object_mut() { m.insert("sub".into(), json!(crate::admin::SUB)); m.insert("name".into(), json!(crate::admin::SUB)); }
+    claims
+}
+
 /// `Http.listen`: bind and accept on threads of its own; -> the receipt. A second listen on the same entity stops the first.
 pub fn listen(st: &Store, eid: &str, req: &J) -> J {
     let id = req.get("id").cloned().unwrap_or(J::Null);
@@ -137,13 +144,13 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
                         // WHO: verified here, by the door, before any pack sees the request (a pack reads `authed` and `sub`; it cannot set them)
                         let headers = props.get("headers").and_then(|h| h.as_object()).cloned().unwrap_or_default();
-                        let verdict = if plain { Ok(json!({"sub": "owner"})) } else { match (&secret, token_of(&headers, "", &cookie)) {
+                        let verdict = if plain { Ok(json!({"sub": crate::admin::SUB, "name": crate::admin::SUB})) } else { match (&secret, token_of(&headers, "", &cookie)) {
                             (None, _) => Err("this door has no secret".to_string()),
                             (Some(_), None) => Err("no token".to_string()),
-                            (Some(k), Some(t)) => crate::jwt::verify(&t, k, now),
+                            (Some(k), Some(t)) => crate::jwt::verify(&t, k, now).map(admin_claims),
                         } };
                         match verdict {
-                            Ok(claims) => { if plain { props.insert("open".into(), json!(true)); }   // no secret, no check: the caller is the owner by decision (docs/auth.md)
+                            Ok(claims) => { if plain { props.insert("open".into(), json!(true)); }   // no secret, no check: the caller is the admin by decision (docs/auth.md)
                                 props.insert("authed".into(), json!(true)); props.insert("sub".into(), claims["sub"].clone()); props.insert("claims".into(), claims); }
                             Err(why) => { props.insert("authed".into(), json!(false)); props.insert("auth_error".into(), json!(why)); }
                         }

@@ -98,7 +98,7 @@ fn serve_from_the_built_folder_finds_its_packs_there_and_not_in_the_repo() {
     let mut port = 0u16;
     while let Some(Ok(l)) = lines.next() { if l.starts_with("cliffvm: door listening on") { port = l.rsplit(':').next().unwrap().trim().parse().unwrap(); break; } }
     assert!(port != 0 && port != 4096, "the dist's own launcher.c1f was read: {port}");
-    let tok = std::fs::read_to_string(data.join("owner.token")).unwrap();
+    let tok = std::fs::read_to_string(data.join("admin.token")).unwrap();
     let (h, b) = get(port, "/global/health", &format!("Authorization: Bearer {}\r\n", tok.trim()));
     assert!(h.starts_with("HTTP/1.1 200") && b.contains("healthy"), "{h} {b}");
     let (h, b) = get(port, "/", "");
