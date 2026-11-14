@@ -100,7 +100,6 @@ The Home Assistant token is the component's own; the seat holds no Home Assistan
 | key | lives | type / values | default | change today | live | journalled | secret |
 |---|---|---|---|---|---|---|---|
 | `import.sources` ("Other databases": rows `name`, `path`, `access`) | `SqlSource:<name>` {path, mode} (`sql.c1f:25-27`, RESIDENT) | `mode` `ro` or `rw`; the seat's own store is refused with a reason | none; mode `ro` | `entity_write SqlSource:<name>.path / .mode` (a verified token); seeded by the fact `sql_sources` (a source with a path is left alone) | yes; the next run opens it again | yes | no |
-| `import.page` ("Old turns read per query") | fact `legacy_page` (`door_session.c1f`, `legacy_import.c1f`) | whole number >= 1 | none: unset = an open imports nothing | launch only | LAUNCH-ONLY | - | no |
 | "Import old history" (a button, not a value) | `Legacy:seat.list = {id}` / `.import = {id, sessions, page}` (`legacy_import.c1f:47, 69`; ledger entity) | action | - | `entity_write` | yes | yes | no |
 
 `rw` on a source lets the model change that file: the row shows `rw` as text, not hidden (decision 5 asks whether the window may set it).
@@ -162,7 +161,7 @@ Things to prove before building (engine, not assumed): whether a setter can writ
 | **F** token minting from the window | a route and a driver verb (`Request.mint` exists, `door_auth.c1f:12-18`) | today only the command line mints | 2-3; secret handling needs its own review |
 | **G** `Boot` facts readable by the page | read-only `Setting` rows whose `current` reads `instances('Boot')` (a getter, no new route) | the Access / Limits groups | included in S |
 
-Stays launch-only (no edit control, "restart needed", shown with the launch line): `model.cloud`, `model.signin`, `model.cli`, `access.*`, every Limits row, `import.page`, seat identity facts, and anything holding a secret.
+Stays launch-only (no edit control, "restart needed", shown with the launch line): `model.cloud`, `model.signin`, `model.cli`, `access.*`, every Limits row, `import.history`, seat identity facts, and anything holding a secret.
 
 ## Decisions for the operator (none chosen)
 
@@ -176,7 +175,7 @@ Stays launch-only (no edit control, "restart needed", shown with the launch line
 8. Does the window show Access and Limits (read-only information) at all, or only editable settings?
 9. Item E: record who changed a setting (yes/no).
 10. Item F: mint tokens from the window, or keep the command line only.
-11. `legacy_page` has no default (unset imports nothing on open): the window cannot show an editable number until the operator names one.
+11. (removed 2026-11-14) the lazy-open fact `legacy_page` and its row `import.page` are gone: the cutover imports everything in the background.
 
 ## Built: the server side (`membrane/packs/settings.c1f`, tests `native/tests/settings_1143.rs`, model page `Help:settings`)
 

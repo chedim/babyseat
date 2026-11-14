@@ -231,13 +231,8 @@ Request.ml_take getter: this.ml_all
 Request.ml_users getter: [{'id': r['id'], 'h': 0, 'row': prop(r['eid'], 'oc_urow')} for r in this.ml_take]
 Request.ml_assts getter: [{'id': r['id'], 'h': 1, 'row': prop(r['eid'], 'oc_arow')} for r in this.ml_take if prop(r['eid'], 'oc_arow') != None]
 Request.ml_flat getter: [x['row'] for x in sort_by(sort_by(concat(this.ml_users, this.ml_assts), 'h'), 'id')]
--- THE LAZY HISTORY (#1143): a session imported as a header only (packs/legacy_import.c1f: its ledger `Legacy:session:<sid>` is pending or importing) gets its messages the first time it is opened:
--- `ml_ask` is true for an authed list request where the launch fact `legacy_page` (user rows per query, no default) is told; legacy_import's setter on it writes the ledger's `open` (and the reply waits (`ml_lazy`) until the ledger says done or error. A session with no ledger is native: nothing is written, nothing waits.
-Request.ml_ask getter: this.entrant and this.ml_on and len([b for b in instances('Boot') if b.legacy_page != None]) > 0 and prop('membrane::Legacy:session:' + this.ss_sid, 'state') != None
-Request.ml_lazy getter: this.ml_ask and prop('membrane::Legacy:session:' + this.ss_sid, 'state') in ['pending', 'importing']
 Request.ml_reply getter:
   WHEN this.ss_view == None: this.ss_missing
-  ELSE WHEN this.ml_lazy: None
   ELSE WHEN this.ml_all == None: None
   ELSE WHEN len([x for x in this.ml_users if x['row'] == None]) > 0: None
   ELSE WHEN this.ml_before != '' and (this.ml_cut == None or len(this.ml_cut) == 0): {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}

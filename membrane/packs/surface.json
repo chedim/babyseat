@@ -504,7 +504,7 @@
       "Request",
       "SesBus"
     ],
-    "members": 112,
+    "members": 110,
     "writes": [
       "*.eo",
       "*.retire",
@@ -533,7 +533,6 @@
       "/session/"
     ],
     "boot_facts": [
-      "legacy_page",
       "seat_cwd",
       "seat_project",
       "seat_version"
@@ -804,10 +803,9 @@
     "classes": [
       "Boot",
       "LegacySeat",
-      "LegacySession",
-      "Request"
+      "LegacySession"
     ],
-    "members": 20,
+    "members": 17,
     "writes": [
       "*.cursor",
       "*.dropped_parts",
@@ -822,7 +820,6 @@
       "SqlQuery:legacy:sessions.run",
       "SqlQuery:legacy:sessions.source",
       "SqlQuery:legacy:sessions.sql",
-      "membrane:*.open",
       "membrane:*=ChatLine()",
       "membrane:*=ChatMessage()",
       "membrane:*=ChatResponse()",
@@ -837,9 +834,7 @@
       "membrane::Legacy:seat=LegacySeat()"
     ],
     "claims": [],
-    "boot_facts": [
-      "legacy_page"
-    ],
+    "boot_facts": [],
     "resident": [
       "Legacy"
     ]
