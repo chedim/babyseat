@@ -15,7 +15,7 @@ before you read the source: a session that says `done` is already whole in the f
 ## The history cutover: what was imported and what was not
 
 At the first start the seat finds the old store by itself (`Legacy:cutover`: `state` importing, done, absent or error, and the `path`) and imports the chat history in the background, newest first. Only PERSON chats go into the one chat:
-an old session has a kind, on its ledger `Legacy:session:<id>.session_kind`: `chat` (the old `agent` is `build` or `speaker`) is imported; `absorbed` (its title is "absorbed claude session": a Claude Code session the old seat took in)
+an old session has a kind, on its ledger `Legacy:session:<id>.session_kind`: `chat` (the old `agent` is `build` or `speaker`) is imported; `absorbed` (its title is "absorbed claude session": a coding-agent session the old seat took in)
 and `background` (any other agent: worker, watch, planner, worker-loops, field-call) are NOT imported: their ledger says `state: skipped`, they have no messages and no time rows in the chat. They are still in the old store:
 read them with SQL (`json_extract(body, '$.s.agent')` and `'$.s.title'` in `c_sessions`, their rows in `c_messages` under the key prefix `<session id>|`) and bring a piece into the field when it is useful.
 

@@ -776,7 +776,7 @@
       "LegacySession",
       "Request"
     ],
-    "members": 18,
+    "members": 20,
     "writes": [
       "*.cursor",
       "*.dropped_parts",

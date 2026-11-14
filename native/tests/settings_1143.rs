@@ -103,7 +103,7 @@ fn person_token(dir: &Dir, sub: &str) -> String {
 }
 
 /// (id, kind, live): the rows of the design after the operator's answers
-const ROWS: [(&str, &str, &str); 31] = [
+const ROWS: [(&str, &str, &str); 32] = [
     ("model.chat", "text", "live"), ("model.default", "readonly", "restart"), ("model.list", "readonly", "restart"), ("model.cloud", "readonly", "restart"),
     ("model.signin", "readonly", "restart"), ("model.cli", "readonly", "restart"),
     ("chat.max_steps", "number", "live"), ("chat.timeout", "number", "live"),

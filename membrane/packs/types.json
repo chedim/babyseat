@@ -1412,6 +1412,7 @@
   "legacy_import": {
     "getters": {
       "LegacySeat.beat": "Num?",
+      "LegacySeat.chat_agents": "List(Text)",
       "LegacySeat.converter": "Int",
       "LegacySeat.hbad": "Text?",
       "LegacySeat.hl": "Dict?",
@@ -1421,6 +1422,7 @@
       "LegacySeat.owners": "List(List(Text))?",
       "LegacySeat.pg": "Any",
       "LegacySeat.pgq": "Any",
+      "LegacySeat.pgrows": "Any",
       "LegacySeat.run_left": "Any",
       "LegacySeat.waiting": "List(Text)",
       "LegacySeat.want": "Text",
