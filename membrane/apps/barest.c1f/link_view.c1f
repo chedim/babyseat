@@ -1,0 +1,48 @@
+PACK link_view 1
+IMPORT dom 1
+IMPORT fetch 1
+IMPORT shell_view 1
+-- THE PAGE TELLS THE SEAT WHAT IT IS (#1143, the graph link, slice 1: docs/graph-link.md "Slice 1: built"). A PAGE pack (it imports `dom`: the seat sends it with `GET /ui/fieldvm` and does not run it). The seat cannot ask the page,
+-- so the page writes, through the door the model uses (`POST /mcp`, `entity_write`; whoever reaches the page may write: no per-person rights):
+--   Vm:<ns>.caps            once, when the page is up: what this page can do (`Host:page`, made by boot.js from the loaded packs and the host: protocol, encodings, frames, the DOM allow-list, `provides` with each pack's
+--                           `requires` and `closure`, the classes, limits, the device class)
+--   <ns>::Page:main.report  the packs' sizes, the load errors, the view in front, hidden or not, the width class, the build and the host version; written AGAIN only when one of them changes. NO timer: an idle page sends nothing.
+-- `<ns>` is the seat's name for this load of the page (`Link:page.ns`, from the snapshot). The seat side is packs/link.c1f (the classes `Vm` and `Page`, the time stamp, the state).
+--   LinkView:main   `live` (the page is up), `report`, `caps` (getters), `seq`, `note` (the seat refused or did not answer a write: the text, kept here)
+--   Fetch:link:caps, Fetch:link:report   the two writes (ONE POST /mcp each)
+-- A refused or failed write is `LinkView:main.note` (never silent in the field; the page draws nothing for it yet).
+
+Shell.open on-setter link-start:
+  WHEN this.open:
+    ('LinkView:main').live = True
+
+-- the page is up when the shell is open and the host has told what it holds
+LinkView.ns getter: prop('Link:page', 'ns')
+LinkView.ready getter: this.live == True and this.ns != None and prop('Host:page', 'provides') != None
+LinkView.caps getter:
+  WHEN not this.ready: None
+  ELSE: {'protocol': prop('Host:page', 'protocol'), 'encodings': prop('Host:page', 'encodings'), 'frames': prop('Host:page', 'frames'), 'dom': prop('Host:page', 'dom'), 'provides': prop('Host:page', 'provides'), 'classes': prop('Host:page', 'classes'), 'limits': prop('Host:page', 'limits'), 'device': prop('Host:page', 'device'), 'host_version': prop('Host:page', 'host_version'), 'build': prop('Link:page', 'build')}
+LinkView.report getter:
+  WHEN not this.ready: None
+  ELSE: {'view': prop('Shell:main', 'view'), 'hidden': prop('Conn:page', 'hidden') == True, 'width': prop('Host:page', 'width'), 'load_errors': prop('Shell:main', 'load_errors') or {}, 'packs': prop('Host:page', 'sizes'), 'build': prop('Link:page', 'build'), 'host_version': prop('Host:page', 'host_version')}
+
+LinkView.caps on-setter link-send-caps:
+  WHEN this.caps != None:
+    ('Fetch:link:caps').request = {'timeout_s': 10, 'id': 'caps-1', 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': 'Vm:' + this.ns, 'prop': 'caps', 'value': this.caps}}})}
+LinkView.report on-setter link-send-report:
+  WHEN this.report != None:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    ('Fetch:link:report').request = {'timeout_s': 10, 'id': 'report-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': this.ns + '::Page:main', 'prop': 'report', 'value': this.report}}})}
+
+-- the receipt of a write, read once: ok = the seat answered 2xx and the call has no error; else the seat's own reason, else the network's
+Fetch.lk getter:
+  rq = this.request_result
+  bd = json(str(prop(rq, 'body') or ''))
+  jd = bd if bd is Dict else {}
+  hs = prop(rq, 'http_status')
+  er = prop(jd, 'error')
+  {'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not prop(prop(jd, 'result'), 'isError'), 'why': (str(prop(er, 'message') if er is Dict else (er or prop(prop(jd, 'result'), 'content'))) if (er or prop(prop(jd, 'result'), 'isError')) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+Fetch.lk on-setter link-receipt:
+  WHEN startswith(this.eid, 'Fetch:link:') and this.lk != None:
+    ('LinkView:main').note = None if prop(this.lk, 'ok') else 'the seat did not take what the page told it (' + this.eid + '): ' + str(prop(this.lk, 'why'))

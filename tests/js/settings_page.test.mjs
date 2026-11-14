@@ -113,7 +113,7 @@ try {
   assert.equal(await b.ev(`${Q(K('chat.max_steps', 'state'))}.getAttribute('data-kind')`), 'ok');
   assert.equal((await feedRow('chat.max_steps')).current, 25, 'the seat holds it');
   assert.equal(await rpc('entity_read', { spec: 'Setting:chat.max_steps', prop: 'current' }), '25');
-  const posts = b.requests.filter((r) => r.startsWith('POST /mcp'));
+  const posts = b.requests.filter((r) => r.startsWith('POST /mcp') && r.includes('"spec":"Setting:'));   // the page's own link reports (slice 1: link_view.c1f) are POSTs to the same door: not the write
   assert.equal(posts.length, 1, 'ONE POST for the write'); assert.match(posts[0], /"entity_write".*"Setting:chat\.max_steps".*"set".*25/);
 
   // 3. 0 is refused, with the seat's reason, in text; nothing changed

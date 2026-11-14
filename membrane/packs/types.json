@@ -703,6 +703,8 @@
       "Request.fn_props": "Any",
       "Request.fn_row": "Any",
       "Request.fv_body": "Dict?",
+      "Request.fv_page": "Any",
+      "Request.fv_rows": "Any",
       "Request.fv_seat": "Entity(FieldVm)?",
       "Request.m_fieldvm": "List(Text)",
       "Request.o_fieldvm": "Bool",
@@ -1475,6 +1477,29 @@
       "Person.sub": "Text?"
     },
     "findings": []
+  },
+  "link": {
+    "getters": {
+      "Boot.old_vms": "Any",
+      "Page.ns": "Text",
+      "Vm.kind": "Text",
+      "Vm.silent": "Num?",
+      "Vm.stale_s": "Num?",
+      "Vm.state": "Text?"
+    },
+    "writes": {
+      "*.retire": "Bool",
+      "Vm.connected_at": "Any",
+      "Vm.page": "Entity(Page)",
+      "Vm.seen": "Num"
+    },
+    "findings": [],
+    "virtual": [
+      "Page"
+    ],
+    "resident": [
+      "Vm"
+    ]
   },
   "mcp": {
     "getters": {

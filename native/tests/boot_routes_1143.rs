@@ -277,7 +277,12 @@ fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_admin() {
     let shell = packs["shell_view"].as_str().unwrap();
     assert_eq!(shell, std::fs::read_to_string(format!("{folder}/shell_view.c1f")).unwrap(), "the file's text, whole");
     // no entity of a view class is mirrored yet; the one entity is `Boot:seat`, the chat view's settings (null: the pack's own default stands)
-    assert_eq!(s["entities"], json!([{"eid": "Boot:seat", "cls": "Boot", "props": {"chat_page_size": null, "chat_poll_size": null, "chat_list_poll_ms": null, "chat_active_poll_ms": null, "chat_stick_px": null, "chat_tool_chars": null, "field_window": 150, "field_poll_ms": 2000, "chat_poll_timeout_s": null, "shell_status_ms": null, "shell_panel_chars": null}}]), "{s}");
+    assert_eq!(s["entities"][0], json!({"eid": "Boot:seat", "cls": "Boot", "props": {"chat_page_size": null, "chat_poll_size": null, "chat_list_poll_ms": null, "chat_active_poll_ms": null, "chat_stick_px": null, "chat_tool_chars": null, "field_window": 150, "field_poll_ms": 2000, "chat_poll_timeout_s": null, "shell_status_ms": null, "shell_panel_chars": null}}), "{s}");
+    // the graph link (slice 1): the seat names this load of the page, and says so in `Link:page` (the name is random: its shape, not its value)
+    let ns = s["page"].as_str().unwrap_or("");
+    assert!(ns.len() == 9 && ns.starts_with('p') && ns[1..].bytes().all(|c| c.is_ascii_hexdigit()), "{s}");
+    assert_eq!(s["entities"].as_array().unwrap().len(), 2, "{s}");
+    assert_eq!(s["entities"][1]["eid"], json!("Link:page")); assert_eq!(s["entities"][1]["props"]["ns"], json!(ns));
     assert!(s.get("views").is_none(), "no per-view switch any more: {s}");
     // the same through the page's prefix; read only
     let (st, s2) = api(&run, "GET", "/ui/serve/ui/fieldvm", J::Null);
@@ -337,7 +342,9 @@ fn the_snapshot_is_the_same_after_a_restart_on_the_same_store() {
     std::mem::forget(first);            // the folder stays: the second seat owns it now
     let second = start_in(dir);
     let (st, b) = api(&second, "GET", "/ui/fieldvm", J::Null);
-    assert_eq!((st, &b), (200, &a), "the same view packs after a restart");
+    assert_eq!(st, 200);
+    assert_eq!((&b["packs"], &b["entities"][0]), (&a["packs"], &a["entities"][0]), "the same view packs and settings after a restart");
+    assert_ne!(b["page"], a["page"], "the page's name is new for every load (the link's, slice 1)");
 }
 
 // ---- w46: the degraded reads the page's windows make (stats, minds): the released answer of a seat with nothing counted -------------------------------------
