@@ -148,13 +148,17 @@ async function send(text) {
 
 export function startChat(parts) {
   ui = parts;
+  let sending = false;   // one POST at a time: a slow seat must not get the same message twice (an Enter and a click, a held key)
   const submit = async () => {
+    if (sending) return;
     const text = ui.input.value.trim();
     if (!text) return;
+    sending = true;
     ui.send.disabled = true;
+    ui.input.disabled = true;
     try { await send(text); ui.input.value = ''; }
     catch (e) { const li = el('li', 'msg'); li.append(el('div', 'bubble note', 'The message did not reach the seat: ' + e.message + '. It is still in the box; send it again when the seat is back.')); ui.log.append(li); setTimeout(() => li.remove(), 8000); }
-    finally { ui.send.disabled = false; ui.input.focus(); }
+    finally { sending = false; ui.send.disabled = false; ui.input.disabled = false; ui.input.focus(); }
   };
   ui.form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
   ui.input.addEventListener('keydown', (e) => {

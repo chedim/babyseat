@@ -17,7 +17,7 @@ Everything under "dry run" was observed on `cliffvm` built from this tree, a fre
 | | |
 |---|---|
 | Used routes | **121 method+path pairs in 76 table rows** (section 1); 111 are needed (10 NOT-NEEDED) |
-| PRESENT / PARTIAL / MISSING / NOT-NEEDED | pairs **30 / 41 / 40 / 10**; rows 22 / 34 / 14 / 6 (the session API and its streams built in w31: rows 15-25, 30, 31; the page's boot calls and the field views' empty answers in w33: section 6) |
+| PRESENT / PARTIAL / MISSING / NOT-NEEDED | pairs **30 / 43 / 38 / 10**; rows 22 / 36 / 12 / 6 (w46: `/membrane/stats` and `/membrane/minds` answer the empty released shape) (the session API and its streams built in w31: rows 15-25, 30, 31; the page's boot calls and the field views' empty answers in w33: section 6) |
 | UI views | 9 (shell, chat, decisions cockpit, home, voice, 2D field, 3D field, work graph, boot animation), about 15,200 lines of own JS (section 2) |
 | Rounds: server swap | 73-110 (map through a Python bridge, model backends included 14-22); 62-91 for a first swap with the claude CLI as the only model |
 | Rounds: no-history backend behind the same routes | 8-12 |
@@ -99,9 +99,9 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 | 44 | POST `/membrane/seat/control` {paused, self, accept, loops_max, self_name} | `panel.js:3850,3863,3880` | `PY:4894` | PARTIAL | same gap |
 | 45 | POST `/membrane/seat/event`, `/membrane/seat/restart-ask` | HA `ha_access.py:223,243` | `PY:4883` | MISSING | |
 | 46 | GET and POST `/membrane/options` | `index.html:78,101`, `home.js:876,892,909` | `PY:4625`, `PY:4961` (settings.json + energy + runner) | PARTIAL | dry run 404 **w33**: `P/door_models.c1f`: GET in the released shape (golden `options.json`, `options_bg.json`), POST validated first (400 with the reason), `self_cpu_share` and `code_runs_keep` kept on `Settings:seat` (nothing reads them here yet), the minds' keys go to `Minds:seat`; an unknown key is refused without its name (no `keys()`) |
-| 47 | GET `/membrane/stats` | `home.js:1028` | `PY:4630` (`stats.py`, tokenomics) | MISSING | 501: a dict with data-driven keys has no c1f form (`P/door_state.c1f:12-14`) |
+| 47 | GET `/membrane/stats` | `home.js:1028` | `PY:4630` (`stats.py`, tokenomics) | PARTIAL | **w46, DEGRADED**: 200 in the released shape of a seat that counted nothing (oracle `tokenomics._assemble`, `server.py:4559`; golden `tests/golden/boot/stats.json`): every window zero, `minds`/`models` `{}`, `claude.answers` 0 (the window draws its zero rows and "no Claude answers since the seat started", `tests/js/stats_empty.test.mjs`), `paused: []`; the counters (message-store token rows, `bg-usage.json`, the claude ledger) are Python state. Decision A below |
 | 48 | GET `/membrane/quota`, POST `/membrane/quota/resume` | `panel.js:2592,2625,2640`, `home.js:1307` | `PY:4634`, `PY:4937` (`quota.py`) | PARTIAL | 501 / 404; keep-list question 1 (is quota dropped?) is still open **w33**: `P/door_state.c1f`: GET and POST `/resume` answer the released shape of a seat with nothing paused (`paused: []`, `probe_s: 600`); no model is paused here |
-| 49 | GET `/membrane/minds` | `home.js:4840` | `SEAT_READ_PATHS` (`PY:4163`), relayed to :11500; admin only (`relay.py` `ADMIN_READ_EXACT`) | MISSING | 501 |
+| 49 | GET `/membrane/minds` | `home.js:4840` | `SEAT_READ_PATHS` (`PY:4163`), relayed to :11500; admin only (`relay.py` `ADMIN_READ_EXACT`) | PARTIAL | **w46, DEGRADED**: 200 `{loops: {}, thinker: [], dreamer: []}`, the released answer with no pulse (`lanes.py:4606-4609`; keys of `fieldpulse.minds()`, golden `minds.json`); the orb chat views read no session, so `home.js:4840` finds no `sid` |
 | 50 | GET and POST `/membrane/models` {loops, cortex, workers, think, ...} | `panel.js:2823,2837,2859` | `PY:4592`, `PY:4971` | PARTIAL | `P/door_models.c1f`; specs `minds.json`, `N/tests/models_door.rs`; works only after the launcher tells `Boot:seat.minds` (dry run 503 without, 200 with `--fact minds=...`); applying a pick (runner.model, `minds_models.py`) stays Python |
 | 51 | GET `/v1/models` | `panel.js:2782,2824` | `PY` seat read (`SEAT_READ_PATHS`) | PARTIAL | spec `models.json`; **w41**: lists the claude-agent rungs of `cloud_models` (`owned_by: membrane->claude-agent`) with or without `router_on` (golden `boot/v1_models.json`, written from `lanes.py` `_v1_models`); local tags are still listed when `seat_backend` answers, but a pick of one is refused in the turn (claude is the only model the seat runs) |
 
@@ -114,7 +114,7 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 | 54 | GET `/membrane/work-graph` | `fieldview.js:149` | `PY:4613` | PARTIAL | dry run 200; watch nodes and the rocket runs are not drawn (`P/door_decisions.c1f:20-26`) |
 | 55 | GET `/membrane/entity-history?spec=` | `fieldview.js:161` | `PY:4613` | PARTIAL | `N/tests/door_decisions_sql.rs`; **dry run: never answers on a fresh store** (curl 20 s, no byte): the `sql()` reads `c_entities`/`c_entity_deltas`, absent in a cliffvm-made store; `properties` answer `{}` **w33**: no longer hangs: the Python tables are asked for first and a store without them has an empty history (`door_decisions.c1f` `dm_tabs`) |
 | 56 | GET `/membrane/item-chat?spec=` | `fieldview.js:162` | `PY:4613` | PARTIAL | same hang on a fresh store **w33**: same (answers `{ok: true, eid, messages: []}`) |
-| 57 | POST `/membrane/item-chat/say` {spec, text} | `fieldview.js:167` | `PY:4926` | MISSING | "no relation-write verb yet, stays Python" (`P/door_decisions.c1f:25-26`) |
+| 57 | POST `/membrane/item-chat/say` {spec, text} | `fieldview.js:167` | `PY:4926` | MISSING | **w46: an honest 501** `not ported yet: ...` (was 404): a write has no empty shape (the oracle writes a Message and a relation edge, `server.py:4889-4899`, `decision_map.item_say`), and answering `ok` would lie; the page catches it (`fieldview.js:167`, "shown by reload"); nothing is written |
 | 58 | POST `/membrane/decision/answer` | `decisions.js:1021` | `PY53:4855` | PRESENT | spec `door_decisions.json` |
 | 59 | POST `/membrane/decision/drop` | `decisions.js:1001` | `PY53:4855` | PRESENT | same |
 | 60 | POST `/membrane/decision/chat` | `decisions.js:963` | `PY53:4855` | PRESENT | same |
@@ -141,7 +141,7 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 | 71 | POST `/membrane/feedback` | `panel.js:3734` | `PY53:4876` | PRESENT | `P/door_self.c1f`; spec `door_self.json` |
 | 72 | POST `/membrane/jsexec/register`, `/result` | `panel.js:3779,3824` (a per-window toggle, `panel.js:3769`) | `PY:4824` | MISSING | 501 (`P/door_self.c1f:14-16`); the model tool that needs it is a Python tool |
 | 73 | GET `/membrane/self/card` | `home.js:2358`, HA `zoo.py:259` | `PY:4661` | NOT-NEEDED (default) | Blurp; the state family answers a presence stub (dry run 200) |
-| 74 | GET `/membrane/self/sheet`, `/self/recent`, `/toybox/state`; POST `/toybox/poke` | `panel.js:3949,3961,3954,3933`, HA `zoo.py:264,268` | `PY:4639-4690, 4747` | NOT-NEEDED (default) | Blurp is off unless `MEMBRANE_BLURP=1` (`index.html:125`); 501 on cliffvm |
+| 74 | GET `/membrane/self/sheet`, `/self/recent`, `/toybox/state`; POST `/toybox/poke` | `panel.js:3949,3961,3954,3933`, HA `zoo.py:264,268` | `PY:4639-4690, 4747` | NOT-NEEDED (default) | Blurp is off unless `MEMBRANE_BLURP=1` (`index.html:125`); **w46**: `/self/recent` answers `{lines: []}`, the released answer with no self record (`server.py:4577`); `/self/sheet`, `/toybox/state`, `/toybox/poke` stay an honest 501 (the oracle's sheet and dock are computed from the self record, energy and the toy files; the page reads a failure as "no sheet" and "no toys", `panel.js:3949-3961`) |
 
 ### 1.8 Home Assistant's own calls
 
@@ -328,7 +328,7 @@ Time to first healthy answer 0.84 s on an empty store; RSS 13.9 MB. Failing pack
 | status | count | which |
 |---|---|---|
 | 200 | 16 | `/ui/conf`, `/global/health`, `/v1/models` (empty), `/membrane/state`, `/membrane/seat`, `/membrane/seat/pause`, `/membrane/self/card` (stub), `/membrane/work-graph`, `/membrane/decisions`, `/membrane/goals`, `/command`, `/path`, `/project`, `/project/current`, `/vcs`, `/membrane/chat/messages` |
-| 501 | 6 | `/membrane/minds`, `/membrane/quota`, `/membrane/stats`, `/membrane/self/sheet`, `/membrane/self/recent`, `/membrane/toybox/state` (each with its reason) |
+| 501 | 6 -> 2 after w46 (`/membrane/minds`, `/membrane/quota`, `/membrane/stats`, `/membrane/self/recent` now 200) | `/membrane/self/sheet`, `/membrane/toybox/state` (each with its reason) |
 | 503 | 1 | `/membrane/models` (no minds fact) |
 | 405 | 1 | `GET /mcp` |
 | no answer (curl timeout) | 2 | `/membrane/entity-history`, `/membrane/item-chat` |
@@ -362,6 +362,39 @@ These are the backlog; each is listed in the test (`MISSING`, `HANGS`), which fa
 | `/membrane/map/field3d`, `/blurp`, `/field`, `/tile`, `/search` | the released answers of a field with no live entity; both views read "the field is empty" | DEGRADED on purpose (the operator's decision): no map, no search hit; `locate` is a reasoned 404 ("not in this projection", the page's `_trackNb` catches it, so it stays on the test's `MISSING`), `distance` and `field/entity` 503 "the field is not loaded"; the engine is a read-only Python bridge later, native recall after |
 | `GET /ui/fieldvm` | 200 `{packs: {about}, entities: []}` | `entities` is empty (nothing feeds `About:seat`: the About window has nothing to draw); the `field.write`/`field.pack` frames are not on `/ui/serve/event`; a model-written Pack is not sent; read once at boot |
 | `/session/<sid>/voice`, `/predict` (tolerated 404s) | 200 `[]` (also `todo`, `children`, `diff`) | POST `/voice` (the vote / rewrite teaching) is not built |
+
+**After w46 (the degraded routes; `native/tests/boot_routes_1143.rs`, `tests/specs/door_state.json`, `door_self.json`, `tests/js/stats_empty.test.mjs`, `chat_submit.test.mjs`).** Release definition (operator): the released UI runs unchanged; where cliffvm has no backend, a route answers the oracle's honest EMPTY shape, never a 501 where the page tolerates the empty shape. TUI rows (29, 34-40, `/tui/*`) are OFF the release and stay unbuilt. Oracle = tag `v0.7.53`; goldens `tests/golden/boot/{stats,minds}.json` are written by `scripts/golden_boot.py`.
+
+| route | oracle shape (v0.7.53) | before | after |
+|---|---|---|---|
+| GET `/membrane/stats` | `tokenomics._assemble` of nothing, `server.py:4559` | 501 | 200, the empty window (golden `stats.json`) |
+| GET `/membrane/minds` | `{loops: {}, thinker: [], dreamer: []}`, `lanes.py:4606-4609` | 501 | 200 (golden `minds.json`) |
+| GET `/membrane/self/recent` | `{lines: []}` with no record, `server.py:4577` | 501 | 200 |
+| POST `/membrane/item-chat/say` | a write (`server.py:4889`): no empty shape | 404 | honest 501 `not ported yet`, writes nothing |
+| GET `/membrane/quota`, `/quota/resume`, `/membrane/options`, the map routes, `/agent`, `/config`, `/ui/fieldvm`, session voice/predict | answered in w33 (above) | 200 | unchanged (rows 7, 32, 33, 46, 48, 61-68) |
+| GET `/membrane/state`, `/seat`, `/seat/pause`, `/self/card` | answered; the presence entity is unwritten, so `seat` is `{}` (the oracle's own no-seat answer for `/membrane/seat`) | 200 | unchanged (rows 41-44) |
+| GET `/membrane/state?section=`, `/membrane/self/sheet`, `/membrane/toybox/state`, `POST /toybox/poke`, `/jsexec/*` | computed from Python state, no honest empty | 501 | honest 501 (the page tolerates a failure on each: no sheet, no toys; `?section=` and `jsexec` are not called by the page's boot) |
+| `/membrane/seat/event`, `/seat/restart-ask` (HA only), `PATCH /config`, `/membrane/{predict,gate-stages,entity-track,intents,coproc,map/cloud,map/entities}` | HA or dev-only: the page never calls them | 404 | 404 (not part of the page; not built) |
+| `/membrane/map/locate` | 404 `<eid> is not in this projection` (found, w33) | 404 | 404, the one tolerated 404 (`page_boot.test.mjs MISSING`) |
+
+The page's send box: `submit()` in `membrane/apps/barest.c1f/ui/chat.js` now holds a `sending` flag (cleared when the POST answers or fails; the input and the button are disabled meanwhile), so a slow seat gets one POST per message (`tests/js/chat_submit.test.mjs`).
+
+**Settings (`--fact name=value`, approved).** The constants carried over from the release are launch facts of the packs that serve them; without the fact the released value stands (so `scripts/seat-full` does not need to pass them). Registered in `membrane/packs/facts.json`, tested in `the_released_constants_are_launch_facts_...`:
+
+| fact | default | meaning |
+|---|---|---|
+| `quota_probe_s` | 600 | the quota answer's `probe_s` (released `quota.PROBE_S`): how often a paused model would be probed; nothing is ever paused here |
+| `map_tile_k` | 150 | `tile_k` of the empty 3D projection (released field3d tile size) |
+| `field_tau_s` | 180.0 | the field current's fade, seconds: `current.tau_s` of the projection and the read-only `current_tau_s` option |
+| `self_cpu_share_default` | 0.5 | the `self_cpu_share` option's default and `defaults` entry (kept, read by nothing here) |
+| `code_runs_keep_default` | 30 | the `code_runs_keep` option's default and `defaults` entry (kept, read by nothing here) |
+| `chat_auth` | `login` | `options.background.chat_auth`: the claude CLI's own login |
+
+**Choices left to the operator (not made here):**
+- **A. Stats window: zeros or an honest 501?** Built as zeros (the window draws a full panel of 0s and "no Claude answers since the seat started"). That is a true count of what this seat counted (nothing) but reads like "no usage" on a seat that did chat. The 501 shows "the seat did not answer". Pick: zeros until a token counter exists. Also `midnight` is the local midnight to the minute (the `localtime` builtin has no seconds; the page does not read it).
+- **B. What feeds the About window?** `/ui/fieldvm` `entities` stays `[]`: nothing writes `About:seat`. The window opens empty. Candidates: the seat's version/build, the model, the data dir (facts the launcher already knows), written as `About:seat` by the launcher. Not invented here.
+- **C. The seat panel** (`/membrane/seat`, `/membrane/state`) answers empty because nothing writes `membrane::presence`; the oracle's seat panel carries paused, loops, models, memory. Who writes it (a pack on the heartbeat) is open.
+- **D. `/membrane/self/sheet` and the toy dock** answer 501 (Blurp is off the release, D10); the oracle's empty sheet is a large dict computed from the record, so an empty shape would be an invention.
 
 Left on the page's boot: `GET /membrane/map/locate`, 404 by design (above). Page code was not changed. Builtins the work wanted and did not get (each is a proposal in `docs/c1f-stdlib.md`): `dict(rows)` (the models row of `/config` is read from JSON text, the `packs` dict by a `json_group_object` sql), `keys(d)` (unknown option names), `urldecode` (only `+` and `%20` are decoded in the map's query).
 

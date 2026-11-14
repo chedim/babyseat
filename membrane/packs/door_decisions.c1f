@@ -35,9 +35,10 @@ Request.dm_route getter:
   ELSE WHEN this.route == '/membrane/decision/answer': 'answer'
   ELSE WHEN this.route == '/membrane/decision/drop': 'drop'
   ELSE WHEN this.route == '/membrane/decision/chat': 'chat'
+  ELSE WHEN this.route == '/membrane/item-chat/say': 'say'
   ELSE: None
 Request.o_decisions getter: this.dm_route != None
-Request.dm_write getter: this.dm_route in ['answer', 'drop', 'chat']
+Request.dm_write getter: this.dm_route in ['answer', 'drop', 'chat', 'say']
 -- the allowed methods (the door answers 405 + allow)
 Request.m_decisions getter: ['POST'] if this.dm_write else ['GET']
 
@@ -223,6 +224,7 @@ Request.dm_read_reply getter:
   ELSE WHEN this.dm_route == 'history': ({'status': 200, 'body': this.dm_hist} if this.dm_hist != None else None)
   ELSE: ({'status': 200, 'body': this.dm_chat} if this.dm_chat != None else None)
 Request.r_decisions getter:
-  WHEN this.dm_refused != None: this.dm_refused
+  WHEN this.dm_route == 'say': {'status': 501, 'body': {'error': 'not ported yet: a Message and a relation edge written (no relation-write verb yet), item_say stays Python'}}
+  ELSE WHEN this.dm_refused != None: this.dm_refused
   ELSE WHEN this.dm_write: this.dm_write_reply
   ELSE: this.dm_read_reply

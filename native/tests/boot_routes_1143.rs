@@ -24,10 +24,13 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 /// scripts/seat-full on a fresh data folder, a free port, the fake claude `/usr/bin/true`; -> the seat and its owner token
 fn seat(tag: &str) -> Run { let dir = tmp(tag); start_in(dir) }
 /// the same on the folder `dir` (a second start on it is a restart: the store, the secret and the page's cookie are kept)
-fn start_in(dir: std::path::PathBuf) -> Run {
+fn start_in(dir: std::path::PathBuf) -> Run { start_with(dir, &[]) }
+/// the same with `--fact name=value` settings on the launch line
+fn start_with(dir: std::path::PathBuf, facts: &[&str]) -> Run {
     let _ = std::fs::remove_file(dir.join("d/owner.token"));
     let script = format!("{}/../scripts/seat-full", env!("CARGO_MANIFEST_DIR"));
     let mut child = Command::new("sh").arg(script).args(["--data-dir", dir.join("d").to_str().unwrap(), "--port", "0"])
+        .args(facts.iter().flat_map(|f| ["--fact", *f]))
         .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -355,4 +358,62 @@ fn the_snapshot_is_the_same_after_a_restart_on_the_same_store() {
     let second = start_in(dir);
     let (st, b) = api(&second, "GET", "/ui/fieldvm", J::Null);
     assert_eq!((st, &b), (200, &a), "the same view packs after a restart");
+}
+
+// ---- w46: the degraded reads the page's windows make (stats, minds): the released answer of a seat with nothing counted -------------------------------------
+#[test]
+fn the_stats_window_reads_the_released_shape_of_a_seat_that_counted_nothing() {
+    let run = seat("stats");
+    let (st, s) = api(&run, "GET", "/ui/serve/membrane/stats", J::Null);
+    same_shape("stats", st, &s);
+    assert_eq!((s["today"]["total"].clone(), s["today"]["minds"].clone(), s["hour"]["models"].clone()), (json!({"calls": 0, "input": 0, "output": 0}), json!({}), json!({})), "{s}");
+    assert_eq!((s["claude"]["answers"].clone(), s["paused"].clone()), (json!(0), json!([])), "{s}");
+    assert!(s["now"].as_f64().unwrap() > 1.7e9 && s["midnight"].as_f64().unwrap() <= s["now"].as_f64().unwrap(), "{s}");
+    assert_eq!(api(&run, "POST", "/ui/serve/membrane/stats", json!({})).0, 405);
+}
+
+#[test]
+fn the_minds_read_is_the_released_empty_orb_lists() {
+    let run = seat("minds");
+    let (st, m) = api(&run, "GET", "/ui/serve/membrane/minds", J::Null);
+    same_shape("minds", st, &m);
+    assert_eq!(m, json!({"loops": {}, "thinker": [], "dreamer": []}));
+}
+
+// ---- w46: the 👶 panel's feed and the item card's say ------------------------------------------------------------------------------------------------------
+#[test]
+fn the_self_record_feed_is_the_empty_list_of_a_seat_with_no_record() {
+    let run = seat("selfrecent");
+    let (st, r) = api(&run, "GET", "/ui/serve/membrane/self/recent?n=15", J::Null);
+    assert_eq!((st, r), (200, json!({"lines": []})), "the released answer with no self record (server.py:4577)");
+}
+
+#[test]
+fn the_item_card_say_is_a_stated_not_built_and_writes_nothing() {
+    let run = seat("itemsay");
+    let (st, r) = api(&run, "POST", "/ui/serve/membrane/item-chat/say", json!({"spec": "Goal:none", "text": "hi"}));
+    assert_eq!(st, 501, "{r}");
+    assert!(r["error"].as_str().unwrap().starts_with("not ported yet"), "{r}");
+    let (_, c) = api(&run, "GET", "/ui/serve/membrane/item-chat?spec=Goal%3Anone", J::Null);
+    assert_eq!(c["messages"], json!([]), "nothing was written: {c}");
+    assert_eq!(api(&run, "GET", "/ui/serve/membrane/item-chat/say", J::Null).0, 405);
+}
+
+// ---- w46: the constants carried over from the release are launch settings (`--fact`), with the released values as their defaults ---------------------------------
+#[test]
+fn the_released_constants_are_launch_facts_and_keep_the_released_values_without_them() {
+    let run = seat("facts-default");
+    let (_, q) = api(&run, "GET", "/ui/serve/membrane/quota", J::Null);
+    let (_, o) = api(&run, "GET", "/ui/serve/membrane/options", J::Null);
+    let (_, f) = api(&run, "GET", "/ui/serve/membrane/map/field3d", J::Null);
+    assert_eq!((q["probe_s"].clone(), f["tile_k"].clone(), f["current"]["tau_s"].clone()), (json!(600), json!(150), json!(180.0)), "{q} {f}");
+    assert_eq!((o["defaults"].clone(), o["current_tau_s"].clone(), o["background"]["chat_auth"].clone()), (json!({"self_cpu_share": 0.5, "code_runs_keep": 30}), json!(180.0), json!("login")), "{o}");
+    let dir = tmp("facts-set");
+    let run = start_with(dir, &["quota_probe_s=900", "map_tile_k=64", "field_tau_s=90.0", "self_cpu_share_default=0.25", "code_runs_keep_default=10", "chat_auth=api-key"]);
+    let (_, q) = api(&run, "GET", "/ui/serve/membrane/quota", J::Null);
+    let (_, o) = api(&run, "GET", "/ui/serve/membrane/options", J::Null);
+    let (_, f) = api(&run, "GET", "/ui/serve/membrane/map/field3d", J::Null);
+    assert_eq!((q["probe_s"].clone(), f["tile_k"].clone(), f["current"]["tau_s"].clone()), (json!(900), json!(64), json!(90.0)), "{q} {f}");
+    assert_eq!((o["defaults"].clone(), o["current_tau_s"].clone(), o["background"]["chat_auth"].clone()), (json!({"self_cpu_share": 0.25, "code_runs_keep": 10}), json!(90.0), json!("api-key")), "{o}");
+    assert_eq!((o["self_cpu_share"].clone(), o["code_runs_keep"].clone()), (json!(0.25), json!(10)), "an unset option reads its default: {o}");
 }

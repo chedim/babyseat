@@ -156,6 +156,30 @@
   "owner_token_ttl_s": {
    "wired": false,
    "why": "how long the owner token minted at every boot lives, in seconds (native/src/owner.rs); default 2592000 (30 days), a threshold flagged for the operator; told by `--fact owner_token_ttl_s=<n>`"
+  },
+  "quota_probe_s": {
+   "wired": false,
+   "why": "the quota probe interval the page shows, seconds (released PROBE_S 600); a `--fact` setting, default 600"
+  },
+  "map_tile_k": {
+   "wired": false,
+   "why": "the field map's tile size `tile_k` in the empty 3D projection (released 150); a `--fact` setting, default 150"
+  },
+  "field_tau_s": {
+   "wired": false,
+   "why": "the field current's fade `tau_s` / options `current_tau_s`, seconds (released 180.0); a `--fact` setting, default 180.0"
+  },
+  "self_cpu_share_default": {
+   "wired": false,
+   "why": "the `self_cpu_share` option's default (released 0.5); a `--fact` setting, default 0.5"
+  },
+  "code_runs_keep_default": {
+   "wired": false,
+   "why": "the `code_runs_keep` option's default (released 30); a `--fact` setting, default 30"
+  },
+  "chat_auth": {
+   "wired": false,
+   "why": "options.background.chat_auth: how the chat reaches claude (released `login`: the claude CLI's own login); a `--fact` setting, default login"
   }
  }
 }

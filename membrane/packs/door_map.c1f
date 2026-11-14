@@ -33,7 +33,10 @@ Request.mp_ints_ok getter: len([i for i in this.mp_ints if i == None]) == 0
 Request.mp_empty_pid getter: '000000000000'
 Request.mp_err getter: 'membrane_error'
 Request.mp_root getter: {'pid': this.mp_empty_pid, 'l': 0, 'x': 0, 'y': 0, 'z': 0, 'nodes': [], 'edges': [], 'more': False}
-Request.mp_3d getter: {'pid': this.mp_empty_pid, 'axes': [], 'n_total': 0, 'kinds': [], 'kind_counts': {}, 'explained': [], 'max_level': 0, 'per_level': [0], 'tile_k': 150, 'edges': 0, 'shape': 'sphere', 'built_s': 0.0, 'root': this.mp_root, 'current': {'p': None, 'tau_s': 180.0}}
+-- LAUNCH SETTINGS (`--fact name=value`, scripts/seat-full passes them on): the constants carried over from the release, each with the released value as its default (docs/release-parity.md, 'Settings').
+Request.mp_tile_k getter: ([b.map_tile_k for b in this.boots] or [None])[0] or 150
+Request.mp_tau getter: ([b.field_tau_s for b in this.boots] or [None])[0] or 180.0
+Request.mp_3d getter: {'pid': this.mp_empty_pid, 'axes': [], 'n_total': 0, 'kinds': [], 'kind_counts': {}, 'explained': [], 'max_level': 0, 'per_level': [0], 'tile_k': this.mp_tile_k, 'edges': 0, 'shape': 'sphere', 'built_s': 0.0, 'root': this.mp_root, 'current': {'p': None, 'tau_s': this.mp_tau}}
 Request.mp_tile getter: {'pid': this.mp_empty_pid, 'l': this.mp_ints[0], 'x': this.mp_ints[1], 'y': this.mp_ints[2], 'z': this.mp_ints[3], 'nodes': [], 'edges': [], 'more': False}
 Request.mp_expired getter: {'status': 410, 'body': {'error': {'message': "projection '" + this.mp_pid + "' expired: re-fetch /membrane/map/field3d", 'type': this.mp_err}}}
 

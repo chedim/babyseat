@@ -9,6 +9,7 @@ IMPORT door 1
 --   (`<Class>:<key>`, like `Goal:<slug>`); the Python `membrane::Feedback:feedback:<id>` namespace is gone and nothing read it.
 --   Not carried over: the pause refusal of writes (reads the presence entity: the state family's) and the owner-only check
 --   (the door has no owner check yet, see door_models).
+-- DEGRADED (w46): GET /membrane/self/recent answers `{lines: []}`, the released answer of a seat with no self record (server.py:4577); nothing here keeps one.
 -- NOT PORTED (each answers 501 and names why; the boundary is in docs/python-to-c1f.md): the character sheet and the record's
 --   feed (self_loop's file, energy.report and the supervisor: live Python state), the toybox (toys are files with locks, clocks
 --   and a burst schedule: toybox.py, 1366 lines of domain logic), the seat's JS (jsexec.py: a registry of open tabs in the
@@ -49,6 +50,7 @@ Request.fb_go on-setter feedback-write:
 Request.sf_why getter: {'/membrane/self/sheet': 'the sheet is computed by the Python seat (record, energy, the supervisor)', '/membrane/self/recent': "self's record is the Python seat's file", '/membrane/toybox/state': "the toys are the Python seat's files and clocks (toybox.py)", '/membrane/toybox/poke': "a poke changes the Python seat's toy files and clocks (toybox.py)", '/membrane/jsexec/register': "the tab registry is the Python seat's live memory (jsexec.py)", '/membrane/jsexec/result': "a job's answer returns to the Python seat's waiting run (jsexec.py)"}[this.route]
 
 Request.r_self getter:
-  WHEN this.route != '/membrane/feedback': {'status': 501, 'body': {'error': 'not ported yet: ' + this.sf_why}}
+  WHEN this.route == '/membrane/self/recent': {'status': 200, 'body': {'lines': []}}
+  ELSE WHEN this.route != '/membrane/feedback': {'status': 501, 'body': {'error': 'not ported yet: ' + this.sf_why}}
   ELSE WHEN this.fb_err != None: {'status': 400, 'body': {'error': this.fb_err}}
   ELSE: {'status': 200, 'body': {'ok': True, 'eid': this.fb_eid, 'kind': this.fb_kind}}
