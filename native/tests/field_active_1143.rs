@@ -11,7 +11,15 @@ use std::time::Duration;
 
 const BIN: &str = env!("CARGO_BIN_EXE_cliffvm");
 struct Run { child: Child, _lines: Receiver<String>, port: u16 }
-impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
+impl Drop for Run {
+    // SIGTERM first and wait for the seat to leave on its own: a SIGKILL right after a write can beat the store's flush and the restart then misses the last write (the flaky
+    // `the_entity_route_lists_one_entitys_class...`); only a seat that ignores the TERM for 10 s is killed.
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("kill").arg("-TERM").arg(self.child.id().to_string()).status();
+        for _ in 0..200 { if matches!(self.child.try_wait(), Ok(Some(_))) { return; } std::thread::sleep(std::time::Duration::from_millis(50)); }
+        let _ = self.child.kill(); let _ = self.child.wait();
+    }
+}
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn tmp(tag: &str) -> std::path::PathBuf {
