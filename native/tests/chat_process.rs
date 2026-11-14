@@ -971,6 +971,7 @@ fn a_running_command_reads_as_running_with_its_id_and_start_and_a_pending_reply_
     // never started: no status
     let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
     assert!(s != "running", "a command that was never run is not running: {s}");
+    assert!(s.contains("has not been run"), "a never-started command says why its status is none: {s}");
     let (t, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
     assert!(t.contains("pending: ") && t.contains("r9") && t.contains("status: running") && t.contains("started: "), "{t}");
     assert!(t.contains("read Command:r.run_result"), "{t}");
@@ -993,7 +994,8 @@ fn reactions_list_only_real_changes_not_null_to_null_rebuilds_or_the_consumed_ve
     // the live shape: a new Command's cmd, then its run
     let (t, _) = put(port, "Command:q", "cmd", json!(["echo", "hi"]));
     let rs = reactions(&t);
-    assert!(rs.iter().all(|r| !(r["new"].is_null() && r["by"] == "rebuild")), "no null-to-null rebuild reactions: {t}");
+    assert!(rs.iter().all(|r| !(r["new"].is_null() && r["by"] == "rebuild" && r["why"].is_null())), "no reasonless null-to-null rebuild reactions: {t}");
+    assert!(rs.iter().any(|r| r["prop"] == "status" && r["why"].as_str().map_or(false, |w| w.contains("has not been run"))), "a null that says why stays: {t}");
     let (t, _) = put_wait(port, "Command:q", "run", json!({"id": "q1", "args": []}), 20.0);
     let rs = reactions(&t);
     assert!(rs.iter().all(|r| !r["by"].as_str().unwrap().contains("consumed")), "the consumed verb is not a reaction: {t}");
