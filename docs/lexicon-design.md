@@ -154,6 +154,24 @@ rewrites a lower one: `related` reads them as separate edge kinds with their own
 3. **Phrase / idiom** over the sentence layer: the window match of (d); a phrase lemma and its synset siblings (`kick_the_bucket` ~ `pass_away`).
 4. **Weighting by rarity and link type:** extends `related`: today each shared entity counts 1/(entries of its `mentioned_in`); a hop adds a link weight
    (same synset > broader/narrower) times that rarity. Only numbers change; the edge reads stay one query plus cached `edge_rows`.
+4.5. **LSA and topic clustering over SemText** (operator-approved to design; UNPROVEN: it would be tested as one more rung by the same bench).
+   SemText already gives each text a sparse bag of entities (Word / Identifier / Path mentions), and `related` already weights each by 1/(texts that mention it),
+   a simple tf-idf. A term-by-text matrix of those weights gives LSA: a truncated SVD (PCA of tf-idf), in which words that keep the same company land close
+   (`boat` / `vessel`). No neural net, no weights file, no download; the inputs are the graph's own `mentioned_in` rows.
+   Three ways to run it:
+   - (1) **Pure c1f getters:** vectors are first-class and `dot` exists, but a getter has 100,000 steps per evaluation and an iteration is a chain of rounds:
+     toy scale only (tens to low hundreds of texts). Not recommended.
+   - (2) **Native builtins** (`kmeans`, `svd`): fast and uncounted by the step budget, but each is a NEW builtin needing operator approval, and floats must reproduce across
+     machines: fixed initial centres, one thread, fixed summation order.
+   - (3) **A driver effect (recommended):** an entity such as `Cluster:<id>.run = {source, k}` computes in Rust and writes a journalled receipt (the assignments and each
+     centroid's top words), so a replay never recomputes: the pattern of the Sql driver (`SqlQuery.run`). The model decides when to run it ("writes, not calls").
+   Uses: paraphrase generalisation (rung 4's weights get a second-order link); a TOPIC INDEX for memory (cluster the texts, name each cluster by its top words: a compact
+   index the model reads instead of copying the whole conversation into its banner, which the system pilot saw it do, `docs/bench-system-pilot.md`); an ABSTENTION
+   signal (the distance of a question to its nearest cluster; the retrieval bench found no "not in memory" signal); merging duplicate Keeps. **Community detection**
+   (label propagation or Louvain) directly on the mention graph is the more natural alternative to k-means: it needs no vectors and no k.
+   Caveats: results go stale as texts arrive (an explicit refresh; incremental is harder); it reintroduces a derived geometry (inspectable by its centroid words and
+   recomputable from the graph, never the source of truth).
+
 5. **Roles** (predicate-argument per sentence, so "A bought B" matches "B was sold by A"). No layer gives a parse today: the tokenizer stops at spans, WordNet
    has verb frames but no syntax. It would need either a native piece (a small deterministic parser compiled into a core pack, like `spans`, English only, with
    a size and an accuracy we would have to measure on held-out sentences), or the MODEL writing the roles as entities per sentence (`Role:<text>:<n>` with
@@ -194,3 +212,7 @@ own licence, build and morphology, loaded as another named read-only source, nev
 15. Embeddings (rung 7): offered at all? If yes: the dial, stored with model name and hash, and the byte budget (57 MB seen in the legacy store).
 16. Non-English: a separate source per language (a Russian lexicon is its own licence, build and morphology), or English only for now.
 17. Word-sense ambiguity: link all senses (as in this note) or let the model pick one per word (a write) before edges count.
+18. Rung 4.5 run: a driver effect with a journalled receipt (my reading of the operator's choice), native builtins `kmeans`/`svd` (each a new builtin), or c1f only (toy scale)?
+19. Representation: tf-idf of lemmas (what `related` weights today) or a co-occurrence PMI matrix; clusters by k-means on LSA vectors or by community detection (label propagation / Louvain) on the mention graph.
+20. Dimension: the SVD rank and k, and the refresh policy (explicit write only, every N new texts, or on a dormancy tick).
+21. Determinism rules: fixed initial centres, one thread, fixed summation order, a tolerance for cross-machine float differences; the receipt stores the result so replay never recomputes.
