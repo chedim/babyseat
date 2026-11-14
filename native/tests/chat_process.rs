@@ -850,7 +850,7 @@ fn a_clifflet_that_writes_lands_its_writes_and_returns_their_reactions() {
 
 #[test]
 fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accumulates() {
-    let (mut run, port) = start_env("cliff3", MCP_PACKS, &[], &[("MEMBRANE_EVAL_BUDGET", "300")]);
+    let (mut run, port) = start_env("cliff3", MCP_PACKS, &[], &[("MEMBRANE_EVAL_BUDGET", "1000")]);
     for i in 0..14 { put(port, &format!("Note:r{i}"), "n", json!(i)); }
     let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
     assert!(e && t.contains("budget exceeded"), "{t}");
@@ -1915,4 +1915,25 @@ fn a_command_run_a_pack_text_and_a_lone_write_keep_their_small_replies_and_error
     assert!(!e, "{t}");
     assert!(t.contains("nothing for 7") && t.contains("boom 7"), "reasons of a null and an Error on another entity: {t}");
     assert!(terminate(&mut run));
+}
+
+// ---- the history route's cost must not grow with the store (#1143, 2026-11-14) ---------------------------------------------------------------
+// On the operator's imported store (5,539 messages) the route answered `{"messages": null}` for every limit: the getter that listed ALL the messages (a comprehension over every row)
+// spent more than the step budget (100,000), and an evaluation past the budget is an Error. The test restarts a seat that holds 60 messages with a SMALL budget (the work, not the time:
+// a listing of the whole store cannot fit in it, a page of 5 can): the page is the newest rows only, `more`/`next` page older ones, a running message is there, an unknown cursor is a 404.
+#[test]
+fn the_history_route_does_work_for_the_page_only_not_for_the_whole_store() {
+    let (mut run, port, dir) = fake_seat_script("history-budget", &[], &[], QUICK);
+    let ids = fill(port, 60);
+    assert!(terminate(&mut run));
+    let (mut run2, port) = launch_env(&dir, &dir.join("fake-claude"), &[], &[("ANTHROPIC_API_KEY", HARNESS_KEY), ("MEMBRANE_EVAL_BUDGET", "1000")]);
+    let h = history(port, "?limit=5");
+    assert_eq!(texts(&h), (55..60).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h}");
+    assert_eq!((h["more"].clone(), h["next"].clone()), (json!(true), json!(ids[55])), "{h}");
+    let h2 = history(port, &format!("?limit=5&before={}", ids[55]));
+    assert_eq!(texts(&h2), (50..55).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h2}");
+    let h3 = history(port, &format!("?limit=5&before={}", ids[5]));
+    assert_eq!((texts(&h3), h3["more"].clone(), h3["next"].clone()), ((0..5).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), json!(false), J::Null), "{h3}");
+    assert_eq!(http(port, "GET", "/membrane/chat/messages?before=nope", "").0, 404);
+    assert!(terminate(&mut run2));
 }

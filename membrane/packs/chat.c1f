@@ -108,17 +108,19 @@ Request.ev_snap on-setter ev-send:
 Request.hs_on getter: this.route == '/membrane/chat/messages'
 Request.hs_limit getter: max(1, (num(([q[1] for q in this.qpairs if q[0] == 'limit'] or ['20'])[0]) or 20))
 Request.hs_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [None])[0]
--- the message ids come from the STORE (a message is lazy: `instances` would list only the loaded ones); each is then read by eid, which loads it. `at` orders them, then the request number in the id.
+-- the page is chosen BY THE STORE, not by a comprehension over every message (a store holds thousands; the step budget is for the page): one `sql` returns the newest `limit + 1` message keys older than `before`.
+-- A message is lazy (`instances` would list only the loaded ones); each key is read by eid, which loads it. The order is `at` (the id's millisecond part: no body is read, a message body is large),
+-- then the request number in the id, newest first; the extra row only tells that older ones exist. `?3` is the cursor id ('' = none), `?4` the row count.
 -- rows are None while the query runs: the reply waits for them.
-Request.hs_rows getter: sql('SELECT k, json_extract(body, \'$.props.at\') AS at FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%') if this.hs_on else []
-Request.hs_all getter: sort_by(sort_by([{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), 'membrane::Chat:message:', ''), 'at': prop(r, 'at'), 'n': num(after(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-'))} for r in this.hs_rows], 'n', True), 'at', True) if this.hs_rows != None else None
-Request.hs_cut getter: ([r for r in this.hs_all if r['id'] == this.hs_before] or [None])[0]
-Request.hs_older getter: [r for r in this.hs_all if this.hs_before == None or r['at'] < this.hs_cut['at'] or (r['at'] == this.hs_cut['at'] and r['n'] < this.hs_cut['n'])]
-Request.hs_page getter: sort_by(sort_by(head(this.hs_older, this.hs_limit), 'n'), 'at')
-Request.hs_more getter: len(this.hs_older) > this.hs_limit
+Request.hs_rows getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k LIKE ?1 AND k NOT LIKE ?2 AND (?3 = \'\' OR CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) < CAST(substr(?3, 1, instr(?3, \'-\') - 1) AS INTEGER) OR (CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) = CAST(substr(?3, 1, instr(?3, \'-\') - 1) AS INTEGER) AND CAST(substr(k, 24 + instr(substr(k, 24), \'-\')) AS INTEGER) < CAST(substr(?3, instr(?3, \'-\') + 1) AS INTEGER))) ORDER BY CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) DESC, CAST(substr(k, 24 + instr(substr(k, 24), \'-\')) AS INTEGER) DESC LIMIT ?4', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.hs_before or '', this.hs_limit + 1) if this.hs_on else []
+-- the cursor must be a message: the unknown id is a 404
+Request.hs_cut getter: sql('SELECT k FROM c_field WHERE k = ?', 'membrane::Chat:message:' + this.hs_before) if this.hs_on and this.hs_before != None else []
+Request.hs_ids getter: [{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), 'membrane::Chat:message:', ''), 'at': num(before(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-')) / 1000, 'n': num(after(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-'))} for r in head(this.hs_rows, this.hs_limit)] if this.hs_rows != None else None
+Request.hs_page getter: sort_by(sort_by(this.hs_ids, 'n'), 'at')
+Request.hs_more getter: len(this.hs_rows) > this.hs_limit
 Request.hs_get getter:
-  WHEN this.hs_all == None: None
-  ELSE WHEN this.hs_before != None and this.hs_cut == None: {'status': 404, 'body': {'error': 'no such message'}}
+  WHEN this.hs_rows == None or this.hs_cut == None: None
+  ELSE WHEN this.hs_before != None and len(this.hs_cut) == 0: {'status': 404, 'body': {'error': 'no such message'}}
   ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'page_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None}}
 
 Request.r_session getter:
