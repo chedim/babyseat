@@ -383,7 +383,7 @@ scenario('the engine subscribes what the rows read, once each, and a value fed b
   assert.equal(w.log.filter((x) => x.eid === 'Fetch:settings' && x.prop === 'request').length, reads0, 'and the view asked for nothing');
   w.f.feed_val('membrane::Setting:chat.max_steps', 'current', JSON.stringify(9500), 2, w.t); w.flush();
   assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 9500 steps');
-  assert.equal(w.subs.length, named.length, 'a change of value is no new subscription');
+  assert.equal(w.subs.length, all.length, 'a change of value is no new subscription');
 });
 
 console.log(`settings_view: ${n} scenarios ok`);
