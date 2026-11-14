@@ -49,7 +49,7 @@ packages = ["membrane"]
 # `No module named 'homeassistant.auth'`, a fake aiohttp under the
 # detached-seat tests). Give the root run tests/ only; the integration
 # tree runs as its own pytest process (its own CI step, its own box).
-testpaths = ["tests"]
+testpaths = ["tests/ha", "tests/wrapper"]
 markers = [
     "tokenless: sends no seat credential on purpose (proves the 401); the suite-wide client hook stays off",
     "live_lane: boots real seats and runs REAL model turns through the operator's local ollama",

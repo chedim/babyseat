@@ -85,56 +85,13 @@ jobs:
       - run: cargo install wasm-pack --locked
       - run: sh native/build-web.sh
       - run: git diff --exit-code -- membrane/ui/
-  tests:
+  # the Python wrapper (membrane/launcher.py) and the pins on versions, licence and names
+  wrapper:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      # couchbase: the optional extra -- the fakes-based efstore tests import its
-      # exception classes (the CI exhibit: ModuleNotFoundError 'couchbase');
-      # there is no cluster in CI, the FakeCluster stands in for one.
-      - run: pip install -e ".[couchbase]" pytest aiohttp
-      # Couchbase Lite C + its vector extension (vendor/cbl/, not in git): without them every
-      # real-store test skips here (#799's chat stores, the entity store), and green says nothing
-      # about that code (Memo's review of #803)
-      - run: sh scripts/fetch-cbl.sh linux-x86_64
-      # living language (language.py, on by default): spaCy, its small English model and lemminflect (verb forms; without it test_generation passed only when another test's boot had installed it)
-      - run: pip install "spacy>=3.8.18" lemminflect && python -m spacy download en_core_web_sm
-      # the native (Rust) field engine is compiled by `pip install -e .` above (setuptools-rust, setup.py)
-      - run: python -c "from membrane import membrane_vm"
-      # The seat's suite (tests/) -- live-lane tests skip themselves when the
-      # runner has no ollama. (The thinking-indicator file was deselected at
-      # e385aec and its tests went stale under a changed wire contract -- the
-      # close publish; repaired 2026-10-13, back in the gate.)
-      - run: pytest -q -p no:cacheprovider
-      # #971: the SQLite store (the default for a new seat) held to Couchbase Lite's contract -- the same
-      # store suites, with MEMBRANE_TEST_STORE=sqlite swapping the backend (tests/conftest.py)
-      - run: >-
-          MEMBRANE_TEST_STORE=sqlite pytest -q -p no:cacheprovider
-          tests/test_background_door_755.py tests/test_cbl_foreign_write_commits.py tests/test_cblite_get_once.py
-          tests/test_cblstore.py tests/test_datafiles_in_cbl.py tests/test_db_thread.py tests/test_entities_in_cbl.py
-          tests/test_field_readonly.py tests/test_person_turn_first.py tests/test_recall_bugs_429.py
-          tests/test_serve_stores_in_cbl.py tests/test_store_turn_first_541.py tests/test_tool_recall_429.py
-          tests/test_warm_restart_720.py tests/test_efstore_cb.py tests/test_efstore_file.py
-  # #971: the native (Rust) VM. Built here and held to the same contract as ch.VM: every VM suite runs
-  # against it, plus its own tests. Without this
-  # job the native tests skip in `tests` and nothing enforces the contract (Memo's review of #972).
-  native-vm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - run: pip install -e . pytest
-      - run: python -c "from membrane import membrane_vm"     # compiled by the install (setup.py)
-      - run: >-
-          pytest -q -p no:cacheprovider
-          tests/test_ch_native_971.py tests/test_journal_971.py tests/test_ch_576.py tests/test_ch_index_956.py
-          tests/test_ch_calls_956.py tests/test_ch_learn_576.py tests/test_blurp_learns_576.py
-          tests/test_blurp_skills_751.py tests/test_blurp_body_576.py tests/test_blurp_suggests_576.py
-          tests/test_blurp_overlay_576.py tests/test_child_skill_tree.py tests/test_child_skill_kinds.py
-          tests/test_goal_graph_738.py tests/test_self_is_body_732.py tests/test_toys_first_727.py
-          tests/test_wait_stall_826_798.py tests/test_graph_banner.py tests/test_banner_use.py
+      - run: pip install pytest
+      - run: pytest -q -p no:cacheprovider tests/wrapper
